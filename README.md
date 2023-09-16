@@ -36,6 +36,8 @@ To get started with your contributions, follow these steps:
 The instructors will review your pull request and provide feedback. Once accepted, your changes will be merged into
 the `main` branch, and the website will automatically update.
 
+More detailed instructions on the CS249r scribing effort and peer review process can be found [here](https://docs.google.com/document/d/1izDoWwFLnV8XK2FYCl23_9KYL_7EQ5OWLo-PCNUGle0).
+
 ---
 
 ## Website
