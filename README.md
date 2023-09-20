@@ -1,5 +1,7 @@
 # CS249r: Tiny Machine Learning - Collaborative Book
 
+[![All Contributors](https://img.shields.io/github/all-contributors/harvard-edge/cs249r_book?color=ee8449&style=flat-square)](#contributors)
+
 Welcome to the collaborative book repository for students of CS249r: Tiny Machine Learning at Harvard! This repository
 contains the source files of chapters and sections written by your peers. We're excited to see your contributions!
 
@@ -53,6 +55,17 @@ View the book website at: [https://harvard-edge.github.io/cs249r_book/](https://
 
 To render the book locally, you'll need to install `quarto`. Once `quarto` is installed, you can run the following
 command to generate the HTML pages:
+
+## Contributors
+
+<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+
+<!-- ALL-CONTRIBUTORS-LIST:END -->
 
 ```bash
 cd cs249r_book
