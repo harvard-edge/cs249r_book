@@ -5,14 +5,13 @@ from absl import app
 from github import Github
 import requests
 
-CONTRIBUTORS_TMP_FILE = 'CONTRIBUTORS_TEMP.txt'
 CONTRIBUTORS_FILE = '.all-contributorsrc'
 
-EXCLUDED_USERS = ['web-flow']
+EXCLUDED_USERS = ['web-flow', 'github-actions[bot]', 'mrdragonbear']
 
 OWNER = "harvard-edge"
 REPO = "cs249r_book"
-BRANCH = "auto_contributor"
+BRANCH = "main"
 
 
 def split_name_email(s):
