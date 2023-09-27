@@ -25,18 +25,36 @@ def main(_):
 
     print(web_address)
     user_to_name_dict = dict()
+    users_from_api = []
 
-    # Check if the request was successful
     if res.status_code == 200:
         data = res.json()
 
-        # Extract the 'login' attribute for each committer
-        users_from_api = []
-        for commit in data:
-            if commit['committer']:
-                committer = commit['committer']
-                users_from_api.append(committer['login'])
-                user_to_name_dict[committer['login']] = committer['name']
+        for node in data:
+            user_full_name = None
+            username = None
+            if node['commit']:
+                commit = node['commit']
+                if commit['author']:
+                    author = commit['author']
+                    user_full_name = author['name']
+                elif commit['committer']:
+                    committer = commit['committer']
+                    user_full_name = committer['name']
+            if node['committer']:
+                committer = node['committer']
+                username = committer['login']
+            if node['author']:
+                author = node['author']
+                if author['login']:
+                    username = author['login']
+
+            assert user_full_name is not None, 'User full name should not be None'
+            assert username is not None, 'Username should not be None'
+
+            user_to_name_dict[username] = user_full_name
+            users_from_api.append(username)
+
         users_from_api = set(users_from_api)
         print('Users pulled from API: ', users_from_api)
 
