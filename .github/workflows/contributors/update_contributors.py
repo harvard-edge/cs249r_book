@@ -2,30 +2,15 @@ import json
 import os
 
 from absl import app
-from github import Github
 import requests
 
 CONTRIBUTORS_FILE = '.all-contributorsrc'
 
-EXCLUDED_USERS = ['web-flow', 'github-actions[bot]', 'mrdragonbear']
+EXCLUDED_USERS = {'web-flow', 'github-actions[bot]', 'mrdragonbear'}
 
 OWNER = "harvard-edge"
 REPO = "cs249r_book"
 BRANCH = "main"
-
-
-def split_name_email(s):
-    parts = s.rsplit(' ', 1)
-    return parts[0], parts[1][1:-1]  # Removing angle brackets from email
-
-
-def get_github_username(token, email):
-    g = Github(token)
-    users = g.search_users(email)
-    for user in users:
-        # Assuming the first user returned with the matching email is the correct user
-        return user.login
-    return None
 
 
 def main(_):
@@ -39,35 +24,59 @@ def main(_):
     res = requests.get(web_address, headers=headers)
 
     print(web_address)
+    user_to_name_dict = dict()
+    users_from_api = []
 
-    # Check if the request was successful
     if res.status_code == 200:
-        # Parse the JSON response
         data = res.json()
 
-        # Extract the 'login' attribute for each committer
-        usernames = [commit['committer']['login'] for commit in data if commit['committer']]
+        for node in data:
+            user_full_name = None
+            username = None
+            if node['commit']:
+                commit = node['commit']
+                if commit['author']:
+                    author = commit['author']
+                    user_full_name = author['name']
+                elif commit['committer']:
+                    committer = commit['committer']
+                    user_full_name = committer['name']
+            if node['committer']:
+                committer = node['committer']
+                username = committer['login']
+            if node['author']:
+                author = node['author']
+                if author['login']:
+                    username = author['login']
 
-        # Print unique usernames
-        for username in sorted(set(usernames)):
-            print(username)
+            assert user_full_name is not None, 'User full name should not be None'
+            assert username is not None, 'Username should not be None'
+
+            user_to_name_dict[username] = user_full_name
+            users_from_api.append(username)
+
+        users_from_api = set(users_from_api)
+        print('Users pulled from API: ', users_from_api)
 
         with open(CONTRIBUTORS_FILE, 'r') as contrib_file:
-            contributors_data = json.load(contrib_file)
-            user_to_name_dict = dict()
-            contributors = contributors_data['contributors']
+            existing_contributor_data = json.load(contrib_file)
+            existing_contributors = existing_contributor_data['contributors']
 
-            contributor_logins = []
-            for contrib in contributors:
-                user_to_name_dict[contrib['login']] = contrib['name']
-                contributor_logins.append(contrib['login'])
-            contributor_logins_set = set(contributor_logins)
+            existing_contributor_logins = []
+            for existing_contributor in existing_contributors:
+                user_to_name_dict[existing_contributor['login']] = existing_contributor['name']
+                existing_contributor_logins.append(existing_contributor['login'])
+            existing_contributor_logins_set = set(existing_contributor_logins)
+            print('Existing contributors: ', existing_contributor_logins_set)
 
-            # Perform the set subtraction
-            # result = usernames_set - contributor_logins_set
-            result = contributor_logins_set - set(EXCLUDED_USERS)
+            # All contributors in the file should be in the API
+            assert existing_contributor_logins_set.issubset(
+                users_from_api), 'All contributors in the .all-contributorsrc file should be pulled using the API'
 
-            print('New contributors: ', result)
+            new_contributor_logins = users_from_api - existing_contributor_logins_set
+            print('New contributors: ', new_contributor_logins)
+
+            result = users_from_api - EXCLUDED_USERS
 
             final_result = dict(
                 projectName=REPO,
