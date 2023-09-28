@@ -5,56 +5,73 @@
 Welcome to the collaborative book repository for students of CS249r: Tiny Machine Learning at Harvard! This repository
 contains the source files of chapters and sections written by your peers. We're excited to see your contributions!
 
----
-
 ## Contributing
 
-To get started with your contributions, follow these steps:
+To contribute to the repository using pull requests, follow these steps:
 
-1. **Clone the Repository**:
+1. **Fork the Repository**:
+    - Navigate to the repository's GitHub page and click the 'Fork' button at the top-right corner.
+
+2. **Clone Your Forked Repository**:
     ```bash
-    git clone https://github.com/harvard-edge/cs249r_book.git
+    git clone https://github.com/YOUR_USERNAME/cs249r_book.git
     ```
-2. **Navigate to the Repository**:
+
+3. **Navigate to the Repository**:
     ```bash
     cd cs249r_book
     ```
-3. **Create a New Branch** for your chapter/section:
+
+4. **Set Upstream Remote**:
+    ```bash
+    git remote add upstream https://github.com/harvard-edge/cs249r_book.git
+    ```
+
+5. **Create a New Branch** for your chapter/section:
     ```bash
     git checkout -b name-of-your-new-branch
     ```
-4. Write your chapter/section in Markdown.
-5. **Commit Changes to Your Branch**:
+
+6. Pen down your chapter or section in Markdown.
+
+7. **Commit Changes to Your Branch**:
     ```bash
     git add .
-    git commit -m "Description of your changes"
+    git commit -m "Briefly describe your changes"
     ```
-6. **Push Your Branch to the Repository**:
+
+8. **Push Your Branch to Your Forked Repository**:
     ```bash
     git push origin name-of-your-new-branch
     ```
-7. Open a pull request to the `main` branch of the original repository.
 
-The instructors will review your pull request and provide feedback. Once accepted, your changes will be merged into
-the `main` branch, and the website will automatically update.
+9. Navigate to your fork on GitHub and click the 'New pull request' button. Ensure you're comparing your branch from
+   your fork to the `main` branch of the original `harvard-edge/cs249r_book` repository.
 
-More detailed instructions on the CS249r scribing effort and peer review process can be found [here](https://docs.google.com/document/d/1izDoWwFLnV8XK2FYCl23_9KYL_7EQ5OWLo-PCNUGle0).
+10. Submit the pull request with a descriptive message.
+
+The instructors will assess your pull request and provide feedback. Once it's approved, your contribution will be
+integrated into the `main` branch, and the book's website will be updated.
+
+For a more detailed guide on the CS249r documentation process and peer review,
+check [here](https://docs.google.com/document/d/1izDoWwFLnV8XK2FYCl23_9KYL_7EQ5OWLo-PCNUGle0).
 
 ---
 
 ## Website
 
-The book website is automatically built from the `gh-pages` branch. Changes to `main` will be merged into `gh-pages`
-once reviewed.
+The book's website is automatically constructed from the `gh-pages` branch. Once reviewed, changes to `main` are merged
+into `gh-pages`.
 
-View the book website at: [https://harvard-edge.github.io/cs249r_book/](https://harvard-edge.github.io/cs249r_book/)
+You can view the book's website
+at: [https://harvard-edge.github.io/cs249r_book/](https://harvard-edge.github.io/cs249r_book/)
 
 ---
 
 ## Local Rendering
 
-To render the book locally, you'll need to install `quarto`. Once `quarto` is installed, you can run the following
-command to generate the HTML pages:
+For local rendering of the book, you need to have `quarto` installed. Once that's done, the following command can be
+used to produce the HTML pages:
 
 ```bash
 cd cs249r_book
@@ -82,4 +99,5 @@ quarto render
 
 <!-- ALL-CONTRIBUTORS-LIST:END -->
 
-This project follows the [all-contributors](https://allcontributors.org) specification. Contributions of any kind are welcome!
+This project follows the [all-contributors](https://allcontributors.org) specification. Contributions of any kind are
+welcome!
