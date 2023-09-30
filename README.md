@@ -1,4 +1,4 @@
-# CS249r: Tiny Machine Learning - Collaborative Book
+# CS249r: MACHINE LEARNING SYSTEMS for TinyML
 
 [![All Contributors](https://img.shields.io/github/all-contributors/harvard-edge/cs249r_book?color=ee8449&style=flat-square)](#contributors)
 
@@ -32,7 +32,7 @@ To contribute to the repository using pull requests, follow these steps:
     git checkout -b name-of-your-new-branch
     ```
 
-6. Write your chapter or section in Markdown.
+6. **Make your edits** for your chapter or section in [Markdown](https://quarto.org/docs/authoring/markdown-basics.html).
 
 7. **Commit Changes to Your Branch**:
     ```bash
