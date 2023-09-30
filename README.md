@@ -1,4 +1,4 @@
-# CS249r: Tiny Machine Learning - Collaborative Book
+# CS249r: MACHINE LEARNING SYSTEMS for TinyML
 
 [![All Contributors](https://img.shields.io/github/all-contributors/harvard-edge/cs249r_book?color=ee8449&style=flat-square)](#contributors)
 
@@ -32,7 +32,7 @@ To contribute to the repository using pull requests, follow these steps:
     git checkout -b name-of-your-new-branch
     ```
 
-6. Write your chapter or section in Markdown.
+6. **Make your edits** for your chapter or section in [Markdown](https://quarto.org/docs/authoring/markdown-basics.html).
 
 7. **Commit Changes to Your Branch**:
     ```bash
@@ -86,10 +86,10 @@ quarto render
 <table>
   <tbody>
     <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/uchendui"><img src="https://avatars.githubusercontent.com/uchendui?s=100" width="100px;" alt="Ikechukwu Uchendu"/><br /><sub><b>Ikechukwu Uchendu</b></sub></a><br /><a href="https=//github.com/harvard-edge/cs249r_book/commits?author=uchendui" title="Documentation">📖</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/mpstewart1"><img src="https://avatars.githubusercontent.com/mpstewart1?s=100" width="100px;" alt="Matthew Stewart"/><br /><sub><b>Matthew Stewart</b></sub></a><br /><a href="https=//github.com/harvard-edge/cs249r_book/commits?author=mpstewart1" title="Documentation">📖</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/ShvetankPrakash"><img src="https://avatars.githubusercontent.com/ShvetankPrakash?s=100" width="100px;" alt="Shvetank Prakash"/><br /><sub><b>Shvetank Prakash</b></sub></a><br /><a href="https=//github.com/harvard-edge/cs249r_book/commits?author=ShvetankPrakash" title="Documentation">📖</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/jveejay"><img src="https://avatars.githubusercontent.com/jveejay?s=100" width="100px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br /><a href="https=//github.com/harvard-edge/cs249r_book/commits?author=jveejay" title="Documentation">📖</a></td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/mpstewart1"><img src="https://avatars.githubusercontent.com/mpstewart1?s=100" width="100px;" alt="Matthew Stewart"/><br /><sub><b>Matthew Stewart</b></sub></a><br /><a href="https=//github.com/harvard-edge/cs249r_book/commits?author=mpstewart1" title="Documentation">📖</a></td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/uchendui"><img src="https://avatars.githubusercontent.com/uchendui?s=100" width="100px;" alt="Ikechukwu Uchendu"/><br /><sub><b>Ikechukwu Uchendu</b></sub></a><br /><a href="https=//github.com/harvard-edge/cs249r_book/commits?author=uchendui" title="Documentation">📖</a></td>
     </tr>
   </tbody>
 </table>
