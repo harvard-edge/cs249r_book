@@ -6,7 +6,7 @@ import requests
 
 CONTRIBUTORS_FILE = '.all-contributorsrc'
 
-EXCLUDED_USERS = {'web-flow', 'github-actions[bot]', 'mrdragonbear'}
+EXCLUDED_USERS = {'web-flow', 'github-actions[bot]', 'mrdragonbear', 'jveejay'}
 
 OWNER = "harvard-edge"
 REPO = "cs249r_book"
@@ -68,7 +68,7 @@ def main(_):
                 existing_contributor_logins.append(existing_contributor['login'])
             existing_contributor_logins_set = set(existing_contributor_logins)
             print('Existing contributors: ', existing_contributor_logins_set)
-
+            existing_contributor_logins_set -= EXCLUDED_USERS
             # All contributors in the file should be in the API
             assert existing_contributor_logins_set.issubset(
                 users_from_api), 'All contributors in the .all-contributorsrc file should be pulled using the API'
