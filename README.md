@@ -70,7 +70,9 @@ at: [https://harvard-edge.github.io/cs249r_book/](https://harvard-edge.github.io
 
 ## Local Rendering
 
-For local rendering of the book, you need to have `quarto` installed. Once that's done, the following command can be
+You need to have `quarto` installed for local rendering of the book. Please follow the [Quarto installation instructions here](https://quarto.org/docs/download/).
+
+Once that's done, the following command can be
 used to produce the HTML pages:
 
 ```bash
