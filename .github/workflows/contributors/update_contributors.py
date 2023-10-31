@@ -1,3 +1,4 @@
+import collections
 import json
 import os
 
@@ -31,7 +32,9 @@ def main(_):
         last_page = res.links.get('last', {}).get('url', None)
 
     user_to_name_dict = dict()
-    users_from_api = []
+    name_to_user_dict = dict()
+    users_from_api = set()
+    user_full_names_from_api = set()
 
     for node in data:
         commit_info = node.get('commit', None)
@@ -39,7 +42,7 @@ def main(_):
         commit_commiter_info = commit_info.get('committer', None)
         author_info = node.get('author', None)
         committer_info = node.get('committer', None)
-        committer_login_info = committer_info.get('login', None)
+        committer_login_info = committer_info.get('login', None) if committer_info else None
         user_full_name = None
         username = None
 
@@ -53,13 +56,13 @@ def main(_):
         elif committer_login_info:
             username = committer_login_info['login']
 
-        assert user_full_name is not None, 'User full name should not be None'
-        assert username is not None, 'Username should not be None'
+        if user_full_name:
+            name_to_user_dict[user_full_name] = username if username else None
+            user_full_names_from_api.add(user_full_name)
+        if username:
+            user_to_name_dict[username] = user_full_name if user_full_name else None
+            users_from_api.add(username)
 
-        user_to_name_dict[username] = user_full_name
-        users_from_api.append(username)
-
-    users_from_api = set(users_from_api)
     print('Users pulled from API: ', users_from_api)
 
     with open(CONTRIBUTORS_FILE, 'r') as contrib_file:
@@ -78,7 +81,7 @@ def main(_):
             users_from_api), 'All contributors in the .all-contributorsrc file should be pulled using the API'
 
         new_contributor_logins = users_from_api - existing_contributor_logins_set
-        print('New contributors: ', new_contributor_logins)
+        print('New contributors: ', new_contributor_logins - EXCLUDED_USERS)
 
         result = users_from_api - EXCLUDED_USERS
 
@@ -87,14 +90,15 @@ def main(_):
             projectOwner=OWNER,
             files=["contributors.qmd", "README.md"],
             contributors=[dict(login=user,
-                               name=user_to_name_dict[user],
+                               name=user_to_name_dict[user] or user,
+                               # If the user has no full name listed, use their username
                                avatar_url=f'https://avatars.githubusercontent.com/{user}',
                                profile=f'https://github.com/{user}',
                                contributions=['doc'], ) for
                           user in result],
 
             repoType='github',
-            contributorsPerLine=7,
+            contributorsPerLine=5,
             repoHost="https=//github.com",
             commitConvention='angular',
             skipCi=True,
