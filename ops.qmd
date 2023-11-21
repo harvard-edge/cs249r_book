@@ -230,7 +230,14 @@ Tight coupling between ML model components makes isolating changes difficult. Mo
 
 ![Figure 14.3: The flowchart depicts the concept of correction cascades in the ML workflow, from problem statement to model deployment. The arcs represent the potential iterative corrections needed at each stage of the workflow, with different colors corresponding to distinct issues such as interacting with physical world brittleness, inadequate application-domain expertise, conflicting reward systems, and poor cross-organizational documentation. The red arrows indicate the impact of cascades, which can lead to significant revisions in the model development process, while the dotted red line represents the drastic measure of abandoning the process to restart. This visual emphasizes the complex, interconnected nature of ML system development and the importance of addressing these issues early in the development cycle to mitigate their amplifying effects downstream. [@data_cascades]](images/ai_ops/data_cascades.png)
 
-Building models sequentially creates risky dependencies where later models rely on earlier ones. For example, taking an existing model and fine-tuning it for a new use case seems efficient. However, this bakes in assumptions from the original model that may eventually need correction. Modifying foundational components then becomes extremely costly due to the cascading effects on subsequent models, known as a "correction cascade." A correction cascade occurs when a change to an early model in a sequence requires propagating fixes through each downstream model that depended on it. One mitigation is to only augment existing models when absolutely necessary to reuse some capabilities. Often, it is safer to train models for new use cases from scratch to avoid baking in dependencies that may trigger correction cascades down the line (see Figure 14.3).
+Building models sequentially creates risky dependencies where later models rely on earlier ones. For example, taking an existing model and fine-tuning it for a new use case seems efficient. However, this bakes in assumptions from the original model that may eventually need correction. 
+
+There are several factors that inform the decision to build models sequentially or not:
+
+* **Dataset size and rate of growth:** With small, static datasets, it often makes sense to fine-tune existing models. For large, growing datasets, training custom models from scratch allows more flexibility to account for new data.
+* **Available computing resources:** Fine-tuning requires less resources than training large models from scratch. With limited resources, leveraging existing models may be the only feasible approach.
+ 
+While fine-tuning can be efficient, modifying foundational components later becomes extremely costly due to the cascading effects on subsequent models. Careful thought should be given to identifying points where introducing fresh model architectures, even with large resource requirements, can avoid correction cascades down the line (see Figure 14.3). There are still scenarios where sequential model building makes sense, so it entails weighing these tradeoffs around efficiency, flexibility, and technical debt.
 
 ### Undeclared Consumers
 
@@ -245,6 +252,7 @@ Data dependency debt refers to unstable and underutilized data dependencies whic
 One mitigation for unstable data dependencies is to use versioning which ensures the stability of inputs but comes with the cost of managing multiple sets of data and the potential for staleness of the data. A mitigation for underutilized data dependencies is to conduct exhaustive leave-one-feature-out evaluation.
 
 ### Analysis Debt from Feedback Loops 
+
 Unlike traditional software, ML systems can change their own behavior over time, making it difficult to analyze pre-deployment. This debt manifests in feedback loops, both direct and hidden.
 
 Direct feedback loops occur when a model influences its own future inputs, such as by recommending products to users that in turn shape future training data. Hidden loops arise indirectly between models, such as two systems that interact via real-world environments. Gradual feedback loops are especially hard to detect. These loops lead to analysis debt – the inability to fully predict how a model will act after release. They undermine pre-deployment validation by enabling unmodeled self-influence. 
@@ -265,6 +273,7 @@ This accumulation of technical debt has several consequences. Fragile and outdat
 Addressing configuration debt requires establishing standards to document, test, validate, and centrally store configurations. Investing in more automated approaches such as hyperparameter optimization and architecture search reduces dependence on manual tuning. Better configuration hygiene makes iterative improvement more tractable by preventing complexity from compounding endlessly. The key is recognizing configuration as an integral part of the ML system lifecycle rather than an ad hoc afterthought.
 
 ### The Changing World
+
 ML systems operate in dynamic real-world environments. Thresholds and decisions that are initially effective become outdated as the world evolves. But legacy constraints make it difficult to adapt systems to reflect changing populations, usage patterns, and other shifting contextual factors.
 
 This debt manifests in two main ways. First, preset thresholds and heuristics require constant re-evaluation and tuning as their optimal values drift. Second, validating systems through static unit and integration tests fails when inputs and behaviors are moving targets.
@@ -273,7 +282,23 @@ Responding to a changing world in real-time with legacy ML systems is challengin
 
 Mitigating this requires building in configurability, monitoring, and modular updatability. Online learning where models continuously adapt, as well as robust feedback loops to training pipelines, help automatically tune to the world. But anticipating and architecting for change is essential to prevent erosion of real-world performance over time.
 
+### Navigating Technical Debt in Early Stages
+
+It is understandable that technical debt accumulates naturally in early stages of model development. When aiming to build MVP models quickly, teams often lack complete information on what components will reach scale or require modification. Some deferred work is expected.
+
+However, even scrappy initial systems should follow principles like "Flexible Foundations" to avoid painting themselves into corners:
+
+* Modular code and reusable libraries allow components to be swapped later
+* Loose coupling between models, data stores, and business logic facilitates change
+* Abstraction layers hide implementation details that may shift over time
+* Containerized model serving keeps options open on deployment requirements
+
+Decisions that seem expedient in the moment can seriously limit future flexibility. For example, baking key business logic into model code rather than keeping it separate makes subsequent model changes extremely difficult.
+
+With thoughtful design, though, it is possible to build quickly at first while retaining degrees of freedom to improve. As the system matures, prudent break points emerge where introducing fresh architectures proactively avoids massive rework down the line. This balances urgent timelines with reducing future correction cascades.
+
 ### Summary
+
 Although financial debt is a good metaphor to understand the tradeoffs, it differs from technical debt in its measurability. Technical debt lacks the ability to be fully tracked and quantified. This makes it hard for teams to navigate the tradeoffs between moving quickly and inherently introducing more debt versus taking the time to pay down that debt. 
 
 The [Hidden Technical Debt of Machine Learning Systems](https://papers.nips.cc/paper_files/paper/2015/file/86df7dcfd896fcaf2674f757a2463eba-Paper.pdf) paper spreads awareness of the nuances of ML system specific tech debt and encourages additional development in the broad area of maintainable ML. 
@@ -476,13 +501,9 @@ Ongoing monitoring provides visibility into real-world performance post-deployme
 
 #### Model Deployment
 
-In traditional MLOps, new model versions are directly deployed onto servers via API endpoints. However, embedded devices require optimized delivery mechanisms to receive updated models. 
+In traditional MLOps, new model versions are directly deployed onto servers via API endpoints. However, embedded devices require optimized delivery mechanisms to receive updated models. Over-the-air (OTA) updates provide a standardized approach to wirelessly distribute new software or firmware releases to embedded devices. Rather than direct API access, OTA packages allow remotely deploying models and dependencies as pre-built bundles. As an alternative, [federated learning](@sec-fl) allows model updates without direct access to raw training data. This decentralized approach has potential for continuous model improvement, but currently lacks robust MLOps platforms.
 
-Over-the-air (OTA) updates provide a standardized approach to wirelessly distribute new software or firmware releases to embedded devices. Rather than direct API access, OTA packages allow remotely deploying models and dependencies as pre-built bundles.
-
-However, some deeply embedded devices lack WiFi, Bluetooth or cellular connectivity necessary for OTA updates. For these systems, model delivery relies on physical interfaces like USB or UART serial connections. The model packaging still follows similar principles, but the deployment mechanism is tailored for the capabilities of the edge hardware.
-
-Moreover, specialized OTA protocols optimized for IoT networks are often used rather than standard WiFi or Bluetooth protocols. Key factors include efficiency, reliability, security, and telemetry like progress tracking. Solutions like Mender.io provide embedded-focused OTA services handling differential updates across device fleets.
+For deeply embedded devices lacking connectivity, model delivery relies on physical interfaces like USB or UART serial connections. The model packaging still follows similar principles to OTA updates, but the deployment mechanism is tailored for the capabilities of the edge hardware. Moreover, specialized OTA protocols optimized for IoT networks are often used rather than standard WiFi or Bluetooth protocols. Key factors include efficiency, reliability, security, and telemetry like progress tracking. Solutions like [Mender.io](https://mender.io/) provide embedded-focused OTA services handling differential updates across device fleets.
 
 ### Development and Operations Integration 
 
@@ -614,23 +635,46 @@ Despite the proliferation of new ML Ops tools in response to the increase in dem
 
 #### Edge Impulse
 
-[Edge Impulse](https://edgeimpulse.com/) is a comprehensive software-as-a-service (SaaS) platform that aims to streamline the process of developing ML models for embedded systems. The creators designed Edge Impulse with seven key principles in mind: accessibility, end-to-end capabilities, a data-centric approach, iterativeness, extensibility, team orientation, and community support. 
+[Edge Impulse](https://edgeimpulse.com/) is an end-to-end development platform for creating and deploying machine learning models onto edge devices such as microcontrollers and small processors. It aims to make embedded machine learning more accessible to software developers through its easy-to-use web interface and integrated tools for data collection, model development, optimization and deployment. It's key capabilities include:
 
-The intuitive user interface (see Figure 14.6) guides developers at all experience levels through uploading data, selecting a model architecture, training the model, and deploying it across relevant hardware platforms. It should be noted that, like any tool, Edge Impulse is intended to assist with, not replace, foundational considerations such as determining if ML is an appropriate solution or acquiring the requisite domain expertise for a given application.
+- Intuitive drag and drop workflow for building ML models without coding required
+- Tools for acquiring, labeling, visualizing and preprocessing data from sensors 
+- Choice of model architectures including neural networks and unsupervised learning
+- Model optimization techniques to balance performance metrics and hardware constraints  
+- Seamless deployment onto edge devices through compilation, SDKs and benchmarks
+- Collaboration features for teams and integration with other platforms
 
-![Figure 14.6: Screenshot of Edge Impulse user interface for building workflows from input data to output features.](images/ai_ops/edge_impulse_dashboard.png)
+With Edge Impulse, developers with limited data science expertise can develop specialized ML models that run efficiently within small computing environments. It provides a comprehensive solution for creating embedded intelligence and taking machine learning to the edge.
 
-What makes Edge Impulse notable is its comprehensive yet intuitive end-to-end workflow. Developers start by uploading their data, either through file upload or command line interface (CLI) tools, after which they can examine raw samples and visualize the distribution of data in the training and test splits. Next, users can pick from a variety of preprocessing “blocks” to facilitate digital signal processing (DSP). While default parameter values are provided, users have the option to customize the parameters as needed, with considerations around memory and latency displayed. 
+##### User Interface
 
-Next, users can easily choose their neural network architecture - without any code needed. Thanks to the platform’s visual editor, users can customize the components of the architecture and the specific parameters, all while ensuring that the model is still trainable. Users can also leverage unsupervised learning algorithms, such as K-means clustering and Gaussian mixture models (GMM).
+Edge Impulse was designed with seven key principles in mind: accessibility, end-to-end capabilities, a data-centric approach, iterativeness, extensibility, team orientation, and community support. The intuitive user interface (shown below) guides developers at all experience levels through uploading data, selecting a model architecture, training the model, and deploying it across relevant hardware platforms. It should be noted that, like any tool, Edge Impulse is intended to assist with, not replace, foundational considerations such as determining if ML is an appropriate solution or acquiring the requisite domain expertise for a given application.
 
-To accommodate the resource constraints of TinyML applications, Edge Impulse provides a confusion matrix summarizing key performance metrics including per-class accuracy and F1 scores. The platform elucidates the tradeoffs between model performance, size, and latency using simulations in Renode and device-specific benchmarking. For streaming data use cases, a performance calibration tool leverages a genetic algorithm to find ideal post-processing configurations balancing false acceptance and false rejection rates. To optimize models, techniques like quantization, code optimization, and device-specific optimization are available. For deployment, models can be compiled in appropriate formats for target edge devices. Native firmware SDKs also enable direct data collection on devices.
+![Screenshot of Edge Impulse user interface for building workflows from input data to output features.](images/ai_ops/edge_impulse_dashboard.png)
+
+What makes Edge Impulse notable is its comprehensive yet intuitive end-to-end workflow. Developers start by uploading their data, either through file upload or command line interface (CLI) tools, after which they can examine raw samples and visualize the distribution of data in the training and test splits. Next, users can pick from a variety of preprocessing “blocks” to facilitate digital signal processing (DSP). While default parameter values are provided, users have the option to customize the parameters as needed, with considerations around memory and latency displayed. Users can easily choose their neural network architecture - without any code needed. 
+
+Thanks to the platform’s visual editor, users can customize the components of the architecture and the specific parameters, all while ensuring that the model is still trainable. Users can also leverage unsupervised learning algorithms, such as K-means clustering and Gaussian mixture models (GMM).
+
+##### Optimizations
+
+To accommodate the resource constraints of TinyML applications, Edge Impulse provides a confusion matrix summarizing key performance metrics including per-class accuracy and F1 scores. The platform elucidates the tradeoffs between model performance, size, and latency using simulations in [Renode](https://renode.io/) and device-specific benchmarking. For streaming data use cases, a performance calibration tool leverages a genetic algorithm to find ideal post-processing configurations balancing false acceptance and false rejection rates. To optimize models, techniques like quantization, code optimization, and device-specific optimization are available. For deployment, models can be compiled in appropriate formats for target edge devices. Native firmware SDKs also enable direct data collection on devices.
 
 In addition to streamlining development, Edge Impulse scales the modeling process itself. A key capability is the [EON Tuner](https://docs.edgeimpulse.com/docs/edge-impulse-studio/eon-tuner), an automated machine learning (AutoML) tool that assists users in hyperparameter tuning based on system constraints. It runs a random search to quickly generate configurations for digital signal processing and training steps. The resulting models are displayed for the user to select based on relevant performance, memory, and latency metrics. For data, active learning facilitates training on a small labeled subset then manually or automatically labeling new samples based on proximity to existing classes. This expands data efficiency.
+
+##### Use Cases
 
 Beyond the accessibility of the platform itself, the Edge Impulse team has expanded the knowledge base of the embedded ML ecosystem. The platform lends itself to academic environments, having been used in online courses and on-site workshops globally. Numerous case studies featuring industry and research use cases have been published, most notably [Oura Ring](https://ouraring.com/), which uses ML to identify sleep patterns. The team has made repositories open source on GitHub, facilitating community growth. Users can also make projects public to share techniques and download libraries to share via Apache. Organization-level access enables collaboration on workflows.
 
 Overall, Edge Impulse is uniquely comprehensive and integrateable for developer workflows. Larger platforms like Google and Microsoft focus more on cloud versus embedded systems. TinyMLOps frameworks such as Neuton AI and Latent AI offer some functionality but lack Edge Impulse’s end-to-end capabilities. TensorFlow Lite Micro is the standard inference engine due to flexibility, open source status, and TensorFlow integration but uses more memory and storage than Edge Impulse’s EON Compiler. Other platforms are outdated, academic-focused, or less versatile. In summary, Edge Impulse aims to streamline and scale embedded ML through an accessible, automated platform.
+
+#### Limitations
+
+While Edge Impulse provides an accessible pipeline for embedded ML, there are still important limitations and risks to consider. A key challenge is data quality and availability - the models are only as good as the data used to train them. Users must have sufficient labeled samples that capture the breadth of expected operating conditions and failure modes. Labeled anomalies and outliers are critical yet time-consuming to collect and identify. Insufficient or biased data leads to poor model performance regardless of the tool's capabilities.
+
+There are also inherent challenges in deploying to low-powered devices. Optimized models may still be too resource intensive for ultra-low power MCUs. Striking the right balance of compression versus accuracy takes some experimentation. The tool simplifies but doesn't eliminate the need for foundational ML and signal processing expertise. Embedded environments also constrain debugging and interpretability compared to the cloud.
+
+While impressive results are achievable, users shouldn’t view Edge Impulse as a “Push Button ML” solution. Careful project scoping, data collection, model evaluation and testing is still essential. As with any development tool, reasonable expectations and diligence in application are advised. But for developers willing to invest the requisite data science and engineering effort, Edge Impulse can accelerate embedded ML prototyping and deployment.
 
 ## Case Studies
 
