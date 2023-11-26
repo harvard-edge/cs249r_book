@@ -61,7 +61,7 @@ def get_co_authors_from_commit_message(commit_message):
       except ValueError as e:
         logging.error(
             f"Error parsing co-author: {line}. Co-author should be of the form: "
-            f"'Co-authored-by: <name> <email>'. "
+            f"'Co-authored-by: NAME <email>'. "
             f"Remember to include the angle brackets around the email."
         )
     return pd.DataFrame(co_author_data)
