@@ -10,38 +10,34 @@ from absl import logging
 
 CONTRIBUTORS_FILE = ".all-contributorsrc"
 
-EXCLUDED_USERS = {"web-flow", "github-actions[bot]", "mrdragonbear", "jveejay"}
+EXCLUDED_USERS = {"web-flow", "github-actions[bot]", "mrdragonbear", "jveejay",
+                  "Matthew Steward"}
 
 OWNER = "harvard-edge"
 REPO = "cs249r_book"
 BRANCH = "main"
 
 
-def get_github_user_full_name(username):
+def get_user_data_from_username(username):
   g = github.Github(os.environ["GITHUB_TOKEN"])
   try:
     user = g.get_user(username)
-    return user.name
+    return {'username': user.login, 'user_full_name': user.name,
+            'email_address': user.email}
   except github.GithubException:
-    return None
+    return {'username': username, 'user_full_name': pd.NA,
+            'email_address': pd.NA}
 
 
-def get_github_user_email_address(username):
+def get_user_data_from_email(email_address):
   g = github.Github(os.environ["GITHUB_TOKEN"])
   try:
-    user = g.get_user(username)
-    return user.email
+    user = g.get_user(email_address)
+    return {'username': user.login, 'user_full_name': user.name,
+            'email_address': user.email}
   except github.GithubException:
-    return None
-
-
-def get_username_from_email(email):
-  g = github.Github(os.environ["GITHUB_TOKEN"])
-  try:
-    user = g.get_user(email)
-    return user.login, email
-  except github.GithubException:
-    return None, email
+    return {'username': pd.NA, 'user_full_name': pd.NA,
+            'email_address': email_address}
 
 
 def get_co_authors_from_commit_message(commit_message):
@@ -84,7 +80,7 @@ def main(_):
 
   commit_data = []
   for node in data:
-    commit_message = node.get("commit", {}).get("message", None)
+    commit_message = node.get("commit", {}).get("message", pd.NA)
     commit_info = node.get("commit", None)
     commit_author_info = commit_info.get("author", None)
     commit_commiter_info = commit_info.get("committer", None)
@@ -93,8 +89,8 @@ def main(_):
     committer_login_info = (
         committer_info.get("login", None) if committer_info else None
     )
-    user_full_name = None
-    username = None
+    user_full_name = pd.NA
+    username = pd.NA
 
     if commit_author_info:
       user_full_name = commit_author_info["name"]
@@ -114,64 +110,60 @@ def main(_):
         }
     )
   commit_data_df = pd.DataFrame(commit_data)
-  users_from_api = commit_data_df["username"].unique().tolist()
-  print("Users pulled from API: ", users_from_api)
-
   co_authors_list = [get_co_authors_from_commit_message(row["commit_message"])
                      for index, row in commit_data_df.iterrows()]
   co_authors_df = pd.concat(co_authors_list, ignore_index=True)
 
   commit_data_df.drop(columns=["commit_message"], inplace=True)
+  commit_data_df.drop_duplicates(inplace=True)
   commit_data_df = commit_data_df.merge(
-      co_authors_df, how="left", on="user_full_name")
-  commit_data_df.drop_duplicates(
-      subset=["user_full_name", "username", "email_address"], inplace=True)
-
-  # Try to get email addresses from GitHub API
-  commit_data_df = commit_data_df.assign(
-      email_address=commit_data_df.apply(
-          lambda row: get_github_user_email_address(row['username'])
-          if pd.isna(row['email_address']) and not pd.isna(row['username'])
-          else row['email_address'],
-          axis=1
-      )
-  )
+      co_authors_df, how='outer', on='user_full_name')
+  commit_data_df.drop_duplicates(inplace=True)
 
   # Remove rows with excluded users
   commit_data_df = commit_data_df[~commit_data_df["username"].isin(
       EXCLUDED_USERS)]
   commit_data_df = commit_data_df[~commit_data_df["user_full_name"].isin(
       EXCLUDED_USERS)]
-  commit_data_df = commit_data_df.fillna(value=np.nan)
+
+  # Use API to get user data for any missing users
+  for index, row in commit_data_df.iterrows():
+    user_data = None
+    if pd.isna(row.username) and not pd.isna(row.email_address):
+      user_data = get_user_data_from_email(row.email_address)
+      commit_data_df.at[index, 'username'] = user_data['username']
+    elif not pd.isna(row.username) and pd.isna(row.email_address):
+      user_data = get_user_data_from_username(row.username)
+      commit_data_df.at[index, 'email_address'] = user_data['email_address']
+
+    # Only replace user_full_name if it's missing, or if it's different from what we have
+    if user_data and not pd.isna(user_data['user_full_name']):
+      if pd.isna(row.user_full_name) or user_data[
+        'user_full_name'] != row.user_full_name:
+        commit_data_df.at[index, 'user_full_name'] = user_data['user_full_name']
+
+  # Get name length to figure out which full name to use
   commit_data_df = commit_data_df.assign(
       name_length=commit_data_df['user_full_name'].str.len())
+  commit_data_df = commit_data_df.fillna(pd.NA)
   commit_data_df = commit_data_df.sort_values(by='name_length', ascending=False)
 
-  # Group by 'username' and aggregate
-  aggregated_df = commit_data_df.groupby('username', as_index=False).first()
-  aggregated_df = aggregated_df[["username", "user_full_name", "email_address"]]
+  # Add a flag column for whether 'username' is NaN
+  commit_data_df['has_username'] = ~commit_data_df['username'].isna()
 
-  # Now as a last ditch effort, try to get the full name from the GitHub API
-  # Only do this if user_full_name is the same as username or if user_full_name is NaN
-  aggregated_df = aggregated_df.assign(
-      user_full_name=aggregated_df.apply(
-          lambda row: get_github_user_full_name(row['username'])
-          if row['user_full_name'] == row['username'] or pd.isna(
-              row['user_full_name'])
-          else row['user_full_name'],
-          axis=1
-      )
-  )
+  # Multi-level group by 'has_username' and 'username'
+  commit_data_df = commit_data_df.groupby(
+      ['has_username', 'username', 'email_address'],
+      dropna=False,
+      as_index=False).first()
 
-  # At this point, if we don't have a user_full_name, just use the username
-  aggregated_df = aggregated_df.assign(
-      user_full_name=aggregated_df.apply(
-          lambda row: row['username']
-          if pd.isna(row['user_full_name'])
-          else row['user_full_name'],
-          axis=1
-      )
-  )
+  # Drop the 'has_username' column as it's no longer needed after grouping
+  commit_data_df.drop('has_username', axis=1, inplace=True)
+  commit_data_df['display_name'] = commit_data_df['username'].fillna('octocat')
+
+  # Select required columns for the aggregated DataFrame
+  commit_data_df = commit_data_df[
+    ["display_name", "username", "user_full_name", "email_address"]]
 
   final_result = dict(
       projectName=REPO,
@@ -179,13 +171,13 @@ def main(_):
       files=["contributors.qmd", "README.md"],
       contributors=[
           dict(
-              login=row.username,
+              login=row.display_name,
               name=row.user_full_name,
-              avatar_url=f"https://avatars.githubusercontent.com/{row.username}",
-              profile=f"https://github.com/{row.username}",
+              avatar_url=f"https://avatars.githubusercontent.com/{row.display_name}",
+              profile=f"https://github.com/{row.display_name}",
               contributions=[],
           )
-          for row in aggregated_df.itertuples()
+          for row in commit_data_df.itertuples()
       ],
       repoType="github",
       contributorsPerLine=5,
