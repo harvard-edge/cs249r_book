@@ -161,9 +161,14 @@ def main(_):
   commit_data_df.drop('has_username', axis=1, inplace=True)
   commit_data_df['display_name'] = commit_data_df['username'].fillna('octocat')
 
-  # Select required columns for the aggregated DataFrame
-  commit_data_df = commit_data_df[
-    ["display_name", "username", "user_full_name", "email_address"]]
+  # Shuffle the DataFrame rows
+  commit_data_df = commit_data_df.sample(frac=1).reset_index(drop=True)
+
+  # Sort the DataFrame to put 'octocat' at the bottom
+  commit_data_df['is_octocat'] = commit_data_df['display_name'] == 'octocat'
+  commit_data_df = commit_data_df.sort_values(by='is_octocat',
+                                              ascending=True).drop('is_octocat',
+                                                                   axis=1)
 
   final_result = dict(
       projectName=REPO,
