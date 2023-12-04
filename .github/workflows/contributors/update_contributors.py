@@ -189,6 +189,12 @@ def main(_):
   commit_data_df.drop('has_username', axis=1, inplace=True)
   commit_data_df.drop('name_length', axis=1, inplace=True)
 
+  # If the user_full_name is an email address, replace it with the username
+  commit_data_df['user_full_name'] = commit_data_df.apply(
+      lambda row: row['username'] if '@' in row['user_full_name'] else row[
+        'user_full_name'],
+      axis=1)
+
   def generate_gravatar_url(name):
     name_list = list(name)
     random.shuffle(name_list)
