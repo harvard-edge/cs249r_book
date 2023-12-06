@@ -739,6 +739,8 @@ As introduced earlier, neural networks are comprised of linear operations (matri
 
 ### Runtime Complexity of Matrix Multiplication
 
+#### Layer Multiplications vs. Activations
+
 The bulk of computation in neural networks arises from the matrix multiplications between layers. Consider a neural network layer with an input dimension of $M$ = 500 and output dimension of $N$ = 1000, the matrix multiplication requires $O(N \cdot M) = O(1000 \cdot 500) = 500,000$ multiply-accumulate (MAC) operations between those layers.
 
 Contrast this with the preceding layer which had $M$ = 300 inputs, requiring $O(500 \cdot 300) = 150,000$ ops. We can see how the computations scale exponentially as the layer widths increase, with the total computations across $L$ layers being $\sum_{l=1}^{L-1} O\big(N^{(l)} \cdot M^{(l-1)}\big)$. 
@@ -749,8 +751,7 @@ These large matrix multiplications directly impact hardware choices, inference l
 
 When training neural networks, we typically use mini-batch gradient descent, operating on small batches of data at a time. Considering a batch size of $B$ training examples, the input to the matrix multiplication becomes a $M \times B$ matrix, while the output is an $N \times B$ matrix.
 
-:::{.callout-note collapse="true"}
-## Mini-batch
+#### Mini-batch
 
 In training neural networks, we need to repeatedly estimate the gradient of the loss function with respect to the network parameters (i.e. weights and biases). This gradient indicates which direction the parameters should be updated in order to minimize the loss.
 
@@ -762,9 +763,6 @@ This provides a noisy but consistent gradient estimate that leads to more stable
 
 By tuning the mini-batch size, we can control the tradeoff between the smoothness of the estimate (larger batches are better) and the frequency of updates (smaller batches allow more regular updates). Mini-batch sizes are usually powers of 2 so they can leverage parallelism across GPU cores efficiently.
 
-In summary, mini-batch gradient descent refers to updating the neural network weights based on the gradient estimated from small mini-batches rather than individual examples. This strikes a balance between estimate accuracy and computational efficiency.
-:::
-
 So the total computation is performing an $N \times M$ by $M \times B$ matrix multiplication, yielding $O(N \cdot M \cdot B)$ floating point operations. As a numerical example, with $N=1000$ hidden units, $M=500$ input units, and a batch size $B=64$, this equates to 1000 x 500 x 64 = 32 million multiply-accumulates per training iteration!
 
 In contrast, the activation functions are applied element-wise to the $N \times B$ output matrix, requiring only $O(N \cdot B)$ computations. For $N=1000$ and $B=64$, that is just 64,000 nonlinearities - 500X less work than the matrix multiplication.
@@ -773,11 +771,13 @@ As we increase the batch size to fully leverage parallel hardware like GPUs, the
 
 Therefore, when analyzing where and how neural networks spend computation, matrix multiplication clearly plays a central role. For example, matrix multiplications often account for over 90% of both inference latency and training time in common convolutional and recurrent neural networks.
 
-As a result, techniques that enhance the efficiency of general dense/sparse matrix-matrix and matrix-vector operations would directly improve overall efficiency. Some key methods include:
+#### Optimizing Matrix Multiplication
 
-* Leveraging optimized math libraries like cuBLAS for GPU acceleration
+A number of techniques enhance the efficiency of general dense/sparse matrix-matrix and matrix-vector operations to directly improve overall efficiency. Some key methods include:
+
+* Leveraging optimized math libraries like [cuBLAS](https://developer.nvidia.com/cublas) for GPU acceleration
 * Enabling lower precision formats like FP16 or INT8 where accuracy permits
-* Employing specialized hardware like Tensor Processing Units with hardware matrix multiplication
+* Employing [Tensor Processing Units](https://en.wikipedia.org/wiki/Tensor_Processing_Unit) with hardware matrix multiplication
 * Sparsity-aware computations and data storage formats to exploit zero parameters
 * Approximating matrix multiplications with algorithms like Fast Fourier Transforms
 * Model architecture design to reduce layer widths and activations
@@ -785,17 +785,51 @@ As a result, techniques that enhance the efficiency of general dense/sparse matr
 * Parallelization of computation across available hardware
 * Caching/pre-computing results where possible to reduce redundant operations
 
-The potential optimization techniques are vast given the outsized portion of time models spend in matrix and vector math. Even incremental improvements would directly speed up runtimes and lower energy usage. Finding new ways to enhance these linear algebra primitives continues to be an active area of research aligned with the future demands of machine learning.
+The potential optimization techniques are vast given the outsized portion of time models spend in matrix and vector math. Even incremental improvements would directly speed up runtimes and lower energy usage. Finding new ways to enhance these linear algebra primitives continues to be an active area of research aligned with the future demands of machine learning. We will discuss these in detail in the [Optimizations](./optimizations.qmd) and [AI Acceleration](./hw_acceleration.qmd) chapters.
 
-### Compute vs Memory Bottleneck in Training and Inference
+### Compute vs Memory Bottleneck
 
-As previously outlined, matrix multiplication is the key operational bottleneck in both neural network training and inference. However, this operation may pose a bottleneck to either the memory or computational capability of the underlying hardware system. Concretely, batched matrix multiplication (i.e: matrix-multiplicaton with a high batch-size $B$) exhibits a much higher computation to memory ratio, and hence the underlying computational hardware must have more arithmetic computing capabilities than memory-transfer abilities to maximize performance in these scenarios (this is often the case in both CPUs and GPUs). This is because matrix multiplication performs $O(NMB)$ arithmetic operations, but only $O(NM + MB)$ memory operations; hence when $B$ is large, neural network inference/training requires more arithmetic operations, and when $B$ is small it requires relatively more memory operations. This detail is important since most of today's hardware is better at performing computation rather than memory transfer, and hence from a computational perspective it is better to maximize batch size $B$ at training time to fully utilize the hardware. However, using a larger batch size $B$ at training time means doing fewer updates per pass of the dataset, which might decrease convergence time. Hence, selecting batch size $B$ has a considerable impact on both the convergence, computational efficiency, and runtime of neural networks, and must be tuned to attain high performance. Generally, a good rule of thumb for batch size is between 8-128.
+At this point, it should be clear that the core mathematical operation underpinning neural networks is the matrix-matrix multiplication. Both training and inference for neural networks heavily utilize these matrix multiply operations. Recent analysis shows that over 90% of computational requirements in state-of-the-art neural networks arise from matrix multiplications [?]. Consequently, the performance of matrix multiplication has an enormous influence on overall model training or inference time.
 
-### Optimizing Matrix Multiplication
+#### Training versus Inference
 
-Matrix multiplication is essential to the performance of neural network inference and training, and hence efficiently evaluating matrix multiplication is crucial to performance. Broadly, various methods to accelerate matrix-multiplication include carefully writing the matrix-multiply routine to leverage the caches of the CPU, leveraging hardware-level parallel operations (i.e: SIMD), using hardware capabilities that perform multiply-adds simultaneously (i.e: fused add-multiply, and others. Even better at performing matrix multiplication than the CPU are GPUs, which have hardware that is suitable for performing a mass amount of parallel operations, a capability that is perfect for executing matrix-multiplication whose individual steps are highly parallelizable. Using the GPU, matrix multiplication can be accelerated by a significant factor over the GPU since the matrix-multiplication can be efficiently parallelized on a GPU, using standard techniques like blocking and tiling to maximize resource utilization. Other alternative ways to accelerate matrix-multiplication include using FPGAs, or dedicated hardware like TPUs (i.e: systolic arrays).
+While both training and inference rely heavily on matrix multiplication performance, their precise computational profiles differ. Specifically, neural network inference tends to be much more compute-bound compared to training for an equivalent batch size. The key difference lies in the backpropagation pass which is only required during training. Backpropagation involves a sequence matrix multiply operations to calculate gradients with respect to activations across each network layer. Critically though, no additional memory bandwidth is needed here - the inputs, outputs, and gradients are read/written from cache or registers.
 
-![AI training is typically compute bound due to the high arithmetic intensity of matrix-multiplication when batch size is large](images/aitrainingroof.png)
+As a result, training exhibits lower arithmetic intensities, with gradient calculations bounded by memory access instead of FLOPs. In contrast, neural network inference is dominated by the forward propagation which corresponds to a series of matrix-matrix multiplies. With no memory-intensive gradient retrospecting, larger batch sizes readily push inference into being extremely compute-bound. This is exhibited by the high measured arithmetic intensities.
+
+The implications are that hardware provisioning and bandwidth vs FLOP tradeoffs differ based on whether a system targets training or inference. High-throughput low-latency servers for inference should emphasize computational power instead of memory while training clusters require a more balanced architecture.
+
+However, matrix multiplication exhibits an interesting tension - it can either be bound by the memory bandwidth or arithmetic throughput capabilities of the underlying hardware. The system’s ability to fetch and supply matrix data versus its ability to perform computational operations determines this direction. 
+
+This phenomenon has profound impacts; hardware must be designed judiciously and software optimizations need to keep this in mind. Optimizing and balancing compute versus memory to alleviate this underlying matrix multiplication bottleneck is crucial for both efficient model training as well as deployment.
+
+#### Batch Size
+
+The batch size used during neural network training and inference has a significant impact on whether matrix multiplication poses more of a computational or memory bottleneck. Concretely, the batch size refers to the number of samples that are propagated through the network together in one forward/backward pass. In terms of matrix multiplication, this equates to larger matrix sizes.
+
+Specifically, let's look at the arithmetic intensity of matrix multiplication during neural network training. This measures the ratio between computational operations and memory transfers. The matrix multiply of two matrices of size $N \times M$ and $M \times B$ requires $N \times M \times B$ multiply-accumulate operations, but only transfers of $N \times M + M \times B$ matrix elements.
+
+As we increase the batch size $B$, the number of arithmetic operations grows much faster than the memory transfers. For example, with a batch size of 1, we need $N \times M$ operations and $N + M$ transfers, giving an arithmetic intensity ratio of around $\frac{N \times M}{N+M}$. But with a large batch size of 128, the intensity ratio becomes $\frac{128 \times N \times M}{N \times M + M \times 128} \approx 128$.
+
+Therefore, batched matrix multiplication is far more computationally intensive than memory access bound. This has implications on hardware design as well as software optimizations, which we will cover next. The key insight is that by tuning the batch size, we can significantly alter the computational profile and bottlenecks posed by neural network training and inference.
+
+![AI training is typically compute bound due to the high arithmetic intensity of matrix-multiplication when batch size is large.](images/aitrainingroof.png){#fig-roofline}
+
+#### Hardware Characteristics
+
+Modern hardware like CPUs and GPUs are highly optimized for computational throughput as opposed to memory bandwidth. For example, high-end H100 Tensor Core GPUs can deliver over 60 TFLOPS of double-precision performance but only provide up to 3 TB/s of memory bandwidth. This means there is almost a 20x imbalance between arithmetic units and memory access. Consequently, for hardware like GPU accelerators, neural network training workloads need to be made as computationally intensive as possible in order to fully utilize the available resources.
+
+This further motivates the need for using large batch sizes during training. When using a small batch, the matrix multiplication is bounded by memory bandwidth, underutilizing the abundant compute resources. However, with sufficiently large batches, we can shift the bottleneck more towards computation and attain much higher arithmetic intensity. For instance, batches of 256 or 512 samples may be needed to saturate a high-end GPU. The downside is that larger batches provide less frequent parameter updates, which can impact convergence. Still, the parameter serves as an important tuning knob to balance memory vs compute limitations.
+
+Therefore, given the imbalanced compute-memory architectures of modern hardware, employing large batch sizes is essential to alleviate bottlenecks and maximize throughput. The subsequent software and algorithms also need to accommodate such batch sizes. Failing to do so leads to suboptimal hardware utilization, ultimately limiting training efficiency.
+
+#### Model Architectures
+
+The underlying neural network architecture also affects whether matrix multiplication poses more of a computational or memory bottleneck during execution. Transformers and MLPs tend to be much more compute-bound compared to CNN convolutional neural networks. This stems from the types of matrix multiplication operations involved in each model. Transformers rely on self-attention - multiplying large activation matrices by massive parameter matrices to relate elements. MLPs stack fully-connected layers also requiring large matrix multiplies.
+
+In contrast, the convolutional layers in CNNs have a sliding window that reuses activations and parameters across the input. This means fewer unique matrix operations are needed. However, the convolutions require repeatedly accessing small parts of the input and moving partial sums to populate each window. Even though the arithmetic operations in convolutions are intense, this data movement and buffer manipulation imposes huge memory access overheads. Additionally, CNNs comprise several layered stages so intermediate outputs need to be materialized to memory frequently.
+
+As a result, CNN training tends to be more memory bandwidth bound relative to arithmetic bound compared to Transformers and MLPs. Therefore, the matrix multiplication profile and in turn the bottleneck posed varies significantly based on model choice. Hardware and systems need to be designed with appropriate compute-memory bandwidth balance depending on target model deployment. Models relying more on attention and MLP layers require higher arithmetic throughput compared to CNNs which necessitate high memory bandwidth.
 
 ## Training Parallelization
 
