@@ -833,40 +833,76 @@ As a result, CNN training tends to be more memory bandwidth bound relative to ar
 
 ## Training Parallelization
 
-Training can be computationally intensive. As outlined above, backpropagation can be expensive both in terms of computation and memory. In terms of computation, backpropagation requires many large matrix multiplications which require considerable arithmetic operation. In terms of memory, backpropagation requires storing the model parameters and intermediate activations in memory, which can be significant if training large models. Handling these difficult system challenges is key to training large models. To mitigate these computational and memory challenges, parallelization is necessary. Broadly, there are two different approaches to parallelizing training: Data Parallel and Model Parallel, discussed below.
+Training neural networks entails intensive computational and memory demands. The backpropagation algorithm for calculating gradients and updating weights consists of repeated matrix multiplications and arithmetic operations over the entire dataset. For example, one pass of backpropagation scales in time complexity with $O(num\_parameters \times batch\_size \times sequence\_length)$.
+
+As model size increases in terms of parameters and layers, the computational requirements grow rapidly. Moreover, the algorithm requires storing activation outputs and model parameters for the backward pass, which also grows with model size.
+
+The memory footprint becomes prohibitive for larger models to fit and train on a single accelerator device like a GPU. Therefore, we need to parallelize model training across multiple devices in order to provide sufficient compute and memory to train state-of-the-art neural networks.
+
+As shown in @fig-training-parallelism, the two main approaches are *data parallelism*, which replicates the model across devices while splitting the input data batch-wise, and *model parallelism*, which partitions the model architecture itself across different devices. By training in parallel, we can leverage greater aggregate compute and memory resources to overcome system limitations and accelerate deep learning workloads.
+
+![Data parallelism veresus model parallelism.](images/aitrainingpara.png){#fig-training-parallelism}
 
 ### Data Parallel
 
-Data parallelization is a common approach to parallelize machine learning (ML) training across multiple processing units, such as GPUs or distributed computing resources. In data parallelism, the training dataset is divided into batches, and each batch is processed by a separate processing unit. The model parameters are then updated based on the gradients computed from the processing of each batch.
+Data parallelization is a common approach to parallelize machine learning training across multiple processing units, such as GPUs or distributed computing resources. In data parallelism, the training dataset is divided into batches, and each batch is processed by a separate processing unit. The model parameters are then updated based on the gradients computed from the processing of each batch. Here's a step-by-step description of data parallel parallelization for ML training:
 
-Here's a step-by-step description of data parallel parallelization for ML training:
+1. **Dividing the Dataset:** The entire training dataset is divided into smaller batches. Each batch contains a subset of the training examples.
 
-* Dividing the Dataset
-    The entire training dataset is divided into smaller batches. Each batch contains a subset of the training examples.
+2. **Replicating the Model:** The neural network model is replicated across all processing units. Each processing unit has its copy of the model.
 
-* Replicating the Model
-    The ML model (neural network, for example) is replicated across all processing units. Each processing unit has its copy of the model.
+3. **Parallel Computation:** Each processing unit takes a different batch and computes the forward and backward passes independently. During the forward pass, the model makes predictions on the input data. During the backward pass, gradients are computed for the model parameters using the loss function.
 
-* Parallel Computation
-    Each processing unit takes a different batch and computes the forward and backward passes independently. During the forward pass, the model makes predictions on the input data. During the backward pass, gradients are computed for the model parameters using the loss function.
+4. **Gradient Aggregation:** After processing their respective batches, the gradients from each processing unit are aggregated. Common aggregation methods include summation or averaging of the gradients.
 
-* Gradient Aggregation
-    After processing their respective batches, the gradients from each processing unit are aggregated. Common aggregation methods include summation or averaging of the gradients.
+5. **Parameter Update:** The aggregated gradients are used to update the model parameters. The update can be performed using optimization algorithms like SGD or variants like Adam.
 
-* Parameter Update
-    The aggregated gradients are used to update the model parameters. The update can be performed using optimization algorithms like Stochastic Gradient Descent (SGD) or variants like Adam.
-
-* Synchronization
-    All processing units synchronize their model parameters after the update. This ensures that each processing unit has the latest version of the model.
+6. **Synchronization:** All processing units synchronize their model parameters after the update. This ensures that each processing unit has the latest version of the model.
 
 The prior steps are repeated for a certain number of iterations or until convergence.
+
+Let's take a specific example. Let's say for instance we have 256 batch size and 8 GPUs, each GPU will get a micro-batch of 32 samples. Their forward and backward passes compute losses and gradients only based on the local 32 samples. The gradients get aggregated across devices either with a parameter server or collective communications library to get the effective gradient for the global batch. Weight updates happen independently on each GPU according to these gradients. After a configured number of iterations, updated weights synchronize and equalize across devices before continuing for the next iterations.
+
+
 Data parallelism is effective when the model is large, and the dataset is substantial, as it allows for parallel processing of different parts of the data. It is widely used in deep learning frameworks and libraries that support distributed training, such as TensorFlow and PyTorch. However, care must be taken to handle issues like communication overhead, load balancing, and synchronization to ensure efficient parallelization.
 
 ### Model Parallel
 
-The counterpart to data parallelism is model parallelism, which is an approach to parallelize training by distributing the model across multiple processing units. This is particularly useful when a model is too large to fit into the memory of a single device (e.g., a GPU). In model parallelism, different parts or layers of the model are assigned to different devices, and data is passed between these devices during the training process. By splitting the model across different devices, memory and computational burdens are distributed across individual devices. However, as these devices are separate from each other, they must communicate during the forward and backward passes to share gradient updates, and hence care must be taken with regards to communication and coordination to ensure high performance.
+Model parallelism refers to distributing the neural network model itself across multiple devices, rather than replicating the full model like data parallelism. This is particularly useful when a model is too large to fit into the memory of a single GPU or accelerator device. While this might not be specifically applicable for embedded or TinyML use cases as most of the models are relatively small(er), it is still useful to know.
 
-![](images/aitrainingpara.png )
+In model parallel training, different parts or layers of the model are assigned to separate devices. The input activations and intermediate outputs get partitioned and passed between these devices during the forward and backward passes to coordinate gradient computations across model partitions.
+
+By splitting the model architecture across multiple devices, the memory footprint and computational operations distribute across the devices instead of concentrating on one. This enables training very large models with billions of parameters that otherwise exceed capacity of a single device. There are several main ways in which we can do partitioning:
+
+* **Layer-wise parallelism:** Consecutive layers are distributed onto different devices. For example, device 1 contains layers 1-3, device 2 contains layers 4-6. The output activations from layer 3 would be transferred to device 2 to start the next layers for the forward pass computations.
+
+* **Filter-wise parallelism:** In convolutional layers, output filters can be split up among devices. Each device computes activation outputs for a subset of filters, which get concatenated before propagating further.
+
+* **Spatial parallelism:** The input images get divided spatially, so each device processes over a certain region like the top-left quarter of images. The output regions then combine to form the full output.
+
+Additionally, hybrid combinations can split model both layer-wise and data batch-wise. The appropriate type of model parallelism to use depends on the specific neural architecture constraints and hardware setup. Optimizing the partitioning and communication for the model topology is key to minimizing overhead.
+
+However, as the model parts run on physically separate devices, they must communicate and synchronize their parameters during each training step. The backward pass needs to ensure gradient updates propagate across the model partitions accurately. Hence, coordination and high-speed interconnect between devices is crucial for optimizing performance of model parallel training. Careful partitioning and communication protocols are required to minimize transfer overhead.
+
+### Comparison
+
+To summarize, here are some key characteristics to compare data parallelism and model parallelism in a summary table:
+
+| Characteristic | Data Parallelism | Model Parallelism |
+|-|-----------------|-------------------|
+| Definition | Distribute data across devices with model replicas | Distribute model across devices |  
+| Objective | Accelerate training through compute scaling | Enable larger model training |
+| Scaling Method | Scale devices/workers | Scale model size|   
+| Main Constraint | Model size per device | Device coordination overhead |
+| Hardware Requirements | Multiple GPU/TPUs | Often specialized interconnect |  
+| Primary Challenge | Parameter synchronization | Complex partitioning + communication |
+| Types | N/A | Layer-wise, filter-wise, spatial |
+| Code Complexity | Minimal changes | More significant model surgery |
+| Popular Libraries | Horovod, PyTorch Distributed | Mesh TensorFlow |
+
+I included the high-level definition/objective, way it scales, main hardware assumptions and constraints, types of techniques (where applicable), overall implementation complexity, and some examples of associated libraries.
+
+Let me know if you would like me to explain or expand on any part of this comparison summary! Open to adding other characteristics as well.
 
 ## Conclusion
 
