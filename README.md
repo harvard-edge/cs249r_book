@@ -1,4 +1,4 @@
-# INTRODUCTION TO MACHINE LEARNING SYSTEMS with tinyML
+<h1>CS249r: INTRODUCTION TO MACHINE LEARNING SYSTEMS<br>with tinyML</h1>
 
 [![All Contributors](https://img.shields.io/github/all-contributors/harvard-edge/cs249r_book?color=ee8449&style=flat-square)](#contributors)
 
