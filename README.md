@@ -48,7 +48,7 @@ quarto render
       <td align="center" valign="top" width="20%"><a href="https://github.com/mpstewart1"><img src="https://avatars.githubusercontent.com/mpstewart1?s=100" width="100px;" alt="Matthew Stewart"/><br /><sub><b>Matthew Stewart</b></sub></a><br /></td>
     </tr>
     <tr>
-      <td align="center" valign="top" width="20%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/6cb026b24c9bed2d7cef17360e6e71e5?d=identicon&s=100?s=100" width="100px;" alt="Maximilian Lam"/><br /><sub><b>Maximilian Lam</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/efaae2f4eb6a9447faf76cdb1d4bd513?d=identicon&s=100?s=100" width="100px;" alt="Maximilian Lam"/><br /><sub><b>Maximilian Lam</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/jaysonzlin"><img src="https://avatars.githubusercontent.com/jaysonzlin?s=100" width="100px;" alt="Jayson Lin"/><br /><sub><b>Jayson Lin</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/18jeffreyma"><img src="https://avatars.githubusercontent.com/18jeffreyma?s=100" width="100px;" alt="Jeffrey Ma"/><br /><sub><b>Jeffrey Ma</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/sophiacho1"><img src="https://avatars.githubusercontent.com/sophiacho1?s=100" width="100px;" alt="Sophia Cho"/><br /><sub><b>Sophia Cho</b></sub></a><br /></td>
@@ -63,7 +63,7 @@ quarto render
     </tr>
     <tr>
       <td align="center" valign="top" width="20%"><a href="https://github.com/aptl26"><img src="https://avatars.githubusercontent.com/aptl26?s=100" width="100px;" alt="Aghyad Deeb"/><br /><sub><b>Aghyad Deeb</b></sub></a><br /></td>
-      <td align="center" valign="top" width="20%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/df2e67d4534a4cd0b536fe81312141d7?d=identicon&s=100?s=100" width="100px;" alt="Aghyad Deeb"/><br /><sub><b>Aghyad Deeb</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/6f7005975970f417d37873b5471ca2b1?d=identicon&s=100?s=100" width="100px;" alt="Aghyad Deeb"/><br /><sub><b>Aghyad Deeb</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/zishenwan"><img src="https://avatars.githubusercontent.com/zishenwan?s=100" width="100px;" alt="Zishen"/><br /><sub><b>Zishen</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/DivyaAmirtharaj"><img src="https://avatars.githubusercontent.com/DivyaAmirtharaj?s=100" width="100px;" alt="Divya"/><br /><sub><b>Divya</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/eliasab16"><img src="https://avatars.githubusercontent.com/eliasab16?s=100" width="100px;" alt="eliasab16"/><br /><sub><b>eliasab16</b></sub></a><br /></td>
@@ -97,7 +97,7 @@ quarto render
       <td align="center" valign="top" width="20%"><a href="https://github.com/happyappledog"><img src="https://avatars.githubusercontent.com/happyappledog?s=100" width="100px;" alt="happyappledog"/><br /><sub><b>happyappledog</b></sub></a><br /></td>
     </tr>
     <tr>
-      <td align="center" valign="top" width="20%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/cca43992dae04461cdf489289e550ae3?d=identicon&s=100?s=100" width="100px;" alt="Annie Laurie Cook"/><br /><sub><b>Annie Laurie Cook</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/56964fa935089608fa13c9865fe44424?d=identicon&s=100?s=100" width="100px;" alt="Annie Laurie Cook"/><br /><sub><b>Annie Laurie Cook</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/eezike"><img src="https://avatars.githubusercontent.com/eezike?s=100" width="100px;" alt="Emeka Ezike"/><br /><sub><b>Emeka Ezike</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/jessicaquaye"><img src="https://avatars.githubusercontent.com/jessicaquaye?s=100" width="100px;" alt="Jessica Quaye"/><br /><sub><b>Jessica Quaye</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/ciyer64"><img src="https://avatars.githubusercontent.com/ciyer64?s=100" width="100px;" alt="Curren Iyer"/><br /><sub><b>Curren Iyer</b></sub></a><br /></td>
@@ -106,7 +106,7 @@ quarto render
     <tr>
       <td align="center" valign="top" width="20%"><a href="https://github.com/skmur"><img src="https://avatars.githubusercontent.com/skmur?s=100" width="100px;" alt="Sonia Murthy"/><br /><sub><b>Sonia Murthy</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/abigailswallow"><img src="https://avatars.githubusercontent.com/abigailswallow?s=100" width="100px;" alt="abigailswallow"/><br /><sub><b>abigailswallow</b></sub></a><br /></td>
-      <td align="center" valign="top" width="20%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/8ffba13b401544b3307de359a4dc07a1?d=identicon&s=100?s=100" width="100px;" alt="Costin-Andrei Oncescu"/><br /><sub><b>Costin-Andrei Oncescu</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/894d3532fa1a3bfbc47af000453a2f21?d=identicon&s=100?s=100" width="100px;" alt="Costin-Andrei Oncescu"/><br /><sub><b>Costin-Andrei Oncescu</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/vijay-edu"><img src="https://avatars.githubusercontent.com/vijay-edu?s=100" width="100px;" alt="Vijay Edupuganti"/><br /><sub><b>Vijay Edupuganti</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/jasonlyik"><img src="https://avatars.githubusercontent.com/jasonlyik?s=100" width="100px;" alt="Jason Yik"/><br /><sub><b>Jason Yik</b></sub></a><br /></td>
     </tr>
