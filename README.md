@@ -7,7 +7,7 @@ contains the source files of chapters and sections written by your peers. We're 
 
 ## Contributing
 
-To contribute to the repository please see the [contribution guidelines](contribute.md). 
+To contribute to the repository please see the [contribution guidelines](contribute.md).
 
 ---
 

@@ -2,7 +2,6 @@
 
 The Machine Learning Systems with tinyML project welcomes contributions from everyone. This project is maintained by a community of contributors from around the world. We appreciate your help!
 
-
 Your contributions are welcome and can encompass a variety of tasks, such as:
 
 - Identifying and reporting any bugs in the examples
@@ -22,7 +21,7 @@ If there is an open issue for the contribution you would like to make, please co
 
 ### Fork the repository
 
-Fork the repository on GitHub and clone your fork to your local machine. We are following GitHub flow for collabration. Please make sure that your main branch is up to date with the upstream main branch before you start working on your contribution. 
+Fork the repository on GitHub and clone your fork to your local machine. We are following GitHub flow for collabration. Please make sure that your main branch is up to date with the upstream main branch before you start working on your contribution.
 
 ### Clone the forked repository
 
@@ -41,8 +40,8 @@ cd cs249r_book
 ```bash
 git remote add upstream https://github.com/harvard-edge/cs249r_book.git
 ```
-Please note that the upstream remote is read-only. You will not be able to push to the upstream remote. You will only be able to push to your forked repository (you will use a Pull Request for merging your code to upstream). However, you will be able to pull from the upstream remote to keep your forked repository up to date with the upstream repository.
 
+Please note that the upstream remote is read-only. You will not be able to push to the upstream remote. You will only be able to push to your forked repository (you will use a Pull Request for merging your code to upstream). However, you will be able to pull from the upstream remote to keep your forked repository up to date with the upstream repository.
 
 ### Create a new branch
 
@@ -51,6 +50,7 @@ Create a branch for your contribution. The branch name should start with issue n
 ### Make your changes
 
 Make your changes to the code or documentation. Please make sure that your changes are consistent with the style of the rest of the code or documentation.  
+
 - The `content` directory subfolders that each represent a chapter in the book. Each chapter folder contains the source files and documents to render the book. Any new files should be added to the `content` directory in its appropriate folder. Please create a new folder if needed. Make sure that the path in the `_quarto.yml` file is updated to include the new folder.
 
 - Each chapter folder also include an images folder. The images folder has 4 subfolders: `png`, `pdf`, `svg`, and `jpg`. Please add your images to the appropriate folder. This is important to keep the images organized and to make sure that the images are rendered correctly in the book.
@@ -82,11 +82,9 @@ git push origin your-branch-name
 
 Open a Pull Request (PR) to merge your changes to the upstream repository. Please add a brief description of your contribution to the PR. Please include the issue number in the description. For example, `Fix typo in the documentation (issue #14)`.
 
-Opening an early PR is encouraged. This will allow us to provide feedback on your contribution and help you improve it. Moreover, Github Actions will run on your PR and will generate the book, so you can download the book and make sure that your contribution is rendered correctly. 
+Opening an early PR is encouraged. This will allow us to provide feedback on your contribution and help you improve it. Moreover, Github Actions will run on your PR and will generate the book, so you can download the book and make sure that your contribution is rendered correctly.
 
 - If your PR is a work in progress, please add `[WIP]` to the title of the PR. This will let us know that you are still working on your contribution and that you are not ready for a review or merge yet.
 
-
 For a more detailed guide on the CS249r documentation process and peer review,
 check [here](https://docs.google.com/document/d/1izDoWwFLnV8XK2FYCl23_9KYL_7EQ5OWLo-PCNUGle0).
-
