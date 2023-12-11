@@ -28,13 +28,13 @@ We have structured this chapter in three tiers. First, in @sec-model_ops_represe
 
 Going one level lower, in @sec-model_ops_numerics, we study the role of numerical precision in model computations and how altering it impacts model size, speed, and accuracy. We will examine the various numerical formats and how reduced-precision arithmetic can be leveraged to optimize models for embedded deployment.
 
-Finally, as we go lower closer to the hardware, in @sec-model_ops_hw, we will navigate through the landscape of hardware-software co-design, exploring how models can be optimized by tailoring them to the specific characteristics and capabilities of the target hardware. We will discuss how models can be adapted to exploit the available hardware resources effectively.
+Finally, as we go lower and closer to the hardware, in @sec-model_ops_hw, we will navigate through the landscape of hardware-software co-design, exploring how models can be optimized by tailoring them to the specific characteristics and capabilities of the target hardware. We will discuss how models can be adapted to exploit the available hardware resources effectively.
 
 ![A visualization showing each of the three sections to be covered on the hardware-software gradient.](images/png/modeloptimization_structure.png){width=50%}
 
 ## Efficient Model Representation {#sec-model_ops_representation}
 
-The first avenue of attack for model optimization starts in familiar territory for most ML practitioners: efficient model representation is often first tackled at the highest level of parametrization abstraction: the model's architecture itself.
+The first avenue of attack for model optimization starts in familiar territory for most ML practitioners: efficient model representation is often first tackled at the highest level of parametrization abstraction - the model's architecture itself.
 
 Most traditional ML practitioners design models with a general high-level objective in mind, whether it be image classification, person detection, or keyword spotting as mentioned previously in this textbook. Their designs generally end up naturally fitting into some soft constraints due to limited compute resources during development, but generally these designs are not aware of later constraints, such as those required if the model is to be deployed on a more constrained device instead of the cloud.
 
@@ -97,9 +97,19 @@ The pruning strategy orchestrates how structures are removed and integrates with
 
 **Iterative pruning** gradually removes structures across multiple cycles of pruning followed by fine-tuning. In each cycle, a small set of structures are pruned based on importance criteria. The model is then fine-tuned, allowing it to adjust smoothly to the structural changes before the next pruning iteration. This gradual, cyclic approach prevents abrupt accuracy drops. It allows the model to slowly adapt as structures are reduced across iterations.
 
+Consider a situation where we decide to prune 1/3 of the weights. In @fig-iterative-pruning, we have 6 total weights, so we want to remove 2 of them. In the first iteration, edge `A-X` has the lowest weight with a value of 0.009, so we prune it and fine-tune on the remaining edges. In our case, the fine-tuning has changed some of the weights in a way that changed their ranking/importance. Now, the lowest-weight edge is `C-Y`, with a value of 0.011, so we prune it on the second iteration. 
+
+
+![In iterative pruning on edges, we gradually remove a few edges and fine-tune on the new structure, which can change the weights and ranking of the remaining edges.](images/jpg/modeloptimization_iterative_pruning.jpeg){#fig-iterative-pruning}
+
 **One-shot pruning** takes a more aggressive approach by pruning a large portion of structures simultaneously in one shot based on predefined importance criteria. This is followed by extensive fine-tuning to recover model accuracy. While faster, this aggressive strategy can degrade accuracy if the model cannot recover during fine-tuning.
 
 The choice between these strategies involves weighing factors like model size, target sparsity level, available compute and acceptable accuracy losses. One-shot pruning can rapidly compress models, but iterative pruning may enable better accuracy retention for a target level of pruning. In practice, the strategy is tailored based on use case constraints. The overarching aim is to generate an optimal strategy that removes redundancy, achieves efficiency gains through pruning, and finely tunes the model to stabilize accuracy at an acceptable level for deployment.
+
+Now consider the same network we had in the iterative pruning example. In one-shot pruning, we would have to prune the lowest two weights in one iteration: `A-X` and `B-X`. As you can see in @fig-oneshot-pruning, the final structure is different from that in @fig-iterative-pruning. Since we didn't fine-tune on the new structure, the network didn't have the optimally update the weights, and we ended up with a sub-optimal pruned structure. We pruned `B-X` prematurely, when we should have pruned `C-Y`. But we had no way of knowing that without iteratively pruning with fine-tuning.
+
+
+![In one-shot pruning on edges, we remove a certain number of edges with the lowest weights. This might lead to sub-optimal pruning since the network doesn't have the chance to update the weights as it does in iterative pruning.](images/jpg/modeloptimization_oneshot_pruning.jpeg){#fig-oneshot-pruning}
 
 #### Advantages of Structured Pruning
 
@@ -137,7 +147,7 @@ The following compact table provides a concise comparison between structured and
 | **Implementation Complexity**| Often simpler to implement and manage due to maintaining network structure | Can be complex to manage and compute due to sparse representations |
 | **Fine-Tuning Complexity** | May require less complex fine-tuning strategies post-pruning | Might necessitate more complex retraining or fine-tuning strategies post-pruning |
 
-![A visualization showing the differences and examples between unstructured and structured pruning. Observe that unstructured pruning can lead to models that no longer obey high-level structural guaruntees of their original unpruned counterparts: the left network is no longer a fully connected network after pruning. Structured pruning on the other hand maintains those invariants: in the middle, the fully connected network is pruned in a way that the pruned network is still fully connected; likewise, the CNN maintains its convolutional structure, albeit with fewer filters (@qi_efficient_2021).](images/png/modeloptimization_pruning_comparison.png)
+![A visualization showing the differences and examples between unstructured and structured pruning. Observe that unstructured pruning can lead to models that no longer obey high-level structural guaruntees of their original unpruned counterparts: the left network is no longer a fully connected network after pruning. Structured pruning on the other hand maintains those invariants: in the middle, the fully connected network is pruned in a way that the pruned network is still fully connected; likewise, the CNN maintains its convolutional structure, albeit with fewer filters (@qi_efficient_2021).](images/png/modeloptimization_pruning_comparison.png){#fig-structured-unstructured}
 
 #### Lottery Ticket Hypothesis
 
@@ -147,11 +157,27 @@ A breakthrough finding that catalyzed this evolution was the [lottery ticket hyp
 
 More formally, the lottery ticket hypothesis is a concept in deep learning that suggests that within a neural network, there exist sparse subnetworks (or "winning tickets") that, when initialized with the right weights, are capable of achieving high training convergence and inference performance on a given task. The intuition behind this hypothesis is that, during the training process of a neural network, many neurons and connections become redundant or unimportant, particularly with the inclusion of training techniques encouraging redundancy like dropout. Identifying, pruning out, and initializing these "winning tickets'' allows for faster training and more efficient models, as they contain the essential model decision information for the task. Furthermore, as generally known with the bias-variance tradeoff theory, these tickets suffer less from overparameterization and thus generalize better rather than overfitting to the task.
 
-![An example experiment from the lottery ticket hypothesis showing pruning and training experiments on a fully connected LeNet over a variety of pruning ratios: note the first plot showing how pruning is able to reveal a subnetwork nearly one-fifth the size that trains to a higher test accuracy faster than the unpruned network. However, further note how in the second plot that further pruned models in models that both train slower and are not able to achieve that same maximal test accuracy due to the lower number of parameters.](images/png/modeloptimization_lottery_ticket_hypothesis.png)
+![An example experiment from the lottery ticket hypothesis showing pruning and training experiments on a fully connected LeNet over a variety of pruning ratios: note the first plot showing how pruning is able to reveal a subnetwork nearly one-fifth the size that trains to a higher test accuracy faster than the unpruned network. However, further note how in the second plot that further pruned models in models that both train slower and are not able to achieve that same maximal test accuracy due to the lower number of parameters.](images/png/modeloptimization_lottery_ticket_hypothesis.png){#fig-lotter-ticket-hypothesis}
+
+The following is the process of finding the winning lottery ticket subnetwork, as also shown in @fig-winning-ticket:
+
+1- Initialize the network's weights to random values.
+
+2- Train the network until it converges to the desired performance.
+
+3- Prune out some percentage of the edges with the lowest weight values.
+
+4- Reinitialize the network with the same random values from step 1.
+
+5- Repeat steps 2-4 for a number of times, or as long as the accuracy doesn't significantly degrade.
+
+When we finish, we are left with a pruned network, which is a subnetwork of the one we start with. The subnetwork should have a significantly smaller structure, while maintaining a comparable level of accuracy. 
+
+![On the left, we have a simplified overview of the process of finding the winning ticket subnetwork. On the right, we have an example of a subnetwork (highlighted in bold black), as compared to the original network (in faded grey).](images/jpg/modeloptimization_winning_ticket.jpeg){#fig-winning-ticket}
 
 #### Challenges & Limitations
 
-There is no free lunch with pruning optimizations, with some choices coming with wboth improvements and costs to considers. Below we discuss some tradeoffs for practitioners to consider.
+There is no free lunch with pruning optimizations, with some choices coming with both improvements and costs to considers. Below we discuss some tradeoffs for practitioners to consider.
 
 ##### Quality vs. Size Reduction
 
@@ -171,7 +197,7 @@ Ensuring that pruning strategies, whether structured or unstructured, are scalab
 
 ##### Hardware Compatibility and Efficiency
 
-Especially pertinent to unstructured pruning, hardware compatibility and efficiency become critical. Unstructured pruning often results in sparse weight matrices, which may not be efficiently handled by certain hardware, potentially negating the computational benefits of pruning. Ensuring that pruned models, particularly those resulting from unstructured pruning, are compatible and efficient on the target hardware is a significant consideration.
+Especially pertinent to unstructured pruning, hardware compatibility and efficiency become critical. Unstructured pruning often results in sparse weight matrices, which may not be efficiently handled by certain hardware, potentially negating the computational benefits of pruning (see @fig-sparse-matrix). Ensuring that pruned models, particularly those resulting from unstructured pruning, are compatible and efficient on the target hardware is a significant consideration.
 
 ##### Complexity in Implementing Pruning Algorithms
 
@@ -179,7 +205,9 @@ Unstructured pruning might introduce additional complexity in implementing pruni
 
 ##### Legal and Ethical Considerations
 
-Last but not least, adherence to legal and ethical guidelines is paramount, especially in domains with significant consequences. Both pruning methods must undergo rigorous validation, testing, and potentially certification processes to ensure compliance with relevant regulations and standards. This is especially important in use cases like medical AI applications or autonomous driving where quality drops due to pruning like optimizationscan be life threatening.
+Last but not least, adherence to legal and ethical guidelines is paramount, especially in domains with significant consequences. Both pruning methods must undergo rigorous validation, testing, and potentially certification processes to ensure compliance with relevant regulations and standards. This is especially important in use cases like medical AI applications or autonomous driving where quality drops due to pruning like optimizations can be life threatening.
+
+![Pruning can produce very sparse weight matrices, in which the vast majority of weights are set to zero. While the matrix is now mostly made up of zeros, it still maintains its original shape, which uses up precious memory and introduces calculation inefficiencies.](images/jpg/modeloptimization_sprase_matrix.jpeg){#fig-sparse-matrix}
 
 ### Model Compression
 
@@ -195,7 +223,7 @@ At its core, KD strategically leverages the refined outputs of a pre-trained tea
 
 The loss function is another critical component that typically amalgamates a distillation loss, which measures the divergence between the teacher and student outputs, and a classification loss, which ensures the student model adheres to the true data labels. The Kullback-Leibler (KL) divergence is commonly employed to quantify the distillation loss, providing a measure of the discrepancy between the probability distributions output by the teacher and student models.
 
-Another core concept is "temperature scaling" in the softmax function. It plays the role in controlling the granularity of the information distilled from the teacher model. A higher temperature parameter produces softer, more informative distributions, thereby facilitating the transfer of more nuanced knowledge to the student model. However, it also introduces the challenge of effectively balancing the trade-off between the informativeness of the soft targets and the stability of the training process.
+Another core concept is "temperature scaling" in the softmax function. It plays the role of controlling the granularity of the information distilled from the teacher model. A higher temperature parameter produces softer, more informative distributions, thereby facilitating the transfer of more nuanced knowledge to the student model. However, it also introduces the challenge of effectively balancing the trade-off between the informativeness of the soft targets and the stability of the training process.
 
 These components, when adeptly configured and harmonized, enable the student model to assimilate the teacher model's knowledge, crafting a pathway towards efficient and robust smaller models that retain the predictive prowess of their larger counterparts.
 
