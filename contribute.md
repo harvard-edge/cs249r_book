@@ -1,6 +1,6 @@
 # Guidlines for contributing to the project
 
-The Machine Learning Systems with tinyML project welcomes contributions from everyone. This project is maintained by a community of contributors from around the world. We appreciate your help!
+The Machine Learning Systems with TinyML project welcomes contributions from everyone. This project is maintained by a community of contributors from around the world. We appreciate your help!
 
 Your contributions are welcome and can encompass a variety of tasks, such as:
 

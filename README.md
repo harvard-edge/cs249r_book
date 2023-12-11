@@ -1,4 +1,4 @@
-# MACHINE LEARNING SYSTEMS with tinyML
+# MACHINE LEARNING SYSTEMS with TinyML
 
 [![All Contributors](https://img.shields.io/github/all-contributors/harvard-edge/cs249r_book?color=ee8449&style=flat-square)](#contributors)
 
