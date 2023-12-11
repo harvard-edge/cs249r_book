@@ -33,6 +33,10 @@ cd cs249r_book
 quarto render
 ```
 
+## Code of Conduct
+
+Please note that the cs249r project is released with a [Contributor Code of Conduct](CODE_OF_CONDUCT.md). By contributing to this project, you agree to abide by its terms.
+
 ## Contributors
 
 <!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
