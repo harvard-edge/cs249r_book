@@ -1,6 +1,18 @@
 # MACHINE LEARNING SYSTEMS with TinyML
 
-[![All Contributors](https://img.shields.io/github/all-contributors/harvard-edge/cs249r_book?color=ee8449&style=flat-square)](#contributors)
+<p align="center">
+  <img src="cover.png" height="200" />
+</p>
+
+
+<p align="center">
+<a href="https://img.shields.io/github/all-contributors/harvard-edge/cs249r_book?color=ee8449" alt="Contributors">
+    <img src="https://img.shields.io/github/all-contributors/harvard-edge/cs249r_book?color=ee8449"/></a> 
+<a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/build_pages.yml/badge.svg" alt="Build">
+    <img src="https://github.com/harvard-edge/cs249r_book/actions/workflows/build_pages.yml/badge.svg"/></a>
+<a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/markdown_linter.yml/badge.svg" alt="Linter">
+    <img src="https://github.com/harvard-edge/cs249r_book/actions/workflows/markdown_linter.yml/badge.svg"/></a>
+</p>
 
 Welcome to the collaborative book repository for students of CS249r: Tiny Machine Learning at Harvard! This repository
 contains the source files of chapters and sections written by your peers. We're excited to see your contributions!
