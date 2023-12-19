@@ -221,7 +221,7 @@ def main(_):
   final_result = dict(
       projectName=REPO,
       projectOwner=OWNER,
-      files=["contributors.qmd", "README.md"],
+      files=["contents/contributors.qmd", "README.md"],
       contributors=[
           dict(
               login=row.username,
