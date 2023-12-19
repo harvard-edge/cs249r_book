@@ -77,7 +77,7 @@ def main(_):
   headers = {"Authorization": f"token {token}"}
   data = []
   next_page = (
-      f"https://api.github.com/repos/{OWNER}/{REPO}/commits?sha={BRANCH}&per_page=100"
+      f"https://api.github.com/repos/{OWNER}/{REPO}/commits?sha={BRANCH}&per_page=500"
   )
   last_page = None
   while next_page != last_page:
