@@ -25,9 +25,6 @@ if (!String.prototype.replaceAll) {
 
 const mermaidOpts = {
   startOnLoad: false,
-  flowchart: {
-    htmlLabels: "false",
-  },
 };
 // this CSS is adapted from
 // mkdocs-material
@@ -129,12 +126,8 @@ const _quartoMermaid = {
     const kFigWidth = "figWidth",
       kFigHeight = "figHeight";
     const options = this.resolveOptions(svgEl);
-    const width = svgEl.getAttribute("width");
-    const height = svgEl.getAttribute("height");
-    if (!width || !height) {
-      // attempt to resolve figure dimensions via viewBox
-      throw new Error("Internal error: couldn't find figure dimensions");
-    }
+    let width = svgEl.getAttribute("width");
+    let height = svgEl.getAttribute("height");
     const getViewBox = () => {
       const vb = svgEl.attributes.getNamedItem("viewBox").value; // do it the roundabout way so that viewBox isn't dropped by deno_dom and text/html
       if (!vb) return undefined;
@@ -143,6 +136,19 @@ const _quartoMermaid = {
       if (lst.some(isNaN)) return undefined;
       return lst;
     };
+    if (!width || !height) {
+      // attempt to resolve figure dimensions via viewBox
+      const viewBox = getViewBox();
+      if (viewBox !== undefined) {
+        const [_mx, _my, vbWidth, vbHeight] = viewBox;
+        width = `${vbWidth}px`;
+        height = `${vbHeight}px`;
+      } else {
+        throw new Error(
+          "Mermaid generated an SVG without a viewbox attribute. Without knowing the diagram dimensions, quarto cannot convert it to a PNG"
+        );
+      }
+    }
 
     let svgWidthInInches, svgHeightInInches;
 
@@ -228,17 +234,16 @@ const _quartoMermaid = {
 // deno-lint-ignore no-window-prefix
 window.addEventListener(
   "load",
-  function () {
+  async function () {
     let i = 0;
     // we need pre because of whitespace preservation
     for (const el of Array.from(document.querySelectorAll("pre.mermaid-js"))) {
       // &nbsp; doesn't appear to be treated as whitespace by mermaid
       // so we replace it with a space.
-      const text = el.innerText.replaceAll("&nbsp;", " ");
-      const output = mermaid.mermaidAPI.render(
+      const text = el.textContent.replaceAll("&nbsp;", " ");
+      const { svg: output } = await mermaid.mermaidAPI.render(
         `mermaid-${++i}`,
         text,
-        () => {},
         el
       );
       el.innerHTML = output;
@@ -248,9 +253,9 @@ window.addEventListener(
         const style = svg.querySelector("style");
         style.innerHTML = style.innerHTML.replaceAll(
           `#${svg.id}`,
-          `#${el.dataset.label}`
+          `#${el.dataset.label}-mermaid`
         );
-        svg.id = el.dataset.label;
+        svg.id = el.dataset.label + "-mermaid";
         delete el.dataset.label;
       }
 
