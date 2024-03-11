@@ -8,6 +8,7 @@
 <p align="center">
 <a href="https://github.com/harvard-edge/cs249r_book"><img src="https://img.shields.io/github/all-contributors/harvard-edge/cs249r_book?color=ee8449" alt="Contributors Badge"/></a>
 <a href="https://github.com/harvard-edge/cs249r_book"><img src="https://github.com/harvard-edge/cs249r_book/actions/workflows/build_pages.yml/badge.svg" alt="Build Status Badge"/></a>
+<a href="https://github.com/harvard-edge/cs249r_book"><img src="https://github.com/harvard-edge/cs249r_book/actions/workflows/build_pages_windows.yml/badge.svg" alt="Build Status Badge"/></a>
 <a href="https://github.com/harvard-edge/cs249r_book"><img src="https://github.com/harvard-edge/cs249r_book/actions/workflows/markdown_linter.yml/badge.svg" alt="Markdown Linter Status Badge"/></a>
 </p>
 
