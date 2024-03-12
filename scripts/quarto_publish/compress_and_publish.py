@@ -23,9 +23,7 @@ def quarto_render():
   logging.info("Quarto render process return value: %s", process.returncode)
 
 
-def main(_):
-  quarto_render()
-
+def compress_pdf():
   full_book_path = os.path.abspath(_BOOK_PATH.value)
   full_output_path = os.path.abspath(_OUTPUT_PATH.value)
   logging.info("Converting %s to %s", full_book_path, full_output_path)
@@ -36,6 +34,17 @@ def main(_):
              f'-sOutputFile={full_output_path}',
              full_book_path]
   ghostscript.Ghostscript(*command)
+
+
+def quarto_publish():
+  process = subprocess.run(['quarto', 'publish', '--no-render'], check=True)
+  logging.info("Quarto publish process return value: %s", process.returncode)
+
+
+def main(_):
+  quarto_render()
+  compress_pdf()
+  quarto_publish()
 
 
 if __name__ == "__main__":
