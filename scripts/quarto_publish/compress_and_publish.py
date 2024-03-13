@@ -134,6 +134,17 @@ def quarto_pdf_render():
 
     return pdf_path
 
+def quarto_render_html():
+    """
+    Publish the rendered book using Quarto.
+    """
+    print("Publishing the rendered book using Quarto")
+    try:
+        subprocess.run(['quarto', 'render', '--no-clean', '--to', 'html'], check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Error occurred while publishing with Quarto: {e}")
+        raise RuntimeError("Failed to publish with Quarto")
+
 def quarto_publish():
     """
     Publish the rendered book using Quarto.
@@ -199,12 +210,14 @@ def main():
     Main function to parse command-line arguments and execute the program.
     """
     parser = argparse.ArgumentParser(description="Convert a book to PDF/ePub and optionally reduce its size")
-    parser.add_argument('-c', '--compress', action='store_true', default=True, help='Compress the ePub file (default: %(default)s)')
-    parser.add_argument('-q', '--quality', type=int, default=DEFAULT_COMPRESSION_QUALITY, help='Compression quality (default: %(default)s)')
-    parser.add_argument('-p', '--pdf', action='store_true', default=True, help='Convert to PDF (default: %(default)s)')
-    parser.add_argument('--no-pdf', dest='pdf', action='store_false', help="Don't convert to PDF")
-    parser.add_argument('-e', '--epub', action='store_true', default=True, help='Convert to ePub (default: %(default)s)')
-    parser.add_argument('--no-epub', dest='epub', action='store_false', help="Don't convert to ePub")
+    parser.add_argument('--compress', action='store_true', default=True, help='Compress the ePub file (default: %(default)s)')
+    parser.add_argument('--quality', type=int, default=DEFAULT_COMPRESSION_QUALITY, help='Compression quality (default: %(default)s)')
+    parser.add_argument('--pdf', action='store_true', default=True, help='Render to PDF (default: %(default)s)')
+    parser.add_argument('--epub', action='store_true', default=True, help='Render to ePub (default: %(default)s)')
+    parser.add_argument('--html', action='store_true', default=True, help='Build HTML (default: %(default)s)')
+    parser.add_argument('--no-pdf', dest='pdf', action='store_false', help="Don't render to PDF")
+    parser.add_argument('--no-html', dest='html', action='store_false', help="Don't render to HTML")
+    parser.add_argument('--no-epub', dest='epub', action='store_false', help="Don't render to ePub")
     args = parser.parse_args()
 
     if args.pdf:
@@ -228,6 +241,9 @@ def main():
         output_epub_temp_path = compress_images_in_epub(output_epub_path, args.quality)
         shutil.move(output_epub_temp_path, output_epub_path)
         print(f"Compression of {output_epub_path} completed. Output saved to {output_epub_path}")
+
+    if args.html:
+        quarto_render_html()
 
     quarto_publish()
 
