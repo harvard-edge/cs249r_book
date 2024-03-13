@@ -61,6 +61,41 @@ def rename_and_overwrite_file(old_path, new_path):
     print("Renaming", new_path, "to", old_path)
     os.rename(old_path, new_path)  # Rename the new file to the old filename
 
+def get_file_size(file_path):
+    """
+    Get the size of a file in bytes.
+    """
+    return os.path.getsize(file_path)
+
+# Function to measure file size
+def get_file_size(file_path):
+    # Implementation to get file size from file_path
+    # Ensure to handle cases where the file does not exist or cannot be accessed
+    try:
+        file_size = os.path.getsize(file_path)
+        return file_size
+    except OSError:
+        print(f"Unable to get file size for {file_path}")
+        return None
+
+# Function to convert bytes to appropriate units
+def convert_bytes_to_human_readable(size_in_bytes):
+    if size_in_bytes is None:
+        return "Unknown"
+    
+    size_kb = size_in_bytes / 1024
+    size_mb = size_kb / 1024
+    size_gb = size_mb / 1024
+
+    if size_gb >= 1:
+        return f"{size_gb:.2f} GB"
+    elif size_mb >= 1:
+        return f"{size_mb:.2f} MB"
+    elif size_kb >= 1:
+        return f"{size_kb:.2f} KB"
+    else:
+        return f"{size_in_bytes} bytes"
+
 def compress_pdf_ghostscript(input_path, output_path):
     """
     Compress a PDF file using ghostscript.
@@ -71,6 +106,11 @@ def compress_pdf_ghostscript(input_path, output_path):
     """
     print("Compressing PDF using ghostscript")
 
+    # Measure input file size
+    input_size_before = get_file_size(input_path)
+    print(f"Input file size: {convert_bytes_to_human_readable(input_size_before)}")
+
+    # Command for file conversion
     command = ['ps2pdf', '-dQUIET', '-dBATCH', '-sDEVICE=pdfwrite',
                 '-dPDFSETTINGS=/ebook',
                 '-dNOPAUSE',
@@ -78,6 +118,10 @@ def compress_pdf_ghostscript(input_path, output_path):
                 input_path]
 
     subprocess.run(command, check=True)
+
+    # Measure output file size
+    output_size_after = get_file_size(output_path)
+    print(f"Output file size: {convert_bytes_to_human_readable(output_size_after)}")
 
 def main():
     """
