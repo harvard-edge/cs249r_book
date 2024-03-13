@@ -1,100 +1,157 @@
 import os
+import sys
+import re
 import subprocess
 import argparse
-import PyPDF4
-import sys
+from zipfile import ZipFile
 from PIL import Image
-import io
-import ghostscript  # Ensure ghostscript is installed and available
+import tempfile
+import shutil
+import time
 
-# Default input and output paths
-DEFAULT_INPUT_PATH = 'Machine-Learning-Systems.pdf'
-DEFAULT_OUTPUT_PATH = 'Machine-Learning-Systems_output.pdf'  # Overwrite the file!
+DEFAULT_COMPRESSION_QUALITY = 60
 
-def quarto_pdf_render(output_path):
+def compress_image(image_path, quality=DEFAULT_COMPRESSION_QUALITY):
+    try:
+        img = Image.open(image_path)
+        img.save(image_path, optimize=True, quality=quality)
+    except Exception as e:
+        print(f"Error compressing image {image_path}: {e}")
+
+import os
+import tempfile
+from zipfile import ZipFile
+import time
+
+def compress_images_in_epub(epub_file, quality=DEFAULT_COMPRESSION_QUALITY):
+    temp_dir = tempfile.mkdtemp()
+    output_path = os.path.join(temp_dir, os.path.basename(epub_file))
+    
+    # Extract ePub contents
+    with ZipFile(epub_file, 'r') as zip_ref:
+        zip_ref.extractall(temp_dir)
+
+    # Locate image files
+    image_files = []
+    for root, dirs, files in os.walk(temp_dir):
+        for file in files:
+            if file.lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
+                image_files.append(os.path.join(root, file))
+    
+    # Measure original file size
+    total_original_size = sum(os.path.getsize(file) for file in image_files)
+
+    # Compress images
+    start_time = time.time()
+    total_compressed_size = 0
+    for file in image_files:
+        original_size = os.path.getsize(file)
+        compress_image(file, quality)
+        compressed_size = os.path.getsize(file)
+        total_compressed_size += compressed_size
+        print(f"Compressed {file}: {convert_bytes_to_human_readable(original_size)} -> {convert_bytes_to_human_readable(compressed_size)}")
+    end_time = time.time()
+
+    print(f"Compression complete. Total time taken: {end_time - start_time:.2f} seconds")
+    print(f"Original total size: {convert_bytes_to_human_readable(total_original_size)}")
+    print(f"Compressed total size: {convert_bytes_to_human_readable(total_compressed_size)}")
+    
+    # Repackage ePub file
+    with ZipFile(output_path, 'w') as zip_ref:
+        for root, dirs, files in os.walk(temp_dir):
+            for file in files:
+                file_path = os.path.join(root, file)
+                zip_ref.write(file_path, os.path.relpath(file_path, temp_dir))
+    
+    return output_path
+
+def quarto_epub_render():
     """
-    Install Quarto's TinyTeX and render the book to PDF.
+    Install Quarto's TinyTeX and render the book to ePub.
+    
+    Returns:
+        str: Path to the generated ePub file.
     """
-    print("Installing Quarto TinyTeX")
-    subprocess.run(['quarto', 'install', 'tinytex'])
-    process = subprocess.run(['quarto', 'render', '--output', output_path, '--to', 'pdf'], check=True)
+    print("Rendering book to ePub...")
+    try:
+        process = subprocess.run(['quarto', 'render', '--no-clean', '--to', 'epub'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, text=True)
+    except subprocess.CalledProcessError as e:
+        print("Error:", e)
+        sys.exit(1)
+
+    epub_path = None
+    output_lines = process.stdout.splitlines()
+    for line in output_lines:
+        match = re.search(r'Output created: (.+\.epub)', line)
+        if match:
+            epub_path = match.group(1)
+            break
+
+    if not epub_path:
+        output_lines_err = process.stderr.splitlines()
+        for line in output_lines_err:
+            match = re.search(r'Output created: (.+\.epub)', line)
+            if match:
+                epub_path = match.group(1)
+                break
+
+    if not epub_path:
+        print("Error: ePub file path not found.")
+        sys.exit(1)
 
     print(f"Quarto render process return value: {process.returncode}")
+
+    return epub_path
+
+def quarto_pdf_render():
+    """
+    Install Quarto's TinyTeX and render the book to PDF.
+    
+    Returns:
+        str: Path to the generated PDF file.
+    """
+    print("Rendering book to PDF...")
+    print("Installing Quarto TinyTeX")
+    try:
+        process = subprocess.run(['quarto', 'render', '--no-clean', '--to', 'pdf'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, text=True)
+    except subprocess.CalledProcessError as e:
+        print("Error:", e)
+        sys.exit(1)
+
+    pdf_path = None
+    output_lines = process.stdout.splitlines()
+    for line in output_lines:
+        match = re.search(r'Output created: (.+\.pdf)', line)
+        if match:
+            pdf_path = match.group(1)
+            break
+
+    if not pdf_path:
+        output_lines_err = process.stderr.splitlines()
+        for line in output_lines_err:
+            match = re.search(r'Output created: (.+\.pdf)', line)
+            if match:
+                pdf_path = match.group(1)
+                break
+
+    if not pdf_path:
+        print("Error: PDF file path not found.")
+        sys.exit(1)
+
+    print(f"Quarto render process return value: {process.returncode}")
+
+    return pdf_path
 
 def quarto_publish():
     """
     Publish the rendered book using Quarto.
     """
     print("Publishing the rendered book using Quarto")
-    process = subprocess.run(['quarto', 'publish', '--no-render', 'gh-pages'], check=True)
-
-def compress_pdf_pypdf(input_path, output_path):
-    """
-    Compress a PDF file using PyPDF4 by copying its contents to a new file.
-
-    Args:
-        input_path (str): Path to the input PDF file.
-        output_path (str): Path to the output compressed PDF file.
-    """
-    if not os.path.exists(input_path):
-        print("Input file does not exist:", input_path)
-        return
-
-    print("Compressing PDF using PyPDF4")
-    with open(input_path, 'rb') as input_file:
-        reader = PyPDF4.PdfFileReader(input_file)
-        writer = PyPDF4.PdfFileWriter()
-        for page_num in range(len(reader.pages)):
-            page = reader.pages[page_num]
-            writer.addPage(page)
-        with open(output_path, 'wb') as output_file:
-            writer.write(output_file)
-
-def rename_and_overwrite_file(old_path, new_path):
-    """
-    Rename the new file to the old filename and overwrite it.
-
-    Args:
-        old_path (str): Path to the old file.
-        new_path (str): Path to the new file.
-    """
-    print("Renaming", new_path, "to", old_path)
-    os.rename(old_path, new_path)  # Rename the new file to the old filename
-
-def get_file_size(file_path):
-    """
-    Get the size of a file in bytes.
-    """
-    return os.path.getsize(file_path)
-
-# Function to measure file size
-def get_file_size(file_path):
-    # Implementation to get file size from file_path
-    # Ensure to handle cases where the file does not exist or cannot be accessed
     try:
-        file_size = os.path.getsize(file_path)
-        return file_size
-    except OSError:
-        print(f"Unable to get file size for {file_path}")
-        return None
-
-# Function to convert bytes to appropriate units
-def convert_bytes_to_human_readable(size_in_bytes):
-    if size_in_bytes is None:
-        return "Unknown"
-    
-    size_kb = size_in_bytes / 1024
-    size_mb = size_kb / 1024
-    size_gb = size_mb / 1024
-
-    if size_gb >= 1:
-        return f"{size_gb:.2f} GB"
-    elif size_mb >= 1:
-        return f"{size_mb:.2f} MB"
-    elif size_kb >= 1:
-        return f"{size_kb:.2f} KB"
-    else:
-        return f"{size_in_bytes} bytes"
+        subprocess.run(['quarto', 'publish', '--no-render', 'gh-pages'], check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Error occurred while publishing with Quarto: {e}")
+        raise RuntimeError("Failed to publish with Quarto")
 
 def compress_pdf_ghostscript(input_path, output_path):
     """
@@ -104,49 +161,81 @@ def compress_pdf_ghostscript(input_path, output_path):
         input_path (str): Path to the input PDF file.
         output_path (str): Path to the output compressed PDF file.
     """
-    print("Compressing PDF using ghostscript")
+    print(f"Compressing PDF '{input_path}' using ghostscript")
 
     # Measure input file size
-    input_size_before = get_file_size(input_path)
+    input_size_before = os.path.getsize(input_path)
     print(f"Input file size: {convert_bytes_to_human_readable(input_size_before)}")
 
-    # Command for file conversion
-    command = ['ps2pdf', '-dQUIET', '-dBATCH', '-sDEVICE=pdfwrite',
-                '-dPDFSETTINGS=/ebook',
-                '-dNOPAUSE',
-                f'-sOutputFile={output_path}',
-                input_path]
+    try:
+        # Command for file conversion
+        command = ['gs', '-sDEVICE=pdfwrite', '-dCompatibilityLevel=1.4', '-dPDFSETTINGS=/ebook', '-dNOPAUSE', '-dQUIET', '-dBATCH', '-sOutputFile=' + output_path, input_path]
+        process = subprocess.run(command, check=True)
+    except subprocess.CalledProcessError as e:
+        print("Error:", e)
+        sys.exit(1)
 
-    subprocess.run(command, check=True)
+    print(f"Ghostscript render process return value: {process.returncode}")
 
     # Measure output file size
-    output_size_after = get_file_size(output_path)
+    output_size_after = os.path.getsize(output_path)
     print(f"Output file size: {convert_bytes_to_human_readable(output_size_after)}")
+    print(f"Compression ratio: {(1.0 - (output_size_after / input_size_before)) * 100:.2f}%")
+
+def convert_bytes_to_human_readable(size_in_bytes):
+    """
+    Convert bytes to human-readable format.
+
+    Args:
+        size_in_bytes (int): Size in bytes.
+
+    Returns:
+        str: Size in human-readable format.
+    """
+    if size_in_bytes < 1024:
+        return f"{size_in_bytes} bytes"
+    elif size_in_bytes < 1024 * 1024:
+        return f"{size_in_bytes / 1024:.2f} KB"
+    elif size_in_bytes < 1024 * 1024 * 1024:
+        return f"{size_in_bytes / (1024 * 1024):.2f} MB"
+    else:
+        return f"{size_in_bytes / (1024 * 1024 * 1024):.2f} GB"
+
 
 def main():
     """
     Main function to parse command-line arguments and execute the program.
     """
-    parser = argparse.ArgumentParser(description="Convert a book to PDF and optionally reduce its size")
-    parser.add_argument('-c', '--compress', nargs='?', const='ghostscript', default='ghostscript', choices=['pypdf', 'ghostscript'], help='Compress the PDF file. Default method: ghostscript')
-    parser.add_argument('input_path', nargs='?', default=DEFAULT_INPUT_PATH, help='Path to the rendered book file (default: {})'.format(DEFAULT_INPUT_PATH))
-    parser.add_argument('output_path', nargs='?', default=DEFAULT_OUTPUT_PATH, help='Path to the output PDF file (default: {})'.format(DEFAULT_OUTPUT_PATH))
+    parser = argparse.ArgumentParser(description="Convert a book to PDF/ePub and optionally reduce its size")
+    parser.add_argument('-c', '--compress', action='store_true', default=True, help='Compress the ePub file (default: %(default)s)')
+    parser.add_argument('-q', '--quality', type=int, default=DEFAULT_COMPRESSION_QUALITY, help='Compression quality (default: %(default)s)')
+    parser.add_argument('-p', '--pdf', action='store_true', default=True, help='Convert to PDF (default: %(default)s)')
+    parser.add_argument('--no-pdf', dest='pdf', action='store_false', help="Don't convert to PDF")
+    parser.add_argument('-e', '--epub', action='store_true', default=True, help='Convert to ePub (default: %(default)s)')
+    parser.add_argument('--no-epub', dest='epub', action='store_false', help="Don't convert to ePub")
     args = parser.parse_args()
 
-    quarto_pdf_render(args.input_path)
-    
-    full_input_path = os.path.abspath(os.path.join('_book', args.input_path))
-    full_output_path = os.path.abspath(os.path.join('_book', args.output_path))
+    if args.pdf:
+        output_pdf_path = quarto_pdf_render()        
+        output_dir = tempfile.mkdtemp()
+        output_pdf_temp_path = os.path.join(output_dir, os.path.basename(output_pdf_path))
 
-    # Compress if specified
-    if args.compress:
-        print("Compressing", full_input_path, "to", full_output_path, "using", args.compress)
-        if args.compress == 'ghostscript':
-            compress_pdf_ghostscript(full_input_path, full_output_path)
-        elif args.compress == 'pypdf':  # This option allows for future expansion
-            compress_pdf_pypdf(full_input_path, full_output_path)
+        if args.compress:
+            print("Compressing PDF using", args.quality)
+            compress_pdf_ghostscript(output_pdf_path, output_pdf_temp_path)
+            print(f"Compression of {output_pdf_path} completed. Output saved to {output_pdf_temp_path}")
 
-    rename_and_overwrite_file(full_output_path, full_input_path)
+            # Replace the original file with the temporary file
+            shutil.move(output_pdf_temp_path, output_pdf_path)
+            print(f"Replaced original PDF file with compressed version: {output_pdf_path}")
+        else:
+            print(f"Output saved to {output_pdf_path}")
+
+    if args.epub:
+        output_epub_path = quarto_epub_render()
+        output_epub_path = "_book/Machine-Learning-Systems.epub"
+        compress_images_in_epub(output_epub_path, args.quality)
+        print(f"Compression of {output_epub_path} completed. Output saved to {output_epub_path}")
 
     quarto_publish()
 
