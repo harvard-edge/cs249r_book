@@ -18,11 +18,6 @@ def compress_image(image_path, quality=DEFAULT_COMPRESSION_QUALITY):
     except Exception as e:
         print(f"Error compressing image {image_path}: {e}")
 
-import os
-import tempfile
-from zipfile import ZipFile
-import time
-
 def compress_images_in_epub(epub_file, quality=DEFAULT_COMPRESSION_QUALITY):
     temp_dir = tempfile.mkdtemp()
     output_path = os.path.join(temp_dir, os.path.basename(epub_file))
@@ -42,7 +37,6 @@ def compress_images_in_epub(epub_file, quality=DEFAULT_COMPRESSION_QUALITY):
     total_original_size = sum(os.path.getsize(file) for file in image_files)
 
     # Compress images
-    start_time = time.time()
     total_compressed_size = 0
     for file in image_files:
         original_size = os.path.getsize(file)
@@ -50,9 +44,7 @@ def compress_images_in_epub(epub_file, quality=DEFAULT_COMPRESSION_QUALITY):
         compressed_size = os.path.getsize(file)
         total_compressed_size += compressed_size
         print(f"Compressed {file}: {convert_bytes_to_human_readable(original_size)} -> {convert_bytes_to_human_readable(compressed_size)}")
-    end_time = time.time()
 
-    print(f"Compression complete. Total time taken: {end_time - start_time:.2f} seconds")
     print(f"Original total size: {convert_bytes_to_human_readable(total_original_size)}")
     print(f"Compressed total size: {convert_bytes_to_human_readable(total_compressed_size)}")
     
@@ -233,8 +225,8 @@ def main():
 
     if args.epub:
         output_epub_path = quarto_epub_render()
-        output_epub_path = "_book/Machine-Learning-Systems.epub"
-        compress_images_in_epub(output_epub_path, args.quality)
+        output_epub_temp_path = compress_images_in_epub(output_epub_path, args.quality)
+        shutil.move(output_epub_temp_path, output_epub_path)
         print(f"Compression of {output_epub_path} completed. Output saved to {output_epub_path}")
 
     quarto_publish()
