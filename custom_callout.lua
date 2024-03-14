@@ -5,9 +5,14 @@ local function extractOptions(div, defaultType)
         collapse = div.attributes["collapse"] == "true", -- Check if collapse attribute is true
         appearance = "minimal", -- Default appearance
         -- Default icons for each callout type, could be overridden
-        icon = defaultType == "exercise" and "🏋️‍♂️" or
+        icon = defaultType == "exercise" and "📚" or
+               defaultType == "question" and "❓" or
+               defaultType == "hint" and "🤔" or
                defaultType == "answer" and "✅" or
-               defaultType == "hint" and "🤔"
+               defaultType == "slide" and "🎫" or
+               defaultType == "video" and "📺" or
+               defaultType == "hint" and "🤔" or
+               defaultType == "lab" and "👩‍💻"
     }
     
     -- Example of extracting options from div attributes or structured content
@@ -44,6 +49,19 @@ function Div(div)
         elseif div.classes:includes("callout-hint") then
             local callout = createCallout(div, "hint")
             return callout
+        elseif div.classes:includes("callout-lab") then
+            local callout = createCallout(div, "lab")
+            return callout
+        elseif div.classes:includes("callout-slide") then
+            local callout = createCallout(div, "slide")
+            return callout
+        elseif div.classes:includes("callout-question") then
+            local callout = createCallout(div, "question")
+            return callout
+        elseif div.classes:includes("callout-video") then
+            local callout = createCallout(div, "video")
+            return callout
+
         end
     end
 end
