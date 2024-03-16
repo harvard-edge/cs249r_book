@@ -61,7 +61,6 @@ function Div(div)
         elseif div.classes:includes("callout-video") then
             local callout = createCallout(div, "video")
             return callout
-
         end
     end
 end
