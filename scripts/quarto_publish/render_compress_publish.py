@@ -214,10 +214,12 @@ def main():
     parser.add_argument('--quality', type=int, default=DEFAULT_COMPRESSION_QUALITY, help='Compression quality (default: %(default)s)')
     parser.add_argument('--pdf', action='store_true', default=True, help='Render to PDF (default: %(default)s)')
     parser.add_argument('--epub', action='store_true', default=True, help='Render to ePub (default: %(default)s)')
+    parser.add_argument('--publish', action='store_true', default=True, help='Publish to gh-pages (default: %(default)s)')
     parser.add_argument('--html', action='store_true', default=True, help='Build HTML (default: %(default)s)')
     parser.add_argument('--no-pdf', dest='pdf', action='store_false', help="Don't render to PDF")
     parser.add_argument('--no-html', dest='html', action='store_false', help="Don't render to HTML")
     parser.add_argument('--no-epub', dest='epub', action='store_false', help="Don't render to ePub")
+    parser.add_argument('--no-publish', dest='publish', action='store_false', help="Don't publish")
     args = parser.parse_args()
 
     if args.pdf:
