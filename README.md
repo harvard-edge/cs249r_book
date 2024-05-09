@@ -1,7 +1,7 @@
 # MACHINE LEARNING SYSTEMS with TinyML
 
 <p align="center">
-  <img src="cover-image.png" height="400" alt="Cover Image"/>
+  <img src="cover-image-transparent.png" height="400" alt="Cover Image"/>
 </p>
 
 
