@@ -29,6 +29,8 @@ into `gh-pages`.
 You can view the book's website
 at: [https://harvard-edge.github.io/cs249r_book/](https://harvard-edge.github.io/cs249r_book/)
 
+The most recent changes are staged at: [https://harvard-edge.github.io/cs249r_book_dev/](https://harvard-edge.github.io/cs249r_book_dev/)
+
 ---
 
 ## Local Rendering
