@@ -80,6 +80,8 @@ git push origin your-branch-name
 
 ### Open a Pull Request (PR)
 
+Please submit the PRs to the `dev`  branch, not `main`.
+
 Open a Pull Request (PR) to merge your changes to the upstream repository. Please add a brief description of your contribution to the PR. Please include the issue number in the description. For example, `Fix typo in the documentation (issue #14)`.
 
 Opening an early PR is encouraged. This will allow us to provide feedback on your contribution and help you improve it. Moreover, Github Actions will run on your PR and will generate the book, so you can download the book and make sure that your contribution is rendered correctly.
