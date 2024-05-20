@@ -15,7 +15,7 @@ EXCLUDED_USERS = {"web-flow", "github-actions[bot]", "mrdragonbear", "jveejay",
 
 OWNER = "harvard-edge"
 REPO = "cs249r_book"
-BRANCH = "main"
+BRANCH = "dev"
 
 
 def get_user_data_from_username(username):
