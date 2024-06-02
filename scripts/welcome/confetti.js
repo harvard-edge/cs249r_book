@@ -13,7 +13,7 @@ document.addEventListener("DOMContentLoaded", function() {
         Welcome to the ML Systems Book!
       </div>
       <div style="color: white; font-size: 1.5em; margin-top: 20px;">
-        A collaborative resource for learning about machine learning systems.
+        A resource for learning about machine learning systems.
       </div>
       <div style="color: white; font-size: 1.2em; margin-top: 30px;">
         Prof. Vijay Janapa Reddi, Harvard University.
