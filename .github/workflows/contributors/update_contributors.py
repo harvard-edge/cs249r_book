@@ -15,7 +15,7 @@ EXCLUDED_USERS = {"web-flow", "github-actions[bot]", "mrdragonbear", "jveejay",
 
 OWNER = "harvard-edge"
 REPO = "cs249r_book"
-BRANCH = "main"
+BRANCH = "dev"
 
 
 def get_user_data_from_username(username):
@@ -196,6 +196,7 @@ def main(_):
       axis=1)
 
   def generate_gravatar_url(name):
+    random.seed(name)
     name_list = list(name)
     random.shuffle(name_list)
     name = ''.join(name_list)
