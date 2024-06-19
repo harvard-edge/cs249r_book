@@ -12,12 +12,12 @@
 <a href="https://github.com/harvard-edge/cs249r_book"><img src="https://github.com/harvard-edge/cs249r_book/actions/workflows/markdown_linter.yml/badge.svg" alt="Markdown Linter Status Badge"/></a>
 </p>
 
-Welcome to the collaborative book repository for students of CS249r: Tiny Machine Learning at Harvard! This repository
+Welcome to the collaborative book repository for students of CS249r at Harvard! This repository
 contains the source files of chapters and sections written by your peers. We're excited to see your contributions!
 
 ## Contributing
 
-To contribute to the repository please see the [contribution guidelines](contribute.md).
+To contribute to the repository, please see the [contribution guidelines](contribute.md).
 
 ---
 
@@ -29,13 +29,13 @@ into `gh-pages`.
 You can view the book's website
 at: [https://harvard-edge.github.io/cs249r_book/](https://harvard-edge.github.io/cs249r_book/)
 
-The most recent changes are staged at: [https://harvard-edge.github.io/cs249r_book_dev/](https://harvard-edge.github.io/cs249r_book_dev/)
+The most recent changes are staged at [https://harvard-edge.github.io/cs249r_book_dev/](https://harvard-edge.github.io/cs249r_book_dev/)
 
 ---
 
 ## Local Rendering
 
-You need to have `quarto` installed for local rendering of the book. Please follow the [Quarto installation instructions here](https://quarto.org/docs/download/).
+You need to have `quarto` installed for local book rendering. Please follow the [Quarto installation instructions here](https://quarto.org/docs/download/).
 
 Once that's done, the following command can be
 used to produce the HTML pages:
