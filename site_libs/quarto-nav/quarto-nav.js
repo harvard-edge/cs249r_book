@@ -5,8 +5,44 @@ const headroomChanged = new CustomEvent("quarto-hrChanged", {
   composed: false,
 });
 
+const announceDismiss = () => {
+  const annEl = window.document.getElementById("quarto-announcement");
+  if (annEl) {
+    annEl.remove();
+
+    const annId = annEl.getAttribute("data-announcement-id");
+    window.localStorage.setItem(`quarto-announce-${annId}`, "true");
+  }
+};
+
+const announceRegister = () => {
+  const annEl = window.document.getElementById("quarto-announcement");
+  if (annEl) {
+    const annId = annEl.getAttribute("data-announcement-id");
+    const isDismissed =
+      window.localStorage.getItem(`quarto-announce-${annId}`) || false;
+    if (isDismissed) {
+      announceDismiss();
+      return;
+    } else {
+      annEl.classList.remove("hidden");
+    }
+
+    const actionEl = annEl.querySelector(".quarto-announcement-action");
+    if (actionEl) {
+      actionEl.addEventListener("click", function (e) {
+        e.preventDefault();
+        // Hide the bar immediately
+        announceDismiss();
+      });
+    }
+  }
+};
+
 window.document.addEventListener("DOMContentLoaded", function () {
   let init = false;
+
+  announceRegister();
 
   // Manage the back to top button, if one is present.
   let lastScrollTop = window.pageYOffset || document.documentElement.scrollTop;
@@ -237,6 +273,7 @@ window.document.addEventListener("DOMContentLoaded", function () {
     const links = window.document.querySelectorAll("a");
     for (let i = 0; i < links.length; i++) {
       if (links[i].href) {
+        links[i].dataset.originalHref = links[i].href;
         links[i].href = links[i].href.replace(/\/index\.html/, "/");
       }
     }
