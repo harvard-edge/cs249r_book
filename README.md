@@ -77,6 +77,8 @@ Want to build the book locally? Here's how:
 
 ## Contributors
 
+This project follows the [all-contributors](https://allcontributors.org) specification. Contributions of any kind are welcome!
+
 <!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable -->
@@ -187,6 +189,3 @@ Want to build the book locally? Here's how:
 <!-- prettier-ignore-end -->
 
 <!-- ALL-CONTRIBUTORS-LIST:END -->
-
-This project follows the [all-contributors](https://allcontributors.org) specification. Contributions of any kind are
-welcome!
