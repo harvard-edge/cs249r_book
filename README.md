@@ -72,7 +72,7 @@ Want to build the book locally? Here's how:
    ```bash
    cd cs249r_book
    quarto render
-  ```
+    ```
 ---
 
 ## Contributors
