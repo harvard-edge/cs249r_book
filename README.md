@@ -1,5 +1,6 @@
-# MACHINE LEARNING SYSTEMS  
-*Principles and Practices of Engineering Artificially Intelligent Systems*
+# INTRODUCTION TO BIOMEDICAL SIGNALS
+*Principles and Practices of biosignals*
+*Interpreting the Waves of Life*
 
 <p align="center">
   <img src="cover-image-transparent.png" height="400" alt="Cover Image"/>
