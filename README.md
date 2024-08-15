@@ -1,9 +1,9 @@
-# MACHINE LEARNING SYSTEMS with TinyML
+# MACHINE LEARNING SYSTEMS  
+*Principles and Practices of Engineering Artificially Intelligent Systems*
 
 <p align="center">
   <img src="cover-image-transparent.png" height="400" alt="Cover Image"/>
 </p>
-
 
 <p align="center">
 <a href="https://github.com/harvard-edge/cs249r_book"><img src="https://img.shields.io/github/all-contributors/harvard-edge/cs249r_book?color=ee8449" alt="Contributors Badge"/></a>
@@ -12,44 +12,72 @@
 <a href="https://github.com/harvard-edge/cs249r_book"><img src="https://github.com/harvard-edge/cs249r_book/actions/workflows/markdown_linter.yml/badge.svg" alt="Markdown Linter Status Badge"/></a>
 </p>
 
-Welcome to the collaborative book repository for students of CS249r at Harvard! This repository
-contains the source files of chapters and sections written by your peers. We're excited to see your contributions!
+<p align="center">
+  <strong>⭐ Help Us Reach 1,000 GitHub Stars! ⭐</strong><br>
+  <em>For every 25 stars, Arduino and SEEED will donate a <a href="https://store.arduino.cc/products/nicla-vision">Nicla Vision</a> or <a href="https://www.seeedstudio.com/XIAO-ESP32S3-p-5627.html">XIAO ESP32S3</a> for AI education.
+    <br>Your ⭐ makes a difference. Click below to support our mission!</em>
+</p>
 
-## Contributing
-
-To contribute to the repository, please see the [contribution guidelines](contribute.md).
-
----
-
-## Website
-
-The book's website is automatically constructed from the `gh-pages` branch. Once reviewed, changes to `main` are merged
-into `gh-pages`.
-
-You can view the book's website
-at: [https://harvard-edge.github.io/cs249r_book/](https://harvard-edge.github.io/cs249r_book/)
-
-The most recent changes are staged at [https://harvard-edge.github.io/cs249r_book_dev/](https://harvard-edge.github.io/cs249r_book_dev/)
+<p align="center">
+  <a href="https://github.com/harvard-edge/cs249r_book">
+    <img src="https://img.shields.io/github/stars/harvard-edge/cs249r_book?style=social" alt="GitHub Stars"/>
+  </a>
+</p>
 
 ---
 
-## Local Rendering
+## 📚 Explore the Book
 
-You need to have `quarto` installed for local book rendering. Please follow the [Quarto installation instructions here](https://quarto.org/docs/download/).
+- **[Read Online](https://mlsysbook.ai)**: View the most recent and fully rendered version of the book on our website.
+- **[Download PDF](https://mlsysbook.ai/Machine-Learning-Systems.pdf)**: Get a downloadable PDF version of the entire book for offline reading.
+- **[Staging Version](https://harvard-edge.github.io/cs249r_book_dev/)**: Check out the latest changes before they go live on the main `mlsysbook.ai` site.
 
-Once that's done, the following command can be
-used to produce the HTML pages:
+---
 
-```bash
-cd cs249r_book
-quarto render
-```
+## 🌟 Why Star the Repository?
 
-## Code of Conduct
+Starring our repository on GitHub helps others discover this valuable resource and supports ongoing improvements. Plus, your star contributes to our donation drive for AI education hardware! 
 
-Please note that the cs249r project is released with a [Contributor Code of Conduct](CODE_OF_CONDUCT.md). By contributing to this project, you agree to abide by its terms.
+---
+
+## 🤝 Contributing
+
+We believe that the best learning and development happen when people come together to share knowledge and ideas. Whether you're a seasoned expert or just starting your journey in machine learning, your contributions can be valuable to share with the community.
+
+### Why Contribute?
+- **Share Your Expertise**: If you have experience or insights in a specific area of machine learning or TinyML, your contributions can help others learn and apply these concepts.
+- **Learn and Grow**: Contributing to this project is a great way to deepen your understanding of machine learning systems. As you write, code, or review content, you'll reinforce your own knowledge and discover new aspects of the field.
+- **Collaborate and Network**: Join a community of like-minded individuals passionate about advancing AI education. Collaborate with peers, receive feedback, and make connections that could lead to exciting opportunities.
+- **Make an Impact**: Your contributions can directly influence how others understand and engage with machine learning. By improving and expanding the content, you're helping shape the education of future engineers and AI practitioners.
+
+### How to Get Started
+Getting started is easy! Whether you're interested in writing a new chapter, fixing a bug, or suggesting an improvement, we welcome all forms of contribution. Here's how you can begin:
+
+1. **Explore the Repository**: Familiarize yourself with the structure and content of the book by browsing the repository.
+2. **Check Out the Guidelines**: Review our [contribution guidelines](contribute.md) to understand how to contribute effectively.
+3. **Choose Your Area**: Pick a topic or area you’re passionate about. It could be anything from writing a new section, improving existing content, or even helping with code snippets and examples.
+4. **Submit Your Contribution**: Once you're ready, submit a pull request. We review all contributions and provide feedback to help you refine your work.
+
+### Need Help?
+If you're unsure where to start or have any questions, feel free to reach out through our [GitHub Discussions](#) or open an issue. We're here to support you throughout the process!
+
+---
+
+## 🛠️ Local Rendering Instructions
+
+Want to build the book locally? Here's how:
+
+1. **Install Quarto**: Follow the [Quarto installation instructions](https://quarto.org/docs/download/).
+2. **Render the Book**:
+   ```bash
+   cd cs249r_book
+   quarto render
+    ```
+---
 
 ## Contributors
+
+This project follows the [all-contributors](https://allcontributors.org) specification. Contributions of any kind are welcome!
 
 <!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
 <!-- prettier-ignore-start -->
@@ -79,42 +107,43 @@ Please note that the cs249r project is released with a [Contributor Code of Cond
     </tr>
     <tr>
       <td align="center" valign="top" width="20%"><a href="https://github.com/korneelf1"><img src="https://avatars.githubusercontent.com/korneelf1?s=100" width="100px;" alt="Korneel Van den Berghe"/><br /><sub><b>Korneel Van den Berghe</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/jasonjabbour"><img src="https://avatars.githubusercontent.com/jasonjabbour?s=100" width="100px;" alt="jasonjabbour"/><br /><sub><b>jasonjabbour</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/zishenwan"><img src="https://avatars.githubusercontent.com/zishenwan?s=100" width="100px;" alt="Zishen Wan"/><br /><sub><b>Zishen Wan</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/colbybanbury"><img src="https://avatars.githubusercontent.com/colbybanbury?s=100" width="100px;" alt="Colby Banbury"/><br /><sub><b>Colby Banbury</b></sub></a><br /></td>
-      <td align="center" valign="top" width="20%"><a href="https://github.com/srivatsankrishnan"><img src="https://avatars.githubusercontent.com/srivatsankrishnan?s=100" width="100px;" alt="Srivatsan Krishnan"/><br /><sub><b>Srivatsan Krishnan</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/andreamurillomtz"><img src="https://avatars.githubusercontent.com/andreamurillomtz?s=100" width="100px;" alt="Andrea"/><br /><sub><b>Andrea</b></sub></a><br /></td>
     </tr>
     <tr>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/srivatsankrishnan"><img src="https://avatars.githubusercontent.com/srivatsankrishnan?s=100" width="100px;" alt="Srivatsan Krishnan"/><br /><sub><b>Srivatsan Krishnan</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/alxrod"><img src="https://avatars.githubusercontent.com/alxrod?s=100" width="100px;" alt="Alex Rodriguez"/><br /><sub><b>Alex Rodriguez</b></sub></a><br /></td>
-      <td align="center" valign="top" width="20%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/1439f56088ae6ed2a84066d1396e3027?d=identicon&s=100?s=100" width="100px;" alt="Aghyad Deeb"/><br /><sub><b>Aghyad Deeb</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/DivyaAmirtharaj"><img src="https://avatars.githubusercontent.com/DivyaAmirtharaj?s=100" width="100px;" alt="Divya Amirtharaj"/><br /><sub><b>Divya Amirtharaj</b></sub></a><br /></td>
-      <td align="center" valign="top" width="20%"><a href="https://github.com/ma3mool"><img src="https://avatars.githubusercontent.com/ma3mool?s=100" width="100px;" alt="Abdulrahman Mahmoud"/><br /><sub><b>Abdulrahman Mahmoud</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/arnaumarin"><img src="https://avatars.githubusercontent.com/arnaumarin?s=100" width="100px;" alt="arnaumarin"/><br /><sub><b>arnaumarin</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/aptl26"><img src="https://avatars.githubusercontent.com/aptl26?s=100" width="100px;" alt="Aghyad Deeb"/><br /><sub><b>Aghyad Deeb</b></sub></a><br /></td>
     </tr>
     <tr>
-      <td align="center" valign="top" width="20%"><a href="https://github.com/arnaumarin"><img src="https://avatars.githubusercontent.com/arnaumarin?s=100" width="100px;" alt="arnaumarin"/><br /><sub><b>arnaumarin</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/ma3mool"><img src="https://avatars.githubusercontent.com/ma3mool?s=100" width="100px;" alt="Abdulrahman Mahmoud"/><br /><sub><b>Abdulrahman Mahmoud</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/1439f56088ae6ed2a84066d1396e3027?d=identicon&s=100?s=100" width="100px;" alt="Aghyad Deeb"/><br /><sub><b>Aghyad Deeb</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/ELSuitorHarvard"><img src="https://avatars.githubusercontent.com/ELSuitorHarvard?s=100" width="100px;" alt="ELSuitorHarvard"/><br /><sub><b>ELSuitorHarvard</b></sub></a><br /></td>
-      <td align="center" valign="top" width="20%"><a href="https://github.com/MichaelSchnebly"><img src="https://avatars.githubusercontent.com/MichaelSchnebly?s=100" width="100px;" alt="Michael Schnebly"/><br /><sub><b>Michael Schnebly</b></sub></a><br /></td>
-      <td align="center" valign="top" width="20%"><a href="https://github.com/jared-ni"><img src="https://avatars.githubusercontent.com/jared-ni?s=100" width="100px;" alt="Jared Ni"/><br /><sub><b>Jared Ni</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/oishib"><img src="https://avatars.githubusercontent.com/oishib?s=100" width="100px;" alt="oishib"/><br /><sub><b>oishib</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/jared-ni"><img src="https://avatars.githubusercontent.com/jared-ni?s=100" width="100px;" alt="Jared Ni"/><br /><sub><b>Jared Ni</b></sub></a><br /></td>
     </tr>
     <tr>
       <td align="center" valign="top" width="20%"><a href="https://github.com/Ekhao"><img src="https://avatars.githubusercontent.com/Ekhao?s=100" width="100px;" alt="Emil Njor"/><br /><sub><b>Emil Njor</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/MichaelSchnebly"><img src="https://avatars.githubusercontent.com/MichaelSchnebly?s=100" width="100px;" alt="Michael Schnebly"/><br /><sub><b>Michael Schnebly</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/mmaz"><img src="https://avatars.githubusercontent.com/mmaz?s=100" width="100px;" alt="Mark Mazumder"/><br /><sub><b>Mark Mazumder</b></sub></a><br /></td>
-      <td align="center" valign="top" width="20%"><a href="https://github.com/leo47007"><img src="https://avatars.githubusercontent.com/leo47007?s=100" width="100px;" alt="Yu-Shun Hsiao"/><br /><sub><b>Yu-Shun Hsiao</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/jaywonchung"><img src="https://avatars.githubusercontent.com/jaywonchung?s=100" width="100px;" alt="Jae-Won Chung"/><br /><sub><b>Jae-Won Chung</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/Sara-Khosravi"><img src="https://avatars.githubusercontent.com/Sara-Khosravi?s=100" width="100px;" alt="Sara Khosravi"/><br /><sub><b>Sara Khosravi</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/BaeHenryS"><img src="https://avatars.githubusercontent.com/BaeHenryS?s=100" width="100px;" alt="Henry Bae"/><br /><sub><b>Henry Bae</b></sub></a><br /></td>
     </tr>
     <tr>
-      <td align="center" valign="top" width="20%"><a href="https://github.com/jaywonchung"><img src="https://avatars.githubusercontent.com/jaywonchung?s=100" width="100px;" alt="Jae-Won Chung"/><br /><sub><b>Jae-Won Chung</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/leo47007"><img src="https://avatars.githubusercontent.com/leo47007?s=100" width="100px;" alt="Yu-Shun Hsiao"/><br /><sub><b>Yu-Shun Hsiao</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/BaeHenryS"><img src="https://avatars.githubusercontent.com/BaeHenryS?s=100" width="100px;" alt="Henry Bae"/><br /><sub><b>Henry Bae</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/eurashin"><img src="https://avatars.githubusercontent.com/eurashin?s=100" width="100px;" alt="eurashin"/><br /><sub><b>eurashin</b></sub></a><br /></td>
-      <td align="center" valign="top" width="20%"><a href="https://github.com/marcozennaro"><img src="https://avatars.githubusercontent.com/marcozennaro?s=100" width="100px;" alt="Marco Zennaro"/><br /><sub><b>Marco Zennaro</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/arbass22"><img src="https://avatars.githubusercontent.com/arbass22?s=100" width="100px;" alt="Andrew Bass"/><br /><sub><b>Andrew Bass</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/ShvetankPrakash"><img src="https://avatars.githubusercontent.com/ShvetankPrakash?s=100" width="100px;" alt="Shvetank Prakash"/><br /><sub><b>Shvetank Prakash</b></sub></a><br /></td>
     </tr>
     <tr>
       <td align="center" valign="top" width="20%"><a href="https://github.com/AditiR-42"><img src="https://avatars.githubusercontent.com/AditiR-42?s=100" width="100px;" alt="Aditi Raju"/><br /><sub><b>Aditi Raju</b></sub></a><br /></td>
-      <td align="center" valign="top" width="20%"><a href="https://github.com/jasonjabbour"><img src="https://avatars.githubusercontent.com/jasonjabbour?s=100" width="100px;" alt="jasonjabbour"/><br /><sub><b>jasonjabbour</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/marcozennaro"><img src="https://avatars.githubusercontent.com/marcozennaro?s=100" width="100px;" alt="Marco Zennaro"/><br /><sub><b>Marco Zennaro</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/pongtr"><img src="https://avatars.githubusercontent.com/pongtr?s=100" width="100px;" alt="Pong Trairatvorakul"/><br /><sub><b>Pong Trairatvorakul</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/jzhou1318"><img src="https://avatars.githubusercontent.com/jzhou1318?s=100" width="100px;" alt="Jennifer Zhou"/><br /><sub><b>Jennifer Zhou</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/Gjain234"><img src="https://avatars.githubusercontent.com/Gjain234?s=100" width="100px;" alt="Gauri Jain"/><br /><sub><b>Gauri Jain</b></sub></a><br /></td>
@@ -161,6 +190,3 @@ Please note that the cs249r project is released with a [Contributor Code of Cond
 <!-- prettier-ignore-end -->
 
 <!-- ALL-CONTRIBUTORS-LIST:END -->
-
-This project follows the [all-contributors](https://allcontributors.org) specification. Contributions of any kind are
-welcome!
