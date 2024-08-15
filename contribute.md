@@ -29,7 +29,7 @@ Fork the repository on GitHub and clone your fork to your local machine. We are 
 git clone https://github.com/YOUR_USERNAME/cs249r_book.git
 ```
 
-### Naviage to the repository
+### Navigate to the repository
 
 ```bash
 cd cs249r_book
