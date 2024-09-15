@@ -3,7 +3,7 @@
 # Check if the current git branch is main
 current_branch=$(git branch --show-current)
 if [ "$current_branch" != "main" ]; then
-    echo "You are not on the main branch. Please switch to the main branch to proceed."
+    echo "You are not on the main branch. Please switch to the main branch to proceed. You should have merged dev into main by now."
     exit 1
 fi
 
