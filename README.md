@@ -14,7 +14,7 @@
 
 <p align="center">
   <strong>🌟 We Hit 1,000 GitHub Stars - Thank You! 🌟</strong><br>
-  <em>Thanks to your amazing support, Arduino and SEEED are donating <a href="https://store.arduino.cc/products/nicla-vision">Nicla Vision</a> and <a href="https://www.seeedstudio.com/XIAO-ESP32S3-p-5627.html">XIAO ESP32S3</a> boards for AI education.
+  <em>Thanks to your support, Arduino and SEEED are donating <a href="https://store.arduino.cc/products/nicla-vision">Nicla Vision</a> and <a href="https://www.seeedstudio.com/XIAO-ESP32S3-p-5627.html">XIAO ESP32S3</a> boards for AI education.
     <br>But we’re not stopping here! Every 25 stars from here on helps us bring even more resources to the community.</em>
 </p>
 
