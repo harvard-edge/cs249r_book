@@ -13,10 +13,15 @@
 </p>
 
 <p align="center">
-  <strong>⭐ Help Us Reach 1,000 GitHub Stars! ⭐</strong><br>
-  <em>For every 25 stars, Arduino and SEEED will donate a <a href="https://store.arduino.cc/products/nicla-vision">Nicla Vision</a> or <a href="https://www.seeedstudio.com/XIAO-ESP32S3-p-5627.html">XIAO ESP32S3</a> for AI education.
-    <br>Your ⭐ makes a difference. Click below to support our mission!</em>
+  <strong>🌟 We Hit 1,000 GitHub Stars - Thank You! 🌟</strong><br>
+  <em>Thanks to your amazing support, Arduino and SEEED are donating <a href="https://store.arduino.cc/products/nicla-vision">Nicla Vision</a> and <a href="https://www.seeedstudio.com/XIAO-ESP32S3-p-5627.html">XIAO ESP32S3</a> boards for AI education.
+    <br>But we’re not stopping here! Every 25 stars from here on helps us bring even more resources to the community.</em>
 </p>
+
+<p align="center">
+  <a href="https://github.com/YOUR_REPO"><strong>⭐ Keep the Momentum Going - Star Our Repo! ⭐</strong></a>
+</p>
+
 
 <p align="center">
   <a href="https://github.com/harvard-edge/cs249r_book">
