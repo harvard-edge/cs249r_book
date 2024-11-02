@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/YOUR_REPO"><strong>⭐ Keep the Momentum Going - Star Our Repo! ⭐</strong></a>
+  <a href="https://github.com/harvard-edge/cs249r_book"><strong>⭐ Keep the Momentum Going - Star Our Repo! ⭐</strong></a>
 </p>
 
 
