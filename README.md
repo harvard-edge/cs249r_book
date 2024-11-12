@@ -73,11 +73,17 @@ If you're unsure where to start or have any questions, feel free to reach out th
 Want to build the book locally? Here's how:
 
 1. **Install Quarto**: Follow the [Quarto installation instructions](https://quarto.org/docs/download/).
-2. **Render the Book**:
+2. **Render the Book in all formats**:
    ```bash
    cd cs249r_book
    quarto render
     ```
+3. **Render the Book in a specific format (works faster)**:
+   ```bash
+   cd cs249r_book
+   quarto render --to epub
+    ```
+
 ---
 
 ## Contributors
