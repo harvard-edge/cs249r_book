@@ -23,17 +23,15 @@
 
 ## 🌟 **How Your Stars Make an Impact**
 
-<p>
-  Thanks to your support, we’re driving meaningful change in AI education.  
-  Organizations such as <a href=https://store-usa.arduino.cc/products/nicla-vision>Arduino</a> and <a href=https://www.seeedstudio.com/XIAO-ESP32S3-Sense-p-5639.html>SEEED Studio</a> are partnering with us to deliver AI hardware kits to underserved learners around the world, enabling them to explore cutting-edge technologies.
-</p>
+<p>  Thanks to your support, we’re driving meaningful change in AI education. </p>
+  <p>  Organizations such as <a href=https://store-usa.arduino.cc/products/nicla-vision>Arduino</a> and <a href=https://www.seeedstudio.com/XIAO-ESP32S3-Sense-p-5639.html>SEEED Studio</a> are partnering with us to deliver AI hardware kits to underserved learners around the world, enabling them to explore cutting-edge technologies.</p>
 
 <p>
-  In addition, for every new GitHub ⭐, the <a href="https://store.arduino.cc/products/nicla-vision">EDGE AI Foundation</a> is matching <a href=https://www.edgeaifoundation.org/posts/edge-ai-scholarship-fund>academic scholarship funds</a>, empowering even more learners to access AI education. Every 25 stars helps us expand our efforts and reach new communities.
+  In addition, for every new GitHub ⭐, the <a href="https://store.arduino.cc/products/nicla-vision">EDGE AI Foundation</a> is matching <a href=https://www.edgeaifoundation.org/posts/edge-ai-scholarship-fund>academic scholarship funds</a>, empowering even more learners to access AI education. 
 </p>
 
 <p align="center" >
-  <a href="https://github.com/harvard-edge/cs249r_book"><strong>⭐ Keep the Momentum Going - Star Our Repo! ⭐</strong></a>
+  <a href="https://github.com/harvard-edge/cs249r_book"><strong>⭐ So... Please Keep the Momentum Going - Star Our Repo! ⭐</strong></a>
 </p>
 
 <p align="center" >
