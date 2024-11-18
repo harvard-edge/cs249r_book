@@ -222,8 +222,7 @@ const zQ=`
 
         <div class="bg-zinc-100 text-gray-500 p-1 dark:bg-zinc-200/50" style="font-size: 8pt">
           <!-- <p class="font-bold">Be cautious</p> -->
-          <p>Information provided here may not always be accurate.<span> <a href="#" id="openModal-feedback"
-                class="underline text-blue-500 hover:text-zinc-800 dark:hover:text-zinc-900">Provide feedback</a>
+          <p>Information provided here may not always be accurate.<span>
             </span></p>
         </div>
       </div>
