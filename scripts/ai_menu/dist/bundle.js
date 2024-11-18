@@ -2184,17 +2184,18 @@ end`};e.events.push(["putFont",function(a){(function(o){var s=o.font,l=o.out,c=o
             <strong class="font-bold">Error: </strong>
             <span class="block sm:inline">Check your network connection and try again.</span>
         `,i.replaceWith(a),r=!0}),r&&Dpe(t,e)}function Dpe(t,e){e.querySelectorAll(`#${t}`).forEach(r=>{r.remove()})}function K1(t){let e=!1;const n=document.querySelector(".quarto-color-scheme-toggle");n&&n.classList.contains("alternate")&&(e=!0);function r(a){e?a.classList.add("dark-mode"):a.classList.remove("dark-mode")}["text-selection-menu","text-selection-menu-highlight","popover-container","modal1","modal_feedback"].forEach(a=>{const o=t.getElementById(a);if(o&&(r(o),o.querySelectorAll("*").forEach(r),a==="modal_feedback")){const s=o.querySelector("#feedback-iframe");if(s&&s.contentDocument){const l=s.contentDocument;r(l.documentElement),l.querySelectorAll("*").forEach(r)}}})}function Lpe(t){K1(t),new MutationObserver(n=>{for(const r of n)r.type==="attributes"&&r.attributeName==="class"&&K1(t)}).observe(document.body,{attributes:!0,attributeFilter:["class"]}),window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change",()=>{K1(t)})}class Ppe{constructor(e="tinyMLChapters",n=1){this.dbName=e,this.version=n,this.storeName="quizTitles"}async initDB(){return new Promise((e,n)=>{const r=indexedDB.open(this.dbName,this.version);r.onerror=()=>n(r.error),r.onupgradeneeded=i=>{const a=i.target.result;a.objectStoreNames.contains(this.storeName)||a.createObjectStore(this.storeName,{keyPath:"url"})},r.onsuccess=()=>e(r.result)})}async saveQuizTitles(e,n){try{const r=await this.initDB();return new Promise((i,a)=>{const o=r.transaction([this.storeName],"readwrite"),l=o.objectStore(this.storeName).put({url:e,titles:n,timestamp:new Date().toISOString()});l.onerror=()=>a(l.error),l.onsuccess=()=>i(l.result),o.oncomplete=()=>r.close()})}catch(r){throw console.error("Error saving quiz titles:",r),r}}async getQuizTitles(e){try{const n=await this.initDB();return new Promise((r,i)=>{const s=n.transaction([this.storeName],"readonly").objectStore(this.storeName).get(e);s.onerror=()=>i(s.error),s.onsuccess=()=>{r(s.result?.titles||null),n.close()}})}catch(n){throw console.error("Error getting quiz titles:",n),n}}}function Fpe(t){const e=document.querySelector("h1.title");if(e&&e.textContent.includes("SocratiQ"))return;const n=document.querySelectorAll("section.level2");let r=[];const i=window.location.href,a=new Ppe;window.sectionData||(window.sectionData={}),n.forEach((s,l)=>{const c=s.querySelector("h2.anchored");if(!c||c.textContent.trim().includes("Resources"))return;const u=s.textContent.trim(),A=s.id,d=c.getAttribute("data-number"),f=c.textContent.trim(),p=d+" "+f.replace(`${d} `,"");r.push(p),window.sectionData[A]={title:p,content:u};let g=null,m=s.querySelectorAll("section.level3");if(m.length>0){let _=m[m.length-1];g=tP(_)}else g=tP(s);if(g){const _=kpe(p,u,A,t);g.insertAdjacentElement("beforeend",_)}});const o=n[n.length-1];if(o){const s=Mpe(r,t);o.insertAdjacentElement("afterend",s)}r.length>0&&(window.requestIdleCallback||(l=>setTimeout(l,0)))(()=>{a.saveQuizTitles(i,r).catch(l=>console.error("Error saving quiz titles:",l))})}function tP(t){const e=t.querySelectorAll("p");return e.length>0?e[e.length-1]:null}function kpe(t,e,n,r){const i=document.createElement("div");i.style.cssText=`
-    margin-top: 0.5rem;
+    margin-top: 0rem;
+    margin-bottom: 0rem;
     display: flex;
     justify-content: flex-start;
     width: 100%;
   `;const a=document.createElement("div");a.className="callout callout-style-simple callout-exercise no-icon callout-titled",a.style.width="100%",a.innerHTML=`
     <div class="callout-header d-flex align-content-center">
       <div class="callout-icon-container">
-        🧩
+        🧠
       </div>
       <div class="callout-title-container flex-fill">
-        &nbsp; Section Quiz
+        &nbsp; Click to take section quiz.
       </div>
     </div>
   `;const o=document.createElement("style");return o.textContent=`
@@ -2203,7 +2204,7 @@ end`};e.events.push(["putFont",function(a){(function(o){var s=o.font,l=o.out,c=o
       transition: background-color 0.3s;
       margin-bottom: 0;
       width: 100%;
-      border-left-color: #ff00ff !important;
+      border-left-color: #A51C30 !important;
     }
     .callout-exercise.callout:hover {
       background-color: rgba(229, 231, 235, 0.5);
@@ -2213,19 +2214,21 @@ end`};e.events.push(["putFont",function(a){(function(o){var s=o.font,l=o.out,c=o
       display: flex;
       align-items: center;
       margin-right: 10px !important;
-      font-size: 1.1em !important;
+      font-size: 1.25em !important;
     }
   `,a.appendChild(o),a.dataset.sectionId=n,a.dataset.sectionText=e,a.addEventListener("click",s=>{s.stopPropagation(),OU(t,e,n,r)}),i.appendChild(a),i}function Mpe(t,e){const n=document.createElement("div");n.className="callout callout-style-simple callout-exercise no-icon callout-titled custom-quiz-callout";const r=document.createElement("style");return r.textContent=`
     .custom-quiz-callout.callout-exercise.callout {
-      border-left-color: #ff00ff !important;
+      border-left-color: #A51C30 !important;
+      width: 102% !important;
     }
     .custom-quiz-callout.callout-exercise.callout > .callout-header::before {
       font-family: sans-serif !important;
-      content: "🧩" !important;
+      align-items: center; /* Aligns items vertically */
+      content: "🧠" !important;
       margin-right: 10px !important;
       display: inline-block !important;
       text-decoration: none !important;
-      font-size: 1.1em !important;
+      font-size: .9em !important;
     }
     .custom-quiz-callout.callout-exercise.callout > .callout-header {
       text-decoration: none !important;
@@ -2236,7 +2239,7 @@ end`};e.events.push(["putFont",function(a){(function(o){var s=o.font,l=o.out,c=o
         <i class="callout-icon no-icon"></i>
       </div>
       <div class="callout-title-container flex-fill">
-        Sub Section Quick AI Quizzes
+        Subsection Quick AI Quizzes
       </div>
       <div class="callout-btn-toggle d-inline-block border-0 py-1 ps-1 pe-0 float-end"><i class="callout-toggle"></i></div>
     </div>
