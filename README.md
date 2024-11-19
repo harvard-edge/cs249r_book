@@ -5,25 +5,36 @@
   <img src="cover-image-transparent.png" height="400" alt="Cover Image"/>
 </p>
 
-<p align="center">
-<a href="https://github.com/harvard-edge/cs249r_book"><img src="https://img.shields.io/github/all-contributors/harvard-edge/cs249r_book?color=ee8449" alt="Contributors Badge"/></a>
-<a href="https://github.com/harvard-edge/cs249r_book"><img src="https://github.com/harvard-edge/cs249r_book/actions/workflows/build_pages.yml/badge.svg" alt="Build Status Badge"/></a>
-<a href="https://github.com/harvard-edge/cs249r_book"><img src="https://github.com/harvard-edge/cs249r_book/actions/workflows/build_pages_windows.yml/badge.svg" alt="Build Status Badge"/></a>
-<a href="https://github.com/harvard-edge/cs249r_book"><img src="https://github.com/harvard-edge/cs249r_book/actions/workflows/markdown_linter.yml/badge.svg" alt="Markdown Linter Status Badge"/></a>
+---
+
+## 🚀 **Our Mission**
+
+<p align="center" style="font-size: 24px;">
+  <strong>1 GitHub ⭐ = 1 Learner 👩‍🎓</strong>
 </p>
 
 <p align="center">
-  <strong>🌟 We Hit 1,000 GitHub Stars - Thank You! 🌟</strong><br>
-  <em>Thanks to your support, Arduino and SEEED are donating <a href="https://store.arduino.cc/products/nicla-vision">Nicla Vision</a> and <a href="https://www.seeedstudio.com/XIAO-ESP32S3-p-5627.html">XIAO ESP32S3</a> boards for AI education.
-    <br>But we’re not stopping here! Every 25 stars from here on helps us bring even more resources to the community.</em>
+  Every GitHub ⭐ tells a unique story: </br>
+  Learners acquiring knowledge and skills, and supporters encouraging us to push forward. </br>
+  Together, we are all collectively shaping the future of AI education at a global scale.
 </p>
 
-<p align="center">
-  <a href="https://github.com/harvard-edge/cs249r_book"><strong>⭐ Keep the Momentum Going - Star Our Repo! ⭐</strong></a>
+---
+
+## 🌟 **How Your Stars Make an Impact**
+
+<p>  Thanks to your support, we’re driving meaningful change in AI education. </p>
+  <p>  Organizations such as <a href=https://store-usa.arduino.cc/products/nicla-vision>Arduino</a> and <a href=https://www.seeedstudio.com/XIAO-ESP32S3-Sense-p-5639.html>SEEED Studio</a> are partnering with us to deliver AI hardware kits to underserved learners around the world, enabling them to explore cutting-edge technologies.</p>
+
+<p>
+  In addition, for every new GitHub ⭐, the <a href="https://store.arduino.cc/products/nicla-vision">EDGE AI Foundation</a> is matching <a href=https://www.edgeaifoundation.org/posts/edge-ai-scholarship-fund>academic scholarship funds</a>, empowering even more learners to access AI education. 
 </p>
 
+<p align="center" >
+  <a href="https://github.com/harvard-edge/cs249r_book"><strong>⭐ So... Please Keep the Momentum Going - Star Our Repo! ⭐</strong></a>
+</p>
 
-<p align="center">
+<p align="center" >
   <a href="https://github.com/harvard-edge/cs249r_book">
     <img src="https://img.shields.io/github/stars/harvard-edge/cs249r_book?style=social" alt="GitHub Stars"/>
   </a>
@@ -31,17 +42,20 @@
 
 ---
 
+## 📰 **Latest Updates**
+
+- 🎓 **[Nov 15] Matching Academic Scholarship Funds**  
+  The EDGE AI Foundation is matching scholarship funds for every new GitHub ⭐ (up to 10,000 stars). [Click here to show support!](#)
+
+- ⭐ **[Oct 18] We Hit 1,000 GitHub Stars! 🎉**  
+  Thanks to you, Arduino and SEEED donated AI hardware kits for TinyML workshops in developing nations!
+
+---
+
 ## 📚 Explore the Book
 
 - **[Read Online](https://mlsysbook.ai)**: View the most recent and fully rendered version of the book on our website.
 - **[Download PDF](https://mlsysbook.ai/Machine-Learning-Systems.pdf)**: Get a downloadable PDF version of the entire book for offline reading.
-- **[Staging Version](https://harvard-edge.github.io/cs249r_book_dev/)**: Check out the latest changes before they go live on the main `mlsysbook.ai` site.
-
----
-
-## 🌟 Why Star the Repository?
-
-Starring our repository on GitHub helps others discover this valuable resource and supports ongoing improvements. Plus, your star contributes to our donation drive for AI education hardware! 
 
 ---
 
@@ -67,6 +81,7 @@ Getting started is easy! Whether you're interested in writing a new chapter, fix
 If you're unsure where to start or have any questions, feel free to reach out through our [GitHub Discussions](#) or open an issue. We're here to support you throughout the process!
 
 ---
+
 
 ## 🛠️ Local Rendering Instructions
 
@@ -104,14 +119,14 @@ This project follows the [all-contributors](https://allcontributors.org) specifi
     </tr>
     <tr>
       <td align="center" valign="top" width="20%"><a href="https://github.com/Sara-Khosravi"><img src="https://avatars.githubusercontent.com/Sara-Khosravi?s=100" width="100px;" alt="Sara Khosravi"/><br /><sub><b>Sara Khosravi</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/kai4avaya"><img src="https://avatars.githubusercontent.com/kai4avaya?s=100" width="100px;" alt="Kai Kleinbard"/><br /><sub><b>Kai Kleinbard</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/V0XNIHILI"><img src="https://avatars.githubusercontent.com/V0XNIHILI?s=100" width="100px;" alt="Douwe den Blanken"/><br /><sub><b>Douwe den Blanken</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/shanzehbatool"><img src="https://avatars.githubusercontent.com/shanzehbatool?s=100" width="100px;" alt="shanzehbatool"/><br /><sub><b>shanzehbatool</b></sub></a><br /></td>
-      <td align="center" valign="top" width="20%"><a href="https://github.com/kai4avaya"><img src="https://avatars.githubusercontent.com/kai4avaya?s=100" width="100px;" alt="Kai Kleinbard"/><br /><sub><b>Kai Kleinbard</b></sub></a><br /></td>
-      <td align="center" valign="top" width="20%"><a href="https://github.com/mpstewart1"><img src="https://avatars.githubusercontent.com/mpstewart1?s=100" width="100px;" alt="Matthew Stewart"/><br /><sub><b>Matthew Stewart</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/eliasab16"><img src="https://avatars.githubusercontent.com/eliasab16?s=100" width="100px;" alt="Elias Nuwara"/><br /><sub><b>Elias Nuwara</b></sub></a><br /></td>
     </tr>
     <tr>
-      <td align="center" valign="top" width="20%"><a href="https://github.com/eliasab16"><img src="https://avatars.githubusercontent.com/eliasab16?s=100" width="100px;" alt="Elias Nuwara"/><br /><sub><b>Elias Nuwara</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/JaredP94"><img src="https://avatars.githubusercontent.com/JaredP94?s=100" width="100px;" alt="Jared Ping"/><br /><sub><b>Jared Ping</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/mpstewart1"><img src="https://avatars.githubusercontent.com/mpstewart1?s=100" width="100px;" alt="Matthew Stewart"/><br /><sub><b>Matthew Stewart</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/ishapira1"><img src="https://avatars.githubusercontent.com/ishapira1?s=100" width="100px;" alt="Itai Shapira"/><br /><sub><b>Itai Shapira</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/8863743b4f26c1a20e730fcf7ebc3bc0?d=identicon&s=100?s=100" width="100px;" alt="Maximilian Lam"/><br /><sub><b>Maximilian Lam</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/jaysonzlin"><img src="https://avatars.githubusercontent.com/jaysonzlin?s=100" width="100px;" alt="Jayson Lin"/><br /><sub><b>Jayson Lin</b></sub></a><br /></td>
