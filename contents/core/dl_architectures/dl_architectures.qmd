@@ -1,0 +1,748 @@
+---
+bibliography: dl_architectures.bib
+---
+
+# DL Architectures {#sec-dl_arch}
+
+::: {.content-visible when-format="html"}
+Resources: [Slides](#sec-deep-learning-primer-resource), [Videos](#sec-deep-learning-primer-resource), [Exercises](#sec-deep-learning-primer-resource)
+:::
+
+![_DALL·E 3 Prompt: A visually striking rectangular image illustrating the interplay between deep learning algorithms like CNNs, RNNs, and Attention Networks, interconnected with machine learning systems. The composition features neural network diagrams blending seamlessly with representations of computational systems such as processors, graphs, and data streams. Bright neon tones contrast against a dark futuristic background, symbolizing cutting-edge technology and intricate system complexity._](images/png/cover_dl_arch.png)
+
+::: {.callout-tip}
+
+## Learning Objectives
+
+* Bridge theoretical deep learning concepts with their practical system implementations.
+
+* Understand how different deep learning architectures impact system requirements.
+
+* Compare traditional ML and deep learning approaches from a systems perspective.
+
+* Identify core computational patterns in deep learning and their deployment implications.
+
+* Apply systems thinking to deep learning model development and deployment.
+  
+:::
+
+## Overview
+
+coming soon
+
+## Modern Neural Network Architectures
+
+The basic principles of neural networks have evolved into more sophisticated architectures that power today's most advanced AI systems. While the fundamental concepts of neurons, activations, and learning remain the same, modern architectures introduce specialized structures and organizational patterns that dramatically enhance the network's ability to process specific types of data and solve increasingly complex problems.
+
+These architectural innovations reflect both theoretical insights about how networks learn and practical lessons from applying neural networks in the real world. Each new architecture represents a careful balance between computational efficiency, learning capacity, and the specific demands of different problem domains. By examining these architectures, we will see how the field has moved from general-purpose networks to highly specialized designs optimized for particular tasks, while also understanding the implicatiuons of these changes on the unlderying system that enables their computation.
+
+### Multi-Layer Perceptrons: Dense Pattern Processing
+
+Multi-Layer Perceptrons (MLPs) represent the most direct extension of neural networks into deep architectures. Unlike more specialized networks, MLPs process each input element with equal importance, making them versatile but computationally intensive. Their architecture, while simple, establishes fundamental computational patterns that appear throughout deep learning systems.
+
+When applied to the MNIST handwritten digit recognition challenge, an MLP reveals its computational power by transforming a complex 28×28 pixel image into a precise digit classification. By treating each of the 784 pixels as an equally weighted input, the network learns to decompose visual information through a systematic progression of layers, converting raw pixel intensities into increasingly abstract representations that capture the essential characteristics of handwritten digits.
+
+#### Algorithmic Structure
+
+The core structure of an MLP is a series of fully-connected layers, where each neuron connects to every neuron in adjacent layers. As shown in @fig-mlp, each layer transforms its input through matrix multiplication followed by element-wise activation:
+
+![MLP layers and its associated matrix representation. Source: @reagen2017deep](images/png/mlp_mm.png)
+
+$$
+\mathbf{h}^{(l)} = f(\mathbf{W}^{(l)}\mathbf{h}^{(l-1)} + \mathbf{b}^{(l)})
+$$
+
+The dimensions at each layer illustrate the computation scale:
+* Input vector: $\mathbf{h}^{(0)} \in \mathbb{R}^{d_{in}}$
+* Weight matrices: $\mathbf{W}^{(l)} \in \mathbb{R}^{d_{out} \times d_{in}}$
+* Output vector: $\mathbf{h}^{(l)} \in \mathbb{R}^{d_{out}}$
+
+#### Computational Mapping
+
+The fundamental computation in MLPs is dense matrix multiplication, which creates specific computational patterns:
+
+1. **Full Connectivity**: Each output depends on every input element
+   * Complete rows and columns must be accessed
+   * All-to-all communication pattern
+   * High memory bandwidth requirement
+
+2. **Batch Processing**: Multiple inputs processed simultaneously via matrix-matrix multiply:
+   $$
+   \mathbf{H}^{(l)} = f(\mathbf{H}^{(l-1)}\mathbf{W}^{(l)} + \mathbf{b}^{(l)})
+   $$
+   where $\mathbf{H}^{(l)} \in \mathbb{R}^{B \times d_{out}}$ for batch size B
+
+While this mathematical view is elegant, its actual implementation reveals a more detailed computational reality:
+
+```python
+# Mathematical abstraction
+def mlp_layer_matrix(X, W, b):
+    H = activation(matmul(X, W) + b)    # One clean line of math
+    return H
+
+# System reality
+def mlp_layer_compute(X, W, b):
+    for batch in range(batch_size):
+        for out in range(num_outputs):
+            Z[batch,out] = b[out]
+            for in_ in range(num_inputs):
+                Z[batch,out] += X[batch,in_] * W[in_,out]
+    
+    H = activation(Z)
+    return H
+```
+
+This translation from mathematical abstraction to concrete computation exposes how dense matrix multiplication decomposes into nested loops of simpler operations. The clean mathematical notation of $\mathbf{W}\mathbf{x}$ becomes hundreds of individual multiply-accumulate operations, each requiring multiple memory accesses. These patterns fundamentally influence system design, creating both challenges in implementation and opportunities for optimization.
+
+#### System Implications
+
+The implementation of MLPs presents several key challenges and opportunities that shape system design.
+
+##### System Challenges
+
+1. **Memory Bandwidth Pressure**
+   * Each output neuron must read all input values and weights. For MNIST, this means 784 memory accesses for inputs and another 784 for weights per output.
+   * Weights must be accessed repeatedly. In a batch of 32 images, each weight is read 32 times.
+   * The system must constantly write intermediate results to memory. For a layer with 128 outputs, this means 128 writes per image.
+   These intensive memory operations create a fundamental bottleneck. For just one fully-connected layer processing a batch of MNIST images, the system performs over 50,000 memory operations.
+
+2. **Computation Volume**
+   * Each output requires hundreds of multiply-accumulate (MAC) operations. For MNIST, each output performs 784 multiply-accumulates.
+   * These operations repeat for every output neuron in each layer. A layer with 128 outputs performs over 100,000 multiply-accumulates per image.
+   * A typical network processes millions of operations per input. Even a modest three-layer network can require over a million operations per image.
+   The massive number of operations means even small inefficiencies can significantly impact performance.
+
+##### System Opportunities
+
+1. Regular Computation Structure
+   * The core operation is a simple multiply-accumulate. This enables specialized hardware units optimized for this specific operation.
+   * Memory access patterns are predictable. The system knows it needs all 784 inputs and weights in a fixed order.
+   * The same operations repeat throughout the network. A single optimization in the multiply-accumulate unit gets reused millions of times.
+   * These patterns remain consistent across different network sizes. Whether processing 28×28 MNIST images or 224×224 ImageNet images, the basic computational pattern stays the same.
+
+2. Parallelism Potential
+   * Input samples can process independently. A batch of 32 MNIST images can process on 32 separate units.
+   * Output neurons have no dependencies. All 128 outputs in a layer can compute in parallel.
+   * Individual multiply-accumulates can execute together. A vector unit could process 8 or 16 multiplications at once.
+   * Layers operate independently. While one layer processes batch 1, another layer can start on batch 0.
+
+These challenges and opportunities drive the development of specialized neural processing engines fo machine learning systems. While memory bandwidth limitations push designs toward sophisticated memory hierarchies (needing to handle >50,000 memory operations efficiently), the regular patterns and parallel opportunities enable efficient implementations through specialized processing units. The patterns established by MLPs form a baseline that more specialized neural architectures must consider in their implementations.
+
+:::{.callout-caution #exr-mlp collapse="false"}
+
+##### Multilayer Perceptrons (MLPs)
+
+We've just scratched the surface of neural networks. Now, you'll get to try and apply these concepts in practical examples. In the provided Colab notebooks, you'll explore:
+
+**Predicting house prices:** Learn how neural networks can analyze housing data to estimate property values.
+[![](https://colab.research.google.com/assets/colab-badge.png)](https://colab.research.google.com/github/Mjrovai/UNIFEI-IESTI01-TinyML-2022.1/blob/main/00_Curse_Folder/1_Fundamentals/Class_07/TF_Boston_Housing_Regression.ipynb)
+
+**Image Classification:** Discover how to build a network to understand the famous MNIST handwritten digit dataset.
+[![](https://colab.research.google.com/assets/colab-badge.png)](https://colab.research.google.com/github/Mjrovai/UNIFEI-IESTI01-TinyML-2022.1/blob/main/00_Curse_Folder/1_Fundamentals/Class_09/TF_MNIST_Classification_v2.ipynb)
+
+**Real-world medical diagnosis:** Use deep learning to tackle the important task of breast cancer classification.
+[![](https://colab.research.google.com/assets/colab-badge.png)](https://colab.research.google.com/github/Mjrovai/UNIFEI-IESTI01-TinyML-2022.1/blob/main/00_Curse_Folder/1_Fundamentals/Class_13/docs/WDBC_Project/Breast_Cancer_Classification.ipynb)
+
+:::
+
+### Convolutional Neural Networks: Spatial Pattern Processing
+
+Convolutional Neural Networks (CNNs) represent a specialized neural architecture designed to efficiently process data with spatial relationships, such as images. While MLPs treat each input independently, CNNs exploit local patterns and spatial hierarchies, establishing computational patterns that have revolutionized computer vision and spatial data processing.
+
+In the MNIST digit recognition task, CNNs demonstrate their unique approach by recognizing that visual information contains inherent spatial dependencies. Using sliding kernels that move across the image, these networks detect local features like edges, curves, and intersections specific to handwritten digits. This spatially-aware method allows the network to learn and distinguish digit characteristics by focusing on their most distinctive local patterns, fundamentally different from the uniform processing of MLPs.
+
+#### Algorithmic Structure
+
+The core innovation of CNNs is the convolutional layer, where each neuron processes only a local region of the input. As shown in @fig-cnn, a kernel (or filter) slides across the input data, performing the same transformation at each position:
+
+::: {.content-visible when-format="html"}
+![Convolution operation, image data (blue) and 3x3 kernel (green). Source: V. Dumoulin, F. Visin, MIT](images/gif/cnn.gif){#fig-cnn}
+:::
+
+::: {.content-visible when-format="pdf"}
+![Convolution operation, image data (blue) and 3x3 kernel (green). Source: V. Dumoulin, F. Visin, MIT](images/png/cnn.png){#fig-cnn}
+:::
+
+For a convolutional layer with kernel $\mathbf{K}$, the computation at each spatial position $(i,j)$ is:
+
+$$
+\mathbf{h}^{(l)}_{i,j} = f(\sum_{p,q} \mathbf{K}_{p,q} \cdot \mathbf{h}^{(l-1)}_{i+p,j+q} + b)
+$$
+
+where the dimensions depend on the layer configuration:
+
+* Input: $\mathbf{h}^{(l-1)} \in \mathbb{R}^{H \times W \times C_{in}}$
+* Kernel: $\mathbf{K} \in \mathbb{R}^{k \times k \times C_{in} \times C_{out}}$
+* Output: $\mathbf{h}^{(l)} \in \mathbb{R}^{H' \times W' \times C_{out}}$
+
+#### Computational Mapping
+
+The fundamental computation in CNNs is the convolution operation, which exhibits distinct patterns:
+
+1. **Sliding Window**: The kernel moves systematically across spatial dimensions, creating regular access patterns.
+2. **Weight Sharing**: The same kernel weights are reused at each position, reducing parameter count.
+3. **Local Connectivity**: Each output depends only on a small neighborhood of input values.
+
+For a batch of B inputs, the convolution operation processes multiple images simultaneously:
+
+$$
+\mathbf{H}^{(l)}_{b,i,j} = f(\sum_{p,q} \mathbf{K}_{p,q} \cdot \mathbf{H}^{(l-1)}_{b,i+p,j+q} + b)
+$$
+
+where $b$ indexes the batch dimension.
+
+The convolution operation involves systematically applying a kernel across an input. While mathematically elegant, its implementation reveals the complex patterns of data movement and computation:
+
+```python
+# Mathematical abstraction - simple and clean
+def conv_layer_math(input, kernel, bias):
+    output = convolution(input, kernel) + bias
+    return activation(output)
+
+# System reality - nested loops of computation
+def conv_layer_compute(input, kernel, bias):
+    # Loop 1: Process each image in batch
+    for image in range(batch_size):
+        
+        # Loop 2&3: Move across image spatially
+        for y in range(height):
+            for x in range(width):
+                
+                # Loop 4: Compute each output feature
+                for out_channel in range(num_output_channels):
+                    result = bias[out_channel]
+                    
+                    # Loop 5&6: Move across kernel window
+                    for ky in range(kernel_height):
+                        for kx in range(kernel_width):
+                            
+                            # Loop 7: Process each input feature
+                            for in_channel in range(num_input_channels):
+                                # Get input value from correct window position
+                                in_y = y + ky  
+                                in_x = x + kx
+                                # Perform multiply-accumulate operation
+                                result += input[image, in_y, in_x, in_channel] * \
+                                         kernel[ky, kx, in_channel, out_channel]
+                    
+                    # Store result for this output position
+                    output[image, y, x, out_channel] = result
+```                    
+
+This implementation, while simplified, exposes the core patterns in convolution. The seven nested loops reveal different aspects of the computation:
+
+* Outer loops (1-3) manage position: which image and where in the image
+* Middle loop (4) handles output features: computing different learned patterns
+* Inner loops (5-7) perform the actual convolution: sliding the kernel window
+
+Each level creates different system implications. The outer loops show where we can parallelize across images or spatial positions. The inner loops reveal opportunities for data reuse, as adjacent positions share input values. While real implementations use sophisticated optimizations, these basic patterns drive the key design decisions in CNN execution.
+
+#### System Implications
+
+The implementation of CNNs reveals a distinct set of challenges and opportunities that fundamentally shape system design.
+
+**Data Access Complexity:** The sliding window nature of convolution creates complex data access patterns. Consider a basic 3×3 convolution kernel. Each output computation requires reading 9 input values per channel. For a simple MNIST image with one channel, this means 9 values per output pixel. The complexity grows substantially with modern CNNs. A 3×3 kernel operating on a 224×224 RGB image with 64 output channels must access 1,728 values (9 × 3 × 64) for each output position. Moreover, these windows overlap, meaning adjacent outputs need much of the same input data.
+
+**Computation Organization:** The computational workload in CNNs follows the sliding window pattern. Each position requires a complete set of kernel computations. Even for a modest 3×3 kernel on MNIST, this means 9 multiply-accumulate operations per output. The computational demands scale dramatically with channels. In a modern network, a 3×3 kernel with 64 input and output channels requires 36,864 multiply-accumulate operations (3 × 3 × 64 × 64) per window position.
+
+**Spatial Locality:** CNNs exhibit strong spatial data reuse patterns. In a 3×3 convolution, each input value contributes to 9 different output computations. This natural overlap creates opportunities for efficient caching strategies. A well-designed memory hierarchy can reduce memory bandwidth by a factor of 9 for a 3×3 kernel. The potential for reuse grows with kernel size - a 5×5 kernel allows each input value to be reused up to 25 times.
+
+**Computation Structure:** The computational pattern of CNNs offers multiple paths to parallelism. The same kernel weights apply across the entire image, simplifying weight management. Within each window, the 9 multiplications of a 3×3 kernel can execute in parallel. The computation can also parallelize across output channels and spatial positions, as these calculations are independent.
+
+###### System Design Impact
+
+These patterns create fundamentally different system demands than MLPs. While MLPs struggle with global data access patterns, CNNs must efficiently manage sliding windows of computation. The opportunity for data reuse is significantly higher in CNNs, but capturing this reuse requires more sophisticated memory systems. Many CNN accelerators specifically target these patterns through specialized memory hierarchies and computational arrays that align with the natural structure of convolution operations.
+
+### Recurrent Neural Networks: Sequential Pattern Processing
+
+Recurrent Neural Networks (RNNs) introduce a fundamental shift in deep learning architecture by maintaining state across time steps. Unlike MLPs and CNNs that process fixed-size inputs, RNNs handle variable-length sequences by reusing weights across time steps while maintaining an internal memory state. This architecture enables sequential data processing but introduces new computational patterns and dependencies.
+
+RNNs excel in processing sequential data that changes over time. In tasks like predicting stock prices or analyzing sentiment in customer reviews, RNNs demonstrate their unique ability to process data as a temporal sequence. By maintaining an internal hidden state that captures information from previous time steps, these networks can recognize patterns that unfold over time. For instance, in sentiment analysis, an RNN can progressively understand the emotional trajectory of a sentence by processing each word in context, allowing it to capture nuanced changes in tone and meaning that traditional fixed-input models might miss.
+
+#### Algorithmic Structure
+
+The core innovation of RNNs is the recurrent connection, where each step's computation depends on both the current input and the previous hidden state. As shown in @fig-rnn, the same weights are applied repeatedly across the sequence:
+
+![RNN unrolled.](images/jpg/rnn_unrolled.jpg){#fig-rnn}
+
+For a sequence of T time steps, each step t computes:
+
+$$
+\mathbf{h}_t = f(\mathbf{W}_h\mathbf{h}_{t-1} + \mathbf{W}_x\mathbf{x}_t + \mathbf{b})
+$$
+
+The dimensions reveal the computation structure:
+
+* Input vector: $\mathbf{x}_t \in \mathbb{R}^{d_{in}}$
+* Hidden state: $\mathbf{h}_t \in \mathbb{R}^{d_h}$
+* Weight matrices: $\mathbf{W}_h \in \mathbb{R}^{d_h \times d_h}$, $\mathbf{W}_x \in \mathbb{R}^{d_h \times d_{in}}$
+
+#### Computational Mapping
+
+RNN computation exhibits distinct patterns due to its sequential nature:
+
+1. **State Update**: Each time step combines current input with previous state
+   * Two matrix multiplications per step
+   * State must be maintained across sequence
+   * Sequential dependency limits parallelization
+
+2. **Batch Processing**: Sequences processed in parallel with shape transformations:
+   $$
+   \mathbf{H}_t = f(\mathbf{H}_{t-1}\mathbf{W}_h + \mathbf{X}_t\mathbf{W}_x + \mathbf{b})
+   $$
+   where $\mathbf{H}_t \in \mathbb{R}^{B \times d_h}$ for batch size B
+
+The translation from mathematical abstraction to implementation reveals how these patterns manifest in practice:
+
+```python
+# Mathematical abstraction - clean and stateless
+def rnn_step_math(x_t, h_prev, W_h, W_x, b):
+    h_t = activation(matmul(h_prev, W_h) + matmul(x_t, W_x) + b)
+    return h_t
+
+# System reality - managing state and sequence
+def rnn_sequence_compute(X, W_h, W_x, b):
+    # Process each sequence in batch
+    for batch in range(batch_size):
+        # Hidden state must be maintained
+        h = zeros(hidden_size)
+        
+        # Steps must process sequentially
+        for t in range(sequence_length):
+            # State update computation
+            h_prev = h
+            h = activation(matmul(h_prev, W_h) + 
+                         matmul(X[batch,t], W_x) + b)
+            outputs[batch,t] = h
+```
+
+While real implementations use sophisticated optimizations, this simplified code reveals how RNNs must carefully manage state and sequential dependencies.
+
+#### System Implications
+
+The implementation of RNNs reveals unique challenges and opportunities that shape system design. Consider processing a batch of text sequences, each 100 words long, with a hidden state size of 256:
+
+**Sequential Data Dependencies:** The fundamental challenge in RNNs stems from their sequential nature. Each time step must wait for the completion of the previous step's computation, creating a chain of dependencies throughout the sequence. For a 100-word input, this means 100 strictly sequential operations, each producing a 256-dimensional hidden state that must be preserved and passed forward. This creates a computational pipeline that cannot be parallelized across time steps, fundamentally limiting system throughput.
+
+**Variable Computation and Storage:** Unlike MLPs or CNNs where computation is fixed, RNNs must handle varying sequence lengths. A batch might contain sequences ranging from a few words to hundreds of words, each requiring a different amount of computation. This variability creates complex resource management challenges. A system processing sequences of length 100 might suddenly need to accommodate sequences of length 500, requiring five times more computation and memory. Load balancing becomes particularly challenging when different sequences in a batch have widely varying lengths.
+
+**Weight Reuse Structure:** RNNs offer significant opportunities for weight reuse. The same weight matrices (W_h and W_x) are applied at every time step in the sequence. For a 100-word sequence, each weight is reused 100 times. With a hidden state size of 256, the W_h matrix has only 65,536 parameters (256 × 256) but participates in tens of thousands of computations. This intensive reuse makes weight-stationary architectures particularly effective for RNN computation.
+
+**Regular Computation Pattern:** Despite their sequential nature, RNNs exhibit highly regular computation patterns. Each time step performs identical operations: two matrix multiplications with fixed dimensions followed by an activation function. This regularity means that once a system is optimized for a single step's computation, that optimization applies throughout the sequence. The matrix sizes remain constant (256 × 256 for W_h, 256 × d_in for W_x), enabling efficient hardware utilization despite the sequential constraints.
+
+These patterns create fundamentally different demands than MLPs or CNNs. While MLPs focus on parallel matrix multiplication and CNNs on spatial data reuse, RNNs must carefully manage sequential state while maximizing batch-level parallelism. This has led to specialized architectures that pipeline sequential operations while exploiting weight reuse across time steps.
+
+Modern systems address these challenges through deep pipelines that overlap sequential computations, sophisticated batch scheduling for varying sequence lengths, and hierarchical memory systems optimized for weight reuse. The patterns established by RNNs highlight how sequential dependencies can fundamentally reshape system architecture decisions, even while maintaining the core mathematical operations common to deep learning.
+
+### Attention Mechanisms: Dynamic Information Flow
+
+Attention mechanisms revolutionized deep learning by enabling dynamic, content-based information processing. Unlike the fixed patterns of MLPs, CNNs, or RNNs, attention allows each element in a sequence to selectively focus on relevant parts of the input. This dynamic routing of information creates new computational patterns that scale differently from traditional architectures.
+
+In language translation tasks, attention mechanisms reveal their power by allowing the network to dynamically align and focus on relevant words across different languages. Instead of processing a sentence sequentially with fixed weights, an attention-based model can simultaneously consider multiple parts of the input, creating contextually rich representations that capture subtle linguistic nuances. This approach enables more accurate and contextually aware translations by letting the model dynamically determine which parts of the input are most relevant for generating each output word.
+
+#### Mathematical Structure
+
+The core operation in attention computes relevance scores between pairs of elements in sequences. Each output is a weighted combination of all inputs, where weights are learned from content:
+
+$$
+\text{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{softmax}(\frac{\mathbf{Q}\mathbf{K}^T}{\sqrt{d_k}})\mathbf{V}
+$$
+
+The dimensions highlight the scale of computation:
+* Queries: $\mathbf{Q} \in \mathbb{R}^{N \times d_k}$
+* Keys: $\mathbf{K} \in \mathbb{R}^{N \times d_k}$
+* Values: $\mathbf{V} \in \mathbb{R}^{N \times d_v}$
+* Output: $\mathbf{O} \in \mathbb{R}^{N \times d_v}$
+
+#### Computational Mapping
+
+Attention computation exhibits distinct patterns:
+
+1. **All-to-All Interaction**: Every query computes relevance with every key
+   * Quadratic scaling with sequence length
+   * Large intermediate matrices
+   * Global information access
+
+2. **Batch Processing**: Multiple sequences processed simultaneously:
+   $$
+   \mathbf{A} = \text{softmax}(\frac{\mathbf{Q}\mathbf{K}^T}{\sqrt{d_k}}) \in \mathbb{R}^{B \times N \times N}
+   $$
+   where B is batch size and A is the attention matrix
+
+The translation from mathematical abstraction to implementation reveals the computational complexity:
+
+```{python}
+# Mathematical abstraction - clean matrix operations
+def attention_math(Q, K, V):
+    scores = matmul(Q, K.transpose()) / sqrt(d_k)
+    weights = softmax(scores)
+    output = matmul(weights, V)
+    return output
+
+# System reality - explicit computation
+def attention_compute(Q, K, V):
+    # Process each sequence in batch
+    for b in range(batch_size):
+        # Every query must interact with every key
+        for i in range(seq_length):
+            for j in range(seq_length):
+                # Compute attention score
+                score = 0
+                for d in range(d_k):
+                    score += Q[b,i,d] * K[b,j,d]
+                scores[b,i,j] = score / sqrt(d_k)
+        
+        # Softmax normalization
+        weights = softmax(scores[b])
+        
+        # Weighted combination of values
+        for i in range(seq_length):
+            for j in range(seq_length):
+                for d in range(d_v):
+                    output[b,i,d] += weights[i,j] * V[b,j,d]
+```
+
+This simplified code view exposes the quadratic nature of attention computation.
+
+#### System Implications
+
+The implementation of attention mechanisms reveals unique challenges and opportunities that shape system design. Consider processing a batch of sentences, each containing 512 tokens, with an embedding dimension of 64:
+
+**Memory Intensity:** The defining characteristic of attention is its quadratic memory scaling. For a sequence of 512 tokens, the attention matrix alone requires 512 × 512 = 262,144 elements per head. With 8 attention heads, this grows to over 2 million elements just for intermediate storage. This quadratic growth means doubling sequence length quadruples memory requirements, creating a fundamental scaling challenge that often limits batch sizes in practice.
+
+**Computation Volume:** Attention mechanisms create an intense computational workload. Computing attention scores requires 512 × 512 × 64 multiply-accumulate operations just for the Q-K interaction in a single head. This amounts to over 16 million operations per layer. Unlike CNNs where computation is local, or RNNs where it's sequential, attention requires global interaction between all elements, making the computational pattern both dense and extensive.
+
+**Parallelization Opportunity:** Despite its computational intensity, attention offers extensive parallelism opportunities. Unlike RNNs, attention has no sequential dependencies. All attention scores can compute simultaneously. Moreover, different attention heads can process independently, and operations across the batch dimension are entirely separate. This creates multiple levels of parallelism that modern hardware can exploit.
+
+**Dynamic Data Access:** The content-dependent nature of attention creates unique data access patterns. Unlike CNNs with fixed sliding windows or MLPs with regular matrix multiplication, attention's data access depends on the computed relevance scores. This dynamic pattern means the system cannot predict which values will be most important, requiring efficient access to the entire sequence at each step.
+
+These characteristics drive the development of specialized attention accelerators. While CNNs focus on reusing spatial data and RNNs on managing sequential state, attention accelerators must handle large, dense matrix operations while managing significant memory requirements. 
+
+Modern systems address these challenges through:
+
+* Sophisticated memory hierarchies to handle the quadratic scaling
+* Highly parallel matrix multiplication units
+* Custom data layouts optimized for attention patterns
+* Memory management strategies to handle variable sequence lengths
+
+The patterns established by attention mechanisms highlight how dynamic, content-dependent computation can create fundamentally different system requirements, even while building on the basic operations of deep learning.
+
+### Transformers: Parallel Sequence Processing
+
+Transformers represent a culmination of deep learning architecture development, combining attention mechanisms with positional encoding and parallel processing. Unlike RNNs that process sequences step by step, Transformers handle entire sequences simultaneously through self-attention layers. This architecture has enabled breakthrough performance in language processing and increasingly in other domains, while introducing distinct computational patterns that influence system design.
+
+#### Mathematical Structure
+
+The Transformer architecture processes sequences through alternating self-attention and feedforward layers. The core computation in each attention head is:
+
+$$
+\text{head}_i = \text{Attention}(\mathbf{X}\mathbf{W}^Q_i, \mathbf{X}\mathbf{W}^K_i, \mathbf{X}\mathbf{W}^V_i)
+$$
+
+Multiple heads are concatenated and projected:
+$$
+\text{MultiHead}(\mathbf{X}) = \text{Concat}(\text{head}_1,...,\text{head}_h)\mathbf{W}^O
+$$
+
+Dimensions scale with model size:
+* Input sequence: $\mathbf{X} \in \mathbb{R}^{N \times d_{model}}$
+* Per-head projections: $\mathbf{W}^Q_i, \mathbf{W}^K_i, \mathbf{W}^V_i \in \mathbb{R}^{d_{model} \times d_k}$
+* Output projection: $\mathbf{W}^O \in \mathbb{R}^{hd_v \times d_{model}}$
+
+#### Computational Mapping
+
+Transformer computation exhibits several key patterns:
+
+1. **Multi-Head Processing**: Attention computed in parallel heads
+   * Multiple attention patterns learned simultaneously
+   * Head outputs concatenated and projected
+   * Parameter count scales with head count
+
+2. **Layer Operations**: Each block performs sequence transformation:
+   $$
+   \mathbf{X}' = \text{FFN}(\text{LayerNorm}(\mathbf{X} + \text{MultiHead}(\mathbf{X})))
+   $$
+   where FFN is a position-wise feedforward network
+
+The translation from mathematical abstraction to implementation reveals the computational complexity:
+
+```python
+# Mathematical abstraction - clean composition
+def transformer_layer(X):
+    # Multi-head attention
+    attention_out = multi_head_attention(X)
+    residual1 = layer_norm(X + attention_out)
+    
+    # Position-wise feedforward
+    ff_out = feedforward(residual1)
+    output = layer_norm(residual1 + ff_out)
+    return output
+
+# System reality - explicit computation
+def transformer_compute(X):
+    # Process each sequence in batch
+    for b in range(batch_size):
+        # Compute attention in each head
+        for h in range(num_heads):
+            # Project inputs to Q,K,V
+            Q = matmul(X[b], W_q[h])
+            K = matmul(X[b], W_k[h])
+            V = matmul(X[b], W_v[h])
+            
+            # Compute attention scores
+            for i in range(seq_length):
+                for j in range(seq_length):
+                    scores[h,i,j] = dot(Q[i], K[j]) / sqrt(d_k)
+            
+            # Apply attention and transform
+            weights = softmax(scores[h])
+            head_out[h] = matmul(weights, V)
+        
+        # Combine heads and apply FFN
+        combined = concat(head_out) @ W_o
+        residual1 = layer_norm(X[b] + combined)
+        
+        # Position-wise feedforward
+        for pos in range(seq_length):
+            ff_out[pos] = feedforward(residual1[pos])
+        output[b] = layer_norm(residual1 + ff_out)
+```
+
+#### System Implications
+
+The implementation of Transformers reveals unique challenges and opportunities that shape system design. Consider a typical model with 12 layers, 12 attention heads, and processing sequences of 512 tokens with model dimension 768:
+
+**Memory Hierarchy Complexity:** Transformers create intricate memory demands across multiple scales. Each attention head in each layer requires its own attention matrix (512 × 512 elements), leading to 12 × 12 × 512 × 512 = 37.7M elements just for attention scores. Additionally, residual connections mean each layer's activations (512 × 768 = 393K elements) must be preserved until the corresponding addition operation. Layer normalization requires computing and storing statistics across the full sequence length. For a batch size of 32, the total active memory footprint can exceed 1GB, creating complex memory management challenges.
+
+**Computational Pattern Diversity:** Unlike MLPs or CNNs with uniform computation patterns, Transformers alternate between two fundamentally different computations. The self-attention mechanism requires the quadratic-scaling attention computation we saw earlier (262K elements per head), while the position-wise feedforward network applies identical dense layers (768 × 3072 for the first FFN layer) at each position independently. This creates a unique rhythm of global interaction followed by local computation that systems must manage efficiently.
+
+**Parallelization Structure:** Transformers offer multiple levels of parallel computation. Each attention head can process independently, the feedforward networks can run separately for each position, and different layers can potentially pipeline their operations. However, this parallelism comes with data dependencies: layer normalization needs global statistics, attention requires the full key-value space, and residual connections need preserved activations. For our example model, each layer offers 12-way parallelism across heads and 512-way parallelism across positions, but must synchronize between major operations.
+
+**Scaling Implications:** The most distinctive aspect of Transformer computation is how it scales with different dimensions. Doubling sequence length quadruples memory requirements for attention (from 262K to 1M elements per head). Doubling model dimension increases both attention projection sizes and feedforward layer sizes. Adding heads or layers creates more independent computation streams but requires proportionally more parameter storage. These scaling properties create fundamental tensions in system design between memory capacity, computational throughput, and parallelization strategy.
+
+These characteristics drive the development of specialized Transformer accelerators. Systems must balance:
+
+* Complex memory hierarchies to handle multiple scales of data reuse
+* Mixed computation units for attention and feedforward operations
+* Sophisticated scheduling to exploit available parallelism
+* Memory management strategies for growing model sizes
+
+The patterns established by Transformers show how combining multiple computational motifs (attention and feedforward networks) creates new system-level challenges that go beyond simply implementing each component separately. Modern hardware must carefully co-design their memory systems, computational units, and control logic to handle these diverse demands efficiently.
+
+## Computational Patterns and System Impact
+
+Having examined major deep learning architectures, we can now compare and contrast their computational patterns and system implications collectively. This synthesis reveals common themes and distinct challenges that drive system design decisions in deep learning.
+
+### Memory Access Patterns
+
+Deep learning architectures exhibit various memory access patterns that significantly impact system performance. MLPs demonstrate the simplest pattern with dense, regular access to weight matrices. Each layer requires loading its entire weight matrix, creating substantial memory bandwidth demands that grow with layer width. CNNs, in contrast, exploit spatial locality through weight sharing. The same kernel parameters are reused across spatial positions, reducing memory requirements but necessitating efficient caching mechanisms for kernel weights.
+
+RNNs introduce temporal dependencies in memory access, requiring state maintenance across sequence steps. While they reuse weights efficiently across time steps, the sequential nature of computation limits opportunities for parallel processing. Attention mechanisms and Transformers create perhaps the most demanding memory patterns, with quadratic scaling in sequence length due to their all-to-all interaction matrices.
+
+Consider the memory scaling for processing a sequence of length N:
+
+* MLP: Linear scaling with layer width
+* CNN: Constant kernel size, independent of input
+* RNN: Linear scaling with hidden state size
+* Attention: Quadratic scaling with sequence length
+* Transformer: Quadratic in sequence length, linear in model width
+
+### Computation Characteristics
+
+The computational structure of these architectures reveals a spectrum of parallelization opportunities and constraints. MLPs and CNNs offer straightforward parallelization—each output element can be computed independently. CNNs add the complexity of sliding window operations but maintain regular computation patterns amenable to hardware acceleration.
+
+RNNs represent a sharp departure, with inherent sequential dependencies limiting parallelization across time steps. While batch processing enables some parallelism, the fundamental sequential nature remains a bottleneck. Attention mechanisms swing to the opposite extreme, enabling full parallelization but at the cost of quadratic computation growth.
+
+Key computation patterns across architectures:
+
+1. **Matrix Operations**
+
+* MLPs: Dense matrix multiplication
+* CNNs: Convolution as structured sparse multiplication
+* RNNs: Sequential matrix operations with state updates
+* Attention/Transformers: Batched matrix multiplication with dynamic weights
+
+2. **Data Dependencies**
+
+* MLPs: Layer-wise dependencies only
+* CNNs: Local spatial dependencies
+* RNNs: Sequential temporal dependencies
+* Attention: Global but parallel dependencies
+
+### System Design Implications
+
+These patterns drive specific system design decisions across the deep learning stack:
+
+#### Memory Hierarchy
+
+Modern deep learning systems must balance multiple memory access patterns:
+
+* Fast access to frequently reused weights (CNN kernels)
+* Efficient handling of large, dense matrices (MLP layers)
+* Support for dynamic, content-dependent access (Attention)
+* Management of growing intermediate states (Transformers)
+
+#### Computation Units
+
+Different architectures benefit from specialized compute capabilities:
+
+* Matrix multiplication units for MLPs and Transformers
+* Convolution accelerators for CNNs
+* Sequential processing optimization for RNNs
+* High-bandwidth units for attention computation
+
+#### Data Movement
+
+The cost of data movement often dominates energy and performance:
+
+* Weight streaming in MLPs
+* Feature map movement in CNNs
+* State propagation in RNNs
+* Attention score distribution in Transformers
+
+Understanding these patterns helps system designers to make informed decisions about hardware architecture, memory hierarchy, and optimization strategies. The diversity of patterns across architectures also explains the trend toward heterogeneous computing systems that can efficiently handle multiple types of deep learning workloads.
+
+The computational characteristics of neural network architectures reveal fundamental trade-offs in deep learning system design. @tbl-arch-comparison synthesizes the key computational patterns across major neural network architectures, highlighting how different design choices impact performance, memory usage, and computational efficiency.
+
+The diversity of architectural approaches reflects the complex challenges of processing different types of data. Each architecture emerges as a specialized solution to specific computational demands, balancing factors like parallelization, memory efficiency, and the ability to capture complex patterns in data.
+
++--------------+------------------------------------+--------------------------------+-----------------------+----------------------------------------------+---------------------------------------------------------+
+| Architecture |         Primary Computation        |         Memory Scaling         |    Parallelization    |          Key Computational Patterns          |                     Typical Use Case                    |
++:=============+:===================================+:===============================+:======================+:=============================================+:========================================================+
+| MLP          | Dense Matrix Multiplication        | Linear with layer width        | High                  | Full connectivity, uniform weight access     | General-purpose classification, regression              |
++--------------+------------------------------------+--------------------------------+-----------------------+----------------------------------------------+---------------------------------------------------------+
+| CNN          | Convolution with Sliding Kernel    | Constant with kernel size      | High                  | Spatial local computation, weight sharing    | Image processing, spatial data                          |
++--------------+------------------------------------+--------------------------------+-----------------------+----------------------------------------------+---------------------------------------------------------+
+| RNN          | Sequential Matrix Operations       | Linear with hidden state size  | Low                   | Temporal dependencies, state maintenance     | Sequential data, time series                            |
++--------------+------------------------------------+--------------------------------+-----------------------+----------------------------------------------+---------------------------------------------------------+
+| Attention    | Batched Matrix Multiplication      | Quadratic with sequence length | Very High             | Global, content-dependent interactions       | Natural language processing, sequence-to-sequence tasks |
++--------------+------------------------------------+--------------------------------+-----------------------+----------------------------------------------+---------------------------------------------------------+
+| Transformer  | Multi-head Attention + Feedforward | Quadratic in sequence length   | Highly Parallelizable | Parallel sequence processing, global context | Large language models, complex sequence tasks           |
++--------------+------------------------------------+--------------------------------+-----------------------+----------------------------------------------+---------------------------------------------------------+
+
+: Comparative computational characteristics of neural network architectures. {#tbl-arch-comparison .striped .hover}
+
+This comparative view shows the fundamental design principles driving neural network architectures, demonstrating how computational requirements shape the evolution of deep learning systems.
+
+### Architectural Complexity Analysis
+
+#### Computational Complexity
+
+For an input of size N, different architectures exhibit distinct computational complexities:
+
+* **MLP (Multi-Layer Perceptron)**: 
+  * Time Complexity: O(N * W)
+  * Where W is the width of the layers
+  * Example: For a 784-100-10 MNIST network, complexity scales linearly with layer sizes
+
+* **CNN (Convolutional Neural Network)**:
+  * Time Complexity: O(N * K * C)
+  * Where K is kernel size, C is number of channels
+  * Significantly more efficient for spatial data due to local connectivity
+
+* **RNN (Recurrent Neural Network)**:
+  * Time Complexity: O(N * T * H)
+  * Where T is sequence length, H is hidden state size
+  * Quadratic complexity with sequence length creates scaling challenges
+
+* **Transformer**:
+  * Time Complexity: O(N² * d)
+  * Where N is sequence length, d is model dimensionality
+  * Quadratic scaling makes long sequence processing expensive
+
+#### Memory Complexity Comparison
+
++---------------+-------------------+-------------------+---------------------+-------------------+
+| Architecture  | Input Dependency  | Parameter Storage | Activation Storage  | Scaling Behavior  |
++:==============+:==================+:==================+:====================+:==================+
+| MLP           | Linear            | O(N * W)          | O(B * W)            | Predictable       |
++---------------+-------------------+-------------------+---------------------+-------------------+
+| CNN           | Constant          | O(K * C)          | O(B * H * W)        | Efficient         |
++---------------+-------------------+-------------------+---------------------+-------------------+
+| RNN           | Linear            | O(H²)             | O(B * T * H)        | Challenging       |
++---------------+-------------------+-------------------+---------------------+-------------------+
+| Transformer   | Quadratic         | O(N * d)          | O(B * N²)           | Problematic       |
++---------------+-------------------+-------------------+---------------------+-------------------+
+
+Where:
+* N: Input/sequence size
+* W: Layer width
+* B: Batch size
+* K: Kernel size
+* C: Channels
+* H: Hidden state size
+* T: Sequence length
+* d: Model dimensionality
+
+## System Demands
+
+Deep learning systems must manage significant computational and memory resources during both training and inference. While the previous section examined computational patterns of different architectures, here we focus on the practical system requirements for running these models. Understanding these fundamental demands is crucial for later chapters where we explore optimization and deployment strategies in detail.
+
+### Training Demands
+
+#### Batch Processing
+
+Training neural networks requires processing multiple examples simultaneously through batch processing. This approach not only improves statistical learning by computing gradients across multiple examples but also enables better hardware utilization. The batch size choice directly impacts memory usage since activations must be stored for each example in the batch, creating a fundamental trade-off between training efficiency and memory constraints.
+
+From a systems perspective, batch processing creates opportunities for optimization through parallel computation and memory access patterns. Modern deep learning systems employ techniques like gradient accumulation to work around memory limitations, and dynamic batch sizing to adapt to available resources. These considerations become particularly important in distributed training settings, which we will explore in detail in subsequent chapters.
+
+#### Gradient Computation
+
+The backward pass in neural network training requires maintaining activation values from the forward pass to compute gradients. This effectively doubles the memory requirements compared to inference, as each layer's outputs must be preserved until they're needed for gradient calculation. The computational graph grows with model depth, making gradient computation increasingly demanding for deeper networks.
+
+System design must carefully manage this memory-computation trade-off. Techniques exist to reduce memory pressure by recomputing activations instead of storing them, or by using checkpointing to save memory at the cost of additional computation. While we will explore these optimization strategies thoroughly in Chapter 8, the fundamental challenge of balancing gradient computation requirements with system resources shapes basic design decisions.
+
+#### Parameter Updates and State Management
+
+Training requires maintaining and updating millions to billions of parameters across iterations. Each training step not only computes gradients but must safely update these parameters, often while maintaining optimizer states like momentum values. This creates substantial memory requirements beyond the basic model parameters.
+
+Systems must efficiently handle these frequent, large-scale parameter updates. Memory hierarchies need to be designed for both fast access during forward/backward passes and efficient updates during the optimization step. While various optimization techniques exist to reduce this overhead, which we will explore in Chapter 8, the basic challenge of parameter management influences fundamental system design choices.
+
+### Inference Requirements
+
+#### Latency Management
+
+Inference workloads often demand real-time or near-real-time responses, particularly in applications like autonomous systems, recommendation engines, or interactive services. Unlike training, where throughput is the primary concern, inference must often meet strict latency requirements. These timing constraints fundamentally shape how the system processes inputs and manages resources.
+
+From a systems perspective, meeting latency requirements involves carefully orchestrating computation and memory access. While techniques like batching can improve throughput, they must be balanced against latency constraints. The system must maintain consistent response times while efficiently utilizing available compute resources, a challenge we will examine more deeply in Chapter 9.
+
+#### Resource Utilization
+
+Inference deployments must operate within specific resource budgets, whether running on edge devices with limited power and memory or in cloud environments with cost constraints. The model's computational and memory demands must fit within these boundaries while maintaining acceptable performance. This creates a fundamental tension between model capability and resource efficiency.
+
+System designs address this challenge through various approaches to resource management. Memory usage can be optimized through quantization and compression, while computation can be streamlined through operation fusion and hardware acceleration. While we will explore these optimization techniques in detail in later chapters, understanding the basic resource constraints is essential for system design.
+
+### Memory Management
+
+#### Working Memory
+
+Deep learning systems require substantial working memory to hold intermediate activations during computation. For training, these memory demands are particularly high as activations must be preserved for gradient computation. Even during inference, the system needs sufficient memory to handle intermediate results, especially for large models or batch processing.
+
+Memory management systems must efficiently handle these dynamic memory requirements. Techniques like gradient checkpointing during training or activation recomputation during inference can trade computation for memory savings. The fundamental challenge lies in balancing memory usage against computational overhead, a trade-off that influences system architecture.
+
+#### Storage Requirements
+
+Beyond working memory, deep learning systems need efficient storage and access patterns for model parameters. Modern architectures can require anywhere from megabytes to hundreds of gigabytes for weight storage. This creates challenges not just in terms of capacity but also in terms of efficient parameter access during computation.
+
+Systems must carefully manage this parameter storage across the memory hierarchy. Fast access to frequently used parameters must be balanced against total storage capacity. While advanced techniques like parameter sharding and caching exist, which we will discuss in a future chapter, the basic requirements for parameter storage and access shape fundamental system design decisions.
+
+## Case Studies
+
+### Scaling Architectures: Transformers and Large Language Models
+
+* Evolution from Attention Mechanisms to GPT and BERT  
+* System challenges in scaling, memory, and deployment  
+
+### Efficiency and Specialization: EfficientNet and Mobile AI
+
+* Optimizing for constrained environments  
+* Trade-offs between accuracy and efficiency  
+
+### Distributed Systems: Training at Scale
+
+* Challenges in multi-GPU communication and resource scaling  
+* Tools and frameworks like Horovod and DeepSpeed  
+
+## Conclusion
+
+coming soon.
