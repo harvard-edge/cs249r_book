@@ -57,9 +57,28 @@ Multi-Layer Perceptrons (MLPs) represent the most direct extension of neural net
 
 When applied to the MNIST handwritten digit recognition challenge, an MLP reveals its computational power by transforming a complex 28×28 pixel image into a precise digit classification. By treating each of the 784 pixels as an equally weighted input, the network learns to decompose visual information through a systematic progression of layers, converting raw pixel intensities into increasingly abstract representations that capture the essential characteristics of handwritten digits.
 
+### Pattern Processing Need
+
+Deep learning systems frequently encounter problems where any input feature could potentially influence any output - there are no inherent constraints on these relationships. Consider analyzing financial market data: any economic indicator might affect any market outcome or in natural language processing, where the meaning of a word could depend on any other word in the sentence. These scenarios demand an architectural pattern capable of learning arbitrary relationships across all input features.
+
+Dense pattern processing addresses this fundamental need by enabling several key capabilities. First, it allows unrestricted feature interactions where each output can depend on any combination of inputs. Second, it facilitates learned feature importance, allowing the system to determine which connections matter rather than having them prescribed. Finally, it provides adaptive representation, enabling the network to reshape its internal representations based on the data.
+
+For example, in the MNIST digit recognition task, while humans might focus on specific parts of digits (like loops in '6' or crossings in '8'), we cannot definitively say which pixel combinations are crucial for classification. A '7' written with a serif could share pixel patterns with a '2', while variations in handwriting mean discriminative features might appear anywhere in the image. This uncertainty about feature relationships necessitates a dense processing approach where every pixel can potentially influence the classification decision.
+
+The need for processing arbitrary relationships, however, comes with significant computational implications. When every output potentially depends on every input, the system must:
+
+* Access all input values for each computation
+* Store weights for all possible connections
+* Compute across all these connections
+* Move data between all elements of the network
+
+These requirements directly influence how we structure both algorithms and computer systems to handle dense pattern processing efficiently.
+
 ### Algorithmic Structure
 
-The core structure of an MLP is a series of fully-connected layers, where each neuron connects to every neuron in adjacent layers. As shown in @fig-mlp, each layer transforms its input through matrix multiplication followed by element-wise activation:
+To enable unrestricted feature interactions, MLPs implement a direct algorithmic solution: connect everything to everything. This is realized through a series of fully-connected layers, where each neuron connects to every neuron in adjacent layers. This structure not only enables unrestricted feature interactions but also leverages a fundamental theoretical result: the Universal Approximation Theorem (UAT) [@cybenko1989approximation]. The UAT states that a sufficiently large MLP with non-linear activation functions can approximate any continuous function on a compact domain, given suitable weights and biases [hornik1989multilayer]. This highlights why dense architectures like MLPs are particularly well-suited for tasks requiring complex feature transformations and interactions.
+
+The dense connectivity pattern translates mathematically into matrix multiplication operations. As shown in @fig-mlp, each layer transforms its input through matrix multiplication followed by element-wise activation:
 
 ![MLP layers and its associated matrix representation. Source: @reagen2017deep](images/png/mlp_mm.png){#fig-mlp}
 
@@ -67,39 +86,56 @@ $$
 \mathbf{h}^{(l)} = f(\mathbf{W}^{(l)}\mathbf{h}^{(l-1)} + \mathbf{b}^{(l)})
 $$
 
-The dimensions at each layer illustrate the computation scale:
-* Input vector: $\mathbf{h}^{(0)} \in \mathbb{R}^{d_{in}}$
-* Weight matrices: $\mathbf{W}^{(l)} \in \mathbb{R}^{d_{out} \times d_{in}}$
-* Output vector: $\mathbf{h}^{(l)} \in \mathbb{R}^{d_{out}}$
+The dimensions of these operations reveal the computational scale of dense pattern processing:
+
+* Input vector: $\mathbf{h}^{(0)} \in \mathbb{R}^{d_{in}}$ represents all potential input features
+* Weight matrices: $\mathbf{W}^{(l)} \in \mathbb{R}^{d_{out} \times d_{in}}$ capture all possible input-output relationships
+* Output vector: $\mathbf{h}^{(l)} \in \mathbb{R}^{d_{out}}$ produces transformed representations
+
+In the MNIST example, this means:
+
+* Each 784-dimensional input ($28 \times 28$ pixels) connects to every neuron in the first hidden layer
+* A hidden layer with 100 neurons requires a 784 × 100 weight matrix
+* Each weight in this matrix represents a learnable relationship between an input pixel and a hidden feature
+
+This algorithmic structure directly addresses our need for arbitrary feature relationships but creates specific computational patterns that must be handled efficiently by computer systems.
 
 ### Computational Mapping
 
-The fundamental computation in MLPs is dense matrix multiplication, which creates specific computational patterns:
+The elegant mathematical representation of dense matrix multiplication maps to specific computational patterns that systems must handle. Let's examine how this mapping progresses from mathematical abstraction to computational reality.
 
-1. **Full Connectivity**: Each output depends on every input element
-   * Complete rows and columns must be accessed
-   * All-to-all communication pattern
-   * High memory bandwidth requirement
+The fundamental computation in MLPs is dense matrix multiplication, where each output depends on every input element. When processing multiple inputs simultaneously through batch processing, we can express this mathematically as:
 
-2. **Batch Processing**: Multiple inputs processed simultaneously via matrix-matrix multiply:
-   $$
-   \mathbf{H}^{(l)} = f(\mathbf{H}^{(l-1)}\mathbf{W}^{(l)} + \mathbf{b}^{(l)})
-   $$
-   where $\mathbf{H}^{(l)} \in \mathbb{R}^{B \times d_{out}}$ for batch size B
+$$
+\mathbf{H}^{(l)} = f(\mathbf{H}^{(l-1)}\mathbf{W}^{(l)} + \mathbf{b}^{(l)})
+$$
 
-While this mathematical view is elegant, its actual implementation reveals a more detailed computational reality:
+where $\mathbf{H}^{(l)} \in \mathbb{R}^{B \times d_{out}}$ for batch size B.
+
+While this mathematical view is elegant, its actual implementation reveals a more detailed computational reality. Let's examine two different implementations of the same computation - one that mirrors the mathematical abstraction and one that exposes the core computational pattern:
 
 ```{.python}
-# Mathematical abstraction
+# Mathematical abstraction in code
 def mlp_layer_matrix(X, W, b):
+    # X: input matrix (batch_size × num_inputs)
+    # W: weight matrix (num_inputs × num_outputs)
+    # b: bias vector (num_outputs)
     H = activation(matmul(X, W) + b)    # One clean line of math
     return H
+```
 
-# System reality
+The first implementation, `mlp_layer_matrix`, directly mirrors our mathematical equation. It uses high-level matrix operations (`matmul`) to express the computation in a single line, hiding the underlying complexity. This is the style commonly used in deep learning frameworks, where optimized libraries handle the actual computation.
+
+```{.python}
+# Core computational pattern
 def mlp_layer_compute(X, W, b):
+    # Process each sample in the batch
     for batch in range(batch_size):
+        # Compute each output neuron
         for out in range(num_outputs):
+            # Initialize with bias
             Z[batch,out] = b[out]
+            # Accumulate weighted inputs
             for in_ in range(num_inputs):
                 Z[batch,out] += X[batch,in_] * W[in_,out]
     
@@ -107,41 +143,46 @@ def mlp_layer_compute(X, W, b):
     return H
 ```
 
-This translation from mathematical abstraction to concrete computation exposes how dense matrix multiplication decomposes into nested loops of simpler operations. The clean mathematical notation of $\mathbf{W}\mathbf{x}$ becomes hundreds of individual multiply-accumulate operations, each requiring multiple memory accesses. These patterns fundamentally influence system design, creating both challenges in implementation and opportunities for optimization.
+The second implementation, `mlp_layer_compute`, exposes the actual computational pattern through nested loops. This version shows us what really happens when we compute a layer's output: we process each sample in the batch, computing each output neuron by accumulating weighted contributions from all inputs.
+
+This translation from mathematical abstraction to concrete computation exposes how dense matrix multiplication decomposes into nested loops of simpler operations. The outer loop processes each sample in the batch, while the middle loop computes values for each output neuron. Within the innermost loop, the system performs repeated multiply-accumulate operations, combining each input with its corresponding weight.
+
+In the MNIST example, each output neuron requires 784 multiply-accumulate operations and at least 1,568 memory accesses (784 for inputs, 784 for weights). While actual implementations use sophisticated optimizations through libraries like [BLAS](https://www.netlib.org/blas/) or [cuBLAS](https://developer.nvidia.com/cublas) (which we'll explore in Chapter 8 on AI Training and Chapter 11 on AI Acceleration), these fundamental patterns drive key system design decisions.
+
+The computational mapping reveals several critical patterns that influence system design:
+
+1. Each output depends on every input, creating an all-to-all communication pattern
+2. Memory access is extensive and regular, with complete rows and columns being accessed
+3. The basic operation (multiply-accumulate) repeats many times with different data
+4. Computation can be parallelized across batches and output neurons
+
+These patterns create both challenges in implementation and opportunities for optimization, which we'll examine in the next [section](#system-implications)
 
 ### System Implications
 
-The implementation of MLPs presents several key challenges and opportunities that shape system design.
+When analyzing how computational patterns impact computer systems, we examine three fundamental dimensions: memory requirements, computation needs, and data movement. This framework enables systematic analysis of how algorithmic patterns influence system design decisions.
 
-#### System Challenges
+#### Memory Requirements
 
-1. **Memory Bandwidth Pressure**
-   * Each output neuron must read all input values and weights. For MNIST, this means 784 memory accesses for inputs and another 784 for weights per output.
-   * Weights must be accessed repeatedly. In a batch of 32 images, each weight is read 32 times.
-   * The system must constantly write intermediate results to memory. For a layer with 128 outputs, this means 128 writes per image.
-   These intensive memory operations create a fundamental bottleneck. For just one fully-connected layer processing a batch of MNIST images, the system performs over 50,000 memory operations.
+For dense pattern processing, the memory requirements stem from storing and accessing weights, inputs, and intermediate results. In our MNIST example, connecting our 784-dimensional input layer to a hidden layer of 100 neurons requires 78,400 weight parameters. Each forward pass must access all these weights, along with input data and intermediate results. The all-to-all connectivity pattern means there's no inherent locality in these accesses—every output needs every input and its corresponding weights. 
 
-2. **Computation Volume**
-   * Each output requires hundreds of multiply-accumulate (MAC) operations. For MNIST, each output performs 784 multiply-accumulates.
-   * These operations repeat for every output neuron in each layer. A layer with 128 outputs performs over 100,000 multiply-accumulates per image.
-   * A typical network processes millions of operations per input. Even a modest three-layer network can require over a million operations per image.
-   The massive number of operations means even small inefficiencies can significantly impact performance.
+These memory access patterns suggest opportunities for optimization through careful data organization and reuse. Modern processors handle these patterns differently - CPUs leverage their cache hierarchy for data reuse, while GPUs employ specialized memory hierarchies designed for high-bandwidth access. Deep learning frameworks abstract these hardware-specific details through optimized matrix multiplication implementations.
 
-#### System Opportunities
+#### Computation Needs
 
-1. Regular Computation Structure
-   * The core operation is a simple multiply-accumulate. This enables specialized hardware units optimized for this specific operation.
-   * Memory access patterns are predictable. The system knows it needs all 784 inputs and weights in a fixed order.
-   * The same operations repeat throughout the network. A single optimization in the multiply-accumulate unit gets reused millions of times.
-   * These patterns remain consistent across different network sizes. Whether processing 28×28 MNIST images or 224×224 ImageNet images, the basic computational pattern stays the same.
+The core computation revolves around multiply-accumulate operations arranged in nested loops. Each output value requires as many multiply-accumulates as there are inputs. For MNIST, this means 784 multiply-accumulates per output neuron. With 100 neurons in our hidden layer, we're performing 78,400 multiply-accumulates for a single input image. While these operations are simple, their volume and arrangement create specific demands on processing resources.
 
-2. Parallelism Potential
-   * Input samples can process independently. A batch of 32 MNIST images can process on 32 separate units.
-   * Output neurons have no dependencies. All 128 outputs in a layer can compute in parallel.
-   * Individual multiply-accumulates can execute together. A vector unit could process 8 or 16 multiplications at once.
-   * Layers operate independently. While one layer processes batch 1, another layer can start on batch 0.
+#### Data Movement
 
-These challenges and opportunities drive the development of specialized neural processing engines fo machine learning systems. While memory bandwidth limitations push designs toward sophisticated memory hierarchies (needing to handle >50,000 memory operations efficiently), the regular patterns and parallel opportunities enable efficient implementations through specialized processing units. The patterns established by MLPs form a baseline that more specialized neural architectures must consider in their implementations.
+The all-to-all connectivity pattern in MLPs creates significant data movement requirements. Each multiply-accumulate operation needs three pieces of data: an input value, a weight value, and the running sum. For our MNIST example layer, computing a single output value requires moving 784 inputs and 784 weights to wherever the computation occurs. This movement pattern repeats for each of the 100 output neurons, creating substantial data transfer demands between memory and compute units.
+
+The predictable nature of these data movement patterns enables strategic data staging and transfer optimizations. Different architectures address this challenge through various mechanisms - CPUs use sophisticated prefetching and multi-level caches, while GPUs employ high-bandwidth memory systems and latency hiding through massive threading. Deep learning frameworks orchestrate these data movements through optimized memory management systems.
+
+The analysis of MLPs demonstrates how dense pattern processing translates into specific computational patterns and system implications. These characteristics - high memory bandwidth requirements, intensive multiply-accumulate computations, and significant data movement needs - establish a baseline for understanding neural network implementations in computer systems. As we examine other architectural patterns in subsequent sections, this same analytical framework will reveal how different approaches to pattern processing create their own unique demands on system resources.
+
+### Summary and Next Steps
+
+The analysis of MLPs demonstrates how dense pattern processing translates into specific computational patterns and system implications. These characteristics - high memory bandwidth requirements, intensive multiply-accumulate computations, and significant data movement needs - establish a baseline for understanding neural network implementations in computer systems. As we examine other architectural patterns in subsequent sections, this same analytical framework will reveal how different approaches to pattern processing create their own unique demands on system resources.
 
 :::{.callout-caution #exr-mlp collapse="false"}
 
@@ -364,6 +405,7 @@ $$
 $$
 
 The dimensions highlight the scale of computation:
+
 * Queries: $\mathbf{Q} \in \mathbb{R}^{N \times d_k}$
 * Keys: $\mathbf{K} \in \mathbb{R}^{N \times d_k}$
 * Values: $\mathbf{V} \in \mathbb{R}^{N \times d_v}$
@@ -460,6 +502,7 @@ $$
 $$
 
 Dimensions scale with model size:
+
 * Input sequence: $\mathbf{X} \in \mathbb{R}^{N \times d_{model}}$
 * Per-head projections: $\mathbf{W}^Q_i, \mathbf{W}^K_i, \mathbf{W}^V_i \in \mathbb{R}^{d_{model} \times d_k}$
 * Output projection: $\mathbf{W}^O \in \mathbb{R}^{hd_v \times d_{model}}$
@@ -680,6 +723,7 @@ For an input of size N, different architectures exhibit distinct computational c
 +---------------+-------------------+-------------------+---------------------+-------------------+
 
 Where:
+
 * N: Input/sequence size
 * W: Layer width
 * B: Batch size
