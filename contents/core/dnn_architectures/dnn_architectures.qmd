@@ -723,3 +723,115 @@ This compositional nature of neural architectures has important implications for
 
 As we move forward to examine the system implications of these architectures, this building block perspective will help us understand how fundamental computational patterns map to hardware resources. Each building block creates specific demands on memory, computation, and data movement, and their composition in modern architectures drives key system design decisions.
 
+## System-Level Building Blocks
+
+After examining different deep learning architectures, we can distill their system requirements into fundamental primitives that underpin both hardware and software implementations. These primitives represent operations that cannot be broken down further while maintaining their essential characteristics. Just as complex molecules are built from basic atoms, sophisticated neural networks are constructed from these fundamental operations.
+
+### Core Computational Primitives
+
+Three fundamental operations serve as the building blocks for all deep learning computations: matrix multiplication, sliding window operations, and dynamic computation. What makes these operations primitive is that they cannot be further decomposed without losing their essential computational properties and efficiency characteristics.
+
+Matrix multiplication represents the most basic form of transforming sets of features. When we multiply a matrix of inputs by a matrix of weights, we're computing weighted combinations - the fundamental operation of neural networks. For example, in our MNIST network, each 784-dimensional input vector multiplies with a 784×100 weight matrix. This pattern appears everywhere: MLPs use it directly for layer computations, CNNs reshape convolutions into matrix multiplications through `im2col` (turning a 3×3 convolution into a matrix operation), and Transformers use it extensively in their attention mechanisms. In modern systems, matrix multiplication maps to specific hardware and software implementations. Hardware accelerators provide specialized tensor cores that can perform thousands of multiply-accumulates in parallel - NVIDIA's A100 tensor cores can achieve up to 312 TFLOPS (32-bit) through massive parallelization of these operations. Software frameworks like PyTorch and TensorFlow automatically map these high-level operations to optimized matrix libraries (cuBLAS, MKL) that exploit these hardware capabilities.
+
+Sliding window operations compute local relationships by applying the same operation to chunks of data. In CNNs processing MNIST images, a 3×3 convolution filter slides across the 28×28 input, requiring 26×26 windows of computation. Modern hardware accelerators implement this through specialized memory access patterns and data buffering schemes that optimize data reuse. For example, Google's TPU uses a 128×128 systolic array where data flows systematically through processing elements, allowing each input value to be reused across multiple computations without accessing memory. Software frameworks optimize these operations by transforming them into efficient matrix multiplications (a 3×3 convolution becomes a 9×N matrix multiplication) and carefully managing data layout in memory to maximize spatial locality.
+
+Dynamic computation, where the operation itself depends on the input data, emerged prominently with attention mechanisms but represents a fundamental capability needed for adaptive processing. In Transformer attention, each query dynamically determines its interaction weights with all keys - for a sequence of length 512, this means 512 different weight patterns must be computed on the fly. Unlike fixed patterns where we know the computation graph in advance, dynamic computation requires runtime decisions. This creates specific implementation challenges - hardware must provide flexible routing of data (modern GPUs use dynamic scheduling) and support variable computation patterns, while software frameworks need efficient mechanisms for handling data-dependent execution paths (PyTorch's dynamic computation graphs, TensorFlow's dynamic control flow).
+
+These primitives combine in sophisticated ways in modern architectures. A Transformer layer processing a sequence of 512 tokens demonstrates this clearly: it uses matrix multiplications for feature projections (512×512 operations implemented through tensor cores), may employ sliding windows for efficient attention over long sequences (using specialized memory access patterns for local regions), and requires dynamic computation for attention weights (computing 512×512 attention patterns at runtime). The way these primitives interact creates specific demands on system design - from memory hierarchy organization to computation scheduling.
+
+Different neural network architectures leverage these core computational primitives in varying ways, as illustrated in @tbl-nn-arch-primitives:
+
++----------------+-----------------------+----------------------------+-----------------------------+--------------------------+
+| Primitive Type | MLP                   | CNN                        | RNN                         | Transformer              |
++:===============+:======================+:===========================+:============================+:=========================+
+| Computational  | Matrix Multiplication | Convolution (Matrix Mult.) | Matrix Mult. + State Update | Matrix Mult. + Attention |
++----------------+-----------------------+----------------------------+-----------------------------+--------------------------+
+| Memory Access  | Sequential            | Strided                    | Sequential + Random         | Random (Attention)       |
++----------------+-----------------------+----------------------------+-----------------------------+--------------------------+
+| Data Movement  | Broadcast             | Sliding Window             | Sequential                  | Broadcast + Gather       |
++----------------+-----------------------+----------------------------+-----------------------------+--------------------------+
+
+: Utilization of primitives across neural network architectures. {#tbl-nn-arch-primitives}
+
+This table highlights how the fundamental operations we've discussed manifest in different architectures, showcasing both the commonalities and differences in their computational needs. For instance, while all architectures rely on matrix multiplication as a core computational primitive, they differ significantly in their memory access and data movement patterns.
+
+The building blocks we've discussed help explain why certain hardware features exist (like tensor cores for matrix multiplication) and why software frameworks organize computations in particular ways (like batching similar operations together). As we move from computational primitives to consider memory access and data movement patterns, it's crucial to recognize how these fundamental operations shape the demands placed on memory systems and data transfer mechanisms. The way computational primitives are implemented and combined has direct implications for how data needs to be stored, accessed, and moved within the system.
+
+### Memory Access Primitives
+
+The efficiency of deep learning systems heavily depends on how they access and manage memory. In fact, memory access often becomes the primary bottleneck in modern ML systems - while a matrix multiplication unit might be capable of performing thousands of operations per cycle, it will sit idle if data isn't available at the right time. For example, accessing data from DRAM typically takes hundreds of cycles, while on-chip computation takes only a few cycles.
+
+Three fundamental memory access patterns dominate in deep learning architectures: sequential access, strided access, and random access. Each pattern creates different demands on the memory system and offers different opportunities for optimization.
+
+Sequential access represents the simplest and most efficient pattern. Consider an MLP performing matrix multiplication with a batch of MNIST images: it needs to access both the 784×100 weight matrix and the input vectors sequentially. This pattern maps well to modern memory systems - DRAM can operate in burst mode for sequential reads (achieving up to 400 GB/s in modern GPUs), and hardware prefetchers can effectively predict and fetch upcoming data. Software frameworks optimize for this by ensuring data is laid out contiguously in memory and aligning data to cache line boundaries.
+
+Strided access appears prominently in CNNs, where each output position needs to access a window of input values at regular intervals. For a CNN processing MNIST images with 3×3 filters, each output position requires accessing 9 input values with a stride matching the input width. While less efficient than sequential access, hardware supports this through pattern-aware caching strategies and specialized memory controllers. Software frameworks often transform these strided patterns into sequential access through data layout reorganization - the im2col transformation in deep learning frameworks converts convolution's strided access into efficient matrix multiplications.
+
+Random access poses the greatest challenge for system efficiency. In a Transformer processing a sequence of 512 tokens, each attention operation potentially needs to access any position in the sequence, creating unpredictable memory access patterns. Random access can severely impact performance through cache misses (potentially causing 100+ cycle stalls per access) and unpredictable memory latencies. Systems address this through large cache hierarchies (modern GPUs have several MB of L2 cache) and sophisticated prefetching strategies, while software frameworks employ techniques like attention pattern pruning to reduce random access requirements.
+
+The impact of these patterns becomes clearer when we consider data reuse opportunities. In CNNs, each input pixel participates in multiple convolution windows (typically 9 times for a 3×3 filter), making effective data reuse crucial for performance. Modern GPUs provide multi-level cache hierarchies (L1, L2, shared memory) to capture this reuse, while software techniques like loop tiling ensure data remains in cache once loaded.
+
+Working set size - the amount of data needed simultaneously for computation - varies dramatically across architectures. An MLP layer processing MNIST images might need only a few hundred KB (weights plus activations), while a Transformer processing long sequences can require several MB just for storing attention patterns. These differences directly influence hardware design choices, like the balance between compute units and on-chip memory, and software optimizations like activation checkpointing or attention approximation techniques.
+
+Understanding these memory access patterns is crucial as architectures evolve. The shift from CNNs to Transformers, for instance, has driven the development of hardware with larger on-chip memories and more sophisticated caching strategies to handle increased working sets and more dynamic access patterns. Future architectures will likely continue to be shaped by their memory access characteristics as much as their computational requirements.
+
+### Data Movement Primitives
+
+While computational and memory access patterns define what operations occur where, data movement primitives characterize how information flows through the system. These patterns are crucial because data movement often consumes more time and energy than computation itself - moving data from off-chip memory typically requires 100-1000x more energy than performing a floating-point operation.
+
+Four fundamental data movement patterns are prevalent in deep learning architectures: broadcast, scatter, gather, and reduction. These patterns determine how data is distributed and collected across computational units.
+
+Broadcast operations send the same data to multiple destinations simultaneously. In matrix multiplication with batch size 32, each weight must be broadcast to process different inputs in parallel. Modern hardware supports this through specialized interconnects - NVIDIA GPUs provide hardware multicast capabilities achieving up to 600GB/s broadcast bandwidth, while TPUs use dedicated broadcast buses. Software frameworks optimize broadcasts by restructuring computations (like matrix tiling) to maximize data reuse.
+
+Scatter operations distribute different elements to different destinations. When parallelizing a 512×512 matrix multiplication across GPU cores, each core receives a subset of the computation. This parallelization is crucial for performance but challenging - memory conflicts and load imbalance can reduce efficiency by 50% or more. Hardware provides flexible interconnects (like NVIDIA's NVLink offering 600GB/s bi-directional bandwidth), while software frameworks employ sophisticated work distribution algorithms to maintain high utilization.
+
+Gather operations collect data from multiple sources. In Transformer attention with sequence length 512, each query must gather information from 512 different key-value pairs. These irregular access patterns are challenging - random gathering can be 10x slower than sequential access. Hardware supports this through high-bandwidth interconnects and large caches, while software frameworks employ techniques like attention pattern pruning to reduce gathering overhead.
+
+Reduction operations combine multiple values into a single result through operations like summation. When computing attention scores in Transformers or layer outputs in MLPs, efficient reduction is crucial. Hardware implements tree-structured reduction networks (reducing latency from O(n) to O(log n)), while software frameworks use optimized parallel reduction algorithms that can achieve near-theoretical peak performance.
+
+These patterns combine in sophisticated ways. A Transformer attention operation with sequence length 512 and batch size 32 involves:
+
+- Broadcasting query vectors (512×64 elements)
+- Gathering relevant keys and values (512×512×64 elements)
+- Reducing attention scores (512×512 elements per sequence)
+
+The evolution from CNNs to Transformers has increased reliance on gather and reduction operations, driving hardware innovations like more flexible interconnects and larger on-chip memories. As models grow (some now exceeding 100 billion parameters), efficient data movement becomes increasingly critical, leading to innovations like near-memory processing and sophisticated data flow optimizations.
+
+### System Design Impact
+
+The computational, memory access, and data movement primitives we've explored form the foundational requirements that shape the design of systems for deep learning. The way these primitives influence hardware design, create common bottlenecks, and drive trade-offs is crucial for developing efficient and effective deep learning systems.
+
+One of the most significant impacts of these primitives on system design is the push towards specialized hardware. The prevalence of matrix multiplications and convolutions in deep learning has led to the development of tensor processing units (TPUs) and tensor cores in GPUs, which are specifically designed to perform these operations efficiently. These specialized units can perform many multiply-accumulate operations in parallel, dramatically accelerating the core computations of neural networks.
+
+Memory systems have also been profoundly influenced by the demands of deep learning primitives. The need to support both sequential and random access patterns efficiently has driven the development of sophisticated memory hierarchies. High-bandwidth memory (HBM) has become common in AI accelerators to support the massive data movement requirements, especially for operations like attention mechanisms in Transformers. On-chip memory hierarchies have grown in complexity, with multiple levels of caching and scratchpad memories to support the diverse working set sizes of different neural network layers.
+
+The data movement primitives have particularly influenced the design of interconnects and on-chip networks. The need to support efficient broadcasts, gathers, and reductions has led to the development of more flexible and higher-bandwidth interconnects. Some AI chips now feature specialized networks-on-chip designed to accelerate common data movement patterns in neural networks.
+
+@tbl-sys-design-implications summarizes the system implications of these primitives:
+
++-----------------------+---------------------------+--------------------------+----------------------------+
+| Primitive             | Hardware Impact           | Software Optimization    | Key Challenges             |
++:======================+:==========================+:=========================+:===========================+
+| Matrix Multiplication | Tensor Cores              | Batching, GEMM libraries | Parallelization, precision |
++-----------------------+---------------------------+--------------------------+----------------------------+
+| Sliding Window        | Specialized datapaths     | Data layout optimization | Stride handling            |
++-----------------------+---------------------------+--------------------------+----------------------------+
+| Dynamic Computation   | Flexible routing          | Dynamic graph execution  | Load balancing             |
++-----------------------+---------------------------+--------------------------+----------------------------+
+| Sequential Access     | Burst mode DRAM           | Contiguous allocation    | -                          |
++-----------------------+---------------------------+--------------------------+----------------------------+
+| Random Access         | Large caches              | Memory-aware scheduling  | Cache misses               |
++-----------------------+---------------------------+--------------------------+----------------------------+
+| Broadcast             | Specialized interconnects | Operation fusion         | Bandwidth                  |
++-----------------------+---------------------------+--------------------------+----------------------------+
+| Gather/Scatter        | High-bandwidth memory     | Work distribution        | Load balancing             |
++-----------------------+---------------------------+--------------------------+----------------------------+
+
+: System implications of primitives. {#tbl-sys-design-implications}
+
+Despite these advancements, several common bottlenecks persist in deep learning systems. Memory bandwidth often remains a key limitation, particularly for models with large working sets or those that require frequent random access. The energy cost of data movement, especially between off-chip memory and processing units, continues to be a significant concern. For large-scale models, the communication overhead in distributed training can become a bottleneck, limiting scaling efficiency.
+
+System designers must navigate complex trade-offs in supporting different primitives, each with unique characteristics that influence system design and performance. For example, optimizing for the dense matrix operations common in MLPs and CNNs might come at the cost of flexibility needed for the more dynamic computations in attention mechanisms. Supporting large working sets for Transformers might require sacrificing energy efficiency.
+
+Balancing these trade-offs requires careful consideration of the target workloads and deployment scenarios. Understanding the nature of each primitive guides the development of both hardware and software optimizations in deep learning systems, allowing designers to make informed decisions about system architecture and resource allocation.
+
