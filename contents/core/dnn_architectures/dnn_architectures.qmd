@@ -499,7 +499,7 @@ The analysis of RNNs demonstrates how sequential pattern processing creates fund
 
 These characteristics illustrate why different optimization strategies have evolved for RNN processing, and why certain applications began shifting toward alternative architectures like attention mechanisms, which we'll examine next. As we explore these newer architectural patterns, we'll see how they address some of the fundamental challenges of sequential processing while creating their own unique demands on computer systems.
 
-## Transformers: Dynamic Pattern Processing
+## Attention Mechanisms: Dynamic Pattern Processing
 
 While previous architectures process patterns in fixed ways—MLPs with dense connectivity, CNNs with spatial operations, and RNNs with sequential updates—many tasks require dynamic relationships between elements that change based on content. Language understanding, for instance, needs to capture relationships between words that depend on meaning rather than just position. Graph analysis requires understanding connections that vary by node. These dynamic relationships suggest we need an architecture that can learn and adapt its processing patterns based on the data itself.
 
@@ -511,31 +511,23 @@ This requirement for dynamic processing appears across many domains. In protein 
 
 These scenarios demand specific capabilities from our processing architecture. The system must compute relationships between all pairs of elements, weigh these relationships based on content, and use these weights to selectively combine information. Unlike previous architectures with fixed connectivity patterns, dynamic processing requires the flexibility to modify its computation graph based on the input itself. This leads us to the Transformer architecture, which implements these capabilities through attention mechanisms.
 
-### Algorithmic Structure
+### Basic Attention Mechanism
 
-Transformers implement dynamic pattern processing through attention mechanisms, which compute weighted connections between elements based on their content. The core operation in a Transformer is self-attention, where each element queries every other element to determine their relevance. This creates a dynamic connectivity pattern that adapts to the input data.
+#### Algorithmic Structure
 
-The attention operation can be expressed mathematically as:
+Attention mechanisms form the foundation of dynamic pattern processing by computing weighted connections between elements based on their content. This approach allows for the processing of relationships that aren't fixed by architecture but instead emerge from the data itself. At the core of an attention mechanism lies a fundamental operation that can be expressed mathematically as:
 
 $$
 \text{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{softmax}(\frac{\mathbf{Q}\mathbf{K}^T}{\sqrt{d_k}})\mathbf{V}
 $$
 
-Here, Q (queries), K (keys), and V (values) are learned projections of the input. For a sequence of length N with dimension d, this creates an N×N attention matrix that determines how each position should attend to all others. Unlike the fixed weight matrices in previous architectures, these attention weights are computed dynamically for each input.
+In this equation, Q (queries), K (keys), and V (values) represent learned projections of the input. For a sequence of length N with dimension d, this operation creates an N×N attention matrix, determining how each position should attend to all others. 
 
-For example, in processing a sentence with 50 words, each word position computes attention scores with all other positions. If each word is represented by a 512-dimensional vector, the operation involves:
+The attention operation involves several key steps. First, it computes query, key, and value projections for each position in the sequence. Next, it generates an N×N attention matrix through query-key interactions. Finally, it uses these attention weights to combine value vectors, producing the output. Unlike the fixed weight matrices found in previous architectures, these attention weights are computed dynamically for each input, allowing the model to adapt its processing based on the content at hand.
 
-- Computing query, key, and value projections for each position
-- Generating a 50×50 attention matrix through query-key interactions
-- Using these attention weights to combine value vectors
+#### Computational Mapping
 
-This algorithmic structure directly implements our need for dynamic relationship processing but creates distinctive computational patterns that significantly influence system design.
-
-### Computational Mapping
-
-The dynamic structure of attention operations maps to computational patterns quite different from our previous architectures. Let's examine how this mapping progresses from mathematical abstraction to computational reality.
-
-The fundamental computation in Transformers involves computing attention weights and using them to combine values. Let's examine two different implementations of the same computation:
+The dynamic structure of attention operations maps to computational patterns that differ significantly from those of previous architectures. To understand this mapping, let's examine how it progresses from mathematical abstraction to computational reality:
 
 ```{.python}
 # Mathematical abstraction in code
@@ -576,47 +568,145 @@ def attention_layer_compute(Q, K, V):
     return outputs
 ```
 
-The nested loops in `attention_layer_compute` reveal the true nature of attention's computational pattern. Loop 1 processes each sequence in the batch independently. Loop 2 and 3 compute attention scores between all pairs of positions, creating a quadratic computation pattern with respect to sequence length. Finally, Loop 4 uses these attention weights to combine values from all positions.
+The nested loops in `attention_layer_compute` reveal the true nature of attention's computational pattern. The first loop processes each sequence in the batch independently. The second and third loops compute attention scores between all pairs of positions, creating a quadratic computation pattern with respect to sequence length. The fourth loop uses these attention weights to combine values from all positions, producing the final output.
 
-For our example with a sequence length of 50 and dimension 512, computing attention scores requires 1,250,000 multiply-accumulates (50×50×512) just for the query-key interactions. This quadratic scaling with sequence length creates a distinctive computational challenge that differs from the linear scaling of MLPs, CNNs, and RNNs.
+#### System Implications
 
-These patterns fundamentally influence system design, creating both challenges and opportunities for optimization, which we'll examine next.
+The attention mechanism creates distinctive patterns in memory requirements, computation needs, and data movement that set it apart from previous architectures.
 
-### System Implications
+##### Memory Requirements
 
-Let's once again examine three fundamental dimensions: memory requirements, computation needs, and data movement. For Transformers, the dynamic nature of attention creates distinctive patterns in each dimension that differ significantly from previous architectures.
+In terms of memory requirements, attention mechanisms necessitate storage for attention weights, key-query-value projections, and intermediate feature representations. For a sequence length N and dimension d, each attention layer must store an N×N attention weight matrix for each sequence in the batch, three sets of projection matrices for queries, keys, and values (each sized d×d), and input and output feature maps of size N×d. The dynamic generation of attention weights for every input creates a memory access pattern where intermediate attention weights become a significant factor in memory usage.
 
-#### Memory Requirements
+##### Computation Needs
 
-Transformer memory requirements center around three key components: attention weights, key-query-value projections, and intermediate feature representations. For our example with sequence length 50 and dimension 512, each attention layer must store the attention weight matrix, which is 50×50 for each sequence in the batch. The layer also needs three sets of projection matrices for queries, keys, and values, each sized 512×512, along with input and output feature maps of size 50×512.
+Computation needs in attention mechanisms center around two main phases: generating attention weights and applying them to values. For each attention layer, the system performs substantial multiply-accumulate operations across multiple computational stages. The query-key interactions alone require N×N×d multiply-accumulates, with an equal number needed for applying attention weights to values. Additional computations are required for the projection matrices and softmax operations. This computational pattern differs from previous architectures due to its quadratic scaling with sequence length and the need to perform fresh computations for each input.
 
-Unlike CNNs where weights are reused across spatial positions or RNNs where weights are reused across time steps, Transformers generate new attention weights for every input. This dynamic weight generation creates a different memory access pattern where intermediate attention weights become a significant factor in memory usage.
+##### Data Movement
 
-These memory access patterns suggest different optimization requirements than previous architectures. Modern processors handle these patterns by carefully managing the attention weight computations and storage. Deep learning frameworks typically implement sophisticated memory management schemes to handle the quadratic memory scaling of attention weights. CPUs and GPUs approach this through different strategies - CPUs often compute attention weights in blocks to fit in cache, while GPUs use specialized memory architectures designed for handling large intermediate results.
+Data movement in attention mechanisms presents unique challenges. Each attention operation involves projecting and moving query, key, and value vectors for each position, storing and accessing the full attention weight matrix, and coordinating the movement of value vectors during the weighted combination phase. This creates a data movement pattern where intermediate attention weights become a major factor in system bandwidth requirements. Unlike the more predictable access patterns of CNNs or the sequential access of RNNs, attention operations require frequent movement of dynamically computed weights across the memory hierarchy.
 
-#### Computation Needs
+These distinctive characteristics of attention mechanisms in terms of memory, computation, and data movement have significant implications for system design and optimization, setting the stage for the development of more advanced architectures like Transformers.
 
-The core computation in Transformers involves two main phases: generating attention weights and applying them to values. For each attention layer with sequence length 50 and dimension 512, the system performs substantial multiply-accumulate operations across multiple computational stages. The query-key interactions alone require 1,250,000 multiply-accumulates (50×50×512), with an equal number needed for applying attention weights to values. Additional computations are needed for the projection matrices and softmax operations.
+### Transformers and Self-Attention
 
-This computational pattern differs from previous architectures in two key ways. First, the quadratic scaling with sequence length creates intensive computation requirements even for moderate sequence lengths. Second, the dynamic nature of attention weights means all these computations must be performed fresh for each input, unlike the weight reuse in CNNs or RNNs.
+Transformers represent a significant evolution in the application of attention mechanisms, introducing the concept of self-attention to create a powerful architecture for dynamic pattern processing. While the basic attention mechanism allows for content-based weighting of information from a source sequence, Transformers extend this idea by applying attention within a single sequence, enabling each element to attend to all other elements including itself.
 
-Modern processors handle these patterns through different approaches. CPUs pipeline operations and use SIMD instructions to parallelize across the dimension axis while managing the quadratic sequence interactions. GPUs leverage their massive parallel processing capabilities to handle multiple attention computations simultaneously. Deep learning frameworks optimize this further through techniques like attention masking and blocking to reduce unnecessary computations.
+The key innovation in Transformers lies in their use of self-attention layers. In a self-attention layer, the queries, keys, and values are all derived from the same input sequence. This allows the model to weigh the importance of different positions within the same sequence when encoding each position. For instance, in processing the sentence "The animal didn't cross the street because it was too wide," self-attention allows the model to link "it" with "street," capturing long-range dependencies that are challenging for traditional sequential models.
 
-#### Data Movement
+Transformers typically employ multi-head attention, which involves multiple sets of query/key/value projections. Each set, or "head," can focus on different aspects of the input, allowing the model to jointly attend to information from different representation subspaces. This multi-head structure provides the model with a richer representational capability, enabling it to capture various types of relationships within the data simultaneously.
 
-The dynamic attention patterns in Transformers create distinctive data movement requirements that differ fundamentally from previous architectures. While CNNs reuse filter weights spatially and RNNs reuse weights temporally, Transformers must compute and move new attention weights for every input. Each attention operation involves a complex dance of data movement: the system must project and move query, key, and value vectors for each position, store and access the full attention weight matrix, and coordinate the movement of value vectors during the weighted combination phase.
+The self-attention mechanism in Transformers can be expressed mathematically in a form similar to the basic attention mechanism:
 
-This creates a challenging data movement pattern where intermediate attention weights become a major factor in system bandwidth requirements. Unlike the predictable access patterns of CNNs or the sequential access of RNNs, attention operations require frequent movement of dynamically computed weights across the memory hierarchy.
+$$
+\text{SelfAttention}(\mathbf{X}) = \text{softmax}(\frac{\mathbf{XW_Q}(\mathbf{XW_K})^T}{\sqrt{d_k}})\mathbf{XW_V}
+$$
 
-Different architectures handle these data movement patterns through specialized mechanisms. CPUs manage data movement through blocked computations that maximize cache utilization. GPUs employ memory hierarchies optimized for the parallel movement of attention weights and feature vectors. Deep learning frameworks orchestrate these movements by carefully scheduling attention computations and managing intermediate storage.
+Here, X is the input sequence, and $W_Q$, $W_K$, and $W_V$ are learned weight matrices for queries, keys, and values respectively. This formulation highlights how self-attention derives all its components from the same input, creating a dynamic, content-dependent processing pattern.
+
+The Transformer architecture leverages this self-attention mechanism within a broader structure that typically includes feed-forward layers, layer normalization, and residual connections. This combination allows Transformers to process input sequences in parallel, capturing complex dependencies without the need for sequential computation. As a result, Transformers have demonstrated remarkable effectiveness across a wide range of tasks, from natural language processing to computer vision, revolutionizing the landscape of deep learning architectures.
+
+#### Computational Mapping in Transformer Self-Attention
+
+While Transformer self-attention builds upon the basic attention mechanism, it introduces distinct computational patterns that set it apart. To understand these patterns, we must examine the typical implementation of self-attention in Transformers:
+
+```{.python}
+def self_attention_layer(X, W_Q, W_K, W_V, d_k):
+    # X: input tensor (batch_size × seq_len × d_model)
+    # W_Q, W_K, W_V: weight matrices (d_model × d_k)
+    
+    Q = matmul(X, W_Q)
+    K = matmul(X, W_K)
+    V = matmul(X, W_V)
+    
+    scores = matmul(Q, K.transpose(-2, -1)) / sqrt(d_k)
+    attention_weights = softmax(scores, dim=-1)
+    output = matmul(attention_weights, V)
+    
+    return output
+
+def multi_head_attention(X, W_Q, W_K, W_V, W_O, num_heads, d_k):
+    outputs = []
+    for i in range(num_heads):
+        head_output = self_attention_layer(X, W_Q[i], W_K[i], W_V[i], d_k)
+        outputs.append(head_output)
+    
+    concat_output = torch.cat(outputs, dim=-1)
+    final_output = matmul(concat_output, W_O)
+    
+    return final_output
+```
+
+This implementation reveals several key computational characteristics of Transformer self-attention:
+
+First, self-attention enables parallel processing across all positions in the sequence. This is evident in the matrix multiplications that compute Q, K, and V simultaneously for all positions. Unlike recurrent architectures that process inputs sequentially, this parallel nature allows for more efficient computation, especially on modern hardware designed for parallel operations.
+
+Second, the attention score computation results in a matrix of size (seq_len × seq_len), leading to quadratic complexity with respect to sequence length. This quadratic relationship becomes a significant computational bottleneck when processing long sequences, a challenge that has spurred research into more efficient attention mechanisms.
+
+Third, the multi-head attention mechanism effectively runs multiple self-attention operations in parallel, each with its own set of learned projections. While this increases the computational load linearly with the number of heads, it allows the model to capture different types of relationships within the same input, enhancing the model's representational power.
+
+Fourth, the core computations in self-attention are dominated by large matrix multiplications. For a sequence of length N and embedding dimension d, the main operations involve matrices of sizes (N × d), (d × d), and (N × N). These intensive matrix operations are well-suited for acceleration on specialized hardware like GPUs, but they also contribute significantly to the overall computational cost of the model.
+
+Finally, self-attention generates memory-intensive intermediate results. The attention weights matrix (N × N) and the intermediate results for each attention head create substantial memory requirements, especially for long sequences. This can pose challenges for deployment on memory-constrained devices and necessitates careful memory management in implementations.
+
+These computational patterns create a unique profile for Transformer self-attention, distinct from previous architectures. The parallel nature of the computations makes Transformers well-suited for modern parallel processing hardware, but the quadratic complexity with sequence length poses challenges for processing long sequences. As a result, much research has focused on developing optimization techniques, such as sparse attention patterns or low-rank approximations, to address these challenges. Each of these optimizations presents its own trade-offs between computational efficiency and model expressiveness, a balance that must be carefully considered in practical applications.
+
+#### Computational Mapping in Transformer Self-Attention
+
+While Transformer self-attention builds upon the basic attention mechanism, it introduces distinct computational patterns that set it apart. To understand these patterns, we must examine the typical implementation of self-attention in Transformers:
+
+```{.python}
+def self_attention_layer(X, W_Q, W_K, W_V, d_k):
+    # X: input tensor (batch_size × seq_len × d_model)
+    # W_Q, W_K, W_V: weight matrices (d_model × d_k)
+    
+    Q = matmul(X, W_Q)
+    K = matmul(X, W_K)
+    V = matmul(X, W_V)
+    
+    scores = matmul(Q, K.transpose(-2, -1)) / sqrt(d_k)
+    attention_weights = softmax(scores, dim=-1)
+    output = matmul(attention_weights, V)
+    
+    return output
+
+def multi_head_attention(X, W_Q, W_K, W_V, W_O, num_heads, d_k):
+    outputs = []
+    for i in range(num_heads):
+        head_output = self_attention_layer(X, W_Q[i], W_K[i], W_V[i], d_k)
+        outputs.append(head_output)
+    
+    concat_output = torch.cat(outputs, dim=-1)
+    final_output = matmul(concat_output, W_O)
+    
+    return final_output
+```
+
+This implementation reveals several key computational characteristics of Transformer self-attention:
+
+Firstly, self-attention enables parallel processing across all positions in the sequence. This is evident in the matrix multiplications that compute Q, K, and V simultaneously for all positions. Unlike recurrent architectures that process inputs sequentially, this parallel nature allows for more efficient computation, especially on modern hardware designed for parallel operations.
+
+Secondly, the attention score computation results in a matrix of size (seq_len × seq_len), leading to quadratic complexity with respect to sequence length. This quadratic relationship becomes a significant computational bottleneck when processing long sequences, a challenge that has spurred research into more efficient attention mechanisms.
+
+Thirdly, the multi-head attention mechanism effectively runs multiple self-attention operations in parallel, each with its own set of learned projections. While this increases the computational load linearly with the number of heads, it allows the model to capture different types of relationships within the same input, enhancing the model's representational power.
+
+Fourthly, the core computations in self-attention are dominated by large matrix multiplications. For a sequence of length N and embedding dimension d, the main operations involve matrices of sizes (N × d), (d × d), and (N × N). These intensive matrix operations are well-suited for acceleration on specialized hardware like GPUs, but they also contribute significantly to the overall computational cost of the model.
+
+Lastly, self-attention generates memory-intensive intermediate results. The attention weights matrix (N × N) and the intermediate results for each attention head create substantial memory requirements, especially for long sequences. This can pose challenges for deployment on memory-constrained devices and necessitates careful memory management in implementations.
+
+These computational patterns create a unique profile for Transformer self-attention, distinct from previous architectures. The parallel nature of the computations makes Transformers well-suited for modern parallel processing hardware, but the quadratic complexity with sequence length poses challenges for processing long sequences. As a result, much research has focused on developing optimization techniques, such as sparse attention patterns or low-rank approximations, to address these challenges. Each of these optimizations presents its own trade-offs between computational efficiency and model expressiveness, a balance that must be carefully considered in practical applications.
 
 ### Summary and Next Steps
 
-The analysis of Transformers reveals how dynamic pattern processing creates fundamentally different computational patterns from all previous architectures. While MLPs use fixed dense connections, CNNs reuse weights spatially, and RNNs process sequentially, Transformers dynamically compute their connectivity pattern based on content. This manifests in distinctive system demands: memory systems must handle quadratic scaling of attention weights, computation must process intensive query-key interactions, and data movement centers around dynamically generated weights and intermediate results.
+Attention mechanisms and Transformers have ushered in a paradigm shift in neural network information processing. Unlike the fixed patterns of MLPs, CNNs, or RNNs, these architectures introduce dynamic, content-dependent computation, bringing both unprecedented capabilities and unique system challenges. The basic attention mechanism laid the groundwork for content-based weighting of information, allowing models to dynamically focus on relevant parts of the input. Transformers then extended this concept with self-attention, enabling each element in a sequence to interact with every other element, capturing complex dependencies regardless of positional distance.
 
-These characteristics explain both the power and challenges of Transformer architectures. Their ability to capture dynamic relationships enables breakthrough performance on many tasks, but their computational intensity drives the need for specialized hardware and optimized implementations. As we continue exploring deep learning architectures, these fundamental patterns and their system implications will guide our understanding of efficient implementation strategies.
+This dynamic pattern processing manifests in distinctive system demands. Memory systems must contend with the quadratic scaling of attention weights with sequence length, a challenge that becomes particularly acute for longer sequences. Computation needs center around intensive matrix multiplications for query-key interactions and value combining, operations that benefit from parallelization but scale quadratically with sequence length. Data movement patterns revolve around the frequent access and update of dynamically generated weights and intermediate results, creating unique bandwidth requirements.
 
-## Pattern Classification and Building Blocks
+These characteristics elucidate both the strengths and challenges of Transformer architectures. Their ability to capture dynamic, long-range relationships has enabled breakthrough performance across a wide range of tasks, from natural language processing to computer vision and beyond. However, their computational intensity necessitates specialized hardware and optimized implementations to manage their resource demands effectively.
+
+The advent of attention mechanisms and Transformers has opened new frontiers in machine learning, challenging our previous notions of architectural design and efficiency. As we continue to push the boundaries of what's possible with these models, a deep understanding of their computational patterns and system implications will be crucial in guiding future innovations in both model architecture and hardware design.
+
+## Architectural Building Blocks
 
 Deep learning architectures, while we presented them as distinct approaches in the previous sections, are better understood as compositions of fundamental building blocks that evolved over time. Much like how complex LEGO structures are built from basic bricks, modern neural networks combine and iterate on core computational patterns that emerged through decades of research [@lecun2015deep]. Each architectural innovation introduced new building blocks while finding novel ways to use existing ones.
 
@@ -666,7 +756,7 @@ This composition of building blocks creates something greater than the sum of it
 
 Even recent innovations in vision and language models follow this pattern of recombining fundamental building blocks. Vision Transformers adapt the Transformer architecture to images while maintaining its essential components [@dosovitskiy2021image]. Large language models scale up these patterns while introducing refinements like grouped-query attention or sliding window attention, yet still rely on the core building blocks established through this architectural evolution [@brown2020language].
 
-### Summary: Building Blocks and Architecture Design
+### Summary
 
 The evolution of deep learning architectures reveals a consistent pattern of innovation through composition. What began with the simple perceptron led to MLPs that established foundational concepts of layered processing and gradient-based learning. CNNs introduced parameter sharing, skip connections, and normalization techniques, while sequence models contributed state management, gating mechanisms, and early forms of attention. Modern architectures like Transformers succeed not by reinventing these patterns, but by finding novel ways to combine and refine them.
 
