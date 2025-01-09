@@ -2,7 +2,7 @@ import argparse
 import subprocess
 import sys
 
-def convert_pdf(input_file, output_file, settings='/screen', compatibility='1.4', debug=False):
+def convert_pdf(input_file, output_file, settings='/printer', compatibility='1.4', debug=False):
     command = [
         'gs',
         '-sDEVICE=pdfwrite',
@@ -30,7 +30,7 @@ def main():
     parser = argparse.ArgumentParser(description="Convert PDF using Ghostscript with various options.")
     parser.add_argument('-i', '--input', required=True, help="Input PDF file")
     parser.add_argument('-o', '--output', required=True, help="Output PDF file")
-    parser.add_argument('-s', '--settings', default='/screen', help="PDF settings (default: /screen)")
+    parser.add_argument('-s', '--settings', default='/printer', help="PDF settings (default: /ebook)")
     parser.add_argument('-c', '--compatibility', default='1.4', help="PDF compatibility level (default: 1.4)")
     parser.add_argument('-d', '--debug', action='store_true', help="Enable debug mode")
 
