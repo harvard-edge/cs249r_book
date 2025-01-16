@@ -249,44 +249,504 @@ These hybrid solutions aim to provide the flexibility of dynamic graphs during d
 
 ### Automatic Differentiation
 
-Machine learning frameworks must solve a fundamental computational challenge: calculating derivatives through complex chains of mathematical operations efficiently and accurately. This capability is essential because modern machine learning, particularly deep learning, relies on adjusting millions of parameters through gradient-based optimization. Automatic differentiation (AD) provides the mathematical and computational foundation that makes this possible.
+Machine learning frameworks must solve a fundamental computational challenge: calculating derivatives through complex chains of mathematical operations efficiently and accurately. This capability enables the training of neural networks by computing how millions of parameters should be adjusted to improve the model's performance.
 
-Automatic differentiation calculates derivatives of functions implemented as computer programs. When a data scientist writes a neural network in PyTorch or TensorFlow, the framework must compute gradients through every layer, activation function, and operation in the model. AD accomplishes this by breaking down computations into elementary operations (addition, multiplication, exponentials) and systematically applying the chain rule to compute exact derivatives.
-
-Consider a simple computation in a machine learning framework:
-
+Consider a simple computation that illustrates this challenge:
 ```{.python}
 def f(x):
     a = x * x      # Square
     b = sin(x)     # Sine
-    return a * b   # Product
+    return a * b    # Product
 ```
-
-While this example appears straightforward, it demonstrates key AD capabilities. The framework must:
-
-1. Track dependencies between operations
-2. Apply chain rule through the computation
-3. Manage memory for intermediate values
-4. Compute both forward results and derivatives
-
-In our basic example, computing derivatives manually would require careful application of calculus rules---the product rule, the chain rule, and derivatives of trigonometric functions. Now imagine scaling this to a neural network with millions of operations. This is where automatic differentiation (AD) becomes essential.
+Even in this basic example, computing derivatives manually would require careful application of calculus rules - the product rule, the chain rule, and derivatives of trigonometric functions. Now imagine scaling this to a neural network with millions of operations. This is where automatic differentiation (AD) becomes essential.
 
 Automatic differentiation calculates derivatives of functions implemented as computer programs by decomposing them into elementary operations. In our example, AD breaks down f(x) into three basic steps:
-
 1. Computing a = x * x (squaring)
 2. Computing b = sin(x) (sine function)
 3. Computing the final product a * b
 
 For each step, AD knows the basic derivative rules:
-
 - For squaring: d(x²)/dx = 2x
 - For sine: d(sin(x))/dx = cos(x)
 - For products: d(uv)/dx = u(dv/dx) + v(du/dx)
 
 By tracking how these operations combine and systematically applying the chain rule, AD computes exact derivatives through the entire computation. When implemented in frameworks like PyTorch or TensorFlow, this enables automatic computation of gradients through arbitrary neural network architectures.
 
-This introductory understanding sets the foundation for examining how automatic differentiation operates within machine learning frameworks. We will explore its mathematical principles, implementation approaches, and system-level considerations that enable efficient training of modern machine learning models.
+The significance of automatic differentiation extends beyond machine learning. Scientists use these same principles for physics simulations, engineers for design optimization, and financial analysts for risk calculations. Any field requiring derivatives of complex computational processes benefits from AD's ability to handle arbitrary programs while maintaining both efficiency and accuracy.
 
+This fundamental understanding of how AD decomposes and tracks computations sets the foundation for examining its implementation in machine learning frameworks. We will explore its mathematical principles, system architecture implications, and performance considerations that make modern machine learning possible.
+
+#### Computational Approaches
+
+##### Forward Mode
+
+Forward mode automatic differentiation computes derivatives alongside the original computation, tracking how changes propagate from input to output. This approach mirrors how we might manually compute derivatives, making it intuitive to understand and implement in machine learning frameworks.
+
+Consider our previous example with a slight modification to show how forward mode works:
+```{.python}
+def f(x):    # Computing both value and derivative
+    # Step 1: x -> x²
+    a = x * x            # Value: x²
+    da = 2 * x          # Derivative: 2x
+    
+    # Step 2: x -> sin(x)
+    b = sin(x)          # Value: sin(x)
+    db = cos(x)         # Derivative: cos(x)
+    
+    # Step 3: Combine using product rule
+    result = a * b      # Value: x² * sin(x)
+    dresult = a * db + b * da  # Derivative: x²*cos(x) + sin(x)*2x
+    
+    return result, dresult
+```
+
+Forward mode achieves this systematic derivative computation by augmenting each number with its derivative value, creating what mathematicians call a "dual number." When x = 2.0, the computation tracks both values and derivatives:
+
+```{.python}
+x = 2.0    # Initial value
+dx = 1.0   # We're tracking derivative with respect to x
+
+# Step 1: x²
+a = 4.0    # (2.0)²
+da = 4.0   # 2 * 2.0
+
+# Step 2: sin(x)
+b = 0.909  # sin(2.0)
+db = -0.416 # cos(2.0)
+
+# Final result
+result = 3.637   # 4.0 * 0.909
+dresult = 2.805  # 4.0 * (-0.416) + 0.909 * 4.0
+```
+
+###### Implementation Structure
+
+Forward mode AD structures computations to track both values and derivatives simultaneously through programs. Consider again our simple example:
+
+```{.python}
+def f(x):
+    a = x * x     
+    b = sin(x)    
+    return a * b   
+```
+
+When a framework executes this function in forward mode, it augments each computation to carry two pieces of information: the value itself and how that value changes with respect to the input. This paired movement of value and derivative mirrors how we think about rates of change:
+
+```{.python}
+# Conceptually, each computation tracks (value, derivative)
+x = (2.0, 1.0)           # Input value and its derivative
+a = (4.0, 4.0)           # x² and its derivative 2x
+b = (0.909, -0.416)      # sin(x) and its derivative cos(x)
+result = (3.637, 2.805)  # Final value and derivative
+```
+
+This forward propagation of derivative information happens automatically within the framework's computational machinery. The framework:
+1. Enriches each value with derivative information
+2. Transforms each basic operation to handle both value and derivative
+3. Propagates this information forward through the computation
+
+The beauty of this approach is that it follows the natural flow of computation - as values move forward through the program, their derivatives move with them. This makes forward mode particularly well-suited for functions with single inputs and multiple outputs, as the derivative information follows the same path as the regular computation.
+
+###### Performance Characteristics
+
+Forward mode AD exhibits distinct performance patterns that influence when and how frameworks employ it. Understanding these characteristics helps explain why frameworks choose different AD approaches for different scenarios.
+
+Forward mode performs one derivative computation alongside each original operation. For a function with one input variable, this means roughly doubling the computational work - once for the value, once for the derivative. The cost scales linearly with the number of operations in the program, making it predictable and manageable for simple computations.
+
+However, consider a neural network layer computing derivatives for matrix multiplication between weights and inputs. To compute derivatives with respect to all weights, forward mode would need to perform the computation once for each weight parameter - potentially thousands of times. This reveals a crucial characteristic: forward mode's efficiency depends on the number of input variables we need derivatives for.
+
+Forward mode's memory requirements are relatively modest. It needs to store the original value, a single derivative value, and temporary results during computation. The memory usage stays constant regardless of how complex the computation becomes. This predictable memory pattern makes forward mode particularly suitable for embedded systems with limited memory, real-time applications requiring consistent memory use, and systems where memory bandwidth is a bottleneck.
+
+This combination of computational scaling with input variables but constant memory usage creates specific trade-offs that influence framework design decisions. Forward mode shines in scenarios with few inputs but many outputs, where its straightforward implementation and predictable resource usage outweigh the computational cost of multiple passes.
+
+Let me revise to include code while maintaining the narrative textbook style:
+
+###### Use Cases
+
+While forward mode automatic differentiation isn't the primary choice for training full neural networks, it plays several important roles in modern machine learning frameworks. Its strength lies in scenarios where we need to understand how small changes in inputs affect a network's behavior.
+
+Consider a data scientist trying to understand why their model makes certain predictions. They might want to analyze how changing a single pixel in an image or a specific feature in their data affects the model's output:
+
+```{.python}
+def analyze_image_sensitivity(model, image):
+    # Forward mode tracks how changing one pixel
+    # affects the final classification
+    layer1 = relu(W1 @ image + b1)
+    layer2 = relu(W2 @ layer1 + b2)
+    predictions = softmax(W3 @ layer2 + b3)
+    return predictions
+```
+
+As the computation moves through each layer, forward mode carries both values and derivatives, making it straightforward to see how input perturbations ripple through to the final prediction. For each operation, we can track exactly how small changes propagate forward.
+
+Neural network interpretation presents another compelling application. When researchers want to generate saliency maps or attribution scores, they often need to compute how each input element influences the output:
+
+```{.python}
+def compute_feature_importance(model, input_features):
+    # Track influence of each input feature
+    # through the network's computation
+    hidden = tanh(W1 @ input_features + b1)
+    logits = W2 @ hidden + b2
+    # Forward mode efficiently computes d(logits)/d(input)
+    return logits
+```
+
+In specialized training scenarios, particularly those involving online learning where models update on individual examples, forward mode offers advantages. The framework can track derivatives for a single example through the network efficiently, though this approach becomes less practical when dealing with batch training or updating multiple model parameters simultaneously.
+
+Understanding these use cases helps explain why machine learning frameworks maintain forward mode capabilities alongside other differentiation strategies. While reverse mode handles the heavy lifting of full model training, forward mode provides an elegant solution for specific analytical tasks where its computational pattern matches the problem structure.
+
+##### Reverse Mode
+
+Reverse mode automatic differentiation forms the computational backbone of modern neural network training. This isn't by accident - reverse mode's structure perfectly matches what we need for training neural networks. During training, we have one scalar output (the loss function) and need derivatives with respect to millions of parameters (the network weights). Reverse mode is exceptionally efficient at computing exactly this pattern of derivatives.
+
+Let's examine a simple computation in detail:
+
+```{.python}
+def f(x):
+    a = x * x        # First operation: square x
+    b = sin(x)       # Second operation: sine of x
+    c = a * b        # Third operation: multiply results
+    return c
+```
+
+In this function, we have three operations that create a computational chain. Notice how 'x' influences the final result 'c' through two different paths: once through squaring (a = x²) and once through sine (b = sin(x)). We'll need to account for both paths when computing derivatives.
+
+First, the forward pass computes and stores values:
+```{.python}
+# Forward pass - computing and storing each intermediate value
+x = 2.0             # Our input value
+a = 4.0             # x * x = 2.0 * 2.0 = 4.0
+b = 0.909           # sin(2.0) ≈ 0.909
+c = 3.637           # a * b = 4.0 * 0.909 ≈ 3.637
+```
+
+Then comes the backward pass. This is where reverse mode shows its elegance. We start at the output and work backwards:
+```{.python}
+# Backward pass - computing derivatives in reverse
+dc/dc = 1.0         # Derivative of output with respect to itself is 1
+
+# Moving backward through multiplication c = a * b
+dc/da = b           # ∂(a*b)/∂a = b = 0.909
+dc/db = a           # ∂(a*b)/∂b = a = 4.0
+
+# Finally, combining derivatives for x through both paths
+# Path 1: x -> x² -> c    contribution: 2x * dc/da
+# Path 2: x -> sin(x) -> c contribution: cos(x) * dc/db
+dc/dx = (2x * dc/da) + (cos(x) * dc/db)
+      = (2 * 2.0 * 0.909) + (cos(2.0) * 4.0)
+      = 3.636 + (-0.416 * 4.0)
+      = 2.805
+```
+
+The power of reverse mode becomes clear when we consider what would happen if we added more operations that depend on x. Forward mode would need to track derivatives through each new path, but reverse mode efficiently handles all paths in a single backward pass. This is exactly the scenario in neural networks, where each weight can affect the final loss through multiple paths in the network.
+
+###### Implementation Structure
+
+The implementation of reverse mode in machine learning frameworks requires careful orchestration of computation and memory. While forward mode simply augments each computation, reverse mode needs to maintain a record of the forward computation to enable the backward pass. Modern frameworks accomplish this through computational graphs and automatic gradient accumulation.
+
+Let's extend our previous example to a small neural network computation to see how this works:
+
+```{.python}
+def simple_network(x, w1, w2):
+    # Forward pass
+    hidden = x * w1          # First layer multiplication
+    activated = max(0, hidden)  # ReLU activation
+    output = activated * w2     # Second layer multiplication
+    return output            # Final output (before loss)
+```
+
+During the forward pass, the framework doesn't just compute values - it builds a graph of operations while tracking intermediate results:
+
+```{.python}
+# Forward pass with value tracking
+x = 1.0
+w1 = 2.0
+w2 = 3.0
+
+hidden = 2.0        # x * w1 = 1.0 * 2.0
+activated = 2.0     # max(0, 2.0) = 2.0
+output = 6.0        # activated * w2 = 2.0 * 3.0
+```
+
+The backward pass then uses this saved information to compute gradients for each parameter:
+
+```{.python}
+# Backward pass through computation
+d_output = 1.0          # Start with derivative of output
+
+d_w2 = activated        # d_output * d(output)/d_w2 = 1.0 * 2.0 = 2.0
+d_activated = w2        # d_output * d(output)/d_activated = 1.0 * 3.0 = 3.0
+
+# ReLU gradient: 1 if input was > 0, 0 otherwise
+d_hidden = d_activated * (1 if hidden > 0 else 0)  # 3.0 * 1 = 3.0
+
+d_w1 = x * d_hidden    # 1.0 * 3.0 = 3.0
+d_x = w1 * d_hidden    # 2.0 * 3.0 = 6.0
+```
+
+This example illustrates several key implementation considerations:
+1. The framework must track dependencies between operations
+2. Intermediate values must be stored for the backward pass
+3. Gradient computations follow the reverse topological order of the forward computation
+4. Each operation needs both forward and backward implementations
+
+###### Memory Management Strategies
+
+Memory management represents one of the key challenges in implementing reverse mode differentiation in machine learning frameworks. Unlike forward mode where we can discard intermediate values as we go, reverse mode requires storing results from the forward pass to compute gradients during the backward pass.
+
+Consider our neural network example extended to show memory usage patterns:
+
+```{.python}
+def deep_network(x, w1, w2, w3):
+    # Forward pass - must store intermediates
+    hidden1 = x * w1              
+    activated1 = max(0, hidden1)   # Store for backward
+    hidden2 = activated1 * w2      
+    activated2 = max(0, hidden2)   # Store for backward
+    output = activated2 * w3
+    return output
+```
+
+Each intermediate value needed for gradient computation must be kept in memory until its backward pass completes. As networks grow deeper, this memory requirement grows linearly with network depth. For a typical deep neural network processing a batch of images, this can mean gigabytes of stored activations.
+
+Frameworks employ several strategies to manage this memory burden:
+
+```{.python}
+# Conceptual example of memory management
+def training_step(model, input_batch):
+    # Strategy 1: Checkpointing
+    with checkpoint_scope():
+        hidden1 = activation(layer1(input_batch))
+        # Framework might free some memory here
+        hidden2 = activation(layer2(hidden1))
+        # More selective memory management
+        output = layer3(hidden2)
+
+    # Strategy 2: Gradient accumulation
+    loss = compute_loss(output)
+    # Backward pass with managed memory
+    loss.backward()
+```
+
+Modern frameworks automatically balance memory usage and computation speed. They might recompute some intermediate values during the backward pass rather than storing everything, particularly for memory-intensive operations. This trade-off between memory and computation becomes especially important in large-scale training scenarios.
+
+###### Optimization Techniques
+
+Reverse mode automatic differentiation in machine learning frameworks employs several key optimization techniques to enhance training efficiency. These optimizations become crucial when training large neural networks where computational and memory resources are pushed to their limits.
+
+Modern frameworks implement gradient checkpointing, a technique that strategically balances computation and memory. Consider a deep neural network:
+
+```{.python}
+def deep_network(input_tensor):
+    # A typical deep network computation
+    layer1 = large_dense_layer(input_tensor)
+    activation1 = relu(layer1)
+    layer2 = large_dense_layer(activation1)
+    activation2 = relu(layer2)
+    # ... many more layers
+    output = final_layer(activation_n)
+    return output
+```
+
+Instead of storing all intermediate activations, frameworks can strategically recompute certain values during the backward pass. This trades additional computation for reduced memory usage. The framework might save activations only every few layers:
+
+```{.python}
+# Conceptual representation of checkpointing
+checkpoint1 = save_for_backward(activation1)
+# Intermediate activations can be recomputed
+checkpoint2 = save_for_backward(activation4)
+# Framework balances storage vs recomputation
+```
+
+Another crucial optimization involves operation fusion. Rather than treating each mathematical operation separately, frameworks combine operations that commonly occur together. Matrix multiplication followed by bias addition, for instance, can be fused into a single operation, reducing memory transfers and improving hardware utilization.
+
+The backward pass itself can be optimized by reordering computations to maximize hardware efficiency. Consider the gradient computation for a convolution layer - rather than directly translating the mathematical definition into code, frameworks implement specialized backward operations that take advantage of modern hardware capabilities.
+
+These optimizations work together to make the training of large neural networks practical. Without them, many modern architectures would be prohibitively expensive to train, both in terms of memory usage and computation time.
+
+##### Framework Integration
+
+The integration of automatic differentiation into machine learning frameworks requires careful system design to balance flexibility, performance, and usability. Modern frameworks like PyTorch and TensorFlow expose AD capabilities through high-level APIs while maintaining the sophisticated underlying machinery.
+
+Let's examine how frameworks present AD to users:
+
+```{.python}
+# PyTorch-style automatic differentiation
+def neural_network(x):
+    # Framework transparently tracks operations
+    layer1 = nn.Linear(784, 256)
+    layer2 = nn.Linear(256, 10)
+    
+    # Each operation is automatically tracked
+    hidden = torch.relu(layer1(x))
+    output = layer2(hidden)
+    return output
+
+# Training loop showing AD integration
+for batch_x, batch_y in data_loader:
+    optimizer.zero_grad()    # Clear previous gradients
+    output = neural_network(batch_x)
+    loss = loss_function(output, batch_y)
+    
+    # Framework handles all AD machinery
+    loss.backward()         # Automatic backward pass
+    optimizer.step()        # Parameter updates
+```
+
+While this code appears straightforward, it masks considerable complexity. The framework must:
+1. Track all operations during the forward pass
+2. Build and maintain the computational graph
+3. Manage memory for intermediate values
+4. Schedule gradient computations efficiently
+5. Interface with hardware accelerators
+
+This integration extends beyond basic training. Frameworks must handle complex scenarios like higher-order gradients, where we compute derivatives of derivatives, and mixed-precision training, where different parts of the computation use different numerical precisions:
+
+```{.python}
+# Computing higher-order gradients
+with torch.set_grad_enabled(True):
+    # First-order gradient computation
+    output = model(input)
+    grad_output = torch.autograd.grad(output, model.parameters())
+    
+    # Second-order gradient computation
+    grad2_output = torch.autograd.grad(grad_output, model.parameters())
+```
+
+Let me rewrite the Memory Systems section in a more narrative style while keeping the code examples:
+
+##### Memory Systems in Automatic Differentiation
+
+The memory demands of automatic differentiation stem from a fundamental requirement: to compute gradients during the backward pass, we must remember what happened during the forward pass. This seemingly simple requirement creates interesting challenges for machine learning frameworks. Unlike traditional programs that can discard intermediate results as soon as they're used, AD systems must carefully preserve computational history.
+
+Consider what happens in a neural network's forward pass:
+
+```{.python}
+def neural_network(x):
+    # Each operation creates values we need to remember
+    a = layer1(x)      # Must store for backward pass
+    b = relu(a)        # Must store input to relu
+    c = layer2(b)      # Must store for backward pass
+    return c
+```
+
+When this network processes data, each operation creates not just its output, but also a memory obligation. The multiplication in layer1 needs to remember its inputs because computing its gradient later will require them. Even the seemingly simple relu function must track which inputs were negative to correctly propagate gradients. As networks grow deeper, these memory requirements accumulate.
+
+This memory challenge becomes particularly interesting with deep neural networks:
+
+```{.python}
+# A deeper network shows the accumulating memory needs
+hidden1 = large_matrix_multiply(input, weights1)
+activated1 = relu(hidden1)
+hidden2 = large_matrix_multiply(activated1, weights2)
+activated2 = relu(hidden2)
+output = large_matrix_multiply(activated2, weights3)
+```
+
+Each layer's computation adds to our memory burden. The framework must keep hidden1 in memory until we've computed gradients through hidden2, but after that, we can safely discard it. This creates a wave of memory usage that peaks when we start the backward pass and gradually recedes as we compute gradients.
+
+Modern frameworks handle this memory choreography automatically. They track the lifetime of each intermediate value - how long it must remain in memory for gradient computation. When training large models, this careful memory management becomes as crucial as the numerical computations themselves. The framework frees memory as soon as it's no longer needed for gradient computation, ensuring that our memory usage, while necessarily large, remains as efficient as possible.
+
+##### System-Level Considerations
+
+Automatic differentiation's integration into machine learning frameworks raises important system-level considerations that affect both framework design and training performance. These considerations become particularly apparent when training large neural networks where efficiency at every level matters.
+
+Consider a typical training loop that highlights these system-level interactions:
+
+```{.python}
+def train_epoch(model, data_loader):
+    for batch_x, batch_y in data_loader:
+        # Moving data between CPU and accelerator
+        batch_x = batch_x.to(device)
+        batch_y = batch_y.to(device)
+        
+        # Forward pass builds computational graph
+        outputs = model(batch_x)
+        loss = criterion(outputs, batch_y)
+        
+        # Backward pass computes gradients
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+```
+
+This simple loop masks complex system interactions. The AD system must coordinate with multiple framework components: the memory allocator, the device manager, the operation scheduler, and the optimizer. Each gradient computation potentially triggers data movement between devices, memory allocation, and kernel launches on accelerators.
+
+The scheduling of AD operations becomes particularly intricate with modern hardware accelerators:
+
+```{.python}
+# Complex model with parallel computations
+def parallel_network(x):
+    # These operations could run concurrently
+    branch1 = conv_layer1(x)
+    branch2 = conv_layer2(x)
+    
+    # Must synchronize for combination
+    combined = branch1 + branch2
+    return final_layer(combined)
+```
+
+The AD system must track dependencies not just for correct gradient computation, but also for efficient hardware utilization. It needs to determine which gradient computations can run in parallel and which must wait for others to complete. This dependency tracking extends across both forward and backward passes, creating a complex scheduling problem.
+
+Modern frameworks handle these system-level concerns while maintaining a simple interface for users. Behind the scenes, they make sophisticated decisions about operation scheduling, memory allocation, and data movement, all while ensuring correct gradient computation through the computational graph.
+
+Let me draft the summary section for Automatic Differentiation:
+
+I notice this is a comprehensive section from an ML systems textbook on Data Structures. Looking at how it's structured, we can organize our AD section similarly. Let me revise our summary and transition to better match the textbook's style:
+
+##### Summary
+
+Automatic differentiation systems represent a core computational abstraction in machine learning frameworks, transforming the mathematical concept of derivatives into efficient implementations. Through our examination of both forward and reverse modes, we've seen how frameworks balance mathematical precision with computational efficiency to enable training of modern neural networks.
+
+The implementation of AD systems reveals key design patterns in machine learning frameworks:
+
+```{.python}
+# Simple computation showing AD machinery
+def computation(x, w):
+    # Framework tracks operations
+    hidden = x * w     # Stored for backward pass
+    output = relu(hidden)  # Tracks activation pattern
+    return output
+```
+
+This simple computation embodies several fundamental concepts:
+
+1. Operation tracking for derivative computation
+2. Memory management for intermediate values
+3. System coordination for efficient execution
+
+Modern frameworks abstract these complexities behind clean interfaces while maintaining high performance:
+
+```{.python}
+# Framework hides AD complexity
+loss = model(input)  # Forward pass tracks computation
+loss.backward()      # Triggers efficient reverse mode AD
+optimizer.step()     # Uses computed gradients
+```
+
+The effectiveness of automatic differentiation systems stems from their careful balance of competing demands. They must maintain sufficient computational history for accurate gradients while managing memory constraints, schedule operations efficiently while preserving correctness, and provide flexibility while optimizing performance.
+
+Understanding these systems proves essential for both framework developers and practitioners. Framework developers must implement efficient AD to enable modern deep learning, while practitioners benefit from understanding AD's capabilities and constraints when designing and training models.
+
+While automatic differentiation provides the computational foundation for gradient-based learning, its practical implementation depends heavily on how frameworks organize and manipulate data. This brings us to our next topic: the data structures that enable efficient computation and memory management in machine learning frameworks. These structures must not only support AD operations but also provide efficient access patterns for the diverse hardware platforms that power modern machine learning.
+
+##### Looking Forward
+
+The automatic differentiation systems we've explored provide the computational foundation for neural network training, but they don't operate in isolation. These systems need efficient ways to represent and manipulate the data flowing through them. This brings us to our next topic: the data structures that machine learning frameworks use to organize and process information.
+
+Consider how our earlier examples handled numerical values:
+
+```{.python}
+def neural_network(x):
+    hidden = w1 * x     # What exactly is x?
+    activated = relu(hidden)  # How is hidden stored?
+    output = w2 * activated  # What type of multiplication?
+    return output
+```
+
+These operations appear straightforward, but they raise important questions. How do frameworks represent these values? How do they organize data to enable efficient computation and automatic differentiation? Most importantly, how do they structure data to take advantage of modern hardware?
+
+The next section examines how frameworks answer these questions through specialized data structures, particularly tensors, that form the basic building blocks of machine learning computations.
 
 ### Data Structures
 
@@ -390,7 +850,7 @@ For instance, in symbolic programming, variables and operations are represented 
 
 Consider the following symbolic programming example:
 
-```python
+```{.python}
 # Expressions are constructed but not evaluated
 weights = tf.Variable(tf.random.normal([784, 10]))
 input = tf.placeholder(tf.float32, [None, 784])
@@ -410,7 +870,7 @@ Imperative programming takes a more traditional approach, executing operations i
 
 In this programming paradigm, computations are performed directly as the code executes, closely resembling the procedural style of most general-purpose programming languages. For example:
 
-```python
+```{.python}
 # Imperative Programming Example
 # Each expression evaluates immediately
 weights = torch.randn(784, 10)
@@ -452,7 +912,7 @@ Eager execution is the most straightforward and intuitive execution paradigm. In
 
 Consider the following example using TensorFlow 2.x, which employs eager execution by default:
 
-```python
+```{.python}
 import tensorflow as tf
 
 x = tf.constant([[1., 2.], [3., 4.]])
@@ -475,7 +935,7 @@ Graph execution, also known as static graph execution, takes a different approac
 
 Consider the following example using TensorFlow 1.x style, which employs graph execution:
 
-```python
+```{.python}
 import tensorflow.compat.v1 as tf
 tf.disable_eager_execution()
 
@@ -509,7 +969,7 @@ Just-In-Time (JIT) compilation is a middle ground between eager execution and gr
 
 Let's examine an example using PyTorch's JIT compilation:
 
-```python
+```{.python}
 import torch
 
 @torch.jit.script
@@ -626,7 +1086,7 @@ The API layer of machine learning frameworks provides the primary interface thro
 
 Modern framework APIs typically implement multiple levels of abstraction. At the lowest level, they provide direct access to tensor operations and computational graph construction. These low-level APIs expose the fundamental operations discussed in the previous section, allowing fine-grained control over computation. For example, frameworks like PyTorch and TensorFlow offer such low-level interfaces, enabling researchers to define custom computations and explore novel algorithms [@paszke2019pytorch; @Abadi_2016].
 
-```python
+```{.python}
 # Low-level API example
 import torch
 
