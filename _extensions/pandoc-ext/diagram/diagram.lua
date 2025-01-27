@@ -184,6 +184,8 @@ local mermaid = {
 local tikz_template = pandoc.template.compile [[
 \documentclass{standalone}
 \usepackage{tikz}
+\usetikzlibrary{positioning}
+
 $for(header-includes)$
 $it$
 $endfor$
@@ -229,7 +231,7 @@ local tikz = {
         local success, result = pcall(
           pipe,
           self.execpath or 'pdflatex',
-          { '-interaction=errorstopmode', '-output-directory', tmpdir, tikz_file },
+          { '-interaction=nonstopmode', '-output-directory', tmpdir, tikz_file },
           ''
         )
         if not success then
@@ -426,7 +428,6 @@ local pdf2svg = function (imgdata)
   local pdf_file = 'diagram-' .. pandoc.utils.sha1(imgdata) .. '.pdf'
   write_file(pdf_file, imgdata)
   local args = {
-    '--without-gui',
     '--export-type=svg',
     '--export-plain-svg',
     '--export-filename=-',
