@@ -229,7 +229,7 @@ local tikz = {
         local success, result = pcall(
           pipe,
           self.execpath or 'pdflatex',
-          { '-interaction=nonstopmode', '-output-directory', tmpdir, tikz_file },
+          { '-interaction=errorstopmode', '-output-directory', tmpdir, tikz_file },
           ''
         )
         if not success then
