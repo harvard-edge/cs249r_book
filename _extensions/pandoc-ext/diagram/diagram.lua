@@ -416,6 +416,7 @@ local pdf2svg = function (imgdata)
   local pdf_file = 'diagram-' .. pandoc.utils.sha1(imgdata) .. '.pdf'
   write_file(pdf_file, imgdata)
   local args = {
+    '--without-gui',
     '--export-type=svg',
     '--export-plain-svg',
     '--export-filename=-',
