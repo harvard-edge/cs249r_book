@@ -77,10 +77,20 @@ local function mime_types_set (tbl)
 end
 
 --- Reads the contents of a file.
-local function read_file (filepath)
-  local fh = io.open(filepath, 'rb')
-  local contents = fh:read('a')
+local function read_file(filepath)
+  print("[read_file] Attempting to open file: " .. filepath)
+  local fh, err = io.open(filepath, "rb")
+  if not fh then
+    -- Include the system error plus a Lua traceback
+    local msg = "Failed to open file '" .. filepath .. "': "
+                .. (err or "(unknown IO error)")
+                .. "\n" .. debug.traceback()
+    error(msg)
+  end
+
+  local contents = fh:read("a")
   fh:close()
+  print("[read_file] Successfully read file: " .. filepath .. " (" .. #contents .. " bytes)")
   return contents
 end
 
