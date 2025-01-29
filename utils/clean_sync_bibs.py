@@ -34,7 +34,7 @@ def extract_cited_keys(qmd_file):
     return citation_keys | doi_keys | multi_line_citations
 
 def remove_duplicate_entries(bib_file):
-    """Remove duplicate bibliography entries before parsing."""
+    """Remove duplicate bibliography entries before parsing and fix problematic characters in DOI fields."""
     seen_keys = set()
     unique_entries = []
     
@@ -54,6 +54,8 @@ def remove_duplicate_entries(bib_file):
             if entry_buffer:
                 unique_entries.extend(entry_buffer)
             entry_buffer = []
+        # Fix problematic \_ in DOIs
+        line = line.replace('doi = "', 'doi = "').replace('\\_', '_')
         entry_buffer.append(line)
     
     if entry_buffer:
@@ -61,10 +63,11 @@ def remove_duplicate_entries(bib_file):
     
     with open(bib_file, 'w', encoding='utf-8') as f:
         f.writelines(unique_entries)
+    logging.info(f"Fixed problematic DOI formatting in {bib_file}.")
 
 def clean_bib_file(bib_file, cited_keys, dry_run=False):
     """Remove unused entries from a .bib file and handle duplicate entries."""
-    remove_duplicate_entries(bib_file)  # Ensure no duplicates before parsing
+    remove_duplicate_entries(bib_file)  # Ensure no duplicates and fix DOIs before parsing
     bib_database = Parser().parse_file(bib_file)
     
     original_keys = set(bib_database.entries.keys())
@@ -99,7 +102,7 @@ def update_bib_file(bib_file):
     except subprocess.CalledProcessError:
         logging.error(f"Error: betterbib failed to update {bib_file}.")
 
-def process_qmd_files(qmd_files, dry_run=False):
+def process_qmd_files(qmd_files, dry_run=False, max_workers=4):
     """Find and clean up bib files used by qmd files."""
     bib_files = {}
     
@@ -109,7 +112,7 @@ def process_qmd_files(qmd_files, dry_run=False):
             bib_path = str(Path(qmd_file).parent / bib_file)
             bib_files[bib_path] = bib_files.get(bib_path, set()) | extract_cited_keys(qmd_file)
     
-    with ThreadPoolExecutor() as executor:
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         for bib_file, keys in bib_files.items():
             if os.path.exists(bib_file):
                 executor.submit(clean_bib_file, bib_file, keys, dry_run)
@@ -127,14 +130,15 @@ def main():
     parser.add_argument('-f', '--file', help="Specify a single .bib file to clean and update.")
     parser.add_argument('-d', '--directory', help="Specify a directory to scan for .qmd files and process associated .bib files.")
     parser.add_argument('--dry-run', action='store_true', help="Show what would be removed without modifying files.")
+    parser.add_argument('--workers', type=int, default=4, help="Number of parallel workers for processing.")
     args = parser.parse_args()
     
     if args.file:
         qmd_files = find_qmd_files(Path(args.file).parent)
-        process_qmd_files(qmd_files, args.dry_run)
+        process_qmd_files(qmd_files, args.dry_run, args.workers)
     elif args.directory:
         qmd_files = find_qmd_files(args.directory)
-        process_qmd_files(qmd_files, args.dry_run)
+        process_qmd_files(qmd_files, args.dry_run, args.workers)
     else:
         logging.error("Please specify either a .bib file (-f) or a directory (-d).")
 
