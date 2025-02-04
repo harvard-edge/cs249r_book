@@ -10,7 +10,7 @@ local imgCount = 0
 -- attributes to forward from the image to the newly created link
 local kDescription = "description"
 local kForwardedAttr = {
-  "title", kDescription, "desc-position",
+  "title", kDescription, "desc-position", 
   "type", "effect", "zoomable", "draggable"
 }
 
@@ -21,12 +21,12 @@ local kGalleryPrefix = "quarto-lightbox-gallery-"
 -- A list of images already within links that we can use to filter
 local imagesWithinLinks = pandoc.List({})
 
-local function readAttrValue(el, attrName)
+local function readAttrValue(el, attrName) 
   if attrName == kDescription then
     local doc = pandoc.read(el.attr.attributes[attrName])
     local attrInlines = doc.blocks[1].content
     return pandoc.write(pandoc.Pandoc(attrInlines), "html")
-  else
+  else 
     return el[attrName]
   end
 
@@ -34,12 +34,12 @@ end
 
 return {
   {
-    Meta = function(meta)
+    Meta = function(meta) 
 
-      -- If the mode is auto, we need go ahead and
+      -- If the mode is auto, we need go ahead and 
       -- run if there are any images (ideally we would)
       -- filter to images in the body, but that can be
-      -- left for future me to deal with
+      -- left for future me to deal with 
       -- supports:
       -- lightbox: auto
       -- or
@@ -54,16 +54,16 @@ return {
         elseif lbMeta.match ~= nil and pandoc.utils.stringify(lbMeta.match) == 'auto' then
           auto = true
         elseif lbMeta == true then
-          auto = true
+          auto = true      
         end
       end
-    end,
+    end, 
     -- Find images that are already within links
     -- we'll use this to filter out these images if
     -- the most is auto
     Link = function(linkEl)
       pandoc.walk_inline(linkEl, {
-        Image = function(imageEl)
+        Image = function(imageEl) 
           imagesWithinLinks[#imagesWithinLinks + 1] = imageEl
         end
       })
@@ -87,14 +87,14 @@ return {
                   imgEl.attr.attributes.group = meta.group or imgEl.attr.attributes.group
                 end
                 for _, v in next, kForwardedAttr do
-                  if type(meta[v]) == "table" and #meta[v] > 1 then
+                  if type(meta[v]) == "table" and #meta[v] > 1 then 
                     -- if list attributes it should be one per plot
                     if imgCount > #meta[v] then
                       quarto.log.warning("More plots than '" .. v .. "' passed in YAML chunk options.")
                     else
                       attrLb = meta[v][imgCount]
                     end
-                  else
+                  else 
                     -- Otherwise reuse the single attributes
                     attrLb = meta[v]
                   end
@@ -114,17 +114,17 @@ return {
   Image = function(imgEl)
     if quarto.doc.is_format("html:js") then
       local isAlreadyLinked = imagesWithinLinks:includes(imgEl)
-      if (not isAlreadyLinked and auto and not imgEl.classes:includes(kNoLightboxClass))
+      if (not isAlreadyLinked and auto and not imgEl.classes:includes(kNoLightboxClass)) 
           or imgEl.classes:includes('lightbox') then
         -- note that we need to include the dependency for lightbox
         needsLightbox = true
         imgCount = imgCount + 1
 
         -- remove the class from the image
-        imgEl.attr.classes = imgEl.attr.classes:filter(function(clz)
+        imgEl.attr.classes = imgEl.attr.classes:filter(function(clz) 
           return clz ~= kLightboxClass
         end)
-
+        
         -- attributes for the link
         local linkAttributes = {}
 
@@ -143,7 +143,7 @@ return {
         if imgEl.attr.attributes.group ~= nil then
           linkAttributes.gallery = imgEl.attr.attributes.group
           imgEl.attr.attributes.group = nil
-        else
+        else 
           linkAttributes.gallery = kGalleryPrefix .. imgCount
         end
 
@@ -152,7 +152,7 @@ return {
           if imgEl.attr.attributes[v] ~= nil then
             -- forward the attribute
             linkAttributes[v] = readAttrValue(imgEl, v)
-
+          
             -- clear the attribute
             imgEl.attr.attributes[v] = nil
           end
@@ -168,7 +168,7 @@ return {
         local link = pandoc.Link({imgEl}, imgEl.src, nil, linkAttributes)
         return link
       end
-    end
+    end 
   end,
   Meta = function(meta)
     -- If we discovered lightbox-able images
@@ -184,7 +184,7 @@ return {
       -- read lightbox options
       local lbMeta = meta.lightbox
       local lbOptions = {}
-      local readEffect = function(el)
+      local readEffect = function(el) 
         local val = pandoc.utils.stringify(el)
         if val == "fade" or val == "zoom" or val == "none" then
           return val
@@ -200,10 +200,10 @@ return {
       --   loop: true | false
       --   class: <class-name>
       local effect = "zoom"
-      local descPosition = "bottom"
+      local descPosition = "bottom" 
       local loop = true
       local skin = nil
-
+      
       -- The selector controls which elements are targeted.
       -- currently, it always targets .lightbox elements
       -- and there is no way for the user to change this
@@ -216,12 +216,12 @@ return {
 
         if lbMeta['desc-position'] ~= nil then
           descPosition = pandoc.utils.stringify(lbMeta['desc-position'])
-        end
+        end  
 
         if lbMeta['css-class'] ~= nil then
           skin = pandoc.utils.stringify(lbMeta['css-class'])
         end
-
+        
         if lbMeta.loop ~= nil then
           loop = lbMeta.loop
         end
@@ -231,7 +231,7 @@ return {
       local options = {
         selector = selector,
         closeEffect = effect,
-        openEffect = effect,
+        openEffect = effect, 
         descPosition = descPosition,
         loop = loop,
       }

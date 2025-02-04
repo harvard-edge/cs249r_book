@@ -105,7 +105,7 @@ This function assigns the themevals to the meta data
         ["elements"] = {
           pandoc.MetaInlines{pandoc.RawInline("latex","\\headerblock")},
           pandoc.MetaInlines{pandoc.RawInline("latex","\\logoblock")},
-          pandoc.MetaInlines{pandoc.RawInline("latex","\\titleblock")},
+          pandoc.MetaInlines{pandoc.RawInline("latex","\\titleblock")}, 
           pandoc.MetaInlines{pandoc.RawInline("latex","\\authorblock")},
           pandoc.MetaInlines{pandoc.RawInline("latex","\\vfill")},
           pandoc.MetaInlines{pandoc.RawInline("latex","\\dateblock")}
@@ -125,7 +125,7 @@ This function assigns the themevals to the meta data
         ["date-fontstyle"] = {"large"}
         }
       assign_value(themevals)
-
+        
       return m
     end,
     ["bg-image"] = function (m)
@@ -137,7 +137,7 @@ This function assigns the themevals to the meta data
       end
       themevals = {
         ["elements"] = {
-          pandoc.MetaInlines{pandoc.RawInline("latex","\\titleblock")},
+          pandoc.MetaInlines{pandoc.RawInline("latex","\\titleblock")}, 
           pandoc.MetaInlines{pandoc.RawInline("latex","\\authorblock")},
           pandoc.MetaInlines{pandoc.RawInline("latex","\\affiliationblock")},
           pandoc.MetaInlines{pandoc.RawInline("latex","\\vfill")},
@@ -169,13 +169,13 @@ This function assigns the themevals to the meta data
         ["bg-image-location"] = "ULCorner",
         }
       assign_value(themevals)
-
+        
       return m
     end,
     ["classic-lined"] = function (m)
       themevals = {
         ["elements"] = {
-          pandoc.MetaInlines{pandoc.RawInline("latex","\\titleblock")},
+          pandoc.MetaInlines{pandoc.RawInline("latex","\\titleblock")}, 
           pandoc.MetaInlines{pandoc.RawInline("latex","\\authorblock")},
           pandoc.MetaInlines{pandoc.RawInline("latex","\\vfill")},
           pandoc.MetaInlines{pandoc.RawInline("latex","\\logoblock")},
@@ -205,13 +205,13 @@ This function assigns the themevals to the meta data
         ["logo-space-after"] = "1cm",
         }
       assign_value(themevals)
-
+        
       return m
     end,
     ["colorbox"] = function (m)
       themevals = {
         ["elements"] = {
-          pandoc.MetaInlines{pandoc.RawInline("latex","\\titleblock")},
+          pandoc.MetaInlines{pandoc.RawInline("latex","\\titleblock")}, 
           pandoc.MetaInlines{pandoc.RawInline("latex","\\vfill")},
           pandoc.MetaInlines{pandoc.RawInline("latex","\\authorblock")}
           },
@@ -234,13 +234,13 @@ This function assigns the themevals to the meta data
         ["title-colorbox-bordercolor"] = "black",
         }
       assign_value(themevals)
-
+        
       return m
     end,
     ["formal"] = function (m)
       themevals = {
         ["elements"] = {
-          pandoc.MetaInlines{pandoc.RawInline("latex","\\titleblock")},
+          pandoc.MetaInlines{pandoc.RawInline("latex","\\titleblock")}, 
           pandoc.MetaInlines{pandoc.RawInline("latex","\\authorblock")},
           pandoc.MetaInlines{pandoc.RawInline("latex","\\vfill")},
           pandoc.MetaInlines{pandoc.RawInline("latex","A report presented at the annual\\\\meeting on 10 August 2025\\\\ \\vspace{0.8cm}")},
@@ -269,13 +269,13 @@ This function assigns the themevals to the meta data
         ["logo-space-after"] = "1cm",
         }
       assign_value(themevals)
-
+        
       return m
     end,
     ["vline"] = function (m)
       themevals = {
         ["elements"] = {
-          pandoc.MetaInlines{pandoc.RawInline("latex","\\titleblock")},
+          pandoc.MetaInlines{pandoc.RawInline("latex","\\titleblock")}, 
           pandoc.MetaInlines{pandoc.RawInline("latex","\\authorblock")},
           pandoc.MetaInlines{pandoc.RawInline("latex","\\affiliationblock")},
           pandoc.MetaInlines{pandoc.RawInline("latex","\\vfill")},
@@ -307,13 +307,13 @@ This function assigns the themevals to the meta data
         ["vrule-color"] = "black",
         }
       assign_value(themevals)
-
+        
       return m
     end,
     ["vline-text"] = function (m)
       themevals = {
         ["elements"] = {
-          pandoc.MetaInlines{pandoc.RawInline("latex","\\titleblock")},
+          pandoc.MetaInlines{pandoc.RawInline("latex","\\titleblock")}, 
           pandoc.MetaInlines{pandoc.RawInline("latex","\\authorblock")},
           pandoc.MetaInlines{pandoc.RawInline("latex","\\affiliationblock")},
           pandoc.MetaInlines{pandoc.RawInline("latex","\\vfill")},
@@ -348,14 +348,14 @@ This function assigns the themevals to the meta data
         ["vrule-text"] = "Add your text in vrule-text"
         }
       assign_value(themevals)
-
+        
       return m
     end,
     ["plain"] = function (m)
       themevals = {
         ["elements"] = {
-          pandoc.MetaInlines{pandoc.RawInline("latex","\\headerblock")},
-          pandoc.MetaInlines{pandoc.RawInline("latex","\\titleblock")},
+          pandoc.MetaInlines{pandoc.RawInline("latex","\\headerblock")}, 
+          pandoc.MetaInlines{pandoc.RawInline("latex","\\titleblock")}, 
           pandoc.MetaInlines{pandoc.RawInline("latex","\\authorblock")},
           pandoc.MetaInlines{pandoc.RawInline("latex","\\affiliationblock")},
           pandoc.MetaInlines{pandoc.RawInline("latex","\\vfill")},
@@ -386,20 +386,20 @@ This function assigns the themevals to the meta data
           pandoc.RawInline("latex","1\\baselineskip")},
         }
       assign_value(themevals)
-
+        
       return m
     end,
     ["none"] = function (m) return m end
   }
-
+  
   m['titlepage-file'] = false
   if isEmpty(m.titlepage) then m['titlepage'] = "plain" end
   if getVal(m.titlepage) == "false" then m['titlepage'] = "none" end
   if getVal(m.titlepage) == "true" then m['titlepage'] = "plain" end
-  if getVal(m.titlepage) == "none" then
+  if getVal(m.titlepage) == "none" then 
     m['titlepage-true'] = false
   else
-    m['titlepage-true'] = true
+    m['titlepage-true'] = true 
   end
   choice = pandoc.utils.stringify(m.titlepage)
   okvals = {"plain", "vline", "vline-text", "bg-image", "colorbox", "academic", "formal", "classic-lined"}
@@ -486,7 +486,7 @@ Set affiliation sep character
     m['titlepage-theme']["affiliation-sep"] = pandoc.MetaInlines{
           pandoc.RawInline("latex","\\\\")}
   end
-
+  
 --[[
 Set vrule defaults
 --]]
@@ -511,7 +511,7 @@ Set vrule defaults
 --[[
 Set the defaults for the titlepage alignments
 default titlepage alignment is left
---]]
+--]]    
   if isEmpty(m['titlepage-theme']["page-align"]) then
     m['titlepage-theme']["page-align"] = "left"
   end
@@ -523,7 +523,7 @@ default titlepage alignment is left
       if not ok then error("") end
     end
   end
-
+  
 --[[
 Set bg-image defaults
 --]]
@@ -536,7 +536,7 @@ Set bg-image defaults
       okvals = {"ULCorner", "URCorner", "LLCorner", "LRCorner", "TileSquare", "Center"}
       ok = check_yaml (m["titlepage-theme"]["bg-image-location"], "titlepage-theme: bg-image-location", okvals)
       if not ok then error("") end
-    end
+    end  
   end
 
 --[[
@@ -548,9 +548,11 @@ Set logo defaults
           pandoc.RawInline("latex","0.2\\paperwidth")}
     end
   end
-
+  
 end -- end the theme section
 
   return m
-
+  
 end
+
+
