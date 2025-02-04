@@ -111,7 +111,7 @@ This function assigns the themevals to the meta data
         ["date-style"] = "none",
         }
       assign_value(themevals)
-
+        
       return m
     end,
     ["author"] = function (m)
@@ -124,7 +124,7 @@ This function assigns the themevals to the meta data
         ["date-style"] = "none",
         }
       assign_value(themevals)
-
+        
       return m
     end,
     ["titleauthor"] = function (m)
@@ -137,7 +137,7 @@ This function assigns the themevals to the meta data
         ["date-style"] = "none",
         }
       assign_value(themevals)
-
+        
       return m
     end,
     ["true"] = function (m)
@@ -145,7 +145,7 @@ This function assigns the themevals to the meta data
         ["page-align"] = "left"
         }
       assign_value(themevals)
-
+        
       return m
     end,
     ["great-wave"] = function (m)
@@ -158,7 +158,7 @@ This function assigns the themevals to the meta data
         ["date-style"] = "none",
         }
       assign_value(themevals)
-
+        
       return m
     end,
     ["otter"] = function (m)
@@ -171,11 +171,11 @@ This function assigns the themevals to the meta data
         ["date-style"] = "none",
         }
       assign_value(themevals)
-
+        
       return m
     end,
   }
-
+  
   m['coverpage-file'] = false
   if m.coverpage then
     choice = pandoc.utils.stringify(m.coverpage)
@@ -217,7 +217,7 @@ This function assigns the themevals to the meta data
 -- Only for themes
 -- coverpage-theme will exist if using a theme
 if not m['coverpage-file'] and m['coverpage-true'] then
-
+  
 --[[
 Set up the demos
 --]]
@@ -287,7 +287,7 @@ Set up the demos
     end
   end
 
-
+  
 --[[
 Error checking and setting the style codes
 --]]
@@ -387,7 +387,7 @@ Set affiliation sep character
 Set the defaults for the coverpage alignments
 default coverpage alignment is left
 because coverpage uses tikzpicture, the alignments of the elements must be set
---]]
+--]]    
   if isEmpty(m['coverpage-theme']["page-align"]) then
     m['coverpage-theme']["page-align"] = "left"
   end
@@ -470,7 +470,7 @@ Set left and width alignments, bottom distance and rotation
       end -- rotate
     end -- if style not none
   end -- for loop
-
+  
 
 --[[
 Set logo defaults
@@ -481,9 +481,11 @@ Set logo defaults
           pandoc.RawInline("latex","0.2\\paperwidth")}
     end
   end
-
+  
 end -- end the theme section
 
   return m
-
+  
 end
+
+
