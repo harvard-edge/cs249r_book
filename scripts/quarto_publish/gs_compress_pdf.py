@@ -14,7 +14,7 @@ def convert_pdf(input_file, output_file, settings='/printer', compatibility='1.4
         f'-sOutputFile={output_file}',
         input_file
     ]
-    
+
     if debug:
         print(f"Running command: {' '.join(command)}")
 
@@ -40,4 +40,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
