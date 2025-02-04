@@ -44,7 +44,7 @@ return {
       group = icon
       icon = pandoc.utils.stringify(args[2])
     end
-    
+
     local title = pandoc.utils.stringify(kwargs["title"])
     if not isEmpty(title) then
       title = " title=\"" .. title  .. "\""
@@ -58,7 +58,7 @@ return {
     end
 
     local size = pandoc.utils.stringify(kwargs["size"])
-    
+
     -- detect html (excluding epub which won't handle fa)
     if quarto.doc.is_format("html:js") then
       ensureHtmlDeps()

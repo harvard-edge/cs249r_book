@@ -5,11 +5,11 @@ import sys
 
 def find_issues(file_path, file_extension):
     """Find potential issues in a file.
-    
+
     Args:
         file_path (str): The path to the file to be analyzed.
         file_extension (str): The extension of the file to determine the type of analysis.
-        
+
     Returns:
         list: A list of issues identified in the file.
     """
@@ -34,11 +34,11 @@ def find_issues(file_path, file_extension):
 
 def generate_error_report(directory, file_extension):
     """Generate an error report for files with a specific extension in a directory.
-    
+
     Args:
         directory (str): The directory to search for files.
         file_extension (str): The file extension to check (e.g., .tex, .md).
-        
+
     Returns:
         dict: A dictionary containing file paths mapped to lists of issues found in those files.
     """
@@ -64,11 +64,11 @@ def main():
     parser = argparse.ArgumentParser(description="Check files for potential issues.")
     parser.add_argument("directory", help="The directory to search for files.")
     parser.add_argument("file_extension", help="The file extension to check (e.g., .tex, .md)")
-    
+
     # Adding help option for argument parsing
     parser.add_argument(
-        "-help", 
-        action="help", 
+        "-help",
+        action="help",
         help="Show this help message and exit."
     )
 
@@ -84,7 +84,7 @@ def main():
             print(f"\nFile: {file_path}")
             for issue in issues:
                 print(f"- {issue}")
-    
+
     # Check if any issues were found
     if has_issues:
         sys.exit(1)  # Exit with non-zero exit code if issues were found
