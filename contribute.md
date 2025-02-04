@@ -49,7 +49,7 @@ Create a branch for your contribution. The branch name should start with issue n
 
 ### Make your changes
 
-Make your changes to the code or documentation. Please make sure that your changes are consistent with the style of the rest of the code or documentation.  
+Make your changes to the code or documentation. Please make sure that your changes are consistent with the style of the rest of the code or documentation.
 
 - The `content` directory subfolders that each represent a chapter in the book. Each chapter folder contains the source files and documents to render the book. Any new files should be added to the `content` directory in its appropriate folder. Please create a new folder if needed. Make sure that the path in the `_quarto.yml` file is updated to include the new folder.
 
