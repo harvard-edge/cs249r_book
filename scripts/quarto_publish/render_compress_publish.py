@@ -21,7 +21,7 @@ def compress_image(image_path, quality=DEFAULT_COMPRESSION_QUALITY):
 def compress_images_in_epub(epub_file, quality=DEFAULT_COMPRESSION_QUALITY):
     temp_dir = tempfile.mkdtemp()
     output_path = os.path.join(temp_dir, os.path.basename(epub_file))
-    
+
     # Extract ePub contents
     with ZipFile(epub_file, 'r') as zip_ref:
         zip_ref.extractall(temp_dir)
@@ -32,7 +32,7 @@ def compress_images_in_epub(epub_file, quality=DEFAULT_COMPRESSION_QUALITY):
         for file in files:
             if file.lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
                 image_files.append(os.path.join(root, file))
-    
+
     # Measure original file size
     total_original_size = sum(os.path.getsize(file) for file in image_files)
 
@@ -47,20 +47,20 @@ def compress_images_in_epub(epub_file, quality=DEFAULT_COMPRESSION_QUALITY):
 
     print(f"Original total size: {convert_bytes_to_human_readable(total_original_size)}")
     print(f"Compressed total size: {convert_bytes_to_human_readable(total_compressed_size)}")
-    
+
     # Repackage ePub file
     with ZipFile(output_path, 'w') as zip_ref:
         for root, dirs, files in os.walk(temp_dir):
             for file in files:
                 file_path = os.path.join(root, file)
                 zip_ref.write(file_path, os.path.relpath(file_path, temp_dir))
-    
+
     return output_path
 
 def quarto_epub_render():
     """
     Install Quarto's TinyTeX and render the book to ePub.
-    
+
     Returns:
         str: Path to the generated ePub file.
     """
@@ -98,7 +98,7 @@ def quarto_epub_render():
 def quarto_pdf_render():
     """
     Install Quarto's TinyTeX and render the book to PDF.
-    
+
     Returns:
         str: Path to the generated PDF file.
     """
@@ -223,7 +223,7 @@ def main():
     args = parser.parse_args()
 
     if args.pdf:
-        output_pdf_path = quarto_pdf_render()        
+        output_pdf_path = quarto_pdf_render()
         output_dir = tempfile.mkdtemp()
         output_pdf_temp_path = os.path.join(output_dir, os.path.basename(output_pdf_path))
 
