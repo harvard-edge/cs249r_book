@@ -6,16 +6,16 @@ import argparse
 def update_callout(content):
     """
     Updates callout blocks in the content.
-    
+
     Looks for blocks of the form:
-    
+
     ::: {.callout-*}
     ## Any Title
     <text>
     :::
-    
+
     And changes them to:
-    
+
     ::: {.callout-* title="Any Title"}
     <text>
     :::
@@ -29,12 +29,12 @@ def process_file(filepath):
     """Reads a .qmd file, updates the callouts, and overwrites the same file."""
     with open(filepath, "r", encoding="utf-8") as file:
         content = file.read()
-    
+
     updated_content = update_callout(content)
-    
+
     with open(filepath, "w", encoding="utf-8") as file:
         file.write(updated_content)
-    
+
     print(f"Updated file: {filepath}")
 
 
@@ -51,7 +51,7 @@ def main():
     parser.add_argument("-f", "--file", help="Specify a single .qmd file to process.")
     parser.add_argument("-d", "--directory", help="Specify a directory to process all .qmd files.")
     args = parser.parse_args()
-    
+
     if args.file:
         process_file(args.file)
     elif args.directory:

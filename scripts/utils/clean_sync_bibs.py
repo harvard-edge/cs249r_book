@@ -21,26 +21,26 @@ def extract_cited_keys(qmd_file):
     """Extract all citation keys from a .qmd file, including DOIs, handling multi-line citations."""
     with open(qmd_file, 'r', encoding='utf-8') as f:
         content = f.read()
-    
+
     # Capture standard @citations inside brackets and inline, including DOIs
     citation_keys = set(re.findall(r'@([\w\d:\-_]+)', content))
-    
+
     # Capture DOIs inside [@...] citation brackets, handling in-text [-@...] cases
     doi_keys = set(re.findall(r'\[-?@]?(10\.\d{4,9}/[-._;()/:A-Za-z0-9]+)', content))
-    
+
     # Capture multi-line citations separated by ',' or ';', including page numbers
     multi_line_citations = set(re.findall(r'@([\w\d:\-_]+)(?:,|;|\s+p{0,2}\.\s*\d+|\s+and\s+passim)', content))
-    
+
     return citation_keys | doi_keys | multi_line_citations
 
 def remove_duplicate_entries(bib_file):
     """Remove duplicate bibliography entries before parsing and fix problematic characters in DOI fields."""
     seen_keys = set()
     unique_entries = []
-    
+
     with open(bib_file, 'r', encoding='utf-8') as f:
         lines = f.readlines()
-    
+
     entry_buffer = []
     current_key = None
     for line in lines:
@@ -57,10 +57,10 @@ def remove_duplicate_entries(bib_file):
         # Fix problematic \_ in DOIs
         line = line.replace('doi = "', 'doi = "').replace('\\_', '_')
         entry_buffer.append(line)
-    
+
     if entry_buffer:
         unique_entries.extend(entry_buffer)
-    
+
     with open(bib_file, 'w', encoding='utf-8') as f:
         f.writelines(unique_entries)
     logging.info(f"Fixed problematic DOI formatting in {bib_file}.")
@@ -69,14 +69,14 @@ def clean_bib_file(bib_file, cited_keys, dry_run=False):
     """Remove unused entries from a .bib file and handle duplicate entries."""
     remove_duplicate_entries(bib_file)  # Ensure no duplicates and fix DOIs before parsing
     bib_database = Parser().parse_file(bib_file)
-    
+
     original_keys = set(bib_database.entries.keys())
     used_entries = {key: entry for key, entry in bib_database.entries.items() if key in cited_keys}
     removed_keys = original_keys - cited_keys
-    
+
     logging.info("="*50)
     logging.info(f"Processing {bib_file}:")
-    
+
     if removed_keys:
         if dry_run:
             logging.info(f"[Dry Run] Would remove {len(removed_keys)} unused entries from {bib_file}:")
@@ -87,7 +87,7 @@ def clean_bib_file(bib_file, cited_keys, dry_run=False):
             logging.info(f"Removed {len(removed_keys)} unused entries from {bib_file}:")
         for key in sorted(removed_keys):
             logging.info(f" - {key}")
-    
+
     return removed_keys
 
 def update_bib_file(bib_file):
@@ -105,13 +105,13 @@ def update_bib_file(bib_file):
 def process_qmd_files(qmd_files, dry_run=False, max_workers=4):
     """Find and clean up bib files used by qmd files."""
     bib_files = {}
-    
+
     for qmd_file in qmd_files:
         bib_file = extract_bibliography_file(qmd_file)
         if bib_file:
             bib_path = str(Path(qmd_file).parent / bib_file)
             bib_files[bib_path] = bib_files.get(bib_path, set()) | extract_cited_keys(qmd_file)
-    
+
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         for bib_file, keys in bib_files.items():
             if os.path.exists(bib_file):
@@ -132,7 +132,7 @@ def main():
     parser.add_argument('--dry-run', action='store_true', help="Show what would be removed without modifying files.")
     parser.add_argument('--workers', type=int, default=4, help="Number of parallel workers for processing.")
     args = parser.parse_args()
-    
+
     if args.file:
         qmd_files = find_qmd_files(Path(args.file).parent)
         process_qmd_files(qmd_files, args.dry_run, args.workers)
