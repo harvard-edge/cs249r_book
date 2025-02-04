@@ -1,4 +1,4 @@
-# MACHINE LEARNING SYSTEMS  
+# MACHINE LEARNING SYSTEMS
 *Principles and Practices of Engineering Artificially Intelligent Systems*
 
 <p align="center">
@@ -34,7 +34,7 @@
   <p>  Organizations such as <a href=https://store-usa.arduino.cc/products/nicla-vision>Arduino</a> and <a href=https://www.seeedstudio.com/XIAO-ESP32S3-Sense-p-5639.html>SEEED Studio</a> are partnering with us to deliver AI hardware kits to underserved learners around the world, enabling them to explore cutting-edge technologies.</p>
 
 <p>
-  In addition, for every new GitHub ⭐, the <a href="https://store.arduino.cc/products/nicla-vision">EDGE AI Foundation</a> is matching <a href=https://www.edgeaifoundation.org/posts/edge-ai-scholarship-fund>academic scholarship funds</a>, empowering even more learners to access AI education. 
+  In addition, for every new GitHub ⭐, the <a href="https://store.arduino.cc/products/nicla-vision">EDGE AI Foundation</a> is matching <a href=https://www.edgeaifoundation.org/posts/edge-ai-scholarship-fund>academic scholarship funds</a>, empowering even more learners to access AI education.
 </p>
 
 <p align="center" >
@@ -51,10 +51,10 @@
 
 ## 📰 **Latest Updates**
 
-- 🎓 **[Nov 15] Matching Academic Scholarship Funds**  
+- 🎓 **[Nov 15] Matching Academic Scholarship Funds**
   The EDGE AI Foundation is matching scholarship funds for every new GitHub ⭐ (up to 10,000 stars). [Click here to show support!](#)
 
-- ⭐ **[Oct 18] We Hit 1,000 GitHub Stars! 🎉**  
+- ⭐ **[Oct 18] We Hit 1,000 GitHub Stars! 🎉**
   Thanks to you, Arduino and SEEED donated AI hardware kits for TinyML workshops in developing nations!
 
 ---
