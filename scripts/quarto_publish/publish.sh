@@ -23,7 +23,7 @@ python3 ./scripts/quarto_publish/gs_compress_pdf.py -i ./_book/Machine-Learning-
 if [ $? -ne 0 ]; then
     echo "PDF compression failed!"
     exit 1
-else    
+else
     echo "PDF compression completed successfully."
 fi
 
@@ -33,7 +33,7 @@ mv ./_book/ebook.pdf ./_book/Machine-Learning-Systems.pdf
 if [ $? -ne 0 ]; then
     echo "Failed to replace the original PDF!"
     exit 1
-else    
+else
     echo "PDF replaced successfully."
 fi
 
@@ -43,9 +43,8 @@ quarto publish --no-render gh-pages
 if [ $? -ne 0 ]; then
     echo "Publishing to gh-pages failed!"
     exit 1
-else    
+else
     echo "Published to gh-pages successfully."
 fi
 
 echo "All steps completed successfully."
-

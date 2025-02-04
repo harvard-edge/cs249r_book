@@ -1,6 +1,6 @@
 # ==============================================================
 # R Package Installation Script for Quarto GitHub Actions
-# 
+#
 # This script installs required R packages for rendering Quarto (.qmd) files.
 # If you need to add a new package, follow the instructions below.
 # ==============================================================

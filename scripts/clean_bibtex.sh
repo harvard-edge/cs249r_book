@@ -18,7 +18,7 @@ preserve.keys = on
 preserve.values = on
 remove.double.braces = off  # Keeps values wrapped in {{...}}
 expand.macros = off         # Prevents breaking macros
-modify.field = { 
+modify.field = {
     title journal booktitle author editor
     replace " \_" "_"
     replace "\\_" "_"
@@ -55,4 +55,3 @@ fi
 
 # 📌 STEP 7: Show Summary of Changes
 echo "✅ Cleaning Complete! Output saved to: $OUTPUT_BIB"
-
