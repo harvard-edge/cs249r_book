@@ -1,35 +1,50 @@
-name: Wait for Workflows
+name: Wait for Dependencies
 
 on:
   workflow_call:
+    inputs:
+      wait-timeout:
+        description: 'Timeout in seconds'
+        default: '900'
+        required: false
+        type: string
 
 jobs:
   wait-for-workflows:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install GitHub CLI
+      - name: Debug Info Start
         run: |
-          sudo apt update
-          sudo apt install -y gh
+          echo "Starting to wait for dependent workflows..."
+          echo "Timeout setting: ${{ inputs.wait-timeout }} seconds"
 
-      - name: Define Workflow Names and Check Completion
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          WORKFLOW_A: "Update Changelog"
-          WORKFLOW_B: "Add Contributors"
-        run: |
-          check_workflow_status() {
-            WORKFLOW_NAME=$1
-            STATUS=$(gh run list --workflow "$WORKFLOW_NAME" --json status,conclusion --jq '.[0].conclusion' 2>/dev/null)
-            echo "$WORKFLOW_NAME Status: $STATUS"
-            if [[ "$STATUS" != "success" ]]; then
-              echo "$WORKFLOW_NAME has not completed successfully. Exiting."
-              exit 1
-            fi
-          }
+      - name: Wait for "Update Changelog"
+        id: wait-changelog
+        uses: fkirc/wait-for-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          checkName: "Update Changelog"
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repo: ${{ github.repository }}
+          waitForSuccess: true
+          timeoutSeconds: ${{ inputs.wait-timeout }}
 
-          check_workflow_status "$WORKFLOW_A"
-          check_workflow_status "$WORKFLOW_B"
+      - name: Changelog Wait Status
+        run: echo "Changelog workflow completed with conclusion: ${{ steps.wait-changelog.outputs.conclusion }}"
+
+      - name: Wait for "Add Contributors"
+        id: wait-contributors
+        uses: fkirc/wait-for-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          checkName: "Add Contributors"
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repo: ${{ github.repository }}
+          waitForSuccess: true
+          timeoutSeconds: ${{ inputs.wait-timeout }}
+
+      - name: Contributors Wait Status
+        run: echo "Contributors workflow completed with conclusion: ${{ steps.wait-contributors.outputs.conclusion }}"
+
+      - name: Debug Info End
+        run: echo "All dependent workflows completed successfully!"
