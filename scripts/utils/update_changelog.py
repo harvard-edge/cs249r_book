@@ -75,8 +75,8 @@ def generate_changelog():
         raise SystemExit("❌ Error: `gh-pages` branch not found. The changelog generation process requires this branch to exist.")
 
     # Get commit history from `gh-pages`
-    commits_with_dates = run_git_command(["git", "--no-pager", "log", "--pretty=format:%H %ad", "--date=iso", "gh-pages"]).split("\n")
-    
+    commits_with_dates = run_git_command(["git", "--no-pager", "log", "--pretty=format:%H %ad", "--date=iso", "origin/gh-pages"]).split("\n")
+
     if not commits_with_dates:
         return intro_text + "_No `gh-pages` commits found._"
 
