@@ -45,11 +45,16 @@ jobs:
               exit 1
             fi
             
-            STATUS=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              "https://api.github.com/repos/${{ github.repository }}/commits/${{ github.event.pull_request.head.sha || github.sha }}/check-runs" | \
-              jq -r --arg name "${{ inputs.check-name }}" '.check_runs[] | select(.name==$name) | .conclusion')
+            # Get full response and debug it
+            RESPONSE=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/repos/${{ github.repository }}/commits/${{ github.event.pull_request.head.sha || github.sha }}/check-runs")
             
-            echo "Current status at $(date): $STATUS"
+            echo "All check runs:"
+            echo "$RESPONSE" | jq -r '.check_runs[] | .name + ": " + (.conclusion // "in_progress")'
+            
+            STATUS=$(echo "$RESPONSE" | jq -r --arg name "${{ inputs.check-name }}" '.check_runs[] | select(.name==$name) | .conclusion')
+            
+            echo "Current status at $(date) for ${{ inputs.check-name }}: $STATUS"
             
             if [ "$STATUS" = "success" ]; then
               echo "Workflow ${{ inputs.check-name }} completed successfully"
@@ -57,6 +62,8 @@ jobs:
             elif [ "$STATUS" = "failure" ] || [ "$STATUS" = "cancelled" ]; then
               echo "Workflow ${{ inputs.check-name }} failed or was cancelled"
               exit 1
+            elif [ -z "$STATUS" ]; then
+              echo "No status found for ${{ inputs.check-name }}, might not have started yet"
             fi
             
             echo "Waiting ${interval} seconds before next check..."
