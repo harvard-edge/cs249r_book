@@ -66,6 +66,7 @@ def generate_changelog():
         "## Book Changelog {.unnumbered}\n\n"
         "This *Machine Learning Systems* textbook is constantly evolving. "
         "This changelog automatically records all updates and improvements, helping you stay informed about what's new and refined.\n\n"
+        f"_Last Updated: {datetime.now().strftime('%b %d, %Y')}_\n\n"
     )
 
     # Ensure `gh-pages` branch exists on the remote, otherwise fail
