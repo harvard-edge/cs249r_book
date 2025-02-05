@@ -57,6 +57,7 @@ def generate_changelog():
     intro_text = (
         "---\n"
         "toc: false\n"
+        "format: html\n" # build only for html files, not PDF
         "---\n\n"        
         "## Book Changelog {.unnumbered}\n\n"
         "This *Machine Learning Systems* textbook is constantly evolving. "
