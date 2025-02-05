@@ -9,6 +9,7 @@ GITHUB_REPO_URL = "https://github.com/harvard-edge/cs249r_book/"
 MAJOR_CHANGE_THRESHOLD = 200  # Define threshold for major updates
 
 def format_friendly_date(date_str):
+    """Format the date in a human-friendly way."""
     try:
         date_obj = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z")
         return date_obj.strftime("%b %d, %Y")
@@ -16,14 +17,16 @@ def format_friendly_date(date_str):
         return date_str
 
 def run_git_command(cmd):
+    """Run a git command and return the output."""
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        print(f"Error running command: {' '.join(cmd)}")
+        print(f"❌ Error running command: {' '.join(cmd)}")
         print(result.stderr)
-        return ""
+        raise SystemExit(f"Git command failed: {' '.join(cmd)}")
     return result.stdout.strip()
 
 def extract_chapter_title(file_path):
+    """Extract the chapter title from the QMD file."""
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             for line in f:
@@ -36,6 +39,7 @@ def extract_chapter_title(file_path):
     return os.path.basename(file_path).replace("_", " ").replace(".qmd", "").title()
 
 def get_changes_in_dev_since(date_start, date_end=None):
+    """Get changes in the dev branch since a given date."""
     cmd = ["git", "log", "--numstat", "--since", date_start]
     if date_end:
         cmd += ["--until", date_end]
@@ -43,6 +47,7 @@ def get_changes_in_dev_since(date_start, date_end=None):
     return run_git_command(cmd)
 
 def generate_change_visual(added, removed, max_length=6):
+    """Generate a visual representation of changes."""
     total = added + removed
     if total == 0:
         return ""
@@ -52,8 +57,8 @@ def generate_change_visual(added, removed, max_length=6):
     removed_bars = f'<span style="color:red">{"-" * removed_blocks}</span>'
     return f"{added_bars}{removed_bars}"
 
-# Generate the changelog
 def generate_changelog():
+    """Generate the changelog content."""
     intro_text = (
         "---\n"
         "toc: false\n"
@@ -63,7 +68,15 @@ def generate_changelog():
         "This changelog automatically records all updates and improvements, helping you stay informed about what's new and refined.\n\n"
     )
 
+    # Ensure `gh-pages` branch exists, otherwise fail
+    try:
+        run_git_command(["git", "rev-parse", "--verify", "gh-pages"])
+    except SystemExit:
+        raise SystemExit("❌ Error: `gh-pages` branch not found. The changelog generation process requires this branch to exist.")
+
+    # Get commit history from `gh-pages`
     commits_with_dates = run_git_command(["git", "--no-pager", "log", "--pretty=format:%H %ad", "--date=iso", "gh-pages"]).split("\n")
+    
     if not commits_with_dates:
         return intro_text + "_No `gh-pages` commits found._"
 
