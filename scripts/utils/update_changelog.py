@@ -155,4 +155,4 @@ if __name__ == "__main__":
     changelog = generate_changelog()
     with open(CHANGELOG_FILE, "w", encoding="utf-8") as f:
         f.write(changelog + "\n")
-    print("📄 Changelog successfully generated in CHANGELOG.md!")
+    print(f"📄 Changelog successfully generated in {CHANGELOG_FILE}")
