@@ -130,7 +130,6 @@ def generate_changelog():
             summary += "\n".join(minor_updates) + "\n\n"
             summary += "</details>\n\n"
 
-        break
     summary += "\n---\n"
     return summary.strip()
 
