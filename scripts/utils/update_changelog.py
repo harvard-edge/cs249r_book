@@ -68,18 +68,23 @@ def generate_changelog():
         "This changelog automatically records all updates and improvements, helping you stay informed about what's new and refined.\n\n"
     )
 
-    # Ensure `gh-pages` branch exists, otherwise fail
-    try:
-        run_git_command(["git", "rev-parse", "--verify", "gh-pages"])
-    except SystemExit:
-        raise SystemExit("❌ Error: `gh-pages` branch not found. The changelog generation process requires this branch to exist.")
+    # Ensure `gh-pages` branch exists on the remote, otherwise fail
+    gh_pages_exists = run_git_command(["git", "ls-remote", "--heads", "origin", "gh-pages"])
+    if not gh_pages_exists:
+        raise SystemExit("❌ Error: `gh-pages` branch not found on the remote. The changelog generation process requires this branch to exist.")
 
-    # Get commit history from `gh-pages`
-    commits_with_dates = run_git_command(["git", "--no-pager", "log", "--pretty=format:%H %ad", "--date=iso", "origin/gh-pages"]).split("\n")
+    # Fetch the `gh-pages` branch to ensure its history is available
+    run_git_command(["git", "fetch", "origin", "gh-pages:refs/remotes/origin/gh-pages"])
+
+    # Get commit history from `origin/gh-pages`
+    commits_with_dates = run_git_command([
+        "git", "--no-pager", "log", "--pretty=format:%H %ad", "--date=iso", "origin/gh-pages"
+    ]).split("\n")
 
     if not commits_with_dates:
         return intro_text + "_No `gh-pages` commits found._"
 
+    # Parse commits and dates
     commits_with_dates = [(line.split(" ")[0], " ".join(line.split(" ")[1:])) for line in commits_with_dates]
     summary = intro_text  # Start the summary with the intro text
 
