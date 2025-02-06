@@ -125,14 +125,14 @@ def generate_changelog():
         
         # Create change entry
         change_entry = f"### 📅 Published on {format_friendly_date(current_date)}\n\n"
-        change_entry += f"🔗 [View Full Diff]({full_diff_link})\n\n"
+        change_entry += f"🔗 [View Full Diff]({full_diff_link}) --- "
 
         total_added = sum(added for added, _ in changes_by_file.values())
         total_removed = sum(removed for _, removed in changes_by_file.values())
         total_files = len(changes_by_file)
 
-        change_entry += f"- **{total_files} files updated**\n"
-        change_entry += f"- **{total_added} lines added**, **{total_removed} lines removed**\n\n"
+        change_entry += f"{total_files} files updated "
+        change_entry += f"({total_added} lines added, {total_removed} lines removed)\n\n"
 
         # Separate Major and Minor Updates
         major_updates = []
