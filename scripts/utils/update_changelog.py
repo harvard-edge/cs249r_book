@@ -4,7 +4,7 @@ import os
 from collections import defaultdict
 from datetime import datetime
 
-CHANGELOG_FILE = "contents/frontmatter/changelog/changelog.qmd"
+CHANGELOG_FILE = "CHANGELOG.md"
 GITHUB_REPO_URL = "https://github.com/harvard-edge/cs249r_book/"
 MAJOR_CHANGE_THRESHOLD = 200  # Define threshold for major updates
 
@@ -67,14 +67,8 @@ def generate_change_visual(added, removed, max_length=6):
 
 def generate_changelog():
     """Generate the changelog content."""
-    
+
     intro_text = (
-        "# Book Changelog {.unnumbered}\n\n"
-        "This Machine Learning Systems textbook originated from lecture materials developed for CS249r at Harvard. "
-        "Through valuable feedback from students, professors, practitioners, researchers, and learners such as yourself, "
-        "it continues to evolve and expand. While the content is useful in its current form, it remains in active development - "
-        "with ongoing additions to technical coverage, enhanced explanations, and regular updates informed by academic and industry expertise. "
-        "This changelog documents these improvements, helping you stay informed of the latest changes.\n\n"
         f"_Last Updated: {datetime.now().strftime('%b %d, %Y')}_\n\n"
     )
 
