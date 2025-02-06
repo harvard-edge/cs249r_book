@@ -64,7 +64,7 @@ def extract_chapter_title(file_path):
     
     # If we couldn't find or read the file, create a title from the filename
     readable_title = base_name.replace('_', ' ').title()
-    print(f"📝 Note: Using generated title '{readable_title}' for {file_path}")
+    # print(f"📝 Note: Using generated title '{readable_title}' for {file_path}")
     return readable_title
 
 def get_changes_in_dev_since(date_start, date_end=None):
