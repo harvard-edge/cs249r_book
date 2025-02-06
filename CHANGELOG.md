@@ -38,7 +38,6 @@ _Last Updated: Feb 06, 2025_
 
 </details>
 
-
 ### 📅 Published on Jan 28, 2025
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/06ea94061111da881bca7cfe113074f9924b348d...1e3700476beef870534c67c579385a3b7e5561f0) --- 1 files updated (52 lines added, 52 lines removed)
@@ -49,7 +48,6 @@ _Last Updated: Feb 06, 2025_
 - **Acknowledgements**: <span style="color:green">+++</span><span style="color:red">---</span> (52 lines added, 52 lines removed)
 
 </details>
-
 
 ### 📅 Published on Jan 28, 2025
 
@@ -83,7 +81,6 @@ _Last Updated: Feb 06, 2025_
 
 </details>
 
-
 ### 📅 Published on Jan 17, 2025
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/5227423a805e158bbd45e54306ac4e8f3ffd4ef7...1d3e1fdf249171a89567f39035d75ff1c93a196c) --- 12 files updated (1976 lines added, 1477 lines removed)
@@ -112,7 +109,6 @@ _Last Updated: Feb 06, 2025_
 
 </details>
 
-
 ### 📅 Published on Jan 12, 2025
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/ed67d6fd30baa8db50bb146d603cf263f72d77f1...5227423a805e158bbd45e54306ac4e8f3ffd4ef7) --- 5 files updated (221 lines added, 253 lines removed)
@@ -134,7 +130,6 @@ _Last Updated: Feb 06, 2025_
 
 </details>
 
-
 ### 📅 Published on Jan 11, 2025
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/cebf5e21dc3c1daafa2c0016833dc2e466c714da...ed67d6fd30baa8db50bb146d603cf263f72d77f1) --- 4 files updated (154 lines added, 103 lines removed)
@@ -148,7 +143,6 @@ _Last Updated: Feb 06, 2025_
 - **Data Engineering**: <span style="color:green">++</span><span style="color:red">----</span> (3 lines added, 6 lines removed)
 
 </details>
-
 
 ### 📅 Published on Jan 11, 2025
 
@@ -171,7 +165,6 @@ _Last Updated: Feb 06, 2025_
 
 </details>
 
-
 ### 📅 Published on Jan 09, 2025
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/c705aa67f479e1021fac4f51e2613f89004da5d8...74f10205558cff3cb5f6603bd8d6ad9972f283bc) --- 8 files updated (56 lines added, 58 lines removed)
@@ -190,7 +183,6 @@ _Last Updated: Feb 06, 2025_
 
 </details>
 
-
 ### 📅 Published on Jan 07, 2025
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/a9929ea87198993a56a2371955388572ec0df22c...c705aa67f479e1021fac4f51e2613f89004da5d8) --- 5 files updated (254 lines added, 149 lines removed)
@@ -205,7 +197,6 @@ _Last Updated: Feb 06, 2025_
 - **Introduction**: <span style="color:green">++++</span><span style="color:red">-</span> (42 lines added, 13 lines removed)
 
 </details>
-
 
 ### 📅 Published on Jan 03, 2025
 
@@ -224,7 +215,6 @@ _Last Updated: Feb 06, 2025_
 
 </details>
 
-
 ### 📅 Published on Jan 02, 2025
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/b64c7a870d05b7a7276372899b149a64812437dc...1796edc4fb49621762466339507345e19b15e5b1) --- 4 files updated (66 lines added, 127 lines removed)
@@ -238,7 +228,6 @@ _Last Updated: Feb 06, 2025_
 - **Conclusion**: <span style="color:green">+++</span><span style="color:red">---</span> (8 lines added, 8 lines removed)
 
 </details>
-
 
 ### 📅 Published on Jan 01, 2025
 
@@ -301,7 +290,6 @@ _Last Updated: Feb 06, 2025_
 
 </details>
 
-
 ---
 
 ## 2024 Changes
@@ -317,7 +305,6 @@ _Last Updated: Feb 06, 2025_
 - **SocratiQ AI**: <span style="color:green">++++</span><span style="color:red">-</span> (15 lines added, 5 lines removed)
 
 </details>
-
 
 ### 📅 Published on Nov 19, 2024
 
@@ -341,7 +328,6 @@ _Last Updated: Feb 06, 2025_
 
 </details>
 
-
 ### 📅 Published on Nov 16, 2024
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/cd105cae77f809e8b124ad1dd01eb8a3cfb886a2...15f71c3c3324579497acef62fc2794d9e138f197) --- 4 files updated (502 lines added, 106 lines removed)
@@ -361,7 +347,6 @@ _Last Updated: Feb 06, 2025_
 - **Responsible AI**: <span style="color:green">+++</span><span style="color:red">--</span> (40 lines added, 30 lines removed)
 
 </details>
-
 
 ### 📅 Published on Nov 15, 2024
 
@@ -407,7 +392,6 @@ _Last Updated: Feb 06, 2025_
 - **KWS Feature Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
 
 </details>
-
 
 ### 📅 Published on Nov 15, 2024
 
@@ -511,7 +495,6 @@ _Last Updated: Feb 06, 2025_
 
 </details>
 
-
 ### 📅 Published on Sep 20, 2024
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/a8e5c6a59190d5a0415d0dceb0e55094381d0620...1ed42d2ae55f55ea336b77f49d5876ce858eeb38) --- 1 files updated (1 lines added, 1 lines removed)
@@ -522,7 +505,6 @@ _Last Updated: Feb 06, 2025_
 - **Introduction**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 
 </details>
-
 
 ### 📅 Published on Sep 20, 2024
 
@@ -583,7 +565,6 @@ _Last Updated: Feb 06, 2025_
 
 </details>
 
-
 ### 📅 Published on Sep 12, 2024
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/dd73ca406692bb65034ec7e5dc937a25c43dd572...d67fd6ce43b9e1740508c2093d9285f2f587d4f9) --- 7 files updated (1561 lines added, 86 lines removed)
@@ -607,7 +588,6 @@ _Last Updated: Feb 06, 2025_
 
 </details>
 
-
 ### 📅 Published on Sep 06, 2024
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/df327f0f183f1cd283e1dbb8e8ac2501ffb8b35c...27189b4434b257744e9aebe2242c7d0ebde471d2) --- 1 files updated (8 lines added, 10 lines removed)
@@ -618,7 +598,6 @@ _Last Updated: Feb 06, 2025_
 - **Responsible AI**: <span style="color:green">++</span><span style="color:red">---</span> (8 lines added, 10 lines removed)
 
 </details>
-
 
 ### 📅 Published on Sep 04, 2024
 
@@ -650,7 +629,6 @@ _Last Updated: Feb 06, 2025_
 
 </details>
 
-
 ### 📅 Published on Sep 02, 2024
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/ed092ea810aaaf276ae4eba42f501a559d488019...52ca11c81244182d5533111e3509e6d9df2e4195) --- 5 files updated (218 lines added, 179 lines removed)
@@ -665,7 +643,6 @@ _Last Updated: Feb 06, 2025_
 - **Image Classification**: <span style="color:green">+++</span><span style="color:red">--</span> (29 lines added, 26 lines removed)
 
 </details>
-
 
 ### 📅 Published on Aug 29, 2024
 
@@ -687,7 +664,6 @@ _Last Updated: Feb 06, 2025_
 - **KWS Feature Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 
 </details>
-
 
 ### 📅 Published on Aug 27, 2024
 
@@ -715,7 +691,6 @@ _Last Updated: Feb 06, 2025_
 
 </details>
 
-
 ### 📅 Published on Aug 22, 2024
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/f7218322ad3f83a2d7047d024bc0713919609142...cd331d47238f352d0f89e006329d15a0249ecc0b) --- 6 files updated (14 lines added, 21 lines removed)
@@ -731,7 +706,6 @@ _Last Updated: Feb 06, 2025_
 - **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 
 </details>
-
 
 ### 📅 Published on Aug 21, 2024
 
@@ -767,7 +741,6 @@ _Last Updated: Feb 06, 2025_
 
 </details>
 
-
 ### 📅 Published on Aug 15, 2024
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/f5866c3f66e7b4d8ad7f23f90312ceb673cbf556...b413a3f838505559193e42987f82acbcc64beb83) --- 3 files updated (3 lines added, 6 lines removed)
@@ -780,7 +753,6 @@ _Last Updated: Feb 06, 2025_
 - **Security & Privacy**: <span style="color:green">++</span><span style="color:red">----</span> (1 lines added, 2 lines removed)
 
 </details>
-
 
 ### 📅 Published on Aug 15, 2024
 
@@ -814,7 +786,6 @@ _Last Updated: Feb 06, 2025_
 
 </details>
 
-
 ### 📅 Published on Aug 15, 2024
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/472bf09b948ac1de01f6c769ebfdbef67eec1681...c627585aa31cd9235ece6517eb9a5e608e53cfb8) --- 3 files updated (188 lines added, 164 lines removed)
@@ -833,7 +804,6 @@ _Last Updated: Feb 06, 2025_
 - **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 
 </details>
-
 
 ### 📅 Published on Aug 06, 2024
 
@@ -858,7 +828,6 @@ _Last Updated: Feb 06, 2025_
 - **KWS Feature Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (8 lines added, 8 lines removed)
 
 </details>
-
 
 ### 📅 Published on Aug 06, 2024
 
@@ -903,7 +872,6 @@ _Last Updated: Feb 06, 2025_
 
 </details>
 
-
 ### 📅 Published on Jun 25, 2024
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/a380d4054b5fc5f5f9d1608c554de89ff95d0190...d5991b0854573bafa45fe00ae46c45bdd2ba725c) --- 1 files updated (1 lines added, 1 lines removed)
@@ -914,7 +882,6 @@ _Last Updated: Feb 06, 2025_
 - **DL Primer**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 
 </details>
-
 
 ### 📅 Published on Jun 20, 2024
 
@@ -927,7 +894,6 @@ _Last Updated: Feb 06, 2025_
 - **Shared**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 
 </details>
-
 
 ### 📅 Published on Jun 19, 2024
 
@@ -1003,7 +969,6 @@ _Last Updated: Feb 06, 2025_
 
 </details>
 
-
 ### 📅 Published on Jun 11, 2024
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/3e4fae48989e30d92dcadf5ebfc5b15a614a2c97...a4029b0feb69086ed51af34e1ec353c1f0fa158b) --- 18 files updated (518 lines added, 204 lines removed)
@@ -1031,7 +996,6 @@ _Last Updated: Feb 06, 2025_
 - **Generative AI**: <span style="color:green">++++</span><span style="color:red">-</span> (13 lines added, 6 lines removed)
 
 </details>
-
 
 ### 📅 Published on Jun 01, 2024
 
@@ -1061,7 +1025,6 @@ _Last Updated: Feb 06, 2025_
 - **Introduction**: <span style="color:green">+++</span><span style="color:red">---</span> (9 lines added, 9 lines removed)
 
 </details>
-
 
 ### 📅 Published on May 26, 2024
 
@@ -1108,7 +1071,6 @@ _Last Updated: Feb 06, 2025_
 
 </details>
 
-
 ### 📅 Published on Mar 21, 2024
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/372f54b246f037b28a0014aab19f25188537d9eb...1358e93b39d842182ece950cc39e4b87aef71fc7) --- 17 files updated (860 lines added, 374 lines removed)
@@ -1135,7 +1097,6 @@ _Last Updated: Feb 06, 2025_
 - **AI Workflow**: <span style="color:green">++++</span><span style="color:red">-</span> (41 lines added, 18 lines removed)
 
 </details>
-
 
 ### 📅 Published on Mar 12, 2024
 
@@ -1170,7 +1131,6 @@ _Last Updated: Feb 06, 2025_
 
 </details>
 
-
 ### 📅 Published on Feb 03, 2024
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/1d156d19e985df842a1f64d0660341d4258a4b9b...bc9f7319072ddba597e7c9ba86b4e3f337b5dfd3) --- 8 files updated (35 lines added, 35 lines removed)
@@ -1188,7 +1148,6 @@ _Last Updated: Feb 06, 2025_
 - **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">---</span> (11 lines added, 11 lines removed)
 
 </details>
-
 
 ### 📅 Published on Feb 02, 2024
 
@@ -1214,7 +1173,6 @@ _Last Updated: Feb 06, 2025_
 
 </details>
 
-
 ### 📅 Published on Jan 02, 2024
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/a4d0babd94a2c08854a76b27ce7c8739964ed368...02870db92c11b28f932b64bd23cc054d16048a9d) --- 2 files updated (1 lines added, 3 lines removed)
@@ -1226,7 +1184,6 @@ _Last Updated: Feb 06, 2025_
 - **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 
 </details>
-
 
 ---
 
@@ -1257,7 +1214,6 @@ _Last Updated: Feb 06, 2025_
 
 </details>
 
-
 ### 📅 Published on Dec 13, 2023
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/5ad9906eee18cf373d80394711068134eb232113...374f03d7beede8859b5cbd3f277d9e11a7bc1540) --- 1 files updated (1 lines added, 1 lines removed)
@@ -1268,7 +1224,6 @@ _Last Updated: Feb 06, 2025_
 - **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 
 </details>
-
 
 ### 📅 Published on Dec 13, 2023
 
@@ -1281,7 +1236,6 @@ _Last Updated: Feb 06, 2025_
 
 </details>
 
-
 ### 📅 Published on Dec 12, 2023
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/d619841ba6b3b768f5c65eda6726a933ff209718...a70794c54fc382d15a4c4ad7ab2a3f7c74242711) --- 1 files updated (2 lines added, 2 lines removed)
@@ -1292,7 +1246,6 @@ _Last Updated: Feb 06, 2025_
 - **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 
 </details>
-
 
 ### 📅 Published on Dec 12, 2023
 
@@ -1306,7 +1259,6 @@ _Last Updated: Feb 06, 2025_
 
 </details>
 
-
 ### 📅 Published on Dec 12, 2023
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/f5d1d8b212e55212e3fbe8817fb7e16790a4e8e8...a0f97f059097d2a3b676e2b372564b01cbbaaf3d) --- 1 files updated (1 lines added, 1 lines removed)
@@ -1317,7 +1269,6 @@ _Last Updated: Feb 06, 2025_
 - **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 
 </details>
-
 
 ### 📅 Published on Dec 11, 2023
 
@@ -1344,7 +1295,6 @@ _Last Updated: Feb 06, 2025_
 
 </details>
 
-
 ### 📅 Published on Dec 11, 2023
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/6ce9bdc80b4e47af7e3e9c43e910bf9f62ea9302...c590ea9772deb421978530cbe0e67853467997ae) --- 10 files updated (36 lines added, 36 lines removed)
@@ -1364,7 +1314,6 @@ _Last Updated: Feb 06, 2025_
 - **AI Workflow**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 
 </details>
-
 
 ### 📅 Published on Dec 11, 2023
 
@@ -1402,7 +1351,6 @@ _Last Updated: Feb 06, 2025_
 
 </details>
 
-
 ### 📅 Published on Dec 10, 2023
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/9b55170ef1d9e34590bdb4d9b57504d5d61d1038...83b04495506c7d8efcc994e128761c282ca4c2f6) --- 1 files updated (7 lines added, 7 lines removed)
@@ -1413,7 +1361,6 @@ _Last Updated: Feb 06, 2025_
 - **AI Training**: <span style="color:green">+++</span><span style="color:red">---</span> (7 lines added, 7 lines removed)
 
 </details>
-
 
 ### 📅 Published on Dec 10, 2023
 
@@ -1456,6 +1403,5 @@ _Last Updated: Feb 06, 2025_
 - **Robust AI**: <span style="color:green">++++++</span><span style="color:red"></span> (50 lines added, 0 lines removed)
 
 </details>
-
 
 ---
