@@ -16,6 +16,14 @@ def format_friendly_date(date_str):
     except ValueError:
         return date_str
 
+def get_year_from_date(date_str):
+    """Extract year from date string."""
+    try:
+        date_obj = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z")
+        return date_obj.year
+    except ValueError:
+        return None
+
 def run_git_command(cmd):
     """Run a git command and return the output."""
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -60,24 +68,21 @@ def generate_change_visual(added, removed, max_length=6):
 def generate_changelog():
     """Generate the changelog content."""
     intro_text = (
-        "---\n"
-        "toc: false\n"
-        "---\n\n"        
-        "## Book Changelog {.unnumbered}\n\n"
+        "# Book Changelog {.unnumbered}\n\n"
         "This *Machine Learning Systems* textbook is constantly evolving. "
         "This changelog automatically records all updates and improvements, helping you stay informed about what's new and refined.\n\n"
         f"_Last Updated: {datetime.now().strftime('%b %d, %Y')}_\n\n"
     )
 
-    # Ensure `gh-pages` branch exists on the remote, otherwise fail
+    # Ensure `gh-pages` branch exists on the remote
     gh_pages_exists = run_git_command(["git", "ls-remote", "--heads", "origin", "gh-pages"])
     if not gh_pages_exists:
         raise SystemExit("❌ Error: `gh-pages` branch not found on the remote. The changelog generation process requires this branch to exist.")
 
-    # Fetch the `gh-pages` branch to ensure its history is available
+    # Fetch the `gh-pages` branch
     run_git_command(["git", "fetch", "origin", "gh-pages:refs/remotes/origin/gh-pages"])
 
-    # Get commit history from `origin/gh-pages`
+    # Get commit history
     commits_with_dates = run_git_command([
         "git", "--no-pager", "log", "--pretty=format:%H %ad", "--date=iso", "origin/gh-pages"
     ]).split("\n")
@@ -87,11 +92,19 @@ def generate_changelog():
 
     # Parse commits and dates
     commits_with_dates = [(line.split(" ")[0], " ".join(line.split(" ")[1:])) for line in commits_with_dates]
-    summary = intro_text  # Start the summary with the intro text
+    
+    # Group changes by year
+    changes_by_year = defaultdict(list)
+    current_year = datetime.now().year
+    first_details_created = False  # Track if we've created the first details section
 
     for i in range(len(commits_with_dates) - 1):
         current_commit, current_date = commits_with_dates[i]
         previous_commit, previous_date = commits_with_dates[i + 1]
+        
+        year = get_year_from_date(current_date)
+        if not year:
+            continue
 
         changes = get_changes_in_dev_since(previous_date, current_date)
         if not changes.strip():
@@ -109,18 +122,19 @@ def generate_changelog():
             changes_by_file[file_path][0] += added
             changes_by_file[file_path][1] += removed
 
-        # Generate diff link for the commit range
+        # Generate diff link
         full_diff_link = f"{GITHUB_REPO_URL}/compare/{previous_commit}...{current_commit}"
-        summary += "---\n\n"
-        summary += f"### 📅 Published on {format_friendly_date(current_date)}\n\n"
-        summary += f"🔗 [View Full Diff]({full_diff_link})\n\n"
+        
+        # Create change entry
+        change_entry = f"### 📅 Published on {format_friendly_date(current_date)}\n\n"
+        change_entry += f"🔗 [View Full Diff]({full_diff_link})\n\n"
 
         total_added = sum(added for added, _ in changes_by_file.values())
         total_removed = sum(removed for _, removed in changes_by_file.values())
         total_files = len(changes_by_file)
 
-        summary += f"- **{total_files} files updated**\n"
-        summary += f"- **{total_added} lines added**, **{total_removed} lines removed**\n\n"
+        change_entry += f"- **{total_files} files updated**\n"
+        change_entry += f"- **{total_added} lines added**, **{total_removed} lines removed**\n\n"
 
         # Separate Major and Minor Updates
         major_updates = []
@@ -135,21 +149,33 @@ def generate_changelog():
             else:
                 minor_updates.append(f"- **{chapter_title}**: {change_visual} ({added} lines added, {removed} lines removed)")
 
-        # Add Major Updates Section
         if major_updates:
-            summary += "<details>\n"
-            summary += "  <summary>**Major Updates**</summary>\n\n"
-            summary += "\n".join(major_updates) + "\n\n"
-            summary += "</details>\n\n"
+            details_open = " open" if not first_details_created else ""
+            change_entry += f"<details{details_open}>\n"
+            change_entry += "  <summary>**Major Updates**</summary>\n\n"
+            change_entry += "\n".join(major_updates) + "\n\n"
+            change_entry += "</details>\n\n"
 
-        # Add Minor Updates Section
         if minor_updates:
-            summary += "<details>\n"
-            summary += "  <summary>**Minor Updates**</summary>\n\n"
-            summary += "\n".join(minor_updates) + "\n\n"
-            summary += "</details>\n\n"
+            details_open = " open" if not first_details_created else ""
+            change_entry += f"<details{details_open}>\n"
+            change_entry += "  <summary>**Minor Updates**</summary>\n\n"
+            change_entry += "\n".join(minor_updates) + "\n\n"
+            change_entry += "</details>\n\n"
 
-    summary += "\n---\n"
+        first_details_created = True
+        changes_by_year[year].append(change_entry)
+
+    # Build final summary
+    summary = intro_text
+
+    # Add each year's changes
+    for year in sorted(changes_by_year.keys(), reverse=True):
+        year_summary = f"## {year} Changes\n\n"
+        year_summary += "\n".join(changes_by_year[year])        
+        summary += year_summary
+        summary += "\n---\n\n"
+
     return summary.strip()
 
 if __name__ == "__main__":
