@@ -16,10 +16,25 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0  # Ensure full history
+          ref: ${{ github.ref }}  # Explicitly checkout the triggering branch
 
-      - name: Fetch and Checkout gh-pages
+      - name: Setup Git
         run: |
-          git fetch origin gh-pages || echo "⚠️ gh-pages branch not found, skipping checkout"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Fetch all branches
+          git fetch --all
+          
+          # Setup local tracking for dev and gh-pages
+          git branch -f dev origin/dev || echo "Dev branch not found"
+          git branch -f gh-pages origin/gh-pages || echo "gh-pages branch not found"
+          
+          # Print branch status for debugging
+          echo "Current branch:"
+          git branch --show-current
+          echo "All branches:"
+          git branch -a
 
       - name: Setup Python3.11
         uses: actions/setup-python@v4
@@ -30,26 +45,28 @@ jobs:
         run: chmod +x ./scripts/utils/update_changelog.py
 
       - name: Run Update Script
+        id: update
         run: |
           echo "Running changelog update script..."
           python3 ./scripts/utils/update_changelog.py || exit 1
           echo "Changelog update script completed successfully"
 
-      - name: Commit and Push Updates
+      - name: Check and Commit Changes
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          echo "Git status:"
+          git status
           
           # Check if there are changes to commit
-          if git diff --quiet; then
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Changes detected, committing to dev branch..."
+            git checkout dev
+            git add -A
+            git commit -m "Auto-update changelog"
+            git push origin dev
+            echo "Successfully pushed changes to dev branch"
+          else
             echo "No changes to commit"
             exit 0
           fi
-          
-          git add .
-          git commit -m "Auto-update changelog"
-          
-          # Push to the branch that triggered the workflow
-          git push origin ${GITHUB_REF#refs/heads/}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
