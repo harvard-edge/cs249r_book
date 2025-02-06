@@ -10,6 +10,9 @@ required_packages <- c(
   "ggplot2",    # Visualization package
   "knitr",      # Needed for Quarto rendering
   "rmarkdown",  # Markdown rendering in R
+  "tidyverse",  # 
+  "reshape2",   #
+  "viridis",    #
   "xml2"        # Required for XML/HTML processing
 )
 
