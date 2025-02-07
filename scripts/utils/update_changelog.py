@@ -192,7 +192,7 @@ def generate_changelog():
             change_entry += f"<details{details_open}>\n"
             change_entry += "  <summary>**Minor Updates**</summary>\n\n"
             change_entry += "\n".join(minor_updates) + "\n\n"
-            change_entry += "</details>\n\n"
+            change_entry += "</details>\n"
 
         first_details_created = True
         changes_by_year[year].append(change_entry)
