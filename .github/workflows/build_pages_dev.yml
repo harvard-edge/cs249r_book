@@ -1,27 +1,82 @@
-name: Build on dev (Ubuntu)
-
+name: 'Quarto Render HTML (Push to dev, Ubuntu)'
 on:
   push:
     branches:
       - dev
-
 jobs:
-  build-ubuntu:
+  checkout:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        
+  wait-for-changelog:
+    needs: checkout
+    uses: ./.github/workflows/wait_for_workflow.yml
+    with:
+      check-name: "Update Changelog"
+      
+  wait-for-contributors:
+    needs: checkout
+    uses: ./.github/workflows/wait_for_workflow.yml
+    with:
+      check-name: "Add Contributors"
+      
+  build:
+    needs: [wait-for-changelog, wait-for-contributors]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          ref: dev
+          fetch-depth: 0  # Need full history to check changes
 
+      - name: Check for changes
+        id: check_changes
+        run: |
+          echo "Changes between ${{ github.event.before }} and ${{ github.sha }}:"
+          git diff --name-only ${{ github.event.before }} ${{ github.sha }}
+          
+          # Check specific files and store results
+          if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -q "CHANGELOG.md"; then
+            echo "changelog_modified=true" >> $GITHUB_OUTPUT
+            echo "CHANGELOG.md was modified"
+            echo "Changes in CHANGELOG.md:"
+            git diff ${{ github.event.before }} ${{ github.sha }} CHANGELOG.md
+          else
+            echo "changelog_modified=false" >> $GITHUB_OUTPUT
+            echo "CHANGELOG.md was not modified"
+          fi
+          
+          if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -q "CONTRIBUTORS.md"; then
+            echo "contributors_modified=true" >> $GITHUB_OUTPUT
+            echo "CONTRIBUTORS.md was modified"
+            echo "Changes in CONTRIBUTORS.md:"
+            git diff ${{ github.event.before }} ${{ github.sha }} CONTRIBUTORS.md
+          else
+            echo "contributors_modified=false" >> $GITHUB_OUTPUT
+            echo "CONTRIBUTORS.md was not modified"
+          fi
+          
       - name: Setup Quarto
         uses: quarto-dev/quarto-actions/setup@v2
         with:
           version: "1.7.13"
-          tinytex: true
-
+          
       - name: Install TinyTeX
         run: |
           quarto install tinytex
           echo "$HOME/.TinyTeX/bin/x86_64-linux" >> $GITHUB_PATH
-
+          
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: '4.2'
+          
+      - name: Install R Packages
+        run: Rscript install_packages.R
+        
       - name: Install Dependencies
         run: |
           sudo apt-get update
@@ -43,13 +98,13 @@ jobs:
           sudo add-apt-repository ppa:inkscape.dev/stable -y
           sudo apt-get update
           sudo apt-get install inkscape -y
-
+          
       - name: Render Quarto Project
         uses: quarto-dev/quarto-actions/render@v2
         with:
-          to: html          
-
-      - name: stage files
+          to: html
+          
+      - name: Stage files
         uses: cpina/github-action-push-to-another-repository@v1.7.2
         env:
           SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
@@ -60,4 +115,8 @@ jobs:
           user-email: khoshnevis.naeem@gmail.com
           target-branch: 'main'
           target-directory: 'docs'
-          commit-message: 'Push dev branch build'
+          commit-message: |
+            Push dev branch build
+            
+            Changelog modified: ${{ steps.check_changes.outputs.changelog_modified }}
+            Contributors modified: ${{ steps.check_changes.outputs.contributors_modified }}
