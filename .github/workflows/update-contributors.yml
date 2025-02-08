@@ -1,0 +1,86 @@
+name: Update Contributors
+
+on:
+  workflow_call:  # Make it callable from other workflows
+  push:
+    branches:
+      - main
+      - dev
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+jobs:
+  update-contributors:
+    name: Update Contributors List
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          # Install system dependencies
+          sudo apt-get update
+          sudo apt-get install -y gh jq nodejs npm
+          
+          # Install Python packages
+          pip install -r .github/workflows/contributors/requirements.txt
+          
+          # Install all-contributors CLI
+          npm i -D all-contributors-cli
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Update Contributors
+        id: update
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Detect branch
+          BRANCH_NAME=${GITHUB_HEAD_REF:-$(git rev-parse --abbrev-ref HEAD)}
+          echo "Working on branch: $BRANCH_NAME"
+          
+          # Ensure clean state
+          git checkout -B "$BRANCH_NAME"
+          git fetch origin "$BRANCH_NAME"
+          git reset --hard origin/"$BRANCH_NAME"
+          
+          # Run update script
+          python .github/workflows/contributors/update_contributors.py
+          npx all-contributors generate
+          
+          # Check for changes
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "changes_made=true" >> $GITHUB_OUTPUT
+          else
+            echo "changes_made=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit Changes
+        if: steps.update.outputs.changes_made == 'true'
+        run: |
+          BRANCH_NAME=${GITHUB_HEAD_REF:-$(git rev-parse --abbrev-ref HEAD)}
+          
+          git add -u
+          git commit -m "Update contributors list [skip ci]"
+          git push origin "$BRANCH_NAME"
+
+      - name: Report Status
+        run: |
+          if [ "${{ steps.update.outputs.changes_made }}" = "true" ]; then
+            echo "✅ Contributors list has been updated"
+          else
+            echo "ℹ️ No changes were needed for contributors list"
+          fi
