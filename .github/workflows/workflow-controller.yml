@@ -7,7 +7,13 @@ on:
   pull_request:
     branches: [main, dev]
 
+env:
+  IS_MAIN: ${{ github.ref == 'refs/heads/main' }}
+  BUILD_WORKFLOW: ${{ github.ref == 'refs/heads/main' && 'main-build.yml' || 'dev-build.yml' }}
+  DEPLOY_ENV: ${{ github.ref == 'refs/heads/main' && 'production' || 'development' }}
+
 jobs:
+  # Initialize job to set up outputs for later jobs
   initialize:
     runs-on: ubuntu-latest
     outputs:
@@ -18,7 +24,7 @@ jobs:
         with:
           fetch-depth: 0
 
-  # Initial checks and validation
+  # Run quality checks (structure, links, linting)
   quality-checks:
     needs: initialize
     runs-on: ubuntu-latest
@@ -44,7 +50,7 @@ jobs:
       - name: Run Markdown Lint
         uses: ./.github/workflows/lint-markdown.yml
 
-  # Update metadata
+  # Update metadata (e.g., changelog, contributors)
   update-metadata:
     needs: quality-checks
     runs-on: ubuntu-latest
@@ -52,7 +58,7 @@ jobs:
       - name: Update Changelog
         uses: ./.github/workflows/update-changelog.yml
         with:
-          environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'development' }}
+          environment: ${{ env.DEPLOY_ENV }}
 
       - name: Update Contributors
         uses: ./.github/workflows/update-contributors.yml
@@ -60,13 +66,13 @@ jobs:
   # Branch-specific builds
   build:
     needs: update-metadata
-    uses: ./.github/workflows/${{ github.ref == 'refs/heads/main' && 'main-build' || 'dev-build' }}.yml
+    uses: ./.github/workflows/${{ env.BUILD_WORKFLOW }}
     with:
-      environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'development' }}
+      environment: ${{ env.DEPLOY_ENV }}
 
   # Deployment (only on main branch)
   deploy:
-    if: github.ref == 'refs/heads/main'
+    if: env.IS_MAIN == 'true'
     needs: build
     runs-on: ubuntu-latest
     environment: production
@@ -84,7 +90,6 @@ jobs:
         run: |
           echo "## 📊 Workflow Status Report" >> $GITHUB_STEP_SUMMARY
           
-          # Quality Checks Status
           echo "### 🔍 Quality Checks" >> $GITHUB_STEP_SUMMARY
           if [ "${{ needs.quality-checks.result }}" = "success" ]; then
             echo "✅ Passed" >> $GITHUB_STEP_SUMMARY
@@ -92,7 +97,6 @@ jobs:
             echo "❌ Failed" >> $GITHUB_STEP_SUMMARY
           fi
           
-          # Metadata Updates Status
           echo "### 📝 Metadata Updates" >> $GITHUB_STEP_SUMMARY
           if [ "${{ needs.update-metadata.result }}" = "success" ]; then
             echo "✅ Completed" >> $GITHUB_STEP_SUMMARY
@@ -100,7 +104,6 @@ jobs:
             echo "❌ Failed" >> $GITHUB_STEP_SUMMARY
           fi
           
-          # Build Process Status
           echo "### 🔨 Build Process" >> $GITHUB_STEP_SUMMARY
           if [ "${{ needs.build.result }}" = "success" ]; then
             echo "✅ Built Successfully" >> $GITHUB_STEP_SUMMARY
@@ -108,8 +111,7 @@ jobs:
             echo "❌ Build Failed" >> $GITHUB_STEP_SUMMARY
           fi
           
-          # Deployment Status (main branch only)
-          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+          if [ "${{ env.IS_MAIN }}" = "true" ]; then
             echo "### 🚀 Deployment" >> $GITHUB_STEP_SUMMARY
             if [ "${{ needs.deploy.result }}" = "success" ]; then
               echo "✅ Deployed Successfully" >> $GITHUB_STEP_SUMMARY
@@ -118,7 +120,6 @@ jobs:
             fi
           fi
           
-          # Add summary footer
           echo "---" >> $GITHUB_STEP_SUMMARY
           echo "🕒 Completed at: $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_STEP_SUMMARY
 
@@ -128,7 +129,7 @@ jobs:
           if [ "${{ needs.quality-checks.result }}" != "success" ] || \
              [ "${{ needs.update-metadata.result }}" != "success" ] || \
              [ "${{ needs.build.result }}" != "success" ] || \
-             ([ "${{ github.ref }}" = "refs/heads/main" ] && [ "${{ needs.deploy.result }}" != "success" ]); then
+             ([ "${{ env.IS_MAIN }}" = "true" ] && [ "${{ needs.deploy.result }}" != "success" ]); then
             echo "::error::One or more workflow steps failed"
             exit 1
           fi
