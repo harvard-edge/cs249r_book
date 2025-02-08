@@ -1,0 +1,232 @@
+# quarto-build.yml
+# This is a unified build workflow for both development and production builds of the CS249r book.
+# It handles both development (cross-platform testing + staging site deployment) and 
+# production (Linux-only build + GitHub Pages deployment) scenarios.
+
+name: '📚 Quarto Build'
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+        description: 'Build environment (development/production)'
+      os:
+        required: true
+        type: string
+        description: 'Operating system to run on (ubuntu-latest/windows-latest)'
+      quarto-version:
+        required: false
+        type: string
+        default: '1.7.13'
+        description: 'Version of Quarto to use'
+      r-version:
+        required: false
+        type: string
+        default: '4.3.2'
+        description: 'Version of R to use'
+      target:
+        required: true
+        type: string
+        enum: ['dev', 'main']
+        description: 'Target branch (dev/main) - determines build behavior'
+
+permissions:
+  contents: write  # Required for pushing to repositories
+  pages: write    # Required for GitHub Pages deployment
+
+jobs:
+  build:
+    runs-on: ${{ inputs.os }}
+    environment:
+      name: ${{ inputs.environment }}
+    
+    steps:
+      - name: 🔍 Verify branch
+        run: |
+          if [[ "${{ inputs.target }}" == "main" && "${{ github.ref }}" != "refs/heads/main" ]]; then
+            echo "❌ Main build can only run on the main branch"
+            exit 1
+          fi
+          if [[ "${{ inputs.target }}" == "dev" && "${{ github.ref }}" != "refs/heads/dev" ]]; then
+            echo "❌ Dev build can only run on the dev branch"
+            exit 1
+          fi
+          echo "✅ Branch verification passed"
+
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ inputs.target }}
+          fetch-depth: 0
+
+      - name: 📦 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+        with:
+          version: ${{ inputs.quarto-version }}
+
+      - name: Check Quarto syntax
+        run: |
+          quarto check
+
+      - name: 📝 Install TinyTeX
+        shell: bash
+        run: |
+          echo "🔄 Installing TinyTeX..."
+          quarto install tinytex
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            echo "$HOME/.TinyTeX/bin/windows" >> $GITHUB_PATH
+          else
+            echo "$HOME/.TinyTeX/bin/x86_64-linux" >> $GITHUB_PATH
+          fi
+          echo "✅ TinyTeX installed"
+
+      - name: 📊 Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: ${{ inputs.r-version }}
+          use-public-rspm: true
+
+      - name: 💾 Cache R packages
+        uses: actions/cache@v3
+        with:
+          path: ${{ runner.os == 'Windows' && 'C:/Users/runneradmin/Documents/R/win-library' || '~/R/library' }}
+          key: ${{ runner.os }}-r-${{ hashFiles('**/install_packages.R') }}
+          restore-keys: |
+            ${{ runner.os }}-r-
+
+      - name: 📦 Install R Dependencies
+        shell: bash
+        run: |
+          echo "🔄 Installing R packages..."
+          Rscript -e 'install.packages(c("renv", "remotes"))'
+          Rscript -e 'renv::restore()'
+          echo "✅ R packages installed"
+
+      - name: 🛠️ Install Linux Dependencies
+        if: ${{ runner.os == 'Linux' }}
+        run: |
+          echo "🔄 Installing Linux dependencies..."
+          sudo apt-get update
+          sudo apt-get install -y \
+            libpangoft2-1.0-0 \
+            fonts-dejavu \
+            fonts-freefont-ttf \
+            libpango-1.0-0 \
+            libpangocairo-1.0-0 \
+            libcogl-pango-dev \
+            pango1.0-tools \
+            libcairo2 \
+            gdk-pixbuf2.0-bin \
+            libgdk-pixbuf2.0-dev \
+            librsvg2-bin \
+            libcurl4-openssl-dev \
+            libssl-dev \
+            libxml2-dev \
+            libfontconfig1-dev \
+            libharfbuzz-dev \
+            libfribidi-dev \
+            libfreetype6-dev \
+            libtiff5-dev \
+            libjpeg-dev
+          echo "✅ Linux dependencies installed"
+
+      - name: 🎨 Install Inkscape (Linux)
+        if: ${{ runner.os == 'Linux' }}
+        run: |
+          echo "🔄 Installing Inkscape..."
+          sudo add-apt-repository ppa:inkscape.dev/stable -y
+          sudo apt-get update
+          sudo apt-get install inkscape -y
+          echo "✅ Inkscape installed"
+
+      - name: 🎨 Install Inkscape (Windows)
+        if: ${{ runner.os == 'Windows' }}
+        run: |
+          echo "🔄 Installing Inkscape..."
+          choco install inkscape -y
+          echo "✅ Inkscape installed"
+
+      - name: 🔨 Render Quarto Project
+        uses: quarto-dev/quarto-actions/render@v2
+
+      - name: 📤 Upload artifact
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: _book-${{ inputs.os }}
+          path: _book
+
+      - name: 🐍 Setup Python for PDF compression
+        if: ${{ inputs.target == 'main' && runner.os == 'Linux' }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: 📦 Install Ghostscript
+        if: ${{ inputs.target == 'main' && runner.os == 'Linux' }}
+        run: |
+          echo "🔄 Installing Ghostscript..."
+          sudo apt-get update
+          sudo apt-get install -y ghostscript
+          echo "✅ Ghostscript installed"
+
+      - name: 📄 Check and Compress PDF
+        if: ${{ inputs.target == 'main' && runner.os == 'Linux' }}
+        run: |
+          set -e  # Exit on any error
+          
+          echo "🔍 Checking for PDF..."
+          if [ ! -f "./_book/Machine-Learning-Systems.pdf" ]; then
+            echo "❌ PDF file not found!"
+            exit 1
+          fi
+          
+          echo "🔄 Compressing PDF..."
+          python3 ./scripts/quarto_publish/gs_compress_pdf.py \
+            -i ./_book/Machine-Learning-Systems.pdf \
+            -o ./_book/ebook.pdf \
+            -s "/ebook"
+          
+          if [ ! -f "./_book/ebook.pdf" ]; then
+            echo "❌ PDF compression failed!"
+            exit 1
+          fi
+          
+          mv ./_book/ebook.pdf ./_book/Machine-Learning-Systems.pdf
+          echo "✅ PDF compression complete"
+
+      - name: 🚀 Stage to Dev Site
+        if: ${{ inputs.target == 'dev' && runner.os == 'Linux' }}
+        uses: cpina/github-action-push-to-another-repository@v1.7.2
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+        with:
+          source-directory: '_book'
+          destination-github-username: 'harvard-edge'
+          destination-repository-name: 'cs249r_book_dev'
+          user-email: khoshnevis.naeem@gmail.com
+          target-branch: 'main'
+          target-directory: 'docs'
+          commit-message: |
+            📚 Push dev branch build
+
+      - name: 🚀 Deploy to GitHub Pages
+        if: ${{ inputs.target == 'main' && runner.os == 'Linux' }}
+        uses: quarto-dev/quarto-actions/publish@v2
+        with:
+          target: gh-pages
+          render: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📋 Build Summary
+        run: |
+          echo "## 📊 Build Status Summary" >> $GITHUB_STEP_SUMMARY
+          echo "🎯 Target: ${{ inputs.target }}" >> $GITHUB_STEP_SUMMARY
+          echo "💻 OS: ${{ inputs.os }}" >> $GITHUB_STEP_SUMMARY
+          echo "🔧 Environment: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "📚 Quarto Version: ${{ inputs.quarto-version }}" >> $GITHUB_STEP_SUMMARY
+          echo "🔬 R Version: ${{ inputs.r-version }}" >> $GITHUB_STEP_SUMMARY
+          echo "⏰ Completed at: $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_STEP_SUMMARY
