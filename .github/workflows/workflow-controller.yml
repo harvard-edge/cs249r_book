@@ -12,8 +12,7 @@ env:
   DEPLOY_ENV: ${{ github.ref == 'refs/heads/main' && 'production' || 'development' }}
 
 jobs:
-  # Initialize job to set up outputs for later jobs
-  initialize:
+  checkout:
     runs-on: ubuntu-latest
     outputs:
       matrix_os: '["ubuntu-latest", "windows-latest"]'
@@ -23,74 +22,61 @@ jobs:
         with:
           fetch-depth: 0
 
-  # Run quality checks (structure, links, linting)
-  quality-checks:
-    needs: initialize
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        os: ${{ fromJson(needs.initialize.outputs.matrix_os) }}
-    steps:
-      - name: Run Structure Check
-        uses: ./.github/workflows/structure-check.yml
-        with:
-          os: ${{ matrix.os }}
-      
-      - name: Run Link Check
-        uses: ./.github/workflows/link-check.yml
-        with:
-          os: ${{ matrix.os }}
-      
-      - name: Run Quarto Check
-        uses: ./.github/workflows/quarto-check.yml
-        with:
-          os: ${{ matrix.os }}
+  structure-check:
+    needs: checkout
+    uses: ./.github/workflows/structure-check.yml
+    with:
+      matrix_os: ${{ needs.checkout.outputs.matrix_os }}
 
-      - name: Run Markdown Lint
-        uses: ./.github/workflows/lint-markdown.yml
+  link-check:
+    needs: checkout
+    uses: ./.github/workflows/link-check.yml
+    with:
+      matrix_os: ${{ needs.checkout.outputs.matrix_os }}
 
-  # Update metadata (e.g., changelog, contributors)
-  update-metadata:
-    needs: quality-checks
-    runs-on: ubuntu-latest
-    steps:
-      - name: Update Changelog
-        uses: ./.github/workflows/update-changelog.yml
-        with:
-          environment: ${{ env.DEPLOY_ENV }}
+  quarto-check:
+    needs: checkout
+    uses: ./.github/workflows/quarto-check.yml
+    with:
+      matrix_os: ${{ needs.checkout.outputs.matrix_os }}
 
-      - name: Update Contributors
-        uses: ./.github/workflows/update-contributors.yml
+  markdown-lint:
+    needs: checkout
+    uses: ./.github/workflows/lint-markdown.yml
 
-  # Build for main branch
+  update-changelog:
+    needs: [structure-check, link-check, quarto-check, markdown-lint]
+    uses: ./.github/workflows/update-changelog.yml
+    with:
+      environment: ${{ env.DEPLOY_ENV }}
+
+  update-contributors:
+    needs: [structure-check, link-check, quarto-check, markdown-lint]
+    uses: ./.github/workflows/update-contributors.yml
+
   build-main:
     if: github.ref == 'refs/heads/main'
-    needs: update-metadata
+    needs: [update-changelog, update-contributors]
     uses: ./.github/workflows/main-build.yml
     with:
       environment: production
 
-  # Build for dev branch
   build-dev:
     if: github.ref == 'refs/heads/dev'
-    needs: update-metadata
+    needs: [update-changelog, update-contributors]
     uses: ./.github/workflows/dev-build.yml
     with:
       environment: development
 
-  # Deployment (only on main branch)
   deploy:
     if: github.ref == 'refs/heads/main'
     needs: build-main
-    runs-on: ubuntu-latest
-    environment: production
-    steps:
-      - name: Deploy to Production
-        uses: ./.github/workflows/deploy.yml
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: production
 
-  # Status reporting
   report-status:
-    needs: [quality-checks, update-metadata, build-main, build-dev, deploy]
+    needs: [structure-check, link-check, quarto-check, markdown-lint, update-changelog, update-contributors, build-main, build-dev, deploy]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -99,18 +85,22 @@ jobs:
           echo "## 📊 Workflow Status Report" >> $GITHUB_STEP_SUMMARY
           
           echo "### 🔍 Quality Checks" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ needs.quality-checks.result }}" = "success" ]; then
-            echo "✅ Passed" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ Failed" >> $GITHUB_STEP_SUMMARY
-          fi
+          for check in "structure-check" "link-check" "quarto-check" "markdown-lint"; do
+            if [ "${{ needs[check].result }}" = "success" ]; then
+              echo "✅ $check: Passed" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ $check: Failed" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
           
           echo "### 📝 Metadata Updates" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ needs.update-metadata.result }}" = "success" ]; then
-            echo "✅ Completed" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ Failed" >> $GITHUB_STEP_SUMMARY
-          fi
+          for update in "update-changelog" "update-contributors"; do
+            if [ "${{ needs[update].result }}" = "success" ]; then
+              echo "✅ $update: Completed" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ $update: Failed" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
           
           if [ "${{ github.ref }}" = "refs/heads/main" ]; then
             echo "### 🔨 Build (Main)" >> $GITHUB_STEP_SUMMARY
@@ -118,6 +108,13 @@ jobs:
               echo "✅ Built Successfully" >> $GITHUB_STEP_SUMMARY
             else
               echo "❌ Build Failed" >> $GITHUB_STEP_SUMMARY
+            fi
+            
+            echo "### 🚀 Deployment" >> $GITHUB_STEP_SUMMARY
+            if [ "${{ needs.deploy.result }}" = "success" ]; then
+              echo "✅ Deployed Successfully" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ Deployment Failed" >> $GITHUB_STEP_SUMMARY
             fi
           fi
 
@@ -130,26 +127,31 @@ jobs:
             fi
           fi
           
-          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            echo "### 🚀 Deployment" >> $GITHUB_STEP_SUMMARY
-            if [ "${{ needs.deploy.result }}" = "success" ]; then
-              echo "✅ Deployed Successfully" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "❌ Deployment Failed" >> $GITHUB_STEP_SUMMARY
-            fi
-          fi
-          
           echo "---" >> $GITHUB_STEP_SUMMARY
           echo "🕒 Completed at: $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_STEP_SUMMARY
 
       - name: Check Overall Status
         if: always()
         run: |
-          if [ "${{ needs.quality-checks.result }}" != "success" ] || \
-             [ "${{ needs.update-metadata.result }}" != "success" ] || \
-             ([ "${{ github.ref }}" = "refs/heads/main" ] && [ "${{ needs.build-main.result }}" != "success" ]) || \
-             ([ "${{ github.ref }}" = "refs/heads/dev" ] && [ "${{ needs.build-dev.result }}" != "success" ]) || \
-             ([ "${{ github.ref }}" = "refs/heads/main" ] && [ "${{ needs.deploy.result }}" != "success" ]); then
+          FAILED=0
+          for job in "structure-check" "link-check" "quarto-check" "markdown-lint" "update-changelog" "update-contributors"; do
+            if [ "${{ needs[job].result }}" != "success" ]; then
+              FAILED=1
+              break
+            fi
+          done
+          
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            if [ "${{ needs.build-main.result }}" != "success" ] || [ "${{ needs.deploy.result }}" != "success" ]; then
+              FAILED=1
+            fi
+          fi
+          
+          if [ "${{ github.ref }}" = "refs/heads/dev" ] && [ "${{ needs.build-dev.result }}" != "success" ]; then
+            FAILED=1
+          fi
+          
+          if [ "$FAILED" = "1" ]; then
             echo "::error::One or more workflow steps failed"
             exit 1
           fi
