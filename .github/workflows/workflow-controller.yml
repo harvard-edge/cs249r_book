@@ -9,7 +9,6 @@ on:
 
 env:
   IS_MAIN: ${{ github.ref == 'refs/heads/main' }}
-  BUILD_WORKFLOW: ${{ github.ref == 'refs/heads/main' && 'main-build.yml' || 'dev-build.yml' }}
   DEPLOY_ENV: ${{ github.ref == 'refs/heads/main' && 'production' || 'development' }}
 
 jobs:
@@ -63,17 +62,26 @@ jobs:
       - name: Update Contributors
         uses: ./.github/workflows/update-contributors.yml
 
-  # Branch-specific builds
-  build:
+  # Build for main branch
+  build-main:
+    if: github.ref == 'refs/heads/main'
     needs: update-metadata
-    uses: ./.github/workflows/${{ env.BUILD_WORKFLOW }}
+    uses: ./.github/workflows/main-build.yml
     with:
-      environment: ${{ env.DEPLOY_ENV }}
+      environment: production
+
+  # Build for dev branch
+  build-dev:
+    if: github.ref == 'refs/heads/dev'
+    needs: update-metadata
+    uses: ./.github/workflows/dev-build.yml
+    with:
+      environment: development
 
   # Deployment (only on main branch)
   deploy:
-    if: env.IS_MAIN == 'true'
-    needs: build
+    if: github.ref == 'refs/heads/main'
+    needs: build-main
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -82,7 +90,7 @@ jobs:
 
   # Status reporting
   report-status:
-    needs: [quality-checks, update-metadata, build, deploy]
+    needs: [quality-checks, update-metadata, build-main, build-dev, deploy]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -104,14 +112,25 @@ jobs:
             echo "❌ Failed" >> $GITHUB_STEP_SUMMARY
           fi
           
-          echo "### 🔨 Build Process" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ needs.build.result }}" = "success" ]; then
-            echo "✅ Built Successfully" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ Build Failed" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "### 🔨 Build (Main)" >> $GITHUB_STEP_SUMMARY
+            if [ "${{ needs.build-main.result }}" = "success" ]; then
+              echo "✅ Built Successfully" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ Build Failed" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+
+          if [ "${{ github.ref }}" = "refs/heads/dev" ]; then
+            echo "### 🔨 Build (Dev)" >> $GITHUB_STEP_SUMMARY
+            if [ "${{ needs.build-dev.result }}" = "success" ]; then
+              echo "✅ Built Successfully" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ Build Failed" >> $GITHUB_STEP_SUMMARY
+            fi
           fi
           
-          if [ "${{ env.IS_MAIN }}" = "true" ]; then
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
             echo "### 🚀 Deployment" >> $GITHUB_STEP_SUMMARY
             if [ "${{ needs.deploy.result }}" = "success" ]; then
               echo "✅ Deployed Successfully" >> $GITHUB_STEP_SUMMARY
@@ -128,8 +147,9 @@ jobs:
         run: |
           if [ "${{ needs.quality-checks.result }}" != "success" ] || \
              [ "${{ needs.update-metadata.result }}" != "success" ] || \
-             [ "${{ needs.build.result }}" != "success" ] || \
-             ([ "${{ env.IS_MAIN }}" = "true" ] && [ "${{ needs.deploy.result }}" != "success" ]); then
+             ([ "${{ github.ref }}" = "refs/heads/main" ] && [ "${{ needs.build-main.result }}" != "success" ]) || \
+             ([ "${{ github.ref }}" = "refs/heads/dev" ] && [ "${{ needs.build-dev.result }}" != "success" ]) || \
+             ([ "${{ github.ref }}" = "refs/heads/main" ] && [ "${{ needs.deploy.result }}" != "success" ]); then
             echo "::error::One or more workflow steps failed"
             exit 1
           fi
