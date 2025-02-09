@@ -1,8 +1,3 @@
-# quarto-build.yml
-# This is a unified build workflow for both development and production builds of the CS249r book.
-# It handles both development (cross-platform testing + staging site deployment) and 
-# production (Linux-only build + GitHub Pages deployment) scenarios.
-
 name: '📚 Quarto Build'
 
 on:
@@ -32,8 +27,8 @@ on:
         description: 'Target branch (dev/main) - determines build behavior'
 
 permissions:
-  contents: write  # Required for pushing to repositories
-  pages: write    # Required for GitHub Pages deployment
+  contents: write
+  pages: write
 
 jobs:
   build:
@@ -43,23 +38,26 @@ jobs:
     
     steps:
       - name: 🔍 Validate inputs
+        shell: pwsh
         run: |
-          if [[ "${{ inputs.target }}" != "dev" && "${{ inputs.target }}" != "main" ]]; then
-            echo "❌ Target must be either 'dev' or 'main'"
+          if (("${{ inputs.target }}" -ne "dev") -and ("${{ inputs.target }}" -ne "main")) {
+            Write-Error "❌ Target must be either 'dev' or 'main'"
             exit 1
-          fi
+          }
+          Write-Output "✅ Input validation passed"
 
       - name: 🔍 Verify branch
+        shell: pwsh
         run: |
-          if [[ "${{ inputs.target }}" == "main" && "${{ github.ref }}" != "refs/heads/main" ]]; then
-            echo "❌ Main build can only run on the main branch"
+          if (("${{ inputs.target }}" -eq "main") -and ("${{ github.ref }}" -ne "refs/heads/main")) {
+            Write-Error "❌ Main build can only run on the main branch"
             exit 1
-          fi
-          if [[ "${{ inputs.target }}" == "dev" && "${{ github.ref }}" != "refs/heads/dev" ]]; then
-            echo "❌ Dev build can only run on the dev branch"
+          }
+          if (("${{ inputs.target }}" -eq "dev") -and ("${{ github.ref }}" -ne "refs/heads/dev")) {
+            Write-Error "❌ Dev build can only run on the dev branch"
             exit 1
-          fi
-          echo "✅ Branch verification passed"
+          }
+          Write-Output "✅ Branch verification passed"
 
       - name: 📥 Checkout repository
         uses: actions/checkout@v3
@@ -73,16 +71,16 @@ jobs:
           version: ${{ inputs.quarto-version }}
 
       - name: 📝 Install TinyTeX
-        shell: bash
+        shell: pwsh
         run: |
-          echo "🔄 Installing TinyTeX..."
+          Write-Output "🔄 Installing TinyTeX..."
           quarto install tinytex
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
-            echo "$HOME/.TinyTeX/bin/windows" >> $GITHUB_PATH
-          else
-            echo "$HOME/.TinyTeX/bin/x86_64-linux" >> $GITHUB_PATH
-          fi
-          echo "✅ TinyTeX installed"
+          if ("${{ runner.os }}" -eq "Windows") {
+            Add-Content $env:GITHUB_PATH "$env:USERPROFILE\.TinyTeX\bin\windows"
+          } else {
+            Add-Content $env:GITHUB_PATH "$env:HOME/.TinyTeX/bin/x86_64-linux"
+          }
+          Write-Output "✅ TinyTeX installed"
 
       - name: 📊 Setup R
         uses: r-lib/actions/setup-r@v2
@@ -99,15 +97,15 @@ jobs:
             ${{ runner.os }}-r-
 
       - name: 📦 Install R Dependencies
-        shell: bash
+        shell: Rscript {0}
         run: |
-          echo "🔄 Installing R packages..."
-          Rscript -e 'install.packages(c("renv", "remotes"))'
-          Rscript -e 'renv::restore()'
-          echo "✅ R packages installed"
+          options(repos = c(CRAN = "https://cran.rstudio.com"))
+          install.packages(c("renv", "remotes"))
+          renv::restore()
 
       - name: 🛠️ Install Linux Dependencies
         if: ${{ runner.os == 'Linux' }}
+        shell: bash
         run: |
           echo "🔄 Installing Linux dependencies..."
           sudo apt-get update
@@ -136,19 +134,19 @@ jobs:
 
       - name: 🎨 Install Inkscape (Linux)
         if: ${{ runner.os == 'Linux' }}
+        shell: bash
         run: |
-          echo "🔄 Installing Inkscape..."
           sudo add-apt-repository ppa:inkscape.dev/stable -y
           sudo apt-get update
           sudo apt-get install inkscape -y
-          echo "✅ Inkscape installed"
 
       - name: 🎨 Install Inkscape (Windows)
         if: ${{ runner.os == 'Windows' }}
+        shell: pwsh
         run: |
-          echo "🔄 Installing Inkscape..."
+          Write-Output "🔄 Installing Inkscape..."
           choco install inkscape -y
-          echo "✅ Inkscape installed"
+          Write-Output "✅ Inkscape installed"
 
       - name: 🔨 Render Quarto Project
         uses: quarto-dev/quarto-actions/render@v2
@@ -160,6 +158,7 @@ jobs:
           name: _book-${{ inputs.os }}
           path: _book
 
+      # Main-only steps (Linux only)
       - name: 🐍 Setup Python for PDF compression
         if: ${{ inputs.target == 'main' && runner.os == 'Linux' }}
         uses: actions/setup-python@v4
@@ -168,24 +167,22 @@ jobs:
 
       - name: 📦 Install Ghostscript
         if: ${{ inputs.target == 'main' && runner.os == 'Linux' }}
+        shell: bash
         run: |
-          echo "🔄 Installing Ghostscript..."
           sudo apt-get update
           sudo apt-get install -y ghostscript
-          echo "✅ Ghostscript installed"
 
       - name: 📄 Check and Compress PDF
         if: ${{ inputs.target == 'main' && runner.os == 'Linux' }}
+        shell: bash
         run: |
           set -e  # Exit on any error
           
-          echo "🔍 Checking for PDF..."
           if [ ! -f "./_book/Machine-Learning-Systems.pdf" ]; then
             echo "❌ PDF file not found!"
             exit 1
           fi
           
-          echo "🔄 Compressing PDF..."
           python3 ./scripts/quarto_publish/gs_compress_pdf.py \
             -i ./_book/Machine-Learning-Systems.pdf \
             -o ./_book/ebook.pdf \
@@ -197,7 +194,6 @@ jobs:
           fi
           
           mv ./_book/ebook.pdf ./_book/Machine-Learning-Systems.pdf
-          echo "✅ PDF compression complete"
 
       - name: 🚀 Stage to Dev Site
         if: ${{ inputs.target == 'dev' && runner.os == 'Linux' }}
@@ -224,11 +220,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 📋 Build Summary
+        shell: pwsh
         run: |
-          echo "## 📊 Build Status Summary" >> $GITHUB_STEP_SUMMARY
-          echo "🎯 Target: ${{ inputs.target }}" >> $GITHUB_STEP_SUMMARY
-          echo "💻 OS: ${{ inputs.os }}" >> $GITHUB_STEP_SUMMARY
-          echo "🔧 Environment: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "📚 Quarto Version: ${{ inputs.quarto-version }}" >> $GITHUB_STEP_SUMMARY
-          echo "🔬 R Version: ${{ inputs.r-version }}" >> $GITHUB_STEP_SUMMARY
-          echo "⏰ Completed at: $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_STEP_SUMMARY
+          @"
+          ## 📊 Build Status Summary
+          🎯 Target: ${{ inputs.target }}
+          💻 OS: ${{ inputs.os }}
+          🔧 Environment: ${{ inputs.environment }}
+          📚 Quarto Version: ${{ inputs.quarto-version }}
+          🔬 R Version: ${{ inputs.r-version }}
+          ⏰ Completed at: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+          "@ | Add-Content $env:GITHUB_STEP_SUMMARY
