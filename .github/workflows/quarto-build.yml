@@ -80,7 +80,6 @@ jobs:
         uses: quarto-dev/quarto-actions/setup@v2
         with:
           version: ${{ inputs.quarto-version }}
-          tinytex: true
 
       # Cache TeX Live
       - name: 💾 Cache TeX Live
@@ -89,29 +88,54 @@ jobs:
         with:
           path: |
             ~/.texlive
+            ~/.TinyTeX
             ~/AppData/Roaming/TinyTeX  # Windows path
           key: ${{ runner.os }}-texlive-${{ hashFiles('**/*.tex') }}
           restore-keys: |
             ${{ runner.os }}-texlive-
+
+      # TinyTeX setup based on OS
+      - name: 📝 Install TinyTeX (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          quarto install tinytex
+          echo "$HOME/.TinyTeX/bin/x86_64-linux" >> $GITHUB_PATH
+
+      - name: 📝 Install TinyTeX (Windows)
+        if: runner.os == 'Windows'
+        uses: r-lib/actions/setup-tinytex@v2
 
       - name: 📦 Install TeX Live
         if: steps.cache-texlive.outputs.cache-hit != 'true'
         uses: teatimeguest/setup-texlive-action@v2
         with:
           packages: >-
-            scheme-full
+            scheme-basic
+            collection-basic
+            collection-latex
+            collection-latexrecommended
+            collection-latexextra
+            collection-fontsrecommended
+            collection-pictures
+            collection-science
+            collection-xetex
+            collection-luatex
+            collection-bibtexextra
+            collection-langenglish
+            collection-plaingeneric
+            collection-binextra
+            collection-mathscience
             standalone
-            texlive-latex-extra
-            texlive-fonts-recommended
-            texlive-latex-recommended
-            texlive-pictures
-            texlive-science
-            texlive-xetex
-            texlive-luatex
-            texlive-bibtex-extra
-            texlive-lang-english
-            texlive-plain-generic
+            metafont
+            mfware
+          package-file: |
+            tools
+            geometry
+            graphics
+            hyperref
+          update-all-packages: true
           install-fonts: true
+          path: custom-texlive
 
       - name: 📊 Setup R
         uses: r-lib/actions/setup-r@v2
@@ -143,7 +167,7 @@ jobs:
           source("install_packages.R")
 
       - name: 🛠️ Install Linux Dependencies
-        if: ${{ runner.os == 'Linux' }}
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           echo "🔄 Installing Linux dependencies..."
@@ -183,7 +207,7 @@ jobs:
           key: ${{ runner.os }}-inkscape-${{ hashFiles('**/*.svg') }}
 
       - name: 🎨 Install Inkscape (Linux)
-        if: ${{ runner.os == 'Linux' && steps.cache-inkscape.outputs.cache-hit != 'true' }}
+        if: runner.os == 'Linux' && steps.cache-inkscape.outputs.cache-hit != 'true'
         shell: bash
         run: |
           sudo add-apt-repository ppa:inkscape.dev/stable -y
@@ -191,12 +215,32 @@ jobs:
           sudo apt-get install inkscape -y
 
       - name: 🎨 Install Inkscape (Windows)
-        if: ${{ runner.os == 'Windows' && steps.cache-inkscape.outputs.cache-hit != 'true' }}
+        if: runner.os == 'Windows' && steps.cache-inkscape.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           Write-Output "🔄 Installing Inkscape..."
           choco install inkscape -y
           Write-Output "✅ Inkscape installed"
+
+      # Cache compilation artifacts
+      - name: 💾 Cache compilation artifacts
+        uses: actions/cache@v3
+        with:
+          path: |
+            **/_cache
+            **/.quarto
+            **/.jupyter_cache
+          key: ${{ runner.os }}-compilation-${{ hashFiles('**/*.qmd', '**/*.ipynb', '**/*.md') }}
+          restore-keys: |
+            ${{ runner.os }}-compilation-
+
+      # Cache Python dependencies for PDF compression
+      - name: 💾 Cache Python PDF tools
+        if: inputs.target == 'main' && runner.os == 'Linux'
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-pdf-${{ hashFiles('**/scripts/quarto_publish/requirements.txt') }}
 
       # Cache Quarto build outputs
       - name: 💾 Cache Quarto build
@@ -211,7 +255,7 @@ jobs:
         uses: quarto-dev/quarto-actions/render@v2
 
       - name: 📤 Upload artifact
-        if: ${{ github.event_name == 'pull_request' }}
+        if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: _book-${{ inputs.os }}
@@ -219,20 +263,20 @@ jobs:
 
       # Main-only steps (Linux only)
       - name: 🐍 Setup Python for PDF compression
-        if: ${{ inputs.target == 'main' && runner.os == 'Linux' }}
+        if: inputs.target == 'main' && runner.os == 'Linux'
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
 
       - name: 📦 Install Ghostscript
-        if: ${{ inputs.target == 'main' && runner.os == 'Linux' }}
+        if: inputs.target == 'main' && runner.os == 'Linux'
         shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install -y ghostscript
 
       - name: 📄 Check and Compress PDF
-        if: ${{ inputs.target == 'main' && runner.os == 'Linux' }}
+        if: inputs.target == 'main' && runner.os == 'Linux'
         shell: bash
         run: |
           set -e  # Exit on any error
@@ -240,7 +284,7 @@ jobs:
           if [ ! -f "./_book/Machine-Learning-Systems.pdf" ]; then
             echo "❌ PDF file not found!"
             exit 1
-          }
+          fi
           
           python3 ./scripts/quarto_publish/gs_compress_pdf.py \
             -i ./_book/Machine-Learning-Systems.pdf \
@@ -250,12 +294,12 @@ jobs:
           if [ ! -f "./_book/ebook.pdf" ]; then
             echo "❌ PDF compression failed!"
             exit 1
-          }
+          fi
           
           mv ./_book/ebook.pdf ./_book/Machine-Learning-Systems.pdf
 
       - name: 🚀 Stage to Dev Site
-        if: ${{ inputs.target == 'dev' && runner.os == 'Linux' }}
+        if: inputs.target == 'dev' && runner.os == 'Linux'
         uses: cpina/github-action-push-to-another-repository@v1.7.2
         env:
           SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
@@ -270,13 +314,39 @@ jobs:
             📚 Push dev branch build
 
       - name: 🚀 Deploy to GitHub Pages
-        if: ${{ inputs.target == 'main' && runner.os == 'Linux' }}
+        if: inputs.target == 'main' && runner.os == 'Linux'
         uses: quarto-dev/quarto-actions/publish@v2
         with:
           target: gh-pages
           render: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Add comprehensive debug artifacts
+      - name: 📦 Collect Debug Artifacts
+        if: always()  # Run even if previous steps failed
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-${{ inputs.target }}-${{ inputs.os }}
+          path: |
+            _book/**
+            .quarto/**
+            **/_cache/**
+            **/logs/**
+            **/*.log
+            **/.jupyter_cache/**
+            .Rcheck/**
+            **/*.Rout
+            custom-texlive/**/*.log
+            ~/.TinyTeX/texmf-var/log/**
+            **/.texlive/**/*.log
+            **/texmf-var/log/**
+            **/*.aux
+            **/*.blg
+            **/*.fls
+            **/*.fdb_latexmk
+          compression-level: 9  # Maximum compression
+          retention-days: 5  # Keep for 5 days
 
       - name: 📋 Build Summary
         shell: pwsh
