@@ -65,17 +65,42 @@ jobs:
           ref: ${{ inputs.target }}
           fetch-depth: 0
 
+      # Cache Quarto
+      - name: 💾 Cache Quarto
+        uses: actions/cache@v3
+        id: cache-quarto
+        with:
+          path: |
+            ~/.local/share/quarto
+            ~/AppData/Local/quarto  # Windows path
+          key: ${{ runner.os }}-quarto-${{ inputs.quarto-version }}
+
       - name: 📦 Setup Quarto
+        if: steps.cache-quarto.outputs.cache-hit != 'true'
         uses: quarto-dev/quarto-actions/setup@v2
         with:
           version: ${{ inputs.quarto-version }}
           tinytex: true
 
-      - name: 📦 Install TeX Live (with required packages)
+      # Cache TeX Live
+      - name: 💾 Cache TeX Live
+        uses: actions/cache@v3
+        id: cache-texlive
+        with:
+          path: |
+            ~/.texlive
+            ~/AppData/Roaming/TinyTeX  # Windows path
+          key: ${{ runner.os }}-texlive-${{ hashFiles('**/*.tex') }}
+          restore-keys: |
+            ${{ runner.os }}-texlive-
+
+      - name: 📦 Install TeX Live
+        if: steps.cache-texlive.outputs.cache-hit != 'true'
         uses: teatimeguest/setup-texlive-action@v2
         with:
           packages: >-
-            scheme-basic
+            scheme-full
+            standalone
             texlive-latex-extra
             texlive-fonts-recommended
             texlive-latex-recommended
@@ -102,6 +127,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-r-
 
+      # Cache Linux system packages
+      - name: 💾 Cache APT packages
+        if: runner.os == 'Linux'
+        uses: actions/cache@v3
+        with:
+          path: ~/.apt-cache
+          key: ${{ runner.os }}-apt-${{ hashFiles('**/workflow.yml') }}
+
       - name: 📦 Install R Dependencies
         shell: Rscript {0}
         run: |
@@ -115,7 +148,8 @@ jobs:
         run: |
           echo "🔄 Installing Linux dependencies..."
           sudo apt-get update
-          sudo apt-get install -y \
+          mkdir -p ~/.apt-cache
+          sudo apt-get -o dir::cache::archives="$HOME/.apt-cache" install -y \
             libpangoft2-1.0-0 \
             fonts-dejavu \
             fonts-freefont-ttf \
@@ -138,8 +172,18 @@ jobs:
             libjpeg-dev
           echo "✅ Linux dependencies installed"
 
+      # Cache Inkscape
+      - name: 💾 Cache Inkscape
+        uses: actions/cache@v3
+        id: cache-inkscape
+        with:
+          path: |
+            ~/.config/inkscape
+            ~/AppData/Roaming/inkscape  # Windows path
+          key: ${{ runner.os }}-inkscape-${{ hashFiles('**/*.svg') }}
+
       - name: 🎨 Install Inkscape (Linux)
-        if: ${{ runner.os == 'Linux' }}
+        if: ${{ runner.os == 'Linux' && steps.cache-inkscape.outputs.cache-hit != 'true' }}
         shell: bash
         run: |
           sudo add-apt-repository ppa:inkscape.dev/stable -y
@@ -147,12 +191,21 @@ jobs:
           sudo apt-get install inkscape -y
 
       - name: 🎨 Install Inkscape (Windows)
-        if: ${{ runner.os == 'Windows' }}
+        if: ${{ runner.os == 'Windows' && steps.cache-inkscape.outputs.cache-hit != 'true' }}
         shell: pwsh
         run: |
           Write-Output "🔄 Installing Inkscape..."
           choco install inkscape -y
           Write-Output "✅ Inkscape installed"
+
+      # Cache Quarto build outputs
+      - name: 💾 Cache Quarto build
+        uses: actions/cache@v3
+        with:
+          path: _book
+          key: ${{ runner.os }}-quarto-book-${{ hashFiles('**/*.qmd', '**/*.ipynb', '**/*.bib') }}
+          restore-keys: |
+            ${{ runner.os }}-quarto-book-
 
       - name: 🔨 Render Quarto Project
         uses: quarto-dev/quarto-actions/render@v2
@@ -187,7 +240,7 @@ jobs:
           if [ ! -f "./_book/Machine-Learning-Systems.pdf" ]; then
             echo "❌ PDF file not found!"
             exit 1
-          fi
+          }
           
           python3 ./scripts/quarto_publish/gs_compress_pdf.py \
             -i ./_book/Machine-Learning-Systems.pdf \
@@ -197,7 +250,7 @@ jobs:
           if [ ! -f "./_book/ebook.pdf" ]; then
             echo "❌ PDF compression failed!"
             exit 1
-          fi
+          }
           
           mv ./_book/ebook.pdf ./_book/Machine-Learning-Systems.pdf
 
