@@ -1,4 +1,4 @@
-name: 'Quarto Build'
+name: '📚 Quarto Build'
 
 on:
   workflow_call:
@@ -10,23 +10,25 @@ on:
       os:
         required: true
         type: string
-        description: 'Operating system (ubuntu-latest/windows-latest)'
+        description: 'Operating system to run on (ubuntu-latest/windows-latest)'
       quarto-version:
         required: false
         type: string
         default: '1.7.13'
+        description: 'Version of Quarto to use'
       r-version:
         required: false
         type: string
         default: '4.3.2'
+        description: 'Version of R to use'
       target:
         required: true
         type: string
-        description: 'Target branch (dev/main)'
+        description: 'Target branch (dev/main) - determines build behavior'
     secrets:
       SSH_DEPLOY_KEY:
         required: true
-
+        
 permissions:
   contents: write
   pages: write
@@ -34,104 +36,149 @@ permissions:
 jobs:
   build:
     runs-on: ${{ inputs.os }}
-    environment: ${{ inputs.environment }}
+    environment:
+      name: ${{ inputs.environment }}
     
     steps:
-      - name: Validate Branch
-        shell: bash
+      - name: 🔍 Validate inputs
+        shell: pwsh
         run: |
-          if [[ "${{ inputs.target }}" != "dev" && "${{ inputs.target }}" != "main" ]]; then
-            echo "❌ Target must be 'dev' or 'main'"
+          if (("${{ inputs.target }}" -ne "dev") -and ("${{ inputs.target }}" -ne "main")) {
+            Write-Error "❌ Target must be either 'dev' or 'main'"
             exit 1
-          fi
-          if [[ "${{ inputs.target }}" == "main" && "${{ github.ref }}" != "refs/heads/main" ]]; then
-            echo "❌ Main build requires main branch"
-            exit 1
-          fi
-          if [[ "${{ inputs.target }}" == "dev" && "${{ github.ref }}" != "refs/heads/dev" ]]; then
-            echo "❌ Dev build requires dev branch"
-            exit 1
-          fi
-          echo "✅ Branch validation passed"
+          }
+          Write-Output "✅ Input validation passed"
 
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - name: 🔍 Verify branch
+        shell: pwsh
+        run: |
+          if (("${{ inputs.target }}" -eq "main") -and ("${{ github.ref }}" -ne "refs/heads/main")) {
+            Write-Error "❌ Main build can only run on the main branch"
+            exit 1
+          }
+          if (("${{ inputs.target }}" -eq "dev") -and ("${{ github.ref }}" -ne "refs/heads/dev")) {
+            Write-Error "❌ Dev build can only run on the dev branch"
+            exit 1
+          }
+          Write-Output "✅ Branch verification passed"
+
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v3
         with:
           ref: ${{ inputs.target }}
           fetch-depth: 0
 
-      # Quarto Setup
-      - name: Cache Quarto
-        id: cache-quarto
+      # Cache and setup Quarto
+      - name: 💾 Cache Quarto
         uses: actions/cache@v3
+        id: cache-quarto
         with:
           path: |
             ~/.local/share/quarto
             ~/AppData/Local/quarto
           key: quarto-${{ runner.os }}-${{ inputs.quarto-version }}
 
-      - name: Setup Quarto
+      - name: 📦 Setup Quarto
         if: steps.cache-quarto.outputs.cache-hit != 'true'
         uses: quarto-dev/quarto-actions/setup@v2
         with:
           version: ${{ inputs.quarto-version }}
 
-      # R Setup
-      - name: Cache R Packages
+      # Cache and setup TeX Live
+      - name: 💾 Cache TeX Live
+        uses: actions/cache@v3
+        id: cache-texlive
+        with:
+          path: |
+            ~/.texlive
+            ~/.TinyTeX
+            ~/AppData/Roaming/TinyTeX
+          key: texlive-${{ runner.os }}-${{ hashFiles('**/*.qmd', '**/*.tex') }}
+
+      - name: 📝 Install TinyTeX (Linux)
+        if: runner.os == 'Linux' && steps.cache-texlive.outputs.cache-hit != 'true'
+        run: |
+          quarto install tinytex
+          echo "$HOME/.TinyTeX/bin/x86_64-linux" >> $GITHUB_PATH
+
+      - name: 📝 Install TinyTeX (Windows)
+        if: runner.os == 'Windows' && steps.cache-texlive.outputs.cache-hit != 'true'
+        uses: r-lib/actions/setup-tinytex@v2
+        
+      - name: 📦 Install & Update TeX Live
+        if: steps.cache-texlive.outputs.cache-hit != 'true'
+        uses: teatimeguest/setup-texlive-action@v3
+        with:
+          packages: |
+            scheme-basic
+            collection-basic
+            collection-latex
+            collection-latexrecommended
+            collection-latexextra
+            collection-fontsrecommended
+            collection-pictures
+            collection-xetex
+            collection-luatex
+            collection-bibtexextra
+            collection-langenglish
+            koma-script
+            standalone
+            pgf
+            tikz-cd
+            pgfplots
+            preview
+
+      # Cache and setup R
+      - name: 💾 Cache R packages
         id: cache-r
         uses: actions/cache@v3
         with:
           path: ${{ runner.os == 'Windows' && 'C:/Users/runneradmin/Documents/R/win-library' || '~/R/library' }}
           key: r-${{ runner.os }}-${{ inputs.r-version }}-${{ hashFiles('**/install_packages.R') }}
 
-      - name: Setup R
+      - name: 📊 Setup R
         if: steps.cache-r.outputs.cache-hit != 'true'
         uses: r-lib/actions/setup-r@v2
         with:
           r-version: ${{ inputs.r-version }}
           use-public-rspm: true
 
-      - name: Install R Dependencies
+      - name: 📦 Install R Dependencies
         if: steps.cache-r.outputs.cache-hit != 'true'
         shell: Rscript {0}
         run: |
-          install.packages("remotes")
+          options(repos = c(CRAN = "https://cran.rstudio.com"))
+          install.packages(c("remotes"))
           source("install_packages.R")
 
-      # TeX Setup
-      - name: Cache TeX
-        id: cache-tex
+      # Cache and install system dependencies
+      - name: 💾 Cache APT packages
+        if: runner.os == 'Linux'
+        id: cache-apt
         uses: actions/cache@v3
         with:
-          path: |
-            ~/.texlive
-            ~/.TinyTeX
-            ~/AppData/Roaming/TinyTeX
-          key: tex-${{ runner.os }}-${{ hashFiles('**/*.qmd', '**/*.tex') }}
+          path: ~/.apt-cache
+          key: apt-${{ runner.os }}-${{ hashFiles('**/workflow.yml') }}
 
-      - name: Setup TinyTeX
-        if: steps.cache-tex.outputs.cache-hit != 'true'
-        uses: r-lib/actions/setup-tinytex@v2
-
-      - name: Install TeX Packages
-        if: steps.cache-tex.outputs.cache-hit != 'true'
+      - name: 🛠️ Install Linux Dependencies
+        if: runner.os == 'Linux' && steps.cache-apt.outputs.cache-hit != 'true'
+        shell: bash
         run: |
-          tlmgr install \
-            babel-english \
-            collection-latex \
-            collection-fontsrecommended \
-            collection-latexrecommended \
-            pgf \
-            pgfplots \
-            standalone \
-            xcolor
-
-      # System Dependencies
-      - name: Install Linux Dependencies
-        if: runner.os == 'Linux'
-        run: |
+          echo "🔄 Installing Linux dependencies..."
           sudo apt-get update
-          sudo apt-get install -y \
+          mkdir -p ~/.apt-cache
+          sudo apt-get -o dir::cache::archives="$HOME/.apt-cache" install -y \
+            libpangoft2-1.0-0 \
+            fonts-dejavu \
+            fonts-freefont-ttf \
+            libpango-1.0-0 \
+            libpangocairo-1.0-0 \
+            libcogl-pango-dev \
+            pango1.0-tools \
+            libcairo2 \
+            gdk-pixbuf2.0-bin \
+            libgdk-pixbuf2.0-dev \
+            librsvg2-bin \
             libcurl4-openssl-dev \
             libssl-dev \
             libxml2-dev \
@@ -140,52 +187,109 @@ jobs:
             libfribidi-dev \
             libfreetype6-dev \
             libtiff5-dev \
-            libjpeg-dev \
-            inkscape
+            libjpeg-dev
 
-      - name: Install Windows Dependencies
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          choco install inkscape -y
-
-      # Build Cache
-      - name: Cache Build
+      # Cache and setup Inkscape
+      - name: 💾 Cache Inkscape
         uses: actions/cache@v3
+        id: cache-inkscape
         with:
           path: |
-            _book
+            ~/.config/inkscape
+            ~/AppData/Roaming/inkscape
+          key: inkscape-${{ runner.os }}
+
+      - name: 🎨 Install Inkscape (Linux)
+        if: runner.os == 'Linux' && steps.cache-inkscape.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          sudo add-apt-repository ppa:inkscape.dev/stable -y
+          sudo apt-get update
+          sudo apt-get install inkscape -y
+
+      - name: 🎨 Install Inkscape (Windows)
+        if: runner.os == 'Windows' && steps.cache-inkscape.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          Write-Output "🔄 Installing Inkscape..."
+          choco install inkscape -y
+          Write-Output "✅ Inkscape installed"
+
+      # Cache compilation artifacts
+      - name: 💾 Cache compilation artifacts
+        uses: actions/cache@v3
+        id: cache-compilation
+        with:
+          path: |
             **/_cache
             **/.quarto
             **/.jupyter_cache
-          key: build-${{ runner.os }}-${{ hashFiles('**/*.qmd', '**/*.ipynb', '**/*.md', '_quarto.yml') }}
+          key: compilation-${{ runner.os }}-${{ hashFiles('**/*.qmd', '**/*.ipynb', '**/*.md', '_quarto.yml') }}
 
-      # Build Book
-      - name: Render Quarto Project
+      # Cache Quarto build outputs
+      - name: 💾 Cache Quarto build
+        uses: actions/cache@v3
+        id: cache-book
+        with:
+          path: _book
+          key: book-${{ runner.os }}-${{ hashFiles('**/*.qmd', '**/*.ipynb', '**/*.bib', '_quarto.yml') }}
+
+      - name: 🔨 Render Quarto Project
         uses: quarto-dev/quarto-actions/render@v2
 
-      # PDF Processing (Main only)
-      - name: Setup PDF Tools
+      - name: 📤 Upload artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: _book-${{ inputs.os }}
+          path: _book
+
+      # Main-only steps for PDF handling
+      - name: 💾 Cache Python PDF tools
         if: inputs.target == 'main' && runner.os == 'Linux'
+        id: cache-python-pdf
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: python-pdf-${{ runner.os }}-${{ hashFiles('**/scripts/quarto_publish/requirements.txt') }}
+
+      - name: 🐍 Setup Python for PDF compression
+        if: inputs.target == 'main' && runner.os == 'Linux' && steps.cache-python-pdf.outputs.cache-hit != 'true'
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: 📦 Install Ghostscript
+        if: inputs.target == 'main' && runner.os == 'Linux'
+        shell: bash
         run: |
+          sudo apt-get update
           sudo apt-get install -y ghostscript
-          python3 -m pip install -r scripts/requirements.txt
 
-      - name: Process PDF
+            - name: 📄 Check and Compress PDF
         if: inputs.target == 'main' && runner.os == 'Linux'
+        shell: bash
         run: |
-          if [ -f "_book/Machine-Learning-Systems.pdf" ]; then
-            python3 ./scripts/quarto_publish/gs_compress_pdf.py \
-              -i _book/Machine-Learning-Systems.pdf \
-              -o _book/ebook.pdf \
-              -s "/ebook"
-            mv _book/ebook.pdf _book/Machine-Learning-Systems.pdf
-          else
-            echo "⚠️ PDF not found - skipping compression"
+          set -e  # Exit on any error
+          
+          if [ ! -f "./_book/Machine-Learning-Systems.pdf" ]; then
+            echo "❌ PDF file not found!"
+            exit 1
           fi
+          
+          python3 ./scripts/quarto_publish/gs_compress_pdf.py \
+            -i ./_book/Machine-Learning-Systems.pdf \
+            -o ./_book/ebook.pdf \
+            -s "/ebook"
+          
+          if [ ! -f "./_book/ebook.pdf" ]; then
+            echo "❌ PDF compression failed!"
+            exit 1
+          fi
+          
+          mv ./_book/ebook.pdf ./_book/Machine-Learning-Systems.pdf
 
-      # Deployment
-      - name: Deploy to Dev Site
+      - name: 🚀 Stage to Dev Site
         if: inputs.target == 'dev' && runner.os == 'Linux'
         uses: cpina/github-action-push-to-another-repository@v1.7.2
         env:
@@ -195,10 +299,12 @@ jobs:
           destination-github-username: 'harvard-edge'
           destination-repository-name: 'cs249r_book_dev'
           user-email: khoshnevis.naeem@gmail.com
-          target-branch: main
-          target-directory: docs
+          target-branch: 'main'
+          target-directory: 'docs'
+          commit-message: |
+            📚 Push dev branch build
 
-      - name: Deploy to GitHub Pages
+      - name: 🚀 Deploy to GitHub Pages
         if: inputs.target == 'main' && runner.os == 'Linux'
         uses: quarto-dev/quarto-actions/publish@v2
         with:
@@ -207,18 +313,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Artifacts
-      - name: Upload Build Artifact
-        if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v4
-        with:
-          name: book-${{ inputs.os }}
-          path: _book
-          compression-level: 9
-          retention-days: 5
-
-      - name: Upload Debug Artifacts
-        if: always()
+      # Add comprehensive debug artifacts
+      - name: 📦 Collect Debug Artifacts
+        if: always()  # Run even if previous steps failed
         uses: actions/upload-artifact@v4
         with:
           name: debug-${{ inputs.target }}-${{ inputs.os }}
@@ -228,14 +325,29 @@ jobs:
             **/_cache/**
             **/logs/**
             **/*.log
-          compression-level: 9
-          retention-days: 2
+            **/.jupyter_cache/**
+            .Rcheck/**
+            **/*.Rout
+            custom-texlive/**/*.log
+            ~/.TinyTeX/texmf-var/log/**
+            **/.texlive/**/*.log
+            **/texmf-var/log/**
+            **/*.aux
+            **/*.blg
+            **/*.fls
+            **/*.fdb_latexmk
+          compression-level: 9  # Maximum compression
+          retention-days: 5  # Keep for 5 days
 
-      - name: Build Summary
+      - name: 📋 Build Summary
+        shell: pwsh
         run: |
-          echo "## Build Status" >> $GITHUB_STEP_SUMMARY
-          echo "- Target: ${{ inputs.target }}" >> $GITHUB_STEP_SUMMARY
-          echo "- OS: ${{ inputs.os }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Environment: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Quarto: ${{ inputs.quarto-version }}" >> $GITHUB_STEP_SUMMARY
-          echo "- R: ${{ inputs.r-version }}" >> $GITHUB_STEP_SUMMARY
+          @"
+          ## 📊 Build Status Summary
+          🎯 Target: ${{ inputs.target }}
+          💻 OS: ${{ inputs.os }}
+          🔧 Environment: ${{ inputs.environment }}
+          📚 Quarto Version: ${{ inputs.quarto-version }}
+          🔬 R Version: ${{ inputs.r-version }}
+          ⏰ Completed at: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+          "@ | Add-Content $env:GITHUB_STEP_SUMMARY
