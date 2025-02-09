@@ -12,6 +12,7 @@ required_packages <- c(
   "rmarkdown",  # Markdown rendering in R
   "tidyverse",  # 
   "reshape2",   #
+  "rsvg",       #
   "viridis",    #
   "xml2"        # Required for XML/HTML processing
 )
