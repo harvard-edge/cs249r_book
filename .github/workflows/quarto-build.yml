@@ -68,15 +68,15 @@ jobs:
           ref: ${{ inputs.target }}
           fetch-depth: 0
 
-      # Cache Quarto
+      # Cache and setup Quarto
       - name: 💾 Cache Quarto
         uses: actions/cache@v3
         id: cache-quarto
         with:
           path: |
             ~/.local/share/quarto
-            ~/AppData/Local/quarto  # Windows path
-          key: ${{ runner.os }}-quarto-${{ inputs.quarto-version }}
+            ~/AppData/Local/quarto
+          key: quarto-${{ runner.os }}-${{ inputs.quarto-version }}
 
       - name: 📦 Setup Quarto
         if: steps.cache-quarto.outputs.cache-hit != 'true'
@@ -84,7 +84,7 @@ jobs:
         with:
           version: ${{ inputs.quarto-version }}
 
-      # Cache TeX Live
+      # Cache and setup TeX Live
       - name: 💾 Cache TeX Live
         uses: actions/cache@v3
         id: cache-texlive
@@ -92,20 +92,17 @@ jobs:
           path: |
             ~/.texlive
             ~/.TinyTeX
-            ~/AppData/Roaming/TinyTeX  # Windows path
-          key: ${{ runner.os }}-texlive-${{ hashFiles('**/*.tex') }}
-          restore-keys: |
-            ${{ runner.os }}-texlive-
+            ~/AppData/Roaming/TinyTeX
+          key: texlive-${{ runner.os }}-${{ hashFiles('**/*.qmd', '**/*.tex') }}
 
-      # TinyTeX setup based on OS
       - name: 📝 Install TinyTeX (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.cache-texlive.outputs.cache-hit != 'true'
         run: |
           quarto install tinytex
           echo "$HOME/.TinyTeX/bin/x86_64-linux" >> $GITHUB_PATH
 
       - name: 📝 Install TinyTeX (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.cache-texlive.outputs.cache-hit != 'true'
         uses: r-lib/actions/setup-tinytex@v2
         
       - name: 📦 Install & Update TeX Live
@@ -113,58 +110,60 @@ jobs:
         uses: teatimeguest/setup-texlive-action@v3
         with:
           packages: |
-            scheme-basic      # Minimal base TeX system
-            collection-basic  # Core LaTeX functionality
-            collection-latex  # Standard LaTeX packages
-            collection-latexrecommended   # Common recommended packages
-            collection-latexextra         # Additional LaTeX utilities
-            collection-fontsrecommended   # Recommended fonts for LaTeX
-            collection-pictures   # Image handling support (TikZ, PGF, etc.)
-            collection-xetex      # XeLaTeX engine and utilities
-            collection-luatex     # LuaLaTeX engine and dependencies
-            collection-bibtexextra  # Advanced bibliography support
-            collection-langenglish  # English language support
-            babel              # Base babel package
-            babel-english     # English language support for babel
-            koma-script       # KOMA-Script classes
-            standalone       # Standalone package for figures
-            pgf              # Core PGF/TikZ package
-            tikz-cd         # Commutative diagrams
-            pgfplots        # Plotting functionality
-            preview         # Preview package
-          update-all-packages: true
+            scheme-basic
+            collection-basic
+            collection-latex
+            collection-latexrecommended
+            collection-latexextra
+            collection-fontsrecommended
+            collection-pictures
+            collection-xetex
+            collection-luatex
+            collection-bibtexextra
+            collection-langenglish
+            babel
+            babel-english
+            koma-script
+            standalone
+            pgf
+            tikz-cd
+            pgfplots
+            preview
+
+      # Cache and setup R
+      - name: 💾 Cache R packages
+        id: cache-r
+        uses: actions/cache@v3
+        with:
+          path: ${{ runner.os == 'Windows' && 'C:/Users/runneradmin/Documents/R/win-library' || '~/R/library' }}
+          key: r-${{ runner.os }}-${{ inputs.r-version }}-${{ hashFiles('**/install_packages.R') }}
 
       - name: 📊 Setup R
+        if: steps.cache-r.outputs.cache-hit != 'true'
         uses: r-lib/actions/setup-r@v2
         with:
           r-version: ${{ inputs.r-version }}
           use-public-rspm: true
 
-      - name: 💾 Cache R packages
-        uses: actions/cache@v3
-        with:
-          path: ${{ runner.os == 'Windows' && 'C:/Users/runneradmin/Documents/R/win-library' || '~/R/library' }}
-          key: ${{ runner.os }}-r-${{ hashFiles('**/install_packages.R') }}
-          restore-keys: |
-            ${{ runner.os }}-r-
-
-      # Cache Linux system packages
-      - name: 💾 Cache APT packages
-        if: runner.os == 'Linux'
-        uses: actions/cache@v3
-        with:
-          path: ~/.apt-cache
-          key: ${{ runner.os }}-apt-${{ hashFiles('**/workflow.yml') }}
-
       - name: 📦 Install R Dependencies
+        if: steps.cache-r.outputs.cache-hit != 'true'
         shell: Rscript {0}
         run: |
           options(repos = c(CRAN = "https://cran.rstudio.com"))
           install.packages(c("remotes"))
           source("install_packages.R")
 
-      - name: 🛠️ Install Linux Dependencies
+      # Cache and install system dependencies
+      - name: 💾 Cache APT packages
         if: runner.os == 'Linux'
+        id: cache-apt
+        uses: actions/cache@v3
+        with:
+          path: ~/.apt-cache
+          key: apt-${{ runner.os }}-${{ hashFiles('**/workflow.yml') }}
+
+      - name: 🛠️ Install Linux Dependencies
+        if: runner.os == 'Linux' && steps.cache-apt.outputs.cache-hit != 'true'
         shell: bash
         run: |
           echo "🔄 Installing Linux dependencies..."
@@ -191,17 +190,16 @@ jobs:
             libfreetype6-dev \
             libtiff5-dev \
             libjpeg-dev
-          echo "✅ Linux dependencies installed"
 
-      # Cache Inkscape
+      # Cache and setup Inkscape
       - name: 💾 Cache Inkscape
         uses: actions/cache@v3
         id: cache-inkscape
         with:
           path: |
             ~/.config/inkscape
-            ~/AppData/Roaming/inkscape  # Windows path
-          key: ${{ runner.os }}-inkscape-${{ hashFiles('**/*.svg') }}
+            ~/AppData/Roaming/inkscape
+          key: inkscape-${{ runner.os }}
 
       - name: 🎨 Install Inkscape (Linux)
         if: runner.os == 'Linux' && steps.cache-inkscape.outputs.cache-hit != 'true'
@@ -222,31 +220,21 @@ jobs:
       # Cache compilation artifacts
       - name: 💾 Cache compilation artifacts
         uses: actions/cache@v3
+        id: cache-compilation
         with:
           path: |
             **/_cache
             **/.quarto
             **/.jupyter_cache
-          key: ${{ runner.os }}-compilation-${{ hashFiles('**/*.qmd', '**/*.ipynb', '**/*.md') }}
-          restore-keys: |
-            ${{ runner.os }}-compilation-
-
-      # Cache Python dependencies for PDF compression
-      - name: 💾 Cache Python PDF tools
-        if: inputs.target == 'main' && runner.os == 'Linux'
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-pdf-${{ hashFiles('**/scripts/quarto_publish/requirements.txt') }}
+          key: compilation-${{ runner.os }}-${{ hashFiles('**/*.qmd', '**/*.ipynb', '**/*.md', '_quarto.yml') }}
 
       # Cache Quarto build outputs
       - name: 💾 Cache Quarto build
         uses: actions/cache@v3
+        id: cache-book
         with:
           path: _book
-          key: ${{ runner.os }}-quarto-book-${{ hashFiles('**/*.qmd', '**/*.ipynb', '**/*.bib') }}
-          restore-keys: |
-            ${{ runner.os }}-quarto-book-
+          key: book-${{ runner.os }}-${{ hashFiles('**/*.qmd', '**/*.ipynb', '**/*.bib', '_quarto.yml') }}
 
       - name: 🔨 Render Quarto Project
         uses: quarto-dev/quarto-actions/render@v2
@@ -258,9 +246,17 @@ jobs:
           name: _book-${{ inputs.os }}
           path: _book
 
-      # Main-only steps (Linux only)
-      - name: 🐍 Setup Python for PDF compression
+      # Main-only steps for PDF handling
+      - name: 💾 Cache Python PDF tools
         if: inputs.target == 'main' && runner.os == 'Linux'
+        id: cache-python-pdf
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: python-pdf-${{ runner.os }}-${{ hashFiles('**/scripts/quarto_publish/requirements.txt') }}
+
+      - name: 🐍 Setup Python for PDF compression
+        if: inputs.target == 'main' && runner.os == 'Linux' && steps.cache-python-pdf.outputs.cache-hit != 'true'
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
@@ -272,7 +268,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ghostscript
 
-      - name: 📄 Check and Compress PDF
+            - name: 📄 Check and Compress PDF
         if: inputs.target == 'main' && runner.os == 'Linux'
         shell: bash
         run: |
