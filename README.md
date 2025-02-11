@@ -6,30 +6,21 @@
 </p>
 
 <p align="center">
- <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/build-quarto.yml">
-   <img src="https://github.com/harvard-edge/cs249r_book/actions/workflows/build-quarto.yml/badge.svg" alt="Build Status"/>
- </a>
- <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/deploy.yml">
-   <img src="https://github.com/harvard-edge/cs249r_book/actions/workflows/deploy.yml/badge.svg" alt="Deploy Status"/>
- </a>
- <a href="https://github.com/harvard-edge/cs249r_book/releases">
-   <img src="https://img.shields.io/github/v/release/harvard-edge/cs249r_book" alt="Latest Release"/>
- </a>
- <a href="https://github.com/harvard-edge/cs249r_book/blob/main/LICENSE">
-   <img src="https://img.shields.io/github/license/harvard-edge/cs249r_book" alt="License"/>
- </a>
- <a href="https://github.com/harvard-edge/cs249r_book/commits/main">
-   <img src="https://img.shields.io/github/last-commit/harvard-edge/cs249r_book" alt="Last Commit"/>
- </a>
- <a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors">
-   <img src="https://img.shields.io/github/contributors/harvard-edge/cs249r_book" alt="Contributors"/>
- </a>
- <a href="https://github.com/harvard-edge/cs249r_book/issues">
-   <img src="https://img.shields.io/github/issues/harvard-edge/cs249r_book" alt="GitHub Issues"/>
- </a>
- <a href="https://harvard-edge.github.io/cs249r_book/">
-   <img src="https://img.shields.io/website?url=https://harvard-edge.github.io/cs249r_book/" alt="Website"/>
- </a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/workflow-controller.yml">
+    <img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/workflow-controller.yml?label=Build" alt="Build Status"/>
+  </a>
+  <a href="https://harvard-edge.github.io/cs249r_book/">
+    <img src="https://img.shields.io/website?url=https://harvard-edge.github.io/cs249r_book/&label=Website" alt="Website"/>
+  </a>
+  <a href="https://github.com/harvard-edge/cs249r_book/commits/main">
+    <img src="https://img.shields.io/github/last-commit/harvard-edge/cs249r_book/main?label=Latest%20Release" alt="Main Branch Updated"/>
+  </a>
+  <a href="https://github.com/harvard-edge/cs249r_book/commits/main">
+    <img src="https://img.shields.io/github/last-commit/harvard-edge/cs249r_book?label=Last%20Commit" alt="Last Commit"/>
+  </a>
+  <a href="https://github.com/harvard-edge/cs249r_book">
+    <img src="https://img.shields.io/github/all-contributors/harvard-edge/cs249r_book?color=ee8449&label=Contributors" alt="Contributors"/>
+  </a>
 </p>
 
 ---
