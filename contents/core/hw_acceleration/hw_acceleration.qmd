@@ -692,15 +692,56 @@ This approach minimizes input reloads, making it highly efficient for workloads 
 
 Modern ML accelerators often implement multiple or hybrid dataflow strategies, selecting the most appropriate pattern based on the layer type and model structure. This flexibility allows for better resource utilization and reduced memory overhead, improving both performance and energy efficiency. However, optimizing execution at the dataflow level is only part of the challenge. To fully understand memory system performance, we must next examine how data is managed across different levels of storage hierarchy in an ML accelerator.
 
-### Summary
+### Model Memory Pressure
 
-The four fundamental architectural primitives---vector operations, matrix operations, dataflow patterns, and special function units---are the basis of modern machine learning accelerators. Each primitive addresses a critical aspect of neural network computation: vector operations enable efficient element-wise processing, matrix operations handle structured parallel transformations, dataflow patterns optimize data movement through memory hierarchies, and special function units accelerate essential non-linear computations.
+The memory demands of machine learning models vary significantly depending on their architecture and computational structure. While all deep learning models rely on large parameter sets and high data movement, the way these models interact with memory systems is distinct. Understanding these differences is crucial for designing accelerators that efficiently handle diverse ML workloads.  
 
-While modern ML accelerators implement many specialized capabilities like quantization engines, sparsity accelerators, and advanced memory management units, which we will cover later in this chapter, these four primitives remain fundamental because they:
+#### Multilayer Perceptrons (MLPs)
 
-1. Address the core computational patterns present in virtually all neural networks
-2. Maintain relevance across multiple hardware generations
-3. Provide building blocks for more complex acceleration strategies
-4. Enable systematic analysis of accelerator architectures
+Multilayer perceptrons (MLPs), also referred to as fully connected networks, are among the simplest neural network architectures. Each layer in an MLP consists of a dense matrix multiplication, where every neuron is connected to all neurons in the previous layer. This results in high memory bandwidth demands for weights, since every input activation interacts with all neurons in the subsequent layer.  
 
-The following section build upon these fundamentals to explore advanced architectural features and complete accelerator designs, showing how these primitives combine with specialized units to create efficient ML hardware.
+From a memory perspective, MLPs are characterized by:  
+
+- Large, dense weight matrices, requiring frequent access to off-chip memory when model sizes exceed on-chip capacity.  
+- Low activation reuse, as each input typically contributes to a small set of computations before being discarded.  
+- Sequential memory access patterns, making them more cache-friendly compared to sparse workloads.  
+
+Although MLPs are relatively bandwidth-heavy, their regular and predictable memory access patterns make them easier to optimize. Accelerators handling MLP workloads often prefetch weights efficiently, leveraging streaming memory accesses and fast SRAM caches to sustain high throughput.  
+
+#### Convolutional Neural Networks (CNNs)
+
+Convolutional neural networks (CNNs) are widely used in image processing and computer vision tasks. Unlike MLPs, which require dense matrix multiplications, CNNs process input feature maps using small filter kernels that slide across the image. This localized computation structure results in high spatial data reuse, where the same input pixels contribute to multiple convolutions.  
+
+From a memory standpoint, CNNs exhibit:  
+
+- Small weight footprints, as convolution kernels are reused extensively across an entire input image.  
+- High activation reuse, allowing for efficient caching of input feature maps in on-chip memory.  
+- Spatial locality, making CNNs highly compatible with tiling strategies that optimize memory movement.  
+
+Since CNN weights are typically much smaller than those of MLPs, accelerators can store filter kernels entirely in fast local memory, reducing off-chip memory accesses. However, the challenge lies in efficiently handling large activation maps, which must be stored, retrieved, and reused multiple times during execution. CNN accelerators often employ tiling techniques, where feature maps are split into smaller regions that fit within on-chip buffers, reducing the need to frequently access slower external memory.  
+
+#### Transformer Networks
+
+Transformers have become the dominant architecture for natural language processing and are increasingly used in other domains such as vision and speech recognition. Unlike CNNs, which rely on local computations, transformers perform global attention mechanisms, where each token in an input sequence can interact with all other tokens. This leads to irregular and bandwidth-intensive memory access patterns, as large key-value matrices must be fetched and updated frequently.  
+
+Memory challenges in transformers include:  
+
+- Large parameter sizes, often reaching hundreds of billions of parameters, far exceeding on-chip memory capacity.  
+- High memory bandwidth consumption, as attention layers require frequent access to large key-value matrices.  
+- Low data reuse, since attention operations dynamically determine which inputs interact, making caching strategies less effective.  
+
+Due to these demands, transformer models are often memory-bound rather than compute-bound. Accelerators optimized for transformers must rely on high-bandwidth memory (HBM), quantization techniques, and efficient memory partitioning to sustain high throughput. Additionally, attention caching and specialized tensor layouts help reduce redundant memory fetches.  
+
+#### Implications for ML Accelerators  
+
+The diverse memory requirements of MLPs, CNNs, and Transformers highlight the importance of tailoring memory architectures to specific workloads. @tbl-model-mem-compare compares the memory access patterns across these different models.
+
+| Model Type      | Weight Size    | Activation Reuse | Memory Access Pattern | Primary Bottleneck |
+|---------------------|-------------------|----------------------|---------------------------|------------------------|
+| MLP (Dense)    | Large, dense      | Low                  | Regular, sequential       | Bandwidth              |
+| CNN            | Small, reused     | High                 | Spatial locality          | Feature map movement   |
+| Transformer    | Massive, sparse   | Low                  | Irregular, high bandwidth | Memory capacity        |
+
+: Comparison of memory access characteristics across different ML models. {#tbl-model-mem-compare .striped .hover}
+
+Each model type presents unique challenges that influence accelerator design. MLPs benefit from fast streaming access, CNNs rely on local caching and tiling, and transformers demand high-bandwidth memory and specialized caching strategies. As ML workloads continue to grow, efficient memory management remains a key determinant of overall system performance.  
