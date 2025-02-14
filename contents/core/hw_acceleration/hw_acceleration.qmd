@@ -1009,20 +1009,223 @@ This equation illustrates the exponential growth of the search space, making bru
 
 ## Mapping Strategies  
 
-The sheer number of possible mapping configurations makes exhaustive search infeasible. Even a single layer in a model can have thousands of ways to order computation loops, hundreds of possible parallelization strategies, and exponentially growing memory placement choices across different levels of the hierarchy. The result is a combinatorial explosion, where small variations in mapping choices can lead to substantial differences in execution efficiency, memory traffic, and energy consumption.
+The sheer number of possible mapping configurations makes exhaustive search infeasible. Even for a single layer in a machine learning model, there exist thousands of ways to order computation loops, hundreds of parallelization strategies, and exponentially growing memory placement choices across different levels of the hierarchy. This results in a combinatorial explosion, where small variations in mapping decisions can lead to substantial differences in execution efficiency, memory traffic, and energy consumption.
 
-Given the impracticality of brute-force exploration, structured optimization approaches are necessary to efficiently navigate this space. Instead of blindly evaluating every possibility, modern AI accelerators rely on a combination of heuristic, analytical, and machine learning-based techniques to guide the search toward high-performance configurations. These strategies aim to balance computational throughput, minimize memory bottlenecks, and maximize resource utilization while adhering to the constraints imposed by hardware architectures.
+Given the impracticality of brute-force exploration, structured optimization techniques are essential for navigating this vast search space efficiently. Rather than evaluating every possibility, modern AI accelerators employ a combination of heuristic, analytical, and machine learning-based approaches to guide mapping decisions toward high-performance configurations. These strategies aim to balance computational throughput, minimize memory bottlenecks, and maximize resource utilization while adhering to hardware-specific constraints.
 
-Different AI accelerators demand different mapping approaches based on their execution models. GPUs, for example, rely on SIMT (Single Instruction, Multiple Threads) execution, requiring mappings that maximize warp-level parallelism while minimizing memory divergence. TPUs, in contrast, employ systolic arrays, favoring structured mappings that optimize data movement for matrix operations. Custom ASICs introduce even more specialized constraints, often requiring tailored dataflow architectures that align with specific workload characteristics.
+Mapping strategies are tightly coupled with the execution models of different AI accelerators. GPUs, for example, rely on SIMT (Single Instruction, Multiple Threads) execution, requiring mappings that enhance warp-level parallelism while minimizing memory divergence. TPUs, in contrast, leverage systolic arrays, favoring structured mappings that optimize data movement for matrix operations. Custom ASICs introduce even more specialized constraints, often necessitating tailored dataflow architectures that align with workload-specific requirements.
 
-To address these challenges, optimization techniques take different forms. Some rely on heuristics, where simple yet effective rules—such as loop transformations and greedy allocation methods—help find reasonable mappings without exhaustive search. Others leverage analytical models to estimate the trade-offs between computation, memory access, and data movement, allowing for informed decision-making when selecting mapping strategies. More recently, machine learning-driven approaches, including reinforcement learning and cost-model-based search, have emerged as powerful tools for optimizing mapping decisions dynamically based on workload characteristics and hardware constraints.
+To effectively optimize mapping strategies, different techniques are employed. Some rely on heuristics, where efficient yet simple rules—such as loop transformations and greedy allocation methods—provide practical solutions without exhaustive search. Others utilize analytical models to estimate trade-offs between computation, memory access, and data movement, enabling informed decision-making. More recently, machine learning-driven approaches, including reinforcement learning and cost-model-guided search, have emerged as powerful tools for dynamically optimizing mapping strategies based on workload characteristics and hardware constraints.
 
-### Core Mapping Optimizations
+As we explore general, layer-specific, and hybrid mapping strategies in the following sections, we will examine how different techniques balance efficiency, scalability, and adaptability in AI acceleration. Understanding these strategies is critical for designing hardware-aware optimizations that maximize the potential of modern AI accelerators.
+
+### General Mapping Strategies
+
+Efficient mapping strategies form the foundation of AI acceleration, influencing computational efficiency, memory utilization, and data movement. These strategies apply across various workloads, providing a structured approach to optimize execution. The key principles include optimizing dataflow, ensuring memory-aware tensor layouts, reusing intermediate computations through kernel fusion, and balancing computation vs. communication trade-offs.
+
+### **Data Movement Patterns**  
+
+While computational mapping determines where and when operations occur, its success depends heavily on how efficiently data is accessed and transferred across the memory hierarchy. Unlike traditional computing workloads, which often exhibit structured and predictable memory access patterns, machine learning workloads present irregular access behaviors due to frequent retrieval of weights, activations, and intermediate values.
+
+Even when computational units are mapped efficiently, poor data movement strategies can severely degrade performance, leading to frequent memory stalls and underutilized hardware resources. If data cannot be supplied to processing elements at the required rate, computational units remain idle, increasing latency, memory traffic, and energy consumption.
+
+To illustrate the impact of data movement inefficiencies, consider a typical matrix multiplication operation, which forms the backbone of many machine learning models:
+
+```python
+# Matrix multiplication where:
+# weights: [512 x 256] - model parameters
+# input:   [256 x 32]  - batch of activations
+# Z:       [512 x 32]  - output activations
+
+# Computing each output element Z[i,j]:
+for i in range(512):
+    for j in range(32):
+        for k in range(256):
+            Z[i,j] += weights[i,k] * input[k,j]
+```
+
+This computation reveals several critical dataflow challenges.  
+
+The first challenge is the number of memory accesses required. For each output $Z[i, j]$, the computation must fetch an entire row of weights from the weight matrix and a full column of activations from the input matrix. Since the weight matrix contains 512 rows and the input matrix contains 32 columns, this results in repeated memory accesses that place a significant burden on memory bandwidth.  
+
+The second challenge comes from weight reuse. The same weights are applied to multiple inputs, meaning that an ideal mapping strategy should maximize weight locality to avoid redundant memory fetches. Without proper reuse, the accelerator would waste bandwidth loading the same weights multiple times.  
+
+The third challenge involves the accumulation of intermediate results. Since each element in $Z[i,j]$ requires contributions from 256 different weight-input pairs, partial sums must be stored and retrieved before the final value is computed. If these intermediate values are stored inefficiently, the system will require frequent memory accesses, further increasing bandwidth demands.  
+
+A natural way to mitigate these challenges is to leverage SIMD and SIMT execution models, which allow multiple values to be fetched in parallel. However, even with these optimizations, data movement remains a bottleneck. The issue is not just how quickly data is retrieved but how often it must be moved and where it is placed within the memory hierarchy.  
+
+To address these constraints, accelerators implement dataflow strategies that determine which data remains fixed in memory and which data is streamed dynamically. These strategies aim to maximize reuse of frequently accessed data, thereby reducing the need for redundant memory fetches. The effectiveness of a given dataflow strategy depends on the specific workload—for example, deep convolutional networks benefit from keeping weights stationary, while fully connected layers may require a different approach.
+
+#### **Weight Stationary Pattern**  
+
+The **Weight Stationary** strategy keeps weights **fixed in local memory**, while input activations and partial sums are streamed through the system. This approach is particularly beneficial in **convolutional neural networks (CNNs)** and matrix multiplications, where the same set of weights is applied across multiple inputs. By ensuring weights remain stationary, this method **reduces redundant memory fetches**, which helps alleviate bandwidth bottlenecks and improves energy efficiency.
+
+A key advantage of the weight stationary approach is that it **maximizes weight reuse**, reducing the frequency of memory accesses to external storage. Since weight parameters are often shared across multiple computations, keeping them in local memory eliminates unnecessary data movement, lowering the overall energy cost of computation. This makes it particularly effective for architectures where **weights represent the dominant memory overhead**, such as systolic arrays and custom accelerators designed for deep learning.
+
+A simplified **Weight Stationary** implementation for matrix multiplication is illustrated below:
+
+```python
+# Weight Stationary Matrix Multiplication
+# - Weights remain fixed in local memory
+# - Input activations stream through
+# - Partial sums accumulate for final output
+
+for weight_block in weights:   # Load and keep weights stationary
+    load_to_local(weight_block)  # Fixed in local storage
+    for input_block in inputs:   # Stream inputs dynamically
+        for output_block in outputs:  # Compute results
+            output_block += compute(weight_block, input_block)  # Reuse weights across inputs
+```
+
+This implementation follows the core principles of weight stationary execution:
+
+- **Weights are loaded once into local memory** and remain fixed.
+- **Inputs are streamed dynamically**, ensuring minimal redundant memory accesses.
+- **Partial sums accumulate efficiently**, avoiding unnecessary data movement.
+
+By keeping weights fixed in local storage, **memory bandwidth requirements are significantly reduced**, as weights do not need to be reloaded for each new computation. Instead, the system efficiently reuses the stored weights across multiple input activations, allowing for **high throughput execution**. This makes weight stationary dataflow highly effective for workloads with **heavy weight reuse patterns**, such as **CNNs and matrix multiplications**.
+
+However, while this strategy reduces weight-related memory traffic, it introduces **trade-offs in input and output movement**. Since inputs must be streamed dynamically while weights remain fixed, the efficiency of this approach depends on **how well input activations can be delivered to the computational units** without causing stalls. Additionally, partial sums—representing intermediate results—must be carefully accumulated to avoid excessive memory traffic. The total performance gain depends on the **size of available on-chip memory**, as storing larger weight matrices locally can become a constraint in models with **millions or billions of parameters**.
+
+The weight stationary strategy is well-suited for workloads where **weights exhibit high reuse** and **memory bandwidth is a limiting factor**. It is commonly employed in **CNNs, systolic arrays, and matrix multiplication kernels**, where structured weight reuse leads to significant performance improvements. However, for models where input or output reuse is more critical, alternative dataflow strategies, such as **output stationary** or **input stationary**, may provide better trade-offs.
+
+#### **Output Stationary Pattern**  
+
+The **Output Stationary** strategy keeps **partial sums fixed in local memory**, while weights and input activations stream through the system. This approach is particularly effective for **fully connected layers, systolic arrays, and other operations where an output element accumulates contributions from multiple weight-input pairs**. By keeping partial sums stationary, this method **reduces redundant memory writes**, minimizing bandwidth consumption and improving energy efficiency.
+
+A key advantage of the output stationary approach is that it **optimizes accumulation efficiency**, ensuring that each output element is computed as efficiently as possible before being written to memory. Unlike **Weight Stationary**, which prioritizes weight reuse, **Output Stationary** execution is designed to **minimize memory bandwidth overhead caused by frequent writes of intermediate results**. This makes it well-suited for workloads where accumulation dominates the computational pattern, such as **fully connected layers and matrix multiplications** in transformer-based models.
+
+A simplified **Output Stationary** implementation for matrix multiplication is illustrated below:
+
+```python
+# Output Stationary Matrix Multiplication
+# - Partial sums remain in local memory
+# - Weights and input activations stream through dynamically
+# - Final outputs are written only once
+
+for output_block in outputs:   # Keep partial sums stationary
+    accumulator = 0             # Initialize accumulation buffer
+    for weight_block, input_block in zip(weights, inputs):  
+        accumulator += compute(weight_block, input_block)  # Accumulate partial sums
+    store_output(accumulator)  # Single write to memory
+```
+
+This implementation follows the core principles of output stationary execution:
+- **Partial sums are kept in local memory** throughout the computation.
+- **Weights and inputs are streamed dynamically**, ensuring that intermediate results remain locally accessible.
+- **Final outputs are written back to memory only once**, reducing unnecessary memory traffic.
+
+By **accumulating partial sums locally**, this approach eliminates excessive memory writes, improving overall system efficiency. In architectures such as **systolic arrays**, where computation progresses through a grid of processing elements, keeping partial sums stationary aligns naturally with **structured accumulation workflows**, reducing synchronization overhead.
+
+However, while **Output Stationary** reduces memory write traffic, it introduces **trade-offs in weight and input movement**. Since weights and activations must be streamed dynamically, the efficiency of this approach depends on **how well data can be fed into the system without causing stalls**. Additionally, parallel implementations must carefully **synchronize updates to partial sums**, especially in architectures where multiple processing elements contribute to the same output.
+
+The **Output Stationary** strategy is most effective for workloads where **accumulation is the dominant operation** and **minimizing intermediate memory writes is critical**. It is commonly employed in **fully connected layers, attention mechanisms, and systolic arrays**, where structured accumulation leads to significant performance improvements. However, for models where input reuse is more critical, alternative dataflow strategies, such as **Input Stationary**, may provide better trade-offs.
+
+#### **Input Stationary Pattern**  
+
+The **Input Stationary** strategy keeps **input activations fixed in local memory**, while weights and partial sums stream through the system. This approach is particularly effective for **batch processing, transformer models, and sequence-based architectures**, where input activations are reused across multiple computations. By ensuring that activations remain in local memory, this method **reduces redundant input fetches**, improving **data locality** and **minimizing memory traffic**.
+
+A key advantage of the **Input Stationary** approach is that it **maximizes input reuse**, reducing the frequency of memory accesses for activations. Since many models, especially those in natural language processing (NLP) and recommendation systems, **process the same input data across multiple computations**, keeping inputs stationary **eliminates unnecessary memory transfers**, thereby lowering energy consumption. This strategy is particularly useful when dealing with large batch sizes, where a single batch of input activations contributes to **multiple weight transformations**.
+
+A simplified **Input Stationary** implementation for matrix multiplication is illustrated below:
+
+```python
+# Input Stationary Matrix Multiplication
+# - Input activations remain in local memory
+# - Weights stream through dynamically
+# - Partial sums accumulate and are written out
+
+for input_block in inputs:   # Keep input activations stationary
+    load_to_local(input_block)  # Fixed in local storage
+    for weight_block in weights:   # Stream weights dynamically
+        for output_block in outputs:  # Compute results
+            output_block += compute(weight_block, input_block)  # Reuse inputs across weights
+```
+
+This implementation follows the core principles of input stationary execution:
+- **Input activations are loaded into local memory** and remain fixed during computation.
+- **Weights are streamed dynamically**, ensuring efficient application across multiple inputs.
+- **Partial sums are accumulated and written out**, optimizing memory bandwidth usage.
+
+By **keeping input activations stationary**, this strategy minimizes redundant memory accesses to input data, significantly reducing external memory bandwidth requirements. This is particularly beneficial in **transformer architectures**, where **each token in an input sequence is used across multiple attention heads and layers**. Additionally, in **batch processing scenarios**, keeping input activations in local memory **improves data locality**, making it well-suited for **fully connected layers and matrix multiplications**.
+
+However, while **Input Stationary** reduces memory traffic for activations, it introduces **trade-offs in weight and output movement**. Since weights must be streamed dynamically while inputs remain fixed, the efficiency of this approach depends on **how well weights can be delivered to the computational units without causing stalls**. Additionally, partial sums must be accumulated efficiently before being written back to memory, which may require **additional buffering mechanisms**.
+
+The **Input Stationary** strategy is most effective for workloads where **input activations exhibit high reuse**, and **memory bandwidth for inputs is a critical constraint**. It is commonly employed in **transformers, recurrent networks, and batch processing workloads**, where structured input reuse leads to significant performance improvements. However, for models where output accumulation is more critical, alternative dataflow strategies, such as **Output Stationary**, may provide better trade-offs.
+
+### Memory-Aware Tensor Layouts
+
+Efficient execution of machine learning workloads depends not only on how data moves (dataflow strategies) but also on how data is stored and accessed in memory. Tensor layouts—the way multidimensional data is arranged in memory—can significantly impact memory access efficiency, cache performance, and computational throughput. Poorly chosen layouts can lead to excessive memory stalls, inefficient cache usage, and increased data movement costs.
+
+In AI accelerators, tensor layout optimization is particularly important because data is frequently accessed in patterns dictated by the underlying hardware architecture. Choosing the right layout ensures that memory accesses align with hardware-friendly access patterns, minimizing overhead from costly memory transactions.
+
+While developers can sometimes manually specify tensor layouts, the choice is often determined automatically by deep learning frameworks (e.g., TensorFlow, PyTorch, JAX), compilers, or AI accelerator runtimes. Low-level optimization tools such as cuDNN (for NVIDIA GPUs), XLA (for TPUs), and MLIR (for custom accelerators) may rearrange tensor layouts dynamically to optimize performance. In high-level frameworks, layout transformations are typically applied transparently, but developers working with custom kernels or low-level libraries (e.g., CUDA, Metal, or OpenCL) may have direct control over tensor format selection.
+
+For example, in PyTorch, users can manually modify layouts using tensor.permute() or tensor.contiguous() to ensure efficient memory access. In TensorFlow, layout optimizations are often applied internally by the XLA compiler, choosing between NHWC (row-major) and NCHW (channel-major) based on the target hardware. Hardware-aware deep learning libraries, such as cuDNN for GPUs or OneDNN for CPUs, enforce specific memory layouts to maximize cache locality and SIMD efficiency. Ultimately, while developers may have some control over tensor layout selection, most layout decisions are driven by the compiler and runtime system, ensuring that tensors are stored in memory in a way that best suits the underlying hardware.
+
+#### **Row-Major Layout (NHWC - Batch, Height, Width, Channels)**  
+
+Row-major layout refers to the way multi-dimensional tensors are stored in memory, where elements are arranged **row by row**, ensuring that all values in a given row are placed **contiguously** before moving to the next row. This storage format is widely used in general-purpose CPUs and some deep learning frameworks because it **aligns naturally with sequential memory access patterns**, making it more **cache-efficient** for certain types of operations.
+
+To understand how row-major layout works, consider a **single RGB image** represented as a **tensor of shape (Height, Width, Channels)**. If the image has a size of **3 × 3 pixels** with **3 channels (RGB)**, the corresponding tensor is structured as **(3, 3, 3)**. The values are stored in memory as follows:
+
+$$
+I(0,0,0), I(0,0,1), I(0,0,2), I(0,1,0), I(0,1,1), I(0,1,2), I(0,2,0), I(0,2,1), I(0,2,2), \dots
+$$
+
+Each row is stored **contiguously**, meaning all pixel values in the first row are placed sequentially in memory before moving on to the second row. This ordering is advantageous because **CPUs and cache hierarchies** are optimized for **sequential memory access**. When data is accessed in a **row-wise fashion**, such as when applying element-wise operations like activation functions or basic arithmetic transformations, **memory fetches are efficient**, and cache utilization is maximized.
+
+The efficiency of row-major storage becomes particularly evident in **CPU-based deep learning workloads**, where operations such as **batch normalization, matrix multiplications, and element-wise arithmetic** frequently process **rows of data sequentially**. Since modern CPUs employ **cache prefetching mechanisms**, a row-major layout allows the **next required data values to be preloaded into cache ahead of execution**, reducing memory latency and improving overall computational throughput.
+
+However, row-major layout can introduce inefficiencies when performing **operations that require accessing data across channels rather than across rows**. Consider a **convolutional layer** that applies a filter across multiple channels of an input image. Since channel values are interleaved in row-major storage, the convolution operation must **jump across memory locations** to fetch all the necessary channel values for a given pixel. These **strided memory accesses** can be costly on hardware architectures that rely on **vectorized execution** and **coalesced memory access**, such as GPUs and TPUs.
+
+Despite these limitations, row-major layout remains a **dominant storage format** in **CPU-based deep learning frameworks**. TensorFlow, for instance, defaults to the **NHWC (row-major) format on CPUs**, ensuring that **cache locality is optimized for sequential processing**. However, when targeting GPUs, frameworks often **rearrange data dynamically** to take advantage of more efficient memory layouts, such as **channel-major storage**, which aligns better with parallelized computation.
+
+#### **Channel-Major Layout (NCHW - Batch, Channels, Height, Width)**  
+
+In contrast to row-major layout, **channel-major layout** arranges data in memory such that **all values for a given channel are stored together before moving to the next channel**. This format is particularly beneficial for **GPUs, TPUs, and other AI accelerators**, where **vectorized operations and memory coalescing** significantly impact computational efficiency.  
+
+To understand how channel-major layout works, consider the same **RGB image tensor** of size **(Height, Width, Channels) = (3, 3, 3)**. Instead of storing pixel values row by row, the data is structured **channel-first** in memory as follows:
+
+$$
+I(0,0,0), I(1,0,0), I(2,0,0), I(0,1,0), I(1,1,0), I(2,1,0), \dots, I(0,0,1), I(1,0,1), I(2,0,1), \dots, I(0,0,2), I(1,0,2), I(2,0,2), \dots
+$$
+
+In this format, **all red channel values for the entire image are stored first, followed by all green values, and then all blue values**. This ordering allows **hardware accelerators to efficiently load and process data across channels in parallel**, which is crucial for **convolution operations and SIMD (Single Instruction, Multiple Data) execution models**.
+
+The **advantage of channel-major layout** becomes clear when performing **convolutions in deep learning models**. Convolutional layers process images by applying a **shared set of filters** across all channels. When the data is stored in a **channel-major format**, a convolution kernel can **load an entire channel efficiently**, reducing the number of scattered memory fetches. This **reduces memory latency, improves throughput, and enhances data locality** for matrix multiplications, which are fundamental to deep learning workloads.
+
+Because **GPUs and TPUs rely on memory coalescing**—a technique where consecutive threads fetch contiguous memory addresses—**channel-major layout aligns naturally with the way these processors execute parallel computations**. For example, in **NVIDIA GPUs**, each thread in a warp (a group of threads executed simultaneously) processes different elements of the same channel, ensuring that memory accesses are efficient and reducing the likelihood of **strided memory accesses**, which can degrade performance.
+
+Despite its advantages in deep learning accelerators, **channel-major layout can introduce inefficiencies when running on general-purpose CPUs**. Since CPUs optimize for **sequential memory access**, storing all values for a single channel before moving to the next **disrupts cache locality for row-wise operations**. This is why **many deep learning frameworks (e.g., TensorFlow, PyTorch)** default to **row-major (NHWC) on CPUs and channel-major (NCHW) on GPUs**—optimizing for the strengths of each hardware type.
+
+Modern AI frameworks and compilers **often transform tensor layouts dynamically** depending on the execution environment. **For instance, TensorFlow and PyTorch automatically switch between NHWC and NCHW** based on whether a model is running on a **CPU, GPU, or TPU**, ensuring that the memory layout aligns with the most efficient execution path.
+
+#### **Comparing Row-Major and Channel-Major Layouts**  
+
+Both **row-major (NHWC)** and **channel-major (NCHW)** layouts serve distinct purposes in machine learning workloads, with their efficiency largely determined by the **hardware architecture, memory access patterns, and computational requirements**. The choice of layout directly influences **cache utilization, memory bandwidth efficiency, and processing throughput**. @tbl-major summarizes the differences between **row-major (NHWC)** and **channel-major (NCHW)** layouts in terms of performance trade-offs and hardware compatibility.
+
+| **Feature**                 | **Row-Major (NHWC)**                          | **Channel-Major (NCHW)**                     |
+|-----------------------------|----------------------------------------------|----------------------------------------------|
+| **Memory Storage Order**    | Pixels are stored row-by-row, channel interleaved | All values for a given channel are stored together first |
+| **Best for**                | CPUs, element-wise operations                | GPUs, TPUs, convolution operations          |
+| **Cache Efficiency**        | High cache locality for sequential row access | Optimized for memory coalescing across channels |
+| **Convolution Performance** | Requires strided memory accesses (inefficient on GPUs) | Efficient for GPU convolution kernels |
+| **Memory Fetching**         | Good for operations that process rows sequentially | Optimized for SIMD execution across channels |
+| **Default in Frameworks**   | Default on CPUs (e.g., TensorFlow NHWC)      | Default on GPUs (e.g., cuDNN prefers NCHW)  |
+
+: Comparison of row-major (NHWC) vs. channel-major (NCHW) layouts. {#tbl-major .striped .hover}
+
+The decision to use **row-major (NHWC) or channel-major (NCHW) layouts** is not always made manually by developers. Instead, **machine learning frameworks and AI compilers** often determine the optimal layout dynamically based on the **target hardware and operation type**. CPUs tend to favor **NHWC** due to cache-friendly sequential memory access, while GPUs perform better with **NCHW**, which reduces memory fetch overhead for deep learning computations.
+
+In practice, **modern AI compilers such as TensorFlow’s XLA and PyTorch’s TorchScript** perform **automatic layout transformations**, converting tensors between **NHWC and NCHW** as needed to optimize performance across different processing units. This ensures that deep learning models achieve the highest possible throughput without requiring developers to manually specify tensor layouts.
 
 ### Layer-Specific Mapping Strategies
 
 ### Hybrid & Adaptive Mapping Strategies
 
+## AI Compilers and Runtime Stack
+
 ## Extending Mapping to Multi-Chip AI Accelerators
 
-## AI Compilers and Runtime Stack
+## Conclusion
