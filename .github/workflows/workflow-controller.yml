@@ -29,7 +29,7 @@ jobs:
     needs: checkout
     uses: ./.github/workflows/lint-markdown.yml
 
-  # Metadata Update Jobs (Run Only After Merge to dev)
+  # Metadata Update Jobs (Run Only on Pushes to dev)
   update-changelog:
     needs: [structure-check, link-check, lint-markdown]
     if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
@@ -43,7 +43,7 @@ jobs:
   # Build Jobs
   build-dev:
     name: 🔧 Development Build
-    if: github.ref == 'refs/heads/dev'
+    if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
     needs: [update-changelog, update-contributors]
     strategy:
       matrix:
@@ -59,7 +59,7 @@ jobs:
   build-main:
     name: 🚀 Production Build
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    needs: [update-changelog, update-contributors]
+    needs: [structure-check, link-check, lint-markdown]
     uses: ./.github/workflows/quarto-build.yml
     with:
       environment: production
@@ -70,15 +70,12 @@ jobs:
 
   # Status Reporting
   report-status:
-    needs: [
-      structure-check, 
-      link-check, 
-      lint-markdown, 
-      update-changelog,
-      update-contributors,
-      build-main,
-      build-dev
-    ]
+    needs: >
+      ${{
+        github.ref == 'refs/heads/main' && fromJSON('["structure-check", "link-check", "lint-markdown", "build-main"]') ||
+        github.ref == 'refs/heads/dev' && fromJSON('["structure-check", "link-check", "lint-markdown", "update-changelog", "update-contributors", "build-dev"]') ||
+        fromJSON('["structure-check", "link-check", "lint-markdown"]')
+      }}
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -92,18 +89,29 @@ jobs:
             echo "- Link Check: ${{ needs.link-check.result == 'success' && '✅ Passed' || '❌ Failed' }}"
             echo "- Markdown Lint: ${{ needs.lint-markdown.result == 'success' && '✅ Passed' || '❌ Failed' }}"
             echo
-            echo "## 📝 Metadata Updates"
-            echo "- Changelog: ${{ needs.update-changelog.result == 'success' && '✅ Updated' || '❌ Failed' }}"
-            echo "- Contributors: ${{ needs.update-contributors.result == 'success' && '✅ Updated' || '❌ Failed' }}"
-            echo
+
+            if [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
+              echo "## 📝 Metadata Updates"
+              if [[ "${{ needs.update-changelog.result }}" ]]; then
+                echo "- Changelog: ${{ needs.update-changelog.result == 'success' && '✅ Updated' || '❌ Failed' }}"
+              fi
+              if [[ "${{ needs.update-contributors.result }}" ]]; then
+                echo "- Contributors: ${{ needs.update-contributors.result == 'success' && '✅ Updated' || '❌ Failed' }}"
+              fi
+              echo
+              echo "## 🔧 Development Build"
+              if [[ "${{ needs.build-dev.result }}" ]]; then
+                echo "- Dev Build: ${{ needs.build-dev.result == 'success' && '✅ Success' || '❌ Failed' }}"
+              fi
+            fi
+
             if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
               echo "## 🚀 Production Build"
-              echo "- Main Build: ${{ needs.build-main.result == 'success' && '✅ Success' || '❌ Failed' }}"
+              if [[ "${{ needs.build-main.result }}" ]]; then
+                echo "- Main Build: ${{ needs.build-main.result == 'success' && '✅ Success' || '❌ Failed' }}"
+              fi
             fi
-            if [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
-              echo "## 🔧 Development Build"
-              echo "- Dev Build: ${{ needs.build-dev.result == 'success' && '✅ Success' || '❌ Failed' }}"
-            fi
+
             echo
             echo "---"
             echo "⏰ Completed at: $(date '+%Y-%m-%d %H:%M:%S')"
@@ -119,16 +127,16 @@ jobs:
           [[ "${{ needs.link-check.result }}" != "success" ]] && FAILED=1
           [[ "${{ needs.lint-markdown.result }}" != "success" ]] && FAILED=1
           
-          # Check metadata updates
-          [[ "${{ needs.update-changelog.result }}" != "success" ]] && FAILED=1
-          [[ "${{ needs.update-contributors.result }}" != "success" ]] && FAILED=1
+          # Check metadata updates only if on dev branch
+          if [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
+            [[ "${{ needs.update-changelog.result }}" && "${{ needs.update-changelog.result }}" != "success" ]] && FAILED=1
+            [[ "${{ needs.update-contributors.result }}" && "${{ needs.update-contributors.result }}" != "success" ]] && FAILED=1
+            [[ "${{ needs.build-dev.result }}" && "${{ needs.build-dev.result }}" != "success" ]] && FAILED=1
+          fi
           
           # Check builds based on branch
           if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            [[ "${{ needs.build-main.result }}" != "success" ]] && FAILED=1
-          fi
-          if [[ "${{ github.ref }}" == "refs/heads/dev" ]]; then
-            [[ "${{ needs.build-dev.result }}" != "success" ]] && FAILED=1
+            [[ "${{ needs.build-main.result }}" && "${{ needs.build-main.result }}" != "success" ]] && FAILED=1
           fi
           
           if [[ $FAILED -eq 1 ]]; then
