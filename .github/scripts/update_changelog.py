@@ -73,7 +73,7 @@ def get_changes_in_dev_since(date_start, date_end=None):
     if date_end:
         cmd += ["--until", date_end]
     # Look for .qmd files anywhere in the contents directory and its subdirectories
-    cmd += ["dev", "--", "contents/**/*.qmd"]
+    cmd += ["origin/dev", "--", "contents/**/*.qmd"]
     return run_git_command(cmd)
 
 def generate_change_visual(added, removed, max_length=6):
