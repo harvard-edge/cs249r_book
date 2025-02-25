@@ -80,23 +80,27 @@ Machine learning models operate within a set of fundamental system constraints t
 
 These constraints are interdependent, meaning that optimizing for one factor may impact another. For example, reducing numerical precision can lower memory usage and improve inference speed but may introduce quantization errors that degrade accuracy. Similarly, aggressive pruning can reduce computation but may lead to diminished generalization if not carefully managed.
 
-### Toward Model Optimization
+## Three Core Dimensions of Model Optimization
 
-Model optimization is not a collection of isolated techniques but a structured process guided by both theoretical and practical considerations. The need for optimization arises from the fundamental constraints imposed by real-world machine learning systems, such as computational cost, memory limitations, energy efficiency, and latency requirements. Addressing these constraints effectively requires a systematic approach that categorizes optimization strategies along three fundamental dimensions: model representation, numerical precision, and structural efficiency.
+Machine learning models must balance accuracy, efficiency, and feasibility to operate effectively in real-world systems. As discussed in the previous section, optimization is necessary to address key system constraints such as computational cost, memory limitations, energy efficiency, and latency requirements. However, model optimization is not a single technique but a structured process that can be categorized into three fundamental dimensions: model representation optimization, numerical precision optimization, and structural efficiency optimization.
 
-#### Model Representation
+Each of these dimensions addresses a distinct aspect of efficiency. Model representation optimization focuses on modifying the architecture of the model itself to reduce redundancy while preserving accuracy. Numerical precision optimization improves efficiency by adjusting how numerical values are stored and computed, reducing the computational and memory overhead of machine learning operations. Structural efficiency optimization optimizes how computations are executed, ensuring that operations are performed efficiently across different hardware platforms.
+
+Understanding these three dimensions provides a structured framework for systematically improving model efficiency. Rather than applying ad hoc techniques, machine learning practitioners must carefully select optimizations based on their impact across these dimensions, considering trade-offs between accuracy, efficiency, and deployment constraints.
+
+### Model Representation
 
 The first dimension, model representation optimization, focuses on reducing redundancy in the structure of machine learning models. Large models often contain excessive parameters that contribute little to overall performance but significantly increase memory footprint and computational cost. Optimizing model representation involves techniques that remove unnecessary components while maintaining predictive accuracy. Common approaches include pruning, which eliminates redundant weights and neurons, and knowledge distillation, where a smaller model learns to approximate the behavior of a larger model. Additionally, automated architecture search methods refine model structures to balance efficiency and accuracy. These optimizations primarily impact how models are designed at an algorithmic level, ensuring that they remain effective while being computationally manageable.
 
-#### Numerical Precision
+### Numerical Precision
 
 The second dimension, numerical precision optimization, addresses how numerical values are represented and processed within machine learning models. Reducing the precision of computations can significantly lower the memory and computational requirements of a model, particularly for deep learning workloads. Quantization techniques map high-precision weights and activations to lower-bit representations, enabling efficient execution on hardware accelerators such as GPUs, TPUs, and specialized AI chips. Mixed-precision training dynamically adjusts precision levels during training to strike a balance between efficiency and accuracy. By carefully optimizing numerical precision, models can achieve substantial reductions in computational cost while maintaining acceptable levels of accuracy.
 
-#### Structural Efficiency
+### Structural Efficiency
 
 The third dimension, structural efficiency optimization, focuses on how computations are performed efficiently during both training and inference. A well-designed model structure is not sufficient if its execution is suboptimal. Many machine learning models contain redundancies in their computational graphs, leading to inefficiencies in how operations are scheduled and executed. Structural efficiency optimization involves techniques that exploit sparsity in both model weights and activations, factorize large computational components into more efficient forms, and dynamically adjust computation based on input complexity. These methods improve execution efficiency across different hardware platforms, reducing latency and power consumption. In addition to inference optimizations, structural efficiency also applies to training, where techniques such as gradient checkpointing and low-rank adaptation help reduce memory overhead and computational demands.
 
-#### Towards a Systematic Approach
+### The Tripartite Framework
 
 These three dimensions collectively provide a framework for understanding model optimization. While each category targets different aspects of efficiency, they are highly interconnected. Pruning, for example, primarily falls under model representation but also affects structural efficiency by reducing the number of operations performed during inference. Quantization reduces numerical precision but can also impact memory footprint and execution efficiency. Understanding these interdependencies is crucial for selecting the right combination of optimizations for a given system.
 
@@ -120,5 +124,588 @@ Table @tbl-constraint-opt-mapping summarizes how different system constraints ma
 
 : Mapping of system constraints to optimization dimensions. {#tbl-constraint-opt-mapping .striped .hover}
 
-
 This mapping highlights the interdependence between optimization strategies and real-world constraints. Although each system constraint primarily aligns with one or more optimization dimensions, the relationships are not strictly one-to-one. Many optimization techniques affect multiple constraints simultaneously. Structuring model optimization along these three dimensions and mapping techniques to specific system constraints enables practitioners to analyze trade-offs more effectively and select optimizations that best align with deployment requirements. The following sections explore each optimization dimension in detail, highlighting the key techniques and their impact on model efficiency.
+
+## Model Representation: Structure and Redundancy Reduction
+
+Model representation plays a fundamental role in determining the computational and memory efficiency of a machine learning system. The way a model is structured, not just in terms of the number of parameters but also how these parameters interact, directly affects its ability to scale, deploy efficiently, and generalize effectively. Optimizing model representation involves reducing redundancy, restructuring architectures for efficiency, and leveraging automated design methods to find optimal configurations.
+
+The primary goal of model representation optimization is to eliminate unnecessary complexity while preserving model performance. Many state-of-the-art models are designed to maximize accuracy with little regard for efficiency, leading to architectures with excessive parameters, redundant computations, and inefficient data flow. In real-world deployment scenarios, these inefficiencies translate into higher computational costs, increased memory usage, and slower inference times. Addressing these issues requires systematically restructuring the model to remove redundancy, minimize unnecessary computations, and ensure that every parameter contributes meaningfully to the task at hand.
+
+From a systems perspective, model representation optimization focuses on two key objectives. First, reducing redundancy by eliminating unnecessary parameters, neurons, or layers while preserving model accuracy. Many models are overparameterized, meaning that a smaller version could achieve similar performance with significantly lower computational overhead. Second, structuring computations efficiently to ensure that the model’s architecture aligns well with modern hardware capabilities, such as leveraging parallel processing and minimizing costly memory operations. An unoptimized model may be unnecessarily large, leading to slower inference times, higher energy consumption, and increased deployment costs. Conversely, an overly compressed model may lose too much predictive accuracy, making it unreliable for real-world use. The challenge in model representation optimization is to strike a balance between model size, accuracy, and efficiency, selecting techniques that reduce computational complexity while maintaining strong generalization.
+
+To systematically approach model representation optimization, we focus on four key techniques that have proven effective in balancing efficiency and accuracy. Pruning systematically removes parameters or entire structural components that contribute little to overall performance, reducing computational and memory overhead while preserving accuracy. Knowledge distillation transfers knowledge from a large, high-capacity model to a smaller, more efficient model, enabling smaller models to retain predictive power while reducing computational cost. Efficient model design involves creating architectures that are inherently compact and scalable rather than relying on post hoc optimizations. Techniques such as depthwise separable convolutions and early-exit networks fall into this category. Finally, Neural Architecture Search (NAS) automates the process of designing models optimized for specific constraints, leveraging machine learning itself to explore and refine model architectures.
+
+We focus on these four techniques because they represent distinct but complementary approaches to optimizing model representation. Pruning and knowledge distillation focus on reducing redundancy in existing models, while efficient model design and NAS address how to build optimized architectures from the ground up. Together, they provide a structured framework for understanding how to create machine learning models that are both accurate and computationally efficient. Each of these techniques offers a different approach to improving model efficiency, and in many cases, they can be combined to achieve even greater optimization. The following section begins with pruning, a foundational technique for eliminating redundancy in deep learning models.
+
+### Pruning
+
+Many state-of-the-art models contain millions—or even billions—of parameters, many of which contribute little to the final predictions. While these large models improve representational power and generalization, they also introduce significant inefficiencies that affect both training and deployment. From a machine learning systems perspective, large models present several challenges:
+
+1. **High Memory Requirements:** Large models consume substantial storage space, which limits their feasibility on resource-constrained devices such as smartphones, IoT devices, and embedded systems. Storing and loading these models can also create bandwidth bottlenecks in distributed ML pipelines.
+
+2. **Increased Computational Cost:** More parameters translate to higher inference latency and energy consumption, which is particularly problematic for real-time applications like autonomous systems, speech recognition, and mobile AI. Running unoptimized models on hardware accelerators such as GPUs and TPUs requires more compute cycles, increasing operational costs.
+
+3. **Scalability Limitations:** Training and deploying large models at scale is expensive in terms of compute, memory, and power. Large-scale distributed training demands high-bandwidth communication and storage, while inference in production environments becomes costly without optimizations.
+
+Despite these challenges, not all parameters in a model are necessary for maintaining accuracy. Many weights contribute minimally to the decision-making process, and their removal can drastically improve efficiency without significantly degrading performance. This motivates the need for pruning—a class of optimization techniques that systematically remove redundant parameters while preserving model accuracy.
+
+::: {.callout-note title="Definition of Pruning"}
+
+**Pruning** is a model optimization technique that removes **unnecessary parameters** from a neural network while maintaining a model's **predictive performance**. By systematically eliminating **redundant weights, neurons, or layers**, pruning reduces **model size and computational cost**, making it more efficient for **storage, inference, and deployment**.
+
+:::
+
+Pruning enables models to become smaller, faster, and more efficient without requiring fundamental changes to their architecture. By reducing redundancy, pruning directly addresses the memory, computation, and scalability challenges associated with deep learning systems, making it a key technique for efficient ML deployment across cloud, edge, and mobile platforms.
+
+#### Definition of Pruning
+
+Pruning is a model optimization technique that removes unnecessary parameters from a neural network while maintaining its predictive performance. By systematically eliminating redundant weights, neurons, or layers, pruning reduces the model’s size and computational requirements, making it more efficient for deployment. The objective is to retain the most important parameters while discarding those that contribute little to the overall computation.
+
+Pruning exploits the fact that many deep learning models are **overparameterized**. While large models are effective at capturing complex patterns, they often contain parameters that have minimal influence on the final output. These redundant parameters increase storage requirements, slow down inference, and consume additional energy. By identifying and removing them, pruning improves the efficiency of machine learning models without requiring fundamental changes to their architecture.
+
+Pruning can be applied at different stages of training:
+
+* **Post-training pruning:** Parameters are removed based on criteria such as their magnitude or contribution to the model’s loss function. The pruned model is then fine-tuned to recover any lost accuracy.
+
+* **During-training pruning:** Sparsity constraints are incorporated into the training process, encouraging the model to develop a more compact representation from the start.
+
+* **Dynamic pruning:** The network structure is adjusted in real-time based on input data, making pruning decisions adaptively rather than fixing them in advance.
+
+While pruning can substantially reduce the number of active parameters in a network, its effectiveness depends on how it is applied. Some methods remove individual weights without altering the model’s structure, while others eliminate entire neurons, channels, or layers to create a smaller, more hardware-friendly architecture. The choice of pruning technique impacts not only memory savings but also computational efficiency and compatibility with different hardware accelerators.
+
+#### Mathematical Formulation
+
+Pruning can be formally described as an optimization problem, where the goal is to reduce the number of parameters in a neural network while maintaining its predictive performance. Given a trained model with parameters $W$, pruning seeks to find a sparse version of the model, $\hat{W}$, that retains only the most important parameters. The objective can be expressed as:
+
+$$
+\min_{\hat{W}} \mathcal{L}(\hat{W}) \quad \text{subject to} \quad \|\hat{W}\|_0 \leq k
+$$
+
+where:
+
+- $\mathcal{L}(\hat{W})$ represents the model’s loss function after pruning.
+- $\hat{W}$ denotes the pruned model’s parameters.
+- $\|\hat{W}\|_0$ is the number of nonzero parameters in $\hat{W}$, constrained to a budget $k$.
+
+This formulation explicitly enforces sparsity, meaning that only a limited number of parameters remain in the pruned model. However, solving this problem exactly is computationally infeasible due to the discrete nature of the $\ell_0$-norm constraint. Finding the optimal subset of parameters to retain would require evaluating an exponential number of possible parameter configurations, making it impractical for deep networks with millions of parameters.
+
+To make pruning computationally feasible, practical methods replace the hard constraint on the number of remaining parameters with a soft regularization term that encourages sparsity. A common relaxation is to introduce an $\ell_1$-norm regularization penalty, leading to the following objective:
+
+$$
+\min_W \mathcal{L}(W) + \lambda \| W \|_1
+$$
+
+where $\lambda$ controls the degree of sparsity. The $\ell_1$-norm encourages smaller weight values and promotes sparsity but does not strictly enforce zero values. Other methods use iterative heuristics, where parameters with the smallest magnitudes are pruned in successive steps, followed by fine-tuning to recover lost accuracy.
+
+One of the key reasons pruning is effective is rooted in the Lottery Ticket Hypothesis (LTH) [@jonathan2019lottery]. The hypothesis suggests that within a large, overparameterized neural network, there exists a subnetwork---a "winning ticket"---that, when trained in isolation, can achieve comparable performance to the full model. In other words, instead of the full network being necessary for learning, a much smaller but well-initialized subset of weights can be just as effective.
+
+The implication of LTH for pruning is profound: rather than simply removing weights after training, it may be possible to identify "winning ticket" subnetworks early in training or even at initialization. This challenges the conventional pruning paradigm, which assumes that pruning is purely a post-training compression technique. Instead, LTH suggests that pruning may reveal the essential structure necessary for learning, meaning that training could be done directly on the sparse subnetwork rather than first training a dense model and then pruning it.
+
+#### Unstructured Pruning
+
+Unstructured pruning reduces the number of active parameters in a neural network by removing individual weights while preserving the overall network architecture. Many deep learning models are overparameterized, meaning they contain more weights than are strictly necessary for accurate predictions. During training, some connections become redundant, contributing little to the final computation. Pruning these weak connections can reduce memory requirements while preserving most of the model’s accuracy.
+
+Mathematically, unstructured pruning introduces sparsity into the weight matrices of a neural network. Let $W \in \mathbb{R}^{m \times n}$ represent a weight matrix in a given layer of a network. Pruning removes a subset of weights by applying a binary mask $M \in \{0,1\}^{m \times n}$, yielding a pruned weight matrix:
+
+$$
+\hat{W} = M \odot W
+$$
+
+where $\odot$ represents the element-wise Hadamard product. The mask $M$ is constructed based on a pruning criterion, typically weight magnitude. A common approach is magnitude-based pruning, which removes a fraction $s$ of the lowest-magnitude weights. This is achieved by defining a threshold $\tau$ such that:
+
+$$
+M_{i,j} =
+\begin{cases}
+1, & \text{if } |W_{i,j}| > \tau \\
+0, & \text{otherwise}
+\end{cases}
+$$
+
+where $\tau$ is chosen to ensure that only the largest $(1 - s)$ fraction of weights remain. This method assumes that larger-magnitude weights contribute more to the network’s function, making them preferable for retention.
+
+The primary advantage of unstructured pruning is memory efficiency. By reducing the number of nonzero parameters, pruned models require less storage, which is particularly beneficial when deploying models to embedded or mobile devices with limited memory. However, unstructured pruning does not necessarily improve computational efficiency on modern deep learning hardware. Standard GPUs and TPUs are optimized for dense matrix multiplications, and a sparse weight matrix often cannot fully utilize hardware acceleration unless specialized sparse computation kernels are available. Consequently, unstructured pruning is most beneficial when the goal is to compress a model for storage rather than to accelerate inference speed. While unstructured pruning improves model efficiency at the parameter level, it does not alter the structural organization of the network.
+
+#### Structured Pruning
+
+While unstructured pruning removes individual weights from a neural network, structured pruning eliminates entire computational units, such as neurons, filters, channels, or layers. This approach is particularly beneficial for hardware efficiency, as it produces smaller dense models that can be directly mapped to modern deep learning accelerators. Unlike unstructured pruning, which results in sparse weight matrices that require specialized execution kernels to exploit computational benefits, structured pruning leads to more efficient inference on general-purpose hardware by reducing the overall size of the network architecture.
+
+Structured pruning is motivated by the observation that not all neurons, filters, or layers contribute equally to a model’s predictions. Some units primarily carry redundant or low-impact information, and removing them does not significantly degrade model performance. The challenge lies in identifying which structures can be pruned while preserving accuracy.
+
+A common approach to structured pruning is magnitude-based pruning, where entire neurons or filters are removed based on the magnitude of their associated weights. The intuition behind this method is that parameters with smaller magnitudes contribute less to the model’s output, making them prime candidates for elimination. The importance of a neuron or filter is often measured using a norm function, such as the $\ell_1$-norm or $\ell_2$-norm, applied to the weights associated with that unit. If the norm falls below a predefined threshold, the corresponding neuron or filter is pruned. This method is straightforward to implement and does not require additional computational overhead beyond computing norms across layers.
+
+Another strategy is activation-based pruning, which evaluates the average activation values of neurons or filters over a dataset. Neurons that consistently produce low activations contribute less information to the network’s decision process and can be safely removed. This method captures the dynamic behavior of the network rather than relying solely on static weight values. Activation-based pruning requires profiling the model over a representative dataset to estimate the average activation magnitudes before making pruning decisions.
+
+Gradient-based pruning uses information from the model’s training process to identify less significant neurons or filters. The key idea is that units with smaller gradient magnitudes contribute less to reducing the loss function, making them less critical for learning. By ranking neurons based on their gradient values, structured pruning can remove those with the least impact on model optimization. Unlike magnitude-based or activation-based pruning, which rely on static properties of the trained model, gradient-based pruning requires access to gradient computations and is typically applied during training rather than as a post-processing step.
+
+Each of these methods has trade-offs in terms of computational complexity and effectiveness. Magnitude-based pruning is computationally inexpensive and easy to implement but does not account for how neurons behave in different data distributions. Activation-based pruning provides a more data-driven pruning approach but requires additional computations to estimate neuron importance. Gradient-based pruning leverages training dynamics but may introduce additional complexity if applied to large-scale models.
+
+#### Dynamic Pruning
+
+Traditional pruning methods, whether unstructured or structured, typically involve static pruning, where parameters are permanently removed after training or at fixed intervals during training. However, this approach assumes that the importance of parameters is fixed, which is not always the case. In contrast, dynamic pruning adapts pruning decisions based on the input data or training dynamics, allowing the model to adjust its structure in real time.
+
+Dynamic pruning techniques introduce flexibility into the pruning process by allowing pruned parameters to be reactivated or by adjusting sparsity levels based on usage patterns. Rather than applying a fixed pruning mask, dynamic pruning methods assess the importance of parameters at inference time or throughout training, removing or reinstating them as needed.
+
+One approach to dynamic pruning involves runtime sparsity, where the model determines which weights to use based on the specific input. For example, in activation-conditioned pruning, neurons or channels with low activations for a given input are skipped during computation, leading to input-dependent sparsity. This technique is particularly useful for models deployed in latency-sensitive environments, as it reduces the number of computations required per inference without statically altering the model architecture.
+
+Another class of dynamic pruning operates during training, where sparsity is gradually introduced and adjusted throughout the optimization process. Methods such as gradual magnitude pruning start with a dense network and progressively increase the fraction of pruned parameters as training progresses. Instead of permanently removing parameters, these approaches allow the network to recover from pruning-induced capacity loss by regrowing connections that prove to be important in later stages of training.
+
+Dynamic pruning presents several advantages over static pruning. It allows models to adapt to different workloads, potentially improving efficiency while maintaining accuracy. Unlike static pruning, which risks over-pruning and degrading performance, dynamic pruning provides a mechanism for selectively reactivating parameters when necessary. However, implementing dynamic pruning requires additional computational overhead, as pruning decisions must be made in real-time, either during training or inference. This makes it more complex to integrate into standard deep learning pipelines compared to static pruning.
+
+Despite its challenges, dynamic pruning is particularly useful in edge computing and adaptive AI systems, where resource constraints and real-time efficiency requirements vary across different inputs. The next section explores the practical considerations and trade-offs involved in choosing the right pruning method for a given machine learning system.
+
+#### Pruning Comparison
+
+Pruning techniques can be categorized into unstructured, structured, and dynamic pruning. Structured pruning directly reduces computational cost by eliminating entire groups of parameters, leading to a reduction in the number of matrix multiplications required during inference. Unlike unstructured pruning, which results in sparse weight matrices that may not fully exploit hardware acceleration, structured pruning maintains dense matrix operations that are inherently optimized for deep learning accelerators. This allows structured pruning to improve inference speed without requiring modifications to standard deep learning frameworks.
+
+Dynamic pruning introduces an adaptive approach where pruning decisions are made at runtime rather than being fixed at training time. This approach optimally balances accuracy and efficiency by adjusting the network’s sparsity based on input conditions or computational constraints.
+
+However, structured pruning imposes a stronger inductive bias on the model because entire computational units are removed. This can lead to a more significant drop in accuracy compared to unstructured pruning, especially when aggressive pruning is applied. To mitigate this, pruned models often require additional fine-tuning or retraining to recover lost performance. Another challenge is that modifying the network’s architecture through structured pruning may require adjustments in transfer learning or pre-trained model settings, as the pruned model's feature representations can change significantly.
+
+Structured pruning is particularly effective in deployment scenarios where both memory reduction and computational efficiency are critical. It is widely used in optimizing convolutional neural networks (CNNs) for edge and mobile applications, where reducing the number of active filters or layers can directly translate into faster inference and lower energy consumption. @tbl-pruning summarizes the key differences between these two approaches.
+
+| Aspect          | Unstructured Pruning                     | Structured Pruning                        | Dynamic Pruning                          |
+|---------------------|----------------------------------|----------------------------------|----------------------------------|
+| What is removed? | Individual weights in the model | Entire neurons, channels, filters, or layers | Adjusts pruning based on runtime conditions |
+| Model structure  | Sparse weight matrices; original architecture remains unchanged | Model architecture is modified; pruned layers are fully removed | Structure adapts dynamically |
+| Impact on memory | Reduces model storage by eliminating nonzero weights | Reduces model storage by removing entire components | Varies based on real-time pruning |
+| Impact on computation | Limited; dense matrix operations still required unless specialized sparse computation is used | Directly reduces FLOPs and speeds up inference | Balances accuracy and efficiency dynamically |
+| Hardware compatibility | Sparse weight matrices require specialized execution support for efficiency | Works efficiently with standard deep learning hardware | Requires adaptive inference engines |
+| Fine-tuning required? | Often necessary to recover accuracy after pruning | More likely to require fine-tuning due to larger structural modifications | Adjusts dynamically, reducing the need for retraining |
+| Use cases | Memory-efficient model compression, particularly for cloud deployment | Real-time inference optimization, mobile/edge AI, and efficient training | Adaptive AI applications, real-time systems |
+
+::: Comparison of unstructured, structured, and dynamic pruning. {#tbl-pruning .striped .hover}
+
+#### Pruning in Practice
+
+Pruning is widely used in real-world machine learning deployments, and several deep learning frameworks provide built-in tools for implementing pruning techniques. While the theoretical foundations of pruning remain the same, applying it effectively requires framework-specific implementations that integrate with training pipelines, model export formats, and hardware execution environments.
+
+Modern deep learning frameworks such as PyTorch, TensorFlow, and ONNX provide pruning utilities that allow developers to apply unstructured and structured pruning, fine-tune pruned models, and optimize them for deployment. These tools enable machine learning engineers to efficiently reduce model size while ensuring compatibility with cloud, edge, and mobile platforms.
+
+In PyTorch, pruning is available through the `torch.nn.utils.prune` module. This module provides functions to apply magnitude-based pruning to individual layers or the entire model. Users can perform unstructured pruning by setting a fraction of the smallest-magnitude weights to zero or apply structured pruning to remove entire neurons or filters. PyTorch also allows for custom pruning strategies, where users define pruning criteria beyond weight magnitude, such as activation-based or gradient-based pruning. Once a model is pruned, it can be fine-tuned to recover lost accuracy before being exported for inference.
+
+TensorFlow provides pruning support through the TensorFlow Model Optimization Toolkit (TF-MOT). This toolkit integrates pruning directly into the training process by applying sparsity-inducing regularization. TensorFlow’s pruning API supports global and layer-wise pruning, where the framework dynamically selects which parameters to remove based on weight magnitudes. Unlike PyTorch, TensorFlow’s pruning is typically applied during training, allowing models to learn sparse representations from the beginning rather than pruning them post-training. TF-MOT also provides export tools to convert pruned models into TFLite format, making them compatible with mobile and edge devices.
+
+ONNX, an open standard for model representation, does not implement pruning directly but provides export and compatibility support for pruned models from PyTorch and TensorFlow. Since ONNX is designed to be hardware-agnostic, it allows models that have undergone pruning in different frameworks to be optimized for inference engines such as TensorRT, OpenVINO, and EdgeTPU. These inference engines can further leverage structured and dynamic pruning for execution efficiency, particularly on specialized hardware accelerators.
+
+Although framework-level support for pruning has advanced significantly, applying pruning in practice requires consideration of hardware compatibility and software optimizations. Standard CPUs and GPUs often do not natively accelerate sparse matrix operations, meaning that unstructured pruning may reduce memory usage without providing significant computational speed-ups. In contrast, structured pruning is more widely supported in inference engines, as it directly reduces the number of computations needed during execution. Dynamic pruning, when properly integrated with inference engines, can optimize execution based on workload variations and hardware constraints, making it particularly beneficial for adaptive AI applications.
+
+Pruning has been successfully deployed in models optimized for real-world use cases. For example, MobileNet, a lightweight convolutional neural network designed for mobile and embedded applications, has been pruned to further reduce its inference latency while preserving accuracy. BERT, a widely used transformer model for natural language processing, has undergone structured pruning of attention heads and intermediate layers to create more efficient versions such as DistilBERT and TinyBERT, which retain much of the original performance while reducing computational overhead. In computer vision, EfficientNet has been pruned to remove unnecessary filters, optimizing it for deployment in resource-constrained environments. Additionally, dynamic pruning techniques have been explored in vision and NLP models to adjust pruning levels in real time based on computational constraints, improving performance in variable hardware environments.
+
+#### Pruning Strategy Trade-offs
+
+Pruning techniques offer different trade-offs in terms of memory efficiency, computational efficiency, accuracy retention, hardware compatibility, and implementation complexity. The choice of pruning strategy depends on the specific constraints of the machine learning system and the deployment environment.
+
+Unstructured pruning is particularly effective in reducing model size and memory footprint, as it removes individual weights while keeping the overall model architecture intact. However, since deep learning accelerators are optimized for dense matrix operations, unstructured pruning does not always translate to significant computational speed-ups unless specialized sparse execution kernels are used.
+
+Structured pruning, in contrast, eliminates entire neurons, channels, or layers, leading to a more hardware-friendly model. This technique provides direct computational savings, as it reduces the number of floating-point operations (FLOPs) required during inference. The downside is that modifying the network structure can lead to a greater accuracy drop, requiring careful fine-tuning to recover lost performance.
+
+Dynamic pruning introduces adaptability into the pruning process by adjusting which parameters are pruned at runtime based on input data or training dynamics. This allows for a better balance between accuracy and efficiency, as the model retains the flexibility to reintroduce previously pruned parameters if needed. However, dynamic pruning increases implementation complexity, as it requires additional computations to determine which parameters to prune on-the-fly.
+
+@tbl-pruning-tradeoffs summarizes the key trade-offs between these pruning strategies:
+
+| **Criterion**               | **Unstructured Pruning** | **Structured Pruning** | **Dynamic Pruning** |
+|-----------------------------|--------------------------|------------------------|----------------------|
+| **Memory Efficiency**        | ↑↑ High                 | ↑ Moderate             | ↑ Moderate           |
+| **Computational Efficiency** | → Neutral               | ↑↑ High                | ↑ High               |
+| **Accuracy Retention**       | ↑ Moderate              | ↓↓ Low                 | ↑↑ High              |
+| **Hardware Compatibility**   | ↓ Low                   | ↑↑ High                | → Neutral            |
+| **Implementation Complexity**| → Neutral               | ↑ Moderate             | ↓↓ High              |
+
+: Comparison of pruning strategies. {#tbl-pruning-tradeoffs .striped .hover}
+
+While pruning is an effective optimization technique, it comes with its own challenges. One of the primary concerns is accuracy degradation, particularly in structured pruning, where removing entire neurons or channels may significantly alter the network's representational power. Fine-tuning is often required to recover lost accuracy, adding additional training overhead.
+
+The Lottery Ticket Hypothesis provides an alternative perspective: instead of viewing pruning as a post-training compression technique, what if we could identify winning ticket subnetworks at initialization? This idea challenges traditional pruning workflows by suggesting that models do not need to be fully trained before being pruned. However, practical methods for efficiently finding these subnetworks remain computationally expensive, requiring multiple training cycles to iteratively prune and retrain.
+
+Despite these challenges, pruning remains a key technique for optimizing machine learning models, particularly for deployment on edge devices, mobile platforms, and cloud environments where resource constraints make efficiency a priority. The next section explores alternative model optimization strategies, including quantization, knowledge distillation, and neural architecture search, which can be combined with pruning to further enhance efficiency.
+
+### Knowledge Distillation
+
+#### Definition of Knowledge Distillation
+
+Machine learning models are often trained with the goal of achieving the highest possible accuracy, leading to the development of large, complex architectures with millions or even billions of parameters. While these models excel in performance, they are computationally expensive and difficult to deploy in resource-constrained environments such as mobile devices, edge computing platforms, and real-time inference systems. Knowledge distillation is a technique designed to transfer the knowledge of a large, high-capacity model (the teacher) into a smaller, more efficient model (the student) while preserving most of the original model’s performance.
+
+::: {.callout-note title="Definition of Knowledge Distillation"}
+
+**Knowledge Distillation** is a model compression technique in which a smaller model (the *student*) is trained to mimic a larger, high-capacity model (the *teacher*). Instead of learning solely from labeled data, the student is optimized to match the teacher’s **soft predictions**, which provide richer information than hard class labels.
+
+Leveraging the probabilistic outputs of the teacher model allows the student models to generalize better and achieve higher accuracy with fewer parameters. This makes it a key technique for deploying efficient machine learning models in resource-constrained environments, such as mobile devices, edge computing platforms, and real-time inference systems.
+
+:::
+
+
+Unlike pruning, which removes unnecessary parameters from a trained model, knowledge distillation involves training a separate, smaller model using guidance from a larger pre-trained model. The student model does not simply learn from labeled data but instead is optimized to match the soft predictions of the teacher model. These soft targets—probability distributions over classes rather than hard labels—contain richer information about how the teacher model generalizes beyond just the correct answer, helping the student learn more efficiently.
+
+<!-- IMAGE: high level image showing how KD works -->
+
+The main advantage of knowledge distillation is that it allows smaller models to reach a level of accuracy that would be difficult to achieve through standard training alone. This makes it particularly useful in ML systems where inference efficiency is a priority, such as real-time applications, cloud-to-edge model compression, and low-power AI systems.
+
+#### Theoretical Foundation
+
+Knowledge distillation is based on the idea that a well-trained teacher model encodes more information about the data distribution than just the correct class labels. In conventional supervised learning, a model is trained to minimize the cross-entropy loss between its predictions and the ground truth labels. However, this approach only provides a hard decision boundary for each class, discarding potentially useful information about how the model relates different classes to one another.
+
+In contrast, knowledge distillation transfers this additional information by using the soft probability distributions produced by the teacher model. Instead of training the student model to match only the correct label, it is trained to match the teacher’s full probability distribution over all possible classes. This is achieved by introducing a temperature-scaled softmax function, which smooths the probability distribution, making it easier for the student model to learn from the teacher’s outputs.
+
+#### Mathematical Formulation
+
+Let $z_i$ be the logits (pre-softmax outputs) of the model for class $i$. The standard softmax function computes class probabilities as:
+
+$$
+p_i = \frac{\exp(z_i)}{\sum_j \exp(z_j)}
+$$
+
+where higher logits correspond to higher confidence in a class prediction.
+
+In knowledge distillation, we introduce a temperature parameter $T$ that scales the logits before applying softmax:
+
+$$
+p_i(T) = \frac{\exp(z_i / T)}{\sum_j \exp(z_j / T)}
+$$
+
+where a higher temperature produces a softer probability distribution, revealing more information about how the model distributes uncertainty across different classes.
+
+The student model is then trained using a loss function that minimizes the difference between its output distribution and the teacher’s softened output distribution. The most common formulation combines two loss terms:
+
+$$
+\mathcal{L}_{\text{distill}} = (1 - \alpha) \mathcal{L}_{\text{CE}}(y_s, y) + \alpha T^2 \sum_i p_i^T \log p_{i, s}^T
+$$
+
+where:
+
+- $\mathcal{L}_{\text{CE}}(y_s, y)$ is the standard cross-entropy loss between the student’s predictions $y_s$ and the ground truth labels $y$.
+- The second term minimizes the Kullback-Leibler (KL) divergence between the teacher’s softened predictions $p_i^T$ and the student’s predictions $p_{i, s}^T$.
+- The factor $T^2$ ensures that gradients remain appropriately scaled when using high-temperature values.
+- The hyperparameter $\alpha$ balances the importance of the standard training loss versus the distillation loss.
+
+By learning from both hard labels and soft teacher outputs, the student model benefits from the generalization power of the teacher, improving its ability to distinguish between similar classes even with fewer parameters.
+
+#### Intuition Behind Why Distillation Works
+
+By learning from both hard labels and soft teacher outputs, the student model benefits from the generalization power of the teacher, improving its ability to distinguish between similar classes even with fewer parameters. Unlike conventional training, where a model learns only from binary correctness signals, knowledge distillation allows the student to absorb a richer understanding of the data distribution from the teacher’s predictions.
+
+A key advantage of soft targets is that they provide relative confidence levels rather than just a single correct answer. Consider an image classification task where the goal is to distinguish between different animal species. A standard model trained with hard labels will only receive feedback on whether its prediction is right or wrong. If an image contains a cat, the correct label is "cat," and all other categories, such as "dog" and "fox," are treated as equally incorrect. However, a well-trained teacher model naturally understands that a cat is more visually similar to a dog than to a fox, and its soft output probabilities might look like @fig-soft-targets, where the relative confidence levels indicate that while "cat" is the most likely category, "dog" is still a plausible alternative, whereas "fox" is much less likely.
+
+```{r}
+
+##| label: fig-soft-targets
+##| fig-cap: Soft target probability distribution.
+##| fig-align: center
+##| echo: false
+
+library(ggplot2)
+
+## Define the data
+data <- data.frame(
+  Animal = c("Cat", "Dog", "Fox"),
+  Probability = c(0.85, 0.10, 0.05)
+)
+
+## Create the plot
+ggplot(data, aes(x = Animal, y = Probability, fill = Animal)) +
+  geom_bar(stat = "identity", width = 0.6, color = "black") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    title = "Soft Target Probability Distribution",
+    x = "Animal",
+    y = "Probability"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none",
+        text = element_text(size = 14))
+```
+
+Rather than simply forcing the student model to classify the image strictly as a cat, the teacher model provides a more nuanced learning signal, indicating that while "dog" is incorrect, it is a more reasonable mistake than "fox." This subtle information helps the student model build better decision boundaries between similar classes, making it more robust to ambiguity in real-world data.
+
+This effect is particularly useful in cases where training data is limited or noisy. A large teacher model trained on extensive data has already learned to generalize well, capturing patterns that might be difficult to discover with smaller datasets. The student benefits by inheriting this structured knowledge, acting as if it had access to a larger training signal than what is explicitly available.
+
+Another key benefit of knowledge distillation is its regularization effect. Because soft targets distribute probability mass across multiple classes, they prevent the student model from overfitting to specific hard labels. Instead of confidently assigning a probability of 1.0 to the correct class and 0.0 to all others, the student learns to make more calibrated predictions, which improves its generalization performance. This is especially important when the student model has fewer parameters, as smaller networks are more prone to overfitting.
+
+Finally, distillation helps compress large models into smaller, more efficient versions without major performance loss. Training a small model from scratch often results in lower accuracy because the model lacks the capacity to learn the complex representations that a larger network can capture. However, by leveraging the knowledge of a well-trained teacher, the student can reach a higher accuracy than it would have on its own, making it a more practical choice for real-world ML deployments, particularly in edge computing, mobile applications, and other resource-constrained environments.
+
+#### Efficiency Gains
+
+Knowledge distillation is widely used in machine learning systems because it enables smaller models to achieve performance levels comparable to larger models, making it an essential technique for optimizing inference efficiency. While pruning reduces the size of a trained model by removing unnecessary parameters, knowledge distillation improves efficiency by training a compact model from the start, leveraging the teacher’s guidance to enhance learning. This allows the student model to reach a level of accuracy that would be difficult to achieve through standard training alone.
+
+The efficiency benefits of knowledge distillation can be categorized into three key areas: memory efficiency, computational efficiency, and deployment flexibility.
+
+##### Memory Efficiency and Model Compression
+
+A key advantage of knowledge distillation is that it enables smaller models to retain much of the predictive power of larger models, significantly reducing memory footprint. This is particularly useful in resource-constrained environments such as mobile and embedded AI systems, where model size directly impacts storage requirements and load times.
+
+For instance, models such as DistilBERT in NLP and MobileNet distillation variants in computer vision have been shown to retain up to 97% of the accuracy of their larger teacher models while using only half the number of parameters. This level of compression is often superior to pruning, where aggressive parameter reduction can lead to deterioration in representational power.
+
+<!-- IMAGE: Add the distillbert graph -->
+
+Another key benefit of knowledge distillation is its ability to transfer robustness and generalization from the teacher to the student. Large models are often trained with extensive datasets and develop strong generalization capabilities, meaning they are less sensitive to noise and data shifts. A well-trained student model inherits these properties, making it less prone to overfitting and more stable across diverse deployment conditions. This is particularly useful in low-data regimes, where training a small model from scratch may result in poor generalization due to insufficient training examples.
+
+##### Computational Efficiency and Inference Speed
+
+By training the student model to approximate the teacher’s knowledge in a more compact representation, distillation results in models that require fewer floating-point operations (FLOPs) per inference, leading to faster execution times. Unlike unstructured pruning, which may require specialized hardware support for sparse computation, a distilled model remains densely structured, making it more compatible with existing deep learning accelerators such as GPUs, TPUs, and edge AI chips.
+
+In real-world deployments, this translates to:
+
+- **Reduced inference latency**, which is important for real-time AI applications such as speech recognition, recommendation systems, and self-driving perception models.
+- **Lower energy consumption**, making distillation particularly relevant for low-power AI on mobile devices and IoT systems.
+- **Higher throughput in cloud inference**, where serving a distilled model allows large-scale AI applications to reduce computational cost while maintaining model quality.
+
+For example, when deploying transformer models for NLP, organizations often use teacher-student distillation to create models that achieve similar accuracy at 2-4× lower latency, making it feasible to serve billions of requests per day with significantly lower computational overhead.
+
+##### Deployment Flexibility and System-Level Considerations
+
+Knowledge distillation is also effective in multi-task learning scenarios, where a single teacher model can guide multiple student models for different tasks. For example, in multi-lingual NLP models, a large teacher trained on multiple languages can transfer language-specific knowledge to smaller, task-specific student models, enabling efficient deployment across different languages without retraining from scratch. Similarly, in computer vision, a teacher trained on diverse object categories can distill knowledge into specialized students optimized for tasks such as face recognition, medical imaging, or autonomous driving.
+
+Once a student model is distilled, it can be further optimized for hardware-specific acceleration using techniques such as pruning, quantization, and graph optimization. This ensures that compressed models remain inference-efficient across multiple hardware environments, particularly in edge AI and mobile deployments.
+
+Despite its advantages, knowledge distillation has some limitations. The effectiveness of distillation depends on the quality of the teacher model—a poorly trained teacher may transfer incorrect biases to the student. Additionally, distillation introduces an additional training phase, where both the teacher and student must be used together, increasing computational costs during training. In some cases, designing an appropriate student model architecture that can fully benefit from the teacher’s knowledge remains a challenge, as overly small student models may not have enough capacity to absorb all the relevant information.
+
+#### Trade-offs
+
+Knowledge distillation is a powerful technique for compressing large models into smaller, more efficient versions while maintaining accuracy. By training a student model under the supervision of a teacher model, distillation enables better generalization and inference efficiency compared to training a small model from scratch. It is particularly effective in low-resource environments, such as mobile devices, edge AI, and large-scale cloud inference, where balancing accuracy, speed, and memory footprint is essential.
+
+Compared to pruning, distillation preserves accuracy better but comes at the cost of higher training complexity, as it requires training a new model instead of modifying an existing one. However, pruning provides a more direct computational efficiency gain, especially when structured pruning is used. In practice, combining pruning and distillation often yields the best trade-off, as seen in models like DistilBERT and MobileBERT, where pruning first reduces unnecessary parameters before distillation optimizes a final student model. @tbl-kd-pruning summarizes the key trade-offs between knowledge distillation and pruning.
+
++------------------------+-----------------------------------------------------------+-------------------------------------------------------------------------------+
+| Criterion              | Knowledge Distillation                                    | Pruning                                                                       |
++:=======================+:==========================================================+:==============================================================================+
+| Accuracy retention     | High – Student learns from teacher, better generalization | Varies – Can degrade accuracy if over-pruned                                  |
++------------------------+-----------------------------------------------------------+-------------------------------------------------------------------------------+
+| Training cost          | Higher – Requires training both teacher and student       | Lower – Only fine-tuning needed                                               |
++------------------------+-----------------------------------------------------------+-------------------------------------------------------------------------------+
+| Inference speed        | High – Produces dense, optimized models                   | Depends – Structured pruning is efficient, unstructured needs special support |
++------------------------+-----------------------------------------------------------+-------------------------------------------------------------------------------+
+| Hardware compatibility | High – Works on standard accelerators                     | Limited – Sparse models may need specialized execution                        |
++------------------------+-----------------------------------------------------------+-------------------------------------------------------------------------------+
+| Ease of implementation | Complex – Requires designing a teacher-student pipeline   | Simple – Applied post-training                                                |
++------------------------+-----------------------------------------------------------+-------------------------------------------------------------------------------+
+
+: Comparison of knowledge distillation and pruning. {#tbl-kd-pruning .striped .hover}
+
+Knowledge distillation remains an essential technique in ML systems optimization, often used alongside pruning and quantization for deployment-ready models. The next section explores quantization, a method that further reduces computational cost by lowering numerical precision.
+
+### Efficient Model Design from the Start
+
+Machine learning models are often designed with a primary focus on achieving high accuracy, with efficiency concerns addressed later through post-training optimizations such as pruning and knowledge distillation. However, in real-world ML systems, waiting until after training to optimize models can be suboptimal. Instead, designing architectures with efficiency in mind from the start ensures that models can be deployed in resource-constrained environments without requiring extensive post-hoc modifications.
+
+Efficient model design is critical in ML systems that operate under constraints such as computational resource limitations, real-time inference requirements, and deployment on mobile or embedded hardware. In many scenarios, computational cost is a limiting factor, making it impractical to deploy large, unoptimized models that require significant memory and processing power. Reducing inference latency is equally important, as applications such as speech recognition, autonomous systems, and interactive AI require models that can process inputs quickly. Storage and memory constraints further complicate deployment, especially in edge computing environments, where models must fit within strict memory budgets without sacrificing predictive performance.
+
+When models are designed without efficiency considerations, they often require aggressive post-training modifications to be feasible for deployment. Techniques such as pruning and knowledge distillation can help mitigate inefficiencies, but they have limitations. A model that is inherently inefficient may never fully match the performance of one that was designed for efficiency from the outset. Post-training optimizations can only recover efficiency to a certain extent—structural inefficiencies baked into a model’s architecture cannot always be eliminated without performance degradation.
+
+Whereas pruning and knowledge distillation optimize trained models, efficient model design aims to minimize computational overhead at the architecture level before training begins. Instead of adapting an inefficient model after it has been trained, efficient architectures are built with compact structures that reduce redundant computations and improve hardware compatibility.
+
+We will explore the key principles of efficient model design, illustrating how different architectural decisions impact computational efficiency, model size, and deployment feasibility. By examining architectures built specifically for efficiency, it becomes clear that model design plays a role in determining whether a model can be practically deployed in an ML system.
+
+#### Principles of Efficient Model Design
+
+Designing machine learning models for efficiency requires structuring architectures to minimize computational cost, memory usage, and inference latency while maintaining strong predictive performance. Unlike post-training optimizations, which attempt to recover efficiency after a model has already been trained, efficient model design incorporates efficiency considerations from the outset. This ensures that models are computationally tractable without requiring extensive modifications and can be deployed across diverse hardware environments with minimal adaptation.
+
+To systematically understand the key aspects of efficient model design, we can organize these principles into broad categories that address different computational and system constraints. The following table provides a taxonomy of efficiency principles, which we will explore in greater depth.
+
+| Principle                 | Goal                                      | Example Networks |
+|---------------------------|-------------------------------------------|------------------|
+| **Scaling Optimization**  | Adjust model depth, width, and resolution for balanced efficiency. | EfficientNet, RegNet |
+| **Computation Reduction** | Minimize redundant operations to lower computational cost. | MobileNet, ResNeXt |
+| **Memory Optimization**   | Reduce activation and parameter storage requirements. | DenseNet, SqueezeNet |
+| **Dynamic Computation**   | Adapt processing complexity based on input difficulty. | BranchyNet, Adaptive Vision Transformers |
+| **Hardware-Aware Design** | Optimize architectures for specific hardware constraints. | TPU-optimized models, MobileNet |
+
+: Taxonomy of efficient model design principle. {#tbl-efficient-design .striped .hover}
+
+Each of these categories addresses a fundamental aspect of model efficiency. Scaling optimization ensures that models are not over- or under-parameterized relative to the available resources. Computation reduction techniques eliminate redundant operations, reducing the number of floating-point operations (FLOPs) required per inference step. Memory optimization techniques focus on minimizing storage overhead, ensuring that models can fit within hardware-imposed constraints. Dynamic computation methods allow models to adapt their inference cost based on the complexity of individual inputs, improving real-time efficiency. Finally, hardware-aware design principles align architectural structures with the capabilities of modern computing platforms, maximizing execution efficiency on different accelerators.
+
+#### Scaling Optimization
+
+Scaling a model’s architecture is a fundamental efficiency strategy that balances accuracy and computational cost. The depth, width, and input resolution of a model each contribute to its overall resource consumption. Optimizing these dimensions collectively ensures that a model remains performant without excessive computation. Deep models can capture complex representations, but excessive depth increases inference latency and training cost. Wide models process more parallel information per layer but require more memory for activations. Higher-resolution inputs provide finer details, but they exponentially increase computational cost.
+
+Mathematically, the total FLOPs for a convolutional model can be approximated as:
+
+$$
+\text{FLOPs} \propto d \cdot w^2 \cdot r^2,
+$$
+
+where $d$ is depth, $w$ is width, and $r$ is the input resolution. Naively increasing all three dimensions quadratically increases computation. A common approach is to scale one dimension at a time, such as increasing depth in deeper networks (e.g., ResNet), increasing width in architectures like ResNeXt, or using higher input resolutions for vision tasks. However, independent scaling of these factors often leads to suboptimal resource usage.
+
+EfficientNet introduced compound scaling, a method that balances all three dimensions together rather than scaling them independently. Instead of manually adjusting depth, width, or resolution, compound scaling assigns a fixed ratio $(\alpha, \beta, \gamma)$ to control how each dimension scales relative to a base model:
+
+$d = \alpha^\phi d_0, \quad w = \beta^\phi w_0, \quad r = \gamma^\phi r_0$,
+
+where $\phi$ is a scaling coefficient, and $\alpha, \beta, \gamma$ are empirically determined scaling factors. This ensures that models grow in a balanced way, maintaining efficiency while improving accuracy. By jointly optimizing depth, width, and resolution, compound scaling achieves significant efficiency gains compared to traditional scaling methods, leading to models that are both compact and performant.
+
+EfficientNet models demonstrate how balancing depth, width, and resolution together leads to significantly better accuracy-efficiency trade-offs than naive scaling approaches. This principle generalizes beyond convolutional models—scaling strategies have also been explored in transformers and other deep learning architectures to optimize performance for various computational constraints.
+
+#### Computation Reduction
+
+Reducing redundant operations is essential for improving model efficiency. Many deep learning architectures originally relied on dense operations, such as standard convolutions, which apply computations uniformly across all spatial locations and channels. However, these operations often introduce unnecessary computation, leading to excessive resource consumption. Instead of performing computations indiscriminately, modern architectures leverage factorized computations that achieve similar representational power while reducing computational overhead.
+
+One widely adopted method for computation reduction is depthwise separable convolutions, introduced in MobileNet. Instead of using a single convolutional filter that jointly processes all input channels, depthwise separable convolutions break the operation into two steps:
+
+1. Depthwise convolution, which applies a separate convolutional filter to each input channel independently.
+2. Pointwise convolution (1×1 convolution), which combines the outputs across channels to generate the final feature representation.
+
+By decoupling spatial feature extraction from channel-wise mixing, depthwise separable convolutions significantly reduce the computational burden while maintaining expressiveness. The computational complexity of a standard convolution with an input size of $ h \times w $, $ C_{\text{in}} $ input channels, and $ C_{\text{out}} $ output channels is given by:
+
+$$
+\mathcal{O}(h w C_{\text{in}} C_{\text{out}} k^2)
+$$
+
+where $k$ is the kernel size.
+
+For depthwise separable convolutions, this complexity is reduced to:
+
+$$
+\mathcal{O}(h w C_{\text{in}} k^2) + \mathcal{O}(h w C_{\text{in}} C_{\text{out}})
+$$
+
+Since the first term depends only on $ C_{\text{in}} $ and the second term removes the expensive $ k^2 $ factor from the channel mixing operation, depthwise separable convolutions result in a 5× to 10× reduction in FLOPs compared to standard convolutions.
+
+Beyond separable convolutions, other architectures employ alternative factorization techniques to reduce computation. Grouped convolutions, used in ResNeXt, split feature maps into separate groups, each processed independently before merging. This approach increases computational efficiency while maintaining strong accuracy. Bottleneck layers, such as those in ResNet, use 1×1 convolutions to reduce dimensionality before applying larger convolutions, reducing unnecessary computations in deeper networks.
+
+These computation reduction techniques allow deep learning models to achieve the same expressive power with fewer operations, making them particularly effective in mobile, edge, and real-time AI applications, where computational efficiency is critical.
+
+#### Memory Optimization
+
+Memory efficiency is a critical consideration in deep learning, particularly for models deployed on resource-constrained devices such as mobile phones, embedded systems, and edge AI platforms. During inference, models must store activations, intermediate feature maps, and parameters, all of which contribute to the overall memory footprint. If a model requires excessive activation storage, it can exceed hardware memory limits, increase inference latency due to frequent memory accesses, and lead to power inefficiencies. To address these challenges, modern architectures employ memory-efficient design strategies that minimize redundant storage while preserving accuracy.
+
+One fundamental approach to memory optimization is feature reuse, as seen in DenseNet. Instead of computing entirely new feature maps at each layer, DenseNet concatenates the outputs of previous layers and selectively applies transformations. If a standard convolutional network with $ L $ layers generates $ k $ new feature maps per layer, the total number of feature maps grows linearly:
+
+$$
+\mathcal{O}(L k)
+$$
+
+In contrast, DenseNet reuses existing feature maps, reducing the need for redundant activations while improving gradient flow during training. This leads to better parameter efficiency and reduced memory footprint without sacrificing performance.
+
+Another widely used technique is activation checkpointing, which reduces peak memory consumption during training by recomputing intermediate activations instead of storing all of them. If an architecture stores $ A_{\text{total}} $ activations, standard backpropagation requires storing all forward activations:
+
+$$
+\mathcal{O}(A_{\text{total}})
+$$
+
+With activation checkpointing, only a subset of activations is stored, and others are recomputed when needed, reducing storage to:
+
+$$
+\mathcal{O}(\sqrt{A_{\text{total}}})
+$$
+
+This technique is particularly useful for training large models on memory-constrained hardware.
+
+Memory optimization can also be achieved through parameter reduction, as demonstrated by SqueezeNet. Instead of using large convolutional filters, SqueezeNet introduces Fire modules, which first apply $ 1 \times 1 $ convolutions to reduce the number of channels, followed by standard convolutions. This significantly reduces the number of parameters while maintaining high expressivity. The number of parameters in a standard convolutional layer is:
+
+$$
+\mathcal{O}(C_{\text{in}} C_{\text{out}} k^2)
+$$
+
+By first reducing $ C_{\text{in}} $ with $ 1 \times 1 $ convolutions, SqueezeNet achieves a 50× reduction in model size compared to AlexNet while maintaining similar accuracy.
+
+These memory-efficient techniques—feature reuse, activation checkpointing, and parameter reduction—allow deep learning models to operate within the memory constraints of modern hardware. By structuring computations efficiently, models can achieve significant savings in memory usage without introducing excessive computational overhead.
+
+#### Dynamic Computation
+
+Not all inputs require the same level of computation. Many deep learning architectures apply a fixed amount of computation to all inputs, regardless of complexity. However, in real-world scenarios, some inputs can be classified with high confidence using fewer layers, while others require deeper feature extraction. Dynamic computation strategies enable models to adapt their computational cost at inference time, allocating resources selectively based on input complexity. This leads to significant efficiency gains, particularly in real-time and edge AI applications where minimizing latency and power consumption is crucial.
+
+One approach to dynamic computation is early exit architectures, as seen in BranchyNet and multi-exit vision transformers. Instead of forcing all inputs to pass through the entire network, these models introduce intermediate classifiers that allow confident predictions to be made at earlier stages. If $ P(E) $ represents the probability that an early exit is taken, and $ C $ represents total computation cost, the expected compute cost of an early-exit model is given by:
+
+$$
+\mathbb{E}[C] = P(E_1)C_1 + P(E_2)C_2 + (1 - P(E_1) - P(E_2))C_T
+$$
+
+where $ C_T $ is the full network compute cost, and $ C_1, C_2 $ are the compute costs for earlier exits. By selectively reducing the number of computations for simpler inputs, inference speed is improved without significantly affecting accuracy.
+
+Another form of dynamic computation is adaptive inference, where models selectively activate different computational pathways based on the input. Conditional computation models, such as SkipNet, learn to bypass specific layers when they are not necessary. The decision to skip layers is typically made using a lightweight gating mechanism that predicts whether a layer’s output will contribute meaningfully to the final prediction. If $ S(l) $ is a binary gating function that determines whether layer $ l $ is skipped, the total computation cost for an adaptive model is given by:
+
+$$
+C = \sum_{l=1}^{L} S(l) C_l
+$$
+
+where $ S(l) = 1 $ when the layer is used and $ S(l) = 0 $ when it is bypassed. By dynamically skipping redundant computations, these models reduce average inference cost while preserving high accuracy on complex inputs.
+
+Dynamic computation techniques are particularly useful for applications requiring low-latency inference, such as autonomous driving, real-time speech processing, and mobile AI applications. By enabling models to adapt computation on a per-input basis, they strike a balance between efficiency and accuracy, ensuring that resources are allocated where they are most needed.
+
+#### Hardware-Aware Design
+
+Deep learning architectures must be optimized to leverage the computational strengths of the hardware they are deployed on. A model designed for high-performance GPUs, which offer massive parallelism, may not perform efficiently on a mobile CPU, which has different memory hierarchies and vectorization constraints. Hardware-aware model design ensures that neural networks are structured in a way that maximizes execution efficiency on specific compute platforms.
+
+One key factor in hardware-aware design is memory bandwidth utilization. In many deep learning workloads, computation is not the bottleneck—memory access latency dominates execution time. Optimizing models for efficient memory access patterns can significantly improve inference speed. For example, MobileNet is optimized for mobile CPUs by using depthwise separable convolutions, which reduce the number of memory-bound operations compared to standard convolutions. Since mobile processors have limited cache sizes, reducing the number of redundant memory fetches improves performance.
+
+Another consideration is parallel execution efficiency. GPUs and TPUs achieve high throughput by executing many operations in parallel, but models must be structured to exploit this capability. TPU-optimized models, such as those used in Google’s Edge TPU deployments, leverage batch matrix multiplications and fused tensor operations to maximize hardware efficiency. Instead of performing computations sequentially, these models batch multiple operations together, reducing redundant memory accesses and improving overall throughput.
+
+The impact of hardware-aware design can also be seen in low-power AI accelerators, such as EfficientNet-X optimized for Arm CPUs or TinyML models designed for microcontrollers. These architectures prioritize integer arithmetic over floating-point computation, reducing power consumption while maintaining accuracy. The choice of numerical precision—such as using int8 quantization instead of float32 arithmetic—can drastically reduce both model size and energy consumption. If a model performs $ N $ multiplications using float32 operations, switching to int8 can reduce energy consumption by approximately:
+
+$$
+E_{\text{int8}} \approx \frac{1}{4} E_{\text{float32}}
+$$
+
+which is particularly beneficial for edge AI applications with strict power constraints.
+
+Hardware-aware design ensures that models are not only computationally efficient in theory but also optimized for real-world deployment on diverse hardware platforms. The choice of architectural components, execution strategies, and numerical precision must be carefully aligned with the target hardware to achieve maximum efficiency.
+
+#### Discussion
+
+Efficient model design must balance scaling, computation, memory, adaptability, and hardware considerations. No single principle dominates—the best architectures integrate multiple strategies to optimize for a given deployment scenario. A model designed for cloud-scale inference prioritizes computation efficiency and scalability, while one designed for mobile AI emphasizes memory efficiency and low-power execution.
+
+### Neural Architecture Search (NAS)
+
+The techniques discussed in previous sections—pruning, knowledge distillation, and efficient model design—rely on human expertise to determine optimal model configurations. While these manual approaches have led to significant advancements, they are inherently slow, resource-intensive, and constrained by human biases. Selecting an optimal architecture requires extensive experimentation, and even experienced practitioners may overlook more efficient designs.
+
+Neural Architecture Search (NAS) addresses these limitations by automating model design. Instead of manually tuning configurations, NAS systematically explores a large space of architectures to identify those that best balance accuracy, computational cost, memory efficiency, and inference latency. By framing model selection as a structured search problem, NAS reduces reliance on trial and error, allowing architectures to be discovered programmatically rather than heuristically.
+
+NAS formalizes model design as an optimization problem, leveraging techniques such as reinforcement learning, evolutionary algorithms, and gradient-based methods to automate decisions traditionally made by experts. This approach integrates principles of scaling optimization, structural pruning, and compressed representations, offering a unified framework for model efficiency.
+
+Real-world applications demonstrate that NAS-generated architectures often match or surpass human-designed models in efficiency and accuracy. Examples include models optimized for mobile and cloud environments, where inference latency and memory constraints are critical considerations. Ultimately, NAS encapsulates a holistic approach to model optimization, unifying multiple strategies into an automated, scalable framework.
+
+#### Encoding Model Efficiency
+
+NAS operates in three key stages: defining the search space, exploring candidate architectures, and evaluating their performance. The search space defines the architectural components and constraints that NAS can modify. The search strategy determines how NAS explores possible architectures, selecting promising candidates based on past observations. The evaluation process ensures that the discovered architectures satisfy multiple objectives, including accuracy, efficiency, and hardware suitability.
+
+1. **Search Space Definition:** This stage establishes the architectural components and constraints NAS can modify, such as the number of layers, convolution types, activation functions, and hardware-specific optimizations. A well-defined search space balances innovation with computational feasibility.
+
+2. **Search Strategy:** NAS explores the search space using methods such as reinforcement learning, evolutionary algorithms, or gradient-based techniques. These approaches guide the search toward architectures that maximize performance while meeting resource constraints.
+
+3. **Evaluation Criteria:** Candidate architectures are assessed based on multiple metrics, including accuracy, FLOPs, memory consumption, inference latency, and power efficiency. NAS ensures that the selected architectures align with deployment requirements.
+
+NAS unifies structural design and optimization into a singular, automated framework. The result is the discovery of architectures that are not only highly accurate but also computationally efficient and well-suited for target hardware platforms.
+
+#### Defining the Search Space
+
+The first step in NAS is determining the set of architectures it is allowed to explore, known as the search space. The size and structure of this space directly affect how efficiently NAS can discover optimal models. A well-defined search space must be broad enough to allow innovation while remaining narrow enough to prevent unnecessary computation on impractical designs.
+
+A typical NAS search space consists of modular building blocks that define the structure of the model. These include the types of layers available for selection, such as standard convolutions, depthwise separable convolutions, attention mechanisms, and residual blocks. The search space also defines constraints on network depth and width, specifying how many layers the model can have and how many channels each layer should include. Additionally, NAS considers activation functions, such as ReLU, Swish, or GELU, which influence both model expressiveness and computational efficiency.
+
+Other architectural decisions within the search space include kernel sizes, receptive fields, and skip connections, which impact both feature extraction and model complexity. Some NAS implementations also incorporate hardware-aware optimizations, ensuring that the discovered architectures align with specific hardware, such as GPUs, TPUs, or mobile CPUs.
+
+The choice of search space determines the extent to which NAS can optimize a model. If the space is too constrained, the search algorithm may fail to discover novel and efficient architectures. If it is too large, the search becomes computationally expensive, requiring extensive resources to explore a vast number of possibilities. Striking the right balance ensures that NAS can efficiently identify architectures that improve upon human-designed models.
+
+#### Exploring the Search Space
+
+Once the search space is defined, NAS must decide how to explore different architectures to determine which designs are most effective. The search strategy guides this process, selecting which architectures to evaluate based on past observations. An effective search strategy must balance exploration—testing new architectures—and exploitation—refining promising designs.
+
+Several methods have been developed to navigate the search space efficiently. Reinforcement learning-based NAS formulates the search process as a decision-making problem, where an agent sequentially selects architectural components and receives a reward signal based on the performance of the generated model. Over time, the agent learns to generate better architectures by maximizing this reward. While effective, reinforcement learning-based NAS can be computationally expensive because it requires training many candidate models before converging on an optimal design.
+
+An alternative approach uses evolutionary algorithms, which maintain a population of candidate architectures and iteratively improve them through mutation and selection. Stronger architectures—those with higher accuracy and efficiency—are retained, while modifications such as changing layer types or filter sizes introduce new variations. This approach has been shown to balance exploration and computational feasibility more effectively than reinforcement learning-based NAS.
+
+More recent methods, such as gradient-based NAS, introduce differentiable parameters that represent architectural choices. Instead of treating architectures as discrete entities, gradient-based methods optimize both model weights and architectural parameters simultaneously using standard gradient descent. This significantly reduces the computational cost of the search, making NAS more practical for real-world applications.
+
+The choice of search strategy has a direct impact on the feasibility of NAS. Early NAS methods that relied on reinforcement learning required weeks of GPU computation to discover a single architecture. More recent methods, particularly those based on gradient-based search, have significantly reduced this cost, making NAS more efficient and accessible.
+
+#### Evaluating the Candidate Architectures
+
+Every architecture explored by NAS must be evaluated based on a set of predefined criteria. While accuracy is a fundamental metric, NAS also optimizes for efficiency constraints to ensure that models are practical for deployment. The evaluation process determines whether an architecture should be retained for further refinement or discarded in favor of more promising designs.
+
+The primary evaluation metrics include computational complexity, memory consumption, inference latency, and energy efficiency. Computational complexity, often measured in floating-point operations per second (FLOPs), determines the overall resource demands of a model. NAS favors architectures that achieve high accuracy while reducing unnecessary computations. Memory consumption, which includes both parameter count and activation storage, ensures that models fit within hardware constraints. For real-time applications, inference latency is a key factor, with NAS selecting architectures that minimize execution time on specific hardware platforms. Finally, some NAS implementations explicitly optimize for power consumption, ensuring that models are suitable for mobile and edge devices.
+
+For example, FBNet, a NAS-generated architecture optimized for mobile inference, incorporated latency constraints into the search process. Instead of selecting the most accurate model, NAS identified architectures that provided the best balance between accuracy and inference speed. Similarly, EfficientNet was discovered through NAS by jointly optimizing for accuracy and computational efficiency, resulting in a model that delivers state-of-the-art performance while reducing FLOPs compared to conventional architectures.
+
+By integrating these constraints into the search process, NAS systematically discovers architectures that balance accuracy, efficiency, and hardware adaptability. Instead of manually fine-tuning these trade-offs, NAS automates the selection of optimal architectures, ensuring that models are well-suited for real-world deployment scenarios.
+
+#### Examples of NAS-Discovered Architectures
+
+Neural Architecture Search (NAS) has been successfully used to design several state-of-the-art architectures that outperform manually designed models in terms of efficiency and accuracy. These architectures illustrate how NAS integrates scaling optimization, computation reduction, memory efficiency, and hardware-aware design into an automated process.
+
+One of the most well-known NAS-generated models is EfficientNet, which was discovered using a NAS framework that searched for the most effective combination of depth, width, and resolution scaling. Unlike traditional scaling strategies that independently adjust these factors, NAS optimized the model using compound scaling, which applies a fixed set of scaling coefficients to ensure that the network grows in a balanced way. EfficientNet achieves higher accuracy with fewer parameters and lower FLOPs than previous architectures, making it ideal for both cloud and mobile deployment.
+
+Another key example is MobileNetV3, which used NAS to optimize its network structure for mobile hardware. The search process led to the discovery of inverted residual blocks with squeeze-and-excitation layers, which improve accuracy while reducing computational cost. NAS also selected optimized activation functions and efficient depthwise separable convolutions, leading to a 5× reduction in FLOPs compared to earlier MobileNet versions.
+
+FBNet, another NAS-generated model, was specifically optimized for real-time inference on mobile CPUs. Unlike architectures designed for general-purpose acceleration, FBNet’s search process explicitly considered latency constraints during training, ensuring that the final model runs efficiently on low-power hardware. Similar approaches have been used in TPU-optimized NAS models, where the search process is guided by hardware-aware cost functions to maximize parallel execution efficiency.
+
+NAS has also been applied beyond convolutional networks. NAS-BERT explores transformer-based architectures, searching for efficient model structures that retain strong natural language understanding capabilities while reducing compute and memory overhead. NAS has been particularly useful in designing efficient vision transformers (ViTs) by automatically discovering lightweight attention mechanisms tailored for edge AI applications.
+
+Each of these NAS-generated models demonstrates how automated architecture search can discover novel efficiency trade-offs that may not be immediately intuitive to human designers. By explicitly encoding efficiency constraints into the search process, NAS systematically produces architectures that are more computationally efficient, memory-friendly, and hardware-adapted than their manually designed counterparts.
