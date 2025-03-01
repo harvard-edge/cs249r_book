@@ -115,6 +115,7 @@ def process_qmd_files(qmd_files, dry_run=False, max_workers=4):
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         for bib_file, keys in bib_files.items():
             if os.path.exists(bib_file):
+                logging.error(f"Cleaning {bib_file}.")
                 executor.submit(clean_bib_file, bib_file, keys, dry_run)
                 if not dry_run:
                     executor.submit(update_bib_file, bib_file)  # Run betterbib update
