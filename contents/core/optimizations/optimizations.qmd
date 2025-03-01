@@ -282,15 +282,17 @@ Dynamic pruning presents several advantages over static pruning. It allows model
 
 Despite its challenges, dynamic pruning is particularly useful in edge computing and adaptive AI systems, where resource constraints and real-time efficiency requirements vary across different inputs. The next section explores the practical considerations and trade-offs involved in choosing the right pruning method for a given machine learning system.
 
-#### Pruning Comparison
+#### Pruning Method Trade-offs
 
-Pruning techniques can be categorized into unstructured, structured, and dynamic pruning. Structured pruning directly reduces computational cost by eliminating entire groups of parameters, leading to a reduction in the number of matrix multiplications required during inference. Unlike unstructured pruning, which results in sparse weight matrices that may not fully exploit hardware acceleration, structured pruning maintains dense matrix operations that are inherently optimized for deep learning accelerators. This allows structured pruning to improve inference speed without requiring modifications to standard deep learning frameworks.
+Pruning techniques offer different trade-offs in terms of memory efficiency, computational efficiency, accuracy retention, hardware compatibility, and implementation complexity. The choice of pruning strategy depends on the specific constraints of the machine learning system and the deployment environment.
 
-Dynamic pruning introduces an adaptive approach where pruning decisions are made at runtime rather than being fixed at training time. This approach optimally balances accuracy and efficiency by adjusting the network’s sparsity based on input conditions or computational constraints.
+Unstructured pruning is particularly effective in reducing model size and memory footprint, as it removes individual weights while keeping the overall model architecture intact. However, since deep learning accelerators are optimized for dense matrix operations, unstructured pruning does not always translate to significant computational speed-ups unless specialized sparse execution kernels are used.
 
-However, structured pruning imposes a stronger inductive bias on the model because entire computational units are removed. This can lead to a more significant drop in accuracy compared to unstructured pruning, especially when aggressive pruning is applied. To mitigate this, pruned models often require additional fine-tuning or retraining to recover lost performance. Another challenge is that modifying the network’s architecture through structured pruning may require adjustments in transfer learning or pre-trained model settings, as the pruned model's feature representations can change significantly.
+Structured pruning, in contrast, eliminates entire neurons, channels, or layers, leading to a more hardware-friendly model. This technique provides direct computational savings, as it reduces the number of floating-point operations (FLOPs) required during inference. The downside is that modifying the network structure can lead to a greater accuracy drop, requiring careful fine-tuning to recover lost performance.
 
-Structured pruning is particularly effective in deployment scenarios where both memory reduction and computational efficiency are critical. It is widely used in optimizing Convolutional Neural Networks (CNNs) for edge and mobile applications, where reducing the number of active filters or layers can directly translate into faster inference and lower energy consumption. @tbl-pruning summarizes the key differences between these two approaches.
+Dynamic pruning introduces adaptability into the pruning process by adjusting which parameters are pruned at runtime based on input data or training dynamics. This allows for a better balance between accuracy and efficiency, as the model retains the flexibility to reintroduce previously pruned parameters if needed. However, dynamic pruning increases implementation complexity, as it requires additional computations to determine which parameters to prune on-the-fly.
+
+@tbl-pruning summarizes the key structural differences between these pruning approaches, outlining how each method modifies the model and impacts its execution.
 
 +------------------------+-----------------------------------------------------------------------------------------------+---------------------------------------------------------------------------+-------------------------------------------------------+
 | Aspect                 | Unstructured Pruning                                                                          | Structured Pruning                                                        | Dynamic Pruning                                       |
@@ -312,33 +314,78 @@ Structured pruning is particularly effective in deployment scenarios where both 
 
 : Comparison of unstructured, structured, and dynamic pruning. {#tbl-pruning .striped .hover}
 
+#### Pruning Execution Strategies
+
+Beyond the broad categories of unstructured, structured, and dynamic pruning, different pruning workflows can impact model efficiency and accuracy retention. Two widely used pruning strategies are iterative pruning and one-shot pruning, each with its own benefits and trade-offs.
+
+##### Iterative Pruning
+
+Iterative pruning implements a gradual approach to structure removal through multiple cycles of pruning followed by fine-tuning. During each cycle, the algorithm removes a small subset of structures based on predefined importance metrics. The model then undergoes fine-tuning to adapt to these structural modifications before proceeding to the next pruning iteration. This methodical approach helps prevent sudden drops in accuracy while allowing the network to progressively adjust to reduced complexity.
+
+To illustrate this process, consider pruning six channels from a convolutional neural network as shown in @fig-iterative-pruning. Rather than removing all channels simultaneously, iterative pruning eliminates two channels per iteration over three cycles. Following each pruning step, the model undergoes fine-tuning to recover performance. The first iteration, which removes two channels, results in an accuracy decrease from 0.995 to 0.971, but subsequent fine-tuning restores accuracy to 0.992. After completing two additional pruning-tuning cycles, the final model achieves 0.991 accuracy—representing only a 0.4% reduction from the original—while operating with 27% fewer channels. By distributing structural modifications across multiple iterations, the network maintains its performance capabilities while achieving improved computational efficiency.
+
+![Iterative pruning.](images/jpg/modeloptimization_iterative_pruning.jpeg){#fig-iterative-pruning}
+
+##### One-shot Pruning
+
+One-shot pruning removes multiple architectural components in a single step, followed by an extensive fine-tuning phase to recover model accuracy. This aggressive approach compresses the model quickly but risks greater accuracy degradation, as the network must adapt to substantial structural changes simultaneously.
+
+Consider applying one-shot pruning to the same network discussed in the iterative pruning example. Instead of removing two channels at a time over multiple iterations, one-shot pruning eliminates all six channels at once, as illustrated in @fig-oneshot-pruning. Removing 27% of the network's channels simultaneously causes the accuracy to drop significantly, from 0.995 to 0.914. Even after fine-tuning, the network only recovers to an accuracy of 0.943, which is a 5% degradation from the original unpruned network. While both iterative and one-shot pruning ultimately produce identical network structures, the gradual approach of iterative pruning better preserves model performance.
+
+![One-shot pruning.](images/jpg/modeloptimization_oneshot_pruning.jpeg){#fig-oneshot-pruning}
+
+The choice of pruning strategy requires careful consideration of several key factors that influence both model efficiency and performance:
+
+**Sparsity Target:** The desired level of parameter reduction directly impacts strategy selection. Higher reduction targets often necessitate iterative approaches to maintain accuracy, while moderate sparsity goals may be achievable through simpler one-shot methods.
+
+**Computational Resources:** Available computing power significantly influences strategy choice. Iterative pruning demands substantial resources for multiple fine-tuning cycles, whereas one-shot approaches require fewer resources but may sacrifice accuracy.
+
+**Performance Requirements:** Applications with strict accuracy requirements typically benefit from gradual, iterative pruning to carefully preserve model capabilities. Use cases with more flexible performance constraints may accommodate more aggressive one-shot approaches.
+
+**Development Timeline:** Project schedules impact pruning decisions. One-shot methods enable faster deployment when time is limited, though iterative approaches generally achieve superior results given sufficient optimization periods.
+
+**Hardware Constraints:** Target platform capabilities significantly influence strategy selection. Certain hardware architectures may better support specific sparsity patterns, making particular pruning approaches more advantageous for deployment.
+
+Understanding these interconnected factors enables practitioners to select pruning strategies that optimally align with their specific requirements and constraints. The following section explores how these considerations translate into practical implementation choices for model optimization.
+
+One-shot pruning offers rapid model compression but may sacrifice accuracy, while iterative pruning typically achieves better accuracy retention at the cost of longer optimization times. In practice, the pruning strategy should align with specific use case requirements, balancing the need for efficiency gains against accuracy constraints.
+
+#### The Lottery Ticket Hypothesis
+
+Pruning is widely used to reduce the size and computational cost of neural networks, but the process of determining which parameters to remove is not always straightforward. While traditional pruning methods eliminate weights based on magnitude, structure, or dynamic conditions, recent research suggests that pruning is not just about reducing redundancy---it may also reveal inherently efficient subnetworks that exist within the original model.
+
+This perspective leads to the Lottery Ticket Hypothesis (LTH), which challenges conventional pruning workflows by proposing that within large neural networks, there exist small, well-initialized subnetworks—"winning tickets"—that can achieve comparable accuracy to the full model when trained in isolation. Rather than viewing pruning as just a post-training compression step, LTH suggests it can serve as a discovery mechanism to identify these efficient subnetworks early in training.
+
+LTH is validated through an iterative pruning process, illustrated in @fig-winning-ticket. A large network is first trained to convergence. The lowest-magnitude weights are then pruned, and the remaining weights are reset to their original initialization rather than being re-randomized. This process is repeated iteratively, gradually reducing the network’s size while preserving performance. After multiple iterations, the remaining subnetwork—the "winning ticket"—proves capable of training to the same or higher accuracy as the original full model.
+
+![The lottery ticket hypothesis.](images/jpg/modeloptimization_winning_ticket.jpeg){#fig-winning-ticket}
+
+The implications of the Lottery Ticket Hypothesis extend beyond conventional pruning techniques. Instead of training large models and pruning them later, LTH suggests that compact, high-performing subnetworks could be trained directly from the start, eliminating the need for overparameterization. This insight challenges the traditional assumption that model size is necessary for effective learning. It also emphasizes the importance of initialization, as winning tickets only retain their performance when reset to their original weight values. This finding raises deeper questions about the role of initialization in shaping a network’s learning trajectory.
+
+The hypothesis further reinforces the effectiveness of iterative pruning over one-shot pruning. Gradually refining the model structure allows the network to adapt at each stage, preserving accuracy more effectively than removing large portions of the model in a single step. This process aligns well with practical pruning strategies used in deployment, where preserving accuracy while reducing computation is critical.
+
+Despite its promise, applying LTH in practice remains computationally expensive, as identifying winning tickets requires multiple cycles of pruning and retraining. Ongoing research explores whether winning subnetworks can be detected early without full training, potentially leading to more efficient sparse training techniques. If such methods become practical, LTH could fundamentally reshape how deep learning models are trained, shifting the focus from pruning large networks after training to discovering and training only the essential components from the beginning.
+
+While LTH presents a compelling theoretical perspective on pruning, practical implementations rely on established framework-level tools to integrate structured and unstructured pruning techniques.
+
 #### Pruning in Practice
 
-Pruning is widely used in real-world machine learning deployments, and several deep learning frameworks provide built-in tools for implementing pruning techniques. While the theoretical foundations of pruning remain the same, applying it effectively requires framework-specific implementations that integrate with training pipelines, model export formats, and hardware execution environments.
+Several machine learning frameworks provide built-in tools to apply structured and unstructured pruning, fine-tune pruned models, and optimize deployment for cloud, edge, and mobile environments.
 
-Machine learning frameworks such as PyTorch, TensorFlow, and ONNX provide pruning utilities that allow developers to apply unstructured and structured pruning, fine-tune pruned models, and optimize them for deployment. These tools enable machine learning engineers to efficiently reduce model size while ensuring compatibility with cloud, edge, and mobile platforms.
+Machine learning frameworks such as PyTorch, TensorFlow, and ONNX offer dedicated pruning utilities that allow practitioners to efficiently implement these techniques while ensuring compatibility with deployment hardware.
 
-In PyTorch, pruning is available through the `torch.nn.utils.prune` module. This module provides functions to apply magnitude-based pruning to individual layers or the entire model. Users can perform unstructured pruning by setting a fraction of the smallest-magnitude weights to zero or apply structured pruning to remove entire neurons or filters. PyTorch also allows for custom pruning strategies, where users define pruning criteria beyond weight magnitude, such as activation-based or gradient-based pruning. Once a model is pruned, it can be fine-tuned to recover lost accuracy before being exported for inference.
+In PyTorch, pruning is available through the `torch.nn.utils.prune` module, which provides functions to apply magnitude-based pruning to individual layers or the entire model. Users can perform unstructured pruning by setting a fraction of the smallest-magnitude weights to zero or apply structured pruning to remove entire neurons or filters. PyTorch also allows for custom pruning strategies, where users define pruning criteria beyond weight magnitude, such as activation-based or gradient-based pruning. Once a model is pruned, it can be fine-tuned to recover lost accuracy before being exported for inference.
 
-TensorFlow provides pruning support through the TensorFlow Model Optimization Toolkit (TF-MOT). This toolkit integrates pruning directly into the training process by applying sparsity-inducing regularization. TensorFlow’s pruning API supports global and layer-wise pruning, where the framework dynamically selects which parameters to remove based on weight magnitudes. Unlike PyTorch, TensorFlow’s pruning is typically applied during training, allowing models to learn sparse representations from the beginning rather than pruning them post-training. TF-MOT also provides export tools to convert pruned models into TFLite format, making them compatible with mobile and edge devices.
+TensorFlow provides pruning support through the TensorFlow Model Optimization Toolkit (TF-MOT). This toolkit integrates pruning directly into the training process by applying sparsity-inducing regularization. TensorFlow’s pruning API supports global and layer-wise pruning, dynamically selecting parameters for removal based on weight magnitudes. Unlike PyTorch, TensorFlow’s pruning is typically applied during training, allowing models to learn sparse representations from the start rather than pruning them post-training. TF-MOT also provides export tools to convert pruned models into TFLite format, making them compatible with mobile and edge devices.
 
 ONNX, an open standard for model representation, does not implement pruning directly but provides export and compatibility support for pruned models from PyTorch and TensorFlow. Since ONNX is designed to be hardware-agnostic, it allows models that have undergone pruning in different frameworks to be optimized for inference engines such as TensorRT, OpenVINO, and EdgeTPU. These inference engines can further leverage structured and dynamic pruning for execution efficiency, particularly on specialized hardware accelerators.
 
-Although framework-level support for pruning has advanced significantly, applying pruning in practice requires consideration of hardware compatibility and software optimizations. Standard CPUs and GPUs often do not natively accelerate sparse matrix operations, meaning that unstructured pruning may reduce memory usage without providing significant computational speed-ups. In contrast, structured pruning is more widely supported in inference engines, as it directly reduces the number of computations needed during execution. Dynamic pruning, when properly integrated with inference engines, can optimize execution based on workload variations and hardware constraints, making it particularly beneficial for adaptive AI applications.
+Although framework-level support for pruning has advanced significantly, applying pruning in practice requires careful consideration of hardware compatibility and software optimizations. Standard CPUs and GPUs often do not natively accelerate sparse matrix operations, meaning that unstructured pruning may reduce memory usage without providing significant computational speed-ups. In contrast, structured pruning is more widely supported in inference engines, as it directly reduces the number of computations needed during execution. Dynamic pruning, when properly integrated with inference engines, can optimize execution based on workload variations and hardware constraints, making it particularly beneficial for adaptive AI applications.
 
-Pruning has been successfully deployed in models optimized for real-world use cases. For example, MobileNet, a lightweight convolutional neural network designed for mobile and embedded applications, has been pruned to further reduce its inference latency while preserving accuracy [@howard2017mobilenets]. BERT, a widely used transformer model for natural language processing, has undergone structured pruning of attention heads and intermediate layers to create more efficient versions such as DistilBERT and TinyBERT, which retain much of the original performance while reducing computational overhead [@sanh2019distilbert]. In computer vision, EfficientNet has been pruned to remove unnecessary filters, optimizing it for deployment in resource-constrained environments [@tan2019efficientnet].
+At a practical level, choosing the right pruning strategy depends on several key trade-offs, including memory efficiency, computational performance, accuracy retention, and implementation complexity. These trade-offs impact how pruning methods are applied in real-world machine learning workflows, influencing deployment choices based on resource constraints and system requirements.
 
-#### Pruning Strategy Trade-offs
+To help guide these decisions, @tbl-pruning-tradeoffs provides a high-level comparison of these trade-offs, summarizing the key efficiency and usability factors that practitioners must consider when selecting a pruning method.
 
-Pruning techniques offer different trade-offs in terms of memory efficiency, computational efficiency, accuracy retention, hardware compatibility, and implementation complexity. The choice of pruning strategy depends on the specific constraints of the machine learning system and the deployment environment.
-
-Unstructured pruning is particularly effective in reducing model size and memory footprint, as it removes individual weights while keeping the overall model architecture intact. However, since deep learning accelerators are optimized for dense matrix operations, unstructured pruning does not always translate to significant computational speed-ups unless specialized sparse execution kernels are used.
-
-Structured pruning, in contrast, eliminates entire neurons, channels, or layers, leading to a more hardware-friendly model. This technique provides direct computational savings, as it reduces the number of floating-point operations (FLOPs) required during inference. The downside is that modifying the network structure can lead to a greater accuracy drop, requiring careful fine-tuning to recover lost performance.
-
-Dynamic pruning introduces adaptability into the pruning process by adjusting which parameters are pruned at runtime based on input data or training dynamics. This allows for a better balance between accuracy and efficiency, as the model retains the flexibility to reintroduce previously pruned parameters if needed. However, dynamic pruning increases implementation complexity, as it requires additional computations to determine which parameters to prune on-the-fly.
-
-@tbl-pruning-tradeoffs summarizes the key trade-offs between these pruning strategies:
 
 +---------------------------+----------------------+--------------------+-----------------+
 | Criterion                 | Unstructured Pruning | Structured Pruning | Dynamic Pruning |
@@ -356,15 +403,13 @@ Dynamic pruning introduces adaptability into the pruning process by adjusting wh
 
 : Comparison of pruning strategies. {#tbl-pruning-tradeoffs .striped .hover}
 
-While pruning is an effective optimization technique, it comes with its own challenges. One of the primary concerns is accuracy degradation, particularly in structured pruning, where removing entire neurons or channels may significantly alter the network's representational power. Fine-tuning is often required to recover lost accuracy, adding additional training overhead.
+These trade-offs underscore the importance of aligning pruning methods with practical deployment needs. Frameworks such as PyTorch, TensorFlow, and ONNX enable developers to implement these strategies, but the effectiveness of a pruning approach depends on the underlying hardware and application requirements.
 
-The Lottery Ticket Hypothesis provides an alternative perspective: instead of viewing pruning as a post-training compression technique, what if we could identify winning ticket subnetworks at initialization? This idea challenges traditional pruning workflows by suggesting that models do not need to be fully trained before being pruned. However, practical methods for efficiently finding these subnetworks remain computationally expensive, requiring multiple training cycles to iteratively prune and retrain.
+For example, structured pruning is commonly used in mobile and edge applications because of its compatibility with standard inference engines, whereas dynamic pruning is better suited for adaptive AI workloads that need to adjust sparsity levels on the fly. Unstructured pruning, while useful for reducing memory footprints, requires specialized sparse execution kernels to fully realize computational savings.
 
-Despite these challenges, pruning remains a key technique for optimizing machine learning models, particularly for deployment on edge devices, mobile platforms, and cloud environments where resource constraints make efficiency a priority. The next section explores alternative model optimization strategies, including quantization, knowledge distillation, and neural architecture search, which can be combined with pruning to further enhance efficiency.
+Understanding these trade-offs is essential when deploying pruned models in real-world settings. Several high-profile models have successfully integrated pruning to optimize performance. MobileNet, a lightweight convolutional neural network designed for mobile and embedded applications, has been pruned to reduce inference latency while preserving accuracy [@howard2017mobilenets]. BERT, a widely used transformer model for natural language processing, has undergone structured pruning of attention heads and intermediate layers to create efficient versions such as DistilBERT and TinyBERT, which retain much of the original performance while reducing computational overhead [@sanh2019distilbert]. In computer vision, EfficientNet has been pruned to remove unnecessary filters, optimizing it for deployment in resource-constrained environments [@tan2019efficientnet].
 
 ### Knowledge Distillation
-
-#### Definition of Knowledge Distillation
 
 Machine learning models are often trained with the goal of achieving the highest possible accuracy, leading to the development of large, complex architectures with millions or even billions of parameters. While these models excel in performance, they are computationally expensive and difficult to deploy in resource-constrained environments such as mobile devices, edge computing platforms, and real-time inference systems. Knowledge distillation is a technique designed to transfer the knowledge of a large, high-capacity model (the teacher) into a smaller, more efficient model (the student) while preserving most of the original model’s performance [@gou2021knowledge].
 
@@ -588,17 +633,60 @@ Each of these NAS-generated models demonstrates how automated architecture searc
 
 Machine learning models perform computations using numerical representations, and the choice of precision directly affects memory usage, computational efficiency, and power consumption. Many state-of-the-art models are trained and deployed using high-precision floating-point formats, such as FP32 (32-bit floating point), which offer numerical stability and high accuracy [@gupta2015deep]. However, high-precision formats increase storage requirements, memory bandwidth usage, and power consumption, making them inefficient for large-scale or resource-constrained deployments.
 
-Reducing numerical precision improves efficiency by reducing storage needs, decreasing data movement between memory and compute units, and enabling faster computation. For example, moving from FP32 to FP16 halves memory storage requirements, while quantized INT8 models can reduce storage by 4×. Many modern AI accelerators, such as TPUs, GPUs, and edge AI chips, include dedicated hardware for low-precision computation, allowing FP16 and INT8 operations to run at significantly higher throughput than FP32 [@wang2019benchmarking].
+Reducing numerical precision improves efficiency by reducing storage needs, decreasing data movement between memory and compute units, and enabling faster computation. Many modern AI accelerators, such as TPUs, GPUs, and edge AI chips, include dedicated hardware for low-precision computation, allowing FP16 and INT8 operations to run at significantly higher throughput than FP32 [@wang2019benchmarking]. However, reducing precision introduces quantization error, which can lead to accuracy degradation. The extent to which precision can be reduced depends on the model architecture, dataset properties, and hardware support.
 
-However, reducing precision introduces quantization error, which can lead to accuracy degradation. The extent to which precision can be reduced depends on the model architecture, dataset properties, and hardware support. Large-scale models, such as those used in computer vision and NLP, can often tolerate aggressive precision reduction with minimal impact, while smaller models may require careful calibration to maintain performance [@nagel2021white].
-
-We will explore the role of numerical precision in model efficiency, the trade-offs between different precision formats, methods for precision reduction, the benefits of custom and adaptive numerical representations, and extreme cases where models operate using only a few discrete numerical states (binarization and ternarization).
+This section explores the role of numerical precision in model efficiency, examining the trade-offs between different precision formats, methods for precision reduction, the benefits of custom and adaptive numerical representations, and extreme cases where models operate using only a few discrete numerical states (binarization and ternarization).
 
 ### Numerical Precision for Efficiency
 
-Numerical precision plays a crucial role in memory consumption, computational efficiency, and energy usage in deep learning systems. The choice of numerical representation determines how models store and process information, directly impacting both training and inference performance. As deep learning continues to scale, the demand for efficient numerical representation has grown, particularly for deploying models on low-power edge devices and hardware accelerators [@gholami2021survey].
-
 Efficient numerical representations enable significant reductions in storage requirements, computation latency, and power usage. By lowering precision, models can perform inference more efficiently, making this approach particularly beneficial for mobile AI, embedded systems, and cloud inference, where efficiency constraints are paramount. Moreover, efficient numerics facilitate hardware-software co-design, allowing precision levels to be tuned to specific hardware capabilities, thereby maximizing throughput on AI accelerators such as GPUs, TPUs, NPUs, and edge AI chips [@dettmers2018training].
+
+#### Energy Costs of Numerical Precision
+
+The energy costs associated with different numerical precisions further highlight the benefits of reducing precision. As shown in @fig-quantized-energy, performing a 32-bit floating-point addition (FAdd) consumes approximately 0.9 pJ, whereas a 16-bit floating-point addition only requires 0.4 pJ. Similarly, a 32-bit integer addition costs 0.1 pJ, while an 8-bit integer addition is significantly lower at just 0.03 pJ. These savings compound when considering large-scale models operating across billions of operations.
+
+```{r}
+#| label: fig-
+#| fig-cap: Coming soon.
+#| fig-align: center
+#| echo: false
+
+# Load required libraries
+library(ggplot2)
+library(gridExtra)
+
+# Create data frame
+data <- data.frame(
+  Operation = c("Integer ADD (8b)", "Integer ADD (16b)", "Integer ADD (32b)",
+                "Integer MULT (8b)", "Integer MULT (32b)",
+                "8KB SRAM Read (32b)", "32KB SRAM Read (32b)", "1MB SRAM Read (32b)"),
+  Energy_pJ = c(0.03, 0.05, 0.1, 0.2, 3.1, 5, 10, 50)
+)
+
+# Create the bar plot with data labels
+bar_plot <- ggplot(data, aes(x=reorder(Operation, Energy_pJ), y=Energy_pJ)) +
+  geom_bar(stat="identity", fill="darkblue") +
+  geom_text(aes(label=Energy_pJ), vjust=-0.5, color="black", size=5) + # Add labels above bars
+  labs(title="Energy Consumption of Different Operations",
+       y="Energy (pJ)", x="Operation") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle=45, hjust=1)) + # Rotate x-axis labels for readability
+  annotate("text", x=2.5, y=25, label="100X", color="red", size=6, fontface="bold") + # 100X label
+  annotate("segment", x=2, xend=7, y=0.05, yend=5,
+           arrow=arrow(length=unit(0.3,"cm")), color="red", size=1.2) # Red arrow from 0.05 pJ
+
+# Create the table
+table_plot <- gridExtra::tableGrob(data, rows=NULL)
+
+# Arrange table and bar plot side by side
+gridExtra::grid.arrange(table_plot, bar_plot, ncol=2, widths=c(1, 2))
+
+```
+Beyond direct compute savings, reducing numerical precision has a significant impact on memory energy consumption, which often dominates total system power. Lower-precision representations reduce data storage requirements and memory bandwidth usage, leading to fewer and more efficient memory accesses. This is critical because accessing memory—especially off-chip DRAM—is far more energy-intensive than performing arithmetic operations. For instance, DRAM accesses require orders of magnitude more energy (1.3–2.6 nJ) compared to cache accesses (e.g., 10 pJ for an 8KB L1 cache access). The breakdown of instruction energy further underscores the cost of moving data within the memory hierarchy, where an instruction’s total energy can be significantly impacted by memory access patterns.
+
+By reducing numerical precision, models can not only execute computations more efficiently but also reduce data movement, leading to lower overall energy consumption. This is particularly important for hardware accelerators and edge devices, where memory bandwidth and power efficiency are key constraints.
+
+#### Performance Gains from Quantization
 
 @fig-quantization_impact illustrates the impact of quantization on both inference time and model size using a stacked bar chart with a dual-axis representation. The left bars in each category show inference time improvements when moving from FP32 to INT8, while the right bars depict the corresponding reduction in model size. The results indicate that quantized models achieve up to 4× faster inference while reducing storage requirements by a factor of 4×, making them highly suitable for deployment in resource-constrained environments.
 
@@ -644,6 +732,14 @@ ggplot(df_melted, aes(x=Model, y=Value, fill=Precision)) +
 ```
 
 However, reducing numerical precision introduces trade-offs. Lower-precision formats can lead to numerical instability and quantization noise, potentially affecting model accuracy. Some architectures, such as large transformer-based NLP models, tolerate precision reduction well, whereas others may experience significant degradation. Thus, selecting the appropriate numerical precision requires balancing accuracy constraints, hardware support, and efficiency gains.
+
+#### Trade-offs in Numerical Precision Reduction
+
+However, reducing numerical precision introduces trade-offs. Lower-precision formats can lead to numerical instability and quantization noise, potentially affecting model accuracy. Some architectures, such as large transformer-based NLP models, tolerate precision reduction well, whereas others may experience significant degradation. Thus, selecting the appropriate numerical precision requires balancing accuracy constraints, hardware support, and efficiency gains.
+
+![Quantization error weighted by p(x).](images/png/modeloptimization_quant_hist.png)
+
+The figure above illustrates the quantization error weighted by the probability distribution of values, comparing different numerical formats (FP8 variants and INT8). The error distribution highlights how different formats introduce varying levels of quantization noise across the range of values, which in turn influences model accuracy and stability.
 
 ### Numeric Encoding and Storage
 
@@ -744,28 +840,49 @@ PTQ is particularly effective for computer vision models, where CNNs often toler
 
 ##### Calibration
 
-A crucial aspect of PTQ is the calibration step, which involves selecting the most effective clipping range [$\alpha$, $\beta$] for quantizing model weights and activations. During PTQ, the model's weights and activations are converted to lower-precision formats (e.g., INT8), but the effectiveness of this reduction depends heavily on the chosen quantization range. Without proper calibration, the quantization process may cause significant accuracy degradation, even if the overall precision is reduced. Calibration ensures that the chosen range minimizes loss of information and helps preserve the model’s performance after precision reduction.
+An important aspect of PTQ is the calibration step, which involves selecting the most effective clipping range [$\alpha$, $\beta$] for quantizing model weights and activations. During PTQ, the model's weights and activations are converted to lower-precision formats (e.g., INT8), but the effectiveness of this reduction depends heavily on the chosen quantization range. Without proper calibration, the quantization process may cause significant accuracy degradation, even if the overall precision is reduced. Calibration ensures that the chosen range minimizes loss of information and helps preserve the model’s performance after precision reduction.
+
+The overall workflow of post-training quantization is illustrated in @fig-ptq-calibration. The process begins with a pre-trained model, which serves as the starting point for optimization. To determine an effective quantization range, a calibration dataset, which is a representative subset of training or validation data—is passed through the model. This step allows the calibration process to estimate the numerical distribution of activations and weights, which is then used to define the clipping range for quantization. Following calibration, the quantization step converts the model parameters to a lower-precision format, producing the final quantized model, which is more efficient in terms of memory and computation.
+
+![Post-Training Quantization Workflow. Calibration uses a pre-trained model and calibration data to determine quantization ranges before applying precision reduction.](images/png/efficientnumerics_PTQ.png){#fig-ptq-calibration}
 
 For example, consider quantizing activations that originally have a floating-point range between -6 and 6 to 8-bit integers. Simply using the full integer range of -128 to 127 for quantization might not be the most effective approach. Instead, calibration involves passing a representative dataset through the model and observing the actual range of the activations. The observed range can then be used to set a more effective quantization range, reducing information loss.
 
+###### Methods
+
 There are several commonly used calibration methods:
 
-- Max: This method uses the maximum absolute value seen during calibration as the clipping range. While simple, it is susceptible to outlier data. For example, in the activation distribution shown in @fig-resnet-activations-histogram, we see an outlier cluster around 2.1, while the rest of the values are clustered around smaller values. The Max method could lead to an inefficient range if the outliers significantly influence the quantization.
+- **Max:** This method uses the maximum absolute value seen during calibration as the clipping range. While simple, it is susceptible to outlier data. For example, in the activation distribution shown in @fig-resnet-activations-histogram, we see an outlier cluster around 2.1, while the rest of the values are clustered around smaller values. The Max method could lead to an inefficient range if the outliers significantly influence the quantization.
 
-- Entropy: This method minimizes information loss between the original floating-point values and the values that could be represented by the quantized format, typically using KL divergence. This is the default calibration method used by TensorRT and works well when trying to preserve the distribution of the original values.
+- **Entropy:** This method minimizes information loss between the original floating-point values and the values that could be represented by the quantized format, typically using KL divergence. This is the default calibration method used by TensorRT and works well when trying to preserve the distribution of the original values.
 
-- Percentile: This method sets the clipping range to a percentile of the distribution of absolute values seen during calibration. For example, a 99% calibration would clip the top 1% of the largest magnitude values. This method helps avoid the impact of outliers, which are not representative of the general data distribution.
+- **Percentile:** This method sets the clipping range to a percentile of the distribution of absolute values seen during calibration. For example, a 99% calibration would clip the top 1% of the largest magnitude values. This method helps avoid the impact of outliers, which are not representative of the general data distribution.
 
 ![Input activations to layer 3 in ResNet50. Source: @@wu2020integer.](images/png/efficientnumerics_calibrationcopy.png){#fig-resnet-activations-histogram}
 
-The quality of calibration directly affects the performance of the quantized model. A poor calibration could lead to a model that suffers from significant accuracy loss, while a well-calibrated model can retain much of its original performance after quantization.
+The quality of calibration directly affects the performance of the quantized model. A poor calibration could lead to a model that suffers from significant accuracy loss, while a well-calibrated model can retain much of its original performance after quantization. Importantly, there are two types of calibration ranges to consider:
 
-Importantly, there are two types of calibration ranges to consider:
-
-- Symmetric Calibration: The clipping range is symmetric around zero, meaning both the positive and negative ranges are equally scaled.
-- Asymmetric Calibration: The clipping range is not symmetric, which means the positive and negative ranges may have different scaling factors. This can be useful when the data is not centered around zero.
+- **Symmetric Calibration:** The clipping range is symmetric around zero, meaning both the positive and negative ranges are equally scaled.
+- **Asymmetric Calibration:** The clipping range is not symmetric, which means the positive and negative ranges may have different scaling factors. This can be useful when the data is not centered around zero.
 
 Choosing the right calibration method and range is critical for maintaining model accuracy while benefiting from the efficiency gains of reduced precision.
+
+###### Ranges
+
+A key challenge in post-training quantization (PTQ) is selecting the appropriate calibration range \([$ \alpha, \beta $]\) to map floating-point values into a lower-precision representation. The choice of this range directly affects the quantization error and, consequently, the accuracy of the quantized model. The figure below illustrates two different calibration strategies: symmetric calibration and asymmetric calibration.
+
+![Comparison of symmetric and asymmetric calibration methods.](images/png/efficientnumerics_symmetry.png){#fig-calibration-ranges}
+
+On the left side of the figure, we see an example of symmetric calibration, where the clipping range is centered around zero. The range extends from \(\alpha = -1\) to \(\beta = 1\), mapping these values to the integer range of \([-127, 127]\). The symmetric mapping ensures that positive and negative values are treated equally, preserving zero-centered distributions. This approach simplifies implementation, as the same scale factor is applied to both positive and negative values. However, it may not be optimal for datasets where the activation distributions are skewed, as significant portions of the data may be poorly represented.
+
+On the right side, we see an example of asymmetric calibration, where \(\alpha = -0.5\) and \(\beta = 1.5\). This results in a mapping where zero is shifted to a different quantized value \(-Z\), and the range extends asymmetrically. In this case, the quantization scale is adjusted to account for the fact that the distribution of values is not symmetric around zero. Asymmetric calibration is particularly useful when activations or weights have a non-zero mean since it allows for a better fit to the observed data distribution. However, it requires additional computation to determine the optimal offset and scaling factors.
+
+- Symmetric calibration is commonly used when weight distributions are centered around zero, which is often the case for well-initialized deep learning models. It simplifies computation and hardware implementation but may not be optimal for all scenarios.
+- Asymmetric calibration is useful when the data distribution is skewed, ensuring that the full quantized range is effectively utilized. It can improve accuracy retention but may introduce additional computational complexity in determining the optimal quantization parameters.
+
+The choice between these calibration strategies depends on the specific model and dataset. In practice, many machine learning frameworks, such as TensorRT and PyTorch, support both symmetric and asymmetric calibration modes, allowing developers to experiment and choose the best approach based on empirical results.
+
+Selecting an appropriate calibration range can help PTQ better preserve model accuracy while still achieving the efficiency benefits of reduced numerical precision.
 
 ##### Granularity
 
@@ -1441,6 +1558,125 @@ Interpretability is another key consideration. Many AutoML-generated architectur
 Beyond technical challenges, there is also a trade-off between automation and control. While AutoML reduces the need for manual intervention, it also abstracts away many decision-making processes that experts might otherwise fine-tune for specific applications. In some cases, domain knowledge is essential for guiding model optimization, and fully automated systems may not always account for subtle but important constraints imposed by the problem domain.
 
 Despite these challenges, AutoML continues to evolve, with ongoing research focused on reducing computational costs, improving generalization, and enhancing interpretability. As these improvements emerge, AutoML is expected to play an increasingly prominent role in the development of optimized machine learning models, making AI systems more accessible and efficient for a wide range of applications.
+
+## Software and Framework Support
+
+The theoretical understanding of model optimization techniques like pruning, quantization, and efficient numerics is essential, but their practical implementation relies heavily on robust software support. Without extensive framework development and tooling, these optimization methods would remain largely inaccessible to practitioners. For instance, implementing quantization would require manual modification of model definitions and careful insertion of quantization operations throughout the network. Similarly, pruning would involve direct manipulation of weight tensors—tasks that become prohibitively complex as models scale.
+
+The widespread adoption of model optimization techniques has been enabled by significant advances in software frameworks, optimization tools, and hardware integration. Modern deep learning frameworks provide high-level APIs and automated workflows that abstract away much of the complexity involved in applying these optimizations. This software infrastructure makes sophisticated optimization techniques accessible to a broader audience of practitioners, enabling the deployment of efficient models across diverse applications.
+
+Framework support addresses several critical challenges in model optimization:
+
+1. Implementation Complexity: Frameworks provide pre-built modules and functions for common optimization techniques, eliminating the need for custom implementations.
+2. Hyperparameter Management: Tools assist in tuning optimization parameters, such as pruning schedules or quantization bit-widths.
+3. Performance Trade-offs: Software helps manage the balance between model compression and accuracy through automated evaluation pipelines.
+4. Hardware Compatibility: Frameworks ensure optimized models remain compatible with target deployment platforms through device-specific code generation and validation.
+
+The support provided by frameworks transforms the theoretical optimization techniques we learned into practical tools that can be readily applied in production environments. This accessibility has been crucial in bridging the gap between academic research and industrial applications, enabling the widespread deployment of efficient machine learning models.
+
+### Built-in Optimization APIs
+
+Modern machine learning frameworks provide extensive APIs and libraries that enable practitioners to apply optimization techniques without implementing complex algorithms from scratch. These built-in optimizations enhance model efficiency while ensuring adherence to established best practices. Leading frameworks such as TensorFlow, PyTorch, and MXNet offer comprehensive toolkits for model optimization, streamlining the deployment of efficient machine learning systems.
+
+TensorFlow provides robust optimization capabilities through its Model Optimization Toolkit, which facilitates various techniques, including quantization, pruning, and clustering. QAT within the toolkit enables the conversion of floating-point models to lower-precision formats, such as INT8, while preserving model accuracy. The toolkit systematically manages both weight and activation quantization, ensuring consistency across diverse model architectures.
+
+Beyond quantization, TensorFlow’s optimization suite includes pruning algorithms that introduce sparsity into neural networks by removing redundant connections at different levels of granularity, from individual weights to entire layers. This flexibility allows practitioners to tailor pruning strategies to their specific requirements. Additionally, weight clustering groups similar weights together to achieve model compression while preserving core functionality. By leveraging these optimization techniques, TensorFlow provides multiple pathways for improving model efficiency beyond traditional quantization.
+
+Similarly, PyTorch offers comprehensive optimization support through built-in modules for quantization and pruning. The `torch.quantization` package provides tools for converting models to lower-precision representations, supporting both post-training quantization (PTQ) and quantization-aware training (QAT):
+
+```python
+import torch
+from torch.quantization import QuantStub, DeQuantStub, prepare_qat
+
+# Define a model with quantization support
+class QuantizedModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.quant = QuantStub()
+        self.conv = torch.nn.Conv2d(3, 64, 3)
+        self.dequant = DeQuantStub()
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.conv(x)
+        return self.dequant(x)
+
+# Prepare model for quantization-aware training
+model = QuantizedModel()
+model.qconfig = torch.quantization.get_default_qat_qconfig()
+model_prepared = prepare_qat(model)
+```
+
+For pruning, PyTorch provides the `torch.nn.utils.prune` module, which supports both unstructured and structured pruning:
+
+```python
+import torch.nn.utils.prune as prune
+
+# Apply unstructured pruning
+module = torch.nn.Linear(10, 10)
+prune.l1_unstructured(module, name='weight', amount=0.3)  # Prune 30% of weights
+
+# Apply structured pruning
+prune.ln_structured(module, name='weight', amount=0.5, n=2, dim=0)
+```
+
+These tools integrate seamlessly into PyTorch’s training pipelines, enabling efficient experimentation with different optimization strategies.
+
+Built-in optimization APIs offer substantial benefits that make model optimization more accessible and reliable. By providing pre-tested, production-ready tools, these APIs dramatically reduce the implementation complexity that practitioners face when optimizing their models. Rather than having to implement complex optimization algorithms from scratch, developers can leverage standardized interfaces that have been thoroughly vetted.
+
+The consistency provided by these built-in APIs is particularly valuable when working across different model architectures. The standardized interfaces ensure that optimization techniques are applied uniformly, reducing the risk of implementation errors or inconsistencies that could arise from custom solutions. This standardization helps maintain reliable and reproducible results across different projects and teams.
+
+These frameworks also serve as a bridge between cutting-edge research and practical applications. As new optimization techniques emerge from the research community, framework maintainers incorporate these advances into their APIs, making state-of-the-art methods readily available to practitioners. This continuous integration of research advances ensures that developers have access to the latest optimization strategies without needing to implement them independently.
+
+Furthermore, the comprehensive nature of built-in APIs enables rapid experimentation with different optimization approaches. Developers can easily test various strategies, compare their effectiveness, and iterate quickly to find the optimal configuration for their specific use case. This ability to experiment efficiently is crucial for finding the right balance between model performance and resource constraints.
+
+As model optimization continues to evolve, major frameworks maintain and expand their built-in support, further reducing barriers to efficient model deployment. The standardization of these APIs has played a crucial role in democratizing access to model efficiency techniques while ensuring high-quality implementations remain consistent and reliable.
+
+### Hardware Optimization Libraries
+
+Hardware optimization libraries in modern machine learning frameworks enable efficient deployment of optimized models across different hardware platforms. These libraries integrate directly with training and deployment pipelines to provide hardware-specific acceleration for various optimization techniques across model representation, numerical precision, and architectural efficiency dimensions.
+
+For model representation optimizations like pruning, libraries such as TensorRT, XLA, and OpenVINO provide sparsity-aware acceleration through optimized kernels that efficiently handle sparse computations. TensorRT specifically supports structured sparsity patterns, allowing models trained with techniques like two-out-of-four structured pruning to run efficiently on NVIDIA GPUs. Similarly, TPUs leverage XLA's sparse matrix optimizations, while FPGAs enable custom sparse execution through frameworks like Vitis AI.
+
+Knowledge distillation benefits from hardware-aware optimizations that help compact student models achieve high inference efficiency. Libraries like TensorRT, OpenVINO, and SNPE optimize distilled models for low-power execution, often combining distillation with quantization or architectural restructuring to meet hardware constraints. For models discovered through neural architecture search (NAS), frameworks such as TVM and TIMM provide compiler support to tune the architectures for various hardware backends.
+
+In terms of numerical precision optimization, these libraries offer extensive support for both PTQ and QAT. TensorRT and TensorFlow Lite implement INT8 and INT4 quantization during model conversion, reducing computational complexity while leveraging specialized hardware acceleration on mobile SoCs and edge AI chips. NVIDIA TensorRT incorporates calibration-based quantization using representative datasets to optimize weight and activation scaling.
+
+More granular quantization approaches like channelwise and groupwise quantization are supported in frameworks such as SNPE and OpenVINO. Dynamic quantization capabilities in PyTorch and ONNX Runtime enable runtime activation quantization, making models adaptable to varying hardware conditions. For extreme precision reduction, techniques like binarization and ternarization are optimized through libraries such as CMSIS-NN, enabling efficient execution of binary-weight models on ARM Cortex-M microcontrollers.
+
+Architectural efficiency techniques integrate tightly with hardware-specific execution frameworks. TensorFlow XLA and TVM provide operator-level tuning through aggressive fusion and kernel reordering, improving efficiency across GPUs, TPUs, and edge devices. Dynamic computation approaches like early exit architectures and conditional computation are supported by custom execution runtimes that optimize control flow.
+
+The widespread support for sparsity-aware execution spans multiple hardware platforms. NVIDIA GPUs utilize specialized sparse tensor cores for accelerating structured sparse models, while TPUs implement hardware-level sparse matrix optimizations. On FPGAs, vendor-specific compilers like Vitis AI enable custom sparse computations to be highly optimized.
+
+This comprehensive integration of hardware optimization libraries with machine learning frameworks enables developers to effectively implement pruning, quantization, NAS, dynamic computation, and sparsity-aware execution while ensuring optimal adaptation to target hardware. The ability to optimize across multiple dimensions—from model representation to numerical precision and architectural efficiency—is crucial for deploying machine learning models efficiently across diverse platforms.
+
+### Visualizing Optimizations
+
+Model optimization techniques fundamentally alter model structure and numerical representations, but their impact can be difficult to interpret without visualization tools. Dedicated visualization frameworks and libraries help practitioners gain insights into how pruning, quantization, and other optimizations affect model behavior. These tools provide graphical representations of sparsity patterns, quantization error distributions, and activation changes, making optimization more transparent and controllable.
+
+#### Visualizing Quantization
+
+Quantization reduces numerical precision, introducing rounding errors that can impact model accuracy. Visualization tools provide direct insight into how these errors are distributed, helping diagnose and mitigate precision-related performance degradation.
+
+One commonly used technique is quantization error histograms, which depict the distribution of errors across weights and activations. These histograms reveal whether quantization errors follow a Gaussian distribution or contain outliers, which could indicate problematic layers. TensorFlow’s Quantization Debugger and PyTorch’s FX Graph Mode Quantization tools allow users to analyze such histograms and compare error patterns between different quantization methods.
+
+Activation visualizations also help detect overflow issues caused by reduced numerical precision. Tools such as ONNX Runtime’s quantization visualization utilities and NVIDIA’s TensorRT Inspector allow practitioners to color-map activations before and after quantization, making saturation and truncation issues visible. This enables calibration adjustments to prevent excessive information loss, preserving numerical stability. For example, @fig-color-mapping is a color mapping of the AlexNet convolutional kernels.
+
+![Color mapping of activations. Source: @alexnet2012.](https://compsci697l.github.io/assets/cnnvis/filt1.jpeg){#fig-color-mapping}
+
+Beyond static visualizations, tracking quantization error over the training process is essential. Monitoring mean squared quantization error (MSQE) during quantization-aware training (QAT) helps identify divergence points where numerical precision significantly impacts learning. TensorBoard and PyTorch’s quantization debugging APIs provide real-time tracking, highlighting instability during training.
+
+By integrating these visualization tools into optimization workflows, practitioners can identify and correct issues early, ensuring optimized models maintain both accuracy and efficiency. These empirical insights provide a deeper understanding of how sparsity, quantization, and architectural optimizations affect models, guiding effective model compression and deployment strategies.
+
+#### Visualizing Sparsity
+
+Sparsity-focused visualization tools provide detailed insight into pruned models, mapping out which weights have been removed and how sparsity is distributed across layers. Frameworks such as TensorBoard (for TensorFlow) and Netron (for ONNX) allow users to inspect pruned networks at both the layer and weight levels.
+
+One common visualization technique is sparsity heat maps, where color gradients indicate the proportion of weights removed from each layer. Layers with higher sparsity appear darker, revealing the model regions most impacted by pruning. Libraries such as DeepSparse’s visualization suite and PyTorch’s pruning utilities enable the generation of such maps to analyze how pruning decisions are affecting different model components.
+
+Beyond static snapshots, trend plots track sparsity progression across multiple pruning iterations. These visualizations illustrate how global model sparsity evolves, often showing an initial rapid sparsity increase followed by more gradual refinements. TensorFlow’s Model Optimization Toolkit and SparseML’s monitoring tools provide such tracking, displaying per-layer pruning levels over time. These insights allow practitioners to fine-tune pruning strategies by adjusting sparsity constraints per layer.
+
+By making sparsity data visually accessible, these tools transform pruning from a black-box operation into an interpretable process, enabling practitioners to control sparsity-aware optimizations more effectively.
 
 ## Conclusion
 
