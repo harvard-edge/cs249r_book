@@ -1116,60 +1116,186 @@ When a machine learning model exceeds the capacity of on-chip memory and HBM, it
 
 At the highest level of the hierarchy, flash storage and solid-state drives (SSDs) store large pre-trained models, datasets, and checkpointed weights. These storage devices offer large capacities but are too slow for real-time execution, requiring models to be loaded into faster memory tiers before computation begins. For instance, in training scenarios, checkpointed models stored in SSDs must be loaded into DRAM or HBM before resuming computation, as direct execution from SSDs would be too slow to maintain efficient accelerator utilization [@Narayanan2021].
 
-#### Memory Bottlenecks
-
 The memory hierarchy balances competing objectives of speed, capacity, and energy efficiency. However, moving data through multiple memory levels introduces bottlenecks that limit accelerator performance. Data transfers between memory levels incur latency costs, particularly for off-chip accesses. Limited bandwidth restricts data flow between memory tiers. Memory capacity constraints force constant data movement as models exceed local storage.
 
+### Host and Accelerator Communication
+
+Machine learning accelerators, such as GPUs and TPUs, achieve high computational throughput through parallel execution. However, their efficiency is fundamentally constrained by data movement between the host (CPU) and accelerator memory. Unlike general-purpose workloads that operate entirely within a CPU’s memory subsystem, AI workloads require frequent data transfers between CPU main memory and the accelerator, introducing latency, consuming bandwidth, and affecting overall performance.
+
+Host-accelerator data movement follows a structured sequence, as illustrated in @fig-host-accelerator-data-movement. Before computation begins, data is copied from CPU memory to the accelerator’s memory. The CPU then issues execution instructions, and the accelerator processes the data in parallel. Once computation completes, the results are stored in accelerator memory and transferred back to the CPU. Each step introduces potential inefficiencies that must be managed to optimize performance.
+
+::: {#fig-host-accelerator-data-movement fig-env="figure" fig-pos="htb"}
+
+```{.tikz}
+
+\begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\small]
+\tikzset{%
+    helvetica/.style={align=flush center,font=\footnotesize\usefont{T1}{phv}{m}{n}},
+    Line/.style={line width=1.0pt,black!50}
+}
+\tikzset{
+  Box/.style={inner xsep=2pt,
+    draw=GreenLine,
+    line width=0.75pt,
+    node distance=1.0,
+    fill=GreenL!70,
+    align=flush center,
+    text width=26mm,
+    minimum width=26mm,
+    minimum height=10mm
+  },
+}
+
+\begin{scope}
+\node[Box](B1){Main Memory};
+\node[Box,right=of B1](B2){CPU};
+\node[Box,right=of B2](B3){Memory for GPU};
+\node[Box,right=of B3](B4){GPU};
+\end{scope}
+%
+\begin{scope}[shift={(0,-6)}]
+\colorlet{GreenL}{OrangeL}
+\colorlet{GreenLine}{OrangeLine}
+\node[Box](2B1){Main Memory};
+\node[Box,right=of 2B1](2B2){CPU};
+\node[Box,right=of 2B2](2B3){Memory for GPU};
+\node[Box,right=of 2B3](2B4){GPU};
+%
+\end{scope}
+%
+\foreach \x in {1,2,3,4} {
+ \draw[Line] (B\x) -- (2B\x);
+}
+%
+\draw[Line,-latex]($(B1)!0.2!(2B1)$)--
+node[above,text=black,helvetica,pos=0.26]{Copy processing data (1)}
+($(B3)!0.2!(2B3)$);
+\draw[Line,-latex]($(B2)!0.37!(2B2)$)--
+node[above,text=black,helvetica,pos=0.26]{Instruct the processing (2)}
+($(B4)!0.37!(2B4)$);
+%
+\draw[Line,-latex]($(B4)!0.75!(2B4)$)--
+node[above,text=black,helvetica,pos=0.5]{Store results}
+($(B3)!0.75!(2B3)$);
+\draw[Line,-latex]($(B3)!0.85!(2B3)$)--
+node[above,text=black,helvetica,pos=0.25]{Copy the result (4)}
+($(B1)!0.85!(2B1)$);
+%
+\draw[Line,-latex]($(B4)!0.57!(2B4)$)
+to [out=10,in=350,distance=42]
+node[above,text=black,helvetica,pos=0.1,fill=white]{Execute parallel in each core (3)}
+($(B4)!0.62!(2B4)$);
+\end{tikzpicture}
+
+```
+Host-accelerator memory access interactions.
+:::
+
+The key challenges in host-accelerator data movement include latency, bandwidth constraints, and synchronization overheads. Optimizing data transfers through efficient memory management and interconnect technologies is essential for maximizing accelerator utilization.
+
+#### Data Transfer Patterns
+
+The efficiency of ML accelerators depends not only on their computational power but also on the continuous supply of data. Even high-performance GPUs and TPUs remain underutilized if data transfers are inefficient. Host and accelerator memory exist as separate domains, requiring explicit transfers over interconnects such as PCIe, NVLink, or proprietary links. Ineffective data movement can cause execution stalls, making transfer optimization critical.
+
+@fig-host-accelerator-data-movement illustrates this structured sequence. In step (1), data is copied from CPU memory to accelerator memory, as GPUs cannot directly access host memory at high speeds. A direct memory access (DMA) engine typically handles this transfer without consuming CPU cycles. In step (2), the CPU issues execution commands via APIs like CUDA, ROCm, or OpenCL. Step (3) involves parallel execution on the accelerator, where stalls can occur if data is not available when needed. Finally, in step (4), computed results are copied back to CPU memory for further processing.
+
+Latency and bandwidth limitations significantly impact AI workloads. PCIe, with a peak bandwidth of 32 GB/s (PCIe 4.0), is much slower than an accelerator’s high-bandwidth memory (HBM), which can exceed 1 TB/s. Large data transfers exacerbate bottlenecks, particularly in deep learning tasks. Additionally, synchronization overheads arise when computation must wait for data transfers to complete. Efficient scheduling and overlapping transfers with execution are essential to mitigate these inefficiencies.
+
+#### Common Data Transfer Mechanisms
+
+The movement of data between the host (CPU) and the accelerator (GPU, TPU, or other AI hardware) depends on the interconnect technology that links the two processing units. The choice of interconnect determines the bandwidth available for transfers, the latency of communication, and the overall efficiency of host-accelerator execution. The most commonly used transfer mechanisms include PCIe (Peripheral Component Interconnect Express), NVLink, Direct Memory Access (DMA), and Unified Memory Architectures. Each of these plays a crucial role in optimizing the four-step data movement process illustrated in @fig-host-accelerator-data-movement.
+
+##### PCIe: The Standard Host-Accelerator Interface
+
+Most accelerators communicate with the CPU via PCIe, the industry-standard interconnect for data movement. PCIe 4.0 provides up to 32 GB/s bandwidth, while PCIe 5.0 doubles this to 64 GB/s. However, this is still significantly lower than HBM bandwidth within accelerators, making PCIe a bottleneck for large AI workloads.
+
+PCIe also introduces latency overheads due to its packet-based communication and memory-mapped I/O model. Frequent small transfers are inefficient, so batching data movement reduces overhead. Computation commands, issued over PCIe, further contribute to latency, requiring careful optimization of execution scheduling.
+
+##### NVLink: A High-Speed Alternative to PCIe
+
+To address the bandwidth limitations of PCIe, NVIDIA developed NVLink, a proprietary high-speed interconnect that provides significantly higher bandwidth between GPUs and, in some configurations, between the CPU and GPU. Unlike PCIe, which operates as a shared bus, NVLink enables direct point-to-point communication between connected devices, reducing contention and improving efficiency for AI workloads.
+
+For host-accelerator transfers, NVLink can be used in step (1) to transfer input data from main memory to GPU memory at speeds far exceeding PCIe, with bandwidths reaching up to 600 GB/s in NVLink 4.0. This significantly reduces the data movement bottleneck, allowing accelerators to access input data with lower latency. In multi-GPU configurations, NVLink also accelerates peer-to-peer transfers, allowing accelerators to exchange data without routing through main memory, thereby optimizing step (3) of the computation process.
+
+Although NVLink offers substantial performance benefits, it is not universally available. Unlike PCIe, which is an industry standard across all accelerators, NVLink is specific to NVIDIA hardware, limiting its applicability to systems designed with NVLink-enabled GPUs.
+
+##### Direct Memory Access (DMA) for Efficient Data Transfers
+
+In conventional memory transfers, the CPU issues load/store instructions, consuming processing cycles. DMA offloads this task, enabling asynchronous data movement without CPU intervention.
+
+During data transfers, the CPU initiates a DMA request, allowing data to be copied to accelerator memory in the background. Similarly, result transfers back to main memory occur without blocking execution. This enables overlapping computation with data movement, reducing idle time and improving accelerator utilization.
+
+DMA is essential for enabling asynchronous data movement, which allows transfers to overlap with computation. Instead of waiting for transfers to complete before execution begins, AI workloads can stream data into the accelerator while earlier computations are still in progress, reducing idle time and improving accelerator utilization.
+
+##### Unified Memory: An Abstraction for Automatic Data Movement
+
+While PCIe, NVLink, and DMA optimize explicit memory transfers, some AI workloads require a more flexible memory model that eliminates the need for manual data copying. Unified Memory provides an abstraction that allows both the host and accelerator to access a single, shared memory space, automatically handling data movement when needed.
+
+With Unified Memory, data does not need to be explicitly copied between CPU and GPU memory before execution. Instead, when a computation requires a memory region that is currently located in host memory, the system automatically migrates it to the accelerator, handling step (1) transparently. Similarly, when computed results are accessed by the CPU, step (4) occurs automatically, eliminating the need for manual memory management.
+
+Although Unified Memory simplifies programming, it introduces performance trade-offs. Since memory migrations occur on demand, they can lead to unpredictable latencies, particularly if large datasets need to be transferred frequently. Additionally, since Unified Memory is implemented through page migration techniques, small memory accesses can trigger excessive data movement, further reducing efficiency.
+
+For AI workloads that require fine-grained memory control, explicit data transfers using PCIe, NVLink, and DMA often provide better performance. However, for applications where ease of development is more important than absolute speed, Unified Memory offers a convenient alternative.
+
+#### Data Transfer Overheads and Latency
+
+Host-accelerator data movement introduces overheads that impact AI workload execution. Unlike on-chip memory accesses, which occur at nanosecond latencies, host-accelerator transfers traverse system interconnects, adding latency, bandwidth constraints, and synchronization delays.
+
+Interconnect latency affects transfer speed, with PCIe, the standard host-accelerator link, incurring significant overhead due to packet-based transactions and memory-mapped I/O. This makes frequent small transfers inefficient. Faster alternatives like NVLink reduce latency and improve bandwidth but are limited to specific hardware ecosystems.
+
+Synchronization delays further contribute to inefficiencies. Synchronous transfers block execution until data movement completes, ensuring data consistency but introducing idle time. Asynchronous transfers allow computation and data movement to overlap, reducing stalls but requiring careful coordination to avoid execution mismatches.
+
+These factors—interconnect latency, bandwidth limitations, and synchronization overheads—determine AI workload efficiency. While optimization techniques mitigate these limitations, understanding these fundamental transfer mechanics is essential for improving performance.
 
 ### Model Memory Pressure
 
-While every machine learning model relies on large parameter sets and significant data movement, the way these models access memory varies considerably. In particular, MLPs, CNNs, and Transformers each impose unique demands on memory hierarchies. This variability directly dictates how accelerators must optimize their memory systems to achieve peak efficiency. By examining the distinct memory access patterns and resource requirements of these model types, we can better understand why accelerators deliver differing performance across various architectures.
+Machine learning models impose varying memory access patterns that significantly influence accelerator performance. The way data is transferred between the host and accelerator, how frequently memory is accessed, and the efficiency of caching mechanisms all determine overall execution efficiency. While multilayer perceptrons (MLPs), convolutional neural networks (CNNs), and transformer networks each require large parameter sets, their distinct memory demands necessitate tailored optimization strategies for accelerators. Understanding these differences provides insight into why different hardware architectures exhibit varying levels of efficiency across workloads.
 
 #### Multilayer Perceptrons
 
-Multilayer perceptrons (MLPs), also referred to as fully connected networks, are among the simplest neural network architectures. Each layer in an MLP consists of a dense matrix multiplication, where every neuron is connected to all neurons in the previous layer. This results in high memory bandwidth demands for weights, since every input activation interacts with all neurons in the subsequent layer.
+MLPs, also referred to as fully connected networks, are among the simplest neural architectures. Each layer consists of a dense matrix multiplication, requiring every neuron to interact with all neurons in the preceding layer. This results in high memory bandwidth demands, particularly for weights, as every input activation contributes to a large set of computations.
 
-From a memory perspective, MLPs are distinguished by their large, dense weight matrices, which frequently necessitate access to off-chip memory when the model size surpasses on-chip capacity. They also exhibit low activation reuse, as each input generally contributes to only a limited number of computations before being discarded. Consequently, their sequential memory access patterns make them more amenable to cache management compared to sparse workloads.
+From a memory perspective, MLPs rely on large, dense weight matrices that frequently exceed on-chip memory capacity, necessitating off-chip memory accesses. Since accelerators cannot directly access host memory at high speed, data transfers must be explicitly managed via interconnects such as PCIe or NVLink. These transfers introduce latency and consume bandwidth, affecting execution efficiency.
 
-Although MLPs are relatively bandwidth-heavy, their regular and predictable memory access patterns make them easier to optimize. Accelerators handling MLP workloads often prefetch weights efficiently, leveraging streaming memory accesses and fast SRAM caches to sustain high throughput.
+Despite their bandwidth-heavy nature, MLPs exhibit regular and predictable memory access patterns, making them amenable to optimizations such as prefetching and streaming memory accesses. Dedicated AI accelerators mitigate transfer overhead by staging weight matrices in fast SRAM caches and overlapping data movement with computation through direct memory access (DMA) engines, reducing execution stalls. These optimizations allow accelerators to sustain high throughput even when handling large parameter sets [@Chen2016].
 
 #### Convolutional Neural Networks
 
 Convolutional Neural Networks (CNNs) are widely used in image processing and computer vision tasks. Unlike MLPs, which require dense matrix multiplications, CNNs process input feature maps using small filter kernels that slide across the image. This localized computation structure results in high spatial data reuse, where the same input pixels contribute to multiple convolutions.
 
-CNNs demonstrate several advantageous memory characteristics. Their convolution kernels exhibit a small weight footprint due to extensive reuse across the input image, which minimizes storage requirements. Additionally, the high degree of activation reuse facilitates efficient caching of input feature maps in on-chip memory, reducing memory access latency. Furthermore, the inherent spatial locality in CNNs makes them well-suited to tiling strategies that optimize the movement of data within the memory hierarchy.
+CNN accelerators benefit from on-chip memory optimizations, as convolution filters exhibit extensive reuse, allowing weights to be stored in fast local SRAM instead of frequently accessing off-chip memory. However, activation maps require careful management due to their size. Since accessing main memory over interconnects like PCIe introduces latency and bandwidth bottlenecks, CNN accelerators employ tiling techniques to divide feature maps into smaller regions that fit within on-chip buffers. This minimizes costly external memory transfers, improving overall efficiency [@Chen2016].
 
-Since CNN weights are typically much smaller than those of MLPs, accelerators can store filter kernels entirely in fast local memory, reducing off-chip memory accesses. However, the challenge lies in efficiently handling large activation maps, which must be stored, retrieved, and reused multiple times during execution. CNN accelerators often employ tiling techniques, where feature maps are split into smaller regions that fit within on-chip buffers, reducing the need to frequently access slower external memory [@Chen2016].
+While CNN workloads are more memory-efficient than MLPs, managing intermediate activations remains a challenge. Accelerators use hierarchical caching strategies and DMA engines to optimize memory movement, ensuring that computations are not stalled by inefficient host-accelerator data transfers. These memory optimizations help CNN accelerators maintain high throughput by reducing reliance on off-chip memory bandwidth [@Chen2016].
 
 #### Transformer Networks
 
 Transformers have become the dominant architecture for natural language processing and are increasingly used in other domains such as vision and speech recognition. Unlike CNNs, which rely on local computations, transformers perform global attention mechanisms, where each token in an input sequence can interact with all other tokens. This leads to irregular and bandwidth-intensive memory access patterns, as large key-value matrices must be fetched and updated frequently.
 
-Transformers present significant memory challenges due to their massive parameter sizes, which often reach hundreds of billions and far exceed on-chip memory capacities. Additionally, their attention mechanisms necessitate frequent access to large key-value matrices, resulting in high memory bandwidth consumption. Moreover, the dynamic nature of attention operations leads to low data reuse, rendering traditional caching strategies less effective.
+These models are particularly challenging for accelerators due to their massive parameter sizes, which often exceed on-chip memory capacity. As a result, frequent memory transfers between host and accelerator introduce substantial latency overheads, particularly when relying on interconnects such as PCIe. Unified Memory architectures can mitigate some of these issues by dynamically handling data movement, but they introduce additional latency due to unpredictable on-demand memory migrations. Because transformers are memory-bound rather than compute-bound, accelerators optimized for them rely on high-bandwidth memory (HBM), tensor tiling, and memory partitioning to sustain performance [@Brown2020].
 
-Due to these demands, transformer models are often memory-bound rather than compute-bound. Accelerators optimized for transformers must rely on high-bandwidth memory (HBM), quantization techniques, and efficient memory partitioning to sustain high throughput [@Brown2020]. Additionally, attention caching and specialized tensor layouts help reduce redundant memory fetches [@Narayanan2021].
+Additionally, attention caching mechanisms and specialized tensor layouts reduce redundant memory fetches, improving execution efficiency. Given the bandwidth limitations of traditional interconnects, NVLink-enabled architectures offer significant advantages for large-scale transformer training, as they provide higher throughput and lower latency compared to PCIe. Furthermore, DMA-based asynchronous memory transfers enable overlapping computation with data movement, reducing execution stalls [@Narayanan2021].
 
 ### Implications for ML Accelerators
 
-The diverse memory requirements of MLPs, CNNs, and Transformers highlight the importance of tailoring memory architectures to specific workloads. @tbl-model-mem-compare compares the memory access patterns across these different models.
+The diverse memory requirements of MLPs, CNNs, and Transformers highlight the need to tailor memory architectures to specific workloads. @tbl-model-mem-compare compares the memory access patterns across these different models.
 
-+-------------+-----------------+------------------+---------------------------+----------------------+
-| Model Type  | Weight Size     | Activation Reuse | Memory Access Pattern     | Primary Bottleneck   |
-+:============+:================+:=================+:==========================+:=====================+
-| MLP (Dense) | Large, dense    | Low              | Regular, sequential       | Bandwidth            |
-+-------------+-----------------+------------------+---------------------------+----------------------+
-| CNN         | Small, reused   | High             | Spatial locality          | Feature map movement |
-+-------------+-----------------+------------------+---------------------------+----------------------+
-| Transformer | Massive, sparse | Low              | Irregular, high bandwidth | Memory capacity      |
-+-------------+-----------------+------------------+---------------------------+----------------------+
++-------------+-----------------+------------------+--------------------------------+-------------------------------+
+| Model Type  | Weight Size     | Activation Reuse | Memory Access Pattern          | Primary Bottleneck            |
++:============+:================+:=================+:===============================+:==============================+
+| MLP (Dense) | Large, dense    | Low              | Regular, sequential (streamed) | Bandwidth (off-chip)          |
++-------------+-----------------+------------------+--------------------------------+-------------------------------+
+| CNN         | Small, reused   | High             | Spatial locality               | Feature map movement          |
++-------------+-----------------+------------------+--------------------------------+-------------------------------+
+| Transformer | Massive, sparse | Low              | Irregular, high-bandwidth      | Memory capacity + Interconnect|
++-------------+-----------------+------------------+--------------------------------+-------------------------------+
 
 : Memory access characteristics across different ML models. {#tbl-model-mem-compare .striped .hover}
 
-Each model type presents unique challenges that directly impact accelerator design. MLPs benefit from fast streaming access to dense weight matrices, making bandwidth a key factor in performance. CNNs, with their high activation reuse and structured memory access patterns, can take advantage of memory hierarchies that prioritize efficient data locality and caching strategies. Transformers, on the other hand, impose significant demands on both bandwidth and capacity due to their large key-value matrices and irregular memory access patterns.
+Each model type presents unique challenges that directly impact accelerator design. MLPs benefit from fast streaming access to dense weight matrices, making memory bandwidth a critical factor in performance, especially when transferring large weights from host memory to accelerator memory. CNNs, with their high activation reuse and structured memory access patterns, can leverage on-chip caching and tiling strategies to minimize off-chip memory transfers. Transformers, however, impose significant demands on both bandwidth and capacity, as attention mechanisms require frequent access to large key-value matrices, leading to high interconnect traffic and increased memory pressure.
 
-To address these challenges, modern AI accelerators incorporate memory hierarchies that balance speed, capacity, and energy efficiency. On-chip memory structures are used to store frequently accessed data, while external memory subsystems provide scalability for larger models. These architectures leverage a mix of cache-based designs, software-managed scratchpad memories, and high-bandwidth memory solutions to optimize data movement.
+To address these challenges, modern AI accelerators incorporate multi-tier memory hierarchies that balance speed, capacity, and energy efficiency. On-chip SRAM caches and scratchpad memories store frequently accessed data, while high-bandwidth external memory (HBM) provides scalability for large models. Efficient interconnects, such as NVLink, help alleviate host-accelerator transfer bottlenecks, particularly in transformer workloads where memory movement constraints can dominate execution time.
 
-As ML workloads continue to grow in complexity, memory efficiency is becoming just as critical as raw compute power. Efficient data movement strategies, workload-specific optimizations, and advanced memory architectures play a fundamental role in sustaining high performance. The following section explores the design of memory hierarchies in AI accelerators, detailing how different levels of memory interact to maximize efficiency.
+As ML workloads continue to grow in complexity, memory efficiency is becoming as critical as raw compute power. Efficient data movement strategies, asynchronous memory transfers (DMA), and unified memory architectures play a fundamental role in sustaining high performance. The following section explores the design of memory hierarchies in AI accelerators, detailing how different levels of memory interact to optimize execution efficiency.
 
 ## Mapping Neural Networks
 
