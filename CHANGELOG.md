@@ -1,12 +1,24 @@
-_Last Updated: Feb 08, 2025_
+_Last Updated: Mar 01, 2025_
 
 ## 2025 Changes
+
+### 📅 Published on Feb 08, 2025
+
+🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/995166bc9c5f488a1f5916915e9080b48a14ff53...a9fc9a4df5f42a07134e6e698fa67cb320ed8406) --- 2 files updated (31 lines added, 29 lines removed)
+
+<details open>
+  <summary>**Minor Updates**</summary>
+
+- **Acknowledgements**: <span style="color:green">+++</span><span style="color:red">---</span> (29 lines added, 29 lines removed)
+- **SocratiQ AI**: <span style="color:green">++++++</span><span style="color:red"></span> (2 lines added, 0 lines removed)
+
+</details>
 
 ### 📅 Published on Feb 07, 2025
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/dfbd41b58fcef7f945bf2cf91f7c5c1a8e11c054...995166bc9c5f488a1f5916915e9080b48a14ff53) --- 46 files updated (4644 lines added, 3807 lines removed)
 
-<details open>
+<details>
   <summary>**Major Updates**</summary>
 
 - **Acknowledgements**: <span style="color:green">++</span><span style="color:red">---</span> (334 lines added, 336 lines removed)
@@ -22,7 +34,7 @@ _Last Updated: Feb 08, 2025_
 
 </details>
 
-<details open>
+<details>
   <summary>**Minor Updates**</summary>
 
 - **AI Frameworks**: <span style="color:green">++</span><span style="color:red">---</span> (35 lines added, 37 lines removed)

@@ -1,0 +1,63 @@
+name: Update Changelog
+
+on:
+  workflow_call:
+
+jobs:
+  update-changelog:
+    name: Update Changelog
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
+
+      - name: Fetch base branch
+        run: git fetch origin +refs/heads/dev:refs/remotes/origin/dev || git fetch --all
+
+      - name: Check available branches
+        run: git branch -a
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Run Changelog Update
+        id: update
+        run: |
+          # Determine the base branch dynamically
+          DEFAULT_BRANCH=$(git remote show origin | awk '/HEAD branch/ {print $NF}')
+
+          echo "Default branch is $DEFAULT_BRANCH"
+
+          # Make changelog script executable
+          chmod +x .github/scripts/update_changelog.py
+
+          # Run update script
+          python3 .github/scripts/update_changelog.py
+
+          # Check for changes
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "changes_made=true" >> $GITHUB_OUTPUT
+          else
+            echo "changes_made=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit Changes
+        if: steps.update.outputs.changes_made == 'true'
+        run: |
+          BRANCH_NAME=${GITHUB_HEAD_REF:-$(git rev-parse --abbrev-ref HEAD)}
+          
+          git add CHANGELOG.md
+          git commit -m "Auto-update changelog"
+          git push origin $BRANCH_NAME
