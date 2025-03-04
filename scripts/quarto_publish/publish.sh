@@ -9,7 +9,7 @@ fi
 
 # Step 1: Run quarto render
 echo "Running quarto render..."
-quarto render
+#quarto render
 if [ $? -ne 0 ]; then
     echo "quarto render failed!"
     exit 1
@@ -19,7 +19,7 @@ fi
 
 # Step 2: Run the Python script to compress the PDF
 echo "Compressing PDF..."
-python3 ./scripts/gs_compress_pdf.py -i ./_book/Machine-Learning-Systems.pdf -o ./_book/ebook.pdf -s "/ebook"
+python3 ./.github/scripts/gs_compress_pdf.py -i ./_book/Machine-Learning-Systems.pdf -o ./_book/ebook.pdf -s "/ebook"
 if [ $? -ne 0 ]; then
     echo "PDF compression failed!"
     exit 1
