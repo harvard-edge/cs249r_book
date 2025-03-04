@@ -9,7 +9,7 @@ fi
 
 # Step 1: Run quarto render
 echo "Running quarto render..."
-#quarto render
+quarto render
 if [ $? -ne 0 ]; then
     echo "quarto render failed!"
     exit 1
