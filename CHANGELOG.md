@@ -1,12 +1,59 @@
-_Last Updated: Mar 01, 2025_
+_Last Updated: Mar 03, 2025_
 
 ## 2025 Changes
+
+### 📅 Published on Mar 03, 2025
+
+🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/a9fc9a4df5f42a07134e6e698fa67cb320ed8406...6b5a1a8b016916e46bc034776beb25cfea774db5) --- 31 files updated (12032 lines added, 7337 lines removed)
+
+<details open>
+  <summary>**Major Updates**</summary>
+
+- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">--</span> (5769 lines added, 3904 lines removed)
+- **AI Frameworks**: <span style="color:green">++++</span><span style="color:red">-</span> (946 lines added, 216 lines removed)
+- **AI Training**: <span style="color:green">++++</span><span style="color:red">-</span> (860 lines added, 335 lines removed)
+- **Image Classification**: <span style="color:green">+++</span><span style="color:red">--</span> (199 lines added, 142 lines removed)
+- **Benchmarking AI**: <span style="color:green">++++</span><span style="color:red">-</span> (265 lines added, 118 lines removed)
+- **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">--</span> (2515 lines added, 1624 lines removed)
+- **Data Engineering**: <span style="color:green">++++</span><span style="color:red">-</span> (229 lines added, 69 lines removed)
+- **DL Primer**: <span style="color:green">++++</span><span style="color:red">-</span> (237 lines added, 84 lines removed)
+
+</details>
+
+<details open>
+  <summary>**Minor Updates**</summary>
+
+- **On-Device Learning**: <span style="color:green">++</span><span style="color:red">---</span> (51 lines added, 67 lines removed)
+- **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">--</span> (80 lines added, 52 lines removed)
+- **Motion Classification and Anomaly Detection**: <span style="color:green">++++</span><span style="color:red">-</span> (58 lines added, 26 lines removed)
+- **Nicla Vision**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Object Detection**: <span style="color:green">++++</span><span style="color:red">-</span> (73 lines added, 35 lines removed)
+- **Setup**: <span style="color:green">+++</span><span style="color:red">--</span> (81 lines added, 42 lines removed)
+- **Efficient AI**: <span style="color:green">+++</span><span style="color:red">---</span> (37 lines added, 37 lines removed)
+- **AI Workflow**: <span style="color:green">+++++</span><span style="color:red"></span> (134 lines added, 21 lines removed)
+- **AI for Good**: <span style="color:green">++</span><span style="color:red">---</span> (37 lines added, 39 lines removed)
+- **ML Operations**: <span style="color:green">++</span><span style="color:red">---</span> (53 lines added, 69 lines removed)
+- **Security & Privacy**: <span style="color:green">++</span><span style="color:red">---</span> (58 lines added, 74 lines removed)
+- **Robust AI**: <span style="color:green">++</span><span style="color:red">---</span> (57 lines added, 71 lines removed)
+- **Sustainable AI**: <span style="color:green">++</span><span style="color:red">---</span> (32 lines added, 42 lines removed)
+- **ML Systems**: <span style="color:green">+++</span><span style="color:red">---</span> (44 lines added, 44 lines removed)
+- **Vision-Language Models (VLM)**: <span style="color:green">+++</span><span style="color:red">--</span> (29 lines added, 27 lines removed)
+- **KWS Feature Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (12 lines added, 12 lines removed)
+- **DNN Architectures**: <span style="color:green">++</span><span style="color:red">---</span> (14 lines added, 16 lines removed)
+- **Introduction**: <span style="color:green">++</span><span style="color:red">---</span> (47 lines added, 49 lines removed)
+- **Responsible AI**: <span style="color:green">++</span><span style="color:red">---</span> (26 lines added, 34 lines removed)
+- **SocratiQ AI**: <span style="color:green">+++</span><span style="color:red">---</span> (22 lines added, 22 lines removed)
+- **Overview**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
+- **Acknowledgements**: <span style="color:green">+++</span><span style="color:red">---</span> (61 lines added, 61 lines removed)
+- **About the Book**: <span style="color:green">++++++</span><span style="color:red"></span> (1 lines added, 0 lines removed)
+
+</details>
 
 ### 📅 Published on Feb 08, 2025
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/995166bc9c5f488a1f5916915e9080b48a14ff53...a9fc9a4df5f42a07134e6e698fa67cb320ed8406) --- 2 files updated (31 lines added, 29 lines removed)
 
-<details open>
+<details>
   <summary>**Minor Updates**</summary>
 
 - **Acknowledgements**: <span style="color:green">+++</span><span style="color:red">---</span> (29 lines added, 29 lines removed)
