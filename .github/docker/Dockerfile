@@ -5,7 +5,7 @@ FROM rocker/r-ver:4.3.2
 ENV DEBIAN_FRONTEND=noninteractive
 
 # ------------------------
-# 🔧 Install System Dependencies (including curl)
+# 🔧 Install System Dependencies (including curl and chromium)
 # ------------------------
 RUN apt-get update && apt-get install -y \
     curl wget unzip perl \
@@ -15,7 +15,11 @@ RUN apt-get update && apt-get install -y \
     libcairo2 gdk-pixbuf2.0-bin libgdk-pixbuf2.0-dev librsvg2-bin \
     fonts-dejavu fonts-freefont-ttf \
     ghostscript inkscape \
+    chromium \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Configure Quarto to use the installed Chromium for PDF rendering
+ENV QUARTO_CHROMIUM_PATH=/usr/bin/chromium
 
 # ------------------------
 # 📦 Install Quarto (Auto-detect architecture)
