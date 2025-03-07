@@ -5,7 +5,7 @@ FROM rocker/r-ver:4.3.2
 ENV DEBIAN_FRONTEND=noninteractive
 
 # ------------------------
-# 🔧 Install System Dependencies (including curl and chromium)
+# 🔧 Install System Dependencies (including curl)
 # ------------------------
 RUN apt-get update && apt-get install -y \
     curl wget unzip perl \
@@ -15,11 +15,7 @@ RUN apt-get update && apt-get install -y \
     libcairo2 gdk-pixbuf2.0-bin libgdk-pixbuf2.0-dev librsvg2-bin \
     fonts-dejavu fonts-freefont-ttf \
     ghostscript inkscape \
-    chromium \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Configure Quarto to use the installed Chromium for PDF rendering
-ENV QUARTO_CHROMIUM_PATH=/usr/bin/chromium
 
 # ------------------------
 # 📦 Install Quarto (Auto-detect architecture)
@@ -27,6 +23,11 @@ ENV QUARTO_CHROMIUM_PATH=/usr/bin/chromium
 RUN ARCH=$(dpkg --print-architecture) && \
     curl -fsSL "https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.13/quarto-1.7.13-linux-${ARCH}.deb" -o quarto.deb && \
     dpkg -i quarto.deb && rm quarto.deb
+
+# ------------------------
+# 🌐 Install Chromium using Quarto's built-in installer
+# ------------------------
+RUN quarto install chromium
 
 # ------------------------
 # 📦 Manually Install TeX Live (Ensuring It Works)
