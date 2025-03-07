@@ -77,9 +77,9 @@ jobs:
             ~/.local/share/quarto
             ~/AppData/Local/quarto  # Windows path
           key: ${{ runner.os }}-quarto-${{ inputs.quarto-version }}
-       if: steps.cache-quarto.outputs.cache-hit != 'true'
 
       - name: 📦 Setup Quarto
+        if: steps.cache-quarto.outputs.cache-hit != 'true'
         uses: quarto-dev/quarto-actions/setup@v2
         with:
           version: ${{ inputs.quarto-version }}
@@ -99,14 +99,15 @@ jobs:
 
       # TinyTeX setup based on OS
       - name: 📝 Install TinyTeX (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.cache-texlive.outputs.cache-hit != 'true'
         timeout-minutes: 5
+        shell: bash
         run: |
           quarto install tinytex
           echo "$HOME/.TinyTeX/bin/x86_64-linux" >> $GITHUB_PATH
 
       - name: 📝 Install TinyTeX (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.cache-texlive.outputs.cache-hit != 'true'
         uses: r-lib/actions/setup-tinytex@v2
         
       - name: 📦 Install & Update TeX Live
@@ -163,7 +164,19 @@ jobs:
         run: |
           options(repos = c(CRAN = "https://cran.rstudio.com"))
           install.packages(c("remotes"))
-          source("install_packages.R")
+          
+          # Cross-platform path handling
+          lib_path <- ifelse(.Platform$OS.type == "windows", 
+                           Sys.getenv("R_LIBS_USER"), 
+                           "~/R/library")
+          dir.create(lib_path, showWarnings = FALSE, recursive = TRUE)
+          .libPaths(lib_path)
+          
+          if (file.exists("install_packages.R")) {
+            source("install_packages.R")
+          } else {
+            message("⚠️ No install_packages.R found, skipping additional dependencies")
+          }
 
       - name: 🛠️ Install Linux Dependencies
         if: runner.os == 'Linux'
@@ -244,6 +257,7 @@ jobs:
 
       - name: 🔨 Render Quarto Project
         uses: quarto-dev/quarto-actions/render@v2
+        continue-on-error: false # Explicitly fail if rendering fails
 
       - name: 📤 Upload artifact
         if: github.event_name == 'pull_request'
@@ -252,50 +266,89 @@ jobs:
           name: _book-${{ inputs.os }}
           path: _book
 
-      # Cache Python dependencies for PDF compression
-      - name: 💾 Cache Python PDF tools
-        if: runner.os == 'Linux'
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-pdf-${{ hashFiles('**/scripts/quarto_publish/requirements.txt') }}
-
-      # Main-only steps (Linux only)
-      - name: 🐍 Setup Python for PDF compression
-        if: runner.os == 'Linux'
+      # Setup Python for both platforms
+      - name: 🐍 Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
 
-      - name: 📦 Install Ghostscript
+      # Cache Python dependencies for PDF compression
+      - name: 💾 Cache Python PDF tools
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/pip
+            ~\AppData\Local\pip\Cache  # Windows path
+          key: ${{ runner.os }}-pip-pdf-${{ hashFiles('**/scripts/quarto_publish/requirements.txt') }}
+
+      - name: 📦 Install Python PDF tools
+        shell: bash
+        run: |
+          if [ -f "./.github/scripts/quarto_publish/requirements.txt" ]; then
+            pip install -r ./.github/scripts/quarto_publish/requirements.txt
+          else
+            pip install pikepdf ghostscript PyPDF2
+          fi
+
+      - name: 📦 Install Ghostscript (Linux)
         if: runner.os == 'Linux'
         shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install -y ghostscript
 
-      - name: 📄 Check and Compress PDF
+      - name: 📦 Install Ghostscript (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Output "🔄 Installing Ghostscript..."
+          choco install ghostscript -y
+          # Add Ghostscript to PATH
+          $GsPath = "C:\Program Files\gs\gs*\bin"
+          $GsExePath = (Get-ChildItem -Path $GsPath -Directory | Sort-Object -Property Name -Descending | Select-Object -First 1).FullName
+          echo "$GsExePath" | Out-File -FilePath $env:GITHUB_PATH -Append
+          Write-Output "✅ Ghostscript installed"
+
+      - name: 📄 Check and Compress PDF (Linux)
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -e  # Exit on any error
-          
-          if [ ! -f "./_book/Machine-Learning-Systems.pdf" ]; then
+          PDF_INPUT="./_book/Machine-Learning-Systems.pdf"
+          PDF_OUTPUT="./_book/ebook.pdf"
+
+          if [[ ! -f "$PDF_INPUT" ]]; then
             echo "❌ PDF file not found!"
             exit 1
           fi
-          
-          python3 ./.github/scripts/gs_compress_pdf.py \
-            -i ./_book/Machine-Learning-Systems.pdf \
-            -o ./_book/ebook.pdf \
-            -s "/ebook"
-          
-          if [ ! -f "./_book/ebook.pdf" ]; then
-            echo "❌ PDF compression failed!"
-            exit 1
+
+          python3 ./.github/scripts/gs_compress_pdf.py -i "$PDF_INPUT" -o "$PDF_OUTPUT" -s "/ebook"
+
+          if [[ -f "$PDF_OUTPUT" ]]; then
+            mv "$PDF_OUTPUT" "$PDF_INPUT"
+          else
+            echo "⚠️ PDF compression failed, keeping original file"
           fi
-          
-          mv ./_book/ebook.pdf ./_book/Machine-Learning-Systems.pdf
+
+      - name: 📄 Check and Compress PDF (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $PdfInput = ".\_book\Machine-Learning-Systems.pdf"
+          $PdfOutput = ".\_book\ebook.pdf"
+
+          if (-not (Test-Path $PdfInput)) {
+            Write-Error "❌ PDF file not found!"
+            exit 1
+          }
+
+          python .\.github\scripts\gs_compress_pdf.py -i "$PdfInput" -o "$PdfOutput" -s "/ebook"
+
+          if (Test-Path $PdfOutput) {
+            Move-Item -Path $PdfOutput -Destination $PdfInput -Force
+          } else {
+            Write-Output "⚠️ PDF compression failed, keeping original file"
+          }
 
       - name: 🚀 Stage to Dev Site
         if: inputs.target == 'dev' && runner.os == 'Linux'
@@ -337,7 +390,7 @@ jobs:
             .Rcheck/**
             **/*.Rout
             custom-texlive/**/*.log
-            ~/.TinyTeX/texmf-var/log/**
+            **/.TinyTeX/texmf-var/log/**
             **/.texlive/**/*.log
             **/texmf-var/log/**
             **/*.aux
