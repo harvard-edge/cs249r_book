@@ -1,4 +1,11 @@
-name: '📚 Quarto Build'
+# Add R package cache back since we're using a custom script
+      - name: 💾 Cache R packages
+        uses: actions/cache@v3
+        id: cache-r-packages
+        with:
+          path: |
+            ${{ runner.os == 'Linux' && '~/R/library' || 'C:/Users/runneradmin/Documents/R/win-library' }}
+          key: r-pkgs-${{ runner.os }}-${{ inputs.r-version }}-${{ hashFiles('install_packages.R') }}-v1name: '📚 Quarto Build'
 
 on:
   workflow_call:
@@ -68,77 +75,59 @@ jobs:
           ref: ${{ inputs.target }}
           fetch-depth: 0
 
-      # Generate efficient cache keys
-      - name: 🔑 Generate dependency hash
-        id: dep-hash
+      # Remove this step since we're now using setup-quarto action
+      
+
+      # Remove this step since we're now using setup-quarto action
+      
+
+      # Use existing actions to install Quarto and TinyTeX
+      - name: 📦 Setup Quarto
+        if: steps.cache-quarto-tex.outputs.cache-hit != 'true'
+        uses: quarto-dev/quarto-actions/setup@v2
+        with:
+          version: ${{ inputs.quarto-version }}
+          
+      - name: 📝 Install TinyTeX
+        if: steps.cache-quarto-tex.outputs.cache-hit != 'true'
         shell: bash
         run: |
-          # Create a simpler dependency tracking system
-          
-          # Calculate hash for R dependencies
-          echo "r_dep_hash=$(find . -name "install_packages.R" -type f -exec sha256sum {} \; | sort | sha256sum | cut -d' ' -f1 || echo 'default')" >> $GITHUB_OUTPUT
-          
-          # Calculate hash for Quarto configuration
-          echo "tex_dep_hash=$(find . -name "_quarto.yml" -o -name "quarto.yml" -type f | sort | xargs sha256sum 2>/dev/null | sha256sum | cut -d' ' -f1 || echo 'default')" >> $GITHUB_OUTPUT
-          
-          # Calculate hash for content files (first 20 only for speed)
-          echo "content_hash=$(find . -name "*.qmd" -o -name "*.Rmd" -o -name "*.tex" -type f | sort | head -n 20 | xargs sha256sum 2>/dev/null | sha256sum | cut -d' ' -f1 || echo 'default')" >> $GITHUB_OUTPUT
-
-      # Combined Quarto + TeX setup with single cache
-      - name: 💾 Cache Quarto and TeX
-        uses: actions/cache@v3
-        id: cache-quarto-tex
-        with:
-          path: |
-            ~/.local/share/quarto
-            ~/AppData/Local/quarto
-            ~/.texlive
-            ~/.TinyTeX
-            ~/AppData/Roaming/TinyTeX
-          key: quarto-tex-${{ runner.os }}-q${{ inputs.quarto-version }}-${{ steps.dep-hash.outputs.tex_dep_hash }}-v3
-          restore-keys: |
-            quarto-tex-${{ runner.os }}-q${{ inputs.quarto-version }}-
-            quarto-tex-${{ runner.os }}-
-
-      # Combined Quarto and TeX setup in one step
-      - name: 📦 Setup Quarto and TeX
-        if: steps.cache-quarto-tex.outputs.cache-hit != 'true'
-        run: |
-          # Install Quarto
-          echo "Setting up Quarto version ${{ inputs.quarto-version }}..."
-          curl -L https://github.com/quarto-dev/quarto-cli/releases/download/v${{ inputs.quarto-version }}/quarto-${{ inputs.quarto-version }}-linux-amd64.deb -o quarto.deb
-          sudo dpkg -i quarto.deb
-          rm quarto.deb
-          
-          # Install TinyTeX
           echo "Installing TinyTeX..."
           quarto install tinytex --no-prompt
           
-          # Add to PATH
+          # Add TinyTeX to PATH based on OS
           if [[ "$RUNNER_OS" == "Linux" ]]; then
             echo "$HOME/.TinyTeX/bin/x86_64-linux" >> $GITHUB_PATH
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            echo "$HOME/AppData/Roaming/TinyTeX/bin/win32" >> $GITHUB_PATH
           fi
           
-          # Install TeX packages directly with tlmgr (faster than using the action)
-          echo "Installing TeX packages..."
-          tlmgr install scheme-basic collection-basic collection-latex collection-latexrecommended \
-            collection-latexextra collection-fontsrecommended collection-pictures collection-xetex \
-            collection-luatex collection-bibtexextra collection-langenglish koma-script standalone \
-            pgf tikz-cd pgfplots preview marginfix newpx luatex85
-        shell: bash
-
-      # Simplified R setup with unified cache
-      - name: 💾 Cache R packages
-        id: cache-r-packages
-        uses: actions/cache@v3
+          # Ensure LuaTeX is properly set up
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            $HOME/.TinyTeX/bin/x86_64-linux/tlmgr path add
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            $HOME/AppData/Roaming/TinyTeX/bin/win32/tlmgr.bat path add
+          fi
+          
+      - name: 📦 Install TeX packages for Quarto
+        if: steps.cache-quarto-tex.outputs.cache-hit != 'true'
+        uses: teatimeguest/setup-texlive-action@v3
         with:
-          path: |
-            ${{ runner.os == 'Linux' && '~/R/library' || 'C:/Users/runneradmin/Documents/R/win-library' }}
-          key: r-unified-${{ runner.os }}-${{ inputs.r-version }}-${{ steps.dep-hash.outputs.r_dep_hash }}-v3
-          restore-keys: |
-            r-unified-${{ runner.os }}-${{ inputs.r-version }}-
-      
-      - name: 📊 Setup R and packages
+          packages: |
+            scheme-full
+            collection-fontsrecommended
+            collection-latexextra
+            collection-luatex
+            collection-mathscience
+            collection-pictures
+            collection-publishers
+            collection-xetex
+            collection-bibtexextra
+            collection-formatsextra
+          update-all-packages: false
+
+      # Simplified R setup with built-in caching
+      - name: 📊 Setup R
         uses: r-lib/actions/setup-r@v2
         with:
           r-version: ${{ inputs.r-version }}
@@ -168,16 +157,16 @@ jobs:
           dir.create(lib_path, showWarnings = FALSE, recursive = TRUE)
           .libPaths(lib_path)
           
-          # Install packages efficiently
+          # First install core packages
           options(repos = c(CRAN = "https://cloud.r-project.org"))
+          install.packages(c("knitr", "rmarkdown", "bookdown", "dplyr", "ggplot2", "plotly", "remotes"))
           
-          # Core packages for Quarto
-          core_pkgs <- c("knitr", "rmarkdown", "bookdown", "dplyr", "ggplot2", "plotly")
-          install.packages(core_pkgs)
-          
-          # Project-specific packages
+          # Then run the custom install script if it exists
           if (file.exists("install_packages.R")) {
+            message("Installing packages from install_packages.R")
             source("install_packages.R")
+          } else {
+            message("No install_packages.R file found, using standard packages only")
           }
 
       - name: 🛠️ Install Linux Dependencies
@@ -220,26 +209,12 @@ jobs:
             ~/AppData/Roaming/inkscape
           key: inkscape-config-${{ runner.os }}-v2
 
-      - name: 🎨 Install Inkscape
-        shell: bash
-        run: |
-          echo "🔄 Installing Inkscape if needed..."
-          if [[ "$RUNNER_OS" == "Linux" ]]; then
-            if ! command -v inkscape &> /dev/null; then
-              sudo add-apt-repository ppa:inkscape.dev/stable -y
-              sudo apt-get update
-              sudo apt-get install inkscape -y
-            else
-              echo "✅ Inkscape is already installed"
-            fi
-          elif [[ "$RUNNER_OS" == "Windows" ]]; then
-            if [ ! -f "/c/Program Files/Inkscape/bin/inkscape.exe" ]; then
-              echo "Installing Inkscape via Chocolatey"
-              choco install inkscape -y
-            else
-              echo "✅ Inkscape is already installed"
-            fi
-          fi
+      # Replace Inkscape installation with action
+      - name: 🎨 Setup Inkscape
+        uses: ConorMacBride/install-package@v1
+        with:
+          apt: inkscape
+          choco: inkscape
 
       # Split cache for compilation artifacts by branch
       - name: 💾 Cache compilation artifacts
@@ -333,31 +308,12 @@ jobs:
             pip install pikepdf ghostscript PyPDF2
           fi
 
-      - name: 📦 Install Ghostscript
-        shell: bash
-        run: |
-          echo "🔄 Installing Ghostscript if needed..."
-          if [[ "$RUNNER_OS" == "Linux" ]]; then
-            if ! command -v gs &> /dev/null; then
-              sudo apt-get update
-              sudo apt-get install -y ghostscript
-            else
-              echo "✅ Ghostscript is already installed"
-            fi
-          elif [[ "$RUNNER_OS" == "Windows" ]]; then
-            if [ ! -d "/c/Program Files/gs" ]; then
-              echo "Installing Ghostscript via Chocolatey"
-              choco install ghostscript -y
-            else
-              echo "✅ Ghostscript is already installed"
-            fi
-            
-            # Add Ghostscript to PATH on Windows
-            GS_DIR=$(ls -d "/c/Program Files/gs/gs"* | sort -r | head -n 1)
-            if [ -n "$GS_DIR" ]; then
-              echo "$GS_DIR/bin" >> $GITHUB_PATH
-            fi
-          fi
+      # Replace Ghostscript installation with action
+      - name: 📦 Setup Ghostscript
+        uses: ConorMacBride/install-package@v1
+        with:
+          apt: ghostscript
+          choco: ghostscript
 
       - name: 📄 Check and Compress PDF
         shell: bash
@@ -402,14 +358,12 @@ jobs:
           commit-message: |
             📚 Push dev branch build
 
+      # Use the built-in GitHub Pages deployment action
       - name: 🚀 Deploy to GitHub Pages
         if: inputs.target == 'main' && runner.os == 'Linux'
-        uses: quarto-dev/quarto-actions/publish@v2
+        uses: actions/deploy-pages@v2
         with:
-          target: gh-pages
-          render: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          path: '_book'
 
       # Simplified debug artifacts with smarter filtering
       - name: 📦 Collect Debug Artifacts
