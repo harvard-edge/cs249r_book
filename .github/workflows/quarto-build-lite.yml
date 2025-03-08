@@ -1,4 +1,4 @@
-name: '📚 Quarto Build Lite'
+name: '📚 Quarto Build HTML'
 
 on:
   workflow_call:
@@ -69,56 +69,78 @@ jobs:
         with:
           version: ${{ inputs.quarto-version }}
 
-      # Check if we need to install R packages
-      - name: 🔍 Check for R package requirements
-        id: check-r-deps
-        shell: bash
-        run: |
-          if [ -f "install_packages.R" ] || [ -f "renv.lock" ] || [ -f "DESCRIPTION" ]; then
-            echo "R_DEPS_NEEDED=true" >> $GITHUB_ENV
-            echo "R dependencies found, will install"
-          else
-            echo "R_DEPS_NEEDED=false" >> $GITHUB_ENV
-            echo "No R dependencies found, skipping R package installation"
-          fi
-
-      # Setup R only if dependencies are needed
+      # Setup R (required for Quarto with R code chunks)
       - name: 📊 Setup R
-        if: env.R_DEPS_NEEDED == 'true'
         uses: r-lib/actions/setup-r@v2
         with:
           r-version: ${{ inputs.r-version }}
           use-public-rspm: true
 
-      # Cache R packages if needed
+      # Cache R packages
       - name: 💾 Cache R packages
-        if: env.R_DEPS_NEEDED == 'true'
         uses: actions/cache@v3
+        id: cache-r-packages
         with:
           path: ~/R/library
-          key: ubuntu-r-${{ inputs.r-version }}-${{ hashFiles('**/renv.lock', '**/DESCRIPTION', '**/install_packages.R') }}
-          restore-keys: ubuntu-r-${{ inputs.r-version }}-
+          key: ubuntu-r-${{ inputs.r-version }}-quarto-${{ hashFiles('**/renv.lock', '**/DESCRIPTION', '**/install_packages.R') }}
+          restore-keys: |
+            ubuntu-r-${{ inputs.r-version }}-quarto-
+            ubuntu-r-${{ inputs.r-version }}-
 
-      # Install R Dependencies if needed
-      - name: 📦 Install R Dependencies
-        if: env.R_DEPS_NEEDED == 'true'
+      # Check if install_packages.R exists
+      - name: 🔍 Check for install_packages.R
+        id: check-install-script
+        shell: bash
+        run: |
+          if [ -f "install_packages.R" ]; then
+            echo "INSTALL_SCRIPT_EXISTS=true" >> $GITHUB_ENV
+            echo "✅ Found install_packages.R script"
+          else
+            echo "INSTALL_SCRIPT_EXISTS=false" >> $GITHUB_ENV
+            echo "⚠️ No install_packages.R script found"
+          fi
+
+      # Run the install_packages.R script if it exists
+      - name: 📦 Run install_packages.R
+        if: env.INSTALL_SCRIPT_EXISTS == 'true'
         shell: Rscript {0}
         run: |
-          options(repos = c(CRAN = "https://cran.rstudio.com"))
-          install.packages(c("remotes"))
-          
+          # Set library path
           lib_path <- "~/R/library"
           dir.create(lib_path, showWarnings = FALSE, recursive = TRUE)
           .libPaths(lib_path)
           
-          if (file.exists("renv.lock")) {
-            install.packages("renv")
-            renv::restore()
-          } else if (file.exists("DESCRIPTION")) {
-            remotes::install_deps(dependencies = TRUE)
-          } else if (file.exists("install_packages.R")) {
-            source("install_packages.R")
+          # Run the custom installation script
+          source("install_packages.R")
+          
+      # Install minimal required packages if no script exists
+      - name: 📦 Install Essential Quarto R Packages
+        if: env.INSTALL_SCRIPT_EXISTS != 'true'
+        shell: Rscript {0}
+        run: |
+          options(repos = c(CRAN = "https://cran.rstudio.com"))
+          
+          # Set library path
+          lib_path <- "~/R/library"
+          dir.create(lib_path, showWarnings = FALSE, recursive = TRUE)
+          .libPaths(lib_path)
+          
+          # Install essential packages
+          essential_pkgs <- c("knitr", "rmarkdown", "jsonlite")
+          for (pkg in essential_pkgs) {
+            if (!requireNamespace(pkg, quietly = TRUE)) {
+              install.packages(pkg)
+            }
           }
+          
+          # Verify installation
+          installed <- vapply(essential_pkgs, requireNamespace, logical(1), quietly = TRUE)
+          if (!all(installed)) {
+            missing <- essential_pkgs[!installed]
+            stop("Failed to install essential packages: ", paste(missing, collapse = ", "))
+          }
+          
+          cat("✅ Essential packages installed and verified\n")
 
       # Cache compilation artifacts
       - name: 💾 Cache compilation artifacts
@@ -131,9 +153,34 @@ jobs:
           key: ubuntu-compilation-${{ hashFiles('**/*.qmd', '**/*.ipynb', '**/*.md') }}
           restore-keys: ubuntu-compilation-
 
+      # Print R package info
+      - name: 🔍 Print R package info
+        shell: Rscript {0}
+        run: |
+          print("R package details:")
+          print(installed.packages()[c("knitr", "rmarkdown"), c("Package", "Version")])
+          print(paste("R library paths: ", paste(.libPaths(), collapse = ", ")))
+          
+          # Check if knitr is available
+          if (require("knitr")) {
+            print("✅ knitr package is available!")
+            print(paste("knitr version:", packageVersion("knitr")))
+          } else {
+            print("❌ knitr package is NOT available!")
+          }
+
       - name: 🔨 Render Quarto to HTML only
         shell: bash
         run: |
+          echo "🔍 Checking Quarto installation..."
+          quarto check
+          
+          echo "📋 Listing installed R packages..."
+          Rscript -e "cat('Installed packages:', paste(sort(installed.packages()[,1]), collapse=', '), '\n')"
+          Rscript -e "cat('knitr version:', as.character(packageVersion('knitr')), '\n')"
+          Rscript -e "cat('rmarkdown version:', as.character(packageVersion('rmarkdown')), '\n')"
+          
+          echo "🚀 Rendering Quarto documents to HTML..."
           quarto render --to html
 
       - name: 📤 Upload artifact
