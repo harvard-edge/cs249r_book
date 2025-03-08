@@ -1,0 +1,179 @@
+name: '📚 Quarto Build Light'
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+        description: 'Build environment (development/production)'
+      os:
+        required: true
+        type: string
+        description: 'Operating system to run on (ubuntu-latest/windows-latest)'
+      quarto-version:
+        required: false
+        type: string
+        default: '1.7.13'
+        description: 'Version of Quarto to use'
+      r-version:
+        required: false
+        type: string
+        default: '4.3.2'
+        description: 'Version of R to use'
+      target:
+        required: true
+        type: string
+        description: 'Target branch (dev/main) - determines build behavior'
+    secrets:
+      SSH_DEPLOY_KEY:
+        required: true
+        
+permissions:
+  contents: write
+  pages: write
+
+jobs:
+  build:
+    runs-on: ${{ inputs.os }}
+    environment:
+      name: ${{ inputs.environment }}
+    
+    steps:
+      - name: 🔍 Validate inputs
+        shell: bash
+        run: |
+          if [[ "${{ inputs.target }}" != "dev" && "${{ inputs.target }}" != "main" ]]; then
+            echo "❌ Target must be either 'dev' or 'main'"
+            exit 1
+          fi
+          echo "✅ Input validation passed"
+
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ inputs.target }}
+          fetch-depth: 0
+
+      # Cache Quarto
+      - name: 💾 Cache Quarto
+        uses: actions/cache@v3
+        id: cache-quarto
+        with:
+          path: |
+            ~/.local/share/quarto
+            ~/AppData/Local/quarto  # Windows path
+          key: ${{ runner.os }}-quarto-${{ inputs.quarto-version }}
+
+      - name: 📦 Setup Quarto
+        if: steps.cache-quarto.outputs.cache-hit != 'true'
+        uses: quarto-dev/quarto-actions/setup@v2
+        with:
+          version: ${{ inputs.quarto-version }}
+
+      # Check if we need to install R packages
+      - name: 🔍 Check for R package requirements
+        id: check-r-deps
+        shell: bash
+        run: |
+          if [ -f "install_packages.R" ] || [ -f "renv.lock" ] || [ -f "DESCRIPTION" ]; then
+            echo "R_DEPS_NEEDED=true" >> $GITHUB_ENV
+            echo "R dependencies found, will install"
+          else
+            echo "R_DEPS_NEEDED=false" >> $GITHUB_ENV
+            echo "No R dependencies found, skipping R package installation"
+          fi
+
+      # Setup R only if dependencies are needed
+      - name: 📊 Setup R
+        if: env.R_DEPS_NEEDED == 'true'
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: ${{ inputs.r-version }}
+          use-public-rspm: true
+
+      # Cache R packages if needed
+      - name: 💾 Cache R packages
+        if: env.R_DEPS_NEEDED == 'true'
+        uses: actions/cache@v3
+        with:
+          path: ${{ runner.os == 'Windows' && 'C:/Users/runneradmin/Documents/R/win-library' || '~/R/library' }}
+          key: ${{ runner.os }}-r-${{ inputs.r-version }}-${{ hashFiles('**/renv.lock', '**/DESCRIPTION', '**/install_packages.R') }}
+          restore-keys: |
+            ${{ runner.os }}-r-${{ inputs.r-version }}-
+
+      # Install R Dependencies if needed
+      - name: 📦 Install R Dependencies
+        if: env.R_DEPS_NEEDED == 'true'
+        shell: Rscript {0}
+        run: |
+          options(repos = c(CRAN = "https://cran.rstudio.com"))
+          options(pkgType = "binary")
+          install.packages(c("remotes"))
+          
+          # Cross-platform path handling
+          lib_path <- ifelse(.Platform$OS.type == "windows", 
+                           Sys.getenv("R_LIBS_USER"), 
+                           "~/R/library")
+          dir.create(lib_path, showWarnings = FALSE, recursive = TRUE)
+          .libPaths(lib_path)
+          
+          if (file.exists("renv.lock")) {
+            install.packages("renv")
+            renv::restore()
+          } else if (file.exists("DESCRIPTION")) {
+            remotes::install_deps(dependencies = TRUE)
+          } else if (file.exists("install_packages.R")) {
+            source("install_packages.R")
+          }
+
+      # Cache compilation artifacts
+      - name: 💾 Cache compilation artifacts
+        uses: actions/cache@v3
+        with:
+          path: |
+            **/_cache
+            **/.quarto
+            **/.jupyter_cache
+          key: ${{ runner.os }}-compilation-${{ hashFiles('**/*.qmd', '**/*.ipynb', '**/*.md') }}
+          restore-keys: |
+            ${{ runner.os }}-compilation-
+
+      - name: 🔨 Render Quarto to HTML only
+        shell: bash
+        run: |
+          quarto render --to html
+
+      - name: 📤 Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: _book-${{ inputs.os }}
+          path: _book
+
+      - name: 🚀 Stage to Dev Site
+        if: inputs.target == 'dev' && runner.os == 'Linux'
+        uses: cpina/github-action-push-to-another-repository@v1.7.2
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+        with:
+          source-directory: '_book'
+          destination-github-username: 'harvard-edge'
+          destination-repository-name: 'cs249r_book_dev'
+          user-email: khoshnevis.naeem@gmail.com
+          target-branch: 'main'
+          target-directory: 'docs'
+          commit-message: |
+            📚 Push dev branch HTML build (light version)
+
+      - name: 📋 Build Summary
+        shell: bash
+        run: |
+          cat << EOF >> $GITHUB_STEP_SUMMARY
+          ## 📊 Lightweight Quarto Build Summary
+          🎯 Target: ${{ inputs.target }}
+          💻 OS: ${{ inputs.os }}
+          🔧 Environment: ${{ inputs.environment }}
+          📚 Quarto Version: ${{ inputs.quarto-version }}
+          🔬 R Version: ${{ inputs.r-version }}
+          ⏰ Completed at: $(date "+%Y-%m-%d %H:%M:%S")
+          EOF
