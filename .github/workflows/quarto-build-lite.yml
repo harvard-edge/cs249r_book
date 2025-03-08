@@ -1,4 +1,4 @@
-name: '📚 Quarto Build Light'
+name: '📚 Quarto Build Lite'
 
 on:
   workflow_call:
@@ -10,7 +10,7 @@ on:
       os:
         required: true
         type: string
-        description: 'Operating system to run on (ubuntu-latest/windows-latest)'
+        description: 'Operating system to run on (ubuntu-latest)'
       quarto-version:
         required: false
         type: string
@@ -55,28 +55,59 @@ jobs:
           ref: ${{ inputs.target }}
           fetch-depth: 0
 
+      # Cache Quarto
+      - name: 💾 Cache Quarto
+        uses: actions/cache@v3
+        id: cache-quarto
+        with:
+          path: ~/.local/share/quarto
+          key: ubuntu-quarto-${{ inputs.quarto-version }}
+
       - name: 📦 Setup Quarto
+        if: steps.cache-quarto.outputs.cache-hit != 'true'
         uses: quarto-dev/quarto-actions/setup@v2
         with:
           version: ${{ inputs.quarto-version }}
 
+      # Check if we need to install R packages
+      - name: 🔍 Check for R package requirements
+        id: check-r-deps
+        shell: bash
+        run: |
+          if [ -f "install_packages.R" ] || [ -f "renv.lock" ] || [ -f "DESCRIPTION" ]; then
+            echo "R_DEPS_NEEDED=true" >> $GITHUB_ENV
+            echo "R dependencies found, will install"
+          else
+            echo "R_DEPS_NEEDED=false" >> $GITHUB_ENV
+            echo "No R dependencies found, skipping R package installation"
+          fi
+
+      # Setup R only if dependencies are needed
       - name: 📊 Setup R
+        if: env.R_DEPS_NEEDED == 'true'
         uses: r-lib/actions/setup-r@v2
         with:
           r-version: ${{ inputs.r-version }}
           use-public-rspm: true
 
+      # Cache R packages if needed
+      - name: 💾 Cache R packages
+        if: env.R_DEPS_NEEDED == 'true'
+        uses: actions/cache@v3
+        with:
+          path: ~/R/library
+          key: ubuntu-r-${{ inputs.r-version }}-${{ hashFiles('**/renv.lock', '**/DESCRIPTION', '**/install_packages.R') }}
+          restore-keys: ubuntu-r-${{ inputs.r-version }}-
+
+      # Install R Dependencies if needed
       - name: 📦 Install R Dependencies
+        if: env.R_DEPS_NEEDED == 'true'
         shell: Rscript {0}
         run: |
           options(repos = c(CRAN = "https://cran.rstudio.com"))
-          options(pkgType = "binary")
           install.packages(c("remotes"))
           
-          # Cross-platform path handling
-          lib_path <- ifelse(.Platform$OS.type == "windows", 
-                           Sys.getenv("R_LIBS_USER"), 
-                           "~/R/library")
+          lib_path <- "~/R/library"
           dir.create(lib_path, showWarnings = FALSE, recursive = TRUE)
           .libPaths(lib_path)
           
@@ -89,6 +120,17 @@ jobs:
             source("install_packages.R")
           }
 
+      # Cache compilation artifacts
+      - name: 💾 Cache compilation artifacts
+        uses: actions/cache@v3
+        with:
+          path: |
+            **/_cache
+            **/.quarto
+            **/.jupyter_cache
+          key: ubuntu-compilation-${{ hashFiles('**/*.qmd', '**/*.ipynb', '**/*.md') }}
+          restore-keys: ubuntu-compilation-
+
       - name: 🔨 Render Quarto to HTML only
         shell: bash
         run: |
@@ -97,11 +139,11 @@ jobs:
       - name: 📤 Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: _book-${{ inputs.os }}
+          name: html-output
           path: _book
 
       - name: 🚀 Stage to Dev Site
-        if: inputs.target == 'dev' && runner.os == 'Linux'
+        if: inputs.target == 'dev'
         uses: cpina/github-action-push-to-another-repository@v1.7.2
         env:
           SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
@@ -119,7 +161,7 @@ jobs:
         shell: bash
         run: |
           cat << EOF >> $GITHUB_STEP_SUMMARY
-          ## 📊 Lightweight Quarto Build Summary
+          ## 📊 HTML-only Quarto Build Summary
           🎯 Target: ${{ inputs.target }}
           💻 OS: ${{ inputs.os }}
           🔧 Environment: ${{ inputs.environment }}
