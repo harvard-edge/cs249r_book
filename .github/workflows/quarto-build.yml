@@ -68,114 +68,116 @@ jobs:
           ref: ${{ inputs.target }}
           fetch-depth: 0
 
-      # Cache Quarto
-      - name: 💾 Cache Quarto
+      # Generate efficient cache keys
+      - name: 🔑 Generate dependency hash
+        id: dep-hash
+        shell: bash
+        run: |
+          # Create a simpler dependency tracking system
+          
+          # Calculate hash for R dependencies
+          echo "r_dep_hash=$(find . -name "install_packages.R" -type f -exec sha256sum {} \; | sort | sha256sum | cut -d' ' -f1 || echo 'default')" >> $GITHUB_OUTPUT
+          
+          # Calculate hash for Quarto configuration
+          echo "tex_dep_hash=$(find . -name "_quarto.yml" -o -name "quarto.yml" -type f | sort | xargs sha256sum 2>/dev/null | sha256sum | cut -d' ' -f1 || echo 'default')" >> $GITHUB_OUTPUT
+          
+          # Calculate hash for content files (first 20 only for speed)
+          echo "content_hash=$(find . -name "*.qmd" -o -name "*.Rmd" -o -name "*.tex" -type f | sort | head -n 20 | xargs sha256sum 2>/dev/null | sha256sum | cut -d' ' -f1 || echo 'default')" >> $GITHUB_OUTPUT
+
+      # Combined Quarto + TeX setup with single cache
+      - name: 💾 Cache Quarto and TeX
         uses: actions/cache@v3
-        id: cache-quarto
+        id: cache-quarto-tex
         with:
           path: |
             ~/.local/share/quarto
-            ~/AppData/Local/quarto  # Windows path
-          key: ${{ runner.os }}-quarto-${{ inputs.quarto-version }}
-
-      - name: 📦 Setup Quarto
-        if: steps.cache-quarto.outputs.cache-hit != 'true'
-        uses: quarto-dev/quarto-actions/setup@v2
-        with:
-          version: ${{ inputs.quarto-version }}
-
-      # Cache TeX Live
-      - name: 💾 Cache TeX Live
-        uses: actions/cache@v3
-        id: cache-texlive
-        with:
-          path: |
+            ~/AppData/Local/quarto
             ~/.texlive
             ~/.TinyTeX
-            ~/AppData/Roaming/TinyTeX  # Windows path
-          key: ${{ runner.os }}-texlive-${{ hashFiles('**/*.tex') }}
+            ~/AppData/Roaming/TinyTeX
+          key: quarto-tex-${{ runner.os }}-q${{ inputs.quarto-version }}-${{ steps.dep-hash.outputs.tex_dep_hash }}-v3
           restore-keys: |
-            ${{ runner.os }}-texlive-
+            quarto-tex-${{ runner.os }}-q${{ inputs.quarto-version }}-
+            quarto-tex-${{ runner.os }}-
 
-      # TinyTeX setup based on OS
-      - name: 📝 Install TinyTeX (Linux)
-        if: runner.os == 'Linux' && steps.cache-texlive.outputs.cache-hit != 'true'
-        timeout-minutes: 5
-        shell: bash
+      # Combined Quarto and TeX setup in one step
+      - name: 📦 Setup Quarto and TeX
+        if: steps.cache-quarto-tex.outputs.cache-hit != 'true'
         run: |
+          # Install Quarto
+          echo "Setting up Quarto version ${{ inputs.quarto-version }}..."
+          curl -L https://github.com/quarto-dev/quarto-cli/releases/download/v${{ inputs.quarto-version }}/quarto-${{ inputs.quarto-version }}-linux-amd64.deb -o quarto.deb
+          sudo dpkg -i quarto.deb
+          rm quarto.deb
+          
+          # Install TinyTeX
+          echo "Installing TinyTeX..."
           quarto install tinytex --no-prompt
-          echo "$HOME/.TinyTeX/bin/x86_64-linux" >> $GITHUB_PATH
+          
+          # Add to PATH
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            echo "$HOME/.TinyTeX/bin/x86_64-linux" >> $GITHUB_PATH
+          fi
+          
+          # Install TeX packages directly with tlmgr (faster than using the action)
+          echo "Installing TeX packages..."
+          tlmgr install scheme-basic collection-basic collection-latex collection-latexrecommended \
+            collection-latexextra collection-fontsrecommended collection-pictures collection-xetex \
+            collection-luatex collection-bibtexextra collection-langenglish koma-script standalone \
+            pgf tikz-cd pgfplots preview marginfix newpx luatex85
+        shell: bash
 
-      - name: 📝 Install TinyTeX (Windows)
-        if: runner.os == 'Windows' && steps.cache-texlive.outputs.cache-hit != 'true'
-        uses: r-lib/actions/setup-tinytex@v2
-        
-      - name: 📦 Install & Update TeX Live
-        if: steps.cache-texlive.outputs.cache-hit != 'true'
-        uses: teatimeguest/setup-texlive-action@v3
+      # Simplified R setup with unified cache
+      - name: 💾 Cache R packages
+        id: cache-r-packages
+        uses: actions/cache@v3
         with:
-          packages: |
-            scheme-basic      # Minimal base TeX system
-            collection-basic  # Core LaTeX functionality
-            collection-latex  # Standard LaTeX packages
-            collection-latexrecommended   # Common recommended packages
-            collection-latexextra         # Additional LaTeX utilities
-            collection-fontsrecommended   # Recommended fonts for LaTeX
-            collection-pictures   # Image handling support (TikZ, PGF, etc.)
-            collection-xetex      # XeLaTeX engine and utilities
-            collection-luatex     # LuaLaTeX engine and dependencies
-            collection-bibtexextra  # Advanced bibliography support
-            collection-langenglish  # English language support
-            koma-script       # KOMA-Script classes
-            standalone       # Standalone package for figures
-            pgf              # Core PGF/TikZ package
-            tikz-cd         # Commutative diagrams
-            pgfplots        # Plotting functionality
-            preview         # Preview package
-            marginfix      # Explicitly add marginfix
-            newpx          # Explicitly add newpx font package
-            luatex85       # Font support
-          update-all-packages: false
-
-      - name: 📊 Setup R
+          path: |
+            ${{ runner.os == 'Linux' && '~/R/library' || 'C:/Users/runneradmin/Documents/R/win-library' }}
+          key: r-unified-${{ runner.os }}-${{ inputs.r-version }}-${{ steps.dep-hash.outputs.r_dep_hash }}-v3
+          restore-keys: |
+            r-unified-${{ runner.os }}-${{ inputs.r-version }}-
+      
+      - name: 📊 Setup R and packages
         uses: r-lib/actions/setup-r@v2
         with:
           r-version: ${{ inputs.r-version }}
           use-public-rspm: true
 
-      - name: 💾 Cache R packages
-        uses: actions/cache@v3
-        with:
-          path: ${{ runner.os == 'Windows' && 'C:/Users/runneradmin/Documents/R/win-library' || '~/R/library' }}
-          key: ${{ runner.os }}-r-${{ hashFiles('**/install_packages.R') }}
-          restore-keys: |
-            ${{ runner.os }}-r-
-
-      # Cache Linux system packages
+      # Cache Linux system packages - these rarely change
       - name: 💾 Cache APT packages
         if: runner.os == 'Linux'
         uses: actions/cache@v3
+        id: cache-apt
         with:
           path: ~/.apt-cache
-          key: ${{ runner.os }}-apt-${{ hashFiles('**/workflow.yml') }}
+          key: apt-${{ runner.os }}-v2
+          restore-keys: |
+            apt-${{ runner.os }}-
 
       - name: 📦 Install R Dependencies
+        if: steps.cache-r-packages.outputs.cache-hit != 'true'
         shell: Rscript {0}
         run: |
-          options(repos = c(CRAN = "https://cran.rstudio.com"))
-          install.packages(c("remotes"))
-          
-          # Cross-platform path handling
-          lib_path <- ifelse(.Platform$OS.type == "windows", 
-                           Sys.getenv("R_LIBS_USER"), 
-                           "~/R/library")
+          # Set library path based on OS
+          lib_path <- if(Sys.info()["sysname"] == "Windows") {
+            "C:/Users/runneradmin/Documents/R/win-library"
+          } else {
+            "~/R/library"
+          }
           dir.create(lib_path, showWarnings = FALSE, recursive = TRUE)
           .libPaths(lib_path)
           
+          # Install packages efficiently
+          options(repos = c(CRAN = "https://cloud.r-project.org"))
+          
+          # Core packages for Quarto
+          core_pkgs <- c("knitr", "rmarkdown", "bookdown", "dplyr", "ggplot2", "plotly")
+          install.packages(core_pkgs)
+          
+          # Project-specific packages
           if (file.exists("install_packages.R")) {
             source("install_packages.R")
-          } else {
-            message("⚠️ No install_packages.R found, skipping additional dependencies")
           }
 
       - name: 🛠️ Install Linux Dependencies
@@ -208,33 +210,38 @@ jobs:
             libjpeg-dev
           echo "✅ Linux dependencies installed"
 
-      # Cache Inkscape
+      # Cache Inkscape binary and configs separately
       - name: 💾 Cache Inkscape
         uses: actions/cache@v3
         id: cache-inkscape
         with:
           path: |
             ~/.config/inkscape
-            ~/AppData/Roaming/inkscape  # Windows path
-          key: ${{ runner.os }}-inkscape-${{ hashFiles('**/*.svg') }}
+            ~/AppData/Roaming/inkscape
+          key: inkscape-config-${{ runner.os }}-v2
 
-      - name: 🎨 Install Inkscape (Linux)
-        if: runner.os == 'Linux' && steps.cache-inkscape.outputs.cache-hit != 'true'
+      - name: 🎨 Install Inkscape
         shell: bash
         run: |
-          sudo add-apt-repository ppa:inkscape.dev/stable -y
-          sudo apt-get update
-          sudo apt-get install inkscape -y
+          echo "🔄 Installing Inkscape if needed..."
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            if ! command -v inkscape &> /dev/null; then
+              sudo add-apt-repository ppa:inkscape.dev/stable -y
+              sudo apt-get update
+              sudo apt-get install inkscape -y
+            else
+              echo "✅ Inkscape is already installed"
+            fi
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            if [ ! -f "/c/Program Files/Inkscape/bin/inkscape.exe" ]; then
+              echo "Installing Inkscape via Chocolatey"
+              choco install inkscape -y
+            else
+              echo "✅ Inkscape is already installed"
+            fi
+          fi
 
-      - name: 🎨 Install Inkscape (Windows)
-        if: runner.os == 'Windows' && steps.cache-inkscape.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          Write-Output "🔄 Installing Inkscape..."
-          choco install inkscape -y
-          Write-Output "✅ Inkscape installed"
-
-      # Cache compilation artifacts
+      # Split cache for compilation artifacts by branch
       - name: 💾 Cache compilation artifacts
         uses: actions/cache@v3
         with:
@@ -242,18 +249,49 @@ jobs:
             **/_cache
             **/.quarto
             **/.jupyter_cache
-          key: ${{ runner.os }}-compilation-${{ hashFiles('**/*.qmd', '**/*.ipynb', '**/*.md') }}
+          key: compilation-${{ runner.os }}-${{ inputs.target }}-${{ steps.dep-hash.outputs.content_hash }}-v2
           restore-keys: |
-            ${{ runner.os }}-compilation-
+            compilation-${{ runner.os }}-${{ inputs.target }}-
+            compilation-${{ runner.os }}-
 
-      # Cache Quarto build outputs
+      # Cache Quarto build outputs per branch
       - name: 💾 Cache Quarto build
         uses: actions/cache@v3
         with:
           path: _book
-          key: ${{ runner.os }}-quarto-book-${{ hashFiles('**/*.qmd', '**/*.ipynb', '**/*.bib') }}
+          key: quarto-book-${{ runner.os }}-${{ inputs.target }}-${{ steps.dep-hash.outputs.content_hash }}-v2
           restore-keys: |
-            ${{ runner.os }}-quarto-book-
+            quarto-book-${{ runner.os }}-${{ inputs.target }}-
+            quarto-book-${{ runner.os }}-
+
+      # Cache verification step
+      - name: 🔍 Verify caches
+        shell: bash
+        run: |
+          echo "Cache verification:"
+          echo "Quarto cache hit: ${{ steps.cache-quarto.outputs.cache-hit }}"
+          echo "TeX Live core cache hit: ${{ steps.cache-texlive-core.outputs.cache-hit }}"
+          echo "TeX Live packages cache hit: ${{ steps.cache-texlive-packages.outputs.cache-hit }}"
+          echo "R core cache hit: ${{ steps.cache-r-core.outputs.cache-hit }}"
+          echo "R project cache hit: ${{ steps.cache-r-project.outputs.cache-hit }}"
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            echo "APT cache hit: ${{ steps.cache-apt.outputs.cache-hit }}"
+          fi
+          echo "Inkscape cache hit: ${{ steps.cache-inkscape.outputs.cache-hit }}"
+          
+          # Check key paths
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            echo "Checking TeX Live installation:"
+            if [[ -d "$HOME/.TinyTeX" ]]; then
+              echo "✅ TinyTeX directory exists"
+              ls -la "$HOME/.TinyTeX/bin" || echo "⚠️ No bin directory found"
+            else
+              echo "❌ TinyTeX directory missing"
+            fi
+          fi
+          
+          echo "Checking R library:"
+          ls -la "$R_LIBS_USER" || echo "❌ R library directory not found"
 
       - name: 🔨 Render Quarto Project
         uses: quarto-dev/quarto-actions/render@v2
@@ -266,20 +304,24 @@ jobs:
           name: _book-${{ inputs.os }}
           path: _book
 
-      # Setup Python for both platforms
+      # Setup Python with proper cache
+      - name: 💾 Cache Python packages
+        uses: actions/cache@v3
+        id: cache-pip
+        with:
+          path: |
+            ~/.cache/pip
+            ~\AppData\Local\pip\Cache
+          key: pip-${{ runner.os }}-v2
+
       - name: 🐍 Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
-
-      # Cache Python dependencies for PDF compression
-      - name: 💾 Cache Python PDF tools
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cache/pip
-            ~\AppData\Local\pip\Cache  # Windows path
-          key: ${{ runner.os }}-pip-pdf-${{ hashFiles('**/scripts/quarto_publish/requirements.txt') }}
+          cache: 'pip'
+          cache-dependency-path: |
+            .github/scripts/quarto_publish/requirements.txt
+            .github/scripts/*/requirements.txt
 
       - name: 📦 Install Python PDF tools
         shell: bash
@@ -287,68 +329,63 @@ jobs:
           if [ -f "./.github/scripts/quarto_publish/requirements.txt" ]; then
             pip install -r ./.github/scripts/quarto_publish/requirements.txt
           else
+            echo "Installing default PDF tools"
             pip install pikepdf ghostscript PyPDF2
           fi
 
-      - name: 📦 Install Ghostscript (Linux)
-        if: runner.os == 'Linux'
+      - name: 📦 Install Ghostscript
         shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ghostscript
+          echo "🔄 Installing Ghostscript if needed..."
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            if ! command -v gs &> /dev/null; then
+              sudo apt-get update
+              sudo apt-get install -y ghostscript
+            else
+              echo "✅ Ghostscript is already installed"
+            fi
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            if [ ! -d "/c/Program Files/gs" ]; then
+              echo "Installing Ghostscript via Chocolatey"
+              choco install ghostscript -y
+            else
+              echo "✅ Ghostscript is already installed"
+            fi
+            
+            # Add Ghostscript to PATH on Windows
+            GS_DIR=$(ls -d "/c/Program Files/gs/gs"* | sort -r | head -n 1)
+            if [ -n "$GS_DIR" ]; then
+              echo "$GS_DIR/bin" >> $GITHUB_PATH
+            fi
+          fi
 
-      - name: 📦 Install Ghostscript (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Write-Output "🔄 Installing Ghostscript..."
-          choco install ghostscript -y
-          # Add Ghostscript to PATH
-          $GsPath = "C:\Program Files\gs\gs*\bin"
-          $GsExePath = (Get-ChildItem -Path $GsPath -Directory | Sort-Object -Property Name -Descending | Select-Object -First 1).FullName
-          echo "$GsExePath" | Out-File -FilePath $env:GITHUB_PATH -Append
-          Write-Output "✅ Ghostscript installed"
-
-      - name: 📄 Check and Compress PDF (Linux)
-        if: runner.os == 'Linux'
+      - name: 📄 Check and Compress PDF
         shell: bash
         run: |
           set -e  # Exit on any error
-          PDF_INPUT="./_book/Machine-Learning-Systems.pdf"
-          PDF_OUTPUT="./_book/ebook.pdf"
-
+          
+          # Define platform-specific file paths
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            PDF_INPUT="./_book/Machine-Learning-Systems.pdf"
+            PDF_OUTPUT="./_book/ebook.pdf"
+          else
+            PDF_INPUT="./_book/Machine-Learning-Systems.pdf" 
+            PDF_OUTPUT="./_book/ebook.pdf"
+          fi
+          
           if [[ ! -f "$PDF_INPUT" ]]; then
-            echo "❌ PDF file not found!"
+            echo "❌ PDF file not found at $PDF_INPUT!"
             exit 1
           fi
-
-          python3 ./.github/scripts/gs_compress_pdf.py -i "$PDF_INPUT" -o "$PDF_OUTPUT" -s "/ebook"
-
+          
+          python ./.github/scripts/gs_compress_pdf.py -i "$PDF_INPUT" -o "$PDF_OUTPUT" -s "/ebook"
+          
           if [[ -f "$PDF_OUTPUT" ]]; then
             mv "$PDF_OUTPUT" "$PDF_INPUT"
+            echo "✅ PDF successfully compressed"
           else
             echo "⚠️ PDF compression failed, keeping original file"
           fi
-
-      - name: 📄 Check and Compress PDF (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $PdfInput = ".\_book\Machine-Learning-Systems.pdf"
-          $PdfOutput = ".\_book\ebook.pdf"
-
-          if (-not (Test-Path $PdfInput)) {
-            Write-Error "❌ PDF file not found!"
-            exit 1
-          }
-
-          python .\.github\scripts\gs_compress_pdf.py -i "$PdfInput" -o "$PdfOutput" -s "/ebook"
-
-          if (Test-Path $PdfOutput) {
-            Move-Item -Path $PdfOutput -Destination $PdfInput -Force
-          } else {
-            Write-Output "⚠️ PDF compression failed, keeping original file"
-          }
 
       - name: 🚀 Stage to Dev Site
         if: inputs.target == 'dev' && runner.os == 'Linux'
@@ -374,31 +411,21 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Add comprehensive debug artifacts
+      # Simplified debug artifacts with smarter filtering
       - name: 📦 Collect Debug Artifacts
-        if: always()  # Run even if previous steps failed
+        if: failure()  # Only collect on failure to save storage
         uses: actions/upload-artifact@v4
         with:
           name: debug-${{ inputs.target }}-${{ inputs.os }}
           path: |
-            _book/**
-            .quarto/**
-            **/_cache/**
-            **/logs/**
+            _book/**/*.pdf
+            _book/**/*.html
+            .quarto/
+            **/logs/
             **/*.log
-            **/.jupyter_cache/**
-            .Rcheck/**
-            **/*.Rout
-            custom-texlive/**/*.log
-            **/.TinyTeX/texmf-var/log/**
-            **/.texlive/**/*.log
-            **/texmf-var/log/**
-            **/*.aux
-            **/*.blg
-            **/*.fls
-            **/*.fdb_latexmk
-          compression-level: 9  # Maximum compression
-          retention-days: 5  # Keep for 5 days
+            **/.TinyTeX/texmf-var/log/
+          compression-level: 9
+          retention-days: 3
 
       - name: 📋 Build Summary
         shell: pwsh
