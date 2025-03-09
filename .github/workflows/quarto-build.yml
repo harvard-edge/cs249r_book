@@ -68,15 +68,16 @@ jobs:
           ref: ${{ inputs.target }}
           fetch-depth: 0
 
-      # Cache Quarto
+      # Cache Quarto - Fixed to use correct paths and persistent key
       - name: 💾 Cache Quarto
         uses: actions/cache@v3
         id: cache-quarto
         with:
           path: |
             ~/.local/share/quarto
-            ~/AppData/Local/quarto  # Windows path
-          key: ${{ runner.os }}-quarto-${{ inputs.quarto-version }}
+            ~/AppData/Local/Programs/Quarto
+            ~/AppData/Local/quarto
+          key: quarto-${{ runner.os }}-${{ inputs.quarto-version }}
 
       - name: 📦 Setup Quarto
         if: steps.cache-quarto.outputs.cache-hit != 'true'
@@ -84,7 +85,7 @@ jobs:
         with:
           version: ${{ inputs.quarto-version }}
 
-      # Cache TeX Live
+      # Cache TeX Live - Fixed paths and better key structure
       - name: 💾 Cache TeX Live
         uses: actions/cache@v3
         id: cache-texlive
@@ -92,10 +93,11 @@ jobs:
           path: |
             ~/.texlive
             ~/.TinyTeX
-            ~/AppData/Roaming/TinyTeX  # Windows path
-          key: ${{ runner.os }}-texlive-${{ inputs.target }}-${{ hashFiles('**/*.tex', '**/*.qmd') }}
+            ~/AppData/Roaming/TinyTeX
+            ${{ runner.temp }}/texlive
+          key: texlive-${{ runner.os }}-${{ hashFiles('**/*.qmd', '**/*.tex') }}
           restore-keys: |
-            ${{ runner.os }}-texlive-
+            texlive-${{ runner.os }}-
 
       # TinyTeX setup based on OS
       - name: 📝 Install TinyTeX (Linux)
@@ -128,6 +130,7 @@ jobs:
             newpx          # Explicitly add newpx font package
             luatex85       # Font support
           update-all-packages: false
+          cache: true      # Enable teatimeguest's own caching
 
       - name: 📊 Setup R
         uses: r-lib/actions/setup-r@v2
@@ -135,54 +138,61 @@ jobs:
           r-version: ${{ inputs.r-version }}
           use-public-rspm: true
 
-      - name: 📦 Install R packages
-        shell: Rscript {0}
-        run: |
-          install.packages("remotes")
-          source("install_packages.R")
-
+      # Cache R packages - Fixed to run before install
       - name: 💾 Cache R packages
         uses: actions/cache@v3
+        id: cache-r-packages
         with:
-          path: ${{ runner.os == 'Windows' && 'C:/Users/runneradmin/Documents/R/win-library' || '~/R/library' }}
-          key: ${{ runner.os }}-r-${{ hashFiles('**/install_packages.R') }}
+          path: |
+            ${{ runner.os == 'Windows' && 'C:/Users/runneradmin/Documents/R/win-library' || '~/R/library' }}
+            ${{ runner.os == 'macOS' && '~/Library/R/x86_64/4.*/library' || '' }}
+          key: r-pkgs-${{ runner.os }}-${{ inputs.r-version }}-${{ hashFiles('**/install_packages.R', '**/DESCRIPTION', '**/renv.lock') }}
           restore-keys: |
-            ${{ runner.os }}-r-
+            r-pkgs-${{ runner.os }}-${{ inputs.r-version }}-
 
-      # Cache Linux system packages
-      - name: 💾 Cache APT packages
-        if: runner.os == 'Linux'
-        uses: actions/cache@v3
-        with:
-          path: ~/.apt-cache
-          key: ${{ runner.os }}-apt-${{ hashFiles('**/workflow.yml') }}-${{ hashFiles('**/*.md') }}
-
-      - name: 📦 Install R Dependencies
+      - name: 📦 Install R packages
+        if: steps.cache-r-packages.outputs.cache-hit != 'true'
         shell: Rscript {0}
         run: |
+          # Set options for better package installation
           options(repos = c(CRAN = "https://cran.rstudio.com"))
-          install.packages(c("remotes"))
           
-          # Cross-platform path handling
+          # Create and set library path
           lib_path <- ifelse(.Platform$OS.type == "windows", 
-                           Sys.getenv("R_LIBS_USER"), 
-                           "~/R/library")
+                         Sys.getenv("R_LIBS_USER"), 
+                         "~/R/library")
           dir.create(lib_path, showWarnings = FALSE, recursive = TRUE)
           .libPaths(lib_path)
+          
+          # Install packages
+          install.packages("remotes")
           
           if (file.exists("install_packages.R")) {
             source("install_packages.R")
           } else {
-            message("⚠️ No install_packages.R found, skipping additional dependencies")
+            message("⚠️ No install_packages.R found, installing common packages")
+            pkgs <- c("rmarkdown", "knitr", "tidyverse", "ggplot2", "bookdown")
+            install.packages(pkgs)
           }
 
-      - name: 🛠️ Install Linux Dependencies
+      # Cache Linux system packages with better path and key
+      - name: 💾 Cache APT packages
         if: runner.os == 'Linux'
+        uses: actions/cache@v3
+        id: cache-apt
+        with:
+          path: ~/.apt-cache
+          key: apt-${{ runner.os }}-${{ hashFiles('**/paste.txt') }}
+          restore-keys: |
+            apt-${{ runner.os }}-
+
+      - name: 🛠️ Install Linux Dependencies
+        if: runner.os == 'Linux' && steps.cache-apt.outputs.cache-hit != 'true'
         shell: bash
         run: |
           echo "🔄 Installing Linux dependencies..."
-          sudo apt-get update
           mkdir -p ~/.apt-cache
+          sudo apt-get update
           sudo apt-get -o dir::cache::archives="$HOME/.apt-cache" install -y \
             libpangoft2-1.0-0 \
             fonts-dejavu \
@@ -206,15 +216,16 @@ jobs:
             libjpeg-dev
           echo "✅ Linux dependencies installed"
 
-      # Cache Inkscape
+      # Cache Inkscape with better paths
       - name: 💾 Cache Inkscape
         uses: actions/cache@v3
         id: cache-inkscape
         with:
           path: |
             ~/.config/inkscape
-            ~/AppData/Roaming/inkscape  # Windows path
-          key: ${{ runner.os }}-inkscape-${{ hashFiles('**/*.svg') }}
+            ~/AppData/Roaming/inkscape
+            ${{ runner.os == 'Windows' && 'C:/Program Files/Inkscape' || '/usr/share/inkscape' }}
+          key: inkscape-${{ runner.os }}-${{ hashFiles('**/*.svg') }}
 
       - name: 🎨 Install Inkscape (Linux)
         if: runner.os == 'Linux' && steps.cache-inkscape.outputs.cache-hit != 'true'
@@ -232,26 +243,30 @@ jobs:
           choco install inkscape -y
           Write-Output "✅ Inkscape installed"
 
-      # Cache compilation artifacts
+      # Cache compilation artifacts - improved keys
       - name: 💾 Cache compilation artifacts
         uses: actions/cache@v3
+        id: cache-compilation
         with:
           path: |
             **/_cache
             **/.quarto
             **/.jupyter_cache
-          key: ${{ runner.os }}-compilation-${{ hashFiles('**/*.qmd', '**/*.ipynb', '**/*.md') }}
+          key: compilation-${{ runner.os }}-${{ inputs.target }}-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-compilation-
+            compilation-${{ runner.os }}-${{ inputs.target }}-
+            compilation-${{ runner.os }}-
 
-      # Cache Quarto build outputs
+      # Cache Quarto build outputs with improved key
       - name: 💾 Cache Quarto build
         uses: actions/cache@v3
+        id: cache-quarto-book
         with:
           path: _book
-          key: ${{ runner.os }}-quarto-book-${{ inputs.target }}-${{ hashFiles('**/*.qmd', '**/*.ipynb', '**/*.bib') }}
+          key: quarto-book-${{ runner.os }}-${{ inputs.target }}-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-quarto-book-
+            quarto-book-${{ runner.os }}-${{ inputs.target }}-
+            quarto-book-${{ runner.os }}-
 
       - name: 🔨 Render Quarto Project
         uses: quarto-dev/quarto-actions/render@v2
@@ -264,20 +279,13 @@ jobs:
           name: _book-${{ inputs.os }}
           path: _book
 
-      # Setup Python for both platforms
+      # Cache Python dependencies with improved path handling
       - name: 🐍 Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
-
-      # Cache Python dependencies for PDF compression
-      - name: 💾 Cache Python PDF tools
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cache/pip
-            ~\AppData\Local\pip\Cache  # Windows path
-          key: ${{ runner.os }}-pip-pdf-${{ hashFiles('**/scripts/quarto_publish/requirements.txt') }}
+          cache: 'pip'
+          cache-dependency-path: '**/scripts/quarto_publish/requirements.txt'
 
       - name: 📦 Install Python PDF tools
         shell: bash
