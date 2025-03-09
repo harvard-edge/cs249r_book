@@ -20,15 +20,9 @@ required_packages <- c(
 
 install_if_missing <- function(pkg) {
   if (!requireNamespace(pkg, quietly = TRUE)) {
-    install.packages(pkg, repos = "https://cloud.r-project.org", type = "binary")
+    install.packages(pkg, repos = "http://cran.rstudio.com")
   }
 }
-
-# install_if_missing <- function(pkg) {
-#   if (!requireNamespace(pkg, quietly = TRUE)) {
-#     install.packages(pkg, repos = "http://cran.rstudio.com")
-#   }
-# }
 
 invisible(sapply(required_packages, install_if_missing))
 
