@@ -36,6 +36,8 @@ permissions:
 jobs:
   build:
     runs-on: ${{ inputs.os }}
+    container: 
+      image: rocker/verse:${{ inputs.r-version }}  # Uses the R version from inputs
     environment:
       name: ${{ inputs.environment }}
     
@@ -55,92 +57,27 @@ jobs:
           ref: ${{ inputs.target }}
           fetch-depth: 0
 
-      # Cache Quarto
-      - name: 💾 Cache Quarto
-        uses: actions/cache@v3
-        id: cache-quarto
-        with:
-          path: ~/.local/share/quarto
-          key: ubuntu-quarto-${{ inputs.quarto-version }}
-
+      # Install Quarto using the action
       - name: 📦 Setup Quarto
-        if: steps.cache-quarto.outputs.cache-hit != 'true'
         uses: quarto-dev/quarto-actions/setup@v2
         with:
           version: ${{ inputs.quarto-version }}
 
-      # Setup R (required for Quarto with R code chunks)
-      - name: 📊 Setup R
-        uses: r-lib/actions/setup-r@v2
-        with:
-          r-version: ${{ inputs.r-version }}
-          use-public-rspm: true
-
-      # Cache R packages
-      - name: 💾 Cache R packages
-        uses: actions/cache@v3
-        id: cache-r-packages
-        with:
-          path: ~/R/library
-          key: ubuntu-r-${{ inputs.r-version }}-quarto-${{ hashFiles('**/renv.lock', '**/DESCRIPTION', '**/install_packages.R') }}
-          restore-keys: |
-            ubuntu-r-${{ inputs.r-version }}-quarto-
-            ubuntu-r-${{ inputs.r-version }}-
-
-      # Check if install_packages.R exists
-      - name: 🔍 Check for install_packages.R
-        id: check-install-script
-        shell: bash
-        run: |
-          if [ -f "install_packages.R" ]; then
-            echo "INSTALL_SCRIPT_EXISTS=true" >> $GITHUB_ENV
-            echo "✅ Found install_packages.R script"
-          else
-            echo "INSTALL_SCRIPT_EXISTS=false" >> $GITHUB_ENV
-            echo "⚠️ No install_packages.R script found"
-          fi
-
-      # Run the install_packages.R script if it exists
-      - name: 📦 Run install_packages.R
-        if: env.INSTALL_SCRIPT_EXISTS == 'true'
+      # Install any additional R packages needed
+      - name: 📦 Install additional R packages
         shell: Rscript {0}
         run: |
-          # Set library path
-          lib_path <- "~/R/library"
-          dir.create(lib_path, showWarnings = FALSE, recursive = TRUE)
-          .libPaths(lib_path)
-          
-          # Run the custom installation script
-          source("install_packages.R")
-          
-      # Install minimal required packages if no script exists
-      - name: 📦 Install Essential Quarto R Packages
-        if: env.INSTALL_SCRIPT_EXISTS != 'true'
-        shell: Rscript {0}
-        run: |
-          options(repos = c(CRAN = "https://cran.rstudio.com"))
-          
-          # Set library path
-          lib_path <- "~/R/library"
-          dir.create(lib_path, showWarnings = FALSE, recursive = TRUE)
-          .libPaths(lib_path)
-          
-          # Install essential packages
-          essential_pkgs <- c("knitr", "rmarkdown", "jsonlite")
-          for (pkg in essential_pkgs) {
-            if (!requireNamespace(pkg, quietly = TRUE)) {
-              install.packages(pkg)
-            }
+          if (file.exists("install_packages.R")) {
+            source("install_packages.R")
+          } else {
+            # Install minimal set of packages needed
+            pkgs <- c("knitr", "rmarkdown", "downlit")
+            install.packages(pkgs)
           }
           
-          # Verify installation
-          installed <- vapply(essential_pkgs, requireNamespace, logical(1), quietly = TRUE)
-          if (!all(installed)) {
-            missing <- essential_pkgs[!installed]
-            stop("Failed to install essential packages: ", paste(missing, collapse = ", "))
-          }
-          
-          cat("✅ Essential packages installed and verified\n")
+          # Print installed packages for debugging
+          cat("Installed packages:\n")
+          print(sort(installed.packages()[, "Package"]))
 
       # Cache compilation artifacts
       - name: 💾 Cache compilation artifacts
@@ -150,38 +87,14 @@ jobs:
             **/_cache
             **/.quarto
             **/.jupyter_cache
-          key: ubuntu-compilation-${{ hashFiles('**/*.qmd', '**/*.ipynb', '**/*.md') }}
-          restore-keys: ubuntu-compilation-
+          key: docker-compilation-${{ hashFiles('**/*.qmd', '**/*.ipynb', '**/*.md') }}
+          restore-keys: docker-compilation-
 
-      # Print R package info
-      - name: 🔍 Print R package info
-        shell: Rscript {0}
-        run: |
-          print("R package details:")
-          print(installed.packages()[c("knitr", "rmarkdown"), c("Package", "Version")])
-          print(paste("R library paths: ", paste(.libPaths(), collapse = ", ")))
-          
-          # Check if knitr is available
-          if (require("knitr")) {
-            print("✅ knitr package is available!")
-            print(paste("knitr version:", packageVersion("knitr")))
-          } else {
-            print("❌ knitr package is NOT available!")
-          }
-
-      - name: 🔨 Render Quarto to HTML only
-        shell: bash
-        run: |
-          echo "🔍 Checking Quarto installation..."
-          quarto check
-          
-          echo "📋 Listing installed R packages..."
-          Rscript -e "cat('Installed packages:', paste(sort(installed.packages()[,1]), collapse=', '), '\n')"
-          Rscript -e "cat('knitr version:', as.character(packageVersion('knitr')), '\n')"
-          Rscript -e "cat('rmarkdown version:', as.character(packageVersion('rmarkdown')), '\n')"
-          
-          echo "🚀 Rendering Quarto documents to HTML..."
-          quarto render --to html
+      # Render using Quarto action
+      - name: 🔨 Render Quarto to HTML
+        uses: quarto-dev/quarto-actions/render@v2
+        with:
+          to: html
 
       - name: 📤 Upload artifact
         uses: actions/upload-artifact@v4
@@ -202,17 +115,18 @@ jobs:
           target-branch: 'main'
           target-directory: 'docs'
           commit-message: |
-            📚 Push dev branch HTML build (light version)
+            📚 Push dev branch HTML build (Docker version)
 
       - name: 📋 Build Summary
         shell: bash
         run: |
           cat << EOF >> $GITHUB_STEP_SUMMARY
-          ## 📊 HTML-only Quarto Build Summary
+          ## 📊 HTML-only Quarto Build Summary (Docker)
           🎯 Target: ${{ inputs.target }}
           💻 OS: ${{ inputs.os }}
           🔧 Environment: ${{ inputs.environment }}
           📚 Quarto Version: ${{ inputs.quarto-version }}
           🔬 R Version: ${{ inputs.r-version }}
+          🐳 Docker Image: rocker/verse:${{ inputs.r-version }}
           ⏰ Completed at: $(date "+%Y-%m-%d %H:%M:%S")
           EOF
