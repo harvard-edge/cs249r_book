@@ -14,7 +14,7 @@ on:
       quarto-version:
         required: false
         type: string
-        default: '1.7.13'
+        default: '1.6.42'
         description: 'Version of Quarto to use'
       r-version:
         required: false
@@ -57,12 +57,34 @@ jobs:
           ref: ${{ inputs.target }}
           fetch-depth: 0
 
-      # Install LaTeX packages needed for TikZ
+      # Cache apt packages
+      - name: 💾 Cache apt packages
+        uses: actions/cache@v3
+        id: apt-cache
+        with:
+          path: /var/cache/apt/archives
+          key: ${{ runner.os }}-apt-${{ hashFiles('**/workflow.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-apt-
+
+      # Install LaTeX packages with cache awareness
       - name: 📦 Install LaTeX dependencies
         shell: bash
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends \
+          # Use -d to download only without installing
+          apt-get -y --no-install-recommends -d install \
+            texlive-latex-base \
+            texlive-latex-extra \
+            texlive-fonts-recommended \
+            texlive-fonts-extra \
+            texlive-xetex \
+            texlive-luatex \
+            texlive-pictures \
+            lmodern
+          
+          # Now install from cache
+          apt-get -y --no-install-recommends install \
             texlive-latex-base \
             texlive-latex-extra \
             texlive-fonts-recommended \
@@ -74,15 +96,34 @@ jobs:
           
           echo "✅ LaTeX packages installed"
           
-      # Install Quarto using the action
+      # Cache Quarto installation
+      - name: 💾 Cache Quarto
+        uses: actions/cache@v3
+        id: quarto-cache
+        with:
+          path: /opt/quarto/${{ inputs.quarto-version }}
+          key: ${{ runner.os }}-quarto-${{ inputs.quarto-version }}
+          
+      # Install Quarto using the action with cache awareness
       - name: 📦 Setup Quarto
         uses: quarto-dev/quarto-actions/setup@v2
         with:
           version: ${{ inputs.quarto-version }}
 
-      # Install Inkscape on Linux
-      - name: 📦 Install Inkscape (Linux)
+      # Cache Inkscape and dependencies installation
+      - name: 💾 Cache Inkscape installation
         if: runner.os == 'Linux'
+        id: inkscape-cache
+        uses: actions/cache@v3
+        with:
+          path: /usr/bin/inkscape
+          key: ${{ runner.os }}-inkscape-${{ hashFiles('/etc/apt/sources.list.d/inkscape*.list') }}
+          restore-keys: |
+            ${{ runner.os }}-inkscape-
+
+      # Install Inkscape on Linux with cache awareness
+      - name: 📦 Install Inkscape (Linux)
+        if: runner.os == 'Linux' && steps.inkscape-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           sudo apt-get update
@@ -96,16 +137,34 @@ jobs:
         shell: bash
         run: inkscape --version
 
+      # Cache R packages
+      - name: 💾 Cache R packages
+        uses: actions/cache@v3
+        with:
+          path: /usr/local/lib/R/site-library
+          key: ${{ runner.os }}-r-${{ inputs.r-version }}-${{ hashFiles('**/install_packages.R', '**/*.Rmd', '**/*.qmd') }}
+          restore-keys: |
+            ${{ runner.os }}-r-${{ inputs.r-version }}-
+
       # Install any additional R packages needed
       - name: 📦 Install additional R packages
         shell: Rscript {0}
         run: |
+          # First check which packages are already installed
+          installed_pkgs <- installed.packages()[, "Package"]
+          
           if (file.exists("install_packages.R")) {
             source("install_packages.R")
           } else {
-            # Install minimal set of packages needed
+            # Install minimal set of packages needed if not already installed
             pkgs <- c("knitr", "rmarkdown", "downlit")
-            install.packages(pkgs)
+            missing_pkgs <- pkgs[!pkgs %in% installed_pkgs]
+            
+            if (length(missing_pkgs) > 0) {
+              install.packages(missing_pkgs)
+            } else {
+              cat("All required packages already installed.\n")
+            }
           }
           
           # Print installed packages for debugging
@@ -120,8 +179,10 @@ jobs:
             **/_cache
             **/.quarto
             **/.jupyter_cache
-          key: docker-compilation-${{ hashFiles('**/*.qmd', '**/*.ipynb', '**/*.md') }}
-          restore-keys: docker-compilation-
+            **/_freeze
+          key: quarto-compilation-${{ hashFiles('**/*.qmd', '**/*.ipynb', '**/*.md', '**/*.Rmd', '**/*.R') }}
+          restore-keys: |
+            quarto-compilation-
 
       # Render using Quarto action
       - name: 🔨 Render Quarto to HTML
@@ -162,4 +223,9 @@ jobs:
           🔬 R Version: ${{ inputs.r-version }}
           🐳 Docker Image: rocker/verse:${{ inputs.r-version }}
           ⏰ Completed at: $(date "+%Y-%m-%d %H:%M:%S")
+          
+          ### 💾 Cache Status
+          - APT Cache: ${{ steps.apt-cache.outputs.cache-hit == 'true' && '✅ Hit' || '❌ Miss' }}
+          - Quarto Cache: ${{ steps.quarto-cache.outputs.cache-hit == 'true' && '✅ Hit' || '❌ Miss' }}
+          - Inkscape Cache: ${{ steps.inkscape-cache.outputs.cache-hit == 'true' && '✅ Hit' || '❌ Miss' }}
           EOF
