@@ -63,14 +63,14 @@ jobs:
           Write-Output "✅ Branch verification passed"
 
       - name: 📥 Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ inputs.target }}
           fetch-depth: 0
 
-      # Cache Quarto - Fixed to use correct paths and persistent key
+      # Cache Quarto - Using environment variables
       - name: 💾 Cache Quarto
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         id: cache-quarto
         with:
           path: |
@@ -85,9 +85,9 @@ jobs:
         with:
           version: ${{ inputs.quarto-version }}
 
-      # Cache TeX Live - Fixed paths and better key structure
+      # Cache TeX Live using environment variables
       - name: 💾 Cache TeX Live
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         id: cache-texlive
         with:
           path: |
@@ -138,14 +138,13 @@ jobs:
           r-version: ${{ inputs.r-version }}
           use-public-rspm: true
 
-      # Cache R packages - Fixed to run before install
+      # Cache R packages using standard paths
       - name: 💾 Cache R packages
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         id: cache-r-packages
         with:
           path: |
-            ${{ runner.os == 'Windows' && 'C:/Users/runneradmin/Documents/R/win-library' || '~/R/library' }}
-            ${{ runner.os == 'macOS' && '~/Library/R/x86_64/4.*/library' || '' }}
+            ${{ env.R_LIBS_USER }}
           key: r-pkgs-${{ runner.os }}-${{ inputs.r-version }}-${{ hashFiles('**/install_packages.R', '**/DESCRIPTION', '**/renv.lock') }}
           restore-keys: |
             r-pkgs-${{ runner.os }}-${{ inputs.r-version }}-
@@ -158,9 +157,7 @@ jobs:
           options(repos = c(CRAN = "https://cran.rstudio.com"))
           
           # Create and set library path
-          lib_path <- ifelse(.Platform$OS.type == "windows", 
-                         Sys.getenv("R_LIBS_USER"), 
-                         "~/R/library")
+          lib_path <- Sys.getenv("R_LIBS_USER")
           dir.create(lib_path, showWarnings = FALSE, recursive = TRUE)
           .libPaths(lib_path)
           
@@ -175,14 +172,14 @@ jobs:
             install.packages(pkgs)
           }
 
-      # Cache Linux system packages with better path and key
+      # Cache Linux system packages without hardcoded paths
       - name: 💾 Cache APT packages
         if: runner.os == 'Linux'
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         id: cache-apt
         with:
           path: ~/.apt-cache
-          key: apt-${{ runner.os }}-${{ hashFiles('**/paste.txt') }}
+          key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
             apt-${{ runner.os }}-
 
@@ -216,9 +213,9 @@ jobs:
             libjpeg-dev
           echo "✅ Linux dependencies installed"
 
-      # Cache Inkscape with better paths
+      # Cache Inkscape with standard paths
       - name: 💾 Cache Inkscape
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         id: cache-inkscape
         with:
           path: |
@@ -243,26 +240,26 @@ jobs:
           choco install inkscape -y
           Write-Output "✅ Inkscape installed"
 
-      # Cache compilation artifacts - improved keys
+      # Cache compilation artifacts with workspace paths
       - name: 💾 Cache compilation artifacts
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         id: cache-compilation
         with:
           path: |
-            **/_cache
-            **/.quarto
-            **/.jupyter_cache
+            ${{ github.workspace }}/**/_cache
+            ${{ github.workspace }}/**/.quarto
+            ${{ github.workspace }}/**/.jupyter_cache
           key: compilation-${{ runner.os }}-${{ inputs.target }}-${{ github.sha }}
           restore-keys: |
             compilation-${{ runner.os }}-${{ inputs.target }}-
             compilation-${{ runner.os }}-
 
-      # Cache Quarto build outputs with improved key
+      # Cache Quarto build outputs with workspace paths
       - name: 💾 Cache Quarto build
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         id: cache-quarto-book
         with:
-          path: _book
+          path: ${{ github.workspace }}/_book
           key: quarto-book-${{ runner.os }}-${{ inputs.target }}-${{ github.sha }}
           restore-keys: |
             quarto-book-${{ runner.os }}-${{ inputs.target }}-
@@ -279,7 +276,7 @@ jobs:
           name: _book-${{ inputs.os }}
           path: _book
 
-      # Cache Python dependencies with improved path handling
+      # Updated Python setup
       - name: 🐍 Setup Python
         uses: actions/setup-python@v4
         with:
@@ -299,15 +296,18 @@ jobs:
       - name: 📚 Compress PDF
         uses: jy95/ghostscript-action@v1  
         with:
-          file: '_book/Machine-Learning-Systems.pdf'
-          output: '_book/Machine-Learning-Systems-compressed.pdf'
+          file: '${{ github.workspace }}/_book/Machine-Learning-Systems.pdf'
+          output: '${{ github.workspace }}/_book/Machine-Learning-Systems-compressed.pdf'
           arbitrary-parameters: '-dCompatibilityLevel=1.4 -dPDFSETTINGS=/ebook'
 
       - name: ♻️ Replace original PDF
         shell: pwsh
         run: |
-          if (Test-Path "_book/Machine-Learning-Systems-compressed.pdf") {
-            Move-Item "_book/Machine-Learning-Systems-compressed.pdf" "_book/Machine-Learning-Systems.pdf" -Force
+          $pdfPath = "${{ github.workspace }}/_book/Machine-Learning-Systems.pdf"
+          $compressedPath = "${{ github.workspace }}/_book/Machine-Learning-Systems-compressed.pdf"
+          
+          if (Test-Path $compressedPath) {
+            Move-Item $compressedPath $pdfPath -Force
             Write-Output "✅ PDF compressed and replaced successfully"
           } else {
             Write-Error "❌ PDF compression failed; keeping original file."
@@ -345,22 +345,22 @@ jobs:
         with:
           name: debug-${{ inputs.target }}-${{ inputs.os }}
           path: |
-            _book/**
-            .quarto/**
-            **/_cache/**
-            **/logs/**
-            **/*.log
-            **/.jupyter_cache/**
-            .Rcheck/**
-            **/*.Rout
-            custom-texlive/**/*.log
+            ${{ github.workspace }}/_book/**
+            ${{ github.workspace }}/.quarto/**
+            ${{ github.workspace }}/**/_cache/**
+            ${{ github.workspace }}/**/logs/**
+            ${{ github.workspace }}/**/*.log
+            ${{ github.workspace }}/**/.jupyter_cache/**
+            ${{ github.workspace }}/.Rcheck/**
+            ${{ github.workspace }}/**/*.Rout
+            ${{ github.workspace }}/custom-texlive/**/*.log
             **/.TinyTeX/texmf-var/log/**
             **/.texlive/**/*.log
             **/texmf-var/log/**
-            **/*.aux
-            **/*.blg
-            **/*.fls
-            **/*.fdb_latexmk
+            ${{ github.workspace }}/**/*.aux
+            ${{ github.workspace }}/**/*.blg
+            ${{ github.workspace }}/**/*.fls
+            ${{ github.workspace }}/**/*.fdb_latexmk
           compression-level: 9  # Maximum compression
           retention-days: 5  # Keep for 5 days
 
@@ -374,5 +374,10 @@ jobs:
           🔧 Environment: ${{ inputs.environment }}
           📚 Quarto Version: ${{ inputs.quarto-version }}
           🔬 R Version: ${{ inputs.r-version }}
+          🧩 Cache Status:
+            - Quarto: ${{ steps.cache-quarto.outputs.cache-hit == 'true' && '✅ Hit' || '❌ Miss' }}
+            - TeX Live: ${{ steps.cache-texlive.outputs.cache-hit == 'true' && '✅ Hit' || '❌ Miss' }}
+            - R Packages: ${{ steps.cache-r-packages.outputs.cache-hit == 'true' && '✅ Hit' || '❌ Miss' }}
+            - Compilation: ${{ steps.cache-compilation.outputs.cache-hit == 'true' && '✅ Hit' || '❌ Miss' }}
           ⏰ Completed at: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
           "@ | Add-Content $env:GITHUB_STEP_SUMMARY
