@@ -1,5 +1,7 @@
 name: '📚 Quarto Build'
 
+# This workflow builds a Quarto project and deploys it to either a development site or GitHub Pages
+# It handles both Windows and Linux environments with extensive caching for better performance
 on:
   workflow_call:
     inputs:
@@ -43,6 +45,11 @@ jobs:
       - name: 🔍 Validate inputs
         shell: pwsh
         run: |
+          Write-Output "🔄 Validating workflow inputs..."
+          Write-Output "👉 Target: ${{ inputs.target }}"
+          Write-Output "👉 OS: ${{ inputs.os }}"
+          Write-Output "👉 Environment: ${{ inputs.environment }}"
+          
           if (("${{ inputs.target }}" -ne "dev") -and ("${{ inputs.target }}" -ne "main")) {
             Write-Error "❌ Target must be either 'dev' or 'main'"
             exit 1
@@ -52,6 +59,10 @@ jobs:
       - name: 🔍 Verify branch
         shell: pwsh
         run: |
+          Write-Output "🔄 Verifying branch alignment..."
+          Write-Output "👉 Current branch: ${{ github.ref }}"
+          Write-Output "👉 Target branch: ${{ inputs.target }}"
+          
           if (("${{ inputs.target }}" -eq "main") -and ("${{ github.ref }}" -ne "refs/heads/main")) {
             Write-Error "❌ Main build can only run on the main branch"
             exit 1
@@ -84,6 +95,18 @@ jobs:
         uses: quarto-dev/quarto-actions/setup@v2
         with:
           version: ${{ inputs.quarto-version }}
+        # Outputs quarto version information after installation
+        id: quarto-setup
+
+      - name: 📋 Quarto Setup Info
+        shell: bash
+        run: |
+          echo "🔄 Checking Quarto installation..."
+          quarto check
+          echo "📊 Quarto version info:"
+          quarto --version
+          echo "📍 Quarto installation location:"
+          which quarto || where.exe quarto
 
       - name: 📦 Install & Update TeX Live 
         uses: teatimeguest/setup-texlive-action@v3
@@ -107,11 +130,29 @@ jobs:
           update-all-packages: true
           cache: true
           
+      - name: 📋 TeX Live Info
+        shell: bash
+        run: |
+          echo "🔄 Checking TeX Live installation..."
+          tlmgr --version
+          echo "📍 TeX Live installation location:"
+          which pdflatex || where.exe pdflatex
+          echo "📊 Installed packages (sample):"
+          tlmgr list --only-installed | head -n 10
+
       - name: 📊 Setup R
         uses: r-lib/actions/setup-r@v2
         with:
           r-version: ${{ inputs.r-version }}
           use-public-rspm: true
+
+      - name: 📋 R Setup Info
+        shell: Rscript {0}
+        run: |
+          cat("🔄 R Version Information:\n")
+          cat(paste("R version:", R.version$version.string, "\n"))
+          cat(paste("R home:", R.home(), "\n"))
+          cat(paste("R library paths:", paste(.libPaths(), collapse=", "), "\n"))
 
       # Cache R packages using standard paths
       - name: 💾 Cache R packages
@@ -131,21 +172,33 @@ jobs:
           # Set options for better package installation
           options(repos = c(CRAN = "https://cran.rstudio.com"))
           
+          cat("🔄 Installing R packages...\n")
+          cat(paste("R library path:", Sys.getenv("R_LIBS_USER"), "\n"))
+          
           # Create and set library path
           lib_path <- Sys.getenv("R_LIBS_USER")
           dir.create(lib_path, showWarnings = FALSE, recursive = TRUE)
           .libPaths(lib_path)
           
           # Install packages
+          cat("📦 Installing remotes package...\n")
           install.packages("remotes")
           
           if (file.exists("install_packages.R")) {
+            cat("📦 Installing packages from install_packages.R...\n")
             source("install_packages.R")
           } else {
-            message("⚠️ No install_packages.R found, installing common packages")
+            cat("⚠️ No install_packages.R found, installing common packages\n")
             pkgs <- c("rmarkdown", "knitr", "tidyverse", "ggplot2", "bookdown")
+            cat(paste("📦 Installing packages:", paste(pkgs, collapse=", "), "\n"))
             install.packages(pkgs)
           }
+          
+          cat("✅ R package installation complete\n")
+          cat("📊 Installed packages:\n")
+          ip <- installed.packages()[, c("Package", "Version")]
+          print(head(ip, 10))
+          cat(paste("Total packages installed:", nrow(ip), "\n"))
 
       # Cache Linux system packages without hardcoded paths
       - name: 💾 Cache APT packages
@@ -163,8 +216,13 @@ jobs:
         shell: bash
         run: |
           echo "🔄 Installing Linux dependencies..."
+          echo "📦 Creating APT cache directory"
           mkdir -p ~/.apt-cache
+          
+          echo "📦 Updating package lists"
           sudo apt-get update
+          
+          echo "📦 Installing required system libraries"
           sudo apt-get -o dir::cache::archives="$HOME/.apt-cache" install -y \
             libpangoft2-1.0-0 \
             fonts-dejavu \
@@ -182,6 +240,8 @@ jobs:
             libtiff5-dev \
             libjpeg-dev
           echo "✅ Linux dependencies installed"
+          echo "📊 Installed packages size:"
+          du -sh ~/.apt-cache
 
       # Cache Inkscape with standard paths
       - name: 💾 Cache Inkscape
@@ -198,17 +258,29 @@ jobs:
         if: runner.os == 'Linux' && steps.cache-inkscape.outputs.cache-hit != 'true'
         shell: bash
         run: |
+          echo "🔄 Adding Inkscape PPA..."
           sudo add-apt-repository ppa:inkscape.dev/stable -y
+          
+          echo "🔄 Updating package lists..."
           sudo apt-get update
+          
+          echo "🔄 Installing Inkscape..."
           sudo apt-get install inkscape -y
+          
+          echo "✅ Inkscape installation complete"
+          echo "📊 Inkscape version:"
+          inkscape --version
 
       - name: 🎨 Install Inkscape (Windows)
         if: runner.os == 'Windows' && steps.cache-inkscape.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           Write-Output "🔄 Installing Inkscape..."
+          Write-Output "📦 Using Chocolatey to install Inkscape"
           choco install inkscape -y
           Write-Output "✅ Inkscape installed"
+          Write-Output "📊 Inkscape version:"
+          & "C:\Program Files\Inkscape\bin\inkscape.exe" --version
 
       # Cache compilation artifacts with workspace paths
       - name: 💾 Cache compilation artifacts
@@ -236,19 +308,31 @@ jobs:
             quarto-book-${{ runner.os }}-
 
       # Build the book
-      - name: 🔨 Render Quarto Project (PDF)
+      - name: 🔨 Render Quarto Project
         uses: quarto-dev/quarto-actions/render@v2
         continue-on-error: false # Explicitly fail if rendering fails
 
-      - name: 📂 List output files in _book (portable)
+      - name: 📋 Check Quarto Build Output
         shell: bash
         run: |
-          echo "Listing files in _book directory:"
+          echo "🔄 Checking Quarto build output..."
+          
           if [ -d "_book" ]; then
-            find _book -type f -exec ls -lh {} \;
+            echo "✅ _book directory exists"
+            echo "📊 Files in _book directory:"
+            ls -la _book | head -n 20
+            echo "📊 Total files in _book:"
+            find _book -type f | wc -l
+            
+            if [ -f "_book/Machine-Learning-Systems.pdf" ]; then
+              echo "✅ PDF file exists"
+              echo "📊 PDF file size:"
+              du -h "_book/Machine-Learning-Systems.pdf"
+            else
+              echo "⚠️ PDF file not found!"
+            fi
           else
-            echo "❌ _book directory not found."
-            exit 1
+            echo "❌ _book directory not found!"
           fi
 
       - name: 📤 Upload artifact
@@ -266,36 +350,105 @@ jobs:
           cache: 'pip'
           cache-dependency-path: '**/scripts/quarto_publish/requirements.txt'
 
+      - name: 📋 Python Setup Info
+        shell: bash
+        run: |
+          echo "🔄 Python environment information:"
+          python --version
+          pip --version
+          echo "📍 Python location:"
+          which python || where.exe python
+
       - name: 📦 Install Python PDF tools
         shell: bash
         run: |
+          echo "🔄 Installing Python PDF tools..."
+          
           if [ -f "./.github/scripts/quarto_publish/requirements.txt" ]; then
+            echo "📦 Installing from requirements.txt"
             pip install -r ./.github/scripts/quarto_publish/requirements.txt
+            echo "📊 Installed packages from requirements.txt:"
+            cat ./.github/scripts/quarto_publish/requirements.txt
           else
+            echo "⚠️ No requirements.txt found, installing essential packages"
             pip install pikepdf ghostscript PyPDF2
           fi
+          
+          echo "📊 Installed Python packages:"
+          pip list
 
-      - name: 📚 Compress PDF
-        uses: jy95/ghostscript-action@v1  
-        with:
-          file: '_book/Machine-Learning-Systems.pdf'
-          output: '_book/Machine-Learning-Systems-compressed.pdf'
-          arbitrary-parameters: '-dCompatibilityLevel=1.4 -dPDFSETTINGS=/ebook'
+      - name: 📄 Check and Compress PDF (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          echo "🔄 Starting PDF compression (Linux)..."
+          set -e  # Exit on any error
+          PDF_INPUT="./_book/Machine-Learning-Systems.pdf"
+          PDF_OUTPUT="./_book/ebook.pdf"
 
-      - name: ♻️ Replace original PDF
+          echo "📊 Input PDF: $PDF_INPUT"
+          echo "📊 Temporary output: $PDF_OUTPUT"
+
+          if [[ ! -f "$PDF_INPUT" ]]; then
+            echo "❌ PDF file not found!"
+            exit 1
+          fi
+
+          echo "📊 Original PDF size:"
+          du -h "$PDF_INPUT"
+
+          echo "🔄 Running PDF compression script..."
+          python3 ./.github/scripts/gs_compress_pdf.py -i "$PDF_INPUT" -o "$PDF_OUTPUT" -s "/ebook"
+
+          if [[ -f "$PDF_OUTPUT" ]]; then
+            echo "✅ PDF compression successful"
+            echo "📊 Compressed PDF size:"
+            du -h "$PDF_OUTPUT"
+            
+            echo "🔄 Replacing original PDF with compressed version..."
+            mv "$PDF_OUTPUT" "$PDF_INPUT"
+            echo "✅ PDF replacement complete"
+          else
+            echo "⚠️ PDF compression failed, keeping original file"
+          fi
+
+      - name: 📄 Check and Compress PDF (Windows)
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $pdfPath = "_book/Machine-Learning-Systems.pdf"
-          $compressedPath = "_book/Machine-Learning-Systems-compressed.pdf"
-          
-          if (Test-Path $compressedPath) {
-            Move-Item $compressedPath $pdfPath -Force
-            Write-Output "✅ PDF compressed and replaced successfully"
-          } else {
-            Write-Error "❌ PDF compression failed; keeping original file."
+          Write-Output "🔄 Starting PDF compression (Windows)..."
+          $PdfInput = ".\_book\Machine-Learning-Systems.pdf"
+          $PdfOutput = ".\_book\ebook.pdf"
+
+          Write-Output "📊 Input PDF: $PdfInput"
+          Write-Output "📊 Temporary output: $PdfOutput"
+
+          if (-not (Test-Path $PdfInput)) {
+            Write-Error "❌ PDF file not found!"
             exit 1
           }
 
+          Write-Output "📊 Original PDF size:"
+          (Get-Item $PdfInput).Length / 1MB
+          Write-Output "MB"
+
+          Write-Output "🔄 Running PDF compression script..."
+          python .\.github\scripts\gs_compress_pdf.py -i "$PdfInput" -o "$PdfOutput" -s "/ebook"
+
+          if (Test-Path $PdfOutput) {
+            Write-Output "✅ PDF compression successful"
+            Write-Output "📊 Compressed PDF size:"
+            (Get-Item $PdfOutput).Length / 1MB
+            Write-Output "MB"
+            
+            Write-Output "🔄 Replacing original PDF with compressed version..."
+            Move-Item -Path $PdfOutput -Destination $PdfInput -Force
+            Write-Output "✅ PDF replacement complete"
+          } else {
+            Write-Output "⚠️ PDF compression failed, keeping original file"
+          }
+
+      # Push to dev site
       - name: 🚀 Stage to Dev Site
         if: inputs.target == 'dev' && runner.os == 'Linux'
         uses: cpina/github-action-push-to-another-repository@v1.7.2
@@ -311,6 +464,18 @@ jobs:
           commit-message: |
             📚 Push dev branch build
 
+      - name: 📋 Dev Deployment Info
+        if: inputs.target == 'dev' && runner.os == 'Linux'
+        shell: bash
+        run: |
+          echo "🔄 Development deployment information:"
+          echo "📊 Deployed to repository: harvard-edge/cs249r_book_dev"
+          echo "📊 Target branch: main"
+          echo "📊 Target directory: docs"
+          echo "📊 Source directory: _book"
+          echo "✅ Deployment should be complete"
+
+      # Deploy to GitHub Pages
       - name: 🚀 Deploy to GitHub Pages
         if: inputs.target == 'main' && runner.os == 'Linux'
         uses: quarto-dev/quarto-actions/publish@v2
@@ -319,6 +484,16 @@ jobs:
           render: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📋 GitHub Pages Deployment Info
+        if: inputs.target == 'main' && runner.os == 'Linux'
+        shell: bash
+        run: |
+          echo "🔄 GitHub Pages deployment information:"
+          echo "📊 Deployed to: gh-pages branch"
+          echo "📊 Source directory: _book"
+          echo "✅ Deployment should be complete"
+          echo "🌐 Site should be available at: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
 
       # Add comprehensive debug artifacts
       - name: 📦 Collect Debug Artifacts
@@ -341,6 +516,16 @@ jobs:
             ${{ github.workspace }}/**/*.fdb_latexmk
           compression-level: 9  # Maximum compression
           retention-days: 5  # Keep for 5 days
+
+      - name: 📋 Debug Artifact Info
+        if: always()
+        shell: bash
+        run: |
+          echo "🔄 Debug artifacts information:"
+          echo "📊 Collected logs and build artifacts"
+          echo "📊 Retention period: 5 days"
+          echo "📊 Target artifact name: debug-${{ inputs.target }}-${{ inputs.os }}"
+          echo "✅ Debug artifacts should be available in GitHub Actions"
 
       - name: 📋 Build Summary
         shell: pwsh
