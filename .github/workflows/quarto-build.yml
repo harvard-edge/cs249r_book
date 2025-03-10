@@ -281,73 +281,31 @@ jobs:
           name: _book-${{ inputs.os }}
           path: _book
 
-      # Updated Python setup
-      - name: 🐍 Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.x'
-          cache: 'pip'
-          cache-dependency-path: '**/scripts/quarto_publish/requirements.txt'
-
-      - name: 📋 Python Setup Info
-        shell: bash
+      - name: 🐳 Compress PDF using Dockerized Ghostscript
         run: |
-          echo "🔄 Python environment information:"
-          python --version
-          pip --version
-          echo "📍 Python location:"
-          which python || where.exe python
+          echo "📦 Pulling Ghostscript container..."
+          docker pull minidocks/ghostscript
 
-      - name: 🍺 Install Ghostscript (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ghostscript
+          echo "📊 Input PDF: ./_book/Machine-Learning-Systems.pdf"
+          echo "📊 Output PDF: ./_book/ebook.pdf"
 
-      - name: 🍫 Install Ghostscript (Windows)
-        if: runner.os == 'Windows'
-        shell: powershell
-        run: choco install ghostscript -y
-
-      - name: 📄 Check and Compress PDF (Cross-platform)
-        shell: bash
-        run: |
-          echo "🔄 Starting PDF compression..."
-          set -e  # Exit on any error
-
-          PDF_INPUT="./_book/Machine-Learning-Systems.pdf"
-          PDF_OUTPUT="./_book/ebook.pdf"
-
-          echo "📊 Input PDF: $PDF_INPUT"
-          echo "📊 Temporary output: $PDF_OUTPUT"
-
-          if [ ! -f "$PDF_INPUT" ]; then
-            echo "❌ PDF file not found!"
+          if [ ! -f "./_book/Machine-Learning-Systems.pdf" ]; then
+            echo "❌ Input PDF not found!"
             exit 1
           fi
 
-          echo "📊 Original PDF size:"
-          if command -v du &> /dev/null; then
-            du -h "$PDF_INPUT"
+          echo "🔄 Compressing PDF via Docker..."
+          docker run --rm -v "$PWD/_book:/work" minidocks/ghostscript \
+            gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 -dPDFSETTINGS=/ebook \
+            -dNOPAUSE -dQUIET -dBATCH \
+            -sOutputFile=/work/ebook.pdf /work/Machine-Learning-Systems.pdf
+
+          if [ -f "./_book/ebook.pdf" ]; then
+            echo "✅ Compression successful"
+            mv ./_book/ebook.pdf ./_book/Machine-Learning-Systems.pdf
           else
-            python -c "import os; print(f'{os.path.getsize(\"$PDF_INPUT\") / 1024 / 1024:.2f} MB')"
-          fi
-
-          echo "🔄 Running PDF compression script..."
-          python ./.github/scripts/gs_compress_pdf.py -i "$PDF_INPUT" -o "$PDF_OUTPUT" -s "/ebook"
-
-          if [ -f "$PDF_OUTPUT" ]; then
-            echo "✅ PDF compression successful"
-            echo "📊 Compressed PDF size:"
-            if command -v du &> /dev/null; then
-              du -h "$PDF_OUTPUT"
-            else
-              python -c "import os; print(f'{os.path.getsize(\"$PDF_OUTPUT\") / 1024 / 1024:.2f} MB')"
-            fi
-
-            echo "🔄 Replacing original PDF with compressed version..."
-            mv "$PDF_OUTPUT" "$PDF_INPUT"
-            echo "✅ PDF replacement complete"
-          else
-            echo "⚠️ PDF compression failed, keeping original file"
+            echo "❌ Compression failed"
+            exit 1
           fi
 
       # Push to dev site
