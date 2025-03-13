@@ -42,7 +42,7 @@ jobs:
       name: ${{ inputs.environment }}
     env:
       R_LIBS_USER: ${{ github.workspace }}/.r-lib
-          
+
     steps:
       - name: 🔍 Validate inputs
         shell: pwsh
@@ -74,6 +74,80 @@ jobs:
             exit 1
           }
           Write-Output "✅ Branch verification passed"
+
+      - name: 📦 Install Ghostscript (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install ghostscript
+          $gsPath = Get-ChildItem "C:\Program Files\gs" | Sort-Object Name -Descending | Select-Object -First 1
+          $binPath = Join-Path $gsPath.FullName "bin"
+          echo "Adding Ghostscript path: $binPath"
+          echo "$binPath" | Out-File -Append -FilePath $env:GITHUB_PATH
+
+
+      - name: 🧪 Test Ghostscript compression with dummy PDF (1.5 and 1.4)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Output "🧪 Creating dummy PDF to test Ghostscript..."
+          $dummypdf = "./_book/dummy.pdf"
+          $outputpdf = "./_book/ebook.pdf"
+
+          New-Item -ItemType Directory -Force -Path "./_book" | Out-Null
+
+          @"
+          %PDF-1.4
+          1 0 obj
+          << /Type /Catalog /Pages 2 0 R >>
+          endobj
+          2 0 obj
+          << /Type /Pages /Kids [3 0 R] /Count 1 >>
+          endobj
+          3 0 obj
+          << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R >>
+          endobj
+          4 0 obj
+          << /Length 44 >>
+          stream
+          BT
+          /F1 24 Tf
+          100 100 Td
+          (Hello, World!) Tj
+          ET
+          endstream
+          endobj
+          xref
+          0 5
+          0000000000 65535 f
+          0000000010 00000 n
+          0000000060 00000 n
+          0000000115 00000 n
+          0000000210 00000 n
+          trailer
+          << /Root 1 0 R /Size 5 >>
+          startxref
+          320
+          %%EOF
+          "@ | Set-Content -Encoding ASCII $dummypdf
+
+          foreach ($compat in @("1.5", "1.4")) {
+            Write-Output "📉 Testing Ghostscript compression with CompatibilityLevel=$compat..."
+            & "gswin64c" -sDEVICE=pdfwrite -dCompatibilityLevel=$compat -dPDFSETTINGS=/ebook -dNOPAUSE -dQUIET -dBATCH -sOutputFile="$outputpdf" "$dummypdf"
+
+            if (Test-Path $outputpdf) {
+              Write-Output "✅ Compression with CompatibilityLevel=$compat succeeded"
+              Remove-Item $outputpdf
+            } else {
+              Write-Error "❌ Compression with CompatibilityLevel=$compat failed"
+              Remove-Item $dummypdf
+              exit 1
+            }
+          }
+
+          Remove-Item $dummypdf
+
+
 
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
@@ -288,7 +362,12 @@ jobs:
           echo "Adding Ghostscript path: $binPath"
           echo "$binPath" | Out-File -Append -FilePath $env:GITHUB_PATH
 
-      - name: 🔨 Render Quarto Project
+      - name: 🔨 Render Quarto Project (HTML)
+        uses: quarto-dev/quarto-actions/render@v2
+        with:
+            to: titlepage-pdf
+
+      - name: 🔨 Render Quarto Project (PDF)
         uses: quarto-dev/quarto-actions/render@v2
         with:
             to: titlepage-pdf
