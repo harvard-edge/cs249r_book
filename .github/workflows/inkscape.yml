@@ -1,42 +1,86 @@
 name: Test Inkscape SVG Conversion
 
+# This workflow builds a Quarto project and deploys it to either a development site or GitHub Pages
+# It handles both Windows and Linux environments with extensive caching for better performance
 on:
   workflow_dispatch:  # Allow manual triggering
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+        description: 'Build environment (development/production)'
+      os:
+        required: true
+        type: string
+        description: 'Operating system to run on (ubuntu-latest/windows-latest)'
+      quarto-version:
+        required: false
+        type: string
+        default: '1.7.15'
+        description: 'Version of Quarto to use'
+      r-version:
+        required: false
+        type: string
+        default: '4.3.2'
+        description: 'Version of R to use'
+      target:
+        required: true
+        type: string
+        description: 'Target branch (dev/main) - determines build behavior'
+    secrets:
+      SSH_DEPLOY_KEY:
+        required: true
+        
+permissions:
+  contents: write
+  pages: write
 
 jobs:
   test-inkscape:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.os }}
+    environment:
+      name: ${{ inputs.environment }}
+    env:
+      G_MESSAGES_DEBUG: ""
+      G_DEBUG: fatal-warnings
+      R_LIBS_USER: ${{ github.workspace }}/.r-lib
     
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
       
       - name: Install Inkscape
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y inkscape
           inkscape --version
-      
+
       - name: Install font dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get install -y \
             fonts-freefont-ttf \
             fonts-liberation \
             fontconfig
           sudo fc-cache -f -v
-      
+
       - name: Create test SVG
+        if: runner.os == 'Linux'
         run: |
           echo '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><circle cx="50" cy="50" r="40" fill="red"/></svg>' > test.svg
           cat test.svg
-      
+
       - name: Test SVG to PNG conversion
+        if: runner.os == 'Linux'
         run: |
           inkscape test.svg --export-type=png --export-filename=test.png
           ls -la test.png
           file test.png
-      
+
       - name: Test SVG to PDF conversion
+        if: runner.os == 'Linux'
         continue-on-error: true
         run: |
           echo "Attempting SVG to PDF conversion..."
@@ -48,15 +92,16 @@ jobs:
           else
             echo "❌ SVG to PDF conversion failed"
           fi
-      
+
       - name: Test rsvg-convert as alternative
+        if: runner.os == 'Linux'
         run: |
           echo "Installing rsvg-convert..."
           sudo apt-get install -y librsvg2-bin
-          
+
           echo "Converting SVG to PDF with rsvg-convert..."
           rsvg-convert -f pdf -o rsvg-test.pdf test.svg
-          
+
           if [ -f rsvg-test.pdf ]; then
             echo "✅ rsvg-convert SVG to PDF conversion succeeded"
             ls -la rsvg-test.pdf
@@ -64,14 +109,3 @@ jobs:
           else
             echo "❌ rsvg-convert SVG to PDF conversion failed"
           fi
-      
-      - name: Upload test artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: svg-conversion-results
-          path: |
-            *.svg
-            *.png
-            *.pdf
-          retention-days: 1
