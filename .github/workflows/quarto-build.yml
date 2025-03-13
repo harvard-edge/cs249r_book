@@ -273,6 +273,21 @@ jobs:
           print(head(ip, 10))
           cat(paste("Total packages installed:", nrow(ip), "\n"))
 
+      # Install before render cause we need it for rendering
+      - name: 📦 Install Ghostscript (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y ghostscript
+
+      - name: 📦 Install Ghostscript (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install ghostscript
+          $gsPath = Get-ChildItem "C:\Program Files\gs" | Sort-Object Name -Descending | Select-Object -First 1
+          $binPath = Join-Path $gsPath.FullName "bin"
+          echo "Adding Ghostscript path: $binPath"
+          echo "$binPath" | Out-File -Append -FilePath $env:GITHUB_PATH
+
       - name: 🔨 Render Quarto Project
         uses: quarto-dev/quarto-actions/render@v2
         with:
@@ -304,13 +319,16 @@ jobs:
       - name: 📉 Compress PDF with Ghostscript (Linux)
         if: runner.os == 'Linux'
         run: |
-          # Use ghostscript-action to compress the PDF
-          uses: jy95/ghostscript-action@v1
-          with:
-            file: './_book/Machine-Learning-Systems.pdf'
-            output: './_book/ebook.pdf'
-            arbitrary-parameters: '-dCompatibilityLevel=1.5 -dPDFSETTINGS=/ebook'
-          
+          gs \
+            -sDEVICE=pdfwrite \
+            -dCompatibilityLevel=1.5 \
+            -dPDFSETTINGS=/ebook \
+            -dNOPAUSE \
+            -dQUIET \
+            -dBATCH \
+            -sOutputFile="./_book/ebook.pdf" \
+            "./_book/Machine-Learning-Systems.pdf"
+
           # Replace original with compressed
           mv ./_book/ebook.pdf ./_book/Machine-Learning-Systems.pdf
 
@@ -318,25 +336,14 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # Install Ghostscript
-          choco install ghostscript
-          
-          # Add Ghostscript to PATH
-          $gsPath = Get-ChildItem "C:\Program Files\gs" | Sort-Object Name -Descending | Select-Object -First 1
-          $binPath = Join-Path $gsPath.FullName "bin"
-          echo "Adding Ghostscript path: $binPath"
-          $env:Path = "$binPath;$env:Path"
-          
-          # Confirm Ghostscript works
-          & gswin64c -version
-          
-          # Compress PDF
           $input = "./_book/Machine-Learning-Systems.pdf"
           $output = "./_book/ebook.pdf"
+
           if (!(Test-Path $input)) {
             Write-Error "❌ Input PDF not found!"
             exit 1
           }
+
           Write-Output "📉 Compressing PDF using Ghostscript..."
           & gswin64c `
             -sDEVICE=pdfwrite `
@@ -347,8 +354,7 @@ jobs:
             -dBATCH `
             -sOutputFile=$output `
             $input
-          
-          # Replace original with compressed
+
           if (Test-Path $output) {
             Write-Output "✅ Compression successful"
             Move-Item -Force $output $input
