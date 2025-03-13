@@ -410,18 +410,39 @@ end
 
 --- Converts a PDF to SVG.
 local pdf2svg = function (imgdata)
-  -- Using `os.tmpname()` instead of a hash would be slightly cleaner, but the
-  -- function causes problems on Windows (and wasm). See, e.g.,
-  -- https://github.com/pandoc-ext/diagram/issues/49
   local pdf_file = 'diagram-' .. pandoc.utils.sha1(imgdata) .. '.pdf'
   write_file(pdf_file, imgdata)
+
   local args = {
     '--export-type=svg',
     '--export-plain-svg',
     '--export-filename=-',
     pdf_file
   }
-  return pandoc.pipe('inkscape', args, ''), os.remove(pdf_file)
+
+  -- DEBUG: Print command being run
+  io.stderr:write("[DEBUG] Running Inkscape with args: ", table.concat(args, " "), "\n")
+
+  local success, result = pcall(function()
+    return pandoc.pipe('inkscape', args, '')
+  end)
+
+  -- Clean up the temporary PDF file
+  os.remove(pdf_file)
+
+  -- DEBUG: Log result or error
+  if not success then
+    io.stderr:write("[ERROR] Inkscape command failed: ", tostring(result), "\n")
+    error("Failed to run Inkscape: " .. tostring(result))
+  end
+
+  -- If output is empty, log that too
+  if result == nil or result == '' then
+    io.stderr:write("[ERROR] Inkscape returned empty output\n")
+    error("Inkscape returned empty output (possible crash or silent failure)")
+  end
+
+  return result
 end
 
 local function properties_from_code (code, comment_start)
