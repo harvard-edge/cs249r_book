@@ -1080,7 +1080,7 @@ def main():
     else:
         # Default models
         if api_provider == "openai":
-            model_name = "gpt-4"
+            model_name = "gpt-4-turbo"
         elif api_provider == "groq":
             model_name = "llama3-70b-8192"
         else:
