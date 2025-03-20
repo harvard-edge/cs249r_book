@@ -69,7 +69,7 @@ fi
 max_len=$(awk '{print length($1)}' "$TMPFILE" | sort -nr | head -n1)
 
 # Display sorted results as a simple bar chart
-sort -k2 -nr "$TMPFILE" | while read -r name count; do
+sort -k1,1 "$TMPFILE" | while read -r name count; do
     bar=$(printf '%*s' "$count" '' | tr ' ' '*')
     printf "%-${max_len}s | %3d %s\n" "$name" "$count" "$bar"
 done
