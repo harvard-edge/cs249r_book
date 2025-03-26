@@ -2,9 +2,21 @@ _Last Updated: Mar 26, 2025_
 
 ## 2025 Changes
 
-### 📅 Published on Mar 25, 2025
+### 📅 Published on Mar 26, 2025
 
-40 files updated (12616 lines added, 7370 lines removed)
+2 files updated (4 lines added, 1 lines removed)
+
+<details open>
+  <summary>**Minor Updates**</summary>
+
+- **ML Operations**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Robust AI**: <span style="color:green">++++++</span><span style="color:red"></span> (3 lines added, 0 lines removed)
+
+</details>
+
+### 📅 Published on Mar 26, 2025
+
+🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/7db82681576fcec579057988c4f1a70638cb9334...fdb64ca113052e81fdbfe5e53e14e263371f2ee6) --- 40 files updated (12616 lines added, 7370 lines removed)
 
 <details open>
   <summary>**Major Updates**</summary>
@@ -19,13 +31,14 @@ _Last Updated: Mar 26, 2025_
 - **ML Operations**: <span style="color:green">+++</span><span style="color:red">--</span> (821 lines added, 590 lines removed)
 - **ML Systems**: <span style="color:green">++</span><span style="color:red">---</span> (259 lines added, 363 lines removed)
 - **Model Optimizations**: <span style="color:green">+++++</span><span style="color:red"></span> (2814 lines added, 396 lines removed)
+- **Old Sus Ai**: <span style="color:green">++</span><span style="color:red">----</span> (667 lines added, 1334 lines removed)
 - **Robust AI**: <span style="color:green">++++</span><span style="color:red">-</span> (2237 lines added, 530 lines removed)
 - **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">---</span> (146 lines added, 146 lines removed)
 - **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">--</span> (3018 lines added, 2099 lines removed)
 
 </details>
 
-<details open>
+<details>
   <summary>**Minor Updates**</summary>
 
 - **AI Training**: <span style="color:green">+++</span><span style="color:red">--</span> (110 lines added, 83 lines removed)
