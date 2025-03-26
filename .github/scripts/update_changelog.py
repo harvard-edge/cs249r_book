@@ -87,6 +87,15 @@ def generate_change_visual(added, removed, max_length=6):
     removed_bars = f'<span style="color:red">{"-" * removed_blocks}</span>'
     return f"{added_bars}{removed_bars}"
 
+def get_latest_gh_pages_commit():
+    """Get the latest gh-pages commit hash and date."""
+    cmd = ["git", "--no-pager", "log", "-1", "--pretty=format:%H %ad", "--date=iso", "origin/gh-pages"]
+    output = run_git_command(cmd)
+    parts = output.split(" ", 1)
+    if len(parts) == 2:
+        return parts[0], parts[1]
+    return None, None
+
 def generate_changelog():
     """Generate the changelog content."""
     print("🚀 Starting changelog generation...")
@@ -106,6 +115,10 @@ def generate_changelog():
     # Fetch the gh-pages branch
     print("📥 Fetching gh-pages branch...")
     run_git_command(["git", "fetch", "origin", "gh-pages:refs/remotes/origin/gh-pages"])
+    
+    # Fetch the dev branch
+    print("📥 Fetching dev branch...")
+    run_git_command(["git", "fetch", "origin", "dev:refs/remotes/origin/dev"])
 
     # Get commit history
     print("📚 Getting commit history...")
@@ -126,7 +139,68 @@ def generate_changelog():
     current_year = datetime.now().year
     first_details_created = False
 
-    print("🔄 Processing commits and generating changelog entries...")
+    # Add entry for pending changes (changes in dev since last gh-pages commit)
+    latest_commit, latest_date = get_latest_gh_pages_commit()
+    if latest_commit and latest_date:
+        print("🔍 Checking for changes since last gh-pages commit...")
+        
+        # Get changes between latest gh-pages commit and current dev
+        current_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S %z")
+        pending_changes = get_changes_in_dev_since(latest_date)
+        
+        if pending_changes.strip():
+            print("🆕 Found changes to include")
+            changes_by_file = defaultdict(lambda: [0, 0])
+            
+            for line in pending_changes.split("\n"):
+                parts = line.split("\t")
+                if len(parts) != 3:
+                    continue
+
+                added, removed, file_path = parts
+                added = int(added) if added.isdigit() else 0
+                removed = int(removed) if removed.isdigit() else 0
+                changes_by_file[file_path][0] += added
+                changes_by_file[file_path][1] += removed
+
+            # Create change entry for current changes (using today's date)
+            change_entry = f"### 📅 Published on {datetime.now().strftime('%b %d, %Y')}\n\n"
+
+            total_added = sum(added for added, _ in changes_by_file.values())
+            total_removed = sum(removed for _, removed in changes_by_file.values())
+            total_files = len(changes_by_file)
+
+            change_entry += f"{total_files} files updated "
+            change_entry += f"({total_added} lines added, {total_removed} lines removed)\n\n"
+
+            # Separate Major and Minor Updates
+            major_updates = []
+            minor_updates = []
+
+            for file_path, (added, removed) in changes_by_file.items():
+                chapter_title = extract_chapter_title(file_path)
+                total_changes = added + removed
+                change_visual = generate_change_visual(added, removed)
+                if total_changes > MAJOR_CHANGE_THRESHOLD:
+                    major_updates.append(f"- **{chapter_title}**: {change_visual} ({added} lines added, {removed} lines removed)")
+                else:
+                    minor_updates.append(f"- **{chapter_title}**: {change_visual} ({added} lines added, {removed} lines removed)")
+
+            if major_updates:
+                change_entry += f"<details open>\n"
+                change_entry += "  <summary>**Major Updates**</summary>\n\n"
+                change_entry += "\n".join(sorted(major_updates)) + "\n\n"
+                change_entry += "</details>\n\n"
+
+            if minor_updates:
+                change_entry += f"<details open>\n"
+                change_entry += "  <summary>**Minor Updates**</summary>\n\n"
+                change_entry += "\n".join(sorted(minor_updates)) + "\n\n"
+                change_entry += "</details>\n"
+
+            changes_by_year[current_year].insert(0, change_entry)
+
+    print("🔄 Processing historical commits...")
     for i in range(len(commits_with_dates) - 1):
         current_commit, current_date = commits_with_dates[i]
         previous_commit, previous_date = commits_with_dates[i + 1]
@@ -181,17 +255,17 @@ def generate_changelog():
                 minor_updates.append(f"- **{chapter_title}**: {change_visual} ({added} lines added, {removed} lines removed)")
 
         if major_updates:
-            details_open = " open" if not first_details_created else ""
+            details_open = " open" if not first_details_created and not i else ""
             change_entry += f"<details{details_open}>\n"
             change_entry += "  <summary>**Major Updates**</summary>\n\n"
-            change_entry += "\n".join(major_updates) + "\n\n"
+            change_entry += "\n".join(sorted(major_updates)) + "\n\n"
             change_entry += "</details>\n\n"
 
         if minor_updates:
-            details_open = " open" if not first_details_created else ""
+            details_open = " open" if not first_details_created and not i and not major_updates else ""
             change_entry += f"<details{details_open}>\n"
             change_entry += "  <summary>**Minor Updates**</summary>\n\n"
-            change_entry += "\n".join(minor_updates) + "\n\n"
+            change_entry += "\n".join(sorted(minor_updates)) + "\n\n"
             change_entry += "</details>\n"
 
         first_details_created = True
