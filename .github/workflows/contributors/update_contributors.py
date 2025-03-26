@@ -173,7 +173,7 @@ def main(_):
         commit_commiter_info = commit_info.get("committer", None)
         author_info = node.get("author", None)
         committer_info = node.get("committer", None)
-        committer_login_info = (
+        committer_login = (
             committer_info.get("login", None) if committer_info else None
         )
         user_full_name = pd.NA
@@ -188,8 +188,8 @@ def main(_):
 
         if author_info:
             user_login = author_info["login"]
-        elif committer_login_info:
-            user_login = committer_login_info["login"]
+        elif committer_login:
+            user_login = committer_login
 
         commit_data.append(
             {

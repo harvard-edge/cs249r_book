@@ -1,5 +1,7 @@
 name: '📚 Quarto Build'
 
+# This workflow builds a Quarto project and deploys it to either a development site or GitHub Pages
+# It handles both Windows and Linux environments with extensive caching for better performance
 on:
   workflow_call:
     inputs:
@@ -14,7 +16,7 @@ on:
       quarto-version:
         required: false
         type: string
-        default: '1.7.13'
+        default: '1.6.42'
         description: 'Version of Quarto to use'
       r-version:
         required: false
@@ -38,11 +40,18 @@ jobs:
     runs-on: ${{ inputs.os }}
     environment:
       name: ${{ inputs.environment }}
-    
+    env:
+      R_LIBS_USER: ${{ github.workspace }}/.r-lib
+
     steps:
       - name: 🔍 Validate inputs
         shell: pwsh
         run: |
+          Write-Output "🔄 Validating workflow inputs..."
+          Write-Output "👉 Target: ${{ inputs.target }}"
+          Write-Output "👉 OS: ${{ inputs.os }}"
+          Write-Output "👉 Environment: ${{ inputs.environment }}"
+          
           if (("${{ inputs.target }}" -ne "dev") -and ("${{ inputs.target }}" -ne "main")) {
             Write-Error "❌ Target must be either 'dev' or 'main'"
             exit 1
@@ -52,6 +61,10 @@ jobs:
       - name: 🔍 Verify branch
         shell: pwsh
         run: |
+          Write-Output "🔄 Verifying branch alignment..."
+          Write-Output "👉 Current branch: ${{ github.ref }}"
+          Write-Output "👉 Target branch: ${{ inputs.target }}"
+          
           if (("${{ inputs.target }}" -eq "main") -and ("${{ github.ref }}" -ne "refs/heads/main")) {
             Write-Error "❌ Main build can only run on the main branch"
             exit 1
@@ -63,187 +76,313 @@ jobs:
           Write-Output "✅ Branch verification passed"
 
       - name: 📥 Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ inputs.target }}
           fetch-depth: 0
-
-      # # Cache Quarto
-      # - name: 💾 Cache Quarto
-      #   uses: actions/cache@v3
-      #   id: cache-quarto
-      #   with:
-      #     path: |
-      #       ~/.local/share/quarto
-      #       ~/AppData/Local/quarto  # Windows path
-      #     key: ${{ runner.os }}-quarto-${{ inputs.quarto-version }}
-#        if: steps.cache-quarto.outputs.cache-hit != 'true'
 
       - name: 📦 Setup Quarto
         uses: quarto-dev/quarto-actions/setup@v2
         with:
           version: ${{ inputs.quarto-version }}
+        # Outputs quarto version information after installation
+        id: quarto-setup
 
-      # Cache TeX Live
-      - name: 💾 Cache TeX Live
-        uses: actions/cache@v3
-        id: cache-texlive
+      - name: 📋 Quarto Setup Info
+        shell: bash
+        run: |
+          echo "🔄 Checking Quarto installation..."
+          quarto check
+          echo "📊 Quarto version info:"
+          quarto --version
+          echo "📍 Quarto installation location:"
+          which quarto || where.exe quarto
+
+      # Cache Linux system packages without hardcoded paths
+      - name: 💾 Cache APT packages
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        id: cache-apt
         with:
-          path: |
-            ~/.texlive
-            ~/.TinyTeX
-            ~/AppData/Roaming/TinyTeX  # Windows path
-          key: ${{ runner.os }}-texlive-${{ hashFiles('**/*.tex') }}
+          path: ~/.apt-cache
+          key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
-            ${{ runner.os }}-texlive-
+            apt-${{ runner.os }}-
 
-      # TinyTeX setup based on OS
-      - name: 📝 Install TinyTeX (Linux)
+      - name: 🛠️ Install Linux Dependencies
+        if: runner.os == 'Linux' && steps.cache-apt.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          echo "🔄 Installing Linux dependencies..."
+          echo "📦 Creating APT cache directory"
+          mkdir -p ~/.apt-cache
+
+          echo "📦 Updating package lists"
+          sudo apt-get update
+
+          echo "📦 Installing required system libraries"
+          sudo apt-get -o dir::cache::archives="$HOME/.apt-cache" install -y \
+            fonts-dejavu \
+            fonts-freefont-ttf \
+            gdk-pixbuf2.0-bin \
+            libcairo2 \
+            libfontconfig1 \
+            libfreetype6 \
+            libpango-1.0-0 \
+            libpangocairo-1.0-0 \
+            libpangoft2-1.0-0 \
+            libxml2-dev \
+            libcurl4-openssl-dev \
+            libjpeg-dev \
+            libtiff5-dev
+
+          echo "✅ Linux dependencies installed"
+                
+      - name: 🎨 Install Inkscape and font dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
-          quarto install tinytex
-          echo "$HOME/.TinyTeX/bin/x86_64-linux" >> $GITHUB_PATH
-
-      - name: 📝 Install TinyTeX (Windows)
+          # First remove any existing Inkscape
+          sudo apt-get remove -y inkscape || true
+          # Install Inkscape from PPA for more reliable version
+          echo "📦 Installing Inkscape from PPA..."
+          sudo add-apt-repository ppa:inkscape.dev/stable -y
+          sudo apt-get update
+          sudo apt-get install -y inkscape
+          
+          # Install font dependencies
+          echo "📦 Installing font dependencies..."
+          sudo apt-get install -y \
+            fonts-freefont-ttf \
+            fonts-liberation \
+            fontconfig
+          
+          # Update font cache after installing Inkscape and fonts
+          echo "🧹 Updating font cache..."
+          sudo fc-cache -fv
+          
+          # Verify Inkscape installation
+          echo "📊 Inkscape version:"
+          inkscape --version
+          
+          # Test SVG to PDF conversion with the new Inkscape
+          echo "🧪 Testing Inkscape SVG to PDF conversion..."
+          echo '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><circle cx="50" cy="50" r="40" fill="red"/></svg>' > test.svg
+          inkscape --export-type=pdf --export-filename=test.pdf test.svg
+          
+          # Verify if the PDF was created
+          if [ -f test.pdf ]; then
+            echo "✅ Inkscape SVG to PDF conversion successful!"
+            ls -lh test.pdf
+          else
+            echo "❌ Inkscape SVG to PDF conversion failed."
+            echo "🔍 Checking Inkscape installation..."
+            dpkg -l | grep inkscape
+            which inkscape
+            ldd $(which inkscape) | grep "not found" || echo "All dependencies resolved"
+          fi
+          
+      - name: 🎨 Install Inkscape (Windows)
         if: runner.os == 'Windows'
-        uses: r-lib/actions/setup-tinytex@v2
-        
-      - name: 📦 Install & Update TeX Live
-        if: steps.cache-texlive.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          choco install inkscape -y
+          echo "C:\Program Files\Inkscape\bin" | Out-File -Append -Encoding ascii $env:GITHUB_PATH
+          
+          # Verify Inkscape installation
+          inkscape --version
+
+      - name: 📦 Install & Update TeX Live 
         uses: teatimeguest/setup-texlive-action@v3
         with:
+          version: latest
           packages: |
-            scheme-basic      # Minimal base TeX system
-            collection-basic  # Core LaTeX functionality
-            collection-latex  # Standard LaTeX packages
-            collection-latexrecommended   # Common recommended packages
-            collection-latexextra         # Additional LaTeX utilities
-            collection-fontsrecommended   # Recommended fonts for LaTeX
-            collection-pictures   # Image handling support (TikZ, PGF, etc.)
-            collection-xetex      # XeLaTeX engine and utilities
-            collection-luatex     # LuaLaTeX engine and dependencies
-            collection-bibtexextra  # Advanced bibliography support
-            collection-langenglish  # English language support
-            koma-script       # KOMA-Script classes
-            standalone       # Standalone package for figures
-            pgf              # Core PGF/TikZ package
-            tikz-cd         # Commutative diagrams
-            pgfplots        # Plotting functionality
-            preview         # Preview package
-            marginfix      # Explicitly add marginfix
-            newpx          # Explicitly add newpx font package
-            luatex85       # Font support
-          update-all-packages: false
-
+            scheme-basic      
+            collection-latex  
+            collection-latexrecommended   
+            collection-fontsrecommended   
+            collection-latexextra
+            collection-pictures   
+            collection-luatex     
+            koma-script       
+            standalone       
+            tikz-cd         
+            marginfix      
+            newpx          
+            luatex85
+            listings       
+          update-all-packages: true
+          cache: true
+          
       - name: 📊 Setup R
         uses: r-lib/actions/setup-r@v2
         with:
           r-version: ${{ inputs.r-version }}
           use-public-rspm: true
 
-      - name: 💾 Cache R packages
-        uses: actions/cache@v3
-        with:
-          path: ${{ runner.os == 'Windows' && 'C:/Users/runneradmin/Documents/R/win-library' || '~/R/library' }}
-          key: ${{ runner.os }}-r-${{ hashFiles('**/install_packages.R') }}
-          restore-keys: |
-            ${{ runner.os }}-r-
-
-      # Cache Linux system packages
-      - name: 💾 Cache APT packages
-        if: runner.os == 'Linux'
-        uses: actions/cache@v3
-        with:
-          path: ~/.apt-cache
-          key: ${{ runner.os }}-apt-${{ hashFiles('**/workflow.yml') }}
-
-      - name: 📦 Install R Dependencies
+      - name: 📋 R Setup Info
         shell: Rscript {0}
         run: |
-          options(repos = c(CRAN = "https://cran.rstudio.com"))
-          install.packages(c("remotes"))
-          source("install_packages.R")
+          cat("🔄 R Version Information:\n")
+          cat(paste("R version:", R.version$version.string, "\n"))
+          cat(paste("R home:", R.home(), "\n"))
+          cat(paste("R library paths:", paste(.libPaths(), collapse=", "), "\n"))
 
-      - name: 🛠️ Install Linux Dependencies
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          echo "🔄 Installing Linux dependencies..."
-          sudo apt-get update
-          mkdir -p ~/.apt-cache
-          sudo apt-get -o dir::cache::archives="$HOME/.apt-cache" install -y \
-            libpangoft2-1.0-0 \
-            fonts-dejavu \
-            fonts-freefont-ttf \
-            libpango-1.0-0 \
-            libpangocairo-1.0-0 \
-            libcogl-pango-dev \
-            pango1.0-tools \
-            libcairo2 \
-            gdk-pixbuf2.0-bin \
-            libgdk-pixbuf2.0-dev \
-            librsvg2-bin \
-            libcurl4-openssl-dev \
-            libssl-dev \
-            libxml2-dev \
-            libfontconfig1-dev \
-            libharfbuzz-dev \
-            libfribidi-dev \
-            libfreetype6-dev \
-            libtiff5-dev \
-            libjpeg-dev
-          echo "✅ Linux dependencies installed"
-
-      # Cache Inkscape
-      - name: 💾 Cache Inkscape
-        uses: actions/cache@v3
-        id: cache-inkscape
+      # Cache R packages using standard paths
+      - name: 💾 Cache R packages
+        uses: actions/cache@v4
+        id: cache-r-packages
         with:
           path: |
-            ~/.config/inkscape
-            ~/AppData/Roaming/inkscape  # Windows path
-          key: ${{ runner.os }}-inkscape-${{ hashFiles('**/*.svg') }}
+            ${{ env.R_LIBS_USER }}
+          key: r-pkgs-${{ runner.os }}-${{ inputs.r-version }}-${{ hashFiles('**/install_packages.R') }}
+          restore-keys: |
+            r-pkgs-${{ runner.os }}-${{ inputs.r-version }}-
 
-      - name: 🎨 Install Inkscape (Linux)
-        if: runner.os == 'Linux' && steps.cache-inkscape.outputs.cache-hit != 'true'
-        shell: bash
+      - name: 📦 Install R packages
+        if: steps.cache-r-packages.outputs.cache-hit != 'true'
+        shell: Rscript {0}
         run: |
-          sudo add-apt-repository ppa:inkscape.dev/stable -y
-          sudo apt-get update
-          sudo apt-get install inkscape -y
+          # Set options for better package installation
+          options(repos = c(CRAN = "https://cran.rstudio.com"))
+          
+          cat("🔄 Installing R packages...\n")
+          cat(paste("R library path:", Sys.getenv("R_LIBS_USER"), "\n"))
+          
+          # Create and set library path
+          lib_path <- Sys.getenv("R_LIBS_USER")
+          dir.create(lib_path, showWarnings = FALSE, recursive = TRUE)
+          .libPaths(lib_path)
+          
+          # Install packages
+          cat("📦 Installing remotes package...\n")
+          install.packages("remotes")
+          
+          if (file.exists("install_packages.R")) {
+            cat("📦 Installing packages from install_packages.R...\n")
+            source("install_packages.R")
+          } else {
+            cat("⚠️ No install_packages.R found, installing common packages\n")
+            pkgs <- c("rmarkdown", "knitr", "tidyverse", "ggplot2", "bookdown")
+            cat(paste("📦 Installing packages:", paste(pkgs, collapse=", "), "\n"))
+            install.packages(pkgs)
+          }
+          
+          cat("✅ R package installation complete\n")
+          cat("📊 Installed packages:\n")
+          ip <- installed.packages()[, c("Package", "Version")]
+          print(head(ip, 10))
+          cat(paste("Total packages installed:", nrow(ip), "\n"))
 
-      - name: 🎨 Install Inkscape (Windows)
-        if: runner.os == 'Windows' && steps.cache-inkscape.outputs.cache-hit != 'true'
+      # Install before render cause we need it for rendering
+      - name: 📦 Install Ghostscript (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y ghostscript
+
+      - name: 📦 Install Ghostscript (Windows)
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Write-Output "🔄 Installing Inkscape..."
-          choco install inkscape -y
-          Write-Output "✅ Inkscape installed"
+          choco install ghostscript
+          $gsPath = Get-ChildItem "C:\Program Files\gs" | Sort-Object Name -Descending | Select-Object -First 1
+          $binPath = Join-Path $gsPath.FullName "bin"
+          echo "Adding Ghostscript path: $binPath"
+          echo "$binPath" | Out-File -Append -FilePath $env:GITHUB_PATH
 
-      # Cache compilation artifacts
-      - name: 💾 Cache compilation artifacts
-        uses: actions/cache@v3
-        with:
-          path: |
-            **/_cache
-            **/.quarto
-            **/.jupyter_cache
-          key: ${{ runner.os }}-compilation-${{ hashFiles('**/*.qmd', '**/*.ipynb', '**/*.md') }}
-          restore-keys: |
-            ${{ runner.os }}-compilation-
-
-      # Cache Quarto build outputs
-      - name: 💾 Cache Quarto build
-        uses: actions/cache@v3
-        with:
-          path: _book
-          key: ${{ runner.os }}-quarto-book-${{ hashFiles('**/*.qmd', '**/*.ipynb', '**/*.bib') }}
-          restore-keys: |
-            ${{ runner.os }}-quarto-book-
-
-      - name: 🔨 Render Quarto Project
+      - name: 🔨 Render Quarto Project (HTML)
         uses: quarto-dev/quarto-actions/render@v2
+        with:
+            to: html
 
+      # Buid PDF after HTML to ensure all assets are available (esp. PDF)
+      - name: 🔨 Render Quarto Project (PDF)
+        uses: quarto-dev/quarto-actions/render@v2
+        with:
+            to: titlepage-pdf
+
+      - name: 📋 Check Quarto Build Output
+        shell: bash
+        run: |
+          echo "🔄 Checking Quarto build output..."
+          
+          if [ -d "_book" ]; then
+            echo "✅ _book directory exists"
+            echo "📊 Files in _book directory:"
+            ls -la _book | head -n 20
+            echo "📊 Total files in _book:"
+            find _book -type f | wc -l
+            
+            if [ -f "_book/Machine-Learning-Systems.pdf" ]; then
+              echo "✅ PDF file exists"
+              echo "📊 PDF file size:"
+              du -h "_book/Machine-Learning-Systems.pdf"
+            else
+              echo "⚠️ PDF file not found!"
+            fi
+          else
+            echo "❌ _book directory not found!"
+          fi
+
+      - name: 📉 Compress PDF with Ghostscript (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          gs \
+            -sDEVICE=pdfwrite \
+            -dCompatibilityLevel=1.4 \
+            -dPDFSETTINGS=/ebook \
+            -dNOPAUSE \
+            -dQUIET \
+            -dBATCH \
+            -sOutputFile="./_book/ebook.pdf" \
+            "./_book/Machine-Learning-Systems.pdf"
+
+          # Replace original with compressed
+          mv ./_book/ebook.pdf ./_book/Machine-Learning-Systems.pdf
+
+      - name: 📉 Compress PDF with Ghostscript (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $input = "./_book/Machine-Learning-Systems.pdf"
+          $output = "./_book/ebook.pdf"
+
+          if (!(Test-Path $input)) {
+            Write-Error "❌ Input PDF not found!"
+            exit 1
+          }
+
+          Write-Output "📉 Compressing PDF using Ghostscript..."
+
+          # Unless you are a sucker for pain, don't try to line-break this command (it was a nightmare)
+          # Note that compatability should be written as -dCompatibilityLevel:1.4, not -dCompatibilityLevel=1.4!!!
+          & gswin64c -sDEVICE=pdfwrite -dCompatibilityLevel:1.4 -dPDFSETTINGS=/ebook -dNOPAUSE -dBATCH -sOutputFile="$output" "$input"
+
+          if (Test-Path $output) {
+            $afterSize = (Get-Item $output).Length / 1MB
+            Write-Output ("📏 Compressed PDF size: {0:N2} MB" -f $afterSize)
+            Write-Output "✅ Compression successful"
+            Move-Item -Force $output $input
+          } else {
+            Write-Error "❌ Compression failed"
+
+            # Check if Ghostscript is available
+            if (!(Get-Command "gswin64c" -ErrorAction SilentlyContinue)) {
+              Write-Error "🚫 Ghostscript (gswin64c) not found in PATH"
+            }
+
+            # Check if input file exists and is readable
+            if (!(Test-Path $input)) {
+              Write-Error "🚫 Input file '$input' does not exist"
+            } elseif ((Get-Item $input).Length -eq 0) {
+              Write-Error "⚠️ Input file exists but is empty"
+            }
+
+            # Log available files in the _book folder
+            Write-Output "📂 Files currently in _book:"
+            Get-ChildItem -Path "./_book" | Format-Table Name, Length, LastWriteTime
+
+            exit 1
+          }
+          
       - name: 📤 Upload artifact
         if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
@@ -251,51 +390,7 @@ jobs:
           name: _book-${{ inputs.os }}
           path: _book
 
-      # Cache Python dependencies for PDF compression
-      - name: 💾 Cache Python PDF tools
-        if: runner.os == 'Linux'
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-pdf-${{ hashFiles('**/scripts/quarto_publish/requirements.txt') }}
-
-      # Main-only steps (Linux only)
-      - name: 🐍 Setup Python for PDF compression
-        if: runner.os == 'Linux'
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.x'
-
-      - name: 📦 Install Ghostscript
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ghostscript
-
-      - name: 📄 Check and Compress PDF
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          set -e  # Exit on any error
-          
-          if [ ! -f "./_book/Machine-Learning-Systems.pdf" ]; then
-            echo "❌ PDF file not found!"
-            exit 1
-          fi
-          
-          python3 ./.github/scripts/gs_compress_pdf.py \
-            -i ./_book/Machine-Learning-Systems.pdf \
-            -o ./_book/ebook.pdf \
-            -s "/ebook"
-          
-          if [ ! -f "./_book/ebook.pdf" ]; then
-            echo "❌ PDF compression failed!"
-            exit 1
-          fi
-          
-          mv ./_book/ebook.pdf ./_book/Machine-Learning-Systems.pdf
-
+      # Push to dev site
       - name: 🚀 Stage to Dev Site
         if: inputs.target == 'dev' && runner.os == 'Linux'
         uses: cpina/github-action-push-to-another-repository@v1.7.2
@@ -311,6 +406,18 @@ jobs:
           commit-message: |
             📚 Push dev branch build
 
+      - name: 📋 Dev Deployment Info
+        if: inputs.target == 'dev' && runner.os == 'Linux'
+        shell: bash
+        run: |
+          echo "🔄 Development deployment information:"
+          echo "📊 Deployed to repository: harvard-edge/cs249r_book_dev"
+          echo "📊 Target branch: main"
+          echo "📊 Target directory: docs"
+          echo "📊 Source directory: _book"
+          echo "✅ Deployment should be complete"
+
+      # Deploy to GitHub Pages
       - name: 🚀 Deploy to GitHub Pages
         if: inputs.target == 'main' && runner.os == 'Linux'
         uses: quarto-dev/quarto-actions/publish@v2
@@ -320,31 +427,47 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: 📋 GitHub Pages Deployment Info
+        if: inputs.target == 'main' && runner.os == 'Linux'
+        shell: bash
+        run: |
+          echo "🔄 GitHub Pages deployment information:"
+          echo "📊 Deployed to: gh-pages branch"
+          echo "📊 Source directory: _book"
+          echo "✅ Deployment should be complete"
+          echo "🌐 Site should be available at: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+
       # Add comprehensive debug artifacts
-      - name: 📦 Collect Debug Artifacts
-        if: always()  # Run even if previous steps failed
-        uses: actions/upload-artifact@v4
-        with:
-          name: debug-${{ inputs.target }}-${{ inputs.os }}
-          path: |
-            _book/**
-            .quarto/**
-            **/_cache/**
-            **/logs/**
-            **/*.log
-            **/.jupyter_cache/**
-            .Rcheck/**
-            **/*.Rout
-            custom-texlive/**/*.log
-            ~/.TinyTeX/texmf-var/log/**
-            **/.texlive/**/*.log
-            **/texmf-var/log/**
-            **/*.aux
-            **/*.blg
-            **/*.fls
-            **/*.fdb_latexmk
-          compression-level: 9  # Maximum compression
-          retention-days: 5  # Keep for 5 days
+      # - name: 📦 Collect Debug Artifacts
+      #   if: always()  # Run even if previous steps failed
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: debug-${{ inputs.target }}-${{ inputs.os }}
+      #     path: |
+      #       ${{ github.workspace }}/_book/**
+      #       ${{ github.workspace }}/.quarto/**
+      #       ${{ github.workspace }}/**/_cache/**
+      #       ${{ github.workspace }}/**/logs/**
+      #       ${{ github.workspace }}/**/*.log
+      #       ${{ github.workspace }}/**/.jupyter_cache/**
+      #       ${{ github.workspace }}/.Rcheck/**
+      #       ${{ github.workspace }}/**/*.Rout
+      #       ${{ github.workspace }}/**/*.aux
+      #       ${{ github.workspace }}/**/*.blg
+      #       ${{ github.workspace }}/**/*.fls
+      #       ${{ github.workspace }}/**/*.fdb_latexmk
+      #     compression-level: 9  # Maximum compression
+      #     retention-days: 5  # Keep for 5 days
+
+      # - name: 📋 Debug Artifact Info
+      #   if: always()
+      #   shell: bash
+      #   run: |
+      #     echo "🔄 Debug artifacts information:"
+      #     echo "📊 Collected logs and build artifacts"
+      #     echo "📊 Retention period: 5 days"
+      #     echo "📊 Target artifact name: debug-${{ inputs.target }}-${{ inputs.os }}"
+      #     echo "✅ Debug artifacts should be available in GitHub Actions"
 
       - name: 📋 Build Summary
         shell: pwsh
@@ -356,5 +479,8 @@ jobs:
           🔧 Environment: ${{ inputs.environment }}
           📚 Quarto Version: ${{ inputs.quarto-version }}
           🔬 R Version: ${{ inputs.r-version }}
+          🧩 Cache Status:
+            - TeX Live: Installed via teatimeguest/setup-texlive-action@v3
+            - R Packages: ${{ steps.cache-r-packages.outputs.cache-hit == 'true' && '✅ Hit' || '❌ Miss' }}
           ⏰ Completed at: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
           "@ | Add-Content $env:GITHUB_STEP_SUMMARY
