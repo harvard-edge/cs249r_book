@@ -2,50 +2,105 @@ _Last Updated: Mar 25, 2025_
 
 ## 2025 Changes
 
-### 📅 Published on Mar 03, 2025
+### 📅 Published on Mar 25, 2025
 
-🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/a9fc9a4df5f42a07134e6e698fa67cb320ed8406...6b5a1a8b016916e46bc034776beb25cfea774db5) --- 31 files updated (12032 lines added, 7337 lines removed)
+40 files updated (12616 lines added, 7370 lines removed)
 
 <details open>
   <summary>**Major Updates**</summary>
 
-- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">--</span> (5769 lines added, 3904 lines removed)
-- **AI Frameworks**: <span style="color:green">++++</span><span style="color:red">-</span> (946 lines added, 216 lines removed)
-- **AI Training**: <span style="color:green">++++</span><span style="color:red">-</span> (860 lines added, 335 lines removed)
-- **Image Classification**: <span style="color:green">+++</span><span style="color:red">--</span> (199 lines added, 142 lines removed)
-- **Benchmarking AI**: <span style="color:green">++++</span><span style="color:red">-</span> (265 lines added, 118 lines removed)
-- **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">--</span> (2515 lines added, 1624 lines removed)
-- **Data Engineering**: <span style="color:green">++++</span><span style="color:red">-</span> (229 lines added, 69 lines removed)
-- **DL Primer**: <span style="color:green">++++</span><span style="color:red">-</span> (237 lines added, 84 lines removed)
+- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">--</span> (159 lines added, 157 lines removed)
+- **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">--</span> (150 lines added, 89 lines removed)
+- **AI Workflow**: <span style="color:green">+++</span><span style="color:red">--</span> (161 lines added, 136 lines removed)
+- **DL Primer**: <span style="color:green">++++</span><span style="color:red">-</span> (471 lines added, 198 lines removed)
+- **Data Engineering**: <span style="color:green">+++</span><span style="color:red">--</span> (313 lines added, 222 lines removed)
+- **Efficient AI**: <span style="color:green">+++</span><span style="color:red">--</span> (510 lines added, 317 lines removed)
+- **Introduction**: <span style="color:green">++</span><span style="color:red">---</span> (236 lines added, 241 lines removed)
+- **ML Operations**: <span style="color:green">+++</span><span style="color:red">--</span> (821 lines added, 590 lines removed)
+- **ML Systems**: <span style="color:green">++</span><span style="color:red">---</span> (259 lines added, 363 lines removed)
+- **Model Optimizations**: <span style="color:green">+++++</span><span style="color:red"></span> (2814 lines added, 396 lines removed)
+- **Robust AI**: <span style="color:green">++++</span><span style="color:red">-</span> (2237 lines added, 530 lines removed)
+- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">---</span> (146 lines added, 146 lines removed)
+- **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">--</span> (3018 lines added, 2099 lines removed)
 
 </details>
 
 <details open>
   <summary>**Minor Updates**</summary>
 
-- **On-Device Learning**: <span style="color:green">++</span><span style="color:red">---</span> (51 lines added, 67 lines removed)
+- **AI Training**: <span style="color:green">+++</span><span style="color:red">--</span> (110 lines added, 83 lines removed)
+- **AI for Good**: <span style="color:green">+++</span><span style="color:red">--</span> (93 lines added, 62 lines removed)
+- **About the Book**: <span style="color:green">++</span><span style="color:red">----</span> (2 lines added, 4 lines removed)
+- **Acknowledgements**: <span style="color:green">+++</span><span style="color:red">--</span> (27 lines added, 26 lines removed)
+- **Author's Note**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">---</span> (73 lines added, 73 lines removed)
+- **Conclusion**: <span style="color:green">+++</span><span style="color:red">---</span> (32 lines added, 32 lines removed)
+- **DNN Architectures**: <span style="color:green">++++</span><span style="color:red">-</span> (77 lines added, 30 lines removed)
+- **DSP Spectral Features**: <span style="color:green">+++</span><span style="color:red">---</span> (5 lines added, 5 lines removed)
+- **Generative AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (10 lines added, 10 lines removed)
+- **KWS Feature Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (34 lines added, 34 lines removed)
+- **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
+- **Motion Classification and Anomaly Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Motion Classification and Anomaly Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (28 lines added, 28 lines removed)
+- **Object Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (10 lines added, 10 lines removed)
+- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">---</span> (67 lines added, 67 lines removed)
+- **PhD Survival Guide**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **Responsible AI**: <span style="color:green">+++</span><span style="color:red">---</span> (30 lines added, 30 lines removed)
+- **Setup**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Setup**: <span style="color:green">+++</span><span style="color:red">---</span> (8 lines added, 8 lines removed)
+- **Small Language Models (SLM)**: <span style="color:green">+++</span><span style="color:red">---</span> (25 lines added, 25 lines removed)
+- **SocratiQ AI**: <span style="color:green">+++</span><span style="color:red">---</span> (5 lines added, 5 lines removed)
+- **Vision-Language Models (VLM)**: <span style="color:green">++</span><span style="color:red">---</span> (4 lines added, 6 lines removed)
+
+</details>
+
+### 📅 Published on Mar 03, 2025
+
+🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/a9fc9a4df5f42a07134e6e698fa67cb320ed8406...6b5a1a8b016916e46bc034776beb25cfea774db5) --- 31 files updated (12032 lines added, 7337 lines removed)
+
+<details>
+  <summary>**Major Updates**</summary>
+
+- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">--</span> (5769 lines added, 3904 lines removed)
+- **AI Frameworks**: <span style="color:green">++++</span><span style="color:red">-</span> (946 lines added, 216 lines removed)
+- **AI Training**: <span style="color:green">++++</span><span style="color:red">-</span> (860 lines added, 335 lines removed)
+- **Benchmarking AI**: <span style="color:green">++++</span><span style="color:red">-</span> (265 lines added, 118 lines removed)
+- **DL Primer**: <span style="color:green">++++</span><span style="color:red">-</span> (237 lines added, 84 lines removed)
+- **Data Engineering**: <span style="color:green">++++</span><span style="color:red">-</span> (229 lines added, 69 lines removed)
+- **Image Classification**: <span style="color:green">+++</span><span style="color:red">--</span> (199 lines added, 142 lines removed)
+- **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">--</span> (2515 lines added, 1624 lines removed)
+
+</details>
+
+<details>
+  <summary>**Minor Updates**</summary>
+
+- **AI Workflow**: <span style="color:green">+++++</span><span style="color:red"></span> (134 lines added, 21 lines removed)
+- **AI for Good**: <span style="color:green">++</span><span style="color:red">---</span> (37 lines added, 39 lines removed)
+- **About the Book**: <span style="color:green">++++++</span><span style="color:red"></span> (1 lines added, 0 lines removed)
+- **Acknowledgements**: <span style="color:green">+++</span><span style="color:red">---</span> (61 lines added, 61 lines removed)
+- **DNN Architectures**: <span style="color:green">++</span><span style="color:red">---</span> (14 lines added, 16 lines removed)
+- **Efficient AI**: <span style="color:green">+++</span><span style="color:red">---</span> (37 lines added, 37 lines removed)
+- **Introduction**: <span style="color:green">++</span><span style="color:red">---</span> (47 lines added, 49 lines removed)
+- **KWS Feature Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (12 lines added, 12 lines removed)
 - **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">--</span> (80 lines added, 52 lines removed)
+- **ML Operations**: <span style="color:green">++</span><span style="color:red">---</span> (53 lines added, 69 lines removed)
+- **ML Systems**: <span style="color:green">+++</span><span style="color:red">---</span> (44 lines added, 44 lines removed)
 - **Motion Classification and Anomaly Detection**: <span style="color:green">++++</span><span style="color:red">-</span> (58 lines added, 26 lines removed)
 - **Nicla Vision**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Object Detection**: <span style="color:green">++++</span><span style="color:red">-</span> (73 lines added, 35 lines removed)
-- **Setup**: <span style="color:green">+++</span><span style="color:red">--</span> (81 lines added, 42 lines removed)
-- **Efficient AI**: <span style="color:green">+++</span><span style="color:red">---</span> (37 lines added, 37 lines removed)
-- **AI Workflow**: <span style="color:green">+++++</span><span style="color:red"></span> (134 lines added, 21 lines removed)
-- **AI for Good**: <span style="color:green">++</span><span style="color:red">---</span> (37 lines added, 39 lines removed)
-- **ML Operations**: <span style="color:green">++</span><span style="color:red">---</span> (53 lines added, 69 lines removed)
-- **Security & Privacy**: <span style="color:green">++</span><span style="color:red">---</span> (58 lines added, 74 lines removed)
-- **Robust AI**: <span style="color:green">++</span><span style="color:red">---</span> (57 lines added, 71 lines removed)
-- **Sustainable AI**: <span style="color:green">++</span><span style="color:red">---</span> (32 lines added, 42 lines removed)
-- **ML Systems**: <span style="color:green">+++</span><span style="color:red">---</span> (44 lines added, 44 lines removed)
-- **Vision-Language Models (VLM)**: <span style="color:green">+++</span><span style="color:red">--</span> (29 lines added, 27 lines removed)
-- **KWS Feature Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (12 lines added, 12 lines removed)
-- **DNN Architectures**: <span style="color:green">++</span><span style="color:red">---</span> (14 lines added, 16 lines removed)
-- **Introduction**: <span style="color:green">++</span><span style="color:red">---</span> (47 lines added, 49 lines removed)
-- **Responsible AI**: <span style="color:green">++</span><span style="color:red">---</span> (26 lines added, 34 lines removed)
-- **SocratiQ AI**: <span style="color:green">+++</span><span style="color:red">---</span> (22 lines added, 22 lines removed)
+- **On-Device Learning**: <span style="color:green">++</span><span style="color:red">---</span> (51 lines added, 67 lines removed)
 - **Overview**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
-- **Acknowledgements**: <span style="color:green">+++</span><span style="color:red">---</span> (61 lines added, 61 lines removed)
-- **About the Book**: <span style="color:green">++++++</span><span style="color:red"></span> (1 lines added, 0 lines removed)
+- **Responsible AI**: <span style="color:green">++</span><span style="color:red">---</span> (26 lines added, 34 lines removed)
+- **Robust AI**: <span style="color:green">++</span><span style="color:red">---</span> (57 lines added, 71 lines removed)
+- **Security & Privacy**: <span style="color:green">++</span><span style="color:red">---</span> (58 lines added, 74 lines removed)
+- **Setup**: <span style="color:green">+++</span><span style="color:red">--</span> (81 lines added, 42 lines removed)
+- **SocratiQ AI**: <span style="color:green">+++</span><span style="color:red">---</span> (22 lines added, 22 lines removed)
+- **Sustainable AI**: <span style="color:green">++</span><span style="color:red">---</span> (32 lines added, 42 lines removed)
+- **Vision-Language Models (VLM)**: <span style="color:green">+++</span><span style="color:red">--</span> (29 lines added, 27 lines removed)
 
 </details>
 
@@ -68,58 +123,58 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Major Updates**</summary>
 
+- **AI Training**: <span style="color:green">+++</span><span style="color:red">--</span> (216 lines added, 148 lines removed)
+- **AI Workflow**: <span style="color:green">+++</span><span style="color:red">---</span> (141 lines added, 141 lines removed)
+- **AI for Good**: <span style="color:green">+++</span><span style="color:red">--</span> (373 lines added, 188 lines removed)
 - **Acknowledgements**: <span style="color:green">++</span><span style="color:red">---</span> (334 lines added, 336 lines removed)
 - **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">--</span> (576 lines added, 384 lines removed)
-- **ML Systems**: <span style="color:green">+++++</span><span style="color:red"></span> (293 lines added, 10 lines removed)
-- **AI Training**: <span style="color:green">+++</span><span style="color:red">--</span> (216 lines added, 148 lines removed)
-- **AI for Good**: <span style="color:green">+++</span><span style="color:red">--</span> (373 lines added, 188 lines removed)
-- **Efficient AI**: <span style="color:green">+++</span><span style="color:red">--</span> (181 lines added, 117 lines removed)
 - **Book Changelog**: <span style="color:green">+++</span><span style="color:red">--</span> (1708 lines added, 1697 lines removed)
-- **AI Workflow**: <span style="color:green">+++</span><span style="color:red">---</span> (141 lines added, 141 lines removed)
-- **Small Language Models (SLM)**: <span style="color:green">+++</span><span style="color:red">---</span> (117 lines added, 117 lines removed)
+- **Efficient AI**: <span style="color:green">+++</span><span style="color:red">--</span> (181 lines added, 117 lines removed)
+- **ML Systems**: <span style="color:green">+++++</span><span style="color:red"></span> (293 lines added, 10 lines removed)
 - **Object Detection**: <span style="color:green">++</span><span style="color:red">---</span> (115 lines added, 118 lines removed)
+- **Small Language Models (SLM)**: <span style="color:green">+++</span><span style="color:red">---</span> (117 lines added, 117 lines removed)
 
 </details>
 
 <details>
   <summary>**Minor Updates**</summary>
 
+- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (19 lines added, 19 lines removed)
 - **AI Frameworks**: <span style="color:green">++</span><span style="color:red">---</span> (35 lines added, 37 lines removed)
-- **Introduction**: <span style="color:green">++++</span><span style="color:red">-</span> (61 lines added, 15 lines removed)
-- **PhD Survival Guide**: <span style="color:green">+++</span><span style="color:red">---</span> (17 lines added, 17 lines removed)
+- **About the Book**: <span style="color:green">+++</span><span style="color:red">---</span> (23 lines added, 23 lines removed)
 - **Conclusion**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Data Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (25 lines added, 25 lines removed)
 - **DL Primer**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
 - **DNN Architectures**: <span style="color:green">+++</span><span style="color:red">---</span> (25 lines added, 25 lines removed)
-- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (19 lines added, 19 lines removed)
-- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">---</span> (10 lines added, 10 lines removed)
+- **DSP Spectral Features**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **Data Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (25 lines added, 25 lines removed)
+- **Getting Started**: <span style="color:green">+++</span><span style="color:red">---</span> (9 lines added, 9 lines removed)
+- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (14 lines added, 14 lines removed)
+- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (61 lines added, 61 lines removed)
+- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (8 lines added, 8 lines removed)
+- **Introduction**: <span style="color:green">++++</span><span style="color:red">-</span> (61 lines added, 15 lines removed)
+- **KWS Feature Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (19 lines added, 19 lines removed)
+- **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (9 lines added, 9 lines removed)
 - **ML Operations**: <span style="color:green">+++</span><span style="color:red">---</span> (8 lines added, 8 lines removed)
 - **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">---</span> (17 lines added, 17 lines removed)
-- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">---</span> (7 lines added, 7 lines removed)
+- **Motion Classification and Anomaly Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (17 lines added, 17 lines removed)
+- **Motion Classification and Anomaly Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (6 lines added, 6 lines removed)
+- **Object Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (14 lines added, 14 lines removed)
+- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">---</span> (10 lines added, 10 lines removed)
+- **Overview**: <span style="color:green"></span><span style="color:red">------</span> (0 lines added, 1 lines removed)
+- **PhD Survival Guide**: <span style="color:green">+++</span><span style="color:red">---</span> (17 lines added, 17 lines removed)
+- **Preface**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Raspberry Pi**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 - **Responsible AI**: <span style="color:green">+++</span><span style="color:red">---</span> (38 lines added, 38 lines removed)
 - **Robust AI**: <span style="color:green">+++</span><span style="color:red">---</span> (8 lines added, 8 lines removed)
-- **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
-- **About the Book**: <span style="color:green">+++</span><span style="color:red">---</span> (23 lines added, 23 lines removed)
-- **SocratiQ AI**: <span style="color:green">++</span><span style="color:red">---</span> (4 lines added, 5 lines removed)
-- **Preface**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (8 lines added, 8 lines removed)
-- **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (9 lines added, 9 lines removed)
-- **Motion Classification and Anomaly Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (6 lines added, 6 lines removed)
-- **Setup**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
-- **Getting Started**: <span style="color:green">+++</span><span style="color:red">---</span> (9 lines added, 9 lines removed)
-- **Overview**: <span style="color:green"></span><span style="color:red">------</span> (0 lines added, 1 lines removed)
-- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (61 lines added, 61 lines removed)
-- **Raspberry Pi**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
-- **Setup**: <span style="color:green">++</span><span style="color:red">---</span> (31 lines added, 32 lines removed)
-- **Vision-Language Models (VLM)**: <span style="color:green">++</span><span style="color:red">---</span> (88 lines added, 89 lines removed)
-- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (14 lines added, 14 lines removed)
-- **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (19 lines added, 19 lines removed)
-- **Motion Classification and Anomaly Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (17 lines added, 17 lines removed)
-- **Object Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (14 lines added, 14 lines removed)
+- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">---</span> (7 lines added, 7 lines removed)
 - **Setup**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **DSP Spectral Features**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
-- **KWS Feature Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Setup**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **Setup**: <span style="color:green">++</span><span style="color:red">---</span> (31 lines added, 32 lines removed)
 - **Shared**: <span style="color:green"></span><span style="color:red">------</span> (0 lines added, 1 lines removed)
+- **SocratiQ AI**: <span style="color:green">++</span><span style="color:red">---</span> (4 lines added, 5 lines removed)
+- **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
+- **Vision-Language Models (VLM)**: <span style="color:green">++</span><span style="color:red">---</span> (88 lines added, 89 lines removed)
 
 </details>
 
@@ -130,32 +185,32 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Major Updates**</summary>
 
-- **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">--</span> (917 lines added, 785 lines removed)
-- **Acknowledgements**: <span style="color:green">+++</span><span style="color:red">---</span> (198 lines added, 198 lines removed)
-- **Efficient AI**: <span style="color:green">+++</span><span style="color:red">--</span> (130 lines added, 95 lines removed)
 - **AI Training**: <span style="color:green">+++</span><span style="color:red">--</span> (800 lines added, 403 lines removed)
+- **Acknowledgements**: <span style="color:green">+++</span><span style="color:red">---</span> (198 lines added, 198 lines removed)
+- **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">--</span> (917 lines added, 785 lines removed)
+- **Efficient AI**: <span style="color:green">+++</span><span style="color:red">--</span> (130 lines added, 95 lines removed)
 
 </details>
 
 <details>
   <summary>**Minor Updates**</summary>
 
-- **DNN Architectures**: <span style="color:green">++</span><span style="color:red">----</span> (2 lines added, 4 lines removed)
-- **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
-- **AI for Good**: <span style="color:green">+</span><span style="color:red">----</span> (1 lines added, 3 lines removed)
-- **Data Engineering**: <span style="color:green">+</span><span style="color:red">----</span> (1 lines added, 3 lines removed)
-- **DL Primer**: <span style="color:green">+</span><span style="color:red">----</span> (1 lines added, 3 lines removed)
 - **AI Acceleration**: <span style="color:green">+</span><span style="color:red">----</span> (1 lines added, 3 lines removed)
+- **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **AI Workflow**: <span style="color:green">+</span><span style="color:red">----</span> (2 lines added, 6 lines removed)
+- **AI for Good**: <span style="color:green">+</span><span style="color:red">----</span> (1 lines added, 3 lines removed)
+- **DL Primer**: <span style="color:green">+</span><span style="color:red">----</span> (1 lines added, 3 lines removed)
+- **DNN Architectures**: <span style="color:green">++</span><span style="color:red">----</span> (2 lines added, 4 lines removed)
+- **Data Engineering**: <span style="color:green">+</span><span style="color:red">----</span> (1 lines added, 3 lines removed)
 - **Introduction**: <span style="color:green">++</span><span style="color:red">----</span> (8 lines added, 16 lines removed)
-- **ML Systems**: <span style="color:green">+</span><span style="color:red">----</span> (6 lines added, 13 lines removed)
-- **On-Device Learning**: <span style="color:green">+</span><span style="color:red">----</span> (1 lines added, 3 lines removed)
 - **ML Operations**: <span style="color:green">+</span><span style="color:red">----</span> (1 lines added, 3 lines removed)
+- **ML Systems**: <span style="color:green">+</span><span style="color:red">----</span> (6 lines added, 13 lines removed)
 - **Model Optimizations**: <span style="color:green">+</span><span style="color:red">----</span> (1 lines added, 3 lines removed)
-- **Security & Privacy**: <span style="color:green">+</span><span style="color:red">----</span> (1 lines added, 3 lines removed)
+- **On-Device Learning**: <span style="color:green">+</span><span style="color:red">----</span> (1 lines added, 3 lines removed)
 - **Responsible AI**: <span style="color:green">+</span><span style="color:red">----</span> (1 lines added, 3 lines removed)
 - **Robust AI**: <span style="color:green">+</span><span style="color:red">----</span> (1 lines added, 3 lines removed)
+- **Security & Privacy**: <span style="color:green">+</span><span style="color:red">----</span> (1 lines added, 3 lines removed)
 - **Sustainable AI**: <span style="color:green">+</span><span style="color:red">----</span> (1 lines added, 3 lines removed)
-- **AI Workflow**: <span style="color:green">+</span><span style="color:red">----</span> (2 lines added, 6 lines removed)
 
 </details>
 
@@ -177,28 +232,28 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Major Updates**</summary>
 
-- **AI Training**: <span style="color:green">+++</span><span style="color:red">--</span> (1711 lines added, 963 lines removed)
-- **Efficient AI**: <span style="color:green">++++</span><span style="color:red">-</span> (824 lines added, 411 lines removed)
 - **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">--</span> (546 lines added, 306 lines removed)
+- **AI Training**: <span style="color:green">+++</span><span style="color:red">--</span> (1711 lines added, 963 lines removed)
 - **AI for Good**: <span style="color:green">++++</span><span style="color:red">-</span> (655 lines added, 298 lines removed)
+- **Efficient AI**: <span style="color:green">++++</span><span style="color:red">-</span> (824 lines added, 411 lines removed)
 
 </details>
 
 <details>
   <summary>**Minor Updates**</summary>
 
-- **Acknowledgements**: <span style="color:green">+++</span><span style="color:red">--</span> (83 lines added, 69 lines removed)
 - **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **AI Workflow**: <span style="color:green">++++</span><span style="color:red">-</span> (22 lines added, 7 lines removed)
+- **Acknowledgements**: <span style="color:green">+++</span><span style="color:red">--</span> (83 lines added, 69 lines removed)
+- **DNN Architectures**: <span style="color:green">+++</span><span style="color:red">--</span> (17 lines added, 15 lines removed)
+- **Data Engineering**: <span style="color:green">++</span><span style="color:red">---</span> (94 lines added, 98 lines removed)
+- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Introduction**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
+- **ML Systems**: <span style="color:green">++++</span><span style="color:red">-</span> (91 lines added, 40 lines removed)
 - **Model Optimizations**: <span style="color:green">++</span><span style="color:red">----</span> (2 lines added, 4 lines removed)
+- **Object Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 - **Painting Pots**: <span style="color:green">++++++</span><span style="color:red"></span> (2 lines added, 0 lines removed)
 - **PhD Survival Guide**: <span style="color:green">+++++</span><span style="color:red"></span> (73 lines added, 1 lines removed)
-- **Introduction**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
-- **Data Engineering**: <span style="color:green">++</span><span style="color:red">---</span> (94 lines added, 98 lines removed)
-- **Object Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
-- **DNN Architectures**: <span style="color:green">+++</span><span style="color:red">--</span> (17 lines added, 15 lines removed)
-- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **ML Systems**: <span style="color:green">++++</span><span style="color:red">-</span> (91 lines added, 40 lines removed)
-- **AI Workflow**: <span style="color:green">++++</span><span style="color:red">-</span> (22 lines added, 7 lines removed)
 
 </details>
 
@@ -209,24 +264,24 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Major Updates**</summary>
 
-- **DNN Architectures**: <span style="color:green">+++</span><span style="color:red">--</span> (125 lines added, 120 lines removed)
 - **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">--</span> (1556 lines added, 994 lines removed)
 - **DL Primer**: <span style="color:green">++</span><span style="color:red">---</span> (116 lines added, 194 lines removed)
+- **DNN Architectures**: <span style="color:green">+++</span><span style="color:red">--</span> (125 lines added, 120 lines removed)
 
 </details>
 
 <details>
   <summary>**Minor Updates**</summary>
 
-- **Acknowledgements**: <span style="color:green">+++</span><span style="color:red">--</span> (60 lines added, 59 lines removed)
-- **Small Language Models (SLM)**: <span style="color:green"></span><span style="color:red">------</span> (0 lines added, 2 lines removed)
-- **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **SocratiQ AI**: <span style="color:green">+++</span><span style="color:red">--</span> (14 lines added, 9 lines removed)
-- **ML Systems**: <span style="color:green">+++</span><span style="color:red">---</span> (86 lines added, 86 lines removed)
-- **Introduction**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
 - **About the Book**: <span style="color:green">++++++</span><span style="color:red"></span> (1 lines added, 0 lines removed)
-- **Vision-Language Models (VLM)**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
+- **Acknowledgements**: <span style="color:green">+++</span><span style="color:red">--</span> (60 lines added, 59 lines removed)
+- **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Data Engineering**: <span style="color:green">+++</span><span style="color:red">--</span> (11 lines added, 6 lines removed)
+- **Introduction**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
+- **ML Systems**: <span style="color:green">+++</span><span style="color:red">---</span> (86 lines added, 86 lines removed)
+- **Small Language Models (SLM)**: <span style="color:green"></span><span style="color:red">------</span> (0 lines added, 2 lines removed)
+- **SocratiQ AI**: <span style="color:green">+++</span><span style="color:red">--</span> (14 lines added, 9 lines removed)
+- **Vision-Language Models (VLM)**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
 
 </details>
 
@@ -244,10 +299,10 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Minor Updates**</summary>
 
+- **AI Workflow**: <span style="color:green"></span><span style="color:red">-----</span> (6 lines added, 61 lines removed)
 - **Acknowledgements**: <span style="color:green">+++</span><span style="color:red">--</span> (63 lines added, 62 lines removed)
 - **Introduction**: <span style="color:green">++</span><span style="color:red">---</span> (21 lines added, 22 lines removed)
 - **ML Systems**: <span style="color:green">+++++</span><span style="color:red"></span> (7 lines added, 1 lines removed)
-- **AI Workflow**: <span style="color:green"></span><span style="color:red">-----</span> (6 lines added, 61 lines removed)
 
 </details>
 
@@ -258,10 +313,10 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Minor Updates**</summary>
 
-- **Acknowledgements**: <span style="color:green">+++</span><span style="color:red">---</span> (56 lines added, 56 lines removed)
-- **ML Systems**: <span style="color:green">++++</span><span style="color:red">-</span> (95 lines added, 39 lines removed)
 - **AI Workflow**: <span style="color:green"></span><span style="color:red">------</span> (0 lines added, 2 lines removed)
+- **Acknowledgements**: <span style="color:green">+++</span><span style="color:red">---</span> (56 lines added, 56 lines removed)
 - **Data Engineering**: <span style="color:green">++</span><span style="color:red">----</span> (3 lines added, 6 lines removed)
+- **ML Systems**: <span style="color:green">++++</span><span style="color:red">-</span> (95 lines added, 39 lines removed)
 
 </details>
 
@@ -279,9 +334,9 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Minor Updates**</summary>
 
+- **About the Book**: <span style="color:green">+++++</span><span style="color:red"></span> (21 lines added, 2 lines removed)
 - **Acknowledgements**: <span style="color:green">+++</span><span style="color:red">---</span> (31 lines added, 31 lines removed)
 - **Introduction**: <span style="color:green">+++</span><span style="color:red">--</span> (95 lines added, 79 lines removed)
-- **About the Book**: <span style="color:green">+++++</span><span style="color:red"></span> (21 lines added, 2 lines removed)
 - **SocratiQ AI**: <span style="color:green">+++++</span><span style="color:red"></span> (74 lines added, 10 lines removed)
 
 </details>
@@ -293,14 +348,14 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Minor Updates**</summary>
 
-- **Data Engineering**: <span style="color:green"></span><span style="color:red">------</span> (0 lines added, 2 lines removed)
-- **AI Frameworks**: <span style="color:green"></span><span style="color:red">------</span> (0 lines added, 2 lines removed)
-- **Acknowledgements**: <span style="color:green">+++</span><span style="color:red">---</span> (31 lines added, 31 lines removed)
 - **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (5 lines added, 5 lines removed)
-- **Responsible AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **AI Frameworks**: <span style="color:green"></span><span style="color:red">------</span> (0 lines added, 2 lines removed)
 - **AI Training**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **AI Workflow**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Acknowledgements**: <span style="color:green">+++</span><span style="color:red">---</span> (31 lines added, 31 lines removed)
+- **Data Engineering**: <span style="color:green"></span><span style="color:red">------</span> (0 lines added, 2 lines removed)
 - **Introduction**: <span style="color:green">+++</span><span style="color:red">--</span> (17 lines added, 15 lines removed)
+- **Responsible AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 
 </details>
 
@@ -327,12 +382,12 @@ _Last Updated: Mar 25, 2025_
   <summary>**Minor Updates**</summary>
 
 - **Acknowledgements**: <span style="color:green">+++</span><span style="color:red">---</span> (26 lines added, 26 lines removed)
+- **Conclusion**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **DNN Architectures**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Data Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Introduction**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 - **ML Systems**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **SocratiQ AI**: <span style="color:green">+++</span><span style="color:red">--</span> (6 lines added, 4 lines removed)
-- **Conclusion**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **DNN Architectures**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 
 </details>
 
@@ -344,9 +399,9 @@ _Last Updated: Mar 25, 2025_
   <summary>**Minor Updates**</summary>
 
 - **Acknowledgements**: <span style="color:green">+++</span><span style="color:red">---</span> (53 lines added, 53 lines removed)
+- **Conclusion**: <span style="color:green">+++</span><span style="color:red">---</span> (8 lines added, 8 lines removed)
 - **DNN Architectures**: <span style="color:green"></span><span style="color:red">-----</span> (5 lines added, 57 lines removed)
 - **Generative AI**: <span style="color:green"></span><span style="color:red">------</span> (0 lines added, 9 lines removed)
-- **Conclusion**: <span style="color:green">+++</span><span style="color:red">---</span> (8 lines added, 8 lines removed)
 
 </details>
 
@@ -357,17 +412,17 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Major Updates**</summary>
 
-- **Acknowledgements**: <span style="color:green">+++</span><span style="color:red">---</span> (108 lines added, 108 lines removed)
 - **AI Workflow**: <span style="color:green">+++</span><span style="color:red">--</span> (835 lines added, 473 lines removed)
-- **ML Systems**: <span style="color:green">+++</span><span style="color:red">--</span> (614 lines added, 389 lines removed)
-- **DNN Architectures**: <span style="color:green">+++</span><span style="color:red">--</span> (954 lines added, 892 lines removed)
-- **DL Primer**: <span style="color:green"></span><span style="color:red">-----</span> (40 lines added, 405 lines removed)
 - **About the Book**: <span style="color:green">+</span><span style="color:red">----</span> (185 lines added, 377 lines removed)
-- **Dl Architectures**: <span style="color:green">+++++</span><span style="color:red"></span> (816 lines added, 64 lines removed)
+- **Acknowledgements**: <span style="color:green">+++</span><span style="color:red">---</span> (108 lines added, 108 lines removed)
 - **Acknowledgements**: <span style="color:green">+++</span><span style="color:red">--</span> (202 lines added, 188 lines removed)
+- **DL Primer**: <span style="color:green"></span><span style="color:red">-----</span> (40 lines added, 405 lines removed)
+- **DNN Architectures**: <span style="color:green">+++</span><span style="color:red">--</span> (954 lines added, 892 lines removed)
+- **Dl Architectures**: <span style="color:green">+++++</span><span style="color:red"></span> (816 lines added, 64 lines removed)
+- **Dl Primer New**: <span style="color:green">++++</span><span style="color:red">-</span> (2181 lines added, 522 lines removed)
+- **ML Systems**: <span style="color:green">+++</span><span style="color:red">--</span> (614 lines added, 389 lines removed)
 - **Nn Primer**: <span style="color:green">++++</span><span style="color:red">-</span> (551 lines added, 184 lines removed)
 - **Nn Primer}**: <span style="color:green"></span><span style="color:red">-----</span> (7 lines added, 707 lines removed)
-- **Dl Primer New**: <span style="color:green">++++</span><span style="color:red">-</span> (2181 lines added, 522 lines removed)
 - **Vision-Language Models (VLM)**: <span style="color:green">++++++</span><span style="color:red"></span> (1194 lines added, 0 lines removed)
 
 </details>
@@ -375,39 +430,39 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Minor Updates**</summary>
 
-- **About the Book**: <span style="color:green">+++++</span><span style="color:red"></span> (112 lines added, 4 lines removed)
-- **Conclusion**: <span style="color:green">+</span><span style="color:red">----</span> (9 lines added, 19 lines removed)
-- **Robust AI**: <span style="color:green">+</span><span style="color:red">----</span> (37 lines added, 92 lines removed)
-- **Security & Privacy**: <span style="color:green">+</span><span style="color:red">----</span> (7 lines added, 17 lines removed)
-- **Author's Note**: <span style="color:green">+++</span><span style="color:red">--</span> (76 lines added, 47 lines removed)
-- **SocratiQ AI**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
-- **Introduction**: <span style="color:green">+++</span><span style="color:red">--</span> (18 lines added, 17 lines removed)
-- **Preface**: <span style="color:green">++++++</span><span style="color:red"></span> (28 lines added, 0 lines removed)
-- **References**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
-- **Acknowledgements**:  (0 lines added, 0 lines removed)
-- **SocratiQ AI**:  (0 lines added, 0 lines removed)
-- **Dnn Architectures}**:  (0 lines added, 0 lines removed)
-- **AI for Good**: <span style="color:green">++++</span><span style="color:red">-</span> (8 lines added, 2 lines removed)
-- **Benchmarking AI**: <span style="color:green">++++</span><span style="color:red">--</span> (4 lines added, 2 lines removed)
-- **Data Engineering**: <span style="color:green">++++</span><span style="color:red">-</span> (9 lines added, 3 lines removed)
-- **Efficient AI**: <span style="color:green">++++</span><span style="color:red">-</span> (7 lines added, 3 lines removed)
-- **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">--</span> (13 lines added, 9 lines removed)
 - **AI Acceleration**: <span style="color:green">+++++</span><span style="color:red">-</span> (5 lines added, 1 lines removed)
-- **On-Device Learning**: <span style="color:green">+++++</span><span style="color:red">-</span> (5 lines added, 1 lines removed)
-- **ML Operations**: <span style="color:green">+++++</span><span style="color:red">-</span> (5 lines added, 1 lines removed)
-- **Model Optimizations**: <span style="color:green">+++++</span><span style="color:red">-</span> (5 lines added, 1 lines removed)
-- **Responsible AI**: <span style="color:green">+++++</span><span style="color:red">-</span> (5 lines added, 1 lines removed)
-- **Sustainable AI**: <span style="color:green">++++</span><span style="color:red">-</span> (8 lines added, 2 lines removed)
+- **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">--</span> (13 lines added, 9 lines removed)
 - **AI Training**: <span style="color:green">+++</span><span style="color:red">--</span> (9 lines added, 5 lines removed)
-- **DL Primer**: <span style="color:green"></span><span style="color:red">------</span> (0 lines added, 158 lines removed)
-- **Dl Primer}**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **AI for Good**: <span style="color:green">++++</span><span style="color:red">-</span> (8 lines added, 2 lines removed)
+- **About the Book**: <span style="color:green">+++++</span><span style="color:red"></span> (112 lines added, 4 lines removed)
+- **Acknowledgements**:  (0 lines added, 0 lines removed)
 - **Ann Primer**: <span style="color:green">+</span><span style="color:red">----</span> (2 lines added, 6 lines removed)
 - **Ann Primer}**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Author's Note**: <span style="color:green">+++</span><span style="color:red">--</span> (76 lines added, 47 lines removed)
+- **Benchmarking AI**: <span style="color:green">++++</span><span style="color:red">--</span> (4 lines added, 2 lines removed)
+- **Conclusion**: <span style="color:green">+</span><span style="color:red">----</span> (9 lines added, 19 lines removed)
 - **DL Primer**:  (0 lines added, 0 lines removed)
 - **DL Primer**: <span style="color:green">+++++</span><span style="color:red"></span> (159 lines added, 1 lines removed)
+- **DL Primer**: <span style="color:green"></span><span style="color:red">------</span> (0 lines added, 158 lines removed)
+- **Data Engineering**: <span style="color:green">++++</span><span style="color:red">-</span> (9 lines added, 3 lines removed)
+- **Dl Primer}**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **Dnn Architectures}**:  (0 lines added, 0 lines removed)
+- **Efficient AI**: <span style="color:green">++++</span><span style="color:red">-</span> (7 lines added, 3 lines removed)
+- **Introduction**: <span style="color:green">+++</span><span style="color:red">--</span> (18 lines added, 17 lines removed)
+- **ML Operations**: <span style="color:green">+++++</span><span style="color:red">-</span> (5 lines added, 1 lines removed)
+- **Model Optimizations**: <span style="color:green">+++++</span><span style="color:red">-</span> (5 lines added, 1 lines removed)
+- **On-Device Learning**: <span style="color:green">+++++</span><span style="color:red">-</span> (5 lines added, 1 lines removed)
 - **Overview**: <span style="color:green">+++</span><span style="color:red">--</span> (17 lines added, 15 lines removed)
+- **Preface**: <span style="color:green">++++++</span><span style="color:red"></span> (28 lines added, 0 lines removed)
 - **Raspberry Pi**: <span style="color:green">+++</span><span style="color:red">--</span> (13 lines added, 9 lines removed)
+- **References**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
+- **Responsible AI**: <span style="color:green">+++++</span><span style="color:red">-</span> (5 lines added, 1 lines removed)
+- **Robust AI**: <span style="color:green">+</span><span style="color:red">----</span> (37 lines added, 92 lines removed)
+- **Security & Privacy**: <span style="color:green">+</span><span style="color:red">----</span> (7 lines added, 17 lines removed)
+- **SocratiQ AI**:  (0 lines added, 0 lines removed)
+- **SocratiQ AI**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
 - **SocratiQ AI**: <span style="color:green">+++</span><span style="color:red">--</span> (24 lines added, 22 lines removed)
+- **Sustainable AI**: <span style="color:green">++++</span><span style="color:red">-</span> (8 lines added, 2 lines removed)
 
 </details>
 
@@ -442,10 +497,10 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Minor Updates**</summary>
 
-- **Security & Privacy**: <span style="color:green">++</span><span style="color:red">---</span> (69 lines added, 103 lines removed)
 - **AI for Good**: <span style="color:green">+++</span><span style="color:red">--</span> (15 lines added, 11 lines removed)
-- **Sustainable AI**: <span style="color:green">++++</span><span style="color:red">--</span> (12 lines added, 6 lines removed)
 - **Responsible AI**: <span style="color:green">+++</span><span style="color:red">---</span> (34 lines added, 34 lines removed)
+- **Security & Privacy**: <span style="color:green">++</span><span style="color:red">---</span> (69 lines added, 103 lines removed)
+- **Sustainable AI**: <span style="color:green">++++</span><span style="color:red">--</span> (12 lines added, 6 lines removed)
 
 </details>
 
@@ -456,8 +511,8 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Major Updates**</summary>
 
-- **Acknowledgements**: <span style="color:green">++++</span><span style="color:red">-</span> (249 lines added, 55 lines removed)
 - **About the Book**: <span style="color:green">+++++</span><span style="color:red"></span> (212 lines added, 20 lines removed)
+- **Acknowledgements**: <span style="color:green">++++</span><span style="color:red">-</span> (249 lines added, 55 lines removed)
 
 </details>
 
@@ -476,41 +531,41 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Minor Updates**</summary>
 
-- **Responsible AI**: <span style="color:green">+++</span><span style="color:red">--</span> (5 lines added, 3 lines removed)
-- **ML Operations**: <span style="color:green">+</span><span style="color:red">----</span> (30 lines added, 120 lines removed)
+- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **AI Training**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **AI Workflow**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Introduction**: <span style="color:green">+++</span><span style="color:red">---</span> (5 lines added, 5 lines removed)
 - **AI for Good**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Conclusion**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Data Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **DL Primer**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Efficient AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **ML Systems**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Robust AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **AI Training**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Motion Classification and Anomaly Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Object Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Setup**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Small Language Models (SLM)**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Object Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Setup**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Motion Classification and Anomaly Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Object Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Setup**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **DSP Spectral Features**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Data Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Efficient AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Introduction**: <span style="color:green">+++</span><span style="color:red">---</span> (5 lines added, 5 lines removed)
 - **KWS Feature Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
+- **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **ML Operations**: <span style="color:green">+</span><span style="color:red">----</span> (30 lines added, 120 lines removed)
+- **ML Systems**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Motion Classification and Anomaly Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Motion Classification and Anomaly Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Object Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Object Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Object Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Responsible AI**: <span style="color:green">+++</span><span style="color:red">--</span> (5 lines added, 3 lines removed)
+- **Robust AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Setup**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Setup**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Setup**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Small Language Models (SLM)**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 
 </details>
 
@@ -521,9 +576,9 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Major Updates**</summary>
 
-- **Introduction**: <span style="color:green">+++</span><span style="color:red">--</span> (654 lines added, 350 lines removed)
 - **Benchmarking AI**: <span style="color:green">++</span><span style="color:red">---</span> (121 lines added, 162 lines removed)
 - **Contributors**: <span style="color:green">+++</span><span style="color:red">---</span> (202 lines added, 202 lines removed)
+- **Introduction**: <span style="color:green">+++</span><span style="color:red">--</span> (654 lines added, 350 lines removed)
 - **Small Language Models (SLM)**: <span style="color:green">+++++</span><span style="color:red"></span> (1454 lines added, 136 lines removed)
 
 </details>
@@ -531,88 +586,88 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Minor Updates**</summary>
 
-- **AI for Good**: <span style="color:green"></span><span style="color:red">-----</span> (1 lines added, 13 lines removed)
-- **Data Engineering**: <span style="color:green"></span><span style="color:red">-----</span> (1 lines added, 13 lines removed)
-- **DL Primer**: <span style="color:green"></span><span style="color:red">-----</span> (1 lines added, 8 lines removed)
-- **Efficient AI**: <span style="color:green"></span><span style="color:red">-----</span> (1 lines added, 11 lines removed)
-- **AI Frameworks**: <span style="color:green"></span><span style="color:red">-----</span> (2 lines added, 14 lines removed)
+- **AI Acceleration**:  (0 lines added, 0 lines removed)
+- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">--</span> (21 lines added, 18 lines removed)
 - **AI Acceleration**: <span style="color:green"></span><span style="color:red">-----</span> (1 lines added, 8 lines removed)
-- **ML Systems**: <span style="color:green"></span><span style="color:red">-----</span> (1 lines added, 10 lines removed)
-- **On-Device Learning**: <span style="color:green">++</span><span style="color:red">---</span> (39 lines added, 50 lines removed)
-- **ML Operations**: <span style="color:green"></span><span style="color:red">-----</span> (2 lines added, 12 lines removed)
-- **Model Optimizations**: <span style="color:green"></span><span style="color:red">-----</span> (1 lines added, 10 lines removed)
-- **Security & Privacy**: <span style="color:green">+</span><span style="color:red">----</span> (9 lines added, 19 lines removed)
-- **Responsible AI**: <span style="color:green"></span><span style="color:red">-----</span> (1 lines added, 12 lines removed)
-- **Robust AI**: <span style="color:green"></span><span style="color:red">-----</span> (1 lines added, 11 lines removed)
-- **Sustainable AI**: <span style="color:green"></span><span style="color:red">-----</span> (1 lines added, 10 lines removed)
+- **AI Frameworks**:  (0 lines added, 0 lines removed)
+- **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">--</span> (39 lines added, 26 lines removed)
+- **AI Frameworks**: <span style="color:green"></span><span style="color:red">-----</span> (2 lines added, 14 lines removed)
+- **AI Training**:  (0 lines added, 0 lines removed)
 - **AI Training**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **AI Training**: <span style="color:green">+++</span><span style="color:red">--</span> (5 lines added, 3 lines removed)
+- **AI Workflow**:  (0 lines added, 0 lines removed)
+- **AI Workflow**: <span style="color:green">+++</span><span style="color:red">--</span> (9 lines added, 7 lines removed)
 - **AI Workflow**: <span style="color:green"></span><span style="color:red">-----</span> (1 lines added, 10 lines removed)
-- **Acknowledgements**: <span style="color:green">+</span><span style="color:red">----</span> (1 lines added, 3 lines removed)
-- **SocratiQ AI**: <span style="color:green">++++++</span><span style="color:red"></span> (84 lines added, 0 lines removed)
-- **SocratiQ AI**: <span style="color:green">+++</span><span style="color:red">---</span> (9 lines added, 9 lines removed)
-- **LABS**: <span style="color:green">+</span><span style="color:red">----</span> (32 lines added, 103 lines removed)
-- **Overview**: <span style="color:green">++++++</span><span style="color:red"></span> (84 lines added, 0 lines removed)
+- **AI for Good**:  (0 lines added, 0 lines removed)
+- **AI for Good**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **AI for Good**: <span style="color:green"></span><span style="color:red">-----</span> (1 lines added, 13 lines removed)
 - **About the Book**: <span style="color:green">+++</span><span style="color:red">---</span> (67 lines added, 67 lines removed)
+- **Acknowledgements**:  (0 lines added, 0 lines removed)
+- **Acknowledgements**: <span style="color:green">+</span><span style="color:red">----</span> (1 lines added, 3 lines removed)
+- **Author's Note**:  (0 lines added, 0 lines removed)
+- **Benchmarking AI**:  (0 lines added, 0 lines removed)
+- **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">--</span> (31 lines added, 20 lines removed)
 - **Case Studies**: <span style="color:green">+++</span><span style="color:red">---</span> (8 lines added, 8 lines removed)
 - **Community**: <span style="color:green">+++</span><span style="color:red">---</span> (50 lines added, 50 lines removed)
+- **Conclusion**:  (0 lines added, 0 lines removed)
 - **Conventions**: <span style="color:green">+++</span><span style="color:red">---</span> (68 lines added, 68 lines removed)
 - **Copyright**: <span style="color:green">+++</span><span style="color:red">---</span> (15 lines added, 15 lines removed)
-- **Dedication**: <span style="color:green">+++</span><span style="color:red">---</span> (7 lines added, 7 lines removed)
-- **Author's Note**:  (0 lines added, 0 lines removed)
-- **Front**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
-- **Learning Resources**: <span style="color:green">+++</span><span style="color:red">---</span> (46 lines added, 46 lines removed)
-- **Summary**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
-- **Tools**: <span style="color:green">+++</span><span style="color:red">---</span> (46 lines added, 46 lines removed)
-- **Zoo Datasets**: <span style="color:green">+++</span><span style="color:red">---</span> (35 lines added, 35 lines removed)
-- **Zoo Models**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Acknowledgements**:  (0 lines added, 0 lines removed)
-- **AI for Good**:  (0 lines added, 0 lines removed)
-- **Benchmarking AI**:  (0 lines added, 0 lines removed)
-- **Conclusion**:  (0 lines added, 0 lines removed)
-- **Data Engineering**:  (0 lines added, 0 lines removed)
 - **DL Primer**:  (0 lines added, 0 lines removed)
-- **Efficient AI**:  (0 lines added, 0 lines removed)
-- **AI Frameworks**:  (0 lines added, 0 lines removed)
-- **Generative AI**:  (0 lines added, 0 lines removed)
-- **AI Acceleration**:  (0 lines added, 0 lines removed)
-- **Introduction**:  (0 lines added, 0 lines removed)
-- **ML Systems**:  (0 lines added, 0 lines removed)
-- **On-Device Learning**:  (0 lines added, 0 lines removed)
-- **ML Operations**:  (0 lines added, 0 lines removed)
-- **Model Optimizations**:  (0 lines added, 0 lines removed)
-- **Security & Privacy**:  (0 lines added, 0 lines removed)
-- **Responsible AI**:  (0 lines added, 0 lines removed)
-- **Robust AI**:  (0 lines added, 0 lines removed)
-- **Sustainable AI**:  (0 lines added, 0 lines removed)
-- **AI Training**:  (0 lines added, 0 lines removed)
-- **AI Workflow**:  (0 lines added, 0 lines removed)
-- **AI for Good**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
-- **Robust AI**: <span style="color:green">++</span><span style="color:red">---</span> (24 lines added, 26 lines removed)
-- **Sustainable AI**: <span style="color:green">++++</span><span style="color:red">--</span> (4 lines added, 2 lines removed)
-- **Responsible AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">--</span> (49 lines added, 44 lines removed)
-- **ML Operations**: <span style="color:green">+++</span><span style="color:red">--</span> (6 lines added, 4 lines removed)
-- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">--</span> (22 lines added, 16 lines removed)
-- **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">--</span> (31 lines added, 20 lines removed)
-- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">--</span> (21 lines added, 18 lines removed)
-- **Nicla Vision**: <span style="color:green">+++</span><span style="color:red">---</span> (6 lines added, 6 lines removed)
-- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (36 lines added, 36 lines removed)
-- **Raspberry Pi**: <span style="color:green">+++</span><span style="color:red">---</span> (10 lines added, 10 lines removed)
-- **Setup**: <span style="color:green">+++</span><span style="color:red">---</span> (52 lines added, 52 lines removed)
-- **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (6 lines added, 6 lines removed)
-- **Setup**: <span style="color:green">+++</span><span style="color:red">---</span> (12 lines added, 12 lines removed)
-- **XIAO ESP32S3**: <span style="color:green">+++</span><span style="color:red">---</span> (8 lines added, 8 lines removed)
-- **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">--</span> (67 lines added, 48 lines removed)
-- **Object Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
-- **Efficient AI**: <span style="color:green">++</span><span style="color:red">---</span> (6 lines added, 8 lines removed)
-- **AI Training**: <span style="color:green">+++</span><span style="color:red">--</span> (5 lines added, 3 lines removed)
-- **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">--</span> (39 lines added, 26 lines removed)
-- **Data Engineering**: <span style="color:green">+++</span><span style="color:red">--</span> (32 lines added, 21 lines removed)
-- **AI Workflow**: <span style="color:green">+++</span><span style="color:red">--</span> (9 lines added, 7 lines removed)
 - **DL Primer**: <span style="color:green">+++</span><span style="color:red">--</span> (59 lines added, 41 lines removed)
-- **ML Systems**: <span style="color:green">+++</span><span style="color:red">--</span> (62 lines added, 41 lines removed)
+- **DL Primer**: <span style="color:green"></span><span style="color:red">-----</span> (1 lines added, 8 lines removed)
+- **Data Engineering**:  (0 lines added, 0 lines removed)
+- **Data Engineering**: <span style="color:green">+++</span><span style="color:red">--</span> (32 lines added, 21 lines removed)
+- **Data Engineering**: <span style="color:green"></span><span style="color:red">-----</span> (1 lines added, 13 lines removed)
+- **Dedication**: <span style="color:green">+++</span><span style="color:red">---</span> (7 lines added, 7 lines removed)
+- **Efficient AI**:  (0 lines added, 0 lines removed)
+- **Efficient AI**: <span style="color:green">++</span><span style="color:red">---</span> (6 lines added, 8 lines removed)
+- **Efficient AI**: <span style="color:green"></span><span style="color:red">-----</span> (1 lines added, 11 lines removed)
+- **Front**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **Generative AI**:  (0 lines added, 0 lines removed)
+- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (36 lines added, 36 lines removed)
+- **Introduction**:  (0 lines added, 0 lines removed)
 - **Introduction**: <span style="color:green">++++</span><span style="color:red">-</span> (10 lines added, 4 lines removed)
 - **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (6 lines added, 6 lines removed)
+- **LABS**: <span style="color:green">+</span><span style="color:red">----</span> (32 lines added, 103 lines removed)
+- **Learning Resources**: <span style="color:green">+++</span><span style="color:red">---</span> (46 lines added, 46 lines removed)
+- **ML Operations**:  (0 lines added, 0 lines removed)
+- **ML Operations**: <span style="color:green">+++</span><span style="color:red">--</span> (6 lines added, 4 lines removed)
+- **ML Operations**: <span style="color:green"></span><span style="color:red">-----</span> (2 lines added, 12 lines removed)
+- **ML Systems**:  (0 lines added, 0 lines removed)
+- **ML Systems**: <span style="color:green">+++</span><span style="color:red">--</span> (62 lines added, 41 lines removed)
+- **ML Systems**: <span style="color:green"></span><span style="color:red">-----</span> (1 lines added, 10 lines removed)
+- **Model Optimizations**:  (0 lines added, 0 lines removed)
+- **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">--</span> (67 lines added, 48 lines removed)
+- **Model Optimizations**: <span style="color:green"></span><span style="color:red">-----</span> (1 lines added, 10 lines removed)
+- **Nicla Vision**: <span style="color:green">+++</span><span style="color:red">---</span> (6 lines added, 6 lines removed)
+- **Object Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **On-Device Learning**:  (0 lines added, 0 lines removed)
+- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">--</span> (22 lines added, 16 lines removed)
+- **On-Device Learning**: <span style="color:green">++</span><span style="color:red">---</span> (39 lines added, 50 lines removed)
+- **Overview**: <span style="color:green">++++++</span><span style="color:red"></span> (84 lines added, 0 lines removed)
+- **Raspberry Pi**: <span style="color:green">+++</span><span style="color:red">---</span> (10 lines added, 10 lines removed)
+- **Responsible AI**:  (0 lines added, 0 lines removed)
+- **Responsible AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Responsible AI**: <span style="color:green"></span><span style="color:red">-----</span> (1 lines added, 12 lines removed)
+- **Robust AI**:  (0 lines added, 0 lines removed)
+- **Robust AI**: <span style="color:green">++</span><span style="color:red">---</span> (24 lines added, 26 lines removed)
+- **Robust AI**: <span style="color:green"></span><span style="color:red">-----</span> (1 lines added, 11 lines removed)
+- **Security & Privacy**:  (0 lines added, 0 lines removed)
+- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">--</span> (49 lines added, 44 lines removed)
+- **Security & Privacy**: <span style="color:green">+</span><span style="color:red">----</span> (9 lines added, 19 lines removed)
+- **Setup**: <span style="color:green">+++</span><span style="color:red">---</span> (12 lines added, 12 lines removed)
+- **Setup**: <span style="color:green">+++</span><span style="color:red">---</span> (52 lines added, 52 lines removed)
+- **SocratiQ AI**: <span style="color:green">++++++</span><span style="color:red"></span> (84 lines added, 0 lines removed)
+- **SocratiQ AI**: <span style="color:green">+++</span><span style="color:red">---</span> (9 lines added, 9 lines removed)
+- **Summary**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
+- **Sustainable AI**:  (0 lines added, 0 lines removed)
+- **Sustainable AI**: <span style="color:green">++++</span><span style="color:red">--</span> (4 lines added, 2 lines removed)
+- **Sustainable AI**: <span style="color:green"></span><span style="color:red">-----</span> (1 lines added, 10 lines removed)
+- **Tools**: <span style="color:green">+++</span><span style="color:red">---</span> (46 lines added, 46 lines removed)
+- **XIAO ESP32S3**: <span style="color:green">+++</span><span style="color:red">---</span> (8 lines added, 8 lines removed)
+- **Zoo Datasets**: <span style="color:green">+++</span><span style="color:red">---</span> (35 lines added, 35 lines removed)
+- **Zoo Models**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 
 </details>
 
@@ -634,55 +689,55 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Major Updates**</summary>
 
-- **Image Classification**: <span style="color:green">+++++</span><span style="color:red"></span> (1553 lines added, 14 lines removed)
-- **Setup**: <span style="color:green">+++++</span><span style="color:red"></span> (606 lines added, 22 lines removed)
-- **Data Engineering**: <span style="color:green">++</span><span style="color:red">---</span> (197 lines added, 246 lines removed)
 - **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">--</span> (159 lines added, 114 lines removed)
-- **Model Optimizations**: <span style="color:green">++</span><span style="color:red">---</span> (157 lines added, 203 lines removed)
-- **AI Training**: <span style="color:green">+++</span><span style="color:red">--</span> (271 lines added, 201 lines removed)
 - **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">--</span> (270 lines added, 157 lines removed)
-- **ML Operations**: <span style="color:green">+++</span><span style="color:red">--</span> (145 lines added, 89 lines removed)
-- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">--</span> (150 lines added, 120 lines removed)
+- **AI Training**: <span style="color:green">+++</span><span style="color:red">--</span> (271 lines added, 201 lines removed)
 - **DSP Spectral Features**: <span style="color:green"></span><span style="color:red">------</span> (0 lines added, 623 lines removed)
+- **Data Engineering**: <span style="color:green">++</span><span style="color:red">---</span> (197 lines added, 246 lines removed)
+- **Image Classification**: <span style="color:green">+++++</span><span style="color:red"></span> (1553 lines added, 14 lines removed)
 - **Image Classification**: <span style="color:green"></span><span style="color:red">------</span> (0 lines added, 518 lines removed)
+- **ML Operations**: <span style="color:green">+++</span><span style="color:red">--</span> (145 lines added, 89 lines removed)
+- **Model Optimizations**: <span style="color:green">++</span><span style="color:red">---</span> (157 lines added, 203 lines removed)
 - **Robust AI**: <span style="color:green">+++</span><span style="color:red">--</span> (121 lines added, 101 lines removed)
+- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">--</span> (150 lines added, 120 lines removed)
+- **Setup**: <span style="color:green">+++++</span><span style="color:red"></span> (606 lines added, 22 lines removed)
 
 </details>
 
 <details>
   <summary>**Minor Updates**</summary>
 
-- **DL Primer**: <span style="color:green">+++</span><span style="color:red">--</span> (119 lines added, 70 lines removed)
-- **Motion Classification and Anomaly Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (19 lines added, 19 lines removed)
-- **AI for Good**: <span style="color:green">+++</span><span style="color:red">--</span> (29 lines added, 22 lines removed)
-- **Motion Classification and Anomaly Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (35 lines added, 35 lines removed)
-- **Object Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (36 lines added, 36 lines removed)
-- **Getting Started**: <span style="color:green">++++</span><span style="color:red">--</span> (28 lines added, 14 lines removed)
-- **Object Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (5 lines added, 5 lines removed)
-- **Setup**: <span style="color:green">+++</span><span style="color:red">---</span> (6 lines added, 6 lines removed)
-- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (11 lines added, 11 lines removed)
-- **Raspberry Pi**: <span style="color:green">+++++</span><span style="color:red"></span> (30 lines added, 1 lines removed)
-- **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
-- **Introduction**: <span style="color:green">++</span><span style="color:red">---</span> (36 lines added, 40 lines removed)
-- **Efficient AI**: <span style="color:green">+++</span><span style="color:red">--</span> (95 lines added, 61 lines removed)
-- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">--</span> (109 lines added, 69 lines removed)
 - **AI Workflow**: <span style="color:green">++++</span><span style="color:red">-</span> (62 lines added, 30 lines removed)
-- **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">--</span> (60 lines added, 56 lines removed)
+- **AI for Good**: <span style="color:green">+++</span><span style="color:red">--</span> (29 lines added, 22 lines removed)
 - **Benchmarking AI**: <span style="color:green">++</span><span style="color:red">---</span> (42 lines added, 45 lines removed)
-- **ML Systems**: <span style="color:green">+++</span><span style="color:red">--</span> (65 lines added, 44 lines removed)
-- **Object Detection**: <span style="color:green">+++</span><span style="color:red">--</span> (71 lines added, 53 lines removed)
 - **Conclusion**: <span style="color:green">+++</span><span style="color:red">---</span> (8 lines added, 8 lines removed)
-- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (55 lines added, 55 lines removed)
-- **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (28 lines added, 28 lines removed)
-- **Nicla Vision**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
-- **Setup**: <span style="color:green">+++</span><span style="color:red">---</span> (31 lines added, 31 lines removed)
-- **LABS**: <span style="color:green">+++</span><span style="color:red">--</span> (19 lines added, 10 lines removed)
-- **Small Language Models (SLM)**: <span style="color:green">++++++</span><span style="color:red"></span> (6 lines added, 0 lines removed)
-- **XIAO ESP32S3**: <span style="color:green">+++</span><span style="color:red">--</span> (12 lines added, 7 lines removed)
+- **DL Primer**: <span style="color:green">+++</span><span style="color:red">--</span> (119 lines added, 70 lines removed)
 - **DSP Spectral Features**: <span style="color:green">+++</span><span style="color:red">---</span> (21 lines added, 21 lines removed)
+- **Efficient AI**: <span style="color:green">+++</span><span style="color:red">--</span> (95 lines added, 61 lines removed)
+- **Getting Started**: <span style="color:green">++++</span><span style="color:red">--</span> (28 lines added, 14 lines removed)
+- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (11 lines added, 11 lines removed)
+- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (55 lines added, 55 lines removed)
+- **Introduction**: <span style="color:green">++</span><span style="color:red">---</span> (36 lines added, 40 lines removed)
 - **KWS Feature Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (10 lines added, 10 lines removed)
-- **Shared**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (28 lines added, 28 lines removed)
+- **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
+- **LABS**: <span style="color:green">+++</span><span style="color:red">--</span> (19 lines added, 10 lines removed)
+- **ML Systems**: <span style="color:green">+++</span><span style="color:red">--</span> (65 lines added, 44 lines removed)
+- **Motion Classification and Anomaly Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (19 lines added, 19 lines removed)
+- **Motion Classification and Anomaly Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (35 lines added, 35 lines removed)
+- **Nicla Vision**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **Object Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (36 lines added, 36 lines removed)
+- **Object Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (5 lines added, 5 lines removed)
+- **Object Detection**: <span style="color:green">+++</span><span style="color:red">--</span> (71 lines added, 53 lines removed)
+- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">--</span> (109 lines added, 69 lines removed)
+- **Raspberry Pi**: <span style="color:green">+++++</span><span style="color:red"></span> (30 lines added, 1 lines removed)
 - **Responsible AI**: <span style="color:green">+++</span><span style="color:red">--</span> (34 lines added, 25 lines removed)
+- **Setup**: <span style="color:green">+++</span><span style="color:red">---</span> (31 lines added, 31 lines removed)
+- **Setup**: <span style="color:green">+++</span><span style="color:red">---</span> (6 lines added, 6 lines removed)
+- **Shared**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Small Language Models (SLM)**: <span style="color:green">++++++</span><span style="color:red"></span> (6 lines added, 0 lines removed)
+- **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">--</span> (60 lines added, 56 lines removed)
+- **XIAO ESP32S3**: <span style="color:green">+++</span><span style="color:red">--</span> (12 lines added, 7 lines removed)
 
 </details>
 
@@ -700,10 +755,10 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Minor Updates**</summary>
 
-- **Conclusion**: <span style="color:green">+++</span><span style="color:red">---</span> (7 lines added, 7 lines removed)
-- **ML Operations**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 - **AI for Good**: <span style="color:green">+++</span><span style="color:red">--</span> (8 lines added, 6 lines removed)
+- **Conclusion**: <span style="color:green">+++</span><span style="color:red">---</span> (7 lines added, 7 lines removed)
 - **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (19 lines added, 19 lines removed)
+- **ML Operations**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 - **Robust AI**: <span style="color:green">++</span><span style="color:red">---</span> (19 lines added, 27 lines removed)
 - **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">--</span> (25 lines added, 24 lines removed)
 
@@ -727,26 +782,26 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Minor Updates**</summary>
 
-- **Introduction**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">---</span> (16 lines added, 16 lines removed)
+- **AI Acceleration**: <span style="color:green">++</span><span style="color:red">---</span> (20 lines added, 22 lines removed)
+- **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **AI Training**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
 - **AI for Good**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 - **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
 - **Conclusion**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Data Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **DL Primer**: <span style="color:green">++</span><span style="color:red">---</span> (3 lines added, 5 lines removed)
-- **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
-- **AI Acceleration**: <span style="color:green">++</span><span style="color:red">---</span> (20 lines added, 22 lines removed)
+- **Data Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Efficient AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Introduction**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **KWS Feature Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **ML Systems**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
-- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 - **ML Operations**: <span style="color:green">+++</span><span style="color:red">---</span> (7 lines added, 7 lines removed)
+- **ML Systems**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 - **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
+- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 - **Responsible AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Robust AI**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
+- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">---</span> (16 lines added, 16 lines removed)
 - **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
-- **AI Training**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
-- **Efficient AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 
 </details>
 
@@ -758,10 +813,10 @@ _Last Updated: Mar 25, 2025_
   <summary>**Minor Updates**</summary>
 
 - **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">--</span> (61 lines added, 53 lines removed)
-- **ML Systems**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
-- **ML Operations**: <span style="color:green">+++</span><span style="color:red">--</span> (82 lines added, 56 lines removed)
-- **Setup**: <span style="color:green">+++</span><span style="color:red">--</span> (44 lines added, 42 lines removed)
 - **Image Classification**: <span style="color:green">+++</span><span style="color:red">--</span> (29 lines added, 26 lines removed)
+- **ML Operations**: <span style="color:green">+++</span><span style="color:red">--</span> (82 lines added, 56 lines removed)
+- **ML Systems**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **Setup**: <span style="color:green">+++</span><span style="color:red">--</span> (44 lines added, 42 lines removed)
 
 </details>
 
@@ -779,10 +834,10 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Minor Updates**</summary>
 
-- **ML Operations**: <span style="color:green">++</span><span style="color:red">---</span> (9 lines added, 11 lines removed)
-- **LABS**: <span style="color:green">+++</span><span style="color:red">--</span> (15 lines added, 8 lines removed)
-- **On-Device Learning**: <span style="color:green">++</span><span style="color:red">---</span> (11 lines added, 13 lines removed)
 - **KWS Feature Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **LABS**: <span style="color:green">+++</span><span style="color:red">--</span> (15 lines added, 8 lines removed)
+- **ML Operations**: <span style="color:green">++</span><span style="color:red">---</span> (9 lines added, 11 lines removed)
+- **On-Device Learning**: <span style="color:green">++</span><span style="color:red">---</span> (11 lines added, 13 lines removed)
 
 </details>
 
@@ -800,15 +855,15 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Minor Updates**</summary>
 
+- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (8 lines added, 8 lines removed)
+- **AI Frameworks**: <span style="color:green">++++</span><span style="color:red">-</span> (19 lines added, 8 lines removed)
 - **Benchmarking AI**: <span style="color:green">++</span><span style="color:red">---</span> (16 lines added, 20 lines removed)
 - **Efficient AI**: <span style="color:green">+++</span><span style="color:red">--</span> (39 lines added, 23 lines removed)
-- **AI Frameworks**: <span style="color:green">++++</span><span style="color:red">-</span> (19 lines added, 8 lines removed)
-- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">---</span> (12 lines added, 12 lines removed)
-- **ML Operations**: <span style="color:green">++</span><span style="color:red">---</span> (3 lines added, 5 lines removed)
 - **LABS**: <span style="color:green">++++</span><span style="color:red">-</span> (16 lines added, 7 lines removed)
-- **XIAO ESP32S3**: <span style="color:green">+++</span><span style="color:red">--</span> (11 lines added, 6 lines removed)
-- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (8 lines added, 8 lines removed)
+- **ML Operations**: <span style="color:green">++</span><span style="color:red">---</span> (3 lines added, 5 lines removed)
+- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">---</span> (12 lines added, 12 lines removed)
 - **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **XIAO ESP32S3**: <span style="color:green">+++</span><span style="color:red">--</span> (11 lines added, 6 lines removed)
 
 </details>
 
@@ -819,11 +874,11 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Minor Updates**</summary>
 
-- **LABS**: <span style="color:green">++</span><span style="color:red">----</span> (8 lines added, 16 lines removed)
-- **Setup**: <span style="color:green">++++</span><span style="color:red">--</span> (2 lines added, 1 lines removed)
-- **Raspberry Pi**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **AI for Good**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **AI for Good**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **LABS**: <span style="color:green">++</span><span style="color:red">----</span> (8 lines added, 16 lines removed)
+- **Raspberry Pi**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Setup**: <span style="color:green">++++</span><span style="color:red">--</span> (2 lines added, 1 lines removed)
 - **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 
 </details>
@@ -844,21 +899,21 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Minor Updates**</summary>
 
-- **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">---</span> (18 lines added, 18 lines removed)
-- **LABS**: <span style="color:green">+++</span><span style="color:red">--</span> (22 lines added, 12 lines removed)
+- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
+- **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **AI Training**: <span style="color:green">+++</span><span style="color:red">---</span> (12 lines added, 12 lines removed)
+- **Data Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (7 lines added, 7 lines removed)
 - **Getting Started**: <span style="color:green">++++</span><span style="color:red">-</span> (27 lines added, 13 lines removed)
 - **Image Classification**: <span style="color:green">++++++</span><span style="color:red"></span> (5 lines added, 0 lines removed)
-- **Small Language Models (SLM)**: <span style="color:green">++++++</span><span style="color:red"></span> (6 lines added, 0 lines removed)
-- **Object Detection**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
-- **Raspberry Pi**: <span style="color:green">++++++</span><span style="color:red"></span> (29 lines added, 0 lines removed)
-- **Data Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (7 lines added, 7 lines removed)
-- **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
-- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">---</span> (5 lines added, 5 lines removed)
+- **LABS**: <span style="color:green">+++</span><span style="color:red">--</span> (22 lines added, 12 lines removed)
 - **ML Operations**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
-- **AI Training**: <span style="color:green">+++</span><span style="color:red">---</span> (12 lines added, 12 lines removed)
 - **ML Systems**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">---</span> (18 lines added, 18 lines removed)
+- **Object Detection**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
+- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">---</span> (5 lines added, 5 lines removed)
+- **Raspberry Pi**: <span style="color:green">++++++</span><span style="color:red"></span> (29 lines added, 0 lines removed)
+- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
+- **Small Language Models (SLM)**: <span style="color:green">++++++</span><span style="color:red"></span> (6 lines added, 0 lines removed)
 
 </details>
 
@@ -882,28 +937,28 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Minor Updates**</summary>
 
-- **Robust AI**: <span style="color:green">+++</span><span style="color:red">---</span> (8 lines added, 8 lines removed)
-- **ML Operations**: <span style="color:green">+++</span><span style="color:red">--</span> (26 lines added, 16 lines removed)
-- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">--</span> (72 lines added, 45 lines removed)
+- **AI Acceleration**: <span style="color:green">++++</span><span style="color:red">-</span> (62 lines added, 29 lines removed)
+- **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">---</span> (11 lines added, 11 lines removed)
 - **AI Training**: <span style="color:green">+++</span><span style="color:red">--</span> (70 lines added, 38 lines removed)
+- **AI Workflow**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
 - **AI for Good**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 - **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">---</span> (10 lines added, 10 lines removed)
-- **Data Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (10 lines added, 10 lines removed)
 - **DL Primer**: <span style="color:green">+++</span><span style="color:red">---</span> (8 lines added, 8 lines removed)
+- **Data Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (10 lines added, 10 lines removed)
 - **Efficient AI**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
-- **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">---</span> (11 lines added, 11 lines removed)
-- **AI Acceleration**: <span style="color:green">++++</span><span style="color:red">-</span> (62 lines added, 29 lines removed)
+- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Introduction**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
-- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **ML Systems**: <span style="color:green">+++</span><span style="color:red">---</span> (5 lines added, 5 lines removed)
-- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">--</span> (28 lines added, 15 lines removed)
-- **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">---</span> (10 lines added, 10 lines removed)
-- **Responsible AI**: <span style="color:green">+++</span><span style="color:red">--</span> (20 lines added, 11 lines removed)
-- **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">---</span> (7 lines added, 7 lines removed)
-- **AI Workflow**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
 - **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **ML Operations**: <span style="color:green">+++</span><span style="color:red">--</span> (26 lines added, 16 lines removed)
+- **ML Systems**: <span style="color:green">+++</span><span style="color:red">---</span> (5 lines added, 5 lines removed)
+- **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">---</span> (10 lines added, 10 lines removed)
+- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">--</span> (28 lines added, 15 lines removed)
+- **Responsible AI**: <span style="color:green">+++</span><span style="color:red">--</span> (20 lines added, 11 lines removed)
+- **Robust AI**: <span style="color:green">+++</span><span style="color:red">---</span> (8 lines added, 8 lines removed)
+- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">--</span> (72 lines added, 45 lines removed)
+- **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">---</span> (7 lines added, 7 lines removed)
 
 </details>
 
@@ -921,8 +976,8 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Minor Updates**</summary>
 
-- **Efficient AI**: <span style="color:green">+++</span><span style="color:red">--</span> (13 lines added, 10 lines removed)
 - **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **Efficient AI**: <span style="color:green">+++</span><span style="color:red">--</span> (13 lines added, 10 lines removed)
 
 </details>
 
@@ -934,19 +989,19 @@ _Last Updated: Mar 25, 2025_
   <summary>**Minor Updates**</summary>
 
 - **DSP Spectral Features**: <span style="color:green">+++</span><span style="color:red">---</span> (21 lines added, 21 lines removed)
+- **DSP Spectral Features**: <span style="color:green">+++</span><span style="color:red">---</span> (21 lines added, 21 lines removed)
+- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 - **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (49 lines added, 49 lines removed)
 - **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (49 lines added, 49 lines removed)
+- **KWS Feature Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (8 lines added, 8 lines removed)
+- **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (26 lines added, 26 lines removed)
+- **Motion Classification and Anomaly Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Motion Classification and Anomaly Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (32 lines added, 32 lines removed)
+- **Object Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Object Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (34 lines added, 34 lines removed)
 - **Setup**: <span style="color:green">+++</span><span style="color:red">---</span> (30 lines added, 30 lines removed)
-- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
-- **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Motion Classification and Anomaly Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Object Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Setup**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
-- **DSP Spectral Features**: <span style="color:green">+++</span><span style="color:red">---</span> (21 lines added, 21 lines removed)
-- **KWS Feature Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (8 lines added, 8 lines removed)
 
 </details>
 
@@ -965,31 +1020,31 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Minor Updates**</summary>
 
-- **ML Operations**: <span style="color:green">+++</span><span style="color:red">--</span> (57 lines added, 33 lines removed)
-- **Robust AI**: <span style="color:green">+++</span><span style="color:red">--</span> (92 lines added, 64 lines removed)
-- **AI Workflow**: <span style="color:green">+++</span><span style="color:red">--</span> (93 lines added, 53 lines removed)
-- **DL Primer**: <span style="color:green">++++</span><span style="color:red">-</span> (82 lines added, 39 lines removed)
-- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">--</span> (78 lines added, 69 lines removed)
-- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
-- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
-- **Setup**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Object Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **AI for Good**: <span style="color:green">+++</span><span style="color:red">--</span> (7 lines added, 4 lines removed)
 - **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (11 lines added, 11 lines removed)
-- **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
-- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">--</span> (55 lines added, 33 lines removed)
-- **Responsible AI**: <span style="color:green">+++</span><span style="color:red">--</span> (6 lines added, 4 lines removed)
 - **AI Training**: <span style="color:green">+++</span><span style="color:red">--</span> (52 lines added, 35 lines removed)
+- **AI Workflow**: <span style="color:green">+++</span><span style="color:red">--</span> (93 lines added, 53 lines removed)
+- **AI for Good**: <span style="color:green">+++</span><span style="color:red">--</span> (7 lines added, 4 lines removed)
+- **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">---</span> (5 lines added, 5 lines removed)
+- **DL Primer**: <span style="color:green">++++</span><span style="color:red">-</span> (82 lines added, 39 lines removed)
 - **Efficient AI**: <span style="color:green">+++</span><span style="color:red">--</span> (69 lines added, 52 lines removed)
+- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
+- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
+- **Introduction**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **ML Operations**: <span style="color:green">+++</span><span style="color:red">--</span> (57 lines added, 33 lines removed)
 - **ML Systems**: <span style="color:green">+++</span><span style="color:red">--</span> (48 lines added, 36 lines removed)
 - **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">--</span> (58 lines added, 49 lines removed)
 - **Nicla Vision**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **Object Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">--</span> (55 lines added, 33 lines removed)
+- **Responsible AI**: <span style="color:green">+++</span><span style="color:red">--</span> (6 lines added, 4 lines removed)
+- **Robust AI**: <span style="color:green">+++</span><span style="color:red">--</span> (92 lines added, 64 lines removed)
+- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">--</span> (78 lines added, 69 lines removed)
+- **Setup**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Shared**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">---</span> (5 lines added, 5 lines removed)
-- **XIAO ESP32S3**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">--</span> (9 lines added, 8 lines removed)
-- **Introduction**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **XIAO ESP32S3**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 
 </details>
 
@@ -1024,69 +1079,69 @@ _Last Updated: Mar 25, 2025_
   <summary>**Major Updates**</summary>
 
 - **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">--</span> (341 lines added, 332 lines removed)
-- **Introduction**: <span style="color:green">+++++</span><span style="color:red"></span> (199 lines added, 15 lines removed)
-- **Image Classification**: <span style="color:green">+++++</span><span style="color:red"></span> (547 lines added, 21 lines removed)
+- **DSP Spectral Features**: <span style="color:green">++++++</span><span style="color:red"></span> (619 lines added, 0 lines removed)
 - **Image Classification**: <span style="color:green">+++++</span><span style="color:red"></span> (388 lines added, 53 lines removed)
-- **Keyword Spotting (KWS)**: <span style="color:green">+++++</span><span style="color:red"></span> (711 lines added, 70 lines removed)
-- **Motion Classification and Anomaly Detection**: <span style="color:green">+++++</span><span style="color:red"></span> (555 lines added, 63 lines removed)
-- **Object Detection**: <span style="color:green">+++++</span><span style="color:red"></span> (380 lines added, 28 lines removed)
-- **Setup**: <span style="color:green">+++++</span><span style="color:red"></span> (291 lines added, 55 lines removed)
+- **Image Classification**: <span style="color:green">+++++</span><span style="color:red"></span> (547 lines added, 21 lines removed)
+- **Introduction**: <span style="color:green">+++++</span><span style="color:red"></span> (199 lines added, 15 lines removed)
 - **KWS Feature Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (149 lines added, 149 lines removed)
+- **Keyword Spotting (KWS)**: <span style="color:green">+++++</span><span style="color:red"></span> (711 lines added, 70 lines removed)
 - **Kws Nicla**: <span style="color:green">+++</span><span style="color:red">---</span> (373 lines added, 373 lines removed)
+- **Motion Classification and Anomaly Detection**: <span style="color:green">+++++</span><span style="color:red"></span> (555 lines added, 63 lines removed)
 - **Motion Classify Ad**: <span style="color:green">+++</span><span style="color:red">---</span> (412 lines added, 412 lines removed)
 - **Niclav Sys**: <span style="color:green">+++</span><span style="color:red">---</span> (311 lines added, 311 lines removed)
-- **Object Detection Fomo**: <span style="color:green"></span><span style="color:red">------</span> (0 lines added, 313 lines removed)
-- **DSP Spectral Features**: <span style="color:green">++++++</span><span style="color:red"></span> (619 lines added, 0 lines removed)
 - **Object Detection Fomo**: <span style="color:green">++++++</span><span style="color:red"></span> (313 lines added, 0 lines removed)
+- **Object Detection Fomo**: <span style="color:green"></span><span style="color:red">------</span> (0 lines added, 313 lines removed)
+- **Object Detection**: <span style="color:green">+++++</span><span style="color:red"></span> (380 lines added, 28 lines removed)
+- **Setup**: <span style="color:green">+++++</span><span style="color:red"></span> (291 lines added, 55 lines removed)
 
 </details>
 
 <details>
   <summary>**Minor Updates**</summary>
 
-- **Data Engineering**: <span style="color:green">+++</span><span style="color:red">--</span> (26 lines added, 24 lines removed)
 - **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">--</span> (22 lines added, 18 lines removed)
-- **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">---</span> (9 lines added, 9 lines removed)
-- **Robust AI**: <span style="color:green">+++</span><span style="color:red">--</span> (51 lines added, 48 lines removed)
-- **Acknowledgements**: <span style="color:green">+++++</span><span style="color:red">-</span> (5 lines added, 1 lines removed)
-- **AI for Good**: <span style="color:green">+++</span><span style="color:red">--</span> (16 lines added, 14 lines removed)
-- **Conclusion**: <span style="color:green">+++</span><span style="color:red">---</span> (7 lines added, 7 lines removed)
-- **DL Primer**: <span style="color:green">++</span><span style="color:red">---</span> (26 lines added, 27 lines removed)
-- **Efficient AI**: <span style="color:green">+++</span><span style="color:red">---</span> (8 lines added, 8 lines removed)
 - **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">--</span> (41 lines added, 30 lines removed)
-- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (17 lines added, 17 lines removed)
-- **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">--</span> (44 lines added, 32 lines removed)
-- **Motion Classification and Anomaly Detection**: <span style="color:green">+++</span><span style="color:red">--</span> (58 lines added, 50 lines removed)
-- **Nicla Vision**: <span style="color:green">+++</span><span style="color:red">--</span> (52 lines added, 41 lines removed)
-- **Object Detection**: <span style="color:green">+++</span><span style="color:red">--</span> (20 lines added, 16 lines removed)
-- **Setup**: <span style="color:green">+++</span><span style="color:red">--</span> (24 lines added, 18 lines removed)
-- **Getting Started**: <span style="color:green">++++</span><span style="color:red">-</span> (81 lines added, 20 lines removed)
-- **KWS Feature Engineering**: <span style="color:green">+++</span><span style="color:red">--</span> (45 lines added, 41 lines removed)
-- **ML Systems**: <span style="color:green">++++</span><span style="color:red">-</span> (108 lines added, 34 lines removed)
-- **On-Device Learning**: <span style="color:green">++</span><span style="color:red">---</span> (20 lines added, 21 lines removed)
-- **ML Operations**: <span style="color:green">+++</span><span style="color:red">--</span> (28 lines added, 26 lines removed)
-- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">---</span> (17 lines added, 17 lines removed)
-- **Responsible AI**: <span style="color:green">+++</span><span style="color:red">--</span> (47 lines added, 45 lines removed)
-- **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">--</span> (16 lines added, 13 lines removed)
 - **AI Training**: <span style="color:green">+++</span><span style="color:red">--</span> (46 lines added, 44 lines removed)
 - **AI Workflow**: <span style="color:green">+++</span><span style="color:red">--</span> (13 lines added, 12 lines removed)
-- **DSP Spectral Features**: <span style="color:green">+++++</span><span style="color:red">-</span> (5 lines added, 1 lines removed)
-- **XIAO ESP32S3**: <span style="color:green">++++</span><span style="color:red">-</span> (34 lines added, 12 lines removed)
-- **LABS**: <span style="color:green">++++</span><span style="color:red">-</span> (115 lines added, 50 lines removed)
-- **DSP Spectral Features**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Shared**: <span style="color:green">++++++</span><span style="color:red"></span> (11 lines added, 0 lines removed)
-- **Kws}**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Motion Classification}**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Object Detection}**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Setup}**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **DSP Spectral Features**:  (0 lines added, 0 lines removed)
-- **KWS Feature Engineering**:  (0 lines added, 0 lines removed)
-- **Generative AI**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
-- **Nicla Vision}**:  (0 lines added, 0 lines removed)
-- **Xiao Esp32S3}**:  (0 lines added, 0 lines removed)
-- **Xiao Esp32S3}**:  (0 lines added, 0 lines removed)
+- **AI for Good**: <span style="color:green">+++</span><span style="color:red">--</span> (16 lines added, 14 lines removed)
+- **Acknowledgements**: <span style="color:green">+++++</span><span style="color:red">-</span> (5 lines added, 1 lines removed)
 - **Arduino Niclavision**: <span style="color:green">++++++</span><span style="color:red"></span> (13 lines added, 0 lines removed)
+- **Conclusion**: <span style="color:green">+++</span><span style="color:red">---</span> (7 lines added, 7 lines removed)
+- **DL Primer**: <span style="color:green">++</span><span style="color:red">---</span> (26 lines added, 27 lines removed)
+- **DSP Spectral Features**:  (0 lines added, 0 lines removed)
+- **DSP Spectral Features**: <span style="color:green">+++++</span><span style="color:red">-</span> (5 lines added, 1 lines removed)
+- **DSP Spectral Features**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Data Engineering**: <span style="color:green">+++</span><span style="color:red">--</span> (26 lines added, 24 lines removed)
+- **Efficient AI**: <span style="color:green">+++</span><span style="color:red">---</span> (8 lines added, 8 lines removed)
+- **Generative AI**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
+- **Getting Started**: <span style="color:green">++++</span><span style="color:red">-</span> (81 lines added, 20 lines removed)
+- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (17 lines added, 17 lines removed)
+- **KWS Feature Engineering**:  (0 lines added, 0 lines removed)
+- **KWS Feature Engineering**: <span style="color:green">+++</span><span style="color:red">--</span> (45 lines added, 41 lines removed)
+- **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">--</span> (44 lines added, 32 lines removed)
+- **Kws}**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **LABS**: <span style="color:green">++++</span><span style="color:red">-</span> (115 lines added, 50 lines removed)
+- **ML Operations**: <span style="color:green">+++</span><span style="color:red">--</span> (28 lines added, 26 lines removed)
+- **ML Systems**: <span style="color:green">++++</span><span style="color:red">-</span> (108 lines added, 34 lines removed)
+- **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">---</span> (9 lines added, 9 lines removed)
+- **Motion Classification and Anomaly Detection**: <span style="color:green">+++</span><span style="color:red">--</span> (58 lines added, 50 lines removed)
+- **Motion Classification}**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Nicla Vision**: <span style="color:green">+++</span><span style="color:red">--</span> (52 lines added, 41 lines removed)
+- **Nicla Vision}**:  (0 lines added, 0 lines removed)
+- **Object Detection**: <span style="color:green">+++</span><span style="color:red">--</span> (20 lines added, 16 lines removed)
+- **Object Detection}**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **On-Device Learning**: <span style="color:green">++</span><span style="color:red">---</span> (20 lines added, 21 lines removed)
+- **Responsible AI**: <span style="color:green">+++</span><span style="color:red">--</span> (47 lines added, 45 lines removed)
+- **Robust AI**: <span style="color:green">+++</span><span style="color:red">--</span> (51 lines added, 48 lines removed)
+- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">---</span> (17 lines added, 17 lines removed)
 - **Seeed Xiao Esp32S3**: <span style="color:green">++++++</span><span style="color:red"></span> (3 lines added, 0 lines removed)
+- **Setup**: <span style="color:green">+++</span><span style="color:red">--</span> (24 lines added, 18 lines removed)
+- **Setup}**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Shared**: <span style="color:green">++++++</span><span style="color:red"></span> (11 lines added, 0 lines removed)
+- **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">--</span> (16 lines added, 13 lines removed)
+- **XIAO ESP32S3**: <span style="color:green">++++</span><span style="color:red">-</span> (34 lines added, 12 lines removed)
+- **Xiao Esp32S3}**:  (0 lines added, 0 lines removed)
+- **Xiao Esp32S3}**:  (0 lines added, 0 lines removed)
 
 </details>
 
@@ -1098,23 +1153,23 @@ _Last Updated: Mar 25, 2025_
   <summary>**Minor Updates**</summary>
 
 - **AI Acceleration**: <span style="color:green">++++</span><span style="color:red">-</span> (39 lines added, 13 lines removed)
-- **AI for Good**: <span style="color:green">++++</span><span style="color:red">-</span> (34 lines added, 14 lines removed)
-- **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">--</span> (15 lines added, 9 lines removed)
-- **Data Engineering**: <span style="color:green">+++</span><span style="color:red">--</span> (24 lines added, 17 lines removed)
-- **DL Primer**: <span style="color:green">++++</span><span style="color:red">-</span> (41 lines added, 12 lines removed)
-- **Efficient AI**: <span style="color:green">++++</span><span style="color:red">-</span> (9 lines added, 3 lines removed)
 - **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">--</span> (16 lines added, 10 lines removed)
-- **ML Systems**: <span style="color:green">++++</span><span style="color:red">-</span> (13 lines added, 6 lines removed)
-- **On-Device Learning**: <span style="color:green">++++</span><span style="color:red">-</span> (33 lines added, 12 lines removed)
-- **ML Operations**: <span style="color:green">+++++</span><span style="color:red"></span> (46 lines added, 9 lines removed)
-- **Model Optimizations**: <span style="color:green">++++</span><span style="color:red">-</span> (24 lines added, 11 lines removed)
-- **Security & Privacy**: <span style="color:green">++++</span><span style="color:red">-</span> (39 lines added, 16 lines removed)
-- **Responsible AI**: <span style="color:green">++++</span><span style="color:red">-</span> (18 lines added, 5 lines removed)
-- **Robust AI**: <span style="color:green">+++</span><span style="color:red">--</span> (25 lines added, 15 lines removed)
-- **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">--</span> (14 lines added, 8 lines removed)
 - **AI Training**: <span style="color:green">++++</span><span style="color:red">-</span> (105 lines added, 34 lines removed)
 - **AI Workflow**: <span style="color:green">++++</span><span style="color:red">-</span> (10 lines added, 4 lines removed)
+- **AI for Good**: <span style="color:green">++++</span><span style="color:red">-</span> (34 lines added, 14 lines removed)
+- **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">--</span> (15 lines added, 9 lines removed)
+- **DL Primer**: <span style="color:green">++++</span><span style="color:red">-</span> (41 lines added, 12 lines removed)
+- **Data Engineering**: <span style="color:green">+++</span><span style="color:red">--</span> (24 lines added, 17 lines removed)
+- **Efficient AI**: <span style="color:green">++++</span><span style="color:red">-</span> (9 lines added, 3 lines removed)
 - **Generative AI**: <span style="color:green">++++</span><span style="color:red">-</span> (13 lines added, 6 lines removed)
+- **ML Operations**: <span style="color:green">+++++</span><span style="color:red"></span> (46 lines added, 9 lines removed)
+- **ML Systems**: <span style="color:green">++++</span><span style="color:red">-</span> (13 lines added, 6 lines removed)
+- **Model Optimizations**: <span style="color:green">++++</span><span style="color:red">-</span> (24 lines added, 11 lines removed)
+- **On-Device Learning**: <span style="color:green">++++</span><span style="color:red">-</span> (33 lines added, 12 lines removed)
+- **Responsible AI**: <span style="color:green">++++</span><span style="color:red">-</span> (18 lines added, 5 lines removed)
+- **Robust AI**: <span style="color:green">+++</span><span style="color:red">--</span> (25 lines added, 15 lines removed)
+- **Security & Privacy**: <span style="color:green">++++</span><span style="color:red">-</span> (39 lines added, 16 lines removed)
+- **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">--</span> (14 lines added, 8 lines removed)
 
 </details>
 
@@ -1125,25 +1180,25 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Minor Updates**</summary>
 
+- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (16 lines added, 16 lines removed)
+- **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">---</span> (27 lines added, 27 lines removed)
+- **AI Training**: <span style="color:green">+++</span><span style="color:red">---</span> (39 lines added, 39 lines removed)
+- **AI Workflow**: <span style="color:green">+++</span><span style="color:red">---</span> (10 lines added, 10 lines removed)
 - **AI for Good**: <span style="color:green">+++</span><span style="color:red">---</span> (23 lines added, 23 lines removed)
 - **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">---</span> (21 lines added, 21 lines removed)
-- **Data Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (34 lines added, 34 lines removed)
 - **DL Primer**: <span style="color:green">++</span><span style="color:red">---</span> (28 lines added, 30 lines removed)
-- **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">---</span> (27 lines added, 27 lines removed)
-- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (16 lines added, 16 lines removed)
-- **ML Systems**: <span style="color:green">+++</span><span style="color:red">---</span> (17 lines added, 17 lines removed)
-- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">--</span> (29 lines added, 28 lines removed)
-- **ML Operations**: <span style="color:green">+++</span><span style="color:red">---</span> (15 lines added, 15 lines removed)
-- **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">---</span> (30 lines added, 30 lines removed)
-- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">---</span> (21 lines added, 21 lines removed)
-- **Robust AI**: <span style="color:green">++</span><span style="color:red">---</span> (38 lines added, 40 lines removed)
-- **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">---</span> (21 lines added, 21 lines removed)
-- **AI Training**: <span style="color:green">+++</span><span style="color:red">---</span> (39 lines added, 39 lines removed)
+- **Data Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (34 lines added, 34 lines removed)
 - **Efficient AI**: <span style="color:green">+++</span><span style="color:red">--</span> (12 lines added, 11 lines removed)
 - **Generative AI**: <span style="color:green">++</span><span style="color:red">----</span> (1 lines added, 2 lines removed)
-- **Responsible AI**: <span style="color:green">+++</span><span style="color:red">---</span> (10 lines added, 10 lines removed)
-- **AI Workflow**: <span style="color:green">+++</span><span style="color:red">---</span> (10 lines added, 10 lines removed)
 - **Introduction**: <span style="color:green">+++</span><span style="color:red">---</span> (9 lines added, 9 lines removed)
+- **ML Operations**: <span style="color:green">+++</span><span style="color:red">---</span> (15 lines added, 15 lines removed)
+- **ML Systems**: <span style="color:green">+++</span><span style="color:red">---</span> (17 lines added, 17 lines removed)
+- **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">---</span> (30 lines added, 30 lines removed)
+- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">--</span> (29 lines added, 28 lines removed)
+- **Responsible AI**: <span style="color:green">+++</span><span style="color:red">---</span> (10 lines added, 10 lines removed)
+- **Robust AI**: <span style="color:green">++</span><span style="color:red">---</span> (38 lines added, 40 lines removed)
+- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">---</span> (21 lines added, 21 lines removed)
+- **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">---</span> (21 lines added, 21 lines removed)
 
 </details>
 
@@ -1154,41 +1209,41 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Major Updates**</summary>
 
-- **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">--</span> (174 lines added, 114 lines removed)
-- **Robust AI**: <span style="color:green">+++</span><span style="color:red">--</span> (5894 lines added, 4852 lines removed)
+- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">--</span> (300 lines added, 285 lines removed)
+- **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">--</span> (252 lines added, 248 lines removed)
+- **AI Training**: <span style="color:green">+++</span><span style="color:red">--</span> (372 lines added, 276 lines removed)
+- **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">--</span> (247 lines added, 225 lines removed)
 - **Conclusion**: <span style="color:green">++++</span><span style="color:red">-</span> (307 lines added, 150 lines removed)
 - **DL Primer**: <span style="color:green">+++</span><span style="color:red">--</span> (167 lines added, 140 lines removed)
-- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">--</span> (215 lines added, 159 lines removed)
-- **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">--</span> (238 lines added, 218 lines removed)
-- **Efficient AI**: <span style="color:green">+++</span><span style="color:red">--</span> (115 lines added, 106 lines removed)
 - **Data Engineering**: <span style="color:green">++</span><span style="color:red">---</span> (212 lines added, 218 lines removed)
-- **AI Training**: <span style="color:green">+++</span><span style="color:red">--</span> (372 lines added, 276 lines removed)
-- **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">--</span> (252 lines added, 248 lines removed)
-- **ML Operations**: <span style="color:green">+++</span><span style="color:red">--</span> (310 lines added, 276 lines removed)
-- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">--</span> (297 lines added, 266 lines removed)
-- **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">--</span> (247 lines added, 225 lines removed)
-- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">--</span> (300 lines added, 285 lines removed)
-- **ML Systems**: <span style="color:green"></span><span style="color:red">-----</span> (82 lines added, 456 lines removed)
-- **Responsible AI**: <span style="color:green">+++</span><span style="color:red">--</span> (126 lines added, 124 lines removed)
+- **Efficient AI**: <span style="color:green">+++</span><span style="color:red">--</span> (115 lines added, 106 lines removed)
 - **Embedded Ml**: <span style="color:green"></span><span style="color:red">-----</span> (15 lines added, 306 lines removed)
+- **ML Operations**: <span style="color:green">+++</span><span style="color:red">--</span> (310 lines added, 276 lines removed)
+- **ML Systems**: <span style="color:green"></span><span style="color:red">-----</span> (82 lines added, 456 lines removed)
 - **Ml Systems}**: <span style="color:green">+++++</span><span style="color:red"></span> (248 lines added, 21 lines removed)
+- **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">--</span> (174 lines added, 114 lines removed)
+- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">--</span> (215 lines added, 159 lines removed)
+- **Responsible AI**: <span style="color:green">+++</span><span style="color:red">--</span> (126 lines added, 124 lines removed)
+- **Robust AI**: <span style="color:green">+++</span><span style="color:red">--</span> (5894 lines added, 4852 lines removed)
+- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">--</span> (297 lines added, 266 lines removed)
+- **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">--</span> (238 lines added, 218 lines removed)
 
 </details>
 
 <details>
   <summary>**Minor Updates**</summary>
 
-- **Acknowledgements**: <span style="color:green">+++++</span><span style="color:red"></span> (37 lines added, 6 lines removed)
 - **AI Workflow**: <span style="color:green">+++</span><span style="color:red">--</span> (54 lines added, 52 lines removed)
 - **AI for Good**: <span style="color:green">+++</span><span style="color:red">--</span> (104 lines added, 80 lines removed)
-- **Generative AI**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
-- **Introduction**: <span style="color:green">++++</span><span style="color:red">-</span> (49 lines added, 24 lines removed)
+- **Acknowledgements**: <span style="color:green">+++++</span><span style="color:red"></span> (37 lines added, 6 lines removed)
 - **DSP Spectral Features**: <span style="color:green">+++</span><span style="color:red">---</span> (5 lines added, 5 lines removed)
+- **Embedded Sys**: <span style="color:green">++++</span><span style="color:red">-</span> (10 lines added, 3 lines removed)
+- **Generative AI**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 - **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (10 lines added, 10 lines removed)
+- **Introduction**: <span style="color:green">++++</span><span style="color:red">-</span> (49 lines added, 24 lines removed)
 - **KWS Feature Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (34 lines added, 34 lines removed)
 - **Motion Classify Ad**: <span style="color:green">+++</span><span style="color:red">---</span> (26 lines added, 26 lines removed)
 - **Niclav Sys**: <span style="color:green">+++</span><span style="color:red">---</span> (6 lines added, 6 lines removed)
-- **Embedded Sys**: <span style="color:green">++++</span><span style="color:red">-</span> (10 lines added, 3 lines removed)
 
 </details>
 
@@ -1199,23 +1254,23 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Minor Updates**</summary>
 
-- **Data Engineering**: <span style="color:green">+++</span><span style="color:red">--</span> (65 lines added, 36 lines removed)
+- **AI Acceleration**: <span style="color:green">+++++</span><span style="color:red"></span> (29 lines added, 3 lines removed)
+- **AI Frameworks**: <span style="color:green">++++</span><span style="color:red">-</span> (57 lines added, 25 lines removed)
+- **AI Training**: <span style="color:green">++++</span><span style="color:red">-</span> (61 lines added, 20 lines removed)
+- **AI Workflow**: <span style="color:green">++++</span><span style="color:red">-</span> (41 lines added, 18 lines removed)
 - **AI for Good**: <span style="color:green">++++</span><span style="color:red">-</span> (38 lines added, 15 lines removed)
 - **Benchmarking AI**: <span style="color:green">++++</span><span style="color:red">-</span> (40 lines added, 18 lines removed)
 - **DL Primer**: <span style="color:green">+++</span><span style="color:red">--</span> (48 lines added, 28 lines removed)
+- **Data Engineering**: <span style="color:green">+++</span><span style="color:red">--</span> (65 lines added, 36 lines removed)
 - **Efficient AI**: <span style="color:green">+++++</span><span style="color:red"></span> (39 lines added, 5 lines removed)
 - **Embedded Ml**: <span style="color:green">++++</span><span style="color:red">-</span> (83 lines added, 31 lines removed)
 - **Embedded Sys**: <span style="color:green">+++</span><span style="color:red">--</span> (48 lines added, 37 lines removed)
-- **AI Frameworks**: <span style="color:green">++++</span><span style="color:red">-</span> (57 lines added, 25 lines removed)
-- **AI Acceleration**: <span style="color:green">+++++</span><span style="color:red"></span> (29 lines added, 3 lines removed)
-- **On-Device Learning**: <span style="color:green">++++</span><span style="color:red">-</span> (53 lines added, 22 lines removed)
 - **ML Operations**: <span style="color:green">++++</span><span style="color:red">-</span> (74 lines added, 22 lines removed)
 - **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">--</span> (54 lines added, 32 lines removed)
-- **Security & Privacy**: <span style="color:green">++++</span><span style="color:red">--</span> (44 lines added, 22 lines removed)
+- **On-Device Learning**: <span style="color:green">++++</span><span style="color:red">-</span> (53 lines added, 22 lines removed)
 - **Responsible AI**: <span style="color:green">++++</span><span style="color:red">-</span> (44 lines added, 21 lines removed)
+- **Security & Privacy**: <span style="color:green">++++</span><span style="color:red">--</span> (44 lines added, 22 lines removed)
 - **Sustainable AI**: <span style="color:green">++++</span><span style="color:red">-</span> (42 lines added, 19 lines removed)
-- **AI Training**: <span style="color:green">++++</span><span style="color:red">-</span> (61 lines added, 20 lines removed)
-- **AI Workflow**: <span style="color:green">++++</span><span style="color:red">-</span> (41 lines added, 18 lines removed)
 
 </details>
 
@@ -1232,23 +1287,23 @@ _Last Updated: Mar 25, 2025_
   <summary>**Minor Updates**</summary>
 
 - **AI Acceleration**: <span style="color:green">++</span><span style="color:red">---</span> (21 lines added, 32 lines removed)
-- **Niclav Sys**: <span style="color:green">+++</span><span style="color:red">---</span> (6 lines added, 6 lines removed)
-- **Embedded Ml**: <span style="color:green">+++</span><span style="color:red">--</span> (53 lines added, 41 lines removed)
 - **AI Frameworks**: <span style="color:green">++++</span><span style="color:red">-</span> (66 lines added, 23 lines removed)
-- **Data Engineering**: <span style="color:green">++++</span><span style="color:red">-</span> (94 lines added, 34 lines removed)
+- **AI Training**: <span style="color:green">++++</span><span style="color:red">-</span> (22 lines added, 6 lines removed)
+- **AI Workflow**: <span style="color:green">++++</span><span style="color:red">-</span> (28 lines added, 13 lines removed)
 - **AI for Good**: <span style="color:green">++++</span><span style="color:red">-</span> (17 lines added, 6 lines removed)
 - **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">--</span> (32 lines added, 18 lines removed)
 - **DL Primer**: <span style="color:green">+++++</span><span style="color:red"></span> (25 lines added, 1 lines removed)
-- **Embedded Sys**: <span style="color:green">+++++</span><span style="color:red"></span> (21 lines added, 2 lines removed)
-- **On-Device Learning**: <span style="color:green">++++</span><span style="color:red">-</span> (23 lines added, 5 lines removed)
-- **ML Operations**: <span style="color:green">+++</span><span style="color:red">--</span> (47 lines added, 29 lines removed)
-- **Security & Privacy**: <span style="color:green">++++</span><span style="color:red">-</span> (29 lines added, 12 lines removed)
-- **Responsible AI**: <span style="color:green">+++++</span><span style="color:red"></span> (18 lines added, 1 lines removed)
-- **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">--</span> (49 lines added, 34 lines removed)
-- **AI Training**: <span style="color:green">++++</span><span style="color:red">-</span> (22 lines added, 6 lines removed)
-- **AI Workflow**: <span style="color:green">++++</span><span style="color:red">-</span> (28 lines added, 13 lines removed)
-- **Model Optimizations**: <span style="color:green">++++</span><span style="color:red">-</span> (50 lines added, 22 lines removed)
+- **Data Engineering**: <span style="color:green">++++</span><span style="color:red">-</span> (94 lines added, 34 lines removed)
 - **Efficient AI**: <span style="color:green">+++</span><span style="color:red">---</span> (5 lines added, 5 lines removed)
+- **Embedded Ml**: <span style="color:green">+++</span><span style="color:red">--</span> (53 lines added, 41 lines removed)
+- **Embedded Sys**: <span style="color:green">+++++</span><span style="color:red"></span> (21 lines added, 2 lines removed)
+- **ML Operations**: <span style="color:green">+++</span><span style="color:red">--</span> (47 lines added, 29 lines removed)
+- **Model Optimizations**: <span style="color:green">++++</span><span style="color:red">-</span> (50 lines added, 22 lines removed)
+- **Niclav Sys**: <span style="color:green">+++</span><span style="color:red">---</span> (6 lines added, 6 lines removed)
+- **On-Device Learning**: <span style="color:green">++++</span><span style="color:red">-</span> (23 lines added, 5 lines removed)
+- **Responsible AI**: <span style="color:green">+++++</span><span style="color:red"></span> (18 lines added, 1 lines removed)
+- **Security & Privacy**: <span style="color:green">++++</span><span style="color:red">-</span> (29 lines added, 12 lines removed)
+- **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">--</span> (49 lines added, 34 lines removed)
 
 </details>
 
@@ -1259,13 +1314,13 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Minor Updates**</summary>
 
-- **Benchmarking AI**: <span style="color:green">++</span><span style="color:red">---</span> (3 lines added, 5 lines removed)
-- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">--</span> (8 lines added, 6 lines removed)
-- **ML Operations**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
 - **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
-- **DL Primer**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **AI for Good**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
+- **Benchmarking AI**: <span style="color:green">++</span><span style="color:red">---</span> (3 lines added, 5 lines removed)
+- **DL Primer**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **ML Operations**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">--</span> (8 lines added, 6 lines removed)
+- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
 - **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">---</span> (11 lines added, 11 lines removed)
 
 </details>
@@ -1277,20 +1332,20 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Minor Updates**</summary>
 
-- **AI for Good**: <span style="color:green">+++</span><span style="color:red">--</span> (7 lines added, 6 lines removed)
 - **AI Acceleration**: <span style="color:green">++</span><span style="color:red">---</span> (51 lines added, 59 lines removed)
-- **ML Operations**: <span style="color:green">+++</span><span style="color:red">--</span> (34 lines added, 24 lines removed)
-- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">---</span> (39 lines added, 39 lines removed)
-- **Sustainable AI**: <span style="color:green">++</span><span style="color:red">---</span> (42 lines added, 44 lines removed)
-- **Data Engineering**: <span style="color:green">+++</span><span style="color:red">--</span> (18 lines added, 12 lines removed)
-- **Responsible AI**: <span style="color:green">++</span><span style="color:red">---</span> (9 lines added, 10 lines removed)
+- **AI Training**: <span style="color:green">+++</span><span style="color:red">---</span> (12 lines added, 12 lines removed)
+- **AI for Good**: <span style="color:green">+++</span><span style="color:red">--</span> (7 lines added, 6 lines removed)
 - **Benchmarking AI**: <span style="color:green">++</span><span style="color:red">---</span> (31 lines added, 36 lines removed)
+- **DL Primer**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
+- **Data Engineering**: <span style="color:green">+++</span><span style="color:red">--</span> (18 lines added, 12 lines removed)
+- **Embedded Ml**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Embedded Sys**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **ML Operations**: <span style="color:green">+++</span><span style="color:red">--</span> (34 lines added, 24 lines removed)
 - **Model Optimizations**: <span style="color:green">++</span><span style="color:red">---</span> (34 lines added, 36 lines removed)
 - **On-Device Learning**: <span style="color:green">++</span><span style="color:red">---</span> (27 lines added, 31 lines removed)
-- **Embedded Sys**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **AI Training**: <span style="color:green">+++</span><span style="color:red">---</span> (12 lines added, 12 lines removed)
-- **Embedded Ml**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **DL Primer**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
+- **Responsible AI**: <span style="color:green">++</span><span style="color:red">---</span> (9 lines added, 10 lines removed)
+- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">---</span> (39 lines added, 39 lines removed)
+- **Sustainable AI**: <span style="color:green">++</span><span style="color:red">---</span> (42 lines added, 44 lines removed)
 
 </details>
 
@@ -1301,8 +1356,8 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Minor Updates**</summary>
 
-- **Niclav Sys**: <span style="color:green"></span><span style="color:red">------</span> (0 lines added, 2 lines removed)
 - **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Niclav Sys**: <span style="color:green"></span><span style="color:red">------</span> (0 lines added, 2 lines removed)
 
 </details>
 
@@ -1330,8 +1385,8 @@ _Last Updated: Mar 25, 2025_
   <summary>**Minor Updates**</summary>
 
 - **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
-- **Sustainable AI**: <span style="color:green">++++</span><span style="color:red">-</span> (35 lines added, 11 lines removed)
 - **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">---</span> (6 lines added, 6 lines removed)
+- **Sustainable AI**: <span style="color:green">++++</span><span style="color:red">-</span> (35 lines added, 11 lines removed)
 
 </details>
 
@@ -1403,16 +1458,16 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Minor Updates**</summary>
 
-- **DL Primer**: <span style="color:green"></span><span style="color:red">------</span> (0 lines added, 12 lines removed)
+- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **AI Training**: <span style="color:green">++++++</span><span style="color:red"></span> (6 lines added, 0 lines removed)
-- **Generative AI**: <span style="color:green"></span><span style="color:red">-----</span> (2 lines added, 61 lines removed)
-- **Robust AI**: <span style="color:green"></span><span style="color:red">-----</span> (2 lines added, 40 lines removed)
 - **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
+- **DL Primer**: <span style="color:green"></span><span style="color:red">------</span> (0 lines added, 12 lines removed)
 - **Data Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Embedded Ml**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Embedded Sys**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Generative AI**: <span style="color:green"></span><span style="color:red">-----</span> (2 lines added, 61 lines removed)
 - **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Robust AI**: <span style="color:green"></span><span style="color:red">-----</span> (2 lines added, 40 lines removed)
 
 </details>
 
@@ -1423,16 +1478,16 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Minor Updates**</summary>
 
+- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
+- **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
+- **AI Workflow**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
 - **Data Engineering**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
 - **Embedded Sys**: <span style="color:green">+++</span><span style="color:red">---</span> (5 lines added, 5 lines removed)
-- **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
-- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
 - **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 - **Kws Nicla**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
 - **Responsible AI**: <span style="color:green">+++</span><span style="color:red">---</span> (9 lines added, 9 lines removed)
-- **AI Workflow**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 
 </details>
 
@@ -1443,32 +1498,32 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Minor Updates**</summary>
 
-- **Efficient AI**: <span style="color:green">++++</span><span style="color:red">-</span> (9 lines added, 3 lines removed)
-- **AI Frameworks**: <span style="color:green">+++++</span><span style="color:red">-</span> (5 lines added, 1 lines removed)
-- **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">--</span> (15 lines added, 11 lines removed)
 - **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">--</span> (20 lines added, 17 lines removed)
+- **AI Frameworks**: <span style="color:green">+++++</span><span style="color:red">-</span> (5 lines added, 1 lines removed)
+- **AI Training**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
+- **AI Workflow**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
 - **AI for Good**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
 - **Benchmarking AI**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
-- **Data Engineering**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
 - **DL Primer**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
 - **DSP Spectral Features**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
+- **Data Engineering**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
+- **Efficient AI**: <span style="color:green">++++</span><span style="color:red">-</span> (9 lines added, 3 lines removed)
 - **Embedded Ml**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
 - **Embedded Sys**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
 - **Generative AI**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
 - **Image Classification**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
 - **KWS Feature Engineering**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
 - **Kws Nicla**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
+- **ML Operations**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
+- **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">--</span> (15 lines added, 11 lines removed)
 - **Motion Classify Ad**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
 - **Niclav Sys**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
 - **Object Detection Fomo**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
 - **On-Device Learning**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
-- **ML Operations**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
-- **Security & Privacy**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
 - **Responsible AI**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
 - **Robust AI**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
+- **Security & Privacy**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
 - **Sustainable AI**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
-- **AI Training**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
-- **AI Workflow**: <span style="color:green">++++++</span><span style="color:red"></span> (4 lines added, 0 lines removed)
 
 </details>
 
@@ -1490,37 +1545,37 @@ _Last Updated: Mar 25, 2025_
 <details>
   <summary>**Major Updates**</summary>
 
+- **AI Acceleration**: <span style="color:green">+++++</span><span style="color:red"></span> (1021 lines added, 12 lines removed)
+- **AI Frameworks**: <span style="color:green">+++++</span><span style="color:red"></span> (708 lines added, 11 lines removed)
+- **AI Training**: <span style="color:green">+++++</span><span style="color:red"></span> (932 lines added, 6 lines removed)
 - **AI for Good**: <span style="color:green">+++++</span><span style="color:red"></span> (208 lines added, 1 lines removed)
 - **Benchmarking AI**: <span style="color:green">+++++</span><span style="color:red"></span> (796 lines added, 11 lines removed)
-- **Data Engineering**: <span style="color:green">+++++</span><span style="color:red"></span> (436 lines added, 12 lines removed)
 - **DL Primer**: <span style="color:green">+++++</span><span style="color:red"></span> (239 lines added, 1 lines removed)
 - **DSP Spectral Features**: <span style="color:green">+++++</span><span style="color:red"></span> (636 lines added, 21 lines removed)
+- **Data Engineering**: <span style="color:green">+++++</span><span style="color:red"></span> (436 lines added, 12 lines removed)
 - **Embedded Ml**: <span style="color:green">+++++</span><span style="color:red"></span> (278 lines added, 5 lines removed)
 - **Embedded Sys**: <span style="color:green">+++++</span><span style="color:red"></span> (393 lines added, 2 lines removed)
-- **AI Frameworks**: <span style="color:green">+++++</span><span style="color:red"></span> (708 lines added, 11 lines removed)
-- **AI Acceleration**: <span style="color:green">+++++</span><span style="color:red"></span> (1021 lines added, 12 lines removed)
 - **Image Classification**: <span style="color:green">+++++</span><span style="color:red"></span> (563 lines added, 49 lines removed)
 - **Kws Nicla**: <span style="color:green">+++++</span><span style="color:red"></span> (395 lines added, 26 lines removed)
+- **ML Operations**: <span style="color:green">+++++</span><span style="color:red"></span> (827 lines added, 9 lines removed)
+- **Model Optimizations**: <span style="color:green">+++++</span><span style="color:red"></span> (895 lines added, 41 lines removed)
 - **Motion Classify Ad**: <span style="color:green">+++++</span><span style="color:red"></span> (440 lines added, 32 lines removed)
 - **Niclav Sys**: <span style="color:green">+++++</span><span style="color:red"></span> (339 lines added, 30 lines removed)
 - **Object Detection Fomo**: <span style="color:green">+++++</span><span style="color:red"></span> (343 lines added, 34 lines removed)
 - **On-Device Learning**: <span style="color:green">+++++</span><span style="color:red"></span> (659 lines added, 13 lines removed)
-- **ML Operations**: <span style="color:green">+++++</span><span style="color:red"></span> (827 lines added, 9 lines removed)
-- **Model Optimizations**: <span style="color:green">+++++</span><span style="color:red"></span> (895 lines added, 41 lines removed)
-- **Security & Privacy**: <span style="color:green">+++++</span><span style="color:red"></span> (1072 lines added, 17 lines removed)
 - **Responsible AI**: <span style="color:green">+++++</span><span style="color:red"></span> (449 lines added, 5 lines removed)
+- **Security & Privacy**: <span style="color:green">+++++</span><span style="color:red"></span> (1072 lines added, 17 lines removed)
 - **Sustainable AI**: <span style="color:green">+++++</span><span style="color:red"></span> (627 lines added, 10 lines removed)
-- **AI Training**: <span style="color:green">+++++</span><span style="color:red"></span> (932 lines added, 6 lines removed)
 
 </details>
 
 <details>
   <summary>**Minor Updates**</summary>
 
+- **AI Workflow**: <span style="color:green">+++++</span><span style="color:red"></span> (97 lines added, 2 lines removed)
 - **Efficient AI**: <span style="color:green">+++++</span><span style="color:red"></span> (179 lines added, 5 lines removed)
 - **Generative AI**: <span style="color:green">+++++</span><span style="color:red"></span> (72 lines added, 1 lines removed)
 - **KWS Feature Engineering**: <span style="color:green">+++++</span><span style="color:red"></span> (153 lines added, 8 lines removed)
-- **AI Workflow**: <span style="color:green">+++++</span><span style="color:red"></span> (97 lines added, 2 lines removed)
 - **Robust AI**: <span style="color:green">++++++</span><span style="color:red"></span> (50 lines added, 0 lines removed)
 
 </details>
