@@ -42,9 +42,23 @@ def collect_stats_from_qmd(file_path):
     # 📝 Word Count (including code and comments)
     stats['words'] += len(re.findall(r'\b\w+\b', full_content))
 
-    # 🖼️ Figures and 📊 Tables (from full content)
-    stats['figures'] += len(re.findall(r'!\[.*?\]\(.*?\)', full_content)) + len(re.findall(r'fig-cap', full_content))
-    stats['tables'] += len(re.findall(r'^\s*\|.*\|', full_content, re.MULTILINE)) + len(re.findall(r'table-cap', full_content))
+    # 🎨 Figures and 📊 Tables (only labeled ones using #fig- and #tbl-)
+    fig_labels = list(set(
+        re.findall(r'#fig-[\w-]+', full_content) +
+        re.findall(r'#\|\s*label:\s*fig-[\w-]+', full_content)
+    ))
+    tbl_labels = list(set(
+        re.findall(r'#tbl-[\w-]+', full_content) +
+        re.findall(r'#\|\s*label:\s*tbl-[\w-]+', full_content)
+    ))
+
+    # Count valid figures and tables (only labeled)
+    stats['figures'] += len(fig_labels)
+    stats['tables'] += len(tbl_labels)
+
+    # ❌ Figures and Tables Without Captions (set to zero since unlabeled are ignored)
+    stats['figs_no_caption'] = 0
+    stats['tables_no_caption'] = 0
 
     # 💻 Code blocks
     stats['code_blocks'] += len(re.findall(r'^```', full_content, re.MULTILINE))
@@ -61,15 +75,8 @@ def collect_stats_from_qmd(file_path):
     # 🚧 TODOs and FIXMEs
     stats['todos'] += len(re.findall(r'TODO|FIXME', full_content, re.IGNORECASE))
 
-    # ❌ Captions
-    stats['figs_no_caption'] += (
-        len(re.findall(r'!\[.*?\]\(.*?\)', full_content)) - len(re.findall(r'fig-cap', full_content))
-    )
-    stats['tables_no_caption'] += (
-        len(re.findall(r'^\s*\|.*\|', full_content, re.MULTILINE)) - len(re.findall(r'table-cap', full_content))
-    )
-
     return stats
+
 
 def summarize_stats(stats_by_file):
     total = defaultdict(int)
@@ -96,7 +103,7 @@ def summarize_stats(stats_by_file):
         "sections":           "🧱 Sections",
         "subsections":        "🧱 Subsections",
         "words":              "📝 Words",
-        "figures":            "🖼️ Figures",
+        "figures":            "🎨 Figures",
         "tables":             "📊 Tables",
         "code_blocks":        "💻 Code Blocks",
         "citations":          "📚 Citations",
