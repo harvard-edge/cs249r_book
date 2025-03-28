@@ -1,12 +1,37 @@
-_Last Updated: Mar 26, 2025_
+_Last Updated: Mar 28, 2025_
 
 ## 2025 Changes
 
-### 📅 Published on Mar 26, 2025
+### 📅 Published on Mar 28, 2025
 
-2 files updated (4 lines added, 1 lines removed)
+15 files updated (32 lines added, 30 lines removed)
 
 <details open>
+  <summary>**Minor Updates**</summary>
+
+- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **AI for Good**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **DL Primer**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **DNN Architectures**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
+- **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
+- **ML Operations**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **ML Systems**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Motion Classification and Anomaly Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Robust AI**: <span style="color:green">+++</span><span style="color:red">--</span> (8 lines added, 6 lines removed)
+- **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+
+</details>
+
+### 📅 Published on Mar 25, 2025
+
+🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/fdb64ca113052e81fdbfe5e53e14e263371f2ee6...a63d66575cad5c98e530cd2fad507ef822dc6808) --- 2 files updated (4 lines added, 1 lines removed)
+
+<details>
   <summary>**Minor Updates**</summary>
 
 - **ML Operations**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
@@ -18,7 +43,7 @@ _Last Updated: Mar 26, 2025_
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/7db82681576fcec579057988c4f1a70638cb9334...fdb64ca113052e81fdbfe5e53e14e263371f2ee6) --- 40 files updated (12616 lines added, 7370 lines removed)
 
-<details open>
+<details>
   <summary>**Major Updates**</summary>
 
 - **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">--</span> (159 lines added, 157 lines removed)
