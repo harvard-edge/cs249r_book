@@ -9,21 +9,33 @@ _Last Updated: Mar 28, 2025_
 <details open>
   <summary>**Minor Updates**</summary>
 
-- **Ai For Good**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Benchmarking**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Dl Primer**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
-- **Dnn Architectures**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Frameworks**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Hw Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **AI for Good**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **DL Primer**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **DNN Architectures**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
-- **Kws**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
-- **Ml Systems**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Motion Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Ondevice Learning**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Ops**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
-- **Robust Ai**: <span style="color:green">+++</span><span style="color:red">--</span> (8 lines added, 6 lines removed)
-- **Sustainable Ai**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
+- **ML Operations**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **ML Systems**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Motion Classification and Anomaly Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Robust AI**: <span style="color:green">+++</span><span style="color:red">--</span> (8 lines added, 6 lines removed)
+- **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+
+</details>
+
+### 📅 Published on Mar 25, 2025
+
+🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/fdb64ca113052e81fdbfe5e53e14e263371f2ee6...a63d66575cad5c98e530cd2fad507ef822dc6808) --- 2 files updated (4 lines added, 1 lines removed)
+
+<details>
+  <summary>**Minor Updates**</summary>
+
+- **ML Operations**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Robust AI**: <span style="color:green">++++++</span><span style="color:red"></span> (3 lines added, 0 lines removed)
 
 </details>
 
