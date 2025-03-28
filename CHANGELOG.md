@@ -4,15 +4,17 @@ _Last Updated: Mar 28, 2025_
 
 ### 📅 Published on Mar 28, 2025
 
-5 files updated (11 lines added, 11 lines removed)
+7 files updated (14 lines added, 14 lines removed)
 
 <details open>
   <summary>**Minor Updates**</summary>
 
+- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 - **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
 - **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
+- **ML Operations**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Motion Classification and Anomaly Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 
 </details>
