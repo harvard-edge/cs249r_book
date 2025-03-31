@@ -9,28 +9,28 @@ _Last Updated: Mar 31, 2025_
 <details open>
   <summary>**Major Updates**</summary>
 
-- **Ops**: <span style="color:green">+++++</span><span style="color:red"></span> (730 lines added, 43 lines removed)
+- **ML Operations**: <span style="color:green">+++++</span><span style="color:red"></span> (730 lines added, 43 lines removed)
 
 </details>
 
 <details open>
   <summary>**Minor Updates**</summary>
 
-- **Ai For Good**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Benchmarking**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Dl Primer**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
-- **Dnn Architectures**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Efficient Ai**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Frameworks**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Hw Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **AI for Good**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **DL Primer**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **DNN Architectures**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Efficient AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
-- **Kws**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
-- **Ml Systems**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Motion Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Ondevice Learning**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Robust Ai**: <span style="color:green">+++</span><span style="color:red">--</span> (8 lines added, 6 lines removed)
-- **Sustainable Ai**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
+- **ML Systems**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Motion Classification and Anomaly Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Robust AI**: <span style="color:green">+++</span><span style="color:red">--</span> (8 lines added, 6 lines removed)
+- **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 
 </details>
 
