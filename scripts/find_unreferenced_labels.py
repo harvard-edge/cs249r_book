@@ -69,7 +69,7 @@ def report_unreferenced(defined, referenced):
             print(f"❌ {label_type:<10}: @{label:<30} ({rel_path}:{line})")
         return False
     else:
-        print("✅ All defined labels are referenced!")
+        print("All defined labels are referenced!")
         return True
 
 def parse_args():
