@@ -6,8 +6,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/workflow-controller.yml">
-    <img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/workflow-controller.yml?label=Build" alt="Build Status"/>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/controller.yml">
+    <img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/controller.yml?label=Build" alt="Build Status"/>
   </a>
   <a href="https://harvard-edge.github.io/cs249r_book/">
     <img src="https://img.shields.io/website?url=https://harvard-edge.github.io/cs249r_book/&label=Website" alt="Website"/>
