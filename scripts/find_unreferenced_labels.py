@@ -16,7 +16,7 @@ from pathlib import Path
 from collections import defaultdict
 
 ALL_LABEL_TYPES = {
-    "Figure":   r'\{#(fig-[\w-]+)',
+    "Figure":   r'(?:\{#|#\|\s*label:\s*)(fig-[\w-]+)', # Matches {#fig-xyz or #| label: fig-xyz
     "Table":    r'\{#(tbl-[\w-]+)',
     "Section":  r'\{#(sec-[\w-]+)',
     "Equation": r'\{#(eq-[\w-]+)',
@@ -86,6 +86,25 @@ def parse_args():
 
     return parser.parse_args()
 
+def report_unresolved_references(referenced, defined):
+    all_defined_labels = set()
+    for label_map in defined.values():
+        all_defined_labels.update(label_map.keys())
+
+    unresolved = []
+    for ref in sorted(referenced):
+        if ref not in all_defined_labels:
+            unresolved.append(ref)
+
+    if unresolved:
+        print("\n🚫 References without matching definitions:\n")
+        for ref in unresolved:
+            print(f"❌ @{ref} has no matching {{#{ref}}} label")
+        return False
+    else:
+        print("All references have corresponding labels!")
+        return True
+
 def main():
     args = parse_args()
 
@@ -105,7 +124,15 @@ def main():
         sys.exit(1)
 
     defined, referenced = collect_labels_and_references(files, label_types)
-    success = report_unreferenced(defined, referenced)
+
+    success1 = report_unreferenced(defined, referenced)
+    success2 = report_unresolved_references(referenced, defined)
+    success = success1 and success2
+    if success:
+        print("✅ All labels and references are correctly defined!")
+    else:
+        print("❌ Some labels or references are not correctly defined!")
+    print("\n🔍 Finished checking labels and references.")
 
     sys.exit(0 if success else 1)
 
