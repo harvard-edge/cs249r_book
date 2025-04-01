@@ -74,7 +74,7 @@ jobs:
             echo "changes_made=false" >> $GITHUB_OUTPUT
             echo "No changes to CHANGELOG.md"
           fi
-      
+            
       - name: 💾 Commit & Push Changes
         if: steps.update.outputs.changes_made == 'true'
         run: |
@@ -91,6 +91,33 @@ jobs:
           
           echo "Committing changes to branch: $TARGET_BRANCH"
           
+          # Try to pull first to integrate any remote changes
+          git pull --rebase origin $TARGET_BRANCH || echo "Could not pull latest changes, continuing anyway"
+          
           git add CHANGELOG.md
           git commit -m "🤖 Auto-update changelog [skip ci]"
-          git push origin HEAD:$TARGET_BRANCH
+          
+          # Try pushing up to 3 times with exponential backoff
+          MAX_ATTEMPTS=3
+          ATTEMPT=1
+          SUCCESS=false
+          
+          while [ $ATTEMPT -le $MAX_ATTEMPTS ] && [ "$SUCCESS" != "true" ]; do
+            echo "Push attempt $ATTEMPT of $MAX_ATTEMPTS"
+            if git push origin HEAD:$TARGET_BRANCH; then
+              SUCCESS=true
+              echo "Push successful!"
+            else
+              SLEEP_TIME=$(( 2 ** $ATTEMPT ))
+              echo "Push failed. Retrying in $SLEEP_TIME seconds..."
+              sleep $SLEEP_TIME
+              # Pull again before retry
+              git pull --rebase origin $TARGET_BRANCH || echo "Could not pull latest changes before retry"
+              ATTEMPT=$(( ATTEMPT + 1 ))
+            fi
+          done
+          
+          if [ "$SUCCESS" != "true" ]; then
+            echo "Failed to push changes after $MAX_ATTEMPTS attempts"
+            exit 1
+          fi
