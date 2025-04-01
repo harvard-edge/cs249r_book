@@ -4,7 +4,7 @@ _Last Updated: Apr 01, 2025_
 
 ### 📅 Published on Apr 01, 2025
 
-21 files updated (1135 lines added, 258 lines removed)
+23 files updated (1140 lines added, 262 lines removed)
 
 <details open>
   <summary>**Major Updates**</summary>
@@ -18,6 +18,7 @@ _Last Updated: Apr 01, 2025_
 
 - **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 - **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **AI Training**: <span style="color:green">++++</span><span style="color:red">--</span> (2 lines added, 1 lines removed)
 - **AI for Good**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **DL Primer**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
@@ -31,8 +32,9 @@ _Last Updated: Apr 01, 2025_
 - **Motion Classification and Anomaly Detection**: <span style="color:green">++++</span><span style="color:red">-</span> (79 lines added, 39 lines removed)
 - **Motion Classification and Anomaly Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Object Detection**: <span style="color:green">++++</span><span style="color:red">-</span> (75 lines added, 36 lines removed)
-- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Robust AI**: <span style="color:green">+++</span><span style="color:red">--</span> (8 lines added, 6 lines removed)
+- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **Robust AI**: <span style="color:green">+++</span><span style="color:red">--</span> (9 lines added, 7 lines removed)
+- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Setup**: <span style="color:green">+++</span><span style="color:red">--</span> (49 lines added, 26 lines removed)
 - **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 - **XIAO ESP32S3**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
