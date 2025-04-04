@@ -1,10 +1,10 @@
-_Last Updated: Apr 01, 2025_
+_Last Updated: Apr 04, 2025_
 
 ## 2025 Changes
 
-### 📅 Published on Apr 01, 2025
+### 📅 Published on Apr 04, 2025
 
-23 files updated (1140 lines added, 262 lines removed)
+23 files updated (1151 lines added, 286 lines removed)
 
 <details open>
   <summary>**Major Updates**</summary>
@@ -16,7 +16,7 @@ _Last Updated: Apr 01, 2025_
 <details open>
   <summary>**Minor Updates**</summary>
 
-- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **AI Acceleration**: <span style="color:green">++</span><span style="color:red">----</span> (13 lines added, 26 lines removed)
 - **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **AI Training**: <span style="color:green">++++</span><span style="color:red">--</span> (2 lines added, 1 lines removed)
 - **AI for Good**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
