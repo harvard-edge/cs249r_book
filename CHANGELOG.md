@@ -4,23 +4,23 @@ _Last Updated: Apr 05, 2025_
 
 ### 📅 Published on Apr 05, 2025
 
-23 files updated (1155 lines added, 288 lines removed)
+23 files updated (1449 lines added, 331 lines removed)
 
 <details open>
   <summary>**Major Updates**</summary>
 
-- **ML Operations**: <span style="color:green">+++++</span><span style="color:red"></span> (730 lines added, 43 lines removed)
+- **ML Operations**: <span style="color:green">+++++</span><span style="color:red"></span> (997 lines added, 77 lines removed)
 
 </details>
 
 <details open>
   <summary>**Minor Updates**</summary>
 
-- **AI Acceleration**: <span style="color:green">++</span><span style="color:red">---</span> (17 lines added, 28 lines removed)
+- **AI Acceleration**: <span style="color:green">++</span><span style="color:red">---</span> (21 lines added, 30 lines removed)
 - **AI Frameworks**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **AI Training**: <span style="color:green">++++</span><span style="color:red">--</span> (2 lines added, 1 lines removed)
 - **AI for Good**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **Benchmarking AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Benchmarking AI**: <span style="color:green">++++</span><span style="color:red">-</span> (24 lines added, 8 lines removed)
 - **DL Primer**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
 - **DNN Architectures**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Efficient AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
