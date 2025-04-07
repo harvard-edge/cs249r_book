@@ -1,15 +1,19 @@
-_Last Updated: Apr 05, 2025_
+_Last Updated: Apr 07, 2025_
 
 ## 2025 Changes
 
-### 📅 Published on Apr 05, 2025
+### 📅 Published on Apr 07, 2025
 
-23 files updated (1449 lines added, 331 lines removed)
+31 files updated (2906 lines added, 1056 lines removed)
 
 <details open>
   <summary>**Major Updates**</summary>
 
+- **Image Classification**: <span style="color:green">+++</span><span style="color:red">--</span> (262 lines added, 143 lines removed)
 - **ML Operations**: <span style="color:green">+++++</span><span style="color:red"></span> (997 lines added, 77 lines removed)
+- **Object Detection**: <span style="color:green">+++</span><span style="color:red">--</span> (274 lines added, 165 lines removed)
+- **Small Language Models (SLM)**: <span style="color:green">+++</span><span style="color:red">--</span> (314 lines added, 162 lines removed)
+- **Vision-Language Models (VLM)**: <span style="color:green">++++</span><span style="color:red">-</span> (390 lines added, 158 lines removed)
 
 </details>
 
@@ -23,9 +27,11 @@ _Last Updated: Apr 05, 2025_
 - **Benchmarking AI**: <span style="color:green">++++</span><span style="color:red">-</span> (24 lines added, 8 lines removed)
 - **DL Primer**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
 - **DNN Architectures**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **DSP Spectral Features**: <span style="color:green">++++</span><span style="color:red">-</span> (121 lines added, 38 lines removed)
 - **Efficient AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Image Classification**: <span style="color:green">+++</span><span style="color:red">--</span> (81 lines added, 41 lines removed)
+- **KWS Feature Engineering**: <span style="color:green">++++</span><span style="color:red">--</span> (14 lines added, 7 lines removed)
 - **Keyword Spotting (KWS)**: <span style="color:green">++++</span><span style="color:red">--</span> (92 lines added, 46 lines removed)
 - **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
 - **ML Systems**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
@@ -33,9 +39,11 @@ _Last Updated: Apr 05, 2025_
 - **Motion Classification and Anomaly Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Object Detection**: <span style="color:green">++++</span><span style="color:red">-</span> (75 lines added, 36 lines removed)
 - **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **Raspberry Pi**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
 - **Robust AI**: <span style="color:green">+++</span><span style="color:red">--</span> (9 lines added, 7 lines removed)
 - **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Setup**: <span style="color:green">+++</span><span style="color:red">--</span> (49 lines added, 26 lines removed)
+- **Setup**: <span style="color:green">+++</span><span style="color:red">--</span> (78 lines added, 48 lines removed)
 - **Sustainable AI**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 - **XIAO ESP32S3**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 
