@@ -132,7 +132,7 @@ def main():
         print("All labels and references are correctly defined!")
     else:
         print("❌ Some labels or references are not correctly defined!")
-    print("Finished checking labels and references.")
+    print("\n Finished checking labels and references.")
 
     sys.exit(0 if success else 1)
 
