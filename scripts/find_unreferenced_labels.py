@@ -129,10 +129,10 @@ def main():
     success2 = report_unresolved_references(referenced, defined)
     success = success1 and success2
     if success:
-        print("✅ All labels and references are correctly defined!")
+        print("All labels and references are correctly defined!")
     else:
         print("❌ Some labels or references are not correctly defined!")
-    print("\n🔍 Finished checking labels and references.")
+    print("Finished checking labels and references.")
 
     sys.exit(0 if success else 1)
 
