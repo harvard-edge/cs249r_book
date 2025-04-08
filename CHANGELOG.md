@@ -1,10 +1,10 @@
-_Last Updated: Apr 07, 2025_
+_Last Updated: Apr 08, 2025_
 
 ## 2025 Changes
 
-### 📅 Published on Apr 07, 2025
+### 📅 Published on Apr 08, 2025
 
-31 files updated (2906 lines added, 1056 lines removed)
+32 files updated (2937 lines added, 1091 lines removed)
 
 <details open>
   <summary>**Major Updates**</summary>
@@ -31,6 +31,7 @@ _Last Updated: Apr 07, 2025_
 - **Efficient AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Image Classification**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Image Classification**: <span style="color:green">+++</span><span style="color:red">--</span> (81 lines added, 41 lines removed)
+- **Introduction**: <span style="color:green">++</span><span style="color:red">---</span> (31 lines added, 35 lines removed)
 - **KWS Feature Engineering**: <span style="color:green">++++</span><span style="color:red">--</span> (14 lines added, 7 lines removed)
 - **Keyword Spotting (KWS)**: <span style="color:green">++++</span><span style="color:red">--</span> (92 lines added, 46 lines removed)
 - **Keyword Spotting (KWS)**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
