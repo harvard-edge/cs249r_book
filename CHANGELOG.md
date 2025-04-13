@@ -1,10 +1,10 @@
-_Last Updated: Apr 12, 2025_
+_Last Updated: Apr 13, 2025_
 
 ## 2025 Changes
 
-### 📅 Published on Apr 12, 2025
+### 📅 Published on Apr 13, 2025
 
-35 files updated (4453 lines added, 1840 lines removed)
+36 files updated (4546 lines added, 1867 lines removed)
 
 <details open>
   <summary>**Major Updates**</summary>
@@ -32,6 +32,7 @@ _Last Updated: Apr 12, 2025_
 - **AI for Good**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 - **Benchmarking AI**: <span style="color:green">++++</span><span style="color:red">-</span> (24 lines added, 8 lines removed)
 - **DSP Spectral Features**: <span style="color:green">++++</span><span style="color:red">-</span> (121 lines added, 38 lines removed)
+- **Data Engineering**: <span style="color:green">++++</span><span style="color:red">-</span> (93 lines added, 27 lines removed)
 - **Efficient AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Image Classification**: <span style="color:green">+++</span><span style="color:red">--</span> (81 lines added, 41 lines removed)
 - **Introduction**: <span style="color:green">++</span><span style="color:red">---</span> (31 lines added, 35 lines removed)
