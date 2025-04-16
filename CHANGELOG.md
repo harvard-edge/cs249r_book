@@ -1,14 +1,15 @@
-_Last Updated: Apr 14, 2025_
+_Last Updated: Apr 16, 2025_
 
 ## 2025 Changes
 
-### 📅 Published on Apr 14, 2025
+### 📅 Published on Apr 16, 2025
 
-36 files updated (4609 lines added, 1962 lines removed)
+36 files updated (4884 lines added, 2190 lines removed)
 
 <details open>
   <summary>**Major Updates**</summary>
 
+- **AI Training**: <span style="color:green">++</span><span style="color:red">---</span> (156 lines added, 218 lines removed)
 - **DL Primer**: <span style="color:green">++++</span><span style="color:red">-</span> (244 lines added, 85 lines removed)
 - **DNN Architectures**: <span style="color:green">+++++</span><span style="color:red"></span> (376 lines added, 28 lines removed)
 - **Image Classification**: <span style="color:green">+++</span><span style="color:red">--</span> (262 lines added, 143 lines removed)
@@ -27,13 +28,12 @@ _Last Updated: Apr 14, 2025_
 
 - **AI Acceleration**: <span style="color:green">+</span><span style="color:red">----</span> (27 lines added, 104 lines removed)
 - **AI Frameworks**: <span style="color:green">++</span><span style="color:red">---</span> (64 lines added, 96 lines removed)
-- **AI Training**: <span style="color:green">++++</span><span style="color:red">--</span> (2 lines added, 1 lines removed)
 - **AI Workflow**: <span style="color:green">+++</span><span style="color:red">--</span> (109 lines added, 63 lines removed)
 - **AI for Good**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 - **Benchmarking AI**: <span style="color:green">++++</span><span style="color:red">-</span> (24 lines added, 8 lines removed)
 - **DSP Spectral Features**: <span style="color:green">++++</span><span style="color:red">-</span> (121 lines added, 38 lines removed)
 - **Data Engineering**: <span style="color:green">++++</span><span style="color:red">-</span> (93 lines added, 27 lines removed)
-- **Efficient AI**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Efficient AI**: <span style="color:green">+++++</span><span style="color:red"></span> (122 lines added, 12 lines removed)
 - **Image Classification**: <span style="color:green">+++</span><span style="color:red">--</span> (81 lines added, 41 lines removed)
 - **Introduction**: <span style="color:green">++</span><span style="color:red">---</span> (31 lines added, 35 lines removed)
 - **KWS Feature Engineering**: <span style="color:green">++++</span><span style="color:red">--</span> (14 lines added, 7 lines removed)
