@@ -139,3 +139,218 @@ On the embedded end of the spectrum, devices such as the STM32F4 or ESP32 microc
 In contrast, mobile-class hardware—such as the Qualcomm Snapdragon, Apple Neural Engine, or Google Tensor SoC—provides significantly more compute power, often with dedicated AI accelerators and optimized support for 8-bit or mixed-precision matrix operations. These platforms can support more complex training routines, including full backpropagation over compact models, though they still fall short of the computational throughput and memory bandwidth available in centralized data centers. For instance, training a lightweight transformer on a smartphone is feasible but must be tightly bounded in both time and energy consumption to avoid degrading the user experience.
 
 Compute constraints are especially salient in real-time or battery-operated systems. In a smartphone-based speech recognizer, on-device adaptation must not interfere with inference latency or system responsiveness. Similarly, in wearable medical monitors, training must occur opportunistically, during periods of low activity or charging, to preserve battery life and avoid thermal issues.
+
+## Adapting the Model: Minimizing What You Learn
+
+Adapting a machine learning model on the device requires revisiting a core assumption of conventional training: that the entire model must be updated. In resource-constrained environments, this assumption becomes infeasible due to memory, compute, and energy limitations. Instead, modern approaches to on-device learning often focus on minimizing the scope of adaptation, updating only a subset of model parameters while reusing the majority of the pretrained architecture. This strategy reduces both computational overhead and memory usage during training, enabling efficient local updates on devices ranging from smartphones to embedded microcontrollers. The central idea is to retain most of the model as a frozen backbone, while introducing lightweight, adaptable components—such as bias-only updates, residual adapters, or task-specific layers—that can capture local variations in data. These techniques enable personalized or environment-aware learning without incurring the full cost of end-to-end finetuning. In the sections that follow, we examine how minimal adaptation strategies are designed, the tradeoffs they introduce, and their role in enabling practical on-device learning.
+
+### Weight Freezing and Bias-Only Updates
+
+One of the simplest and most effective strategies for reducing the cost of on-device learning is to **freeze the majority of a model’s parameters** and adapt only a minimal subset. A widely used approach is **bias-only adaptation**, in which all weights are fixed and only the bias terms—typically scalar offsets applied after linear or convolutional layers—are updated during training. This significantly reduces the number of trainable parameters, simplifies memory management during backpropagation, and helps mitigate overfitting when data is sparse or noisy.
+
+Consider a standard neural network layer:
+
+$$
+y = W x + b
+$$
+
+where $W \in \mathbb{R}^{m \times n}$ is the weight matrix, $b \in \mathbb{R}^m$ is the bias vector, and $x \in \mathbb{R}^n$ is the input. In full training, gradients are computed for both $W$ and $b$. In bias-only adaptation, we constrain:
+
+$$
+\frac{\partial \mathcal{L}}{\partial W} = 0, \quad \frac{\partial \mathcal{L}}{\partial b} \neq 0
+$$
+
+so that only the bias is updated via gradient descent:
+
+$$
+b \leftarrow b - \eta \frac{\partial \mathcal{L}}{\partial b}
+$$
+
+This drastically reduces the number of stored gradients and optimizer states, enabling training to proceed even under memory-constrained conditions. On embedded devices that lack floating-point units, this reduction can be critical to enabling on-device learning at all.
+
+The following code snippet demonstrates how to implement bias-only adaptation in PyTorch:
+
+```python
+# Freeze all parameters
+for name, param in model.named_parameters():
+    param.requires_grad = False
+
+# Enable gradients for bias parameters only
+for name, param in model.named_parameters():
+    if 'bias' in name:
+        param.requires_grad = True
+```
+
+This pattern ensures that only bias terms participate in the backward pass and optimizer update. It is particularly useful when adapting pretrained models to user-specific or device-local data.
+
+This technique underpins **TinyTL**, a framework designed for adapting deep networks on microcontrollers. TinyTL freezes both the weights and batch normalization statistics of the model and trains only the bias terms, occasionally supplementing them with lightweight residual modules to restore representational flexibility. This approach reduces training memory usage by more than 10× and requires only minimal compute overhead—properties that are essential for deployment on devices with 256 KB of RAM or less.
+
+For example, in MobileNetV2, a model with roughly 3.5 million parameters, freezing all but the biases reduces the number of trainable parameters to under 50,000. When combined with 8-bit quantization, the resulting training footprint can fit within just a few hundred kilobytes of memory.
+
+Bias-only adaptation assumes that the frozen model already provides a strong feature representation for the task. Because no weights are updated, the model cannot restructure its internal representations. This makes bias-only updates ideal for **personalization and calibration**, where small shifts in output behavior are needed, but suboptimal for domain adaptation tasks involving significant distribution shift. In such cases, more expressive forms of adaptation—such as low-rank updates or residual adapters—may be necessary.
+
+### Residual Adaptation and Low-Rank Updates
+
+Bias-only updates offer a lightweight path for on-device learning, but they are limited in representational flexibility. When the frozen model does not align well with the target distribution, it may be necessary to allow more expressive adaptation—without incurring the full cost of weight updates. One solution is to introduce **residual adaptation modules**, or **low-rank parameterizations**, which provide a middle ground between static backbones and full fine-tuning.
+
+These methods extend a frozen model by adding trainable layers—typically small and computationally cheap—that allow the network to respond to new data. The main body of the network remains fixed, while only the added components are optimized. This modularity makes the approach well-suited for on-device adaptation in constrained settings, where small updates must deliver meaningful changes.
+
+#### Residual Adaptation via Adapters
+
+A common implementation involves **inserting adapters**—small residual bottleneck layers—between existing layers in a pretrained model. Consider a hidden representation $h$ passed between layers. A residual adapter introduces a transformation:
+
+$$
+h' = h + A(h)
+$$
+
+where $A(\cdot)$ is a trainable function, typically composed of two linear layers with a nonlinearity:
+
+$$
+A(h) = W_2 \, \sigma(W_1 h)
+$$
+
+with $W_1 \in \mathbb{R}^{r \times d}$ and $W_2 \in \mathbb{R}^{d \times r}$, where $r \ll d$. This **bottleneck design** ensures that only a small number of parameters are introduced per layer.
+
+The adapters act as **learnable perturbations** on top of a frozen backbone. Because they are small and sparsely applied, they add negligible memory overhead, yet they allow the model to shift its predictions in response to new inputs.
+
+#### Low-Rank Updates
+
+Another efficient strategy is to constrain weight updates themselves to a **low-rank structure**. Rather than updating a full matrix $W$, we approximate the update as:
+
+$$
+\Delta W \approx U V^\top
+$$
+
+where $U \in \mathbb{R}^{m \times r}$ and $V \in \mathbb{R}^{n \times r}$, with $r \ll \min(m,n)$. This reduces the number of trainable parameters from $mn$ to $r(m + n)$. During adaptation, the new weight is computed as:
+
+$$
+W_{\text{adapted}} = W_{\text{frozen}} + U V^\top
+$$
+
+This formulation is commonly used in **LoRA** (Low-Rank Adaptation) techniques, originally developed for transformer models but broadly applicable across architectures. Low-rank updates can be implemented efficiently on edge devices, particularly when $U$ and $V$ are small and fixed-point representations are supported.
+
+#### Code Example: PyTorch Adapter Module
+
+```python
+class Adapter(nn.Module):
+    def __init__(self, dim, bottleneck_dim):
+        super().__init__()
+        self.down = nn.Linear(dim, bottleneck_dim)
+        self.up = nn.Linear(bottleneck_dim, dim)
+        self.activation = nn.ReLU()
+
+    def forward(self, x):
+        return x + self.up(self.activation(self.down(x)))
+```
+
+This adapter adds a small residual transformation to a frozen layer. When inserted into a larger model, only the adapter parameters are trained.
+
+#### Use Case: Edge Personalization with Adapter Layers
+
+Adapters are especially useful when a global model is deployed to many devices and must adapt to **device-specific input distributions**. For instance, in smartphone camera pipelines, environmental lighting, user preferences, or lens distortion may vary between users. A shared model can be frozen and fine-tuned per-device using a few residual modules, allowing lightweight personalization without risking catastrophic forgetting. In voice-based systems, adapter modules have been shown to reduce word error rates in personalized speech recognition without retraining the full acoustic model. They also allow easy rollback or switching between user-specific versions.
+
+#### Tradeoffs and Considerations
+
+Residual and low-rank updates strike a balance between **expressivity and efficiency**. Compared to bias-only learning, they can model more substantial deviations from the pretrained task. However, they require more memory and compute—both for training and inference.
+
+When considering residual and low-rank updates for on-device learning, several important tradeoffs emerge. First, these methods consistently demonstrate superior adaptation quality compared to bias-only approaches, particularly when deployed in scenarios involving significant distribution shifts from the original training data. This improved adaptability stems from their increased parameter capacity and ability to learn more complex transformations.
+
+However, this enhanced adaptability comes at a cost. The introduction of additional layers or parameters inevitably increases both memory requirements and computational latency during forward and backward passes. While these increases are modest compared to full model training, they must be carefully considered when deploying to resource-constrained devices.
+
+Additionally, implementing these adaptation techniques requires system-level support for dynamic computation graphs and the ability to selectively inject trainable parameters. Not all deployment environments or inference engines may support such capabilities out of the box.
+
+Despite these considerations, residual adaptation techniques have proven particularly valuable in mobile and edge computing scenarios where devices have sufficient computational resources. For instance, modern smartphones and tablets can readily accommodate these adaptations while maintaining acceptable performance characteristics. This makes residual adaptation a practical choice for applications requiring personalization without the overhead of full model retraining.
+
+### Task-Adaptive Sparse Updates
+
+Even when adaptation is restricted to a small number of parameters—such as biases or adapter modules—training remains resource-intensive on constrained devices. One promising approach is to selectively update only a *task-relevant subset* of model parameters, rather than modifying the entire network or introducing new modules. This approach is known as **task-adaptive sparse updating**.
+
+The key insight is that not all layers of a deep model contribute equally to performance gains on a new task or dataset. If we can identify a *minimal subset of parameters* that are most impactful for adaptation, we can train only those, reducing memory and compute costs while still achieving meaningful personalization.
+
+#### Sparse Update Formulation
+
+Let a neural network be defined by parameters $\theta = \{\theta_1, \theta_2, \ldots, \theta_L\}$ across $L$ layers. In standard fine-tuning, we compute gradients and perform updates on all parameters:
+
+$$
+\theta_i \leftarrow \theta_i - \eta \frac{\partial \mathcal{L}}{\partial \theta_i}, \quad \text{for } i = 1, \ldots, L
+$$
+
+In task-adaptive sparse updates, we select a small subset $\mathcal{S} \subset \{1, \ldots, L\}$ such that only parameters in $\mathcal{S}$ are updated:
+
+$$
+\theta_i \leftarrow
+\begin{cases}
+\theta_i - \eta \frac{\partial \mathcal{L}}{\partial \theta_i}, & \text{if } i \in \mathcal{S} \\
+\theta_i, & \text{otherwise}
+\end{cases}
+$$
+
+The challenge lies in selecting the optimal subset $\mathcal{S}$ given memory and compute constraints.
+
+#### Contribution-Based Layer Selection
+
+A principled strategy for selecting $\mathcal{S}$ is to use **contribution analysis**—an empirical method that estimates how much each layer contributes to downstream performance improvement. For example, one can measure the marginal gain from updating each layer independently:
+
+1. Freeze the entire model.
+2. Unfreeze one candidate layer.
+3. Finetune briefly and evaluate improvement in validation accuracy.
+4. Rank layers by performance gain per unit cost (e.g., per KB of trainable memory).
+
+This layer-wise profiling yields a ranking from which $\mathcal{S}$ can be constructed subject to a memory budget.
+
+A concrete example is **TinyTrain**, a method designed to enable rapid adaptation on-device. TinyTrain pretrains a model along with **meta-gradients** that capture which layers are most sensitive to new tasks. At runtime, the system dynamically selects layers to update based on task characteristics and available resources.
+
+#### Code Fragment: Selective Layer Updating (PyTorch)
+
+```python
+## Assume model has named layers: ['conv1', 'conv2', 'fc']
+## We selectively update only conv2 and fc
+
+for name, param in model.named_parameters():
+    if 'conv2' in name or 'fc' in name:
+        param.requires_grad = True
+    else:
+        param.requires_grad = False
+```
+
+This pattern can be extended with profiling logic to select layers based on contribution scores or hardware profiles.
+
+#### Use Case: Efficient Personalization with TinyTrain
+
+Consider a scenario where a user wears an augmented reality headset that performs real-time object recognition. As lighting and environments shift, the system must adapt to maintain accuracy—but training must occur during brief idle periods or while charging.
+
+TinyTrain enables this by using **meta-training** during offline preparation: the model learns not only to perform the task, but also which parameters are most important to adapt. Then, at deployment, the device performs **task-adaptive sparse updates**, modifying only a few layers that are most relevant for its current environment. This keeps adaptation fast, energy-efficient, and memory-aware.
+
+#### Tradeoffs and Considerations
+
+Task-adaptive sparse updates offer a **highly efficient alternative** to full model finetuning, but they require careful design. Task-adaptive sparse updates introduce several important system-level considerations that must be carefully balanced. First, the overhead of contribution analysis—while primarily incurred during pretraining or initial profiling—represents a non-trivial computational cost. This overhead is typically acceptable since it occurs offline, but it must be factored into the overall system design and deployment pipeline.
+
+Second, the stability of the adaptation process becomes critical when working with sparse updates. If too few parameters are selected for updating, the model may underfit the target distribution, failing to capture important local variations. This suggests the need for careful validation of the selected parameter subset before deployment, potentially incorporating minimum thresholds for adaptation capacity.
+
+Third, the selection of updateable parameters must account for hardware-specific characteristics of the target platform. Beyond just considering gradient magnitudes, the system must evaluate the actual execution cost of updating specific layers on the deployed hardware. Some parameters might show high contribution scores but prove expensive to update on certain architectures, requiring a more nuanced selection strategy that balances statistical utility with runtime efficiency.
+
+Despite these tradeoffs, task-adaptive sparse updates provide a powerful mechanism to scale adaptation to diverse deployment contexts, from microcontrollers to mobile devices.
+
+#### Comparison of Model Adaptation Strategies
+
+Each adaptation strategy for on-device learning offers a distinct balance between expressivity, resource efficiency, and implementation complexity. Understanding these tradeoffs is essential when designing systems for diverse deployment targets—from ultra-low-power microcontrollers to feature-rich mobile processors.
+
+**Bias-only adaptation** is the most lightweight approach, updating only scalar offsets in each layer while freezing all other parameters. This significantly reduces memory requirements and computational burden, making it suitable for devices with tight memory and energy budgets. However, its limited expressivity means it is best suited to applications where the pretrained model already captures most of the relevant task features and only minor local calibration is required.
+
+**Residual adaptation**, often implemented via adapter modules, introduces a small number of trainable parameters into the frozen backbone of a neural network. This allows for greater flexibility than bias-only updates, while still maintaining control over the adaptation cost. Because the backbone remains fixed, training can be performed efficiently and safely under constrained conditions. This method supports modular personalization across tasks and users, making it a favorable choice for mobile settings where moderate adaptation capacity is needed.
+
+**Task-adaptive sparse updates** offer the greatest potential for task-specific finetuning by selectively updating only a subset of layers or parameters based on their contribution to downstream performance. While this method enables expressive local adaptation, it requires a mechanism for layer selection—either through profiling, contribution analysis, or meta-training—which introduces additional complexity. Nonetheless, when deployed carefully, it allows for dynamic tradeoffs between accuracy and efficiency, particularly in systems that experience large domain shifts or evolving input conditions.
+
+These three approaches form a spectrum of tradeoffs. Their relative suitability depends on application domain, available hardware, latency constraints, and expected distribution shift. @tbl-adaptation-strategies summarizes their characteristics:
+
++---------------------------+------------------------------+----------------------+-------------------------+----------------------------------------+-----------------------------------------+
+| Technique                 | Trainable Parameters         | Memory Overhead      | Expressivity            | Use Case Suitability                   | System Requirements                     |
++===========================+==============================+======================+=========================+========================================+=========================================+
+| Bias-Only Updates         | Bias terms only              | Minimal              | Low                     | Simple personalization; low variance   | Extreme memory/compute limits           |
++---------------------------+------------------------------+----------------------+-------------------------+----------------------------------------+-----------------------------------------+
+| Residual Adapters         | Adapter modules              | Moderate             | Moderate to High        | User-specific tuning on mobile         | Mobile-class SoCs with runtime support  |
++---------------------------+------------------------------+----------------------+-------------------------+----------------------------------------+-----------------------------------------+
+| Sparse Layer Updates      | Selective parameter subsets  | Variable             | High (task-adaptive)    | Real-time adaptation; domain shift     | Requires profiling or meta-training     |
++---------------------------+------------------------------+----------------------+-------------------------+----------------------------------------+-----------------------------------------+
+
+: Comparison of model adaptation strategies. {#tbl-adaptation-strategies .striped .hover }
