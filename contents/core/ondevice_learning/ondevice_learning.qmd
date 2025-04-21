@@ -386,3 +386,75 @@ where $\eta_t$ is the learning rate at time $t$. This form of adaptation is sens
 Aside from KWS, practical examples of these strategies abound. In wearable health devices, a model that classifies physical activities may begin with a generic classifier and adapt to user-specific motion patterns using only a few labeled activity segments. In smart assistants, user voice profiles are finetuned over time using ongoing speech input, even when explicit supervision is unavailable. In such cases, local feedback—such as correction, repetition, or downstream task success—can serve as implicit signals to guide learning.
 
 Few-shot and streaming adaptation highlight the shift from traditional training pipelines to data-efficient, real-time learning under uncertainty. They form a foundation for more advanced memory and replay strategies, which we turn to next.
+
+### Experience Replay and Memory-Based Learning
+
+On-device learning systems face a fundamental tension between continuous adaptation and limited data availability. One common approach to alleviating this tension is **experience replay**—a memory-based strategy that enables models to retrain on past examples. Originally developed in the context of reinforcement learning and continual learning, replay buffers help prevent **catastrophic forgetting** and stabilize training in non-stationary environments.
+
+Unlike server-side replay strategies that rely on large datasets and extensive compute, on-device replay must operate with extremely limited capacity—often tens or hundreds of samples—and must avoid interfering with user experience. Buffers may store only compressed features or distilled summaries, and updates must occur opportunistically (e.g., during idle cycles or charging). These system-level constraints reshape how replay is implemented and evaluated in the context of embedded ML.
+
+Let $\mathcal{M}$ represent a memory buffer that retains a fixed-size subset of training examples. At time step $t$, the model receives a new data point $(x_t, y_t)$ and appends it to $\mathcal{M}$. A replay-based update then samples a batch $\{(x_i, y_i)\}_{i=1}^{k}$ from $\mathcal{M}$ and applies a gradient step:
+
+$$
+\theta_{t+1} = \theta_t - \eta \nabla_\theta \left[ \frac{1}{k} \sum_{i=1}^{k} \mathcal{L}(x_i, y_i; \theta_t) \right]
+$$
+
+where $\theta_t$ are the model parameters, $\eta$ is the learning rate, and $\mathcal{L}$ is the loss function. Over time, this replay mechanism allows the model to reinforce prior knowledge while incorporating new information.
+
+A practical on-device implementation might use a ring buffer to store a small set of compressed feature vectors rather than full input examples. The following pseudocode illustrates a minimal replay buffer designed for constrained environments:
+
+```python
+# On-device replay buffer using compressed feature vectors
+class ReplayBuffer:
+    def __init__(self, capacity):
+        self.capacity = capacity
+        self.buffer = []
+        self.index = 0
+
+    def store(self, feature_vec, label):
+        if len(self.buffer) < self.capacity:
+            self.buffer.append((feature_vec, label))
+        else:
+            self.buffer[self.index] = (feature_vec, label)
+        self.index = (self.index + 1) % self.capacity
+
+    def sample(self, k):
+        return random.sample(self.buffer, min(k, len(self.buffer)))
+```
+
+This implementation maintains a fixed-capacity cyclic buffer, storing compressed representations (e.g., last-layer embeddings) and associated labels. Such buffers are useful for replaying adaptation updates without violating memory or energy budgets.
+
+In TinyML applications, experience replay has been applied to problems such as gesture recognition, where devices must continuously improve predictions while observing a small number of events per day. Instead of training directly on the streaming data, the device stores representative feature vectors from recent gestures and uses them to finetune classification boundaries periodically. Similarly, in on-device keyword spotting, replaying past utterances can improve wake-word detection accuracy without the need to transmit audio data off-device.
+
+While experience replay improves stability in data-sparse or non-stationary environments, it introduces several tradeoffs. Storing raw inputs may breach privacy constraints or exceed storage budgets, especially in vision and audio applications. Replaying from feature vectors reduces memory usage but may limit the richness of gradients for upstream layers. Write cycles to persistent flash memory—often required for long-term storage on embedded devices—can also raise wear-leveling concerns. These constraints require careful co-design of memory usage policies, replay frequency, and feature selection strategies, particularly in continuous deployment scenarios.
+
+### Compressed Data Representations
+
+In many on-device learning scenarios, the raw training data may be too large, noisy, or redundant to store and process effectively. This motivates the use of **compressed data representations**, where the original inputs are transformed into lower-dimensional embeddings or compact encodings that preserve salient information while minimizing memory and compute costs.
+
+Compressed representations serve two complementary goals. First, they reduce the footprint of stored data, allowing devices to maintain longer histories or replay buffers under tight memory budgets. Second, they simplify the learning task by projecting raw inputs into more structured feature spaces, often learned via pretraining or meta-learning, in which efficient adaptation is possible with minimal supervision.
+
+One common approach is to encode data points using a pretrained feature extractor and discard the original high-dimensional input. For example, an image $x_i$ might be passed through a convolutional neural network (CNN) to produce an embedding vector $z_i = f(x_i)$, where $f(\cdot)$ is a fixed feature encoder. This embedding captures visual structure (e.g., shape, texture, or spatial layout) in a compact representation—typically 64 to 512 dimensions—suitable for lightweight downstream adaptation.
+
+Mathematically, training can proceed over compressed samples $(z_i, y_i)$ using a lightweight decoder or projection head. Let $\theta$ represent the **trainable parameters** of this decoder model, which is typically a small neural network that maps from compressed representations to output predictions. As each example is presented, the model parameters are updated using gradient descent:
+
+$$
+\theta_{t+1} = \theta_t - \eta \nabla_\theta \mathcal{L}(g(z_i; \theta), y_i)
+$$
+
+Here:
+
+- $z_i$ is the compressed representation of the $i$-th input,
+- $y_i$ is the corresponding label or supervision signal,
+- $g(z_i; \theta)$ is the decoder’s prediction,
+- $\mathcal{L}$ is the loss function measuring prediction error,
+- $\eta$ is the learning rate, and
+- $\nabla_\theta$ denotes the gradient with respect to the parameters $\theta$.
+
+This formulation highlights how only a **compact decoder model**—with parameter set $\theta$—needs to be trained, making the learning process feasible even when memory and compute are limited.
+
+Advanced approaches go beyond fixed encoders by learning **discrete or sparse dictionaries** that represent data using low-rank or sparse coefficient matrices. For instance, a dataset of sensor traces can be factorized as $X \approx DC$, where $D$ is a dictionary of basis patterns and $C$ is a block-sparse coefficient matrix indicating which patterns are active in each example. By updating only a small number of dictionary atoms or coefficients, the model can adapt with minimal overhead.
+
+Compressed representations are particularly useful in privacy-sensitive settings, as they allow raw data to be discarded or obfuscated after encoding. Furthermore, compression acts as an implicit regularizer, smoothing the learning process and mitigating overfitting when only a few training examples are available.
+
+In practice, these strategies have been applied in domains such as keyword spotting, where raw audio signals are first transformed into Mel-frequency cepstral coefficients (MFCCs)—a compact, lossy representation of the power spectrum of speech. These MFCC vectors serve as compressed inputs for downstream models, enabling local adaptation using only a few kilobytes of memory. Instead of storing raw audio waveforms, which are large and computationally expensive to process, devices store and learn from these compressed feature vectors directly. Similarly, in low-power computer vision systems, embeddings extracted from lightweight CNNs are retained and reused for few-shot learning. These examples illustrate how representation learning and compression serve as foundational tools for scaling on-device learning to memory- and bandwidth-constrained environments.
