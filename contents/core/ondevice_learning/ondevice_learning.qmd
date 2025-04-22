@@ -489,3 +489,146 @@ Compressed data representations reduce the footprint of learning by transforming
 In practice, these methods are not mutually exclusive. Many real-world systems combine them to achieve robust, efficient adaptation. For example, a keyword spotting system may use compressed audio features (e.g., MFCCs), finetune a few parameters from a small support set, and maintain a replay buffer of past embeddings for continual refinement.
 
 Together, these strategies embody the core challenge of on-device learning: achieving reliable model improvement under persistent constraints on data, compute, and memory.
+
+## Distributed Local Learning: Federated Learning
+
+On-device learning enables models to adapt locally using data generated on the device, but doing so in isolation limits a system’s ability to generalize across users and tasks. In many applications, learning must occur not just within a single device, but across a fleet of heterogeneous, intermittently connected systems. This calls for a distributed coordination framework that supports collective model improvement without violating the constraints of privacy, limited connectivity, and device autonomy. Federated learning (FL) is one such framework.
+
+Federated learning allows edge devices to collaboratively train a shared model by performing local computation and periodically aggregating updates at a central server or aggregator. Critically, raw data remains on-device throughout the process, preserving user privacy and minimizing network transmission. This decentralized approach introduces a new set of system-level challenges, including variability in device availability, communication bottlenecks, and the need for personalization.
+
+This section explores the principles and practical considerations of federated learning in the context of mobile and embedded systems. It begins by outlining the canonical FL protocols and their system implications. It then discusses device participation constraints, communication-efficient update mechanisms, and strategies for personalized learning. Throughout, the emphasis remains on how federated methods can extend the reach of on-device learning by enabling distributed model training across diverse and resource-constrained hardware platforms.
+
+### Introduction and Motivation
+
+Federated learning (FL) represents a decentralized paradigm for training machine learning models across a population of devices without transferring raw data to a central server. Unlike traditional centralized training pipelines, which require aggregating all training data in a single location, federated learning distributes the training process itself. Each participating device computes updates based on its local data and contributes to a global model through an aggregation protocol, typically coordinated by a central server. This shift in training architecture aligns closely with the needs of mobile, edge, and embedded systems, where privacy, communication cost, and system heterogeneity impose significant constraints on centralized approaches.
+
+The relevance of federated learning becomes apparent in several practical domains. In mobile keyboard applications, such as Google’s Gboard, the system must continuously improve text prediction models based on user-specific input patterns. Federated learning allows the system to train on device-local keystroke data—preserving privacy—while still contributing to a shared model that benefits all users. Similarly, wearable health monitors often collect biometric signals that vary greatly between individuals. Training models centrally on such data would require uploading sensitive physiological traces, raising both ethical and regulatory concerns. FL mitigates these issues by enabling model updates to be computed directly on the wearable device.
+
+In the context of smart assistants and voice interfaces, devices must adapt to individual voice profiles while minimizing false activations. Wake-word models, for instance, can be personalized locally and periodically synchronized through federated updates, avoiding the need to transmit raw voice recordings. Industrial and environmental sensors, deployed in remote locations or operating under severe bandwidth limitations, benefit from federated learning by enabling local adaptation and global coordination without constant connectivity.
+
+These examples illustrate how federated learning bridges the gap between model improvement and system-level constraints. It enables personalization without compromising user privacy, supports learning under limited connectivity, and distributes computation across a diverse and heterogeneous device fleet. However, these benefits come with new challenges. Federated learning systems must account for client variability, communication efficiency, and the non-IID nature of local data distributions. Furthermore, they must ensure robustness to adversarial behavior and provide guarantees on model performance despite partial participation or dropout.
+
+The remainder of this section explores the key techniques and tradeoffs that define federated learning in on-device settings. We begin by examining the core learning protocols that govern coordination across devices, and proceed to investigate strategies for scheduling, communication efficiency, and personalization.
+
+## Federated Learning Protocols
+
+Federated learning protocols define the rules and mechanisms by which devices collaborate to train a shared model. These protocols govern how local updates are computed, aggregated, and communicated, as well as how devices participate in the training process. The choice of protocol has significant implications for system performance, communication overhead, and model convergence.
+In this section, we outline the core components of federated learning protocols, including local training, aggregation methods, and communication strategies. We also discuss the tradeoffs associated with different approaches and their implications for on-device learning systems.
+
+### Local Training
+
+Local training refers to the process by which individual devices compute model updates based on their local data. This step is important in federated learning, as it allows devices to adapt the shared model to their specific contexts without transferring raw data. The local training process typically involves the following steps:
+
+1. **Model Initialization**: Each device initializes its local model parameters, often by downloading the latest global model from the server.
+2. **Local Data Sampling**: The device samples a subset of its local data for training. This data may be non-IID, meaning that it may not be uniformly distributed across devices.
+3. **Local Training**: The device performs a number of training iterations on its local data, updating the model parameters based on the computed gradients.
+4. **Model Update**: After local training, the device computes a model update (e.g., the difference between the updated and initial parameters) and prepares to send it to the server.
+5. **Communication**: The device transmits the model update to the server, typically using a secure communication channel to protect user privacy.
+6. **Model Aggregation**: The server aggregates the updates from multiple devices to produce a new global model, which is then distributed back to the participating devices.
+
+This process is repeated iteratively, with devices periodically downloading the latest global model and performing local training. The frequency of these updates can vary based on system constraints, device availability, and communication costs.
+
+### Federated Learning Protocols
+
+At the heart of federated learning is a coordination mechanism that enables many devices—each with access to only a small, local dataset—to collaboratively train a shared model. This is achieved through a protocol in which client devices perform local training and periodically transmit model updates to a central server. The server aggregates these updates to refine a global model, which is then redistributed to clients for the next training round. This cyclical procedure decouples the learning process from centralized data collection, making it especially well-suited to mobile and edge environments where user data is private, bandwidth is constrained, and device participation is sporadic.
+
+The most widely used baseline for this process is **Federated Averaging (FedAvg)**, which has become a canonical algorithm for federated learning. In FedAvg, each device trains its local copy of the model using stochastic gradient descent (SGD) on its private data. After a fixed number of local steps, each device sends its updated model parameters to the server. The server computes a weighted average of these parameters—weighted by the number of data samples on each device—and updates the global model accordingly. This updated model is then sent back to the devices, completing one round of training.
+
+Formally, let $\mathcal{D}_k$ denote the local dataset on client $k$, and let $\theta_k^t$ be the parameters of the model on client $k$ at round $t$. Each client performs $E$ steps of SGD on its local data, yielding an update $\theta_k^{t+1}$. The central server then aggregates these updates as:
+
+$$
+\theta^{t+1} = \sum_{k=1}^{K} \frac{n_k}{n} \theta_k^{t+1}
+$$
+
+where $n_k = |\mathcal{D}_k|$ is the number of samples on device $k$, $n = \sum_k n_k$ is the total number of samples across participating clients, and $K$ is the number of active devices in the current round.
+
+This basic structure introduces a number of design choices and tradeoffs. The number of local steps $E$ impacts the balance between computation and communication: larger $E$ reduces communication frequency but risks divergence if local data distributions vary too much. Similarly, the selection of participating clients affects convergence stability and fairness. In real-world deployments, not all devices are available at all times, and hardware capabilities may differ substantially, requiring robust participation scheduling and failure tolerance.
+
+### Client Scheduling and System participation
+
+Federated learning operates under the assumption that clients—devices holding local data—periodically become available for participation in training rounds. However, in real-world systems, client availability is intermittent and highly variable. Devices may be turned off, disconnected from power, lacking network access, or otherwise unable to participate at any given time. As a result, client scheduling plays a central role in the effectiveness and efficiency of distributed learning.
+
+At a baseline level, federated learning systems define eligibility criteria for participation. Devices must meet minimum requirements such as being plugged in, connected to Wi-Fi, and idle, to avoid interfering with user experience or depleting battery resources. These criteria determine which subset of the total population is considered “available” for any given training round.
+
+Beyond these operational filters, devices also differ in their hardware capabilities, data availability, and network conditions. For example, some smartphones may contain many recent examples relevant to the current task, while others may have outdated or irrelevant data. Network bandwidth and upload speed may vary widely depending on geography and carrier infrastructure. As a result, selecting clients at random can lead to poor coverage of the underlying data distribution and unstable model convergence.
+
+Moreover, availability-driven selection introduces participation bias: clients with favorable conditions—such as frequent charging, high-end hardware, or consistent connectivity—are more likely to participate repeatedly, while others are systematically underrepresented. This can skew the resulting model toward behaviors and preferences of a privileged subset of the population, raising both fairness and generalization concerns. Systems must therefore balance scheduling efficiency with statistical representativeness, often using stratified or quota-based sampling techniques.
+
+To address these challenges, federated learning systems implement adaptive client selection strategies. These include prioritizing clients with underrepresented data types, targeting geographies or demographics that are less frequently sampled, and using historical participation data to enforce fairness constraints. Systems may also incorporate predictive modeling to anticipate future client availability or success rates, improving training throughput.
+
+Selected clients perform one or more local training steps on their private data and transmit their model updates to a central server. These updates are aggregated to form a new global model. Typically, this aggregation is weighted, where the contributions of each client are scaled—such as by the number of local examples used during training—before averaging. This ensures that clients with more representative or larger datasets exert proportional influence on the global model.
+
+These scheduling decisions directly impact system performance. They affect convergence rate, model generalization, energy consumption, and overall user experience. Poor scheduling can result in excessive stragglers, overfitting to narrow client segments, or wasted computation. As a result, client scheduling is not merely a logistical concern—it is a core component of system design in federated learning, demanding both algorithmic insight and infrastructure-level coordination.
+
+### Communication-Efficient Updates
+
+One of the principal bottlenecks in federated learning systems is the cost of communication between edge clients and the central server. Transmitting full model weights or gradients after every training round can quickly overwhelm bandwidth and energy budgets—particularly for mobile or embedded devices operating over constrained wireless links. To address this, a range of techniques have been developed to reduce communication overhead while preserving learning efficacy.
+
+These techniques fall into three primary categories: model compression, selective update sharing, and architectural partitioning.
+
+**Model compression** methods aim to reduce the size of transmitted updates through quantization, sparsification, or subsampling. For instance, instead of sending full-precision gradients, a client may transmit 8-bit quantized updates or communicate only the top-$k$ gradient elements with highest magnitude. These techniques significantly reduce transmission size with limited impact on convergence when applied carefully.
+
+**Selective update sharing** further reduces communication by transmitting only subsets of model parameters or updates. In layer-wise selective sharing, clients may update only certain layers—typically the final classifier or adapter modules—while keeping the majority of the backbone frozen. This reduces both upload cost and the risk of overfitting shared representations to non-representative client data.
+
+**Split models and architectural partitioning** divide the model into a shared global component and a private local component. Clients train and maintain their private modules independently while synchronizing only the shared parts with the server. This allows for user-specific personalization with minimal communication and privacy leakage.
+
+All of these approaches operate within the context of a federated aggregation protocol. A standard baseline for aggregation is **Federated Averaging (FedAvg)**, in which the server updates the global model by computing a weighted average of the client updates received in a given round. Let $\mathcal{K}_t$ denote the set of participating clients in round $t$, and let $\theta_k^t$ represent the locally updated model parameters from client $k$. The server computes the new global model $\theta^{t+1}$ as:
+
+$$
+\theta^{t+1} = \sum_{k \in \mathcal{K}_t} \frac{n_k}{n_{\mathcal{K}_t}} \theta_k^t
+$$
+
+Here, $n_k$ is the number of local training examples at client $k$, and $n_{\mathcal{K}_t} = \sum_{k \in \mathcal{K}_t} n_k$ is the total number of training examples across all participating clients. This **data-weighted aggregation** ensures that clients with more training data exert a proportionally larger influence on the global model, while also accounting for partial participation and heterogeneous data volumes.
+
+However, communication-efficient updates can introduce tradeoffs. Compression may degrade gradient fidelity, selective updates can limit model capacity, and split architectures may complicate coordination. As a result, effective federated learning requires careful balancing of bandwidth constraints, privacy concerns, and convergence dynamics—a balance that depends heavily on the capabilities and variability of the client population.
+
+### Personalization in Federated Learning
+
+While compression and communication strategies improve scalability, they do not address a critical limitation of the global federated learning paradigm—its inability to capture user-specific variation. In real-world deployments, devices often observe distinct and heterogeneous data distributions. A one-size-fits-all global model may underperform when applied uniformly across diverse users. This motivates the need for **personalized federated learning**, where local models are adapted to user-specific data without compromising the benefits of global coordination.
+
+Let $\theta_k$ denote the model parameters on client $k$, and $\theta_{\text{global}}$ the aggregated global model. Traditional FL seeks to minimize a global objective:
+
+$$
+\min_\theta \sum_{k=1}^K w_k \mathcal{L}_k(\theta)
+$$
+
+where $\mathcal{L}_k(\theta)$ is the local loss on client $k$, and $w_k$ is a weighting factor (e.g., proportional to local dataset size). However, this formulation assumes that a single model $\theta$ can serve all users well. In practice, local loss landscapes $\mathcal{L}_k$ often differ significantly across clients, reflecting non-IID data distributions and varying task requirements.
+
+Personalization modifies this objective to allow each client to maintain its own adapted parameters $\theta_k$, optimized with respect to both the global model and local data:
+
+$$
+\min_{\theta_1, \ldots, \theta_K} \sum_{k=1}^K \left( \mathcal{L}_k(\theta_k) + \lambda \cdot \mathcal{R}(\theta_k, \theta_{\text{global}}) \right)
+$$
+
+Here, $\mathcal{R}$ is a regularization term that penalizes deviation from the global model, and $\lambda$ controls the strength of this penalty. This formulation enables local models to deviate as needed, while still benefiting from global coordination.
+
+Real-world use cases illustrate the importance of this approach. Consider a wearable health monitor that tracks physiological signals to classify physical activities. While a global model may perform reasonably well across the population, individual users exhibit unique motion patterns, gait signatures, or sensor placements. Personalized finetuning of the final classification layer or low-rank adapters enables improved accuracy, particularly for rare or user-specific classes.
+
+Several personalization strategies have emerged to address the tradeoffs between compute overhead, privacy, and adaptation speed. One widely used approach is local finetuning, in which each client downloads the latest global model and performs a small number of gradient steps using its private data. While this method is simple and preserves privacy, it may yield suboptimal results when the global model is poorly aligned with the client’s data distribution or when the local dataset is extremely limited.
+
+Another effective technique involves personalization layers, where the model is partitioned into a shared backbone and a lightweight, client-specific head—typically the final classification layer. Only the head is updated on-device, significantly reducing memory usage and training time. This approach is particularly well-suited for scenarios in which the primary variation across clients lies in output categories or decision boundaries.
+
+Clustered federated learning offers an alternative by grouping clients according to similarities in their data or performance characteristics, and training separate models for each cluster. This strategy can enhance accuracy within homogeneous subpopulations but introduces additional system complexity and may require exchanging metadata to determine group membership.
+
+Finally, meta-learning approaches, such as Model-Agnostic Meta-Learning (MAML), aim to produce a global model initialization that can be quickly adapted to new tasks with just a few local updates. This technique is especially useful when clients have limited data or operate in environments with frequent distributional shifts.
+Each of these strategies reflects a different point in the tradeoff space. These strategies vary in their system implications, including compute overhead, privacy guarantees, and adaptation latency. @tbl-personalization-strategies summarizes the tradeoffs.
+
++---------------------------+----------------------------+--------------------+-------------------------+----------------------------+
+| Strategy                  | Personalization Mechanism  | Compute Overhead   | Privacy Preservation    | Adaptation Speed           |
++===========================+============================+====================+=========================+============================+
+| Local Finetuning          | Gradient descent on local  | Low to Moderate    | High (no data sharing)  | Fast (few steps)           |
+|                           | loss post-aggregation      |                    |                         |                            |
++---------------------------+----------------------------+--------------------+-------------------------+----------------------------+
+| Personalization Layers    | Split model: shared base + | Moderate           | High                    | Fast (train small head)    |
+|                           | user-specific head         |                    |                         |                            |
++---------------------------+----------------------------+--------------------+-------------------------+----------------------------+
+| Clustered FL              | Group clients by data      | Moderate to High   | Medium (group metadata) | Medium                     |
+|                           | similarity, train per group|                    |                         |                            |
++---------------------------+----------------------------+--------------------+-------------------------+----------------------------+
+| Meta-Learning             | Train for fast adaptation  | High               | High                    | Very Fast (few-shot)       |
+|                           | across tasks/devices       | (meta-objective)   |                         |                            |
++---------------------------+----------------------------+--------------------+-------------------------+----------------------------+
+
+: Comparison of personalization strategies in federated learning, evaluating their system-level tradeoffs across multiple design dimensions. {#tbl-personalization-strategies .striped .hover}
+
+Selecting the appropriate personalization method depends on deployment constraints, data characteristics, and the desired balance between accuracy, privacy, and computational efficiency. In practice, hybrid approaches that combine elements of multiple strategies—such as local finetuning atop a personalized head—are often employed to achieve robust performance across heterogeneous devices.
