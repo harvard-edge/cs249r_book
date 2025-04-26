@@ -1,10 +1,10 @@
-_Last Updated: Apr 24, 2025_
+_Last Updated: Apr 26, 2025_
 
 ## 2025 Changes
 
-### 📅 Published on Apr 24, 2025
+### 📅 Published on Apr 26, 2025
 
-36 files updated (4884 lines added, 2190 lines removed)
+37 files updated (6137 lines added, 2206 lines removed)
 
 <details open>
   <summary>**Major Updates**</summary>
@@ -16,6 +16,7 @@ _Last Updated: Apr 24, 2025_
 - **Image Classification**: <span style="color:green">++</span><span style="color:red">---</span> (266 lines added, 293 lines removed)
 - **ML Operations**: <span style="color:green">+++++</span><span style="color:red"></span> (1001 lines added, 80 lines removed)
 - **ML Systems**: <span style="color:green">+++++</span><span style="color:red"></span> (292 lines added, 47 lines removed)
+- **Model Optimizations**: <span style="color:green">+++++</span><span style="color:red"></span> (1253 lines added, 16 lines removed)
 - **Object Detection**: <span style="color:green">+++</span><span style="color:red">--</span> (133 lines added, 79 lines removed)
 - **Object Detection**: <span style="color:green">+++</span><span style="color:red">--</span> (274 lines added, 165 lines removed)
 - **Small Language Models (SLM)**: <span style="color:green">+++</span><span style="color:red">--</span> (314 lines added, 162 lines removed)
