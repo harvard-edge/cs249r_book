@@ -1,10 +1,10 @@
-_Last Updated: Apr 27, 2025_
+_Last Updated: May 02, 2025_
 
 ## 2025 Changes
 
-### 📅 Published on Apr 27, 2025
+### 📅 Published on May 02, 2025
 
-37 files updated (6137 lines added, 2206 lines removed)
+37 files updated (6156 lines added, 2225 lines removed)
 
 <details open>
   <summary>**Major Updates**</summary>
@@ -20,7 +20,7 @@ _Last Updated: Apr 27, 2025_
 - **Object Detection**: <span style="color:green">+++</span><span style="color:red">--</span> (133 lines added, 79 lines removed)
 - **Object Detection**: <span style="color:green">+++</span><span style="color:red">--</span> (274 lines added, 165 lines removed)
 - **Small Language Models (SLM)**: <span style="color:green">+++</span><span style="color:red">--</span> (314 lines added, 162 lines removed)
-- **Vision-Language Models (VLM)**: <span style="color:green">++++</span><span style="color:red">-</span> (390 lines added, 158 lines removed)
+- **Vision-Language Models (VLM)**: <span style="color:green">++++</span><span style="color:red">-</span> (409 lines added, 177 lines removed)
 
 </details>
 
