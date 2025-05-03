@@ -4,7 +4,7 @@ _Last Updated: May 03, 2025_
 
 ### 📅 Published on May 03, 2025
 
-37 files updated (6158 lines added, 2227 lines removed)
+37 files updated (7185 lines added, 3152 lines removed)
 
 <details open>
   <summary>**Major Updates**</summary>
@@ -19,6 +19,7 @@ _Last Updated: May 03, 2025_
 - **Model Optimizations**: <span style="color:green">+++++</span><span style="color:red"></span> (1253 lines added, 16 lines removed)
 - **Object Detection**: <span style="color:green">+++</span><span style="color:red">--</span> (133 lines added, 79 lines removed)
 - **Object Detection**: <span style="color:green">+++</span><span style="color:red">--</span> (274 lines added, 165 lines removed)
+- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">--</span> (1029 lines added, 927 lines removed)
 - **Small Language Models (SLM)**: <span style="color:green">+++</span><span style="color:red">--</span> (314 lines added, 162 lines removed)
 - **Vision-Language Models (VLM)**: <span style="color:green">++++</span><span style="color:red">-</span> (409 lines added, 177 lines removed)
 
@@ -43,7 +44,6 @@ _Last Updated: May 03, 2025_
 - **Motion Classification and Anomaly Detection**: <span style="color:green">++++</span><span style="color:red">-</span> (79 lines added, 39 lines removed)
 - **Motion Classification and Anomaly Detection**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **Object Detection**: <span style="color:green">++++</span><span style="color:red">-</span> (75 lines added, 36 lines removed)
-- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 - **Raspberry Pi**: <span style="color:green">+++</span><span style="color:red">---</span> (4 lines added, 4 lines removed)
 - **Robust AI**: <span style="color:green">+++</span><span style="color:red">--</span> (9 lines added, 7 lines removed)
 - **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
