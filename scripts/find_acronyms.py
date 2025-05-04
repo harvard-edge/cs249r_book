@@ -37,12 +37,12 @@ def print_results(keyword_lines):
 def main():
     parser = argparse.ArgumentParser(description="Extract uppercase keywords in parentheses and their line numbers from .qmd files.")
     parser.add_argument("-f", "--file", help="Path to a single .qmd file")
-    parser.add_argument("-t", "--directory", help="Path to a directory containing .qmd files (processed recursively)")
+    parser.add_argument("-d", "--directory", help="Path to a directory containing .qmd files (processed recursively)")
 
     args = parser.parse_args()
 
     if args.file and args.directory:
-        print("Please provide only one of -F (file) or -T (directory), not both.")
+        print("Please provide only one of -f (file) or -d (directory), not both.")
         return
 
     keyword_lines = defaultdict(list)
@@ -56,7 +56,7 @@ def main():
         print_results(keyword_lines)
 
     else:
-        print("Please specify a file with -F or a directory with -T.")
+        print("Please specify a file with -f or a directory with -d.")
 
 if __name__ == "__main__":
     main()
