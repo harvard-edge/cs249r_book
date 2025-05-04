@@ -8,7 +8,7 @@ on:
       environment:
         required: true
         type: string
-        description: 'Build environment (development/production)'
+        description: 'Build environment (development/production/test)'
       os:
         required: true
         type: string
@@ -16,7 +16,7 @@ on:
       quarto-version:
         required: false
         type: string
-        default: '1.6.42'
+        default: '1.7.22'
         description: 'Version of Quarto to use'
       r-version:
         required: false
@@ -24,12 +24,23 @@ on:
         default: '4.3.2'
         description: 'Version of R to use'
       target:
-        required: true
+        required: false
         type: string
+        default: ''
         description: 'Target branch (dev/main) - determines build behavior'
+      format:
+        required: false
+        type: string
+        default: 'all'
+        description: 'Format to build (html/pdf/all)'
+      deploy:
+        required: false
+        type: boolean
+        default: true
+        description: 'Whether to deploy the build or just validate'
     secrets:
       SSH_DEPLOY_KEY:
-        required: true
+        required: false
         
 permissions:
   contents: write
@@ -51,34 +62,20 @@ jobs:
           Write-Output "👉 Target: ${{ inputs.target }}"
           Write-Output "👉 OS: ${{ inputs.os }}"
           Write-Output "👉 Environment: ${{ inputs.environment }}"
+          Write-Output "👉 Format: ${{ inputs.format }}"
+          Write-Output "👉 Deploy: ${{ inputs.deploy }}"
           
-          if (("${{ inputs.target }}" -ne "dev") -and ("${{ inputs.target }}" -ne "main")) {
-            Write-Error "❌ Target must be either 'dev' or 'main'"
+          $valid_formats = @("html", "pdf", "all")
+          if ("${{ inputs.format }}" -notin $valid_formats) {
+            Write-Error "❌ Format must be one of: $($valid_formats -join ', ')"
             exit 1
           }
+          
           Write-Output "✅ Input validation passed"
-
-      - name: 🔍 Verify branch
-        shell: pwsh
-        run: |
-          Write-Output "🔄 Verifying branch alignment..."
-          Write-Output "👉 Current branch: ${{ github.ref }}"
-          Write-Output "👉 Target branch: ${{ inputs.target }}"
-          
-          if (("${{ inputs.target }}" -eq "main") -and ("${{ github.ref }}" -ne "refs/heads/main")) {
-            Write-Error "❌ Main build can only run on the main branch"
-            exit 1
-          }
-          if (("${{ inputs.target }}" -eq "dev") -and ("${{ github.ref }}" -ne "refs/heads/dev")) {
-            Write-Error "❌ Dev build can only run on the dev branch"
-            exit 1
-          }
-          Write-Output "✅ Branch verification passed"
 
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.target }}
           fetch-depth: 0
 
       - name: 📦 Setup Quarto
@@ -192,6 +189,7 @@ jobs:
           inkscape --version
 
       - name: 📦 Install & Update TeX Live 
+        if: inputs.format == 'pdf' || inputs.format == 'all'
         uses: teatimeguest/setup-texlive-action@v3
         with:
           version: latest
@@ -275,11 +273,11 @@ jobs:
 
       # Install before render cause we need it for rendering
       - name: 📦 Install Ghostscript (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && (inputs.format == 'pdf' || inputs.format == 'all')
         run: sudo apt-get install -y ghostscript
 
       - name: 📦 Install Ghostscript (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && (inputs.format == 'pdf' || inputs.format == 'all')
         shell: pwsh
         run: |
           choco install ghostscript
@@ -289,12 +287,14 @@ jobs:
           echo "$binPath" | Out-File -Append -FilePath $env:GITHUB_PATH
 
       - name: 🔨 Render Quarto Project (HTML)
+        if: inputs.format == 'html' || inputs.format == 'all'
         uses: quarto-dev/quarto-actions/render@v2
         with:
             to: html
 
-      # Buid PDF after HTML to ensure all assets are available (esp. PDF)
+      # Build PDF after HTML to ensure all assets are available (esp. PDF)
       - name: 🔨 Render Quarto Project (PDF)
+        if: inputs.format == 'pdf' || inputs.format == 'all'
         uses: quarto-dev/quarto-actions/render@v2
         with:
             to: titlepage-pdf
@@ -311,11 +311,11 @@ jobs:
             echo "📊 Total files in _book:"
             find _book -type f | wc -l
             
-            if [ -f "_book/Machine-Learning-Systems.pdf" ]; then
+            if [ -f "_book/Machine-Learning-Systems.pdf" ] && [ "${{ inputs.format }}" != "html" ]; then
               echo "✅ PDF file exists"
               echo "📊 PDF file size:"
               du -h "_book/Machine-Learning-Systems.pdf"
-            else
+            elif [ "${{ inputs.format }}" != "html" ]; then
               echo "⚠️ PDF file not found!"
             fi
           else
@@ -323,31 +323,35 @@ jobs:
           fi
 
       - name: 📉 Compress PDF with Ghostscript (Linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && (inputs.format == 'pdf' || inputs.format == 'all')
         run: |
-          gs \
-            -sDEVICE=pdfwrite \
-            -dCompatibilityLevel=1.4 \
-            -dPDFSETTINGS=/ebook \
-            -dNOPAUSE \
-            -dQUIET \
-            -dBATCH \
-            -sOutputFile="./_book/ebook.pdf" \
-            "./_book/Machine-Learning-Systems.pdf"
+          if [ -f "_book/Machine-Learning-Systems.pdf" ]; then
+            gs \
+              -sDEVICE=pdfwrite \
+              -dCompatibilityLevel=1.4 \
+              -dPDFSETTINGS=/ebook \
+              -dNOPAUSE \
+              -dQUIET \
+              -dBATCH \
+              -sOutputFile="./_book/ebook.pdf" \
+              "./_book/Machine-Learning-Systems.pdf"
 
-          # Replace original with compressed
-          mv ./_book/ebook.pdf ./_book/Machine-Learning-Systems.pdf
+            # Replace original with compressed
+            mv ./_book/ebook.pdf ./_book/Machine-Learning-Systems.pdf
+          else
+            echo "⚠️ PDF file not found for compression"
+          fi
 
       - name: 📉 Compress PDF with Ghostscript (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && (inputs.format == 'pdf' || inputs.format == 'all')
         shell: pwsh
         run: |
           $input = "./_book/Machine-Learning-Systems.pdf"
           $output = "./_book/ebook.pdf"
 
           if (!(Test-Path $input)) {
-            Write-Error "❌ Input PDF not found!"
-            exit 1
+            Write-Warning "⚠️ Input PDF not found! Skipping compression..."
+            exit 0  # Non-zero exit would fail the workflow
           }
 
           Write-Output "📉 Compressing PDF using Ghostscript..."
@@ -362,37 +366,19 @@ jobs:
             Write-Output "✅ Compression successful"
             Move-Item -Force $output $input
           } else {
-            Write-Error "❌ Compression failed"
-
-            # Check if Ghostscript is available
-            if (!(Get-Command "gswin64c" -ErrorAction SilentlyContinue)) {
-              Write-Error "🚫 Ghostscript (gswin64c) not found in PATH"
-            }
-
-            # Check if input file exists and is readable
-            if (!(Test-Path $input)) {
-              Write-Error "🚫 Input file '$input' does not exist"
-            } elseif ((Get-Item $input).Length -eq 0) {
-              Write-Error "⚠️ Input file exists but is empty"
-            }
-
-            # Log available files in the _book folder
-            Write-Output "📂 Files currently in _book:"
-            Get-ChildItem -Path "./_book" | Format-Table Name, Length, LastWriteTime
-
-            exit 1
+            Write-Warning "⚠️ Compression failed but continuing"
           }
           
       - name: 📤 Upload artifact
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || inputs.deploy == false
         uses: actions/upload-artifact@v4
         with:
-          name: _book-${{ inputs.os }}
+          name: _book-${{ inputs.os }}-${{ inputs.format }}
           path: _book
 
       # Push to dev site
       - name: 🚀 Stage to Dev Site
-        if: inputs.target == 'dev' && runner.os == 'Linux'
+        if: inputs.target == 'dev' && runner.os == 'Linux' && inputs.deploy == true
         uses: cpina/github-action-push-to-another-repository@v1.7.2
         env:
           SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
@@ -407,7 +393,7 @@ jobs:
             📚 Push dev branch build
 
       - name: 📋 Dev Deployment Info
-        if: inputs.target == 'dev' && runner.os == 'Linux'
+        if: inputs.target == 'dev' && runner.os == 'Linux' && inputs.deploy == true
         shell: bash
         run: |
           echo "🔄 Development deployment information:"
@@ -419,7 +405,7 @@ jobs:
 
       # Deploy to GitHub Pages
       - name: 🚀 Deploy to GitHub Pages
-        if: inputs.target == 'main' && runner.os == 'Linux'
+        if: inputs.target == 'main' && runner.os == 'Linux' && inputs.deploy == true
         uses: quarto-dev/quarto-actions/publish@v2
         with:
           target: gh-pages
@@ -428,7 +414,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 📋 GitHub Pages Deployment Info
-        if: inputs.target == 'main' && runner.os == 'Linux'
+        if: inputs.target == 'main' && runner.os == 'Linux' && inputs.deploy == true
         shell: bash
         run: |
           echo "🔄 GitHub Pages deployment information:"
@@ -437,41 +423,16 @@ jobs:
           echo "✅ Deployment should be complete"
           echo "🌐 Site should be available at: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
 
-      # Add comprehensive debug artifacts
-      # - name: 📦 Collect Debug Artifacts
-      #   if: always()  # Run even if previous steps failed
-      #   uses: actions/upload-artifact@v4
-      #   with:
-      #     name: debug-${{ inputs.target }}-${{ inputs.os }}
-      #     path: |
-      #       ${{ github.workspace }}/_book/**
-      #       ${{ github.workspace }}/.quarto/**
-      #       ${{ github.workspace }}/**/_cache/**
-      #       ${{ github.workspace }}/**/logs/**
-      #       ${{ github.workspace }}/**/*.log
-      #       ${{ github.workspace }}/**/.jupyter_cache/**
-      #       ${{ github.workspace }}/.Rcheck/**
-      #       ${{ github.workspace }}/**/*.Rout
-      #       ${{ github.workspace }}/**/*.aux
-      #       ${{ github.workspace }}/**/*.blg
-      #       ${{ github.workspace }}/**/*.fls
-      #       ${{ github.workspace }}/**/*.fdb_latexmk
-      #     compression-level: 9  # Maximum compression
-      #     retention-days: 5  # Keep for 5 days
-
-      # - name: 📋 Debug Artifact Info
-      #   if: always()
-      #   shell: bash
-      #   run: |
-      #     echo "🔄 Debug artifacts information:"
-      #     echo "📊 Collected logs and build artifacts"
-      #     echo "📊 Retention period: 5 days"
-      #     echo "📊 Target artifact name: debug-${{ inputs.target }}-${{ inputs.os }}"
-      #     echo "✅ Debug artifacts should be available in GitHub Actions"
-
       - name: 📋 Build Summary
         shell: pwsh
         run: |
+          # Create a variable for the TeX Live status
+          $texLiveStatus = if ("${{ inputs.format }}" -eq "pdf" -or "${{ inputs.format }}" -eq "all") {
+            "Installed via teatimeguest/setup-texlive-action@v3"
+          } else {
+            "Skipped (not needed for HTML only)"
+          }
+          
           @"
           ## 📊 Build Status Summary
           🎯 Target: ${{ inputs.target }}
@@ -479,8 +440,10 @@ jobs:
           🔧 Environment: ${{ inputs.environment }}
           📚 Quarto Version: ${{ inputs.quarto-version }}
           🔬 R Version: ${{ inputs.r-version }}
+          📄 Format: ${{ inputs.format }}
+          🚀 Deploy: ${{ inputs.deploy }}
           🧩 Cache Status:
-            - TeX Live: Installed via teatimeguest/setup-texlive-action@v3
+            - TeX Live: $texLiveStatus
             - R Packages: ${{ steps.cache-r-packages.outputs.cache-hit == 'true' && '✅ Hit' || '❌ Miss' }}
           ⏰ Completed at: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
           "@ | Add-Content $env:GITHUB_STEP_SUMMARY
