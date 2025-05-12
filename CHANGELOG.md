@@ -1,12 +1,24 @@
-_Last Updated: May 03, 2025_
+_Last Updated: May 12, 2025_
 
 ## 2025 Changes
 
-### 📅 Published on May 03, 2025
+### 📅 Published on May 12, 2025
 
-37 files updated (7185 lines added, 3152 lines removed)
+1 files updated (647 lines added, 57 lines removed)
 
 <details open>
+  <summary>**Major Updates**</summary>
+
+- **On-Device Learning**: <span style="color:green">+++++</span><span style="color:red"></span> (647 lines added, 57 lines removed)
+
+</details>
+
+
+### 📅 Published on May 04, 2025
+
+🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/c2fc08e54e2fd7705add479a07fb154b0c998206...4946f5081f5aae1544f86334bcc53d7326378947) --- 37 files updated (7185 lines added, 3152 lines removed)
+
+<details>
   <summary>**Major Updates**</summary>
 
 - **AI Training**: <span style="color:green">++</span><span style="color:red">---</span> (156 lines added, 218 lines removed)
@@ -25,7 +37,7 @@ _Last Updated: May 03, 2025_
 
 </details>
 
-<details open>
+<details>
   <summary>**Minor Updates**</summary>
 
 - **AI Acceleration**: <span style="color:green">+</span><span style="color:red">----</span> (27 lines added, 104 lines removed)
