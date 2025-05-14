@@ -4,9 +4,20 @@ _Last Updated: May 14, 2025_
 
 ### 📅 Published on May 14, 2025
 
-1 files updated (647 lines added, 57 lines removed)
+1 files updated (39 lines added, 41 lines removed)
 
 <details open>
+  <summary>**Minor Updates**</summary>
+
+- **Ondevice Learning**: <span style="color:green">++</span><span style="color:red">---</span> (39 lines added, 41 lines removed)
+
+</details>
+
+### 📅 Published on May 14, 2025
+
+🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/269a997cd3ee0a6d998faacf65a41a42c2c1b304...538df3a44fe7df6619f4bfefeca74f287ee087f0) --- 1 files updated (647 lines added, 57 lines removed)
+
+<details>
   <summary>**Major Updates**</summary>
 
 - **Ondevice Learning**: <span style="color:green">+++++</span><span style="color:red"></span> (647 lines added, 57 lines removed)
