@@ -9,7 +9,7 @@ from pathlib import Path
 from collections import defaultdict
 
 # -- Set your OpenAI model here
-OPENAI_MODEL = "gpt-4"
+OPENAI_MODEL = "gpt-4o"
 
 # -- Prompt Template
 PROMPT_TEMPLATE = """
@@ -23,12 +23,11 @@ Please follow these guidelines:
 - No Markdown Changes: Only update the text of the headers, not the Markdown level (#, ##, etc.).
 
 Return your output in the following YAML format:
-```yaml
+
 - original: "## Introduction to Compilation Techniques for Machine Learning"
   revised: "## Compilation Techniques"
 - original: "### Explaining Why Compilers Matter in ML Pipelines"
   revised: "### Why Compilers Matter"
-```
 
 Make sure each header revision respects the hierarchy and flow of the textbook. Do not skip any headers, even if they seem fine — evaluate all.
 Here is the full list of headers:
@@ -81,6 +80,13 @@ def apply_revisions(file_line_map, replacements):
                 with path.open('w', encoding="utf-8") as f:
                     f.writelines(content)
 
+def strip_yaml_fence(text):
+    """Remove surrounding ```yaml ... ``` fence if present."""
+    lines = text.strip().splitlines()
+    if lines[0].strip().startswith("```") and lines[-1].strip().startswith("```"):
+        return "\n".join(lines[1:-1]).strip()
+    return text.strip()
+
 def main():
     if not os.getenv("OPENAI_API_KEY"):
         print("[ERROR] OPENAI_API_KEY is not set. Please export it before running.")
@@ -117,7 +123,8 @@ def main():
 
     print("[INFO] Parsing YAML response...")
     try:
-        revisions = yaml.safe_load(raw_output)
+        cleaned_output = strip_yaml_fence(raw_output)
+        revisions = yaml.safe_load(cleaned_output)
     except yaml.YAMLError as e:
         print("[ERROR] Failed to parse YAML:", e)
         print(raw_output)
