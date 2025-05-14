@@ -12,7 +12,27 @@ from collections import defaultdict
 OPENAI_MODEL = "gpt-4"
 
 # -- Prompt Template
-PROMPT_TEMPLATE = """<your prompt stays unchanged here>"""
+PROMPT_TEMPLATE = """
+You are assisting with editing section headers for a textbook on Machine Learning Systems. The headers are extracted from `.qmd` Markdown files. Your task is to revise the headers to be suitable for a professional, technically rigorous textbook.
+
+Please follow these guidelines:
+- Concise: Keep headers short (ideally under 5 words), clear, and impactful.
+- Hierarchical Awareness: Analyze all headers before editing. Ensure that subheaders (e.g., ###) are meaningfully distinct from their parent headers and do not repeat information unnecessarily.
+- Consistent Tone: Use an academic, systems-oriented style. Assume the reader is technically literate but learning the concepts for the first time.
+- No Numbering: Do not include chapter or section numbers (e.g., “3.1”).
+- No Markdown Changes: Only update the text of the headers, not the Markdown level (#, ##, etc.).
+
+Return your output in the following YAML format:
+```yaml
+- original: "## Introduction to Compilation Techniques for Machine Learning"
+  revised: "## Compilation Techniques"
+- original: "### Explaining Why Compilers Matter in ML Pipelines"
+  revised: "### Why Compilers Matter"
+```
+
+Make sure each header revision respects the hierarchy and flow of the textbook. Do not skip any headers, even if they seem fine — evaluate all.
+Here is the full list of headers:
+"""
 
 def find_qmd_headers_in_file(file_path):
     header_map = []
