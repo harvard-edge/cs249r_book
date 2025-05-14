@@ -1,15 +1,15 @@
-_Last Updated: May 12, 2025_
+_Last Updated: May 14, 2025_
 
 ## 2025 Changes
 
-### 📅 Published on May 12, 2025
+### 📅 Published on May 14, 2025
 
 1 files updated (647 lines added, 57 lines removed)
 
 <details open>
   <summary>**Major Updates**</summary>
 
-- **On-Device Learning**: <span style="color:green">+++++</span><span style="color:red"></span> (647 lines added, 57 lines removed)
+- **Ondevice Learning**: <span style="color:green">+++++</span><span style="color:red"></span> (647 lines added, 57 lines removed)
 
 </details>
 
@@ -21,9 +21,8 @@ _Last Updated: May 12, 2025_
 <details>
   <summary>**Major Updates**</summary>
 
-- **AI Training**: <span style="color:green">++</span><span style="color:red">---</span> (156 lines added, 218 lines removed)
-- **DL Primer**: <span style="color:green">++++</span><span style="color:red">-</span> (244 lines added, 85 lines removed)
-- **DNN Architectures**: <span style="color:green">+++++</span><span style="color:red"></span> (376 lines added, 28 lines removed)
+- **Dl Primer**: <span style="color:green">++++</span><span style="color:red">-</span> (244 lines added, 85 lines removed)
+- **Dnn Architectures**: <span style="color:green">+++++</span><span style="color:red"></span> (376 lines added, 28 lines removed)
 - **Image Classification**: <span style="color:green">+++</span><span style="color:red">--</span> (262 lines added, 143 lines removed)
 - **Image Classification**: <span style="color:green">++</span><span style="color:red">---</span> (266 lines added, 293 lines removed)
 - **Llm**: <span style="color:green">+++</span><span style="color:red">--</span> (314 lines added, 162 lines removed)
