@@ -2,7 +2,9 @@ import os
 import re
 import yaml
 import argparse
-import openai
+from openai import OpenAI
+
+client = OpenAI()
 from pathlib import Path
 from collections import defaultdict
 
@@ -39,12 +41,10 @@ def find_qmd_headers_in_directory(directory):
 
 def call_openai(prompt):
     print("[DEBUG] Prompt sent to OpenAI:\n", prompt[:1000], "...\n")
-    response = openai.ChatCompletion.create(
-        model=OPENAI_MODEL,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
-    )
-    return response['choices'][0]['message']['content']
+    response = client.chat.completions.create(model=OPENAI_MODEL,
+    messages=[{"role": "user", "content": prompt}],
+    temperature=0.3)
+    return response.choices[0].message.content
 
 def apply_revisions(file_line_map, replacements):
     for item in replacements:
