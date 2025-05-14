@@ -6,7 +6,7 @@ _Last Updated: May 14, 2025_
 
 🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/cdd450b62604def67900f6dddc7c9bb722ddd485...04a55a039ab725ec6e1cdd640cbb6200329ea6d7) --- 1 files updated (39 lines added, 41 lines removed)
 
-<details open>
+<details>
   <summary>**Minor Updates**</summary>
 
 - **Ondevice Learning**: <span style="color:green">++</span><span style="color:red">---</span> (39 lines added, 41 lines removed)
