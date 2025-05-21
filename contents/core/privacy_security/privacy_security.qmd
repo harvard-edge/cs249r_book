@@ -629,7 +629,9 @@ Together, these techniques reflect a shift from isolating data as the sole path 
 
 #### Comparative Properties
 
-These privacy-preserving techniques differ not only in the guarantees they offer but also in their system-level implications. For practitioners, the choice of mechanism depends on factors such as computational constraints, deployment architecture, and regulatory requirements. Table @tbl-privacy-technique-comparison summarizes the comparative properties of these methods, focusing on privacy strength, runtime overhead, maturity, and common use cases. Understanding these trade-offs is essential for designing privacy-aware machine learning systems that operate under real-world constraints.
+These privacy-preserving techniques differ not only in the guarantees they offer but also in their system-level implications. For practitioners, the choice of mechanism depends on factors such as computational constraints, deployment architecture, and regulatory requirements. 
+
+@tbl-privacy-technique-comparison summarizes the comparative properties of these methods, focusing on privacy strength, runtime overhead, maturity, and common use cases. Understanding these trade-offs is essential for designing privacy-aware machine learning systems that operate under real-world constraints.
 
 +------------------------+-----------------------+-------------------------+----------------------+------------------------------+------------------------------------------------------------+
 | Technique              | Privacy Guarantee     | Computational Overhead | Deployment Maturity | Typical Use Case             | Trade-offs                                                 |
@@ -652,6 +654,63 @@ These privacy-preserving techniques differ not only in the guarantees they offer
 +------------------------+-----------------------+-------------------------+----------------------+------------------------------+------------------------------------------------------------+
 
 : Comparison of data privacy techniques across system-level dimensions. {#tbl-privacy-technique-comparison .striped .hover}
+
+### Secure Model Design
+
+Security begins at the design phase of a machine learning system. While downstream mechanisms such as access control and encryption protect models once deployed, many vulnerabilities can be mitigated earlier—through architectural choices, defensive training strategies, and mechanisms that embed resilience directly into the model’s structure or behavior. By considering security as a design constraint, system developers can reduce the model’s exposure to attacks, limit its ability to leak sensitive information, and provide verifiable ownership protection.
+
+One important design strategy is to build robust-by-construction models that reduce the risk of exploitation at inference time. For instance, models with confidence calibration or abstention mechanisms can be trained to avoid making predictions when input uncertainty is high. These techniques can help prevent overconfident misclassifications in response to adversarial or out-of-distribution inputs. Models may also employ output smoothing, regularizing the output distribution to reduce sharp decision boundaries that are especially susceptible to adversarial perturbations.
+
+Certain application contexts may also benefit from choosing simpler or compressed architectures. While not universally appropriate, limiting model capacity can reduce opportunities for memorization of sensitive training data and complicate efforts to reverse-engineer the model from output behavior. For embedded or on-device settings, smaller models are also easier to secure, as they typically require less memory and compute, lowering the likelihood of side-channel leakage or runtime manipulation.
+
+Another design-stage consideration is the use of model watermarking, a technique for embedding verifiable ownership signatures directly into the model’s parameters or output behavior. A watermark might be implemented, for example, as a hidden response pattern triggered by specific inputs, or as a parameter-space perturbation that does not affect accuracy but is statistically identifiable. These watermarks can be used to detect and prove misuse of stolen models in downstream deployments. Watermarking strategies must be carefully designed to remain robust to model compression, fine-tuning, and format conversion.
+
+For example, in a keyword spotting system deployed on embedded hardware for voice activation (e.g., "Hey Alexa" or "OK Google"), a secure design might use a lightweight convolutional neural network with confidence calibration to avoid false activations on uncertain audio. The model might also include an abstention threshold, below which it produces no activation at all. To protect intellectual property, a designer could embed a watermark by training the model to respond with a unique label only when presented with a specific, unused audio trigger known only to the developer. These design choices not only improve robustness and accountability, but also support future verification in case of IP disputes or performance failures in the field.
+
+In high-risk applications, such as medical diagnosis, autonomous vehicles, or financial decision systems, designers may also prioritize interpretable model architectures, such as decision trees, rule-based classifiers, or sparsified networks, to enhance system auditability. These models are often easier to understand and explain, making it simpler to identify potential vulnerabilities or biases. Using interpretable models allows developers to provide clearer insights into how the system arrived at a particular decision, which is crucial for building trust with users and regulators.
+
+Model design choices often reflect trade-offs between accuracy, robustness, transparency, and system complexity. However, when viewed from a systems perspective, early-stage design decisions frequently yield the highest leverage for long-term security. They shape what the model can learn, how it behaves under uncertainty, and what guarantees can be made about its provenance, interpretability, and resilience.
+
+### Secure Model Deployment
+
+Protecting machine learning models from theft, abuse, and unauthorized manipulation requires security considerations throughout both the design and deployment phases. A model’s vulnerability is not solely determined by its training procedure or architecture, but also by how it is serialized, packaged, deployed, and accessed during inference. As models are increasingly embedded into edge devices, served through public APIs, or integrated into multi-tenant platforms, robust security practices are essential to ensure the integrity, confidentiality, and availability of model behavior.
+
+This section addresses security mechanisms across three key stages: model design, secure packaging and serialization, and deployment and access control.
+
+From a design perspective, architectural choices can reduce a model’s exposure to adversarial manipulation and unauthorized use. For example, models can incorporate confidence calibration or abstention mechanisms that allow them to reject uncertain or anomalous inputs rather than producing potentially misleading outputs. Designing models with simpler or compressed architectures can also reduce the risk of reverse engineering or information leakage through side-channel analysis. In some cases, model designers may embed imperceptible watermarks—unique signatures in the parameters or behavior of the model—that can later be used to demonstrate ownership in cases of misappropriation. These design-time protections are particularly important for commercially valuable models, where intellectual property rights are at stake.
+
+Once training is complete, the model must be securely packaged for deployment. Storing models in plaintext formats—such as unencrypted ONNX or PyTorch checkpoint files—can expose internal structures and parameters to attackers with access to the file system or memory. To mitigate this risk, models should be encrypted, obfuscated, or wrapped in secure containers. Decryption keys should be made available only at runtime and only within trusted environments. Additional mechanisms, such as quantization-aware encryption or integrity-checking wrappers, can prevent tampering and offline model theft.
+
+Deployment environments must also enforce strong access control policies to ensure that only authorized users and services can interact with inference endpoints. Authentication protocols—such as OAuth tokens, mutual TLS, or API keys—should be combined with role-based access control (RBAC) to restrict access according to user roles and operational context. For instance, OpenAI’s hosted model APIs require users to include an OPENAI_API_KEY when submitting inference requests. This key authenticates the client and enables the backend to enforce usage policies, monitor for abuse, and log access patterns. A simplified example of secure usage is shown in @lst-openai-api, where the API key is securely loaded from an environment variable before being used to authenticate requests.
+
+::: {#lst-openai-api .callout-important title="OpenAI API Key"}
+
+```{python}
+import openai
+import os
+
+# Securely load the API key from an environment variable
+openai.api_key = os.getenv("OPENAI_API_KEY")
+
+# Submit a prompt to the model
+response = openai.ChatCompletion.create(
+    model="gpt-4",
+    messages=[
+        {"role": "user", "content": "Summarize the principles of differential privacy."}
+    ]
+)
+
+print(response.choices[0].message["content"])
+```
+
+:::
+
+In this example, the API key is retrieved from an environment variable—avoiding the security risk of hardcoding it into source code or exposing it to the client side. Such key-based access control mechanisms are simple to implement but require careful key management and monitoring to prevent misuse, unauthorized access, or model extraction.
+
+Beyond endpoint access, the integrity of the deployment pipeline itself must also be protected. Continuous integration and deployment (CI/CD) workflows that automate model updates should enforce cryptographic signing of artifacts, dependency validation, and infrastructure hardening. Without these controls, adversaries could inject malicious models or alter existing ones during the build and deployment process. Verifying model signatures and maintaining audit trails helps ensure that only authorized models are deployed into production.
+
+When applied together, these practices protect against a range of threats—from model theft and unauthorized inference access to tampering during deployment and output manipulation at runtime. No single mechanism suffices in isolation, but a layered strategy—beginning at design and extending through deployment—provides a strong foundation for securing machine learning systems under real-world conditions.
+
 
 ### System-level Monitoring
 
