@@ -533,7 +533,336 @@ The Supermicro controversy serves as a cautionary tale for the machine learning 
 
 ## Defensive Strategies
 
-Designing secure and privacy-preserving machine learning systems requires more than identifying threats—it demands proactive, layered defenses tailored to the system's architecture, threat surface, and deployment context. Defensive strategies must account for the distinct challenges posed by model behavior, data pipelines, hardware vulnerabilities, and system integration. In contrast to traditional software systems, ML systems introduce unique risks, such as susceptibility to adversarial examples, sensitivity to data corruption, and increased complexity due to model-data coupling.
+Designing secure and privacy-preserving machine learning systems requires more than identifying threats. It demands proactive, layered defenses tailored to the system's architecture, threat surface, and deployment context. Defensive strategies must account for the distinct challenges posed by model behavior, data pipelines, hardware vulnerabilities, and system integration. In contrast to traditional software systems, ML systems introduce unique risks, such as susceptibility to adversarial examples, sensitivity to data corruption, and increased complexity due to model-data coupling.
 
 This section outlines a range of defensive strategies that can be employed to enhance the security and privacy of machine learning systems. These strategies span multiple layers, from hardware and software to data management and operational practices. By adopting a holistic approach, organizations can build ML systems capable of withstanding a variety of threats while maintaining user trust and compliance with privacy regulations.
 
+### Secure Model Design
+
+Security begins at the design phase of a machine learning system. While downstream mechanisms such as access control and encryption protect models once deployed, many vulnerabilities can be mitigated earlier—through architectural choices, defensive training strategies, and mechanisms that embed resilience directly into the model’s structure or behavior. By considering security as a design constraint, system developers can reduce the model’s exposure to attacks, limit its ability to leak sensitive information, and provide verifiable ownership protection.
+
+One important design strategy is to build robust-by-construction models that reduce the risk of exploitation at inference time. For instance, models with confidence calibration or abstention mechanisms can be trained to avoid making predictions when input uncertainty is high. These techniques can help prevent overconfident misclassifications in response to adversarial or out-of-distribution inputs. Models may also employ output smoothing, regularizing the output distribution to reduce sharp decision boundaries that are especially susceptible to adversarial perturbations.
+
+Certain application contexts may also benefit from choosing simpler or compressed architectures. While not universally appropriate, limiting model capacity can reduce opportunities for memorization of sensitive training data and complicate efforts to reverse-engineer the model from output behavior. For embedded or on-device settings, smaller models are also easier to secure, as they typically require less memory and compute, lowering the likelihood of side-channel leakage or runtime manipulation.
+
+Another design-stage consideration is the use of model watermarking, a technique for embedding verifiable ownership signatures directly into the model’s parameters or output behavior. A watermark might be implemented, for example, as a hidden response pattern triggered by specific inputs, or as a parameter-space perturbation that does not affect accuracy but is statistically identifiable. These watermarks can be used to detect and prove misuse of stolen models in downstream deployments. Watermarking strategies must be carefully designed to remain robust to model compression, fine-tuning, and format conversion.
+
+For example, in a keyword spotting system deployed on embedded hardware for voice activation (e.g., "Hey Alexa" or "OK Google"), a secure design might use a lightweight convolutional neural network with confidence calibration to avoid false activations on uncertain audio. The model might also include an abstention threshold, below which it produces no activation at all. To protect intellectual property, a designer could embed a watermark by training the model to respond with a unique label only when presented with a specific, unused audio trigger known only to the developer. These design choices not only improve robustness and accountability, but also support future verification in case of IP disputes or performance failures in the field.
+
+In high-risk applications, such as medical diagnosis, autonomous vehicles, or financial decision systems, designers may also prioritize interpretable model architectures, such as decision trees, rule-based classifiers, or sparsified networks, to enhance system auditability. These models are often easier to understand and explain, making it simpler to identify potential vulnerabilities or biases. Using interpretable models allows developers to provide clearer insights into how the system arrived at a particular decision, which is crucial for building trust with users and regulators.
+
+Model design choices often reflect trade-offs between accuracy, robustness, transparency, and system complexity. However, when viewed from a systems perspective, early-stage design decisions frequently yield the highest leverage for long-term security. They shape what the model can learn, how it behaves under uncertainty, and what guarantees can be made about its provenance, interpretability, and resilience.
+
+### Secure Model Deployment
+
+Protecting machine learning models from theft, abuse, and unauthorized manipulation requires security considerations throughout both the design and deployment phases. A model’s vulnerability is not solely determined by its training procedure or architecture, but also by how it is serialized, packaged, deployed, and accessed during inference. As models are increasingly embedded into edge devices, served through public APIs, or integrated into multi-tenant platforms, robust security practices are essential to ensure the integrity, confidentiality, and availability of model behavior.
+
+This section addresses security mechanisms across three key stages: model design, secure packaging and serialization, and deployment and access control.
+
+From a design perspective, architectural choices can reduce a model’s exposure to adversarial manipulation and unauthorized use. For example, models can incorporate confidence calibration or abstention mechanisms that allow them to reject uncertain or anomalous inputs rather than producing potentially misleading outputs. Designing models with simpler or compressed architectures can also reduce the risk of reverse engineering or information leakage through side-channel analysis. In some cases, model designers may embed imperceptible watermarks—unique signatures in the parameters or behavior of the model—that can later be used to demonstrate ownership in cases of misappropriation. These design-time protections are particularly important for commercially valuable models, where intellectual property rights are at stake.
+
+Once training is complete, the model must be securely packaged for deployment. Storing models in plaintext formats—such as unencrypted ONNX or PyTorch checkpoint files—can expose internal structures and parameters to attackers with access to the file system or memory. To mitigate this risk, models should be encrypted, obfuscated, or wrapped in secure containers. Decryption keys should be made available only at runtime and only within trusted environments. Additional mechanisms, such as quantization-aware encryption or integrity-checking wrappers, can prevent tampering and offline model theft.
+
+Deployment environments must also enforce strong access control policies to ensure that only authorized users and services can interact with inference endpoints. Authentication protocols—such as OAuth tokens, mutual TLS, or API keys—should be combined with role-based access control (RBAC) to restrict access according to user roles and operational context. For instance, OpenAI’s hosted model APIs require users to include an OPENAI_API_KEY when submitting inference requests. This key authenticates the client and enables the backend to enforce usage policies, monitor for abuse, and log access patterns. A simplified example of secure usage is shown in @lst-openai-api, where the API key is securely loaded from an environment variable before being used to authenticate requests.
+
+::: {#lst-openai-api .callout-important title="OpenAI API Key"}
+
+```{python}
+import openai
+import os
+
+# Securely load the API key from an environment variable
+openai.api_key = os.getenv("OPENAI_API_KEY")
+
+# Submit a prompt to the model
+response = openai.ChatCompletion.create(
+    model="gpt-4",
+    messages=[
+        {"role": "user", "content": "Summarize the principles of differential privacy."}
+    ]
+)
+
+print(response.choices[0].message["content"])
+```
+
+:::
+
+In this example, the API key is retrieved from an environment variable—avoiding the security risk of hardcoding it into source code or exposing it to the client side. Such key-based access control mechanisms are simple to implement but require careful key management and monitoring to prevent misuse, unauthorized access, or model extraction.
+
+Beyond endpoint access, the integrity of the deployment pipeline itself must also be protected. Continuous integration and deployment (CI/CD) workflows that automate model updates should enforce cryptographic signing of artifacts, dependency validation, and infrastructure hardening. Without these controls, adversaries could inject malicious models or alter existing ones during the build and deployment process. Verifying model signatures and maintaining audit trails helps ensure that only authorized models are deployed into production.
+
+When applied together, these practices protect against a range of threats—from model theft and unauthorized inference access to tampering during deployment and output manipulation at runtime. No single mechanism suffices in isolation, but a layered strategy—beginning at design and extending through deployment—provides a strong foundation for securing machine learning systems under real-world conditions.
+
+### Data Privacy Techniques
+
+Protecting the privacy of individuals whose data fuels machine learning systems is a foundational requirement for trustworthy AI. Unlike traditional systems where data is often masked or anonymized before processing, ML workflows typically rely on access to raw, high-fidelity data to train effective models. This tension between utility and privacy has motivated a diverse set of techniques aimed at minimizing data exposure while preserving learning performance.
+
+#### Differential Privacy
+
+One of the most widely adopted frameworks for formalizing privacy guarantees is **differential privacy (DP)**. DP provides a rigorous mathematical definition of privacy loss, ensuring that the inclusion or exclusion of a single individual's data has a provably limited effect on the model's output. A randomized algorithm $\mathcal{A}$ is said to be $\epsilon$-differentially private if, for all adjacent datasets $D$ and $D'$ differing in one record, and for all outputs $S \subseteq \text{Range}(\mathcal{A})$, the following holds:
+
+$$
+\Pr[\mathcal{A}(D) \in S] \leq e^{\epsilon} \Pr[\mathcal{A}(D') \in S]
+$$
+
+This bound ensures that the algorithm’s behavior remains statistically indistinguishable regardless of whether any individual’s data is present, thereby limiting the information that can be inferred about that individual. In practice, DP is implemented by adding calibrated noise to model updates or query responses, using mechanisms such as the Laplace or Gaussian mechanism. Training techniques like differentially private stochastic gradient descent (DP-SGD) integrate noise into the optimization process to ensure per-iteration privacy guarantees.
+
+While differential privacy offers strong theoretical assurances, it introduces a trade-off between privacy and utility. Increasing the noise to reduce $\epsilon$ may degrade model accuracy, especially in low-data regimes or fine-grained classification tasks. Consequently, DP is often applied selectively—either during training on sensitive datasets or at inference when returning aggregate statistics—to balance privacy with performance goals.
+
+#### Federated Learning
+
+Complementary to DP, **federated learning (FL)** reduces privacy risks by restructuring the learning process itself. Rather than aggregating raw data at a central location, FL distributes the training across a set of client devices, each holding local data. Clients compute model updates locally and share only parameter deltas with a central server for aggregation:
+
+$$
+\theta_{t+1} \leftarrow \sum_{k=1}^{K} \frac{n_k}{n} \cdot \theta_{t}^{(k)}
+$$
+
+Here, $\theta_{t}^{(k)}$ represents the model update from client $k$, $n_k$ the number of samples held by that client, and $n$ the total number of samples across all clients. This weighted aggregation allows the global model to learn from distributed data without direct access to it. While FL reduces the exposure of raw data, it still leaks information through gradients, motivating the use of DP, secure aggregation, and hardware-based protections in federated settings.
+
+To address scenarios requiring computation on encrypted data, **homomorphic encryption (HE)** and **secure multiparty computation (SMPC)** allow models to perform inference or training over encrypted inputs. In the case of HE, operations on ciphertexts correspond to operations on plaintexts, enabling encrypted inference:
+
+$$
+\text{Enc}(f(x)) = f(\text{Enc}(x))
+$$
+
+This property supports privacy-preserving computation in untrusted environments, such as cloud inference over sensitive health or financial records. However, the computational cost of HE remains high, making it more suitable for fixed-function models and low-latency batch tasks. SMPC, by contrast, distributes the computation across multiple parties such that no single party learns the complete input or output. This is particularly useful in joint training across institutions with strict data-use policies, such as hospitals or banks.
+
+#### Synthetic Data Generation
+
+A more pragmatic and increasingly popular alternative involves the use of **synthetic data generation**. By training generative models on real datasets and sampling new instances from the learned distribution, organizations can create datasets that approximate the statistical properties of the original data without retaining identifiable details. While this approach reduces the risk of direct reidentification, it does not offer formal privacy guarantees unless combined with DP constraints during generation. Moreover, poorly designed synthetic data may preserve subtle patterns or outliers that leak sensitive information, making validation and auditing essential.
+
+Together, these techniques reflect a shift from isolating data as the sole path to privacy toward embedding privacy-preserving mechanisms into the learning process itself. Each method offers distinct guarantees and trade-offs depending on the application context, threat model, and regulatory constraints. Effective system design often combines multiple approaches—for example, applying differential privacy within a federated learning setup or using homomorphic encryption for critical inference stages—to build ML systems that are both useful and respectful of user privacy.
+
+#### Comparative Properties
+
+These privacy-preserving techniques differ not only in the guarantees they offer but also in their system-level implications. For practitioners, the choice of mechanism depends on factors such as computational constraints, deployment architecture, and regulatory requirements. Table @tbl-privacy-technique-comparison summarizes the comparative properties of these methods, focusing on privacy strength, runtime overhead, maturity, and common use cases. Understanding these trade-offs is essential for designing privacy-aware machine learning systems that operate under real-world constraints.
+
++------------------------+-----------------------+-------------------------+----------------------+------------------------------+------------------------------------------------------------+
+| Technique              | Privacy Guarantee     | Computational Overhead | Deployment Maturity | Typical Use Case             | Trade-offs                                                 |
++========================+=======================+=========================+======================+==============================+============================================================+
+| Differential Privacy   | Formal (ε-DP)         | Moderate to High        | Production           | Training with sensitive      | Reduced accuracy; careful tuning of ε/noise                |
+|                        |                       |                         |                      | or regulated data            | required to balance utility and protection                 |
++------------------------+-----------------------+-------------------------+----------------------+------------------------------+------------------------------------------------------------+
+| Federated Learning     | Structural            | Moderate                | Production           | Cross-device or cross-org    | Gradient leakage risk; requires secure aggregation         |
+|                        |                       |                         |                      | collaborative learning       | and orchestration infrastructure                           |
++------------------------+-----------------------+-------------------------+----------------------+------------------------------+------------------------------------------------------------+
+| Homomorphic Encryption | Strong (Encrypted)    | High                    | Experimental         | Inference in untrusted       | High latency and memory usage; suitable for limited-scope  |
+|                        |                       |                         |                      | cloud environments           | inference on fixed-function models                         |
++------------------------+-----------------------+-------------------------+----------------------+------------------------------+------------------------------------------------------------+
+| Secure MPC             | Strong (Distributed)  | Very High               | Experimental         | Joint training across        | Expensive communication; challenging to scale to many      |
+|                        |                       |                         |                      | mutually untrusted parties   | participants or deep models                                |
++------------------------+-----------------------+-------------------------+----------------------+------------------------------+------------------------------------------------------------+
+| Synthetic Data         | Weak (if standalone)  | Low to Moderate         | Emerging             | Data sharing, benchmarking   | May leak sensitive patterns if training process is not     |
+|                        |                       |                         |                      | without direct access to raw | differentially private or audited for fidelity             |
+|                        |                       |                         |                      | data                         |                                                            |
++------------------------+-----------------------+-------------------------+----------------------+------------------------------+------------------------------------------------------------+
+
+: Comparison of data privacy techniques across system-level dimensions. {#tbl-privacy-technique-comparison .striped .hover}
+
+### System-level Monitoring
+
+Even with robust design and deployment safeguards, machine learning systems remain vulnerable to runtime threats. Attackers may craft inputs that bypass validation, exploit model behavior, or target system-level infrastructure. As ML systems enter production—especially in cloud, edge, or embedded deployments—defensive strategies must extend beyond static protection to include real-time monitoring, threat detection, and incident response. This section outlines operational defenses that maintain system trust under adversarial conditions.
+
+Runtime monitoring encompasses a range of techniques for observing system behavior, detecting anomalies, and triggering mitigation. These techniques can be grouped into three categories: input validation, output monitoring, and system integrity checks.
+
+#### Input Validation
+
+Input validation is the first line of defense at runtime. It ensures that incoming data conforms to expected formats, statistical properties, or semantic constraints before it is passed to a machine learning model. Without these safeguards, models are vulnerable to adversarial inputs—crafted examples designed to trigger incorrect predictions—or to malformed inputs that cause unexpected behavior in preprocessing or inference.
+
+Machine learning models, unlike traditional rule-based systems, often do not fail safely. Small, carefully chosen changes to input data can cause models to make high-confidence but incorrect predictions. Input validation helps detect and reject such inputs early in the pipeline.
+
+Validation techniques range from low-level checks (e.g., input size, type, and value ranges) to semantic filters (e.g., verifying whether an image contains a recognizable object or whether a voice recording includes speech). For example, a facial recognition system might validate that the uploaded image is within a certain resolution range (e.g., 224×224 to 1024×1024 pixels), contains RGB channels, and passes a lightweight face detection filter. This prevents inputs like blank images, text screenshots, or synthetic adversarial patterns from reaching the model. Similarly, a voice assistant might require that incoming audio files be between 1 and 5 seconds long, have a valid sampling rate (e.g., 16kHz), and contain detectable human speech using a speech activity detector (SAD). This ensures that empty recordings, music clips, or noise bursts are filtered before model inference.
+
+In generative systems such as DALL·E, Stable Diffusion, or Sora, input validation often involves prompt filtering. This includes scanning the user's text prompt for banned terms, brand names, profanity, or misleading medical claims. For example, a user prompt like “Generate an image of a medication bottle labeled with Pfizer’s logo” might be rejected or rewritten due to trademark concerns. Filters may operate using keyword lists, regular expressions, or lightweight classifiers that assess prompt intent. These filters prevent the generative model from being used to produce harmful, illegal, or misleading content—even before sampling begins.
+
+In some applications, distributional checks are also used. These assess whether the incoming data statistically resembles what the model saw during training. For instance, a computer vision pipeline might compare the color histogram of the input image to a baseline distribution, flagging outliers for manual review or rejection.
+
+These validations can be lightweight (heuristics or threshold rules) or learned (small models trained to detect distribution shift or adversarial artifacts). In either case, input validation serves as a critical pre-inference firewall—reducing exposure to adversarial behavior, improving system stability, and increasing trust in downstream model decisions.
+
+#### Output Monitoring
+
+Even when inputs pass validation, adversarial or unexpected behavior may still emerge at the model’s output. Output monitoring helps detect such anomalies by analyzing model predictions in real time. These mechanisms observe how the model behaves across inputs—tracking its confidence, prediction entropy, class distribution, or response patterns—to flag deviations from normal behavior.
+
+A key target for monitoring is prediction confidence. For example, if a classification model begins assigning high confidence to low-frequency or previously rare classes, this may indicate an adversarial input or distribution shift. Monitoring the entropy of the output distribution can similarly reveal when the model is overly certain in ambiguous contexts—an early sign of possible manipulation.
+
+In content moderation systems, a model that normally outputs neutral or “safe” labels may suddenly begin producing high-confidence “safe” labels for inputs containing offensive or banned content. Output monitoring can detect this mismatch by comparing predictions against auxiliary signals or known-safe reference sets. In such cases, the system may trigger a fallback policy—such as escalating the content for human review or switching to a conservative baseline model.
+
+Time-series models can also benefit from output monitoring. For example, an anomaly detection model used in fraud detection might track predicted fraud scores for transaction streams. A sudden drop in fraud scores—especially when transaction volume increases—may indicate model tampering, label leakage, or adversarial evasion. Output trends over time can provide valuable signals beyond pointwise predictions.
+
+Generative models, such as text-to-image systems, require output monitoring to enforce content safety policies. Systems like Stable Diffusion, DALL·E, and emerging video generators like Sora can produce highly realistic images or sequences that may violate platform guidelines or user expectations. To mitigate this, many pipelines deploy post-generation classifiers that label outputs for objectionable content (e.g., violence, nudity, brand misuse). These classifiers operate downstream of the generative model and can suppress, flag, or blur images based on confidence scores. In some cases, safety filters may also inspect attention maps or latent representations to predict potential misuse earlier in the generation process.
+
+In language generation, output monitoring plays a different role: identifying toxicity, hallucinations, or off-distribution behavior. For instance, a generative model used in a customer support chatbot may be monitored for keyword presence, tone, or semantic coherence. If outputs include profanity, unsupported claims, or syntactically malformed sentences, monitoring logic may suppress the response or trigger a recovery action (e.g., rephrasing or fallback to a scripted template).
+
+Effective output monitoring often combines rule-based heuristics with learned detectors trained on output logs from real deployments. These detectors flag unusual patterns at inference time and feed into alerting or rollback pipelines. Unlike model-centric defenses such as adversarial training, output monitoring does not aim to prevent exploitation—it provides early detection and containment, playing a critical role in real-world resilience.
+
+#### System Integrity Checks
+
+While input and output monitoring focus on model behavior, system integrity checks ensure that the underlying model files, execution environment, and serving infrastructure remain untampered throughout deployment. These checks detect unauthorized modifications, verify that the model running in production is authentic, and alert operators to suspicious system-level activity.
+
+One of the most common integrity mechanisms is cryptographic model verification. Before a model is loaded into memory, the system can compute a cryptographic hash (e.g., SHA-256) of the model file and compare it against a known-good signature. This process ensures that the model has not been altered during transit or storage. For example, a PyTorch .pt or TensorFlow .pb model artifact stored in object storage (e.g., S3) might be verified using a signed hash from a deployment registry before loading into a production container. If the verification fails, the system can block inference, alert an operator, or revert to a trusted model version.
+
+Access control and audit logging complement cryptographic checks. ML systems should restrict access to model files using role-based permissions and monitor file access patterns. For instance, repeated attempts to read model checkpoints from a non-standard path, or inference requests from unauthorized IP ranges, may indicate tampering, privilege escalation, or insider threats.
+
+In cloud environments, container- or VM-based isolation helps enforce process and memory boundaries, but these protections can erode over time due to misconfiguration or supply chain vulnerabilities. To reinforce runtime assurance, systems may deploy periodic attestation checks—verifying not just the model artifact, but also the software environment, installed dependencies, and hardware identity. These techniques are often backed by hardware trust anchors (e.g., TPMs or TEEs) discussed later on in this chapter.
+
+For example, in a regulated healthcare ML deployment, integrity checks might include: verifying the model hash against a signed manifest, validating that the runtime environment uses only approved Python packages, and checking that inference occurs inside a signed and attested virtual machine. These checks ensure compliance, limit the risk of silent failures, and create a forensic trail in case of audit or breach.
+
+Some systems also implement runtime memory verification, such as scanning for unexpected model parameter changes or checking that memory-mapped model weights remain unaltered during execution. While more common in high-assurance systems, such checks are becoming more feasible with the adoption of secure enclaves and trusted runtimes.
+
+Taken together, system integrity checks play a critical role in protecting machine learning systems from low-level attacks that bypass the model interface. When coupled with input/output monitoring, they provide layered assurance that both the model and its execution environment remain trustworthy under adversarial conditions.
+
+#### Incident Response
+
+When a security breach, anomaly, or performance degradation is detected in a deployed machine learning system, rapid and structured incident response is critical to minimizing impact. The goal is not only to contain the issue but to restore system integrity and ensure that future deployments benefit from the insights gained. Unlike traditional software systems, ML responses may require handling model state, data drift, or inference behavior, making recovery more complex.
+
+The first step is to define incident detection thresholds that trigger escalation. These thresholds may come from input validation (e.g., invalid input rates), output monitoring (e.g., drop in prediction confidence), or system integrity checks (e.g., failed model signature verification). When a threshold is crossed, the system should initiate an automated or semi-automated response protocol.
+
+One common strategy is model rollback, where the system reverts to a previously verified version of the model. For instance, if a newly deployed fraud detection model begins misclassifying transactions, the system may fall back to the last known-good checkpoint, restoring service while the affected version is quarantined. Rollback mechanisms require version-controlled model storage, typically supported by MLOps platforms such as MLflow, TFX, or SageMaker.
+
+In high-availability environments, model isolation may be used to contain failures. The affected model instance can be removed from load balancers or shadowed in a canary deployment setup. This allows continued service with unaffected replicas while maintaining forensic access to the compromised model for analysis.
+
+Traffic throttling is another immediate response tool. If an adversarial actor is probing a public inference API at high volume, the system can rate-limit or temporarily block offending IP ranges while continuing to serve trusted clients. This containment technique helps prevent abuse without requiring full system shutdown.
+
+Once immediate containment is in place, investigation and recovery can begin. This may include forensic analysis of input logs, parameter deltas between model versions, or memory snapshots from inference containers. In regulated environments, organizations may also need to notify users or auditors, particularly if personal or safety-critical data was affected.
+
+Recovery typically involves retraining or patching the model. This must occur through a secure update process, using signed artifacts, trusted build pipelines, and validated data. To prevent recurrence, the incident should feed back into model evaluation pipelines—updating tests, refining monitoring thresholds, or hardening input defenses. For example, if a prompt injection attack bypassed a content filter in a generative model, retraining might include adversarially crafted prompts, and the prompt validation logic would be updated to reflect newly discovered patterns.
+
+Finally, organizations should establish post-incident review practices. This includes documenting root causes, identifying gaps in detection or response, and updating policies and playbooks. Incident reviews help translate operational failures into actionable improvements across the design-deploy-monitor lifecycle.
+
+### Hardware-based Security
+
+Machine learning systems are increasingly deployed in environments where hardware-based security features can provide additional layers of protection. These features can help ensure the integrity of model execution, protect sensitive data, and prevent unauthorized access to system resources. This section discusses several key hardware-based security mechanisms that can enhance the security posture of machine learning systems.
+
+#### Trusted Execution Environments
+
+A **Trusted Execution Environment (TEE)** is a hardware-isolated region within a processor designed to protect sensitive computations and data from potentially compromised software. TEEs enforce confidentiality, integrity, and runtime isolation, ensuring that even if the host operating system or application layer is attacked, sensitive operations within the TEE remain secure.
+
+In the context of machine learning, TEEs are increasingly important for preserving the confidentiality of models, securing sensitive user data during inference, and ensuring that model outputs remain trustworthy. For example, a TEE can protect model parameters from being extracted by malicious software running on the same device, or ensure that computations involving biometric inputs—such as facial or fingerprint data—are performed securely. This capability is particularly critical in applications where model integrity, user privacy, or regulatory compliance are non-negotiable.
+
+One widely deployed example is [Apple’s Secure Enclave](https://support.apple.com/guide/security/secure-enclave-sec59b0b31ff/web), which provides isolated execution and secure key storage for iOS devices. By separating cryptographic operations and biometric data from the main processor, the Secure Enclave ensures that user credentials and Face ID features remain protected, even in the event of a broader system compromise.
+
+Trusted Execution Environments are essential across a range of industries with high security requirements. In telecommunications, TEEs are used to safeguard encryption keys and secure critical 5G control-plane operations. In finance, they enable secure mobile payments and protect PIN-based authentication workflows. In healthcare, TEEs help enforce patient data confidentiality during edge-based ML inference on wearable or diagnostic devices. In the automotive industry, they are deployed in advanced driver-assistance systems (ADAS) to ensure that safety-critical perception and decision-making modules operate on verified software.
+
+In machine learning systems, TEEs can provide several important protections. They secure the execution of model inference or training, shielding intermediate computations and final predictions from system-level observation. They protect the confidentiality of sensitive inputs—such as biometric or clinical signals—used in personal identification or risk scoring tasks. TEEs also serve to prevent reverse engineering of deployed models by restricting access to weights and architecture internals. When models are updated, TEEs ensure the authenticity of new parameters and block unauthorized tampering. Furthermore, in distributed ML settings, TEEs can protect data exchanged between components by enabling encrypted and attested communication channels.
+
+The core security properties of a TEE are achieved through four mechanisms: isolated execution, secure storage, integrity protection, and in-TEE data encryption. Code that runs inside the TEE is executed in a separate processor mode, inaccessible to the normal-world operating system. Sensitive assets such as cryptographic keys or authentication tokens are stored in memory that only the TEE can access. Code and data can be verified for integrity before execution using hardware-anchored hashes or signatures. Finally, data processed inside the TEE can be encrypted, ensuring that even intermediate results are inaccessible without appropriate keys, which are also managed internally by the TEE.
+
+Several commercial platforms provide TEE functionality tailored for different deployment contexts. [ARM TrustZone](https://www.arm.com/technologies/trustzone-for-cortex-m) offers secure and normal world execution on ARM-based systems and is widely used in mobile and IoT applications. [Intel SGX](https://www.intel.com/content/www/us/en/architecture-and-technology/software-guard-extensions.html) implements enclave-based security for cloud and desktop systems, enabling secure computation even on untrusted infrastructure. [Qualcomm’s Secure Execution Environment](https://www.qualcomm.com/products/features/mobile-security-solutions) supports secure mobile transactions and user authentication. Apple’s Secure Enclave remains a canonical example of a hardware-isolated security coprocessor for consumer devices.
+
+@fig-enclave illustrates a secure enclave integrated into a system-on-chip (SoC) design. The enclave includes a dedicated boot ROM to establish a hardware root of trust, a high-performance AES engine for cryptographic operations, and a secure memory region isolated from the main NAND flash storage used by the operating system. By physically separating secure data pathways and minimizing the attack surface, this architecture prevents compromise even if the main processor kernel is under adversarial control.
+
+![System-on-chip secure enclave. Source: Apple.](images/png/System-on-chip_secure_enclave.png){#fig-enclave}
+
+Despite their strengths, Trusted Execution Environments come with notable trade-offs. Implementing a TEE increases both direct hardware costs and indirect costs associated with developing and maintaining secure software. Integrating TEEs into existing systems may require architectural redesigns, especially for legacy infrastructure. Developers must adhere to strict protocols for isolation, attestation, and secure update management, which can extend development cycles and complicate testing workflows. TEEs can also introduce performance overhead, particularly when cryptographic operations are involved, or when context switching between trusted and untrusted modes is frequent.
+
+Energy efficiency is another consideration, particularly in battery-constrained devices. TEEs typically consume additional power due to secure memory accesses, cryptographic computation, and hardware protection logic. In resource-limited embedded systems, these costs may limit their use. In terms of scalability and flexibility, the secure boundaries enforced by TEEs may complicate distributed training or federated inference workloads, where secure coordination between enclaves is required.
+
+Market demand also varies. In some consumer applications, perceived threat levels may be too low to justify the integration of TEEs. Moreover, systems with TEEs may be subject to formal security certifications, such as [Common Criteria](https://www.commoncriteriaportal.org/ccra/index.cfm) or evaluation under [ENISA](https://www.enisa.europa.eu/), which can introduce additional time and expense. For this reason, TEEs are typically adopted only when the expected threat model—whether adversarial users, cloud tenants, or malicious insiders—justifies the investment.
+
+Nonetheless, TEEs remain a powerful hardware primitive in the machine learning security landscape. When paired with software- and system-level defenses, they provide a trusted foundation for executing ML models securely, privately, and verifiably, especially in scenarios where adversarial compromise of the host environment is a serious concern.
+
+Here is the revised **7.5.2 Secure Boot** section, rewritten in formal textbook tone with all original technical content, hyperlinks, and figures preserved. The structure emphasizes narrative clarity, avoids bullet lists, and integrates the Apple Face ID case study naturally.
+
+#### Secure Boot
+
+**Secure Boot** is a mechanism that ensures a device only boots software components that are cryptographically verified and explicitly authorized by the manufacturer. At startup, each stage of the boot process—including the bootloader, kernel, and base operating system—is checked against a known-good digital signature. If any signature fails verification, the boot sequence is halted, preventing unauthorized or malicious code from executing. This chain-of-trust model establishes system integrity from the very first instruction executed.
+
+In ML systems, especially those deployed on embedded or edge hardware, Secure Boot plays an important role. A compromised boot process may result in malicious software loading before the ML runtime begins, enabling attackers to intercept model weights, tamper with training data, or reroute inference results. Such breaches can lead to incorrect or manipulated predictions, unauthorized data access, or device repurposing for botnets or crypto-mining.
+
+For machine learning systems, Secure Boot offers several guarantees. First, it protects model-related data—including training data, inference inputs, and outputs—during the boot sequence, preventing pre-runtime tampering. Second, it ensures that only authenticated model binaries and supporting software are loaded, which helps guard against deployment-time model substitution. Third, Secure Boot enables secure model updates by verifying that firmware or model changes are signed and have not been altered in transit.
+
+Secure Boot frequently works in tandem with hardware-based Trusted Execution Environments (TEEs) to create a fully trusted execution stack. As shown in @fig-secure-boot, this layered boot process verifies firmware, operating system components, and TEE integrity before permitting execution of cryptographic operations or ML workloads. In embedded systems, this architecture provides resilience even under severe adversarial conditions or physical device compromise.
+
+![Secure Boot flow. Source: @Rashmi2018Secure.](images/png/Secure_Boot_flow.png){#fig-secure-boot}
+
+A well-known real-world implementation of Secure Boot appears in Apple’s Face ID system, which leverages advanced machine learning for facial recognition. For Face ID to operate securely, the entire device stack—from power-on to model execution—must be verifiably trusted.
+
+Upon device startup, Secure Boot initiates within Apple’s [Secure Enclave](https://support.apple.com/en-us/102381), a dedicated security coprocessor that handles biometric data. The firmware loaded onto the Secure Enclave is digitally signed by Apple, and any unauthorized modification causes the boot process to fail. Once verified, the Secure Enclave performs continuous checks in coordination with the central processor to maintain a trusted boot chain. Each system component—from the iOS kernel to application-level code—is verified using cryptographic signatures.
+
+After completing the secure boot sequence, the Secure Enclave activates the ML-based Face ID system. The facial recognition model projects over 30,000 infrared points to map a user’s face, generating a depth image and computing a mathematical representation that is compared against a securely stored profile. These facial data artifacts are never written to disk, transmitted off-device, or shared externally. All processing occurs within the enclave to protect against eavesdropping or exfiltration, even in the presence of a compromised kernel.
+
+To support continued integrity, Secure Boot also governs software updates. Only firmware or model updates signed by Apple are accepted, ensuring that even over-the-air patches do not introduce risk. This process maintains a robust chain of trust over time, enabling the secure evolution of the ML system while preserving user privacy and device security.
+
+While Secure Boot provides strong protection, its adoption presents technical and operational challenges. Managing the cryptographic keys used to sign and verify system components is complex, especially at scale. Enterprises must securely provision, rotate, and revoke keys, ensuring that no trusted root is compromised. Any such breach would undermine the entire security chain.
+
+Performance is also a consideration. Verifying signatures during the boot process introduces latency, typically on the order of tens to hundreds of milliseconds per component. Although acceptable in many applications, these delays may be problematic for real-time or power-constrained systems. Developers must also ensure that all components—bootloaders, firmware, kernels, drivers, and even ML models—are correctly signed. Integrating third-party software into a Secure Boot pipeline introduces additional complexity.
+
+Some systems limit user control in favor of vendor-locked security models, restricting upgradability or customization. In response, open-source bootloaders like [u-boot](https://source.denx.de/u-boot/u-boot) and [coreboot](https://www.coreboot.org/) have emerged, offering Secure Boot features while supporting extensibility and transparency. To further scale trusted device deployments, emerging industry standards such as the [Device Identifier Composition Engine (DICE)](https://www.microsoft.com/en-us/research/project/dice-device-identifier-composition-engine/) and [IEEE 802.1AR IDevID](https://1.ieee802.org/security/802-1ar/) provide mechanisms for secure device identity, key provisioning, and cross-vendor trust assurance.
+
+Secure Boot, when implemented carefully and complemented by trusted hardware and secure software update processes, forms the backbone of system integrity for embedded and distributed ML. It provides the assurance that the machine learning model running in production is not only the correct version, but is also executing in a known-good environment, anchored to hardware-level trust.
+
+#### Hardware Security Modules
+
+A **Hardware Security Module (HSM)** is a tamper-resistant physical device designed to perform cryptographic operations and securely manage digital keys. HSMs are widely used across security-critical industries such as finance, defense, and cloud infrastructure, and they are increasingly relevant for securing the machine learning pipeline—particularly in deployments where key confidentiality, model integrity, and regulatory compliance are essential.
+
+HSMs provide an isolated, hardened environment for performing sensitive operations such as key generation, digital signing, encryption, and decryption. Unlike general-purpose processors, they are engineered to withstand physical tampering and side-channel attacks, and they typically include protected storage, cryptographic accelerators, and internal audit logging. HSMs may be implemented as standalone appliances, plug-in modules, or integrated chips embedded within broader systems.
+
+In machine learning systems, HSMs enhance security across several dimensions. They are commonly used to protect encryption keys associated with sensitive data that may be processed during training or inference. These keys might encrypt data at rest in model checkpoints or enable secure transmission of inference requests across networked environments. By ensuring that the keys are generated, stored, and used exclusively within the HSM, the system minimizes the risk of key leakage, unauthorized reuse, or tampering.
+
+HSMs also play a role in maintaining the **integrity of machine learning models**. In many production pipelines, models must be signed before deployment to ensure that only verified versions are accepted into runtime environments. The signing keys used to authenticate models can be stored and managed within the HSM, providing cryptographic assurance that the deployed artifact is authentic and untampered. Similarly, secure firmware updates and configuration changes—whether they involve models, hyperparameters, or supporting infrastructure—can be validated using signatures produced by the HSM.
+
+In addition to protecting inference workloads, HSMs can be used to secure model training. During training, data may originate from distributed and potentially untrusted sources. HSM-backed protocols can help ensure that training pipelines perform encryption, integrity checks, and access control enforcement securely and in compliance with organizational or legal requirements. In regulated industries such as healthcare and finance, such protections are often mandatory.
+
+Despite these benefits, incorporating HSMs into embedded or resource-constrained ML systems introduces several trade-offs. First, HSMs are specialized hardware components and often come at a premium. Their cost may be justified in data center settings or safety-critical applications but can be prohibitive for low-margin embedded products or wearables. Physical space is also a concern. Embedded systems often operate under strict size, weight, and form factor constraints, and integrating an HSM may require redesigning circuit layouts or sacrificing other functionality.
+
+From a performance standpoint, HSMs introduce latency, particularly for operations like key exchange, signature verification, or on-the-fly decryption. In real-time inference systems—such as autonomous vehicles, industrial robotics, or live translation devices—these delays can affect responsiveness. While HSMs are typically optimized for cryptographic throughput, they are not general-purpose processors, and offloading secure operations must be carefully coordinated.
+
+Power consumption is another concern. The continuous secure handling of keys, signing of transactions, and cryptographic validations can consume more power than basic embedded components, impacting battery life in mobile or remote deployments.
+
+Integration complexity also grows when HSMs are introduced into existing ML pipelines. Interfacing between the HSM and the host processor requires dedicated APIs and often specialized software development. Firmware and model updates must be routed through secure, signed channels, and update orchestration must account for device-specific key provisioning. These requirements increase the operational burden, especially in large deployments.
+
+Scalability presents its own set of challenges. Managing a distributed fleet of HSM-equipped devices requires secure provisioning of individual keys, secure identity binding, and coordinated trust management. In large ML deployments—such as fleets of smart sensors or edge inference nodes—ensuring uniform security posture across all devices is nontrivial.
+
+Finally, the use of HSMs often requires organizations to engage in certification and compliance processes, particularly when handling regulated data. Meeting standards such as FIPS 140-2 or Common Criteria adds time and cost to development. Access to the HSM is typically restricted to a small set of authorized personnel, which can complicate development workflows and slow iteration cycles.
+
+Despite these operational complexities, HSMs remain a valuable option for machine learning systems that require high assurance of cryptographic integrity and access control. When paired with TEEs, secure boot, and software-based defenses, HSMs contribute to a multilayered security model that spans hardware, system software, and ML runtime.
+
+#### Physical Unclonable Functions
+
+**Physical Unclonable Functions (PUFs)** provide a hardware-intrinsic mechanism for cryptographic key generation and device authentication by leveraging physical randomness in semiconductor fabrication. Unlike traditional keys stored in memory, a PUF generates secret values based on microscopic variations in a chip’s physical properties—variations that are inherent to manufacturing processes and difficult to clone or predict, even by the manufacturer.
+
+These variations arise from uncontrollable physical factors such as doping concentration, line edge roughness, and dielectric thickness. As a result, even chips fabricated with the same design masks exhibit small but measurable differences in timing, power consumption, or voltage behavior. PUF circuits amplify these variations to produce a device-unique digital output. When a specific input challenge is applied to a PUF, it generates a corresponding response based on the chip’s physical fingerprint. Because these characteristics are effectively impossible to replicate, the same challenge will yield different responses across devices.
+
+This challenge-response mechanism allows PUFs to serve several cryptographic purposes. They can be used to derive device-specific keys that never need to be stored externally, reducing the attack surface for key exfiltration. The same mechanism also supports secure authentication and attestation, where devices must prove their identity to trusted servers or hardware gateways. These properties make PUFs a natural fit for machine learning systems deployed in embedded and distributed environments.
+
+In ML applications, PUFs offer unique advantages for securing resource-constrained systems. For example, consider a smart camera drone that uses onboard computer vision to track objects. A PUF embedded in the drone’s processor can generate a private key to encrypt the model during boot. Even if the model were extracted, it would be unusable on another device lacking the same PUF response. That same PUF-derived key could also be used to watermark the model parameters, creating a cryptographically verifiable link between a deployed model and its origin hardware. If the model were leaked or pirated, the embedded watermark could help prove the source of the compromise.
+
+PUFs also support authentication in distributed ML pipelines. If the drone offloads computation to a cloud server, the PUF can help verify that the drone has not been cloned or tampered with. The cloud backend can issue a challenge, verify the correct response from the device, and permit access only if the PUF proves device authenticity. These protections enhance trust not only in the model and data, but in the execution environment itself.
+
+The internal operation of a PUF is illustrated in @fig-pfu. At a high level, a PUF accepts a challenge input and produces a unique response determined by the physical microstructure of the chip. Variants include optical PUFs—where the challenge is a light pattern and the response is a speckle image—and electronic PUFs such as Arbiter PUFs (APUFs), where timing differences between circuit paths produce a binary output. Another common implementation is the SRAM PUF, which exploits the power-up state of uninitialized SRAM cells: due to threshold voltage mismatch, each cell tends to settle into a preferred value when power is first applied. These response patterns form a stable, reproducible hardware fingerprint.
+
+![PUF basics. Source: @Gao2020Physical.](images/png/PUF_basics.png){#fig-pfu}
+
+Despite their promise, PUFs present several challenges in system design. Their outputs can be sensitive to environmental variation, such as changes in temperature or voltage, which can introduce instability or bit errors in the response. To ensure reliability, PUF systems must often incorporate error correction codes or helper data schemes. Managing large sets of challenge-response pairs also raises questions about storage, consistency, and revocation. Additionally, the unique statistical structure of PUF outputs may make them vulnerable to machine learning-based modeling attacks if not carefully shielded from external observation.
+
+From a manufacturing perspective, incorporating PUF technology can increase device cost or require additional layout complexity. While PUFs eliminate the need for external key storage—which reduces long-term security risk and provisioning cost—they may require calibration and testing during fabrication to ensure consistent performance across environmental conditions and device aging.
+
+Nevertheless, Physical Unclonable Functions remain a compelling building block for securing embedded machine learning systems. By embedding hardware identity directly into the chip, PUFs support lightweight cryptographic operations, reduce key management burden, and help establish root-of-trust anchors in distributed or resource-constrained environments. When integrated thoughtfully, they complement other hardware-assisted security mechanisms such as Secure Boot, TEEs, and HSMs to provide defense-in-depth across the ML system lifecycle.
+
+#### Mechanisms Comparison
+
+Hardware-assisted security mechanisms play a foundational role in establishing trust within modern machine learning systems. While software-based defenses offer flexibility, they ultimately rely on the security of the hardware platform. As machine learning workloads increasingly operate on edge devices, embedded platforms, and untrusted infrastructure, hardware-backed protections become essential for maintaining system integrity, confidentiality, and trust.
+
+Trusted Execution Environments (TEEs) provide runtime isolation for model inference and sensitive data handling. Secure Boot enforces integrity from power-on, ensuring that only verified software is executed. Hardware Security Modules (HSMs) offer tamper-resistant storage and cryptographic processing for secure key management, model signing, and firmware validation. Physical Unclonable Functions (PUFs) bind secrets and authentication to the physical characteristics of a specific device, enabling lightweight and unclonable identities.
+
+These mechanisms address different layers of the system stack—from initialization and attestation to runtime protection and identity binding—and complement one another when deployed together. The table below compares their roles, use cases, and trade-offs in machine learning system design.
+
++---------------------------+-----------------------------+------------------------------------------+----------------------------------------------+
+| Mechanism                | Primary Function            | Common Use in ML                         | Trade-offs                                   |
++===========================+=============================+==========================================+==============================================+
+| Trusted Execution        | Isolated runtime environment| Secure inference and on-device privacy   | Added complexity, memory limits, perf. cost  |
+| Environment (TEE)        | for secure computation      | for sensitive inputs and outputs         | Requires trusted code development            |
++---------------------------+-----------------------------+------------------------------------------+----------------------------------------------+
+| Secure Boot              | Verified boot sequence      | Ensures only signed ML models and        | Key management complexity, vendor lock-in    |
+|                           | and firmware validation     | firmware execute on embedded devices     | Performance impact during startup            |
++---------------------------+-----------------------------+------------------------------------------+----------------------------------------------+
+| Hardware Security Module | Secure key generation and   | Signing ML models, securing training     | High cost, integration overhead, limited I/O |
+| (HSM)                    | storage, crypto-processing  | pipelines, verifying firmware            | Requires infrastructure-level provisioning   |
++---------------------------+-----------------------------+------------------------------------------+----------------------------------------------+
+| Physical Unclonable      | Hardware-bound identity     | Model binding, device authentication,    | Environmental sensitivity, modeling attacks  |
+| Function (PUF)           | and key derivation          | protecting IP in embedded deployments    | Needs error correction and calibration       |
++---------------------------+-----------------------------+------------------------------------------+----------------------------------------------+
+
+**@tbl-hardware-security-comparison** summarizes the core functions, typical ML use cases, and practical trade-offs associated with each mechanism.
+
+Together, these hardware primitives form the foundation of a defense-in-depth strategy for securing ML systems in adversarial environments. Their integration is especially important in domains that demand provable trust, such as autonomous vehicles, healthcare devices, federated learning systems, and critical infrastructure.
