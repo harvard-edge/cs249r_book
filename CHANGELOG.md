@@ -1,14 +1,22 @@
-_Last Updated: May 21, 2025_
+_Last Updated: May 27, 2025_
 
 ## 2025 Changes
 
-### 📅 Published on May 21, 2025
+### 📅 Published on May 27, 2025
 
-2 files updated (4 lines added, 4 lines removed)
+4 files updated (1066 lines added, 1124 lines removed)
+
+<details open>
+  <summary>**Major Updates**</summary>
+
+- **Security & Privacy**: <span style="color:green">++</span><span style="color:red">---</span> (1061 lines added, 1111 lines removed)
+
+</details>
 
 <details open>
   <summary>**Minor Updates**</summary>
 
+- **Data Engineering**: <span style="color:green"></span><span style="color:red">-----</span> (1 lines added, 9 lines removed)
 - **ML Operations**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 - **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 
