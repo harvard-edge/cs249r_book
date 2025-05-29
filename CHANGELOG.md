@@ -1,14 +1,15 @@
-_Last Updated: May 27, 2025_
+_Last Updated: May 29, 2025_
 
 ## 2025 Changes
 
-### 📅 Published on May 27, 2025
+### 📅 Published on May 29, 2025
 
-5 files updated (1248 lines added, 1159 lines removed)
+6 files updated (1554 lines added, 1209 lines removed)
 
 <details open>
   <summary>**Major Updates**</summary>
 
+- **DNN Architectures**: <span style="color:green">+++++</span><span style="color:red"></span> (306 lines added, 50 lines removed)
 - **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">--</span> (1242 lines added, 1145 lines removed)
 
 </details>
