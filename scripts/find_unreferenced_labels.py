@@ -16,11 +16,12 @@ from pathlib import Path
 from collections import defaultdict
 
 ALL_LABEL_TYPES = {
-    "Figure":   r'(?:\{#|#\|\s*label:\s*)(fig-[\w-]+)', # Matches {#fig-xyz or #| label: fig-xyz
+    "Figure":   r'(?:\{#|#\|\s*label:\s*|%%\|\s*label:\s*)(fig-[\w-]+)',
     "Table":    r'\{#(tbl-[\w-]+)',
     "Section":  r'\{#(sec-[\w-]+)',
     "Equation": r'\{#(eq-[\w-]+)',
-    "Listing":  r'\{#(lst-[\w-]+)',
+    "Listing":  r'\{[^}]*#(lst-[\w-]+)',
+
 }
 
 REFERENCE_PATTERN = r'@((?:fig|tbl|sec|eq|lst)-[\w-]+)'

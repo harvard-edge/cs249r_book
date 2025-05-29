@@ -1,12 +1,56 @@
-_Last Updated: May 03, 2025_
+_Last Updated: May 27, 2025_
 
 ## 2025 Changes
 
-### 📅 Published on May 03, 2025
+### 📅 Published on May 27, 2025
 
-37 files updated (7185 lines added, 3152 lines removed)
+5 files updated (1248 lines added, 1159 lines removed)
 
 <details open>
+  <summary>**Major Updates**</summary>
+
+- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">--</span> (1242 lines added, 1145 lines removed)
+
+</details>
+
+<details open>
+  <summary>**Minor Updates**</summary>
+
+- **Data Engineering**: <span style="color:green"></span><span style="color:red">-----</span> (1 lines added, 9 lines removed)
+- **ML Operations**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+
+</details>
+
+### 📅 Published on May 14, 2025
+
+🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/cdd450b62604def67900f6dddc7c9bb722ddd485...04a55a039ab725ec6e1cdd640cbb6200329ea6d7) --- 1 files updated (39 lines added, 41 lines removed)
+
+<details>
+  <summary>**Minor Updates**</summary>
+
+- **On-Device Learning**: <span style="color:green">++</span><span style="color:red">---</span> (39 lines added, 41 lines removed)
+
+</details>
+
+### 📅 Published on May 14, 2025
+
+🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/269a997cd3ee0a6d998faacf65a41a42c2c1b304...538df3a44fe7df6619f4bfefeca74f287ee087f0) --- 1 files updated (647 lines added, 57 lines removed)
+
+<details>
+  <summary>**Major Updates**</summary>
+
+- **On-Device Learning**: <span style="color:green">+++++</span><span style="color:red"></span> (647 lines added, 57 lines removed)
+
+</details>
+
+
+### 📅 Published on May 04, 2025
+
+🔗 [View Full Diff](https://github.com/harvard-edge/cs249r_book//compare/c2fc08e54e2fd7705add479a07fb154b0c998206...4946f5081f5aae1544f86334bcc53d7326378947) --- 37 files updated (7185 lines added, 3152 lines removed)
+
+<details>
   <summary>**Major Updates**</summary>
 
 - **AI Training**: <span style="color:green">++</span><span style="color:red">---</span> (156 lines added, 218 lines removed)
@@ -25,7 +69,7 @@ _Last Updated: May 03, 2025_
 
 </details>
 
-<details open>
+<details>
   <summary>**Minor Updates**</summary>
 
 - **AI Acceleration**: <span style="color:green">+</span><span style="color:red">----</span> (27 lines added, 104 lines removed)

@@ -44,11 +44,11 @@ On-device learning refers to the process of training or adapting machine learnin
 
 This chapter explores the principles and systems design considerations underpinning on-device learning. It begins by examining the motivating applications that necessitate learning on the device, followed by a discussion of the unique hardware constraints introduced by embedded and mobile environments. The chapter then develops a taxonomy of strategies for adapting models, algorithms, and data pipelines to these constraints. Particular emphasis is placed on distributed and collaborative methods, such as federated learning, which enable decentralized training without direct data sharing. The chapter concludes with an analysis of outstanding challenges, including issues related to reliability, system validation, and the heterogeneity of deployment environments.
 
-## On-Device Deployment Drivers
+## Deployment Drivers
 
 Machine learning systems have traditionally relied on centralized training pipelines, where models are developed and refined using large, curated datasets and powerful cloud-based infrastructure [@dean2012large]. Once trained, these models are deployed to client devices for inference. While this separation has served most use cases well, it imposes limitations in settings where local data is dynamic, private, or personalized. On-device learning challenges this model by enabling systems to train or adapt directly on the device, without relying on constant connectivity to the cloud.
 
-### Why Learn On the Device
+### On-Device Learning Benefits
 
 Traditional machine learning systems rely on a clear division of labor between model training and inference. Training is performed in centralized environments with access to high-performance compute resources and large-scale datasets. Once trained, models are distributed to client devices, where they operate in a static inference-only mode. While this centralized paradigm has been effective in many deployments, it introduces limitations in settings where data is user-specific, behavior is dynamic, or connectivity is intermittent.
 
@@ -70,7 +70,6 @@ These motivations are grounded in the broader concept of knowledge transfer, whe
 ![Conceptual illustration of knowledge transfer across tasks and domains. The left side shows a pretrained model adapting to a new task, while the right side illustrates transfer across different domains.](images/png/ondevice_transfer_learning_apps.png){#fig-transfer-conceptual}
 
 This conceptual shift—enabled by transfer learning and adaptation—is essential for real-world on-device applications. Whether adapting a language model for personal typing preferences, adjusting gesture recognition to an individual's movement patterns, or recalibrating a sensor model in a changing environment, on-device learning allows systems to remain responsive, efficient, and user-aligned over time.
-
 
 ### Application Domains
 
@@ -95,8 +94,7 @@ Embedded computer vision systems, including those in robotics, AR/VR, and smart 
 
 Each of these domains highlights a common pattern: the deployment environment introduces variation or uncertainty that cannot be fully anticipated during centralized training. On-device learning offers a mechanism for adapting models in place, enabling systems to improve continuously in response to local conditions. These examples also reveal a critical design requirement: learning must be performed efficiently, privately, and reliably under significant resource constraints. The following section formalizes these constraints and outlines the system-level considerations that shape the design of on-device learning solutions.
 
-
-### Centralized vs. Decentralized Training
+### Training Paradigms
 
 Most machine learning systems today follow a centralized learning paradigm. Models are trained in data centers using large-scale, curated datasets aggregated from many sources. Once trained, these models are deployed to client devices in a static form, where they perform inference without further modification. Updates to model parameters—whether to incorporate new data or improve generalization—are handled periodically through offline retraining, often using newly collected or labeled data sent back from the field.
 
@@ -121,18 +119,404 @@ In contrast, once the model is deployed, local differences begin to emerge. Regi
 
 This shift from centralized training to decentralized, adaptive learning reshapes how ML systems are designed and deployed. It enables learning in settings where connectivity is intermittent, data is user-specific, and personalization is essential—while introducing new challenges in update coordination, evaluation, and system robustness.
 
-![Comparison of centralized training versus decentralized, on-device learning workflows. Local updates are generated and applied at the edge before optional synchronization with a global model.](images/png/ondevice_intro.png){#fig-centralized-vs-decentralized}
+::: {#fig-centralized-vs-decentralized fig-env="figure" fig-pos="htb"}
+```{.tikz}
+\begin{tikzpicture}[line join=round,font=\usefont{T1}{phv}{m}{n}\small]
+\tikzset{
+ LineD/.style={line width=1.85pt,violet!50,text=black,dashed,dash pattern=on 5pt off 3pt,
+-{Triangle[width=1.8*6pt,length=2.2*6pt]}},
+Line/.style={line width=1.85pt,violet!50,text=black,-{Triangle[width=1.8*6pt,length=2.2*6pt]}},
+SArrow/.style={red,line width=4pt,-{Triangle[width=1.8*6pt,length=2.2*6pt]}},
+circleB/.style={circle,fill=red,minimum size=7mm},
+BoxSTAR/.style={star, minimum width=10mm, star points=5, star point ratio=2.5, fill=blue, draw},
+BoxG/.style={rectangle,fill=green!70!black!90,minimum size=7mm},
+BoxB/.style={rectangle,fill=orange,rounded rectangle,minimum width=15mm,minimum height=5mm},
+BoxR/.style={rectangle,fill=OliveLine,minimum width=11mm,minimum height=5mm},
+pics/cloud/.style = {
+        code = {
+\colorlet{red}{BrownLine}
+\begin{scope}[local bounding box=CLO,scale=1.8, every node/.append style={transform shape}]
+\draw[red,line width=1.25pt,fill=yellow!10](0,0)to[out=170,in=180,distance=11](0.1,0.61)
+to[out=90,in=105,distance=17](1.07,0.71)
+to[out=20,in=75,distance=7](1.48,0.36)
+to[out=350,in=0,distance=7](1.48,0)--(0,0);
+\end{scope}
+}
+}
+}
+\tikzset {
+pics/mobile/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\colorlet{red}{BrownLine}
+\begin{scope}[local bounding box=MOB,scale=\scalefac, every node/.append style={transform shape}]
+\node[rectangle,draw=red,minimum height=94,minimum width=57,
+            rounded corners=6,thick,fill=red!10](\picname-R1){};
+\node[rectangle,draw=red,minimum height=67,minimum width=44,thick,fill=white](\picname-R2){};
+\node[circle,minimum size=8,below= 2pt of \picname-R2,inner sep=0pt,thick,fill=red!90]{};
+\node[rectangle,fill=red,minimum height=2,minimum width=20,above= 4pt of \picname-R2,inner sep=0pt,thick]{};
+%
+ \end{scope}
+     }
+  }
+}
 
+\tikzset {
+pics/handmobile/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\colorlet{red}{BrownLine}
+\begin{scope}[local bounding box=MOB,scale=\scalefac, every node/.append style={transform shape}]
+\node[rectangle,draw=red,minimum height=94,minimum width=57,
+            rounded corners=6,thick,fill=red!10](\picname-R1){};
+\node[rectangle,draw=red,minimum height=67,minimum width=44,thick,fill=white](\picname-R2){};
+\node[circle,minimum size=8,below= 2pt of \picname-R2,inner sep=0pt,thick,fill=red!90]{};
+\node[rectangle,fill=red,minimum height=2,minimum width=20,above= 4pt of \picname-R2,inner sep=0pt,thick]{};
+%
+%hand
+\draw[thick,fill=orange!20](-1.62,-1.59)coordinate(D)--(-1.01,-2.12)to[out=320,in=190] (-0.03,-1.65)--++(180:0.3)
+to[out=170,in=270] (-0.83,-1.0)--(-0.82,-0.25)to[out=50,in=50,distance=13] (-1.14,0.6)
+to[out=230,in=70] (-1.29,-0.1)to[out=250,in=70] (-1.55,-0.71)to[out=250,in=150] (D);
 
-## Design Constraints and System Requirements
+\node[rectangle,draw,minimum height=12,minimum width=23,thick,
+            rounded corners=4,rotate=35,fill=orange!20]at(0.96,-0.03)(PR2){};
+\node[rectangle,draw,minimum height=12,minimum width=23,thick,
+            rounded corners=4,rotate=35,fill=orange!20]at(0.96,-0.56)(PR3){};
+\node[rectangle,draw,minimum height=12,minimum width=19,thick,
+            rounded corners=4,rotate=35,fill=orange!20]at(0.96,-1.09)(PR4){};
+\draw[thick,fill=orange!20](1.0,0.80)--(1.13,0.80)to[out=355,in=5,distance=9] (1.13,0.36)--(1.0,0.36)--cycle;
+ \end{scope}
+     }
+  }
+}
+
+\tikzset{
+channel/.pic={
+\pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=MOB,scale=\scalefac, every node/.append style={transform shape}]
+\node[rectangle,draw=\drawchannelcolor,line width=1pt,fill=\channelcolor!10,
+minimum height=20mm,minimum width=20mm](\picname){};
+\end{scope}
+        }
+}
+\pgfkeys{
+  /channel/.cd,
+  channelcolor/.store in=\channelcolor,
+  drawchannelcolor/.store in=\drawchannelcolor,
+  scalefac/.store in=\scalefac,
+  Linewidth/.store in=\Linewidth,
+  picname/.store in=\picname,
+  channelcolor=BrownLine,
+  drawchannelcolor=BrownLine,
+  scalefac=1,
+  Linewidth=0.6pt,
+  picname=C
+}
+\begin{scope}[local bounding box=MOBILE1,shift={($(0,0)+(0,0)$)},
+scale=1, every node/.append style={transform shape}]
+
+ \foreach \i/\sf in {1/0.6,2/0.7,3/0.8,4/0.9,5/1} {
+  \pgfmathsetmacro{\y}{(1.5-\i)*0.83 + 0.7}
+ \pic[shift={(0,0)}] at  ({-\i*0.2}, {0.4*\i}){mobile={scalefac=\sf,picname=1\i}};
+  }
+\end{scope}
+
+\begin{scope}[local bounding box=MOBILE2,shift={($(MOBILE1)+(3.25,-1.52)$)},
+scale=1, every node/.append style={transform shape}]
+
+ \foreach \i/\sf in {1/0.6,2/0.7,3/0.8,4/0.9,5/1} {
+  \pgfmathsetmacro{\y}{(1.5-\i)*0.83 + 0.7}
+ \pic[shift={(0,0)}] at  ({-\i*0.17}, {0.4*\i}){mobile={scalefac=\sf,picname=2\i}};
+  }
+\end{scope}
+\begin{scope}[local bounding box=MOBILE3,shift={($(MOBILE2)+(2.5,-1.52)$)},
+scale=1, every node/.append style={transform shape}]
+
+ \foreach \i/\sf in {1/0.6,2/0.7,3/0.8,4/0.9,5/1} {
+  \pgfmathsetmacro{\y}{(1.5-\i)*0.83 + 0.7}
+ \pic[shift={(0,0)}] at  ({-\i*0.02}, {0.4*\i}){mobile={scalefac=\sf,picname=3\i}};
+  }
+\end{scope}
+\begin{scope}[local bounding box=MOBILE4,shift={($(MOBILE3)+(3.2,-1.52)$)},
+scale=1, every node/.append style={transform shape}]
+
+ \foreach \i/\sf in {1/0.6,2/0.7,3/0.8,4/0.9,5/1} {
+  \pgfmathsetmacro{\y}{(1.5-\i)*0.83 + 0.7}
+ \pic[shift={(0,0)}] at  ({-\i*0.17}, {0.4*\i}){mobile={scalefac=\sf,picname=4\i}};
+  }
+\end{scope}
+\begin{scope}[local bounding box=MOBILE5,shift={($(MOBILE4)+(3.2,-1.52)$)},
+scale=1, every node/.append style={transform shape}]
+
+ \foreach \i/\sf in {1/0.6,2/0.7,3/0.8,4/0.9,5/1} {
+  \pgfmathsetmacro{\y}{(1.5-\i)*0.83 + 0.7}
+ \pic[shift={(0,0)}] at  ({-\i*0.17}, {0.4*\i}){mobile={scalefac=\sf,picname=5\i}};
+  }
+\end{scope}
+\foreach \i in {1,2,3,4,5}{
+\node[circleB](CI\i)at(\i5-R2){};
+}
+%%%
+\begin{scope}[local bounding box=HMOBILE,shift={($(MOBILE1)+(-5,0.5)$)},
+scale=1, every node/.append style={transform shape}]
+\pic[shift={(0,0)}] at  (0,0) {handmobile={scalefac=1,picname=H}};
+\node[circleB](CIA)at(H-R2){};
+\end{scope}
+%%%squars
+\begin{scope}[local bounding box=CHANNELS,shift={($(MOBILE1)+(0.2,-1.5)$)}]
+\begin{scope}[local bounding box=CHANEL1,shift={($(0,0)+(1.5,-3.5)$)}]
+\foreach \i/\sf in {1/0.3,2/0.4,3/0.5,4/0.6,5/0.7,6/0.8,7/0.9,8/1} {
+\pic at ({-\i*0.23}, {-0.23*\i}) {channel={scalefac=\sf,picname=\i-CH1,channelcolor=BrownLine}};
+}
+\end{scope}
+\begin{scope}[local bounding box=CHANEL2,shift={($(CHANEL1)+(4.3,1.38)$)}]
+\foreach \i/\sf in {7/0.9,8/1} {
+\pic at ({-\i*0.23}, {-0.23*\i}) {channel={scalefac=\sf,picname=\i-CH2,channelcolor=BrownLine}};
+}
+\end{scope}
+\begin{scope}[local bounding box=CHANEL3,shift={($(CHANEL2)+(4.3,1.77)$)}]
+\foreach \i/\sf in {8/1} {
+\pic at ({-\i*0.23}, {-0.23*\i}) {channel={scalefac=\sf,picname=\i-CH3,channelcolor=BrownLine}};
+}
+\end{scope}
+\begin{scope}[local bounding box=CHANEL4,shift={($(CHANEL3)+(1.0,1.83)$)}]
+\foreach \i/\sf in {3/0.5,4/0.6,5/0.7,6/0.8,7/0.9,8/1} {
+\pic at ({\i*0.23}, {-0.23*\i}) {channel={scalefac=\sf,picname=\i-CH4,channelcolor=BrownLine}};
+}
+\end{scope}
+\begin{scope}[local bounding box=CHANEL5,shift={($(CHANEL4)+(1.2,1.52)$)}]
+\foreach \i/\sf in {5/0.7,6/0.8,7/0.9,8/1} {
+\pic at ({\i*0.23}, {-0.23*\i}) {channel={scalefac=\sf,picname=\i-CH5,channelcolor=BrownLine}};
+}
+\end{scope}
+\end{scope}
+
+\begin{scope}[local bounding box=CHANEL6,shift={($(MOBILE5)+(7.7,2.35)$)},]
+\foreach \i/\sf in {8/1} {
+\pic at ({-\i*0.23}, {-0.23*\i}) {channel={scalefac=\sf,picname=\i-CH6,channelcolor=BrownLine}};
+}
+\end{scope}
+%
+\path[red](CHANEL6)|-coordinate(DD)(8-CH5);
+\path[red](HMOBILE)|-coordinate(DL)(8-CH1);
+%
+\pic at (DL) {channel={scalefac=1,picname=DL-CH,channelcolor=BrownLine}};
+\pic at ($(MOBILE3)+(0,5)$) {channel={scalefac=1,picname=GO-CH,channelcolor=BrownLine}};
+%
+\begin{scope}[local bounding box=CLOUD1,shift={($(DD)+(-1.25,-0.5)$)},
+scale=1.2, every node/.append style={transform shape}]
+\pic[shift={(0,0)}] at (0,0) {cloud};
+\end{scope}
+%
+\node[circleB](CI)at(GO-CH){};
+\node[BoxG]at(DL-CH){};
+\node[BoxG,rotate=45]at(CHANEL6){};
+\node[BoxG,rotate=45]at($(CLOUD1)+(0,-0.4)$){};
+%
+\node[BoxG]at(8-CH1){};
+\node[BoxG,rotate=45]at(8-CH2){};
+\node[BoxSTAR]at(8-CH3){};
+\node[BoxG,rotate=45,fill=violet]at(8-CH4){};
+\node[BoxB]at(8-CH5){};
+%
+\begin{scope}[local bounding box=CIRCLE,shift={($(HMOBILE)+(0.15,2.5)$)}]
+\def\ra{22mm}
+\draw [SArrow](70:\ra)  arc (70:12:\ra);
+\draw [SArrow](170:\ra)  arc (170:110:\ra);
+\draw [SArrow](230:\ra)  arc (230:190:\ra);
+\draw [red,dashed,line width=2pt](320:\ra)  arc (320:345:\ra);
+\node[BoxG]at(0:\ra){};
+\node[BoxB]at(180:\ra){};
+\node[BoxR]at(90:\ra){};
+\end{scope}
+\draw[LineD,shorten >=4pt](HMOBILE.south)--(DL-CH);
+\draw[LineD,shorten <=4pt,shorten >=4pt](DL-CH)--(8-CH1);
+\draw[Line,shorten <=4pt,shorten >=4pt](8-CH5)--++(3,0);
+\path[Line,shorten <=4pt,shorten >=4pt](8-CH6)--++(0,-5.5)coordinate(CL4);
+\draw[Line,shorten <=4pt,shorten >=4pt](8-CH6)--(CL4);
+\draw[Line,shorten <=4pt,shorten >=4pt](8-CH6)--++(-4.5,0);
+\draw[Line,shorten <=4pt](GO-CH)--++(0,-2.7);
+\draw[LineD](CI1.center)--++(-3.2,0);
+\draw[Line]($(31-R1)+(0,-1.2)$)coordinate(DO)--++(0,-2.5);
+\draw[Line]($(DO)+(-1.3,0)$)--++(250:2.5);
+\draw[Line]($(DO)+(1.3,0)$)--++(290:2.5);
+%
+\node[above=8pt of CHANEL6]{\huge C.};
+\node[below=8pt of 8-CH3]{\huge B.};
+\node[left=38pt of CIA]{\huge A.};
+\end{tikzpicture}
+
+```
+Comparison of centralized training versus decentralized, on-device learning workflows. Local updates are generated and applied at the edge before optional synchronization with a global model.
+:::
+
+## Design Constraints
 
 Enabling learning on the device requires rethinking conventional assumptions about where and how machine learning systems operate. In centralized environments, models are trained with access to extensive compute infrastructure, large and curated datasets, and generous memory and energy budgets. At the edge, none of these assumptions hold. Instead, on-device learning must navigate a constrained design space shaped by the structure of the model, the nature of the available data, and the computational capabilities of the deployment platform.
 
 These three dimensions—model, data, and compute—form the foundation of any on-device learning system. Each imposes distinct limitations that influence algorithmic design and system architecture. The model must be compact enough to fit within memory and storage bounds, yet expressive enough to support adaptation. The data is local, often sparse, unlabeled, and non-IID, requiring robust and efficient learning procedures. The compute environment is resource-constrained, often lacking support for floating-point operations or backpropagation primitives. These constraints are not merely technical—they reflect the realities of deploying machine learning systems in the wild. Devices may be battery-powered, have limited connectivity, and operate in unpredictable environments. They may also be heterogeneous, with different hardware capabilities and software stacks. As a result, on-device learning must be designed to accommodate these variations while still delivering reliable performance.
 
-Figure @fig-ondevice-pretraining illustrates a pipeline that combines offline pre-training with online adaptive learning on resource-constrained IoT devices. The system first undergoes meta-training with generic data. During deployment, device-specific constraints such as data availability, compute, and memory shape the adaptation strategy by ranking and selecting layers and channels to update. This enables efficient on-device learning within limited resource envelopes.
+@fig-ondevice-pretraining illustrates a pipeline that combines offline pre-training with online adaptive learning on resource-constrained IoT devices. The system first undergoes meta-training with generic data. During deployment, device-specific constraints such as data availability, compute, and memory shape the adaptation strategy by ranking and selecting layers and channels to update. This enables efficient on-device learning within limited resource envelopes.
 
-![On-device adaptation framework.](images/png/ondevice_pretraining.png){#fig-ondevice-pretraining}
+::: {#fig-ondevice-pretraining fig-env="figure" fig-pos="htb"}
+```{.tikz}
+\begin{tikzpicture}[line join=round,font=\usefont{T1}{phv}{m}{n}\small]
+\tikzset{
+ Line/.style={line width=0.35pt,black!50,text=black,-latex},
+ LineD/.style={line width=0.75pt,black!50,text=black,dashed,dash pattern=on 5pt off 3pt},
+   Box/.style={inner xsep=2pt,
+   node distance=0.45,
+    draw=BlueLine,
+    line width=0.75pt,
+    fill=BlueL,
+    minimum width=15mm, minimum height=7mm
+  },
+ circles/.pic={
+\pgfkeys{/channel/.cd, #1}
+\node[circle,draw=\channelcolor,line width=\Linewidth,fill=\channelcolor!10,
+minimum size=6.5mm](\picname){};
+        }
+}
+\pgfkeys{
+  /channel/.cd,
+  channelcolor/.store in=\channelcolor,
+  drawchannelcolor/.store in=\drawchannelcolor,
+  scalefac/.store in=\scalefac,
+  Linewidth/.store in=\Linewidth,
+  picname/.store in=\picname,
+  channelcolor=BrownLine,
+  drawchannelcolor=BrownLine,
+  scalefac=1,
+  Linewidth=0.6pt,
+  picname=C
+}
+
+\begin{scope}[local bounding box=CIRCLE1,shift={($(0,0)+(0,0)$)},
+scale=1, every node/.append style={transform shape}]
+%1 column
+\foreach \j in {1,2,3} {
+  \pgfmathsetmacro{\y}{(1.5-\j)*0.83 + 0.7}
+  \pic at (-1.35,\y) {circles={channelcolor=BrownLine,picname=1CD\j}};
+}
+%2 column
+\foreach \i in {1,...,4} {
+  \pgfmathsetmacro{\y}{(2-\i)*0.83+0.7}
+  \pic at (0,\y) {circles={channelcolor=BrownLine, picname=2CD\i}};
+}
+%3 column
+\foreach \j in {1,2} {
+  \pgfmathsetmacro{\y}{(1-\j)*0.83 + 0.7}
+  \pic at (1.35,\y) {circles={channelcolor=BrownLine,picname=3CD\j}};
+}
+\foreach \i in {1,2,3}{
+  \foreach \j in {1,2,3,4}{
+\draw[Line](1CD\i)--(2CD\j);
+}}
+\foreach \i in {1,2,3,4}{
+  \foreach \j in {1,2}{
+\draw[Line](2CD\i)--(3CD\j);
+}}
+\end{scope}
+
+\begin{scope}[local bounding box=CIRCLE2,shift={($(CIRCLE1.east)+(4.0,-0.3)$)},
+scale=1, every node/.append style={transform shape}]
+%1 column
+\foreach \j/\col in {1/RedLine,2/RedLine!40!,3/RedLine} {
+  \pgfmathsetmacro{\y}{(1.5-\j)*0.83 + 0.7}
+  \pic at (-1.35,\y) {circles={channelcolor=\col,picname=1CD\j}};
+}
+%2 column
+\foreach \i/\col in {1/RedLine,2/BrownLine,3/BrownLine,4/RedLine!40!} {
+  \pgfmathsetmacro{\y}{(2-\i)*0.83+0.7}
+  \pic at (0,\y) {circles={channelcolor=\col, picname=2CD\i}};
+}
+%3 column
+\foreach \j/\col in {1/RedLine,2/BrownLine} {
+  \pgfmathsetmacro{\y}{(1-\j)*0.83 + 0.7}
+  \pic at (1.35,\y) {circles={channelcolor=\col,picname=3CD\j}};
+}
+\foreach \i in {1,2,3}{
+  \foreach \j in {1,2,3,4}{
+\draw[Line](1CD\i)--(2CD\j);
+}}
+\foreach \i in {1,2,3,4}{
+  \foreach \j in {1,2}{
+\draw[Line](2CD\i)--(3CD\j);
+}}
+\end{scope}
+
+\begin{scope}[local bounding box=CIRCLE3,shift={($(CIRCLE2.east)+(3.2,-0.3)$)},
+scale=1, every node/.append style={transform shape}]
+%1 column
+\foreach \j/\col in {1/green!60!black!90!,2/green!60!black!90!,3/green!60!black!90!} {
+  \pgfmathsetmacro{\y}{(1.5-\j)*0.83 + 0.7}
+  \pic at (-1.35,\y) {circles={channelcolor=\col,picname=1CD\j}};
+}
+%2 column
+\foreach \i/\col in {1/green!60!black!90!,2/BrownLine,3/BrownLine,4/green!60!black!90!} {
+  \pgfmathsetmacro{\y}{(2-\i)*0.83+0.7}
+  \pic at (0,\y) {circles={channelcolor=\col, picname=2CD\i}};
+}
+%3 column
+\foreach \j/\col in {1/green!60!black!90!,2/BrownLine} {
+  \pgfmathsetmacro{\y}{(1-\j)*0.83 + 0.7}
+  \pic at (1.35,\y) {circles={channelcolor=\col,picname=3CD\j}};
+}
+\foreach \i in {1,2,3}{
+  \foreach \j in {1,2,3,4}{
+\draw[Line](1CD\i)--(2CD\j);
+}}
+\foreach \i in {1,2,3,4}{
+  \foreach \j in {1,2}{
+\draw[Line](2CD\i)--(3CD\j);
+}}
+\end{scope}
+%\node[single arrow,fill=red!80!black!90, inner ysep=2pt,
+    %  minimum width = 12pt, single arrow head extend=2pt,
+      %minimum height=12mm] at($(CIRCLE2.east)!0.5!(CIRCLE3.west)$){};
+\draw[brown!70,line width=6pt,shorten <=4pt,shorten >=4pt,
+-{Triangle[width=1.8*6pt,length=0.9*6pt]}](CIRCLE2.east)
+-- coordinate(SR1) (CIRCLE3.west);
+\draw[brown!70,line width=6pt,shorten <=4pt,shorten >=4pt,
+-{Triangle[width=1.8*6pt,length=0.9*6pt]}](CIRCLE1.east)
+--coordinate(SR) (CIRCLE2.west);
+\draw[brown!70,line width=6pt,shorten <=4pt,shorten >=4pt,
+{Triangle[width=1.8*6pt,length=0.9*6pt]}-](CIRCLE1.west)
+--node[above=6pt,align=center,text=black](PTB){Pre-trained\\ backbone}++(-2,0);
+
+\begin{scope}[local bounding box=BOXX,shift={($(CIRCLE2.north)+(-1.1,1.5)$)}]
+\node[Box](2B1)at(0,0){Data};
+\node[Box,right=of 2B1](2B2){Compute};
+\node[Box,right=of 2B2](2B3){Memory};
+\node[draw=BackLine,inner xsep=3mm,line width=0.75pt,inner ysep=5mm,
+fill=none,yshift=-2mm,fit=(2B1)(2B3)](BB){};
+\node[below=1pt of BB.south,anchor=south]{Device Specific};
+\end{scope}
+\draw[brown!70,line width=6pt,shorten <=4pt,shorten >=4pt,
+-{Triangle[width=1.8*6pt,length=0.9*6pt]}](BB.west)-|
+node[right=2pt,pos=0.85,text=black]{$S_i$}(SR);
+\draw[brown!70,line width=6pt,shorten <=4pt,shorten >=4pt,
+{Triangle[width=1.8*6pt,length=0.9*6pt]}-](SR1)--++(0,2);
+%%
+\node[below=4pt of CIRCLE1,align=center](T1){Meta-training with generic\\
+     data (e.g. MiniImageNet)};
+\node[below=4pt of CIRCLE2,align=center](T2){Rank the channels and layers based\\
+     on the multi-objective metric $S_i$};
+\node[below=4pt of CIRCLE3,align=center](T3){Train the selected\\ layers and channels};
+%
+\scoped[on background layer]
+\node[LineD,draw=BrownLine,inner xsep=5mm,inner ysep=5mm,minimum height=74mm,
+fill=BrownL!10,yshift=4mm,fit=(T2)(BB)(T3)](BB2){};
+\node[below=1pt of BB2.north,anchor=north]{Online Adaptive Learning on loT Devices};
+\scoped[on background layer]
+\node[LineD,draw=BackLine,inner xsep=3mm,inner ysep=5mm,
+minimum height=74mm,
+fill=yellow!05,yshift=14.7mm,fit=(T1)(PTB)(CIRCLE1)](BB2){};
+\node[below=1pt of BB2.north,anchor=north]{Online Pre-training};
+\end{tikzpicture}
+```
+On-device adaptation framework.
+:::
 
 ### Model Constraints
 
@@ -169,7 +553,6 @@ Noise and variability further degrade data quality. Embedded systems such as env
 
 Finally, data privacy and security concerns are paramount in many on-device learning applications. Sensitive information, such as health data or user interactions, must be protected from unauthorized access. This requirement often precludes the use of traditional data-sharing methods, such as uploading raw data to a central server for training. Instead, on-device learning must rely on techniques that allow for local adaptation without exposing sensitive information.
 
-
 ### Compute Constraints
 
 On-device learning must operate within the computational envelope of the target hardware platform, which ranges from low-power embedded microcontrollers to mobile-class processors found in smartphones and wearables. These systems differ substantially from the large-scale GPU or TPU infrastructure used in cloud-based training. They impose strict limits on instruction throughput, parallelism, and architectural support for training-specific operations, all of which shape the design of feasible learning strategies.
@@ -180,7 +563,7 @@ In contrast, mobile-class hardware—such as the Qualcomm Snapdragon, Apple Neur
 
 Compute constraints are especially salient in real-time or battery-operated systems. In a smartphone-based speech recognizer, on-device adaptation must not interfere with inference latency or system responsiveness. Similarly, in wearable medical monitors, training must occur opportunistically, during periods of low activity or charging, to preserve battery life and avoid thermal issues.
 
-## Adapting the Model
+## Model Adaptation
 
 Adapting a machine learning model on the device requires revisiting a core assumption of conventional training: that the entire model must be updated. In resource-constrained environments, this assumption becomes infeasible due to memory, compute, and energy limitations. Instead, modern approaches to on-device learning often focus on minimizing the scope of adaptation, updating only a subset of model parameters while reusing the majority of the pretrained architecture. These approaches leverage the power of transfer learning, starting with a model pretrained (usually offline on large datasets) and efficiently specializing it using the limited local data and compute resources available at the edge. This strategy is particularly effective when the pretrained model has already learned useful representations that can be adapted to new tasks or domains. By freezing most of the model parameters and only updating a small subset, we can achieve significant reductions in memory and compute requirements while still allowing for meaningful adaptation.
 
@@ -188,24 +571,19 @@ This strategy reduces both computational overhead and memory usage during traini
 
 In the sections that follow, we examine how minimal adaptation strategies are designed, the tradeoffs they introduce, and their role in enabling practical on-device learning.
 
-### Weight Freezing and Bias-Only Updates
+### Weight Freezing
 
 One of the simplest and most effective strategies for reducing the cost of on-device learning is to freeze the majority of a model's parameters and adapt only a minimal subset. A widely used approach is bias-only adaptation, in which all weights are fixed and only the bias terms—typically scalar offsets applied after linear or convolutional layers—are updated during training. This significantly reduces the number of trainable parameters, simplifies memory management during backpropagation, and helps mitigate overfitting when data is sparse or noisy.
 
 Consider a standard neural network layer:
-
 $$
 y = W x + b
 $$
-
 where $W \in \mathbb{R}^{m \times n}$ is the weight matrix, $b \in \mathbb{R}^m$ is the bias vector, and $x \in \mathbb{R}^n$ is the input. In full training, gradients are computed for both $W$ and $b$. In bias-only adaptation, we constrain:
-
 $$
 \frac{\partial \mathcal{L}}{\partial W} = 0, \quad \frac{\partial \mathcal{L}}{\partial b} \neq 0
 $$
-
 so that only the bias is updated via gradient descent:
-
 $$
 b \leftarrow b - \eta \frac{\partial \mathcal{L}}{\partial b}
 $$
@@ -239,7 +617,7 @@ Because the base model remains unchanged, TinyTL assumes that the pretrained fea
 
 These design choices allow TinyTL to reduce training memory usage by more than 10×. For instance, adapting a MobileNetV2 model using TinyTL can reduce the number of updated parameters from over 3 million to fewer than 50,000. Combined with quantization, this enables local adaptation on devices with only a few hundred kilobytes of memory—making on-device learning truly feasible in constrained environments.
 
-### Residual Adaptation and Low-Rank Updates
+### Residual and Low-Rank Updates
 
 Bias-only updates offer a lightweight path for on-device learning, but they are limited in representational flexibility. When the frozen model does not align well with the target distribution, it may be necessary to allow more expressive adaptation—without incurring the full cost of weight updates. One solution is to introduce residual adaptation modules [@houlsby2019parameter],[^fn-residual-adaptation] or low-rank parameterizations[^fn-low-rank-parameterizations], which provide a middle ground between static backbones[^fn-static-backbones] and full fine-tuning [@hu2021lora].
 
@@ -249,41 +627,32 @@ Bias-only updates offer a lightweight path for on-device learning, but they are 
 
 These methods extend a frozen model by adding trainable layers—typically small and computationally cheap—that allow the network to respond to new data. The main body of the network remains fixed, while only the added components are optimized. This modularity makes the approach well-suited for on-device adaptation in constrained settings, where small updates must deliver meaningful changes.
 
-#### Residual Adaptation via Adapters
+#### Adapter-Based Adaptation
 
 A common implementation involves inserting adapters—small residual bottleneck layers—between existing layers in a pretrained model. Consider a hidden representation $h$ passed between layers. A residual adapter introduces a transformation:
-
 $$
 h' = h + A(h)
 $$
-
 where $A(\cdot)$ is a trainable function, typically composed of two linear layers with a nonlinearity:
-
 $$
 A(h) = W_2 \, \sigma(W_1 h)
 $$
-
 with $W_1 \in \mathbb{R}^{r \times d}$ and $W_2 \in \mathbb{R}^{d \times r}$, where $r \ll d$. This bottleneck design ensures that only a small number of parameters are introduced per layer.
 
 The adapters act as learnable perturbations on top of a frozen backbone. Because they are small and sparsely applied, they add negligible memory overhead, yet they allow the model to shift its predictions in response to new inputs.
 
-#### Low-Rank Updates
+#### Low-Rank Techniques
 
 Another efficient strategy is to constrain weight updates themselves to a low-rank structure. Rather than updating a full matrix $W$, we approximate the update as:
-
 $$
 \Delta W \approx U V^\top
 $$
-
 where $U \in \mathbb{R}^{m \times r}$ and $V \in \mathbb{R}^{n \times r}$, with $r \ll \min(m,n)$. This reduces the number of trainable parameters from $mn$ to $r(m + n)$. During adaptation, the new weight is computed as:
-
 $$
 W_{\text{adapted}} = W_{\text{frozen}} + U V^\top
 $$
 
 This formulation is commonly used in LoRA (Low-Rank Adaptation) techniques, originally developed for transformer models [@hu2021lora] but broadly applicable across architectures. Low-rank updates can be implemented efficiently on edge devices, particularly when $U$ and $V$ are small and fixed-point representations are supported.
-
-#### Code Example: PyTorch Adapter Module
 
 ```python
 class Adapter(nn.Module):
@@ -299,13 +668,13 @@ class Adapter(nn.Module):
 
 This adapter adds a small residual transformation to a frozen layer. When inserted into a larger model, only the adapter parameters are trained.
 
-#### Use Case: Edge Personalization with Adapter Layers
+#### Edge Personalization
 
 Adapters are especially useful when a global model is deployed to many devices and must adapt to device-specific input distributions. For instance, in smartphone camera pipelines, environmental lighting, user preferences, or lens distortion may vary between users [@rebuffi2017learning]. A shared model can be frozen and fine-tuned per-device using a few residual modules, allowing lightweight personalization without risking catastrophic forgetting[^fn-catastrophic-forgetting]. In voice-based systems, adapter modules have been shown to reduce word error rates in personalized speech recognition without retraining the full acoustic model. They also allow easy rollback or switching between user-specific versions.
 
 [^fn-catastrophic-forgetting]: **Catastrophic Forgetting:** A phenomenon where a neural network forgets previously learned information upon learning new data.
 
-#### Tradeoffs and Considerations
+#### Tradeoffs
 
 Residual and low-rank updates strike a balance between expressivity and efficiency. Compared to bias-only learning, they can model more substantial deviations from the pretrained task. However, they require more memory and compute—both for training and inference.
 
@@ -321,22 +690,20 @@ Additionally, implementing these adaptation techniques requires system-level sup
 
 Despite these considerations, residual adaptation techniques have proven particularly valuable in mobile and edge computing scenarios where devices have sufficient computational resources. For instance, modern smartphones and tablets can readily accommodate these adaptations while maintaining acceptable performance characteristics. This makes residual adaptation a practical choice for applications requiring personalization without the overhead of full model retraining.
 
-### Task-Adaptive Sparse Updates
+### Sparse Updates
 
 Even when adaptation is restricted to a small number of parameters—such as biases or adapter modules—training remains resource-intensive on constrained devices. One promising approach is to selectively update only a task-relevant subset of model parameters, rather than modifying the entire network or introducing new modules. This approach is known as task-adaptive sparse updating [@zhang2020efficient].
 
 The key insight is that not all layers of a deep model contribute equally to performance gains on a new task or dataset. If we can identify a *minimal subset of parameters* that are most impactful for adaptation, we can train only those, reducing memory and compute costs while still achieving meaningful personalization.
 
-#### Sparse Update Formulation
+#### Sparse Update Design
 
 Let a neural network be defined by parameters $\theta = \{\theta_1, \theta_2, \ldots, \theta_L\}$ across $L$ layers. In standard fine-tuning, we compute gradients and perform updates on all parameters:
-
 $$
 \theta_i \leftarrow \theta_i - \eta \frac{\partial \mathcal{L}}{\partial \theta_i}, \quad \text{for } i = 1, \ldots, L
 $$
 
 In task-adaptive sparse updates, we select a small subset $\mathcal{S} \subset \{1, \ldots, L\}$ such that only parameters in $\mathcal{S}$ are updated:
-
 $$
 \theta_i \leftarrow
 \begin{cases}
@@ -347,7 +714,7 @@ $$
 
 The challenge lies in selecting the optimal subset $\mathcal{S}$ given memory and compute constraints.
 
-#### Contribution-Based Layer Selection
+#### Layer Selection
 
 A principled strategy for selecting $\mathcal{S}$ is to use contribution analysis—an empirical method that estimates how much each layer contributes to downstream performance improvement. For example, one can measure the marginal gain from updating each layer independently:
 
@@ -375,13 +742,13 @@ for name, param in model.named_parameters():
 
 This pattern can be extended with profiling logic to select layers based on contribution scores or hardware profiles.
 
-#### Use Case: Efficient Personalization with TinyTrain
+#### TinyTrain Personalization
 
 Consider a scenario where a user wears an augmented reality headset that performs real-time object recognition. As lighting and environments shift, the system must adapt to maintain accuracy—but training must occur during brief idle periods or while charging.
 
 TinyTrain enables this by using meta-training during offline preparation: the model learns not only to perform the task, but also which parameters are most important to adapt. Then, at deployment, the device performs task-adaptive sparse updates, modifying only a few layers that are most relevant for its current environment. This keeps adaptation fast, energy-efficient, and memory-aware.
 
-#### Tradeoffs and Considerations
+#### Tradeoffs
 
 Task-adaptive sparse updates offer a highly efficient alternative to full model finetuning, but they require careful design [@wang2020pick]. Task-adaptive sparse updates introduce several important system-level considerations that must be carefully balanced. First, the overhead of contribution analysis—while primarily incurred during pretraining or initial profiling—represents a non-trivial computational cost. This overhead is typically acceptable since it occurs offline, but it must be factored into the overall system design and deployment pipeline.
 
@@ -391,7 +758,7 @@ Third, the selection of updateable parameters must account for hardware-specific
 
 Despite these tradeoffs, task-adaptive sparse updates provide a powerful mechanism to scale adaptation to diverse deployment contexts, from microcontrollers to mobile devices [@diao2023sparse].
 
-#### Comparison of Model Adaptation Strategies
+#### Adaptation Strategy Comparison
 
 Each adaptation strategy for on-device learning offers a distinct balance between expressivity, resource efficiency, and implementation complexity. Understanding these tradeoffs is essential when designing systems for diverse deployment targets—from ultra-low-power microcontrollers to feature-rich mobile processors.
 
@@ -415,11 +782,11 @@ These three approaches form a spectrum of tradeoffs. Their relative suitability 
 
 : Comparison of model adaptation strategies. {#tbl-adaptation-strategies .striped .hover }
 
-## Working with Less Data
+## Data Efficiency
 
 On-device learning systems operate in environments where data is scarce, noisy, and highly individualized. Unlike centralized machine learning pipelines that rely on large, curated datasets, edge devices typically observe only small volumes of task-relevant data—collected incrementally over time and rarely labeled in a supervised manner [@chen2019closer]. This constraint fundamentally reshapes the learning process. Algorithms must extract value from minimal supervision, generalize from sparse observations, and remain robust to distributional shift. In many cases, the available data may be insufficient to train a model from scratch or even to finetune all parameters of a pretrained network. Instead, practical on-device learning relies on data-efficient techniques: few-shot adaptation, streaming updates, memory-based replay, and compressed supervision. These approaches enable models to improve over time without requiring extensive labeled datasets or centralized aggregation, making them well-suited to mobile, wearable, and embedded platforms where data acquisition is constrained by power, storage, and privacy considerations.
 
-### Few-Shot and Streaming Adaptation
+### Few-Shot and Streaming
 
 In conventional machine learning workflows, effective training typically requires large labeled datasets, carefully curated and preprocessed to ensure sufficient diversity and balance. On-device learning, by contrast, must often proceed from only a handful of local examples—collected passively through user interaction or ambient sensing, and rarely labeled in a supervised fashion. These constraints motivate two complementary adaptation strategies: few-shot learning, in which models generalize from a small, static set of examples, and streaming adaptation, where updates occur continuously as data arrives.
 
@@ -436,29 +803,25 @@ Few-shot adaptation solves this problem by finetuning only the output classifier
 Such an approach is not only computationally efficient, but also aligned with privacy-preserving design principles. Because only the output layer is updated—and often with a simple gradient step or prototype computation—the total memory footprint and runtime compute are compatible with mobile-class devices or even microcontrollers. This makes KWS a canonical case study for few-shot learning at the edge, where the system must operate under tight constraints while delivering user-specific performance.
 
 Beyond static few-shot learning, many on-device scenarios benefit from streaming adaptation, where models must learn incrementally as new data arrives [@hayes2020remind]. Streaming adaptation generalizes this idea to continuous, asynchronous settings where data arrives incrementally over time. Let $\{x_t\}_{t=1}^{\infty}$ represent a stream of observations. In streaming settings, the model must update itself after observing each new input, typically without access to prior data, and under bounded memory and compute. The model update can be written generically as:
-
 $$
 \theta_{t+1} = \theta_t - \eta_t \nabla \mathcal{L}(x_t; \theta_t)
 $$
-
 where $\eta_t$ is the learning rate at time $t$. This form of adaptation is sensitive to noise and drift in the input distribution, and thus often incorporates mechanisms such as learning rate decay, meta-learned initialization, or update gating to improve stability.
 
 Aside from KWS, practical examples of these strategies abound. In wearable health devices, a model that classifies physical activities may begin with a generic classifier and adapt to user-specific motion patterns using only a few labeled activity segments. In smart assistants, user voice profiles are finetuned over time using ongoing speech input, even when explicit supervision is unavailable. In such cases, local feedback—such as correction, repetition, or downstream task success—can serve as implicit signals to guide learning.
 
 Few-shot and streaming adaptation highlight the shift from traditional training pipelines to data-efficient, real-time learning under uncertainty. They form a foundation for more advanced memory and replay strategies, which we turn to next.
 
-### Experience Replay and Memory-Based Learning
+### Experience Replay
 
 On-device learning systems face a fundamental tension between continuous adaptation and limited data availability. One common approach to alleviating this tension is experience replay—a memory-based strategy that enables models to retrain on past examples. Originally developed in the context of reinforcement learning and continual learning, replay buffers help prevent catastrophic forgetting and stabilize training in non-stationary environments.
 
 Unlike server-side replay strategies that rely on large datasets and extensive compute, on-device replay must operate with extremely limited capacity—often tens or hundreds of samples—and must avoid interfering with user experience [@rolnick2019experience]. Buffers may store only compressed features or distilled summaries, and updates must occur opportunistically (e.g., during idle cycles or charging). These system-level constraints reshape how replay is implemented and evaluated in the context of embedded ML.
 
 Let $\mathcal{M}$ represent a memory buffer that retains a fixed-size subset of training examples. At time step $t$, the model receives a new data point $(x_t, y_t)$ and appends it to $\mathcal{M}$. A replay-based update then samples a batch $\{(x_i, y_i)\}_{i=1}^{k}$ from $\mathcal{M}$ and applies a gradient step:
-
 $$
 \theta_{t+1} = \theta_t - \eta \nabla_\theta \left[ \frac{1}{k} \sum_{i=1}^{k} \mathcal{L}(x_i, y_i; \theta_t) \right]
 $$
-
 where $\theta_t$ are the model parameters, $\eta$ is the learning rate, and $\mathcal{L}$ is the loss function. Over time, this replay mechanism allows the model to reinforce prior knowledge while incorporating new information.
 
 A practical on-device implementation might use a ring buffer[^fn-ring-buffer] to store a small set of compressed feature vectors rather than full input examples. The following pseudocode illustrates a minimal replay buffer designed for constrained environments:
@@ -468,8 +831,7 @@ A practical on-device implementation might use a ring buffer[^fn-ring-buffer] to
 
 ```python
 
-
-# On-device replay buffer using compressed feature vectors
+# Replay Buffer Techniques
 class ReplayBuffer:
     def __init__(self, capacity):
         self.capacity = capacity
@@ -484,7 +846,10 @@ class ReplayBuffer:
         self.index = (self.index + 1) % self.capacity
 
     def sample(self, k):
-        return random.sample(self.buffer, min(k, len(self.buffer)))
+    return random.sample(
+        self.buffer,
+        min(k, len(self.buffer))
+    )
 ```
 
 This implementation maintains a fixed-capacity cyclic buffer, storing compressed representations (e.g., last-layer embeddings) and associated labels. Such buffers are useful for replaying adaptation updates without violating memory or energy budgets.
@@ -496,7 +861,7 @@ While experience replay improves stability in data-sparse or non-stationary envi
 
 [^fn-wear-leveling]: Wear leveling is a technique used in flash memory management to distribute data writes evenly across the memory, prolonging lifespan.
 
-### Compressed Data Representations
+### Data Compression
 
 In many on-device learning scenarios, the raw training data may be too large, noisy, or redundant to store and process effectively. This motivates the use of compressed data representations, where the original inputs are transformed into lower-dimensional embeddings or compact encodings that preserve salient information while minimizing memory and compute costs.
 
@@ -505,11 +870,9 @@ Compressed representations serve two complementary goals. First, they reduce the
 One common approach is to encode data points using a pretrained feature extractor and discard the original high-dimensional input. For example, an image $x_i$ might be passed through a convolutional neural network (CNN) to produce an embedding vector $z_i = f(x_i)$, where $f(\cdot)$ is a fixed feature encoder. This embedding captures visual structure (e.g., shape, texture, or spatial layout) in a compact representation—typically 64 to 512 dimensions—suitable for lightweight downstream adaptation.
 
 Mathematically, training can proceed over compressed samples $(z_i, y_i)$ using a lightweight decoder or projection head. Let $\theta$ represent the trainable parameters of this decoder model, which is typically a small neural network that maps from compressed representations to output predictions. As each example is presented, the model parameters are updated using gradient descent:
-
 $$
-\theta_{t+1} = \theta_t - \eta \nabla_\theta \mathcal{L}(g(z_i; \theta), y_i)
+\theta_{t+1} = \theta_t - \eta \nabla_\theta \mathcal{L}\big(g(z_i; \theta), y_i\big)
 $$
-
 Here:
 
 - $z_i$ is the compressed representation of the $i$-th input,
@@ -527,7 +890,7 @@ Compressed representations are particularly useful in privacy-sensitive settings
 
 In practice, these strategies have been applied in domains such as keyword spotting, where raw audio signals are first transformed into Mel-frequency cepstral coefficients (MFCCs)—a compact, lossy representation of the power spectrum of speech. These MFCC vectors serve as compressed inputs for downstream models, enabling local adaptation using only a few kilobytes of memory. Instead of storing raw audio waveforms, which are large and computationally expensive to process, devices store and learn from these compressed feature vectors directly. Similarly, in low-power computer vision systems, embeddings extracted from lightweight CNNs are retained and reused for few-shot learning. These examples illustrate how representation learning and compression serve as foundational tools for scaling on-device learning to memory- and bandwidth-constrained environments.
 
-### Tradeoffs and Comparative Summary
+### Tradeoffs Summary
 
 Each of the techniques introduced in this section, few-shot learning, experience replay, and compressed data representations, offers a strategy for adapting models on-device when data is scarce or streaming. However, they operate under different assumptions and constraints, and their effectiveness depends on system-level factors such as memory capacity, data availability, task structure, and privacy requirements.
 
@@ -556,7 +919,7 @@ In practice, these methods are not mutually exclusive. Many real-world systems c
 
 Together, these strategies embody the core challenge of on-device learning: achieving reliable model improvement under persistent constraints on data, compute, and memory.
 
-## Distributed Local Learning: Federated Learning
+## Federated Learning
 
 On-device learning enables models to adapt locally using data generated on the device, but doing so in isolation limits a system's ability to generalize across users and tasks. In many applications, learning must occur not just within a single device, but across a fleet of heterogeneous, intermittently connected systems. This calls for a distributed coordination framework that supports collective model improvement without violating the constraints of privacy, limited connectivity, and device autonomy. Federated learning (FL) is one such framework.
 
@@ -568,11 +931,226 @@ On-device learning enables models to adapt locally using data generated on the d
 
 To better understand the role of federated learning, it is useful to contrast it with other learning paradigms. @fig-learning-paradigms illustrates the distinction between offline learning, on-device learning, and federated learning. In traditional offline learning, all data is collected and processed centrally. The model is trained in the cloud using curated datasets and is then deployed to edge devices without further adaptation. In contrast, on-device learning enables local model adaptation using data generated on the device itself, supporting personalization but in isolation—without sharing insights across users. Federated learning bridges these two extremes by enabling localized training while coordinating updates globally. It retains data privacy by keeping raw data local, yet benefits from distributed model improvements by aggregating updates from many devices.
 
-![A comparison of learning paradigms: Offline learning occurs centrally with all data aggregated in the cloud. On-device learning adapts models locally based on user data but does not share information across users. Federated learning combines local adaptation with global coordination by aggregating model updates without sharing raw data, enabling privacy-preserving collective improvement.](images/png/federatedvsoil.png){#fig-learning-paradigms}
+::: {#fig-learning-paradigms fig-env="figure" fig-pos="htb"}
+```{.tikz}
+\begin{tikzpicture}[line join=round,font=\usefont{T1}{phv}{m}{n}\small]
+\tikzset{
+ LineD/.style={line width=0.2pt,black!50,text=black},
+ pics/cloud/.style = {
+        code = {
+\colorlet{red}{BrownLine}
+\begin{scope}[local bounding box=CLO,scale=1.8, every node/.append style={transform shape}]
+\draw[red,line width=1.25pt,fill=yellow!10](0,0)to[out=170,in=180,distance=11](0.1,0.61)
+to[out=90,in=105,distance=17](1.07,0.71)
+to[out=20,in=75,distance=7](1.48,0.36)
+to[out=350,in=0,distance=7](1.48,0)--(0,0);
+\end{scope}
+}
+},
+circles/.pic={
+\pgfkeys{/channel/.cd, #1}
+\node[circle,draw=\channelcolor,line width=\linewidth,fill=\channelcolor!10,
+minimum size=6.5mm](\picname){};
+        }
+}
+\pgfkeys{
+  /channel/.cd,
+  channelcolor/.store in=\channelcolor,
+  drawchannelcolor/.store in=\drawchannelcolor,
+  scalefac/.store in=\scalefac,
+  linewidth/.store in=\linewidth,
+  picname/.store in=\picname,
+  channelcolor=BrownLine,
+  drawchannelcolor=BrownLine,
+  scalefac=1,
+  linewidth=0.6pt,
+  dashed/.is if=box@dashed,
+  dashed/.default=true,
+  picname=C
+}
+
+\tikzset {
+  pics/server/.style = {
+    code = {
+      \colorlet{red}{BlueLine}
+      \begin{scope}[anchor=center, transform shape,scale=0.8, every node/.append style={transform shape}]
+        \draw[red,line width=1.25pt,fill=white](-0.55,-0.5) rectangle (0.55,0.5);
+\foreach \i in {-0.25,0,0.25} {
+                \draw[cyan,line width=1.25pt]( -0.55,\i) -- (0.55, \i);
+}
+        \foreach \i in {-0.375, -0.125, 0.125, 0.375} {
+          \draw[cyan!50!black!90,line width=1.25pt](-0.45,\i)--(0,\i);
+          \fill[cyan!50!black!90](0.35,\i) circle (1.5pt);
+        }
+
+        \draw[red,line width=1.75pt](0,-0.53) |- (-0.55,-0.7);
+        \draw[red,line width=1.75pt](0,-0.53) |- (0.55,-0.7);
+      \end{scope}
+    }
+  }
+}
+
+\tikzset {
+pics/mobile/.style = {
+        code = {
+\colorlet{red}{BrownLine}
+\begin{scope}[local bounding box=MOB,scale=0.4, every node/.append style={transform shape}]
+\node[rectangle,draw=red,minimum height=94,minimum width=57,
+            rounded corners=6,thick,fill=red!10](R1){};
+\node[rectangle,draw=red,minimum height=67,minimum width=44,thick,fill=white](R2){};
+\node[circle,minimum size=8,below= 2pt of R2,inner sep=0pt,thick,fill=red!90]{};
+\node[rectangle,fill=red,minimum height=2,minimum width=20,above= 4pt of R2,inner sep=0pt,thick]{};
+%
+ \end{scope}
+     }
+  }
+}
+
+\newcommand{\mobilni}[1]{
+\colorlet{red}{#1}
+\begin{scope}[local bounding box=MOB,scale=0.4, every node/.append style={transform shape}]
+\node[rectangle,draw=red,minimum height=94,minimum width=57,
+            rounded corners=6,thick,fill=red!10](R1){};
+\node[rectangle,draw=red,minimum height=67,minimum width=44,thick,fill=white](R2){};
+\node[circle,minimum size=8,below= 2pt of R2,inner sep=0pt,thick,fill=red!90]{};
+\node[rectangle,fill=red,minimum height=2,minimum width=20,above= 4pt of R2,inner sep=0pt,thick]{};
+ \end{scope}
+}
+\newcommand{\krugovi}[2]{
+\begin{scope}[local bounding box=CIRCLE1,shift={($(0,0)+(6.0,0)$)},
+scale=#1, every node/.append style={transform shape}]
+%1 column
+\foreach \j in {1,2} {
+  \pgfmathsetmacro{\y}{(1-\j)*0.83 + 0.7}
+  \pic at (-2.8,\y) {circles={channelcolor=RedLine, linewidth=#2pt,picname=1CD\j}};
+}
+%2 column
+\foreach \j in {1,2,3} {
+  \pgfmathsetmacro{\y}{(1.5-\j)*0.83 + 0.7}
+  \pic at (-1.5,\y) {circles={channelcolor=VioletLine, linewidth=#2pt,picname=2CD\j}};
+}
+%3 column
+\foreach \i in {1,...,4} {
+  \pgfmathsetmacro{\y}{(2-\i)*0.83+0.7}
+  \pic at (0,\y) {circles={channelcolor=BrownLine, linewidth=#2pt,picname=3CD\i}};
+}
+%4 column
+\foreach \j in {1,2,3,4} {
+  \pgfmathsetmacro{\y}{(2-\j)*0.83 + 0.7}
+  \pic at (1.5,\y) {circles={channelcolor=BlueLine, linewidth=#2pt,picname=4CD\j}};
+}
+%5 column
+\foreach \j in {1,2} {
+  \pgfmathsetmacro{\y}{(1-\j)*0.83 + 0.7}
+  \pic at (2.8,\y) {circles={channelcolor=RedLine, linewidth=#2pt,picname=5CD\j}};
+}
+\foreach \i in {1,2}{
+  \foreach \j in {1,2,3}{
+\draw[LineD](1CD\i)--(2CD\j);
+}}
+\foreach \i in {1,2,3}{
+  \foreach \j in {1,2,3,4}{
+\draw[LineD](2CD\i)--(3CD\j);
+}}
+\foreach \i in {1,2,3,4}{
+  \foreach \j in {1,2,3,4}{
+\draw[LineD](3CD\i)--(4CD\j);
+}}
+\foreach \i in {1,2,3,4}{
+  \foreach \j in {1,2}{
+\draw[LineD](4CD\i)--(5CD\j);
+}}
+\end{scope}
+}
+
+\krugovi{0.6}{0.6}
+\node[above=6pt of CIRCLE1](OL){\textbf{Offline learning}};
+
+\begin{scope}[local bounding box=CLOUD1,shift={($(CIRCLE1)+(-1.4,-4.95)$)},
+scale=1.2, every node/.append style={transform shape}]
+\pic[shift={(0,0)}] at (0,0) {cloud};
+\end{scope}
+
+\begin{scope}[local bounding box=SERVER1,shift={($(CLOUD1)+(0,0)$)},
+scale=1.2, every node/.append style={transform shape}]
+\pic[shift={(-0.1,-0.1)}] at (0,0) {server};
+\end{scope}
+\node[below=2pt of SERVER1]{Data};
+\draw[VioletLine,line width=1pt,-latex,shorten >=2pt,shorten <=-4pt](CLOUD1.80)--(CIRCLE1.288);
+\draw[VioletLine,line width=1pt,latex-,shorten >=2pt,shorten <=-4pt](CLOUD1.110)--(CIRCLE1.245);
+%%%
+%center
+\begin{scope}[local bounding box=CENTER]
+\begin{scope}[local bounding box=MOBILE1,shift={($(CLOUD1)+(4.5,1.9)$)},
+scale=3.35, every node/.append style={transform shape}]
+ \pic[shift={(0,0)}] at (0,0) {mobile};
+\end{scope}
+\begin{scope}[local bounding box=KRUGOVI,shift={($(MOBILE1)+(-6,0)$)},
+scale=1, every node/.append style={transform shape}]
+\krugovi{0.3}{0.3}
+\end{scope}
+\node[draw=GreenLine, line width=0.75pt, fill=GreenL!44, align=center,
+minimum height=10mm](AM)at($(MOBILE1.east)+(2.5,0)$){Adapt model\\ based on\\ local data};
+\draw[VioletLine,line width=1pt,latex-,shorten <=4pt](AM.165)--++(180:1.3);
+\draw[VioletLine,line width=1pt,-latex,shorten <=4pt](AM.195)--++(180:1.3);
+\end{scope}
+\node[below=12pt of CENTER,align=center](LAO){Locally adapt once to a few samples\\ (e.g., few shot learning)
+     or continuously\\ (e.g., unsupervised learning)};
+%%%%
+%RIGHT
+\begin{scope}[local bounding box=RIGHT,shift={($(CENTER)+(5.2,0)$)}]
+\begin{scope}[local bounding box=CLOUD2,shift={($(0,0)+(0,1.0)$)},
+scale=0.65, every node/.append style={transform shape}]
+\pic[shift={(0,0)}] at (0,0) {cloud};
+\end{scope}
+\node[]at(0.8,1.35){Coordinator};
+
+\begin{scope}[local bounding box=MOBILE2,shift={($(CLOUD2)+(-1.25,-2.9)$)},
+scale=1.2, every node/.append style={transform shape}]
+ \mobilni{OliveLine}
+\end{scope}
+\begin{scope}[local bounding box=KRUGOVI,shift={($(MOBILE2)+(-3,0)$)},
+scale=0.5, every node/.append style={transform shape}]
+\krugovi{0.2}{0.2}
+\end{scope}
+%
+\begin{scope}[local bounding box=MOBILE3,shift={($(CLOUD2)+(1.25,-2.9)$)},
+scale=1.2, every node/.append style={transform shape}]
+ \mobilni{OliveLine}
+\end{scope}
+\begin{scope}[local bounding box=KRUGOVI,shift={($(MOBILE3)+(-3,0)$)},
+scale=0.5, every node/.append style={transform shape}]
+\krugovi{0.2}{0.2}
+\end{scope}
+\node[below=3pt of MOBILE2]{Worker};
+\node[below=3pt of MOBILE3]{Worker};
+\node[draw=RedLine, line width=0.75pt, fill=RedL!44, align=center,
+minimum height=10mm](TD)at($(MOBILE3.east)+(2.25,0)$){Training on \\ local data};
+\end{scope}
+\node[]at($(MOBILE2)!0.5!(MOBILE3)$){$\bullet$ $\bullet$ $\bullet$};
+
+\draw[VioletLine,line width=1pt,latex-,shorten <=4pt](TD.165)--++(180:1.2);
+\draw[VioletLine,line width=1pt,-latex,shorten <=4pt](TD.195)--++(180:1.2);
+\draw[VioletLine,line width=1pt,latex-latex,shorten <=1pt](MOBILE2)--
+       node[left=4pt,align=center,text=black]{Model \\ updates}(CLOUD2);
+       \draw[VioletLine,line width=1pt,latex-latex,shorten <=1pt](MOBILE3)--
+       node[right=4pt,align=center,text=black]{5G \\ concectivity}(CLOUD2);
+%
+\path[red](OL)-|coordinate(MO)(MOBILE1);
+\path[red](OL)-|coordinate(CO)(CLOUD2);
+\path[red](LAO)-|coordinate(COD)(CLOUD2);
+\node[align=center]at($(COD)+(1.5,0)$){Aggregate model updates across \\
+multiple users to globally improve\\ model from more diverse data};
+\node[]at(MO){\textbf{On-device learning}};
+\node[]at(CO){\textbf{Federated learning}};
+\end{tikzpicture}
+```
+A comparison of learning paradigms: Offline learning occurs centrally with all data aggregated in the cloud. On-device learning adapts models locally based on user data but does not share information across users. Federated learning combines local adaptation with global coordination by aggregating model updates without sharing raw data, enabling privacy-preserving collective improvement.
+:::
 
 This section explores the principles and practical considerations of federated learning in the context of mobile and embedded systems. It begins by outlining the canonical FL protocols and their system implications. It then discusses device participation constraints, communication-efficient update mechanisms, and strategies for personalized learning. Throughout, the emphasis remains on how federated methods can extend the reach of on-device learning by enabling distributed model training across diverse and resource-constrained hardware platforms.
 
-### Motivation
+### Federated Learning Motivation
 
 Federated learning (FL) is a decentralized paradigm for training machine learning models across a population of devices without transferring raw data to a central server [@mcmahan2017communication]. Unlike traditional centralized training pipelines, which require aggregating all training data in a single location, federated learning distributes the training process itself. Each participating device computes updates based on its local data and contributes to a global model through an aggregation protocol, typically coordinated by a central server. This shift in training architecture aligns closely with the needs of mobile, edge, and embedded systems, where privacy, communication cost, and system heterogeneity impose significant constraints on centralized approaches.
 
@@ -584,7 +1162,7 @@ These examples illustrate how federated learning bridges the gap between model i
 
 The remainder of this section explores the key techniques and tradeoffs that define federated learning in on-device settings. We begin by examining the core learning protocols that govern coordination across devices, and proceed to investigate strategies for scheduling, communication efficiency, and personalization.
 
-### Federated Learning Protocols
+### Learning Protocols
 
 Federated learning protocols define the rules and mechanisms by which devices collaborate to train a shared model. These protocols govern how local updates are computed, aggregated, and communicated, as well as how devices participate in the training process. The choice of protocol has significant implications for system performance, communication overhead, and model convergence.
 
@@ -603,23 +1181,21 @@ Local training refers to the process by which individual devices compute model u
 
 This process is repeated iteratively, with devices periodically downloading the latest global model and performing local training. The frequency of these updates can vary based on system constraints, device availability, and communication costs.
 
-#### Federated Learning Protocols
+#### Protocols Overview
 
 At the heart of federated learning is a coordination mechanism that enables many devices—each with access to only a small, local dataset—to collaboratively train a shared model. This is achieved through a protocol in which client devices perform local training and periodically transmit model updates to a central server. The server aggregates these updates to refine a global model, which is then redistributed to clients for the next training round. This cyclical procedure decouples the learning process from centralized data collection, making it especially well-suited to mobile and edge environments where user data is private, bandwidth is constrained, and device participation is sporadic.
 
 The most widely used baseline for this process is Federated Averaging (FedAvg), which has become a canonical algorithm for federated learning [@mcmahan2017communication]. In FedAvg, each device trains its local copy of the model using stochastic gradient descent (SGD) on its private data. After a fixed number of local steps, each device sends its updated model parameters to the server. The server computes a weighted average of these parameters—weighted by the number of data samples on each device—and updates the global model accordingly. This updated model is then sent back to the devices, completing one round of training.
 
 Formally, let $\mathcal{D}_k$ denote the local dataset on client $k$, and let $\theta_k^t$ be the parameters of the model on client $k$ at round $t$. Each client performs $E$ steps of SGD on its local data, yielding an update $\theta_k^{t+1}$. The central server then aggregates these updates as:
-
 $$
 \theta^{t+1} = \sum_{k=1}^{K} \frac{n_k}{n} \theta_k^{t+1}
 $$
-
 where $n_k = |\mathcal{D}_k|$ is the number of samples on device $k$, $n = \sum_k n_k$ is the total number of samples across participating clients, and $K$ is the number of active devices in the current round.
 
 This basic structure introduces a number of design choices and tradeoffs. The number of local steps $E$ impacts the balance between computation and communication: larger $E$ reduces communication frequency but risks divergence if local data distributions vary too much. Similarly, the selection of participating clients affects convergence stability and fairness. In real-world deployments, not all devices are available at all times, and hardware capabilities may differ substantially, requiring robust participation scheduling and failure tolerance.
 
-#### Client Scheduling and System Participation
+#### Client Scheduling
 
 Federated learning operates under the assumption that clients—devices holding local data—periodically become available for participation in training rounds. However, in real-world systems, client availability is intermittent and highly variable. Devices may be turned off, disconnected from power, lacking network access, or otherwise unable to participate at any given time. As a result, client scheduling plays a central role in the effectiveness and efficiency of distributed learning.
 
@@ -637,7 +1213,7 @@ Selected clients perform one or more local training steps on their private data 
 
 These scheduling decisions directly impact system performance. They affect convergence rate, model generalization, energy consumption, and overall user experience. Poor scheduling can result in excessive stragglers, overfitting to narrow client segments, or wasted computation. As a result, client scheduling is not merely a logistical concern—it is a core component of system design in federated learning, demanding both algorithmic insight and infrastructure-level coordination.
 
-#### Communication-Efficient Updates
+#### Efficient Communication
 
 One of the principal bottlenecks in federated learning systems is the cost of communication between edge clients and the central server. Transmitting full model weights or gradients after every training round can quickly overwhelm bandwidth and energy budgets—particularly for mobile or embedded devices operating over constrained wireless links. To address this, a range of techniques have been developed to reduce communication overhead while preserving learning efficacy.
 
@@ -650,7 +1226,6 @@ Selective update sharing further reduces communication by transmitting only subs
 Split models and architectural partitioning divide the model into a shared global component and a private local component. Clients train and maintain their private modules independently while synchronizing only the shared parts with the server. This allows for user-specific personalization with minimal communication and privacy leakage.
 
 All of these approaches operate within the context of a federated aggregation protocol. A standard baseline for aggregation is Federated Averaging (FedAvg), in which the server updates the global model by computing a weighted average of the client updates received in a given round. Let $\mathcal{K}_t$ denote the set of participating clients in round $t$, and let $\theta_k^t$ represent the locally updated model parameters from client $k$. The server computes the new global model $\theta^{t+1}$ as:
-
 $$
 \theta^{t+1} = \sum_{k \in \mathcal{K}_t} \frac{n_k}{n_{\mathcal{K}_t}} \theta_k^t
 $$
@@ -659,20 +1234,17 @@ Here, $n_k$ is the number of local training examples at client $k$, and $n_{\mat
 
 However, communication-efficient updates can introduce tradeoffs. Compression may degrade gradient fidelity, selective updates can limit model capacity, and split architectures may complicate coordination. As a result, effective federated learning requires careful balancing of bandwidth constraints, privacy concerns, and convergence dynamics—a balance that depends heavily on the capabilities and variability of the client population.
 
-#### Personalization in Federated Learning
+#### Federated Personalization
 
 While compression and communication strategies improve scalability, they do not address a critical limitation of the global federated learning paradigm—its inability to capture user-specific variation. In real-world deployments, devices often observe distinct and heterogeneous data distributions. A one-size-fits-all global model may underperform when applied uniformly across diverse users. This motivates the need for personalized federated learning, where local models are adapted to user-specific data without compromising the benefits of global coordination.
 
 Let $\theta_k$ denote the model parameters on client $k$, and $\theta_{\text{global}}$ the aggregated global model. Traditional FL seeks to minimize a global objective:
-
 $$
 \min_\theta \sum_{k=1}^K w_k \mathcal{L}_k(\theta)
 $$
-
 where $\mathcal{L}_k(\theta)$ is the local loss on client $k$, and $w_k$ is a weighting factor (e.g., proportional to local dataset size). However, this formulation assumes that a single model $\theta$ can serve all users well. In practice, local loss landscapes $\mathcal{L}_k$ often differ significantly across clients, reflecting non-IID data distributions and varying task requirements.
 
 Personalization modifies this objective to allow each client to maintain its own adapted parameters $\theta_k$, optimized with respect to both the global model and local data:
-
 $$
 \min_{\theta_1, \ldots, \theta_K} \sum_{k=1}^K \left( \mathcal{L}_k(\theta_k) + \lambda \cdot \mathcal{R}(\theta_k, \theta_{\text{global}}) \right)
 $$
@@ -710,7 +1282,7 @@ Each of these strategies reflects a different point in the tradeoff space. These
 
 Selecting the appropriate personalization method depends on deployment constraints, data characteristics, and the desired balance between accuracy, privacy, and computational efficiency. In practice, hybrid approaches that combine elements of multiple strategies—such as local finetuning atop a personalized head—are often employed to achieve robust performance across heterogeneous devices.
 
-#### Privacy Considerations in Federated Learning
+#### Federated Privacy
 
 While federated learning is often motivated by privacy concerns—keeping raw data localized rather than transmitting it to a central server—the paradigm introduces its own set of security and privacy risks. Although devices do not share their raw data, the transmitted model updates (such as gradients or weight changes) can inadvertently leak information about the underlying private data. Techniques such as model inversion attacks and membership inference attacks demonstrate that adversaries may partially reconstruct or infer properties of local datasets by analyzing these updates.
 
@@ -718,7 +1290,7 @@ To mitigate such risks, modern federated learning systems commonly employ protec
 
 While these techniques enhance privacy, they introduce additional system complexity and tradeoffs between model utility, communication cost, and robustness. A deeper exploration of these attacks, defenses, and their implications for federated and on-device learning is provided in a later security and privacy chapter.
 
-## Designing Practical On-Device Learning Systems
+## Practical System Design
 
 On-device learning presents opportunities for personalization, privacy preservation, and autonomous adaptation, but realizing these benefits in practice requires disciplined system design. Constraints on memory, compute, energy, and observability necessitate careful selection of adaptation mechanisms, training strategies, and deployment safeguards.
 
@@ -743,37 +1315,53 @@ Finally, throughout the system lifecycle, privacy and compliance requirements mu
 The flowchart in @fig-odl-design-flow summarizes key decision points in designing practical, scalable, and resilient on-device learning systems.
 
 ::: {#fig-odl-design-flow fig-env="figure" fig-pos="htb"}
-```{mermaid}
+```{.tikz}
+\begin{tikzpicture}[line join=round,font=\usefont{T1}{phv}{m}{n}\small]
+\tikzset{%
+    Line/.style={line width=0.75pt,black!50,text=black
+},
+  Box/.style={align=flush center,
+    inner xsep=2pt,
+    node distance=0.65,
+    draw=BlueLine,
+    line width=0.75pt,
+    top color=white, bottom color=BlueL,
+    text width=35mm,
+    minimum width=35mm, minimum height=9mm
+  },
+ decision/.style = {Box,diamond, aspect=2.0, inner xsep=0pt,, bottom color=VioletL2, draw=VioletLine},
+  startstop/.style = {Box,rounded rectangle, top color=white, bottom color=RedL, draw=RedLine},
+}
 
-flowchart TD
-    Start([Start: Deploying On-Device Learning])
-    AdaptScope{Need Heavy Adaptation?}
-    BiasOnly[Use Bias-Only or Lightweight Updates]
-    AdapterModules[Add Residual Adapters or Small Heads]
-    FullFineTune{Sufficient Compute and Energy?}
-    FullFinetuneAllowed[Allow Partial or Full Fine-Tuning]
-    FLUse{Is Data Valuable Across Devices?}
-    Federated[Use Federated Learning + Privacy Measures]
-    LocalOnly[Stay Localized and Monitor Drift]
-
-    Start --> AdaptScope
-    AdaptScope -- No --> BiasOnly
-    AdaptScope -- Yes --> AdapterModules
-    AdapterModules --> FullFineTune
-    FullFineTune -- No --> BiasOnly
-    FullFineTune -- Yes --> FullFinetuneAllowed
-    FullFinetuneAllowed --> FLUse
-    FLUse -- Yes --> Federated
-    FLUse -- No --> LocalOnly
+\node[startstop](B1){Start: Deploying On-Device Learning};
+\node[decision,below=of B1](B2){Need Heavy\\ Adaptation?};
+\node[Box,below left=0.7 and 0.9 of B2](B3){Use Bias-Only or Lightweight Updates};
+\node[Box,below right=0.7 and 0.9 of B2](B4){Add Residual Adapters or Small Heads};
+\node[decision,below=of B4](B5){Sufficient Compute and Energy?};
+\node[Box,below=of B5](B6){Allow Partial or Full Fine-Tuning};
+\node[decision,below=of B6](B7){Is Data Valuable Across Devices?};
+\node[Box,below left=1 and 0.9 of B7](B8){Use Federated Learning + Privacy Measures};
+\node[Box,below right=1 and 0.9 of B7](B9){Stay Localized and Monitor Drift};
+%
+\draw[Line,-latex](B1)--(B2);
+\draw[Line,-latex](B2.west)node[above left]{No}-|(B3);
+\draw[Line,-latex](B2.east)node[above right]{Yes}-|(B4);
+\draw[Line,-latex](B4)--(B5);
+\draw[Line,-latex](B5)--node[right]{Yes}(B6);
+\draw[Line,-latex](B5.west)node[above left]{No}-|(B3);
+\draw[Line,-latex](B6)--(B7);
+\draw[Line,-latex](B7.west)node[above left]{Yes}-|(B8);
+\draw[Line,-latex](B7.east)node[above right]{No}-|(B9);
+\end{tikzpicture}
 ```
 Decision flowchart for designing practical on-device learning systems.
 :::
 
-## Challenges and Limitations
+## Challenges
 
 While on-device learning holds significant promise for enabling adaptive, private, and efficient machine learning at the edge, its practical deployment introduces a range of challenges that extend beyond algorithm design. Unlike conventional centralized systems, where training occurs in controlled environments with uniform hardware and curated datasets, edge systems must contend with heterogeneity in devices, fragmentation in data, and the absence of centralized validation infrastructure. These factors give rise to new systems-level tradeoffs and open questions concerning reliability, safety, and maintainability. Moreover, regulatory and operational constraints complicate the deployment of self-updating models in real-world applications. This section explores these limitations, emphasizing the systemic barriers that must be addressed to make on-device learning robust, scalable, and trustworthy.
 
-#### System Heterogeneity
+#### Heterogeneity
 
 Federated and on-device learning systems must operate across a vast and diverse ecosystem of devices, ranging from smartphones and wearables to IoT sensors and microcontrollers. This heterogeneity spans multiple dimensions: hardware capabilities, software stacks, network connectivity, and power availability. Unlike cloud-based systems, where environments can be standardized and controlled, edge deployments encounter a wide distribution of system configurations and constraints. These variations introduce significant complexity in algorithm design, resource scheduling, and model deployment.
 
@@ -787,7 +1375,7 @@ Finally, system fragmentation affects reproducibility and testing. With such a w
 
 Consider a federated learning deployment for mobile keyboards. A high-end smartphone might feature 8 GB of RAM, a dedicated AI accelerator, and continuous Wi-Fi access. In contrast, a budget device may have just 2 GB of RAM, no hardware acceleration, and rely on intermittent mobile data. These disparities influence how long training runs can proceed, how frequently models can be updated, and even whether training is feasible at all. To support such a range, the system must dynamically adjust training schedules, model formats, and compression strategies—ensuring equitable model improvement across users while respecting each device's limitations.
 
-#### Data Fragmentation and Non-IID Distributions
+#### Data Fragmentation
 
 In centralized machine learning, data can be aggregated, shuffled, and curated to approximate independent and identically distributed (IID) samples—a key assumption underlying many learning algorithms. In contrast, on-device and federated learning systems must contend with highly fragmented and non-IID data. Each device collects data specific to its user, context, and usage patterns. These data distributions are often skewed, sparse, and dynamically shifting over time.
 
@@ -801,7 +1389,7 @@ A common example of data fragmentation arises in speech recognition systems depl
 
 In federated learning deployments for virtual keyboards, the problem is further amplified. One user might primarily type in English, another in Hindi, and a third may switch fluidly between multiple languages. The resulting training data is highly non-IID—not only in language but also in vocabulary, phrasing, and typing cadence. A global model trained on aggregated updates may degrade if it fails to capture these localized differences, highlighting the need for adaptive, data-aware strategies that accommodate heterogeneity without sacrificing collective performance.
 
-#### Update Monitoring and Validation
+#### Monitoring and Validation
 
 Unlike centralized machine learning systems, where model updates can be continuously evaluated against a held-out validation set, on-device learning introduces a fundamental shift in visibility and observability. Once deployed, models operate in highly diverse and often disconnected environments, where internal updates may proceed without external monitoring. This creates significant challenges for ensuring that model adaptation is both beneficial and safe.
 
@@ -817,7 +1405,7 @@ In some cases, federated validation offers a partial solution. Devices can share
 
 Ultimately, update monitoring and validation in on-device learning require a rethinking of traditional evaluation practices. Instead of centralized test sets, systems must rely on implicit signals, runtime feedback, and conservative adaptation policies to ensure robustness. The absence of global observability is not merely a technical limitation—it reflects a deeper systems challenge in aligning local adaptation with global reliability.
 
-#### Resource Competition and Cost
+#### Resource Management
 
 On-device learning introduces new modes of resource contention that are not present in conventional inference-only deployments. While many edge devices are provisioned to run pretrained models efficiently, they are rarely designed with training workloads in mind. Local adaptation therefore competes for scarce resources—compute cycles, memory bandwidth, energy, and thermal headroom—with other system processes and user-facing applications.
 
@@ -837,7 +1425,7 @@ In some deployments, adaptation is further gated by cost constraints imposed by 
 In summary, the cost of on-device learning is not solely measured in FLOPs or memory usage. It manifests as a complex interplay of system load, user experience, energy availability, and infrastructure capacity. Addressing these challenges requires co-design across algorithmic, runtime, and hardware layers, ensuring that adaptation remains unobtrusive, efficient, and sustainable under real-world constraints.
 
 
-#### Deployment and Compliance Risks
+#### Deployment Risks
 
 The deployment of adaptive models on edge devices introduces challenges that extend beyond technical feasibility. In domains where compliance, auditability, and regulatory approval are necessary—such as healthcare, finance, or safety-critical systems—on-device learning poses a fundamental tension between system autonomy and control.
 
@@ -862,13 +1450,13 @@ Lastly, the emergence of edge learning raises open questions about accountabilit
 
 Addressing these deployment and compliance risks requires new tooling, protocols, and design practices that support auditable autonomy—the ability of a system to adapt in place while still satisfying external requirements for traceability, reproducibility, and user protection. As on-device learning becomes more prevalent, these challenges will become central to both system architecture and governance frameworks.
 
-#### Summary
+#### Challenges Summary
 
 Designing on-device learning systems involves navigating a complex landscape of technical and practical constraints. While localized adaptation enables personalization, privacy, and responsiveness, it also introduces a range of challenges that span hardware heterogeneity, data fragmentation, observability, and regulatory compliance.
 
 System heterogeneity complicates deployment and optimization by introducing variation in compute, memory, and runtime environments. Non-IID data distributions challenge learning stability and generalization, especially when models are trained on-device without access to global context. The absence of centralized monitoring makes it difficult to validate updates or detect performance regressions, and training activity must often compete with core device functionality for energy and compute. Finally, post-deployment learning introduces complications in model governance, from auditability and rollback to privacy assurance.
 
-These challenges are not isolated—they interact in ways that influence the viability of different adaptation strategies. Table @tbl-ondevice-challenges summarizes the primary challenges and their implications for ML systems deployed at the edge.
+These challenges are not isolated—they interact in ways that influence the viability of different adaptation strategies. @tbl-ondevice-challenges summarizes the primary challenges and their implications for ML systems deployed at the edge.
 
 +-------------------------------------+-----------------------------------------------------------+------------------------------------------------------+
 | Challenge                           | Root Cause                                                | System-Level Implications                            |
