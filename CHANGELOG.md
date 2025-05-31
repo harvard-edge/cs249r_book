@@ -1,16 +1,16 @@
-_Last Updated: May 30, 2025_
+_Last Updated: May 31, 2025_
 
 ## 2025 Changes
 
-### 📅 Published on May 30, 2025
+### 📅 Published on May 31, 2025
 
-7 files updated (2416 lines added, 1302 lines removed)
+8 files updated (2458 lines added, 1305 lines removed)
 
 <details open>
   <summary>**Major Updates**</summary>
 
 - **AI Frameworks**: <span style="color:green">+++++</span><span style="color:red"></span> (862 lines added, 93 lines removed)
-- **DNN Architectures**: <span style="color:green">+++++</span><span style="color:red"></span> (306 lines added, 50 lines removed)
+- **DNN Architectures**: <span style="color:green">+++++</span><span style="color:red"></span> (315 lines added, 51 lines removed)
 - **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">--</span> (1242 lines added, 1145 lines removed)
 
 </details>
@@ -18,6 +18,7 @@ _Last Updated: May 30, 2025_
 <details open>
   <summary>**Minor Updates**</summary>
 
+- **AI Training**: <span style="color:green">+++++</span><span style="color:red"></span> (33 lines added, 2 lines removed)
 - **Data Engineering**: <span style="color:green"></span><span style="color:red">-----</span> (1 lines added, 9 lines removed)
 - **ML Operations**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 - **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
