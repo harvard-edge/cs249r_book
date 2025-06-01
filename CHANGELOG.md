@@ -1,10 +1,10 @@
-_Last Updated: May 31, 2025_
+_Last Updated: Jun 01, 2025_
 
 ## 2025 Changes
 
-### 📅 Published on May 31, 2025
+### 📅 Published on Jun 01, 2025
 
-8 files updated (2458 lines added, 1305 lines removed)
+9 files updated (2519 lines added, 1310 lines removed)
 
 <details open>
   <summary>**Major Updates**</summary>
@@ -18,10 +18,11 @@ _Last Updated: May 31, 2025_
 <details open>
   <summary>**Minor Updates**</summary>
 
+- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
 - **AI Training**: <span style="color:green">+++++</span><span style="color:red"></span> (33 lines added, 2 lines removed)
 - **Data Engineering**: <span style="color:green"></span><span style="color:red">-----</span> (1 lines added, 9 lines removed)
 - **ML Operations**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
-- **Model Optimizations**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **Model Optimizations**: <span style="color:green">+++++</span><span style="color:red"></span> (61 lines added, 5 lines removed)
 - **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 
 </details>
