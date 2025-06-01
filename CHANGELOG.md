@@ -1,16 +1,29 @@
-_Last Updated: May 15, 2025_
+_Last Updated: Jun 01, 2025_
 
 ## 2025 Changes
 
-### 📅 Published on May 15, 2025
+### 📅 Published on Jun 01, 2025
 
-2 files updated (2 lines added, 2 lines removed)
+9 files updated (2519 lines added, 1310 lines removed)
+
+<details open>
+  <summary>**Major Updates**</summary>
+
+- **AI Frameworks**: <span style="color:green">+++++</span><span style="color:red"></span> (862 lines added, 93 lines removed)
+- **DNN Architectures**: <span style="color:green">+++++</span><span style="color:red"></span> (315 lines added, 51 lines removed)
+- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">--</span> (1242 lines added, 1145 lines removed)
+
+</details>
 
 <details open>
   <summary>**Minor Updates**</summary>
 
-- **ML Operations**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
+- **AI Training**: <span style="color:green">+++++</span><span style="color:red"></span> (33 lines added, 2 lines removed)
+- **Data Engineering**: <span style="color:green"></span><span style="color:red">-----</span> (1 lines added, 9 lines removed)
+- **ML Operations**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **Model Optimizations**: <span style="color:green">+++++</span><span style="color:red"></span> (61 lines added, 5 lines removed)
+- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 
 </details>
 
