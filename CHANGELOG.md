@@ -4,7 +4,7 @@ _Last Updated: Jun 02, 2025_
 
 ### 📅 Published on Jun 02, 2025
 
-14 files updated (6835 lines added, 2375 lines removed)
+15 files updated (7667 lines added, 2923 lines removed)
 
 <details open>
   <summary>**Major Updates**</summary>
@@ -17,6 +17,7 @@ _Last Updated: Jun 02, 2025_
 - **Data Engineering**: <span style="color:green">+++</span><span style="color:red">--</span> (1310 lines added, 681 lines removed)
 - **Efficient AI**: <span style="color:green">+++++</span><span style="color:red"></span> (205 lines added, 37 lines removed)
 - **ML Operations**: <span style="color:green">+++++</span><span style="color:red"></span> (701 lines added, 75 lines removed)
+- **Responsible AI**: <span style="color:green">+++</span><span style="color:red">--</span> (832 lines added, 548 lines removed)
 - **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">--</span> (1243 lines added, 1146 lines removed)
 
 </details>
