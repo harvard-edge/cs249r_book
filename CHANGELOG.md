@@ -4,16 +4,16 @@ _Last Updated: Jun 02, 2025_
 
 ### 📅 Published on Jun 02, 2025
 
-13 files updated (6377 lines added, 2272 lines removed)
+13 files updated (6392 lines added, 2287 lines removed)
 
 <details open>
   <summary>**Major Updates**</summary>
 
-- **AI Acceleration**: <span style="color:green">+++++</span><span style="color:red"></span> (747 lines added, 120 lines removed)
+- **AI Acceleration**: <span style="color:green">+++++</span><span style="color:red"></span> (757 lines added, 130 lines removed)
 - **AI Frameworks**: <span style="color:green">+++++</span><span style="color:red"></span> (1206 lines added, 118 lines removed)
 - **AI Training**: <span style="color:green">++++</span><span style="color:red">-</span> (173 lines added, 46 lines removed)
 - **DL Primer**: <span style="color:green">+++++</span><span style="color:red"></span> (210 lines added, 10 lines removed)
-- **DNN Architectures**: <span style="color:green">+++++</span><span style="color:red"></span> (773 lines added, 79 lines removed)
+- **DNN Architectures**: <span style="color:green">+++++</span><span style="color:red"></span> (778 lines added, 84 lines removed)
 - **Data Engineering**: <span style="color:green">+++</span><span style="color:red">--</span> (1294 lines added, 665 lines removed)
 - **Efficient AI**: <span style="color:green">+++++</span><span style="color:red"></span> (205 lines added, 37 lines removed)
 - **ML Operations**: <span style="color:green">+++++</span><span style="color:red"></span> (376 lines added, 31 lines removed)
