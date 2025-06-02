@@ -25,48 +25,24 @@
 
 ---
 
-## 🚀 **Our Mission**
+## 🚀 Our Mission
 
-<p align="center" style="font-size: 24px;">
+<p align="center" style="font-size: 20px;">
   <strong>1 GitHub ⭐ = 1 Learner 👩‍🎓</strong>
 </p>
 
 <p align="center">
-  Every GitHub ⭐ tells a unique story: </br>
-  Learners acquiring knowledge and skills, and supporters encouraging us to push forward. </br>
-  Together, we are all collectively shaping the future of AI education at a global scale.
+  Your GitHub stars help us expand AI education globally. </br>
+  Every star supports free learning resources and community-driven knowledge sharing.
 </p>
 
 ---
 
-## 🌟 **How Your Stars Make an Impact**
+## 🌍 Impact
 
-<p>  Thanks to your support, we’re driving meaningful change in AI education. </p>
-  <p>  Organizations such as <a href=https://store-usa.arduino.cc/products/nicla-vision>Arduino</a> and <a href=https://www.seeedstudio.com/XIAO-ESP32S3-Sense-p-5639.html>SEEED Studio</a> are partnering with us to deliver AI hardware kits to underserved learners around the world, enabling them to explore cutting-edge technologies.</p>
+Thanks to your support, we’ve developed and distributed TinyML hardware kits to learners in underserved regions. Partnerships with organizations like [Arduino](https://store.arduino.cc/products/nicla-vision) and [SEEED Studio](https://www.seeedstudio.com/XIAO-ESP32S3-Sense-p-5639.html) have helped bring hands-on AI education to new communities around the world.
 
-<p>
-  In addition, for every new GitHub ⭐, the <a href="https://store.arduino.cc/products/nicla-vision">EDGE AI Foundation</a> is matching <a href=https://www.edgeaifoundation.org/posts/edge-ai-scholarship-fund>academic scholarship funds</a>, empowering even more learners to access AI education.
-</p>
-
-<p align="center" >
-  <a href="https://github.com/harvard-edge/cs249r_book"><strong>⭐ So... Please Keep the Momentum Going - Star Our Repo! ⭐</strong></a>
-</p>
-
-<p align="center" >
-  <a href="https://github.com/harvard-edge/cs249r_book">
-    <img src="https://img.shields.io/github/stars/harvard-edge/cs249r_book?style=social" alt="GitHub Stars"/>
-  </a>
-</p>
-
----
-
-## 📰 **Latest Updates**
-
-- 🎓 **[Nov 15] Matching Academic Scholarship Funds**
-  The EDGE AI Foundation is matching scholarship funds for every new GitHub ⭐ (up to 10,000 stars). [Click here to show support!](#)
-
-- ⭐ **[Oct 18] We Hit 1,000 GitHub Stars! 🎉**
-  Thanks to you, Arduino and SEEED donated AI hardware kits for TinyML workshops in developing nations!
+📰 Learn more in this [Science article](https://www.science.org/content/article/what-s-tinyml-global-south-s-alternative-power-hungry-pricey-ai) about how TinyML is reshaping AI access in the Global South.
 
 ---
 
@@ -79,24 +55,15 @@
 
 ## 🤝 Contributing
 
-We believe that the best learning and development happen when people come together to share knowledge and ideas. Whether you're a seasoned expert or just starting your journey in machine learning, your contributions can be valuable to share with the community.
+We welcome contributors of all levels. Whether you’re writing content, fixing mistakes, or suggesting improvements, your work helps us build a better book.
 
-### Why Contribute?
-- **Share Your Expertise**: If you have experience or insights in a specific area of machine learning or TinyML, your contributions can help others learn and apply these concepts.
-- **Learn and Grow**: Contributing to this project is a great way to deepen your understanding of machine learning systems. As you write, code, or review content, you'll reinforce your own knowledge and discover new aspects of the field.
-- **Collaborate and Network**: Join a community of like-minded individuals passionate about advancing AI education. Collaborate with peers, receive feedback, and make connections that could lead to exciting opportunities.
-- **Make an Impact**: Your contributions can directly influence how others understand and engage with machine learning. By improving and expanding the content, you're helping shape the education of future engineers and AI practitioners.
+- **New to ML Systems?** Browse the [book](https://mlsysbook.ai) and suggest edits or clarifications.
+- **Have domain knowledge?** Help with expanding or refining chapters, figures, or labs.
+- **Want to code?** Improve examples or tooling.
 
-### How to Get Started
-Getting started is easy! Whether you're interested in writing a new chapter, fixing a bug, or suggesting an improvement, we welcome all forms of contribution. Here's how you can begin:
+📘 See the [Contribution Guide](contribute.md) to get started.
 
-1. **Explore the Repository**: Familiarize yourself with the structure and content of the book by browsing the repository.
-2. **Check Out the Guidelines**: Review our [contribution guidelines](contribute.md) to understand how to contribute effectively.
-3. **Choose Your Area**: Pick a topic or area you’re passionate about. It could be anything from writing a new section, improving existing content, or even helping with code snippets and examples.
-4. **Submit Your Contribution**: Once you're ready, submit a pull request. We review all contributions and provide feedback to help you refine your work.
-
-### Need Help?
-If you're unsure where to start or have any questions, feel free to reach out through our [GitHub Discussions](#) or open an issue. We're here to support you throughout the process!
+If you're unsure where to start or have any questions, feel free to reach out through our [GitHub Discussions](#) or see the open [GitHub issues](https://github.com/harvard-edge/cs249r_book/issues). We're here to support you throughout the process!
 
 ---
 
@@ -113,14 +80,14 @@ If you'd like to build the book locally, follow these steps:
 3. **Render the Book in a specific format (works faster)**:
    ```bash
    cd cs249r_book
-   quarto render --to epub
+   quarto render --to html
    ```
 
 For a complete setup guide, including dependency installation, see [BUILD.md](BUILD.md).
 
 ---
 
-## Contributors
+## 👥 Contributors
 
 This project follows the [all-contributors](https://allcontributors.org) specification. Contributions of any kind are welcome!
 
