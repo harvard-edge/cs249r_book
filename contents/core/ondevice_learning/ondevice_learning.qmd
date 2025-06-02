@@ -557,7 +557,7 @@ Finally, data privacy and security concerns are paramount in many on-device lear
 
 On-device learning must operate within the computational envelope of the target hardware platform, which ranges from low-power embedded microcontrollers to mobile-class processors found in smartphones and wearables. These systems differ substantially from the large-scale GPU or TPU infrastructure used in cloud-based training. They impose strict limits on instruction throughput, parallelism, and architectural support for training-specific operations, all of which shape the design of feasible learning strategies.
 
-On the embedded end of the spectrum, devices such as the STM32F4 or ESP32 microcontrollers offer only a few hundred kilobytes of SRAM and lack hardware support for floating-point operations [@lai2020tinyml]. These constraints preclude the use of conventional deep learning libraries and require models to be carefully designed for integer arithmetic and minimal runtime memory allocation. In such cases, even small models require tailored techniques—such as quantization-aware training and selective parameter updates—to execute training loops without exceeding memory or power budgets. For example, the STM32F4 microcontroller can run a simple linear regression model with a few hundred parameters, but training even a small convolutional neural network would exceed its memory capacity. In these environments, training is often limited to simple algorithms such as stochastic gradient descent (SGD) or k-means clustering, which can be implemented using integer arithmetic and minimal memory overhead.
+On the embedded end of the spectrum, devices such as the STM32F4 or ESP32 microcontrollers offer only a few hundred kilobytes of SRAM and lack hardware support for floating-point operations [@lai2020tinyml]. These constraints preclude the use of conventional deep learning libraries and require models to be carefully designed for integer arithmetic and minimal runtime memory allocation. In such cases, even small models require tailored techniques—such as quantization-aware training and selective parameter updates—to execute training loops without exceeding memory or power budgets. For example, the STM32F4 microcontroller can run a simple linear regression model with a few hundred parameters, but training even a small convolutional neural network would exceed its memory capacity. In these environments, training is often limited to simple algorithms such as stochastic gradient descent (SGD) or $k$-means clustering, which can be implemented using integer arithmetic and minimal memory overhead.
 
 In contrast, mobile-class hardware—such as the Qualcomm Snapdragon, Apple Neural Engine, or Google Tensor SoC—provides significantly more compute power, often with dedicated AI accelerators and optimized support for 8-bit or mixed-precision matrix operations. These platforms can support more complex training routines, including full backpropagation over compact models, though they still fall short of the computational throughput and memory bandwidth available in centralized data centers. For instance, training a lightweight transformer on a smartphone is feasible but must be tightly bounded in both time and energy consumption to avoid degrading the user experience.
 
@@ -590,9 +590,11 @@ $$
 
 This drastically reduces the number of stored gradients and optimizer states, enabling training to proceed even under memory-constrained conditions. On embedded devices that lack floating-point units, this reduction can be critical to enabling on-device learning at all.
 
-The following code snippet demonstrates how to implement bias-only adaptation in PyTorch:
+The code snippet in @lst-bias-adaptation demonstrates how to implement bias-only adaptation in PyTorch.
 
-```python
+::: {.content-visible when-format="html"}
+::: {#lst-bias-adaptation .callout-important title="Bias-only adaptation in PyTorch"}
+```{.python}
 # Freeze all parameters
 for name, param in model.named_parameters():
     param.requires_grad = False
@@ -602,6 +604,24 @@ for name, param in model.named_parameters():
     if 'bias' in name:
         param.requires_grad = True
 ```
+:::
+:::
+
+::: {.content-visible when-format="pdf"}
+```{python}
+#| lst-label: lst-bias-adaptation
+#| lst-cap: Bias-only adaptation in PyTorch
+#| eval: false
+# Freeze all parameters
+for name, param in model.named_parameters():
+    param.requires_grad = False
+
+# Enable gradients for bias parameters only
+for name, param in model.named_parameters():
+    if 'bias' in name:
+        param.requires_grad = True
+```
+:::
 
 This pattern ensures that only bias terms participate in the backward pass and optimizer update. It is particularly useful when adapting pretrained models to user-specific or device-local data.
 
@@ -652,9 +672,11 @@ $$
 W_{\text{adapted}} = W_{\text{frozen}} + U V^\top
 $$
 
-This formulation is commonly used in LoRA (Low-Rank Adaptation) techniques, originally developed for transformer models [@hu2021lora] but broadly applicable across architectures. Low-rank updates can be implemented efficiently on edge devices, particularly when $U$ and $V$ are small and fixed-point representations are supported.
+This formulation is commonly used in LoRA (Low-Rank Adaptation) techniques, originally developed for transformer models [@hu2021lora] but broadly applicable across architectures. Low-rank updates can be implemented efficiently on edge devices, particularly when $U$ and $V$ are small and fixed-point representations are supported (@lst-lowrank-adapter).
 
-```python
+::: {.content-visible when-format="html"}
+::: {#lst-lowrank-adapter .callout-important title="Low-Rank Adapter Module"}
+```{.python}
 class Adapter(nn.Module):
     def __init__(self, dim, bottleneck_dim):
         super().__init__()
@@ -665,6 +687,25 @@ class Adapter(nn.Module):
     def forward(self, x):
         return x + self.up(self.activation(self.down(x)))
 ```
+:::
+:::
+
+::: {.content-visible when-format="pdf"}
+```{python}
+#| lst-label: lst-lowrank-adapter
+#| lst-cap: Low-Rank Adapter Module
+#| eval: false
+class Adapter(nn.Module):
+    def __init__(self, dim, bottleneck_dim):
+        super().__init__()
+        self.down = nn.Linear(dim, bottleneck_dim)
+        self.up = nn.Linear(bottleneck_dim, dim)
+        self.activation = nn.ReLU()
+
+    def forward(self, x):
+        return x + self.up(self.activation(self.down(x)))
+```
+:::
 
 This adapter adds a small residual transformation to a frozen layer. When inserted into a larger model, only the adapter parameters are trained.
 
@@ -729,7 +770,9 @@ A concrete example is TinyTrain, a method designed to enable rapid adaptation on
 
 #### Code Fragment: Selective Layer Updating (PyTorch)
 
-```python
+::: {.content-visible when-format="html"}
+::: {#lst-selective-update .callout-important title="Selective layer updating in PyTorch"}
+```{.python}
 ## Assume model has named layers: ['conv1', 'conv2', 'fc']
 ## We selectively update only conv2 and fc
 
@@ -739,8 +782,26 @@ for name, param in model.named_parameters():
     else:
         param.requires_grad = False
 ```
+:::
+:::
 
-This pattern can be extended with profiling logic to select layers based on contribution scores or hardware profiles.
+::: {.content-visible when-format="pdf"}
+```{python}
+#| lst-label: lst-selective-update
+#| lst-cap: Selective layer updating in PyTorch
+#| eval: false
+## Assume model has named layers: ['conv1', 'conv2', 'fc']
+## We selectively update only conv2 and fc
+
+for name, param in model.named_parameters():
+    if 'conv2' in name or 'fc' in name:
+        param.requires_grad = True
+    else:
+        param.requires_grad = False
+```
+:::
+
+This pattern can be extended with profiling logic to select layers based on contribution scores or hardware profiles, as shown in @lst-selective-update.
 
 #### TinyTrain Personalization
 
@@ -824,13 +885,13 @@ $$
 $$
 where $\theta_t$ are the model parameters, $\eta$ is the learning rate, and $\mathcal{L}$ is the loss function. Over time, this replay mechanism allows the model to reinforce prior knowledge while incorporating new information.
 
-A practical on-device implementation might use a ring buffer[^fn-ring-buffer] to store a small set of compressed feature vectors rather than full input examples. The following pseudocode illustrates a minimal replay buffer designed for constrained environments:
+A practical on-device implementation might use a ring buffer[^fn-ring-buffer] to store a small set of compressed feature vectors rather than full input examples. The pseudocode as shown in @lst-replay-buffer illustrates a minimal replay buffer designed for constrained environments.
 
 [^fn-ring-buffer]: **Ring Buffer:** A circular buffer that efficiently manages data by overwriting old entries with new ones as space requires.
 
-
-```python
-
+::: {.content-visible when-format="html"}
+::: {#lst-replay-buffer .callout-important title="Minimal replay buffer implementation"}
+```{.python}
 # Replay Buffer Techniques
 class ReplayBuffer:
     def __init__(self, capacity):
@@ -851,6 +912,35 @@ class ReplayBuffer:
         min(k, len(self.buffer))
     )
 ```
+:::
+:::
+
+::: {.content-visible when-format="pdf"}
+```{python}
+#| lst-label: lst-replay-buffer
+#| lst-cap: Minimal replay buffer implementation
+#| eval: false
+# Replay Buffer Techniques
+class ReplayBuffer:
+    def __init__(self, capacity):
+        self.capacity = capacity
+        self.buffer = []
+        self.index = 0
+
+    def store(self, feature_vec, label):
+        if len(self.buffer) < self.capacity:
+            self.buffer.append((feature_vec, label))
+        else:
+            self.buffer[self.index] = (feature_vec, label)
+        self.index = (self.index + 1) % self.capacity
+
+    def sample(self, k):
+    return random.sample(
+        self.buffer,
+        min(k, len(self.buffer))
+    )
+```
+:::
 
 This implementation maintains a fixed-capacity cyclic buffer, storing compressed representations (e.g., last-layer embeddings) and associated labels. Such buffers are useful for replaying adaptation updates without violating memory or energy budgets.
 
