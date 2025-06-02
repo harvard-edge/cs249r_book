@@ -4,7 +4,7 @@ _Last Updated: Jun 02, 2025_
 
 ### 📅 Published on Jun 02, 2025
 
-14 files updated (6394 lines added, 2304 lines removed)
+14 files updated (6719 lines added, 2348 lines removed)
 
 <details open>
   <summary>**Major Updates**</summary>
@@ -16,7 +16,7 @@ _Last Updated: Jun 02, 2025_
 - **DNN Architectures**: <span style="color:green">+++++</span><span style="color:red"></span> (780 lines added, 90 lines removed)
 - **Data Engineering**: <span style="color:green">+++</span><span style="color:red">--</span> (1294 lines added, 665 lines removed)
 - **Efficient AI**: <span style="color:green">+++++</span><span style="color:red"></span> (205 lines added, 37 lines removed)
-- **ML Operations**: <span style="color:green">+++++</span><span style="color:red"></span> (376 lines added, 31 lines removed)
+- **ML Operations**: <span style="color:green">+++++</span><span style="color:red"></span> (701 lines added, 75 lines removed)
 - **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">--</span> (1243 lines added, 1146 lines removed)
 
 </details>
