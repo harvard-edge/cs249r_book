@@ -10,6 +10,7 @@ required_packages <- c(
   "ggplot2",    # Visualization package
   "ggrepel",    # Visualization package
   "knitr",      # Needed for Quarto rendering
+  "png",        # PNG support
   "rmarkdown",  # Markdown rendering in R
   "tidyverse",  # 
   "reshape2",   #
