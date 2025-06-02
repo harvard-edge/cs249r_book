@@ -243,22 +243,53 @@ Modern neural networks are built upon a small number of core computational patte
 
 Unlike traditional software applications, which often involve irregular control flow and diverse instruction types, neural networks exhibit highly structured, data-parallel computations applied across large arrays. This characteristic enables architectural simplifications and optimizations, where hardware is tailored to the consistent patterns in AI execution. These patterns emphasize parallelism, predictable data reuse, and fixed operation sequences—making them ideal candidates for specialized accelerator design. AI compute primitives distill these patterns into reusable architectural units that support high-throughput and energy-efficient execution.
 
-To illustrate this decomposition, consider a dense layer defined at the framework level:
+This decomposition is illustrated in @lst-dense_layer_def, which defines a dense layer at the framework level.
 
-```python
+::: {.content-visible when-format="html"}
+::: {#lst-dense_layer_def .callout-important title="Declarative creation of dense layer"}
+```{.python}
 dense = Dense(512)(input_tensor)
 ```
+:::
+:::
 
-This high-level call expands into mathematical operations:
+::: {.content-visible when-format="pdf"}
+```{python}
+#| lst-label: lst-dense_layer_def
+#| lst-cap: Declarative creation of dense layer
+#| eval: false
 
-```python
+dense = Dense(512)(input_tensor)
+```
+:::
+
+This high-level call expands into mathematical operations is shown in @lst-dense_expansion.
+
+::: {.content-visible when-format="html"}
+::: {#lst-dense_expansion .callout-important title="Breaking down layer computation into primitives"}
+```{.python}
 output = matmul(input_weights) + bias
 output = activation(output)
 ```
+:::
+:::
 
-At the processor level, the computation reduces to nested loops that multiply inputs and weights, sum the results, and apply a nonlinear function:
+::: {.content-visible when-format="pdf"}
+```{python}
+#| lst-label: lst-dense_expansion
+#| lst-cap: Breaking down layer computation into primitives
+#| eval: false
 
-```python
+output = matmul(input_weights) + bias
+output = activation(output)
+```
+:::
+
+At the processor level, the computation reduces to nested loops that multiply inputs and weights, sum the results, and apply a nonlinear function, as shown in @lst-loop_level_dense.
+
+::: {.content-visible when-format="html"}
+::: {#lst-loop_level_dense .callout-important title="Processor-level nested loop computation"}
+```{.python}
 for n in range(batch_size):
     for m in range(output_size):
         sum = bias[m]
@@ -266,6 +297,23 @@ for n in range(batch_size):
             sum += input[n,k] * weights[k,m]
         output[n,m] = activation(sum)
 ```
+:::
+:::
+
+::: {.content-visible when-format="pdf"}
+```{python}
+#| lst-label: lst-loop_level_dense
+#| lst-cap: Processor-level nested loop computation
+#| eval: false
+
+for n in range(batch_size):
+    for m in range(output_size):
+        sum = bias[m]
+        for k in range(input_size):
+            sum += input[n,k] * weights[k,m]
+        output[n,m] = activation(sum)
+```
+:::
 
 This transformation—from framework-level abstraction to processor-level implementation—reveals four essential computational characteristics. First, data-level parallelism enables simultaneous execution across inputs. Second, structured matrix operations define the computational workload and guide the need for dedicated datapaths. Third, predictable data movement patterns drive memory system design to minimize latency and maximize reuse. Fourth, frequent nonlinear transformations motivate hardware support for activation and normalization functions.
 
@@ -277,27 +325,58 @@ Vector operations provide the first level of hardware acceleration by processing
 
 #### Framework-Hardware Execution
 
-Machine learning frameworks hide hardware complexity through high-level abstractions. These abstractions decompose into progressively lower-level operations, revealing opportunities for hardware acceleration. Consider the execution flow of a linear layer:
+Machine learning frameworks hide hardware complexity through high-level abstractions. These abstractions decompose into progressively lower-level operations, revealing opportunities for hardware acceleration. One such abstraction is shown in @lst-linear_layer_highlevel, which illustrates the execution flow of a linear layer.
 
-```python
-# Framework Level: What ML developers write
+::: {.content-visible when-format="html"}
+::: {#lst-linear_layer_highlevel .callout-important title="Framework Level: What ML developers write"}
+```{.python}
+layer = nn.Linear(256, 512)  # 256 inputs to
+                             # 512 outputs
+output = layer(input_tensor) # Process a batch of inputs
+```
+:::
+:::
+
+::: {.content-visible when-format="pdf"}
+```{python}
+#| lst-label: lst-linear_layer_highlevel
+#| lst-cap: "Framework Level: What ML developers write"
+#| eval: false
+
 layer = nn.Linear(256, 512)  # Layer transforms 256 inputs to
                              # 512 outputs
 output = layer(input_tensor) # Process a batch of inputs
 ```
+:::
 
-This abstraction represents a fully connected layer that transforms input features through learned weights. The framework translates this high-level expression into mathematical operations:
+This abstraction represents a fully connected layer that transforms input features through learned weights. As shown in @lst-linear_math_internal the framework translates this high-level expression into mathematical operations.
 
-```python
-# Framework Internal: Mathematical operations
+::: {.content-visible when-format="html"}
+::: {#lst-linear_math_internal .callout-important title="Internal mathematical representation of a linear layer"}
+```{.python}
+
 Z = matmul(weights, input) + bias # Each output needs all inputs
 output = activation(Z)            # Transform each result
 ```
+:::
+:::
 
-These mathematical operations decompose into explicit computational steps during processor execution. Each output value requires a sequence of multiply-accumulate operations:
+::: {.content-visible when-format="pdf"}
+```{python}
+#| lst-label: lst-linear_math_internal
+#| lst-cap: Internal mathematical representation of a linear layer
+#| eval: false
 
-```python
-# Computational Level: Implementation
+Z = matmul(weights, input) + bias # Each output needs all inputs
+output = activation(Z)            # Transform each result
+```
+:::
+
+These mathematical operations decompose into explicit computational steps during processor execution. See @lst-loop_linear_layer for an illustration of these multiply-accumulate operations.
+
+::: {.content-visible when-format="html"}
+::: {#lst-loop_linear_layer .callout-important title="Loop-based execution of a linear layer"}
+```{.python}
 for batch in range(32):            # Process 32 samples at once
     for out_neuron in range(512):  # Compute each output neuron
         sum = 0.0
@@ -308,6 +387,26 @@ for batch in range(32):            # Process 32 samples at once
         output[batch, out_neuron] = activation(sum +
                                     bias[out_neuron])
 ```
+:::
+:::
+
+::: {.content-visible when-format="pdf"}
+```{python}
+#| lst-label: lst-loop_linear_layer
+#| lst-cap: Loop-based execution of a linear layer
+#| eval: false
+
+for batch in range(32):            # Process 32 samples at once
+    for out_neuron in range(512):  # Compute each output neuron
+        sum = 0.0
+        for in_feature in range(256): # Each output needs
+                                      # all inputs
+            sum += input[batch, in_feature] *
+                         weights[out_neuron, in_feature]
+        output[batch, out_neuron] = activation(sum +
+                                    bias[out_neuron])
+```
+:::
 
 #### Sequential Scalar Execution
 
@@ -317,22 +416,45 @@ Traditional scalar processors[^fn-scalar-procs] execute these operations sequent
 
 #### Parallel Vector Execution
 
-Vector processing units transform this execution pattern by operating on multiple data elements simultaneously. The following RISC-V assembly code demonstrates modern vector processing:
+Vector processing units transform this execution pattern by operating on multiple data elements simultaneously. As shown in @lst-riscv_vector_mac, the RISC-V assembly code demonstrates modern vector processing.
 
-```assembly
-# Vector hardware execution (RISC-V Vector Extension)
+::: {.content-visible when-format="html"}
+::: {#lst-riscv_vector_mac .callout-important title="RISC-V vectorized multiply-accumulate loop"}
+```{.assembly}
 vsetvli t0, a0, e32   # Process 8 elements at once
 loop_batch:
     loop_neuron:
         vxor.vv v0, v0, v0    # Clear 8 accumulators
         loop_feature:
-            vle32.v v1, (in_ptr)   # Load 8 inputs together
-            vle32.v v2, (wt_ptr)   # Load 8 weights together
-            vfmacc.vv v0, v1, v2   # 8 multiply-adds at once
+            vle32.v v1, (in_ptr)    # Load 8 inputs together
+            vle32.v v2, (wt_ptr)    # Load 8 weights together
+            vfmacc.vv v0, v1, v2    # 8 multiply-adds at once
             add in_ptr, in_ptr, 32  # Move to next 8 inputs
             add wt_ptr, wt_ptr, 32  # Move to next 8 weights
             bnez feature_cnt, loop_feature
 ```
+:::
+:::
+
+::: {.content-visible when-format="pdf"}
+```{assembly}
+#| lst-label: lst-riscv_vector_mac
+#| lst-cap: RISC-V vectorized multiply-accumulate loop
+#| eval: false
+
+vsetvli t0, a0, e32   # Process 8 elements at once
+loop_batch:
+    loop_neuron:
+        vxor.vv v0, v0, v0    # Clear 8 accumulators
+        loop_feature:
+            vle32.v v1, (in_ptr)    # Load 8 inputs together
+            vle32.v v2, (wt_ptr)    # Load 8 weights together
+            vfmacc.vv v0, v1, v2    # 8 multiply-adds at once
+            add in_ptr, in_ptr, 32  # Move to next 8 inputs
+            add wt_ptr, wt_ptr, 32  # Move to next 8 weights
+            bnez feature_cnt, loop_feature
+```
+:::
 
 This vector implementation processes eight data elements in parallel, reducing both computation time and energy consumption. Vector load instructions transfer eight values simultaneously, maximizing memory bandwidth utilization. The vector multiply-accumulate instruction processes eight pairs of values in parallel, dramatically reducing the total instruction count from over 4 million to approximately 500,000.
 
@@ -370,10 +492,11 @@ Matrix operations are the computational workhorse of neural networks, transformi
 
 #### Matrix Operations in NNs
 
-Neural network computations decompose into hierarchical matrix operations. Consider how a linear layer illustrates this hierarchy, processing multiple input features into output neurons across a batch of samples:
+Neural network computations decompose into hierarchical matrix operations. As shown in @lst-linear_matrix_hierarchy, a linear layer demonstrates this hierarchy by transforming input features into output neurons over a batch.
 
-```python
-# Framework Level: What ML developers write
+::: {.content-visible when-format="html"}
+::: {#lst-linear_matrix_hierarchy .callout-important title="Framework Level: What ML developers write"}
+```{.python}
 layer = nn.Linear(256, 512)  # Layer transforms 256 inputs to
                              # 512 outputs
 output = layer(input_batch)  # Process a batch of 32 samples
@@ -386,43 +509,90 @@ Z = Z + bias                 # Vector: adds bias to each
 output = relu(Z)             # Vector: applies activation to
                              # each element independently
 ```
+:::
+:::
+
+::: {.content-visible when-format="pdf"}
+```{python}
+#| lst-label: lst-linear_matrix_hierarchy
+#| lst-cap: "Framework Level: What ML developers write"
+#| eval: false
+
+layer = nn.Linear(256, 512)  # Layer transforms 256 inputs to
+                             # 512 outputs
+output = layer(input_batch)  # Process a batch of 32 samples
+# Framework Internal: Core operations
+Z = matmul(weights, input)   # Matrix: transforms [256 x 32]
+                             # input to [512 x 32] output
+Z = Z + bias # Vector: adds bias to each output independently
+output = relu(Z)             # Vector: applies activation to
+                             # each element independently
+```
+:::
 
 This computation demonstrates the inherent scale of matrix operations in neural networks. Each output neuron (512 total) must process all input features (256 total) for every sample in the batch (32 samples). The weight matrix alone contains $256 \times 512 = 131,072$ parameters that define these transformations, illustrating why efficient matrix multiplication becomes crucial for performance.
 
 #### Matrix Computation Types in NNs
 
-Matrix operations appear consistently across modern neural architectures. Consider these fundamental patterns:
+Matrix operations appear consistently across modern neural architectures, as illustrated in @lst-matrix_patterns.
 
-```python
-# Linear Layers - Direct matrix multiply
-hidden = matmul(weights, inputs)  # weights: [out_dim x in_dim],
-                                  # inputs: [in_dim x batch]
-                                  # Result combines all inputs
-                                  # for each output
+::: {.content-visible when-format="html"}
+::: {#lst-matrix_patterns .callout-important title="Linear Layers – Direct matrix multiply"}
+```{.python}
+hidden = matmul(weights, inputs)
+# weights: [out_dim x in_dim], inputs: [in_dim x batch]
+# Result combines all inputs for each output
 
 # Attention Mechanisms - Multiple matrix operations
-Q = matmul(Wq, inputs)       # Project inputs to query space
-                             # [query_dim x batch]
-K = matmul(Wk, inputs)       # Project inputs to key space
-                             #[key_dim x batch]
-attention = matmul(Q, K.T)   # Compare all queries with all
-                             # keys [query_dim x key_dim]
+Q = matmul(Wq, inputs)
+# Project inputs to query space [query_dim x batch]
+K = matmul(Wk, inputs)
+# Project inputs to key space[key_dim x batch]
+attention = matmul(Q, K.T)
+# Compare all queries with all keys [query_dim x key_dim]
 
 # Convolutions - Matrix multiply after reshaping
-patches = im2col(input)           # Convert [H x W x C] image
-                                  # to matrix of patches
-output = matmul(kernel, patches)  # Apply kernels to all
-                                  # patches simultaneously
+patches = im2col(input)
+# Convert [H x W x C] image to matrix of patches
+output = matmul(kernel, patches)
+# Apply kernels to all patches simultaneously
 ```
+:::
+:::
+
+::: {.content-visible when-format="pdf"}
+```{python}
+#| lst-label: lst-matrix_patterns
+#| lst-cap: Linear Layers – Direct matrix multiply
+#| eval: false
+
+hidden = matmul(weights, inputs)
+# weights: [out_dim x in_dim], inputs: [in_dim x batch]
+# Result combines all inputs for each output
+# Attention Mechanisms - Multiple matrix operations
+Q = matmul(Wq, inputs)
+# Project inputs to query space [query_dim x batch]
+K = matmul(Wk, inputs)
+# Project inputs to key space[key_dim x batch]
+attention = matmul(Q, K.T)
+# Compare all queries with all keys [query_dim x key_dim]
+# Convolutions - Matrix multiply after reshaping
+patches = im2col(input)
+# Convert [H x W x C] image to matrix of patches
+output = matmul(kernel, patches)
+# Apply kernels to all patches simultaneously
+```
+:::
 
 This pervasive pattern of matrix multiplication has direct implications for hardware design. The need for efficient matrix operations drives the development of specialized hardware architectures that can handle these computations at scale. The following sections explore how modern AI accelerators implement matrix operations, focusing on their architectural features and performance optimizations.
 
 #### Matrix Operations Hardware Acceleration
 
-The computational demands of matrix operations have driven specialized hardware optimizations. Modern processors implement dedicated matrix units that extend beyond vector processing capabilities. Consider the following example of matrix acceleration in hardware:
+The computational demands of matrix operations have driven specialized hardware optimizations. Modern processors implement dedicated matrix units that extend beyond vector processing capabilities. An example of such matrix acceleration is shown in @lst-matrix_unit.
 
-```assembly
-# Matrix processing unit operation for a block of the computation
+::: {.content-visible when-format="html"}
+::: {#lst-matrix_unit .callout-important title="Matrix unit operation for block-wise computation in hardware"}
+```{assembly}
 mload mr1, (weight_ptr)     # Load e.g., 16x16 block of
                             # weight matrix
 mload mr2, (input_ptr)      # Load corresponding input block
@@ -430,6 +600,23 @@ matmul.mm mr3, mr1, mr2     # Multiply and accumulate entire
                             # blocks at once
 mstore (output_ptr), mr3    # Store computed output block
 ```
+:::
+:::
+
+::: {.content-visible when-format="pdf"}
+```{assembly}
+#| lst-label: lst-matrix_unit
+#| lst-cap: Matrix unit operation for block-wise computation in hardware
+#| eval: false
+
+mload mr1, (weight_ptr)     # Load e.g., 16x16 block of
+                            # weight matrix
+mload mr2, (input_ptr)      # Load corresponding input block
+matmul.mm mr3, mr1, mr2     # Multiply and accumulate entire
+                            # blocks at once
+mstore (output_ptr), mr3    # Store computed output block
+```
+:::
 
 This matrix processing unit can handle $16\times16$ blocks of the linear layer computation described earlier, processing 256 multiply-accumulate operations simultaneously compared to the 8 operations possible with vector processing. These matrix operations complement vectorized computation by enabling structured many-to-many transformations. The interplay between matrix and vector operations shapes the efficiency of neural network execution.
 
@@ -461,10 +648,11 @@ While vector and matrix operations efficiently handle the linear transformations
 
 #### Non-Linear Functions
 
-Non-linear functions play a fundamental role in machine learning by enabling neural networks to model complex relationships [@Goodfellow2016]. Consider a typical neural network layer sequence:
+Non-linear functions play a fundamental role in machine learning by enabling neural networks to model complex relationships [@Goodfellow2016]. @lst-nonlinear_layer illustrates a typical neural network layer sequence.
 
-```python
-# Framework Level Operation
+::: {.content-visible when-format="html"}
+::: {#lst-nonlinear_layer .callout-important title="Typical layer sequence with non-linear operations"}
+```{.python}
 layer = nn.Sequential(
     nn.Linear(256, 512),
     nn.ReLU(),
@@ -472,11 +660,29 @@ layer = nn.Sequential(
 )
 output = layer(input_tensor)
 ```
+:::
+:::
 
-This sequence introduces multiple non-linear transformations. The framework decomposes it into mathematical operations:
+::: {.content-visible when-format="pdf"}
+```{python}
+#| lst-label: lst-nonlinear_layer
+#| lst-cap: Typical layer sequence with non-linear operations
+#| eval: false
 
-```python
-# Mathematical Operations
+layer = nn.Sequential(
+    nn.Linear(256, 512),
+    nn.ReLU(),
+    nn.BatchNorm1d(512)
+)
+output = layer(input_tensor)
+```
+:::
+
+This sequence introduces multiple non-linear transformations. As shown in @lst-nonlinear_math, the framework decomposes it into mathematical operations.
+
+::: {.content-visible when-format="html"}
+::: {#lst-nonlinear_math .callout-important title="Mathematical operations from non-linear layer sequence"}
+```{.python}
 Z = matmul(weights, input) + bias    # Linear transformation
 H = max(0, Z)                        # ReLU activation
 mean = reduce_mean(H, axis=0)        # BatchNorm statistics
@@ -484,25 +690,43 @@ var = reduce_mean((H - mean)**2)     # Variance computation
 output = gamma * (H - mean)/sqrt(var + eps) + beta
                                      # Normalization
 ```
+:::
+:::
+
+::: {.content-visible when-format="pdf"}
+```{python}
+#| lst-label: lst-nonlinear_math
+#| lst-cap: Mathematical operations from non-linear layer sequence
+#| eval: false
+
+Z = matmul(weights, input) + bias    # Linear transformation
+H = max(0, Z)                        # ReLU activation
+mean = reduce_mean(H, axis=0)        # BatchNorm statistics
+var = reduce_mean((H - mean)**2)     # Variance computation
+output = gamma * (H - mean)/sqrt(var + eps) + beta
+                                     # Normalization
+```
+:::
 
 #### Non-Linear Functions Implementation
 
-On traditional processors, these seemingly simple mathematical operations translate into complex sequences of instructions. Consider the computation of batch normalization: calculating the square root requires multiple iterations of numerical approximation, while exponential functions in operations like softmax need series expansion or lookup tables [@Ioffe2015]. Even a simple ReLU activation requires conditional branching, which can disrupt instruction pipelining:
+On traditional processors, these seemingly simple mathematical operations translate into complex sequences of instructions. Consider the computation of batch normalization: calculating the square root requires multiple iterations of numerical approximation, while exponential functions in operations like softmax need series expansion or lookup tables [@Ioffe2015]. Even a simple ReLU activation introduces branching logic that can disrupt instruction pipelining—see @lst-traditional_overhead for an example.
 
-```python
-# Traditional Implementation Overhead
+::: {.content-visible when-format="html"}
+::: {#lst-traditional_overhead .callout-important title="Traditional implementation overhead for ReLU and BatchNorm"}
+```{.python}
 for batch in range(32):
     for feature in range(512):
-        # ReLU: Requires branch prediction and potential
-        # pipeline stalls
-        z = matmul_output[batch, feature]
-        h = max(0.0, z)    # Conditional operation
+       # ReLU: Requires branch prediction and potential
+       # pipeline stalls
+       z = matmul_output[batch, feature]
+       h = max(0.0, z)    # Conditional operation
 
-        # BatchNorm: Multiple passes over data
-        mean_sum[feature] += h     # First pass for mean
-        var_sum[feature] += h * h  # Additional pass for variance
+       # BatchNorm: Multiple passes over data
+       mean_sum[feature] += h    # First pass for mean
+       var_sum[feature] += h * h # Additional pass for variance
 
-        temp[batch, feature] = h   # Extra memory storage needed
+       temp[batch, feature] = h  # Extra memory storage needed
 
 # Normalization requires complex arithmetic
 for feature in range(512):
@@ -519,6 +743,41 @@ for feature in range(512):
         output[batch, feature] = temp[batch, feature] *
                                  scale + shift
 ```
+:::
+:::
+
+::: {.content-visible when-format="pdf"}
+```{python}
+#| lst-label: lst-traditional_overhead
+#| lst-cap: Traditional implementation overhead for ReLU and BatchNorm
+#| eval: false
+
+for batch in range(32):
+    for feature in range(512):
+       # ReLU: Requires branch prediction and potential
+       # pipeline stalls
+       z = matmul_output[batch, feature]
+       h = max(0.0, z)    # Conditional operation
+
+       # BatchNorm: Multiple passes over data
+       mean_sum[feature] += h    # First pass for mean
+       var_sum[feature] += h * h # Additional pass for variance
+       temp[batch, feature] = h  # Extra memory storage needed
+
+# Normalization requires complex arithmetic
+for feature in range(512):
+    mean = mean_sum[feature] / batch_size
+    var = (var_sum[feature] / batch_size) - mean * mean
+    # Square root computation: Multiple iterations
+    scale = gamma[feature] / sqrt(var + eps)
+    # Iterative approximation
+    shift = beta[feature] - mean * scale
+    # Additional pass over data for final computation
+    for batch in range(32):
+        output[batch, feature] = temp[batch, feature] *
+                                 scale + shift
+```
+:::
 
 These operations introduce several key inefficiencies:
 
@@ -532,16 +791,33 @@ More specifically, each operation introduces distinct challenges. Batch normaliz
 
 #### Hardware Acceleration
 
-SFUs address these inefficiencies through dedicated hardware implementation. Modern ML accelerators include specialized circuits that transform these complex operations into single-cycle or fixed-latency computations. The accelerator can load a vector of values and apply non-linear functions directly, eliminating the need for multiple passes and complex instruction sequences:
+SFUs address these inefficiencies through dedicated hardware implementation. Modern ML accelerators include specialized circuits that transform these complex operations into single-cycle or fixed-latency computations. The accelerator can load a vector of values and apply non-linear functions directly, eliminating the need for multiple passes and complex instruction sequences as shown in @lst-sfu_vector_ops.
 
-```assembly
-# Example hardware execution with Special Function Units
-vld.v v1, (input_ptr)      # Load vector of values
-vrelu.v v2, v1             # Single-cycle ReLU on entire vector
-vsigm.v v3, v1             # Fixed-latency sigmoid computation
-vtanh.v v4, v1             # Direct hardware tanh implementation
-vrsqrt.v v5, v1            # Fast reciprocal square root
+::: {.content-visible when-format="html"}
+::: {#lst-sfu_vector_ops .callout-important title="Hardware-accelerated non-linear vector operations"}
+```{.assembly}
+vld.v v1, (input_ptr)    # Load vector of values
+vrelu.v v2, v1           # Single-cycle ReLU on entire vector
+vsigm.v v3, v1           # Fixed-latency sigmoid computation
+vtanh.v v4, v1           # Direct hardware tanh implementation
+vrsqrt.v v5, v1          # Fast reciprocal square root
 ```
+:::
+:::
+
+::: {.content-visible when-format="pdf"}
+```{assembly}
+#| lst-label: lst-sfu_vector_ops
+#| lst-cap: Hardware-accelerated non-linear vector operations
+#| eval: false
+
+vld.v v1, (input_ptr)    # Load vector of values
+vrelu.v v2, v1           # Single-cycle ReLU on entire vector
+vsigm.v v3, v1           # Fixed-latency sigmoid computation
+vtanh.v v4, v1           # Direct hardware tanh implementation
+vrsqrt.v v5, v1          # Fast reciprocal square root
+```
+:::
 
 Each SFU implements a specific function through specialized circuitry. For instance, a ReLU unit performs the comparison and selection in dedicated logic, eliminating branching overhead. Square root operations use hardware implementations of algorithms like Newton-Raphson with fixed iteration counts, providing guaranteed latency. Exponential and logarithmic functions often combine small lookup tables with hardware interpolation circuits [@Lauterbach2019]. Using these custom instructions, the SFU implementation eliminates multiple passes over data, removes complex arithmetic sequences, and maintains high computational efficiency. @tbl-sfu shows the various hardware implementations and their typical latencies.
 
@@ -583,23 +859,42 @@ Each execution unit combines these computational primitives with specialized mem
 
 #### SIMD to SIMT Transition
 
-Single Instruction Multiple Data (SIMD) execution applies identical operations to multiple data elements in parallel, minimizing instruction overhead while maximizing data throughput. This execution model is widely used to accelerate workloads with regular, independent data parallelism, such as neural network computations. The ARM Scalable Vector Extension (SVE) provides a representative example of how modern architectures implement SIMD operations efficiently:
+Single Instruction Multiple Data (SIMD) execution applies identical operations to multiple data elements in parallel, minimizing instruction overhead while maximizing data throughput. This execution model is widely used to accelerate workloads with regular, independent data parallelism, such as neural network computations. The ARM Scalable Vector Extension (SVE) provides a representative example of how modern architectures implement SIMD operations efficiently, as illustrated in @lst-arm_sve_vector.
 
-```assembly
-# Vector operation implementation using ARM SVE
+::: {.content-visible when-format="html"}
+::: {#lst-arm_sve_vector .callout-important title="Vector operation implementation using ARM SVE"}
+```{.assembly}
 ptrue p0.s              # Create predicate for vector length
 ld1w z0.s, p0/z, [x0]   # Load vector of inputs
 fmul z1.s, z0.s, z0.s   # Multiply elements
 fadd z2.s, z1.s, z0.s   # Add elements
 st1w z2.s, p0, [x1]     # Store results
 ```
+:::
+:::
+
+::: {.content-visible when-format="pdf"}
+```{assembly}
+#| lst-label: lst-arm_sve_vector
+#| lst-cap: Vector operation implementation using ARM SVE
+#| eval: false
+
+ptrue p0.s              # Create predicate for vector length
+ld1w z0.s, p0/z, [x0]   # Load vector of inputs
+fmul z1.s, z0.s, z0.s   # Multiply elements
+fadd z2.s, z1.s, z0.s   # Add elements
+st1w z2.s, p0, [x1]     # Store results
+```
+:::
 
 Processor architectures continue to expand SIMD capabilities to accommodate increasing computational demands. Intel's Advanced Matrix Extensions (AMX) and ARM's SVE2 architecture provide flexible SIMD execution, enabling software to scale across different hardware implementations [@stephens2017arm].
 
-To address these limitations, SIMT extends SIMD principles by enabling parallel execution across multiple independent threads, each maintaining its own program counter and architectural state [@lindholm2008nvidia]. This model maps naturally to matrix computations, where each thread processes different portions of a workload while still benefiting from shared instruction execution. In NVIDIA's GPU architectures, each Streaming Multiprocessor (SM) coordinates thousands of threads executing in parallel, allowing for efficient scaling of neural network computations:
+To address these limitations, SIMT extends SIMD principles by enabling parallel execution across multiple independent threads, each maintaining its own program counter and architectural state [@lindholm2008nvidia]. This model maps naturally to matrix computations, where each thread processes different portions of a workload while still benefiting from shared instruction execution. In NVIDIA's GPU architectures, each Streaming Multiprocessor (SM) coordinates thousands of threads executing in parallel, allowing for efficient scaling of neural network computations, as demonstrated in @lst-cuda_simt.
 
-```c
-// CUDA kernel demonstrating SIMT execution
+::: {.content-visible when-format="html"}
+::: {#lst-cuda_simt .callout-important title="CUDA kernel for SIMT execution"}
+```{.c}
+#| eval: false
 __global__ void matrix_multiply(float* C, float* A, float*
                                 B, int N) {
     // Each thread processes one output element
@@ -614,6 +909,30 @@ __global__ void matrix_multiply(float* C, float* A, float*
     C[row * N + col] = sum;
 }
 ```
+:::
+:::
+
+::: {.content-visible when-format="pdf"}
+```{c}
+#| lst-label: lst-cuda_simt
+#| lst-cap: CUDA kernel for SIMT execution
+#| eval: false
+
+__global__ void matrix_multiply(float* C, float* A, float*
+                                B, int N) {
+    // Each thread processes one output element
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+    float sum = 0.0f;
+    for (int k = 0; k < N; k++) {
+        // Threads in a warp execute in parallel
+        sum += A[row * N + k] * B[k * N + col];
+    }
+    C[row * N + col] = sum;
+}
+```
+:::
 
 SIMT execution allows neural network computations to scale efficiently across thousands of threads while maintaining flexibility for divergent execution paths. Similar execution models appear in AMD's RDNA and Intel's Xe architectures, reinforcing SIMT as a fundamental mechanism for AI acceleration.
 
@@ -621,9 +940,12 @@ SIMT execution allows neural network computations to scale efficiently across th
 
 While SIMD and SIMT units provide efficient execution of vector operations, neural networks rely heavily on matrix computations that require specialized execution units for structured multi-dimensional processing. Tensor processing units extend SIMD and SIMT principles by enabling efficient matrix operations through dedicated hardware blocks. These units execute matrix multiplications and accumulations on entire matrix blocks in a single operation, reducing instruction overhead and optimizing data movement.
 
-Tensor cores, implemented in architectures such as NVIDIA's Ampere GPUs, provide an example of this approach. They expose matrix computation capabilities through specialized instructions, such as the following tensor core operation in the NVIDIA A100 GPU:
+Tensor cores, implemented in architectures such as NVIDIA's Ampere GPUs, provide an example of this approach. They expose matrix computation capabilities through specialized instructions, such as the tensor core operation shown in @lst-tensor_core_op on the NVIDIA A100 GPU.
 
-```text
+::: {.content-visible when-format="html"}
+::: {#lst-tensor_core_op .callout-important title="Tensor Core operation on NVIDIA A100 GPU"}
+```{text}
+
 Tensor Core Operation (NVIDIA A100):
 mma.sync.aligned.m16n16k16.f16.f16
   {d0,d1,d2,d3},     // Destination registers
@@ -631,6 +953,24 @@ mma.sync.aligned.m16n16k16.f16.f16
   {b0,b1,b2,b3},     // Source matrix B
   {c0,c1,c2,c3}      // Accumulator
 ```
+:::
+:::
+
+::: {.content-visible when-format="pdf"}
+```{text}
+#| lst-label: lst-tensor_core_op
+#| lst-cap: Tensor Core operation on NVIDIA A100 GPU
+#| eval: false
+
+Tensor Core Operation (NVIDIA A100):
+mma.sync.aligned.m16n16k16.f16.f16
+  {d0,d1,d2,d3},     // Destination registers
+  {a0,a1,a2,a3},     // Source matrix A
+  {b0,b1,b2,b3},     // Source matrix B
+  {c0,c1,c2,c3}      // Accumulator
+```
+:::
+
 
 A single tensor core instruction processes an entire matrix block while maintaining intermediate results in local registers, significantly improving computational efficiency compared to implementations based on scalar or vector operations. This structured approach enables hardware to achieve high throughput while reducing the burden of explicit loop unrolling and data management at the software level.
 
@@ -1559,9 +1899,11 @@ While computational mapping determines where and when operations occur, its succ
 
 Even when computational units are mapped efficiently, poor data movement strategies can severely degrade performance, leading to frequent memory stalls and underutilized hardware resources. If data cannot be supplied to processing elements at the required rate, computational units remain idle, increasing latency, memory traffic, and energy consumption [@chen2016eyeriss].
 
-To illustrate the impact of data movement inefficiencies, consider a typical matrix multiplication operation, which forms the backbone of many machine learning models:
+To illustrate the impact of data movement inefficiencies, consider a typical matrix multiplication operation shown in @lst-matmul_data_movement, which forms the backbone of many machine learning models.
 
-```python
+::: {.content-visible when-format="html"}
+::: {#lst-matmul_data_movement .callout-important title="Matrix multiplication illustrating data movement bottlenecks"}
+```{.python}
 ## Matrix multiplication where:
 ## weights: [512 x 256] - model parameters
 ## input:   [256 x 32]  - batch of activations
@@ -1573,6 +1915,27 @@ for i in range(512):
         for k in range(256):
             Z[i,j] += weights[i,k] * input[k,j]
 ```
+:::
+:::
+
+::: {.content-visible when-format="pdf"}
+```{python}
+#| lst-label: lst-matmul_data_movement
+#| lst-cap: Matrix multiplication illustrating data movement bottlenecks
+#| eval: false
+
+## Matrix multiplication where:
+## weights: [512 x 256] - model parameters
+## input:   [256 x 32]  - batch of activations
+## Z:       [512 x 32]  - output activations
+
+## Computing each output element Z[i,j]:
+for i in range(512):
+    for j in range(32):
+        for k in range(256):
+            Z[i,j] += weights[i,k] * input[k,j]
+```
+:::
 
 This computation reveals several critical dataflow challenges.
 
@@ -1592,9 +1955,11 @@ The Weight Stationary strategy keeps weights fixed in local memory, while input 
 
 A key advantage of the weight stationary approach is that it maximizes weight reuse, reducing the frequency of memory accesses to external storage. Since weight parameters are often shared across multiple computations, keeping them in local memory eliminates unnecessary data movement, lowering the overall energy cost of computation. This makes it particularly effective for architectures where weights represent the dominant memory overhead, such as systolic arrays and custom accelerators designed for machine learning.
 
-A simplified Weight Stationary implementation for matrix multiplication is illustrated below:
+A simplified Weight Stationary implementation for matrix multiplication is illustrated in @lst-weight_stationary.
 
-```python
+::: {.content-visible when-format="html"}
+::: {#lst-weight_stationary .callout-important title="Weight Stationary implementation for matrix multiplication"}
+```{.python}
 ## Weight Stationary Matrix Multiplication
 ## - Weights remain fixed in local memory
 ## - Input activations stream through
@@ -1607,6 +1972,28 @@ for weight_block in weights:  # Load and keep weights stationary
             output_block += compute(weight_block, input_block)
             # Reuse weights across inputs
 ```
+:::
+:::
+
+::: {.content-visible when-format="pdf"}
+```{python}
+#| lst-label: lst-weight_stationary
+#| lst-cap: Weight Stationary implementation for matrix multiplication
+#| eval: false
+
+## Weight Stationary Matrix Multiplication
+## - Weights remain fixed in local memory
+## - Input activations stream through
+## - Partial sums accumulate for final output
+
+for weight_block in weights: # Load and keep weights stationary
+    load_to_local(weight_block)  # Fixed in local storage
+    for input_block in inputs:   # Stream inputs dynamically
+        for output_block in outputs:  # Compute results
+            output_block += compute(weight_block, input_block)
+            # Reuse weights across inputs
+```
+:::
 
 In weight stationary execution, weights are loaded once into local memory and remain fixed throughout the computation, while inputs are streamed dynamically, thereby reducing redundant memory accesses. At the same time, partial sums are accumulated in an efficient manner that minimizes unnecessary data movement, ensuring that the system maintains high throughput and energy efficiency.
 
@@ -1622,21 +2009,42 @@ The Output Stationary strategy keeps partial sums fixed in local memory, while w
 
 A key advantage of the output stationary approach is that it optimizes accumulation efficiency, ensuring that each output element is computed as efficiently as possible before being written to memory. Unlike Weight Stationary, which prioritizes weight reuse, Output Stationary execution is designed to minimize memory bandwidth overhead caused by frequent writes of intermediate results. This makes it well-suited for workloads where accumulation dominates the computational pattern, such as fully connected layers and matrix multiplications in transformer-based models.
 
-A simplified Output Stationary implementation for matrix multiplication is illustrated below:
+@lst-output_stationary shows a simplified Output Stationary implementation for matrix multiplication.
 
-```python
-## Output Stationary Matrix Multiplication
+::: {.content-visible when-format="html"}
+::: {#lst-output_stationary .callout-important title="Output Stationary implementation for matrix multiplication"}
+```{.python}
 ## - Partial sums remain in local memory
 ## - Weights and input activations stream through dynamically
 ## - Final outputs are written only once
 
-for output_block in outputs:   # Keep partial sums stationary
-    accumulator = 0             # Initialize accumulation buffer
+for output_block in outputs:  # Keep partial sums stationary
+    accumulator = 0           # Initialize accumulation buffer
     for weight_block, input_block in zip(weights, inputs):
         accumulator += compute(weight_block, input_block)
         # Accumulate partial sums
     store_output(accumulator)  # Single write to memory
 ```
+:::
+:::
+
+::: {.content-visible when-format="pdf"}
+```{python}
+#| lst-label: lst-output_stationary
+#| lst-cap: Output Stationary implementation for matrix multiplication
+#| eval: false
+## - Partial sums remain in local memory
+## - Weights and input activations stream through dynamically
+## - Final outputs are written only once
+
+for output_block in outputs:  # Keep partial sums stationary
+    accumulator = 0           # Initialize accumulation buffer
+    for weight_block, input_block in zip(weights, inputs):
+        accumulator += compute(weight_block, input_block)
+        # Accumulate partial sums
+    store_output(accumulator)  # Single write to memory
+```
+:::
 
 This implementation follows the core principles of output stationary execution:
 - Partial sums are kept in local memory throughout the computation.
@@ -1655,10 +2063,11 @@ The Input Stationary strategy keeps input activations fixed in local memory, whi
 
 A key advantage of the Input Stationary approach is that it maximizes input reuse, reducing the frequency of memory accesses for activations. Since many models, especially those in natural language processing (NLP) and recommendation systems, process the same input data across multiple computations, keeping inputs stationary eliminates unnecessary memory transfers, thereby lowering energy consumption. This strategy is particularly useful when dealing with large batch sizes, where a single batch of input activations contributes to multiple weight transformations.
 
-A simplified Input Stationary implementation for matrix multiplication is illustrated below:
+A simplified Input Stationary implementation for matrix multiplication is illustrated in @lst-input_stationary.
 
-```python
-## Input Stationary Matrix Multiplication
+::: {.content-visible when-format="html"}
+::: {#lst-input_stationary .callout-important title="Input Stationary implementation for matrix multiplication"}
+```{.python}
 ## - Input activations remain in local memory
 ## - Weights stream through dynamically
 ## - Partial sums accumulate and are written out
@@ -1670,6 +2079,27 @@ for input_block in inputs:   # Keep input activations stationary
             output_block += compute(weight_block, input_block)
             # Reuse inputs across weights
 ```
+:::
+:::
+
+::: {.content-visible when-format="pdf"}
+```{python}
+#| lst-label: lst-input_stationary
+#| lst-cap: Input Stationary implementation for matrix multiplication
+#| eval: false
+
+## - Input activations remain in local memory
+## - Weights stream through dynamically
+## - Partial sums accumulate and are written out
+
+for input_block in inputs:   # Keep input activations stationary
+    load_to_local(input_block)  # Fixed in local storage
+    for weight_block in weights:   # Stream weights dynamically
+        for output_block in outputs:  # Compute results
+            output_block += compute(weight_block, input_block)
+            # Reuse inputs across weights
+```
+:::
 
 This implementation follows the core principles of input stationary execution:
 
@@ -1765,19 +2195,43 @@ Optimizing memory access is a fundamental challenge in AI acceleration. While AI
 
 To better understand why kernel fusion is necessary, consider a simple sequence of operations in a machine learning model. Many AI workloads, particularly those involving element-wise transformations, introduce unnecessary intermediate memory writes, leading to increased memory bandwidth consumption and reduced execution efficiency [@nvidia2017gpu].
 
-In a naïve execution model, each operation is treated as a separate kernel, meaning that each intermediate result is written to memory, only to be read back for the next operation. The execution flow looks like this:
+@lst-naive_execution illustrates a naïve execution model in which each operation is treated as a separate kernel, meaning that each intermediate result is written to memory and then read back for the next operation.
 
-```python
+::: {.content-visible when-format="html"}
+::: {#lst-naive_execution .callout-important title="Naïve kernel-by-kernel execution"}
+```{.python}
 import torch
 
 ## Input tensor
 X = torch.randn(1024, 1024).cuda()
 
 ## Step-by-step execution (naïve approach)
-X1 = torch.relu(X)         # Intermediate tensor stored in memory
+X1 = torch.relu(X)         # Intermediate tensor stored
+                           # in memory
 X2 = torch.batch_norm(X1)  # Another intermediate tensor stored
 Y  = 2.0 * X2 + 1.0        # Final result
 ```
+:::
+:::
+
+::: {.content-visible when-format="pdf"}
+```{python}
+#| lst-label: lst-naive_execution
+#| lst-cap: Naïve kernel-by-kernel execution
+#| eval: false
+
+import torch
+
+## Input tensor
+X = torch.randn(1024, 1024).cuda()
+
+## Step-by-step execution (naïve approach)
+X1 = torch.relu(X)         # Intermediate tensor stored
+                           # in memory
+X2 = torch.batch_norm(X1)  # Another intermediate tensor stored
+Y  = 2.0 * X2 + 1.0        # Final result
+```
+:::
 
 Each operation produces an intermediate tensor that must be written to memory and retrieved for the next operation. On large tensors, this overhead of moving data can outweigh the computational cost of the operations [@shazeer2018mesh]. @tbl-memory-footprint illustrates the memory overhead in a naïve execution model. While only the final result $Y$ is needed, storing multiple intermediate tensors creates unnecessary memory traffic and inefficient memory usage. This data movement bottleneck significantly impacts performance, making memory optimization crucial for AI accelerators.
 
@@ -1849,16 +2303,33 @@ While modern AI accelerators offer high computational throughput, their performa
 
 Tiling is a technique used to mitigate this issue by restructuring computations into smaller, memory-friendly subproblems. Instead of processing entire matrices or tensors at once—leading to excessive memory traffic—tiling partitions computations into smaller blocks (tiles) that fit within fast local memory (e.g., caches, shared memory, or registers) [@lam1991cache]. By doing so, tiling increases data reuse, minimizes memory fetches, and improves overall computational efficiency.
 
-A classic example of inefficient memory access is matrix multiplication, which is widely used in AI models. Without tiling, the naïve approach results in repeated memory accesses for the same data, leading to unnecessary bandwidth consumption:
+A classic example of inefficient memory access is matrix multiplication, which is widely used in AI models. Without tiling, the naïve approach results in repeated memory accesses for the same data, leading to unnecessary bandwidth consumption (@lst-naive_matmul).
 
-```python
-## Naïve Matrix Multiplication (No Tiling)
+::: {.content-visible when-format="html"}
+::: {#lst-naive_matmul .callout-important title="Naïve matrix multiplication without tiling"}
+```{.python}
 for i in range(N):
     for j in range(N):
         for k in range(N):
             C[i, j] += A[i, k] * B[k, j]  # Repeatedly fetching
                                           # A[i, k] and B[k, j]
 ```
+:::
+:::
+
+::: {.content-visible when-format="pdf"}
+```{python}
+#| lst-label: lst-naive_matmul
+#| lst-cap: Naïve matrix multiplication without tiling
+#| eval: false
+
+for i in range(N):
+    for j in range(N):
+        for k in range(N):
+            C[i, j] += A[i, k] * B[k, j]  # Repeatedly fetching
+                                          # A[i, k] and B[k, j]
+```
+:::
 
 Each iteration requires loading elements from matrices $A$ and $B$ multiple times from memory, causing excessive data movement. As the size of the matrices increases, the memory bottleneck worsens, limiting performance.
 
@@ -1879,16 +2350,33 @@ $$
 C[i,j] = \sum_{k} A[i,k] \times B[k,j]
 $$
 
-A naïve implementation follows this formula directly:
+A naïve implementation follows this formula directly (@lst-naive_matmul_repeat).
 
-```python
-## Naïve Matrix Multiplication (No Tiling)
+::: {.content-visible when-format="html"}
+::: {#lst-naive_matmul_repeat .callout-important title="Naïve matrix multiplication"}
+```{.python}
 for i in range(N):
     for j in range(N):
         for k in range(N):
             C[i, j] += A[i, k] * B[k, j]  # Repeatedly fetching
                                           # A[i, k] and B[k, j]
 ```
+:::
+:::
+
+::: {.content-visible when-format="pdf"}
+```{python}
+#| lst-label: lst-naive_matmul_repeat
+#| lst-cap: Naïve matrix multiplication
+#| eval: false
+
+for i in range(N):
+    for j in range(N):
+        for k in range(N):
+            C[i, j] += A[i, k] * B[k, j]  # Repeatedly fetching
+                                          # A[i, k] and B[k, j]
+```
+:::
 
 At first glance, this approach seems correct—it computes the desired result and follows the mathematical definition. However, the issue lies in how memory is accessed. Every time the innermost loop runs, it fetches an element from matrix $A$ and matrix $B$ from memory, performs a multiplication, and updates an element in matrix $C$. Because matrices are large, the processor frequently reloads the same values from memory, even though they were just used in previous computations.
 
@@ -1898,21 +2386,47 @@ This unnecessary data movement is expensive. Fetching values from main memory (D
 
 Instead of computing one element at a time and constantly moving data in and out of slow memory, tiling processes submatrices (tiles) at a time, keeping frequently used values in fast memory. The idea is to divide the matrices into smaller blocks that fit within the processor's cache or shared memory, ensuring that once a block is loaded, it is reused multiple times before moving to the next one.
 
-A tiled implementation of matrix multiplication looks like this:
+@lst-tiled_matmul illustrates a tiled version of matrix multiplication, which improves memory locality by processing blocks of data.
 
-```python
-## Tiled Matrix Multiplication
-TILE_SIZE = 32 # Choose a tile size based on hardware constraints
+::: {.content-visible when-format="html"}
+::: {#lst-tiled_matmul .callout-important title="Tiled matrix multiplication"}
+```{.python}
+TILE_SIZE = 32 # Choose a tile size based on
+               # hardware constraints
 
 for i in range(0, N, TILE_SIZE):
     for j in range(0, N, TILE_SIZE):
         for k in range(0, N, TILE_SIZE):
-          # Compute the submatrix C[i:i+TILE_SIZE, j:j+TILE_SIZE]
+          # Compute the submatrix
+          # C[i:i+TILE_SIZE, j:j+TILE_SIZE]
             for ii in range(i, i + TILE_SIZE):
                 for jj in range(j, j + TILE_SIZE):
                     for kk in range(k, k + TILE_SIZE):
                         C[ii, jj] += A[ii, kk] * B[kk, jj]
 ```
+:::
+:::
+
+::: {.content-visible when-format="pdf"}
+```{python}
+#| lst-label: lst-tiled_matmul
+#| lst-cap: Tiled matrix multiplication
+#| eval: false
+
+TILE_SIZE = 32 # Choose a tile size based on
+               # hardware constraints
+
+for i in range(0, N, TILE_SIZE):
+    for j in range(0, N, TILE_SIZE):
+        for k in range(0, N, TILE_SIZE):
+          # Compute the submatrix
+          # C[i:i+TILE_SIZE, j:j+TILE_SIZE]
+            for ii in range(i, i + TILE_SIZE):
+                for jj in range(j, j + TILE_SIZE):
+                    for kk in range(k, k + TILE_SIZE):
+                        C[ii, jj] += A[ii, kk] * B[kk, jj]
+```
+:::
 
 This restructuring significantly improves performance for three main reasons:
 
@@ -1932,11 +2446,13 @@ While the general principle of tiling remains the same—partitioning large comp
 
 Spatial tiling focuses on partitioning data structures into smaller blocks that fit within the fast memory of the processor. This approach ensures that each tile is fully processed before moving to the next, reducing redundant memory accesses. Spatial tiling is widely used in operations such as matrix multiplication, convolutions, and attention mechanisms in transformer models.
 
-Returning to our tiled matrix multiplication example, we can see spatial tiling in action:
+Spatial tiling is illustrated in @lst-tiled_spatial, where the computation proceeds over blocks of the input matrices.
 
-```python
-## Tiled Matrix Multiplication (Spatial Tiling)
-TILE_SIZE = 32  # Tile size chosen based on available fast memory
+::: {.content-visible when-format="html"}
+::: {#lst-tiled_spatial .callout-important title="Tiled matrix multiplication with spatial tiling"}
+```{.python}
+TILE_SIZE = 32  # Tile size chosen based on available
+                # fast memory
 
 for i in range(0, N, TILE_SIZE):
     for j in range(0, N, TILE_SIZE):
@@ -1947,6 +2463,28 @@ for i in range(0, N, TILE_SIZE):
                     for kk in range(k, k + TILE_SIZE):
                         C[ii, jj] += A[ii, kk] * B[kk, jj]
 ```
+:::
+:::
+
+::: {.content-visible when-format="pdf"}
+```{python}
+#| lst-label: lst-tiled_spatial
+#| lst-cap: Tiled matrix multiplication with spatial tiling
+#| eval: false
+
+TILE_SIZE = 32  # Tile size chosen based on available
+                # fast memory
+
+for i in range(0, N, TILE_SIZE):
+    for j in range(0, N, TILE_SIZE):
+        for k in range(0, N, TILE_SIZE):
+            # Process a submatrix (tile) at a time
+            for ii in range(i, i + TILE_SIZE):
+                for jj in range(j, j + TILE_SIZE):
+                    for kk in range(k, k + TILE_SIZE):
+                        C[ii, jj] += A[ii, kk] * B[kk, jj]
+```
+:::
 
 In this implementation, each tile of $A$ and $B$ is loaded into cache or shared memory before processing, ensuring that the same data does not need to be fetched repeatedly from slower memory. The tile is fully used before moving to the next block, minimizing redundant memory accesses. Since data is accessed in a structured, localized way, cache efficiency improves significantly.
 
@@ -1958,10 +2496,11 @@ While spatial tiling optimizes how data is partitioned, temporal tiling focuses 
 
 A classic example where temporal tiling is beneficial is convolutional operations, where the same set of weights is applied to multiple input regions. Without loop blocking, these weights might be loaded from memory multiple times for each computation. With temporal tiling, the computation is reordered so that the weights remain in fast memory across multiple inputs, reducing unnecessary memory fetches and improving overall efficiency.
 
-A simplified example of loop blocking in matrix multiplication is shown below:
+@lst-loop_blocking illustrates a simplified example of loop blocking in matrix multiplication.
 
-```python
-## Matrix Multiplication with Temporal Tiling (Loop Blocking)
+::: {.content-visible when-format="html"}
+::: {#lst-loop_blocking .callout-important title="Matrix Multiplication with Temporal Tiling (Loop Blocking)"}
+```{.python}
 for i in range(0, N, TILE_SIZE):
     for j in range(0, N, TILE_SIZE):
         for k in range(0, N, TILE_SIZE):
@@ -1975,6 +2514,29 @@ for i in range(0, N, TILE_SIZE):
                         C[i+ii, j+jj] += A_tile[ii, kk] *
                                          B_tile[kk, jj]
 ```
+:::
+:::
+
+::: {.content-visible when-format="pdf"}
+```{python}
+#| lst-label: lst-loop_blocking
+#| lst-cap: Matrix Multiplication with Temporal Tiling (Loop Blocking)
+#| eval: false
+
+for i in range(0, N, TILE_SIZE):
+    for j in range(0, N, TILE_SIZE):
+        for k in range(0, N, TILE_SIZE):
+            # Load tile into fast memory before computation
+            A_tile = A[i:i+TILE_SIZE, k:k+TILE_SIZE]
+            B_tile = B[k:k+TILE_SIZE, j:j+TILE_SIZE]
+
+            for ii in range(TILE_SIZE):
+                for jj in range(TILE_SIZE):
+                    for kk in range(TILE_SIZE):
+                        C[i+ii, j+jj] += A_tile[ii, kk] *
+                                         B_tile[kk, jj]
+```
+:::
 
 Temporal tiling improves performance by ensuring that the data loaded into fast memory is used multiple times before being evicted. In this implementation, small tiles of matrices $A$ and $B$ are explicitly loaded into temporary storage before performing computations, reducing memory fetch overhead. This restructuring allows the computation to process an entire tile before moving to the next, thereby reducing the number of times data must be loaded from slower memory.
 
@@ -2376,9 +2938,9 @@ Understanding these scaling strategies is essential for several reasons. First, 
 
 #### Chiplet-Based Architectures
 
-The first step in scaling AI accelerators is to move beyond a single monolithic chip while still maintaining a compact, tightly integrated design. Chiplet architectures achieve this by partitioning large designs into smaller, modular dies that are interconnected within a single package.
+The first step in scaling AI accelerators is to move beyond a single monolithic chip while still maintaining a compact, tightly integrated design. Chiplet architectures achieve this by partitioning large designs into smaller, modular dies that are interconnected within a single package, as illustrated in @fig-AMD_chiplet_based.
 
-![AMD's chiplet-based architecture.](images/png/chiplets.png)
+![AMD's chiplet-based architecture.](images/png/chiplets.png){#fig-AMD_chiplet_based}
 
 Modern AI accelerators, such as AMD's Instinct MI300, take this approach by integrating multiple compute chiplets alongside memory chiplets, linked by high-speed die-to-die interconnects [@Kannan2023chiplet]. This modular design allows manufacturers to bypass the manufacturing limits of monolithic chips while still achieving high-density compute.
 
@@ -2658,6 +3220,7 @@ However, achieving this level of integration introduces formidable engineering c
 #| fig-cap: Processor transistor count over time.
 #| fig-align: center
 #| echo: false
+#| warning: false
 
 library(ggplot2)
 library(ggrepel)  # Smart label positioning with lines
