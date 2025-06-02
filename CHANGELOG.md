@@ -4,7 +4,7 @@ _Last Updated: Jun 02, 2025_
 
 ### 📅 Published on Jun 02, 2025
 
-14 files updated (6720 lines added, 2350 lines removed)
+14 files updated (6819 lines added, 2359 lines removed)
 
 <details open>
   <summary>**Major Updates**</summary>
@@ -27,7 +27,7 @@ _Last Updated: Jun 02, 2025_
 - **AI Workflow**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 - **ML Systems**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
 - **Model Optimizations**: <span style="color:green">+++++</span><span style="color:red"></span> (143 lines added, 13 lines removed)
-- **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **On-Device Learning**: <span style="color:green">+++++</span><span style="color:red"></span> (101 lines added, 11 lines removed)
 - **Sustainable AI**: <span style="color:green"></span><span style="color:red">------</span> (0 lines added, 11 lines removed)
 
 </details>
