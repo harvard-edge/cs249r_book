@@ -4,25 +4,29 @@ _Last Updated: Jun 02, 2025_
 
 ### 📅 Published on Jun 02, 2025
 
-9 files updated (3134 lines added, 1923 lines removed)
+13 files updated (6377 lines added, 2272 lines removed)
 
 <details open>
   <summary>**Major Updates**</summary>
 
-- **AI Frameworks**: <span style="color:green">+++++</span><span style="color:red"></span> (862 lines added, 93 lines removed)
-- **DNN Architectures**: <span style="color:green">+++++</span><span style="color:red"></span> (315 lines added, 51 lines removed)
-- **Data Engineering**: <span style="color:green">++</span><span style="color:red">---</span> (616 lines added, 622 lines removed)
-- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">--</span> (1242 lines added, 1145 lines removed)
+- **AI Acceleration**: <span style="color:green">+++++</span><span style="color:red"></span> (747 lines added, 120 lines removed)
+- **AI Frameworks**: <span style="color:green">+++++</span><span style="color:red"></span> (1206 lines added, 118 lines removed)
+- **AI Training**: <span style="color:green">++++</span><span style="color:red">-</span> (173 lines added, 46 lines removed)
+- **DL Primer**: <span style="color:green">+++++</span><span style="color:red"></span> (210 lines added, 10 lines removed)
+- **DNN Architectures**: <span style="color:green">+++++</span><span style="color:red"></span> (773 lines added, 79 lines removed)
+- **Data Engineering**: <span style="color:green">+++</span><span style="color:red">--</span> (1294 lines added, 665 lines removed)
+- **Efficient AI**: <span style="color:green">+++++</span><span style="color:red"></span> (205 lines added, 37 lines removed)
+- **ML Operations**: <span style="color:green">+++++</span><span style="color:red"></span> (376 lines added, 31 lines removed)
+- **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">--</span> (1243 lines added, 1146 lines removed)
 
 </details>
 
 <details open>
   <summary>**Minor Updates**</summary>
 
-- **AI Acceleration**: <span style="color:green">+++</span><span style="color:red">---</span> (1 lines added, 1 lines removed)
-- **AI Training**: <span style="color:green">+++++</span><span style="color:red"></span> (33 lines added, 2 lines removed)
-- **ML Operations**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
-- **Model Optimizations**: <span style="color:green">+++++</span><span style="color:red"></span> (61 lines added, 5 lines removed)
+- **AI Workflow**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
+- **ML Systems**: <span style="color:green">+++</span><span style="color:red">---</span> (3 lines added, 3 lines removed)
+- **Model Optimizations**: <span style="color:green">+++++</span><span style="color:red"></span> (143 lines added, 13 lines removed)
 - **On-Device Learning**: <span style="color:green">+++</span><span style="color:red">---</span> (2 lines added, 2 lines removed)
 
 </details>
