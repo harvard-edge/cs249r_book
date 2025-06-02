@@ -518,7 +518,204 @@ Many modern ML systems employ a hybrid approach, combining both batch and stream
 
 ### ETL and ELT Comparison
 
-When designing data ingestion pipelines for ML systems, it's necessary to understand the differences between Extract, Transform, Load (ETL) and Extract, Load, Transform (ELT) approaches. These paradigms determine when data transformations occur relative to the loading phase, significantly impacting the flexibility and efficiency of your ML pipeline.
+When designing data ingestion pipelines for ML systems, it's necessary to understand the differences between Extract, Transform, Load (ETL) and Extract, Load, Transform (ELT) approaches, as illustrated in @fig-etl-vs-elt. These paradigms determine when data transformations occur relative to the loading phase, significantly impacting the flexibility and efficiency of your ML pipeline.
+
+::: {#fig-etl-vs-elt fig-env="figure" fig-pos="htb"}
+```{.tikz}
+\begin{tikzpicture}[line join=round,font=\small\usefont{T1}{phv}{m}{n}]
+\tikzset{
+ Line/.style={line width=0.75pt,black!50,text=black},
+ LineD/.style={line width=0.5pt,black!50,text=black,dashed},
+}
+
+\tikzset{
+channel/.pic={
+\pgfkeys{/channel/.cd, #1}
+\begin{scope}[yscale=\scalefac,xscale=\scalefac,every node/.append style={scale=\scalefac}]
+\node[rectangle,draw=\drawchannelcolor,line width=0.5pt,fill=\channelcolor!50,
+minimum width=50,minimum height=28.5](\picname){};
+\end{scope}
+        },
+cyl/.pic={
+\pgfkeys{/channel/.cd, #1}
+\begin{scope}[yscale=\scalefac,xscale=\scalefac,every node/.append style={scale=\scalefac}]
+\node[cylinder, draw=\drawchannelcolor,shape border rotate=90, aspect=1.99,inner ysep=0pt,
+    minimum height=20mm,minimum width=21mm, cylinder uses custom fill,
+ cylinder body fill=\channelcolor!10,cylinder end fill=\channelcolor!35](\picname){};
+\end{scope}
+        },
+tableicon/.pic={
+\pgfkeys{/channel/.cd, #1}
+    \begin{scope}[yscale=\scalefac,xscale=\scalefac,every node/.append style={scale=\scalefac}]
+      \draw[line width=0.5pt,fill=\channelcolor!20] (0,0)coordinate(DO\picname)
+      rectangle (2,1.5)coordinate(GO\picname);
+% Horizontal line
+      \foreach \y in {0.5,1} {
+        \draw (0,\y) -- (2,\y);
+      }
+      % Vertical line
+      \foreach \x in {0.5,1,1.5} {
+        \draw (\x,0) -- (\x,1.5);
+      }
+    \end{scope}
+  }
+}
+
+\pgfkeys{
+  /channel/.cd,
+  channelcolor/.store in=\channelcolor,
+  drawchannelcolor/.store in=\drawchannelcolor,
+  scalefac/.store in=\scalefac,
+  picname/.store in=\picname,
+  channelcolor=BrownLine,
+  drawchannelcolor=BrownLine,
+  scalefac=1,
+  picname=C
+}
+% #1 number of teeths
+% #2 radius intern
+% #3 radius extern
+% #4 angle from start to end of the first arc
+% #5 angle to decale the second arc from the first
+% #6 inner radius to cut off
+\newcommand{\gear}[6]{%
+  (0:#2)
+  \foreach \i [evaluate=\i as \n using {\i-1)*360/#1}] in {1,...,#1}{%
+    arc (\n:\n+#4:#2) {[rounded corners=1.5pt] -- (\n+#4+#5:#3)
+    arc (\n+#4+#5:\n+360/#1-#5:#3)} --  (\n+360/#1:#2)
+  }%
+  (0,0) circle[radius=#6];
+}
+\begin{scope}[local bounding box=RIGHT,shift={(0,0)},
+scale=1,every node/.append style={scale=1}]
+\begin{scope}[local bounding box=TARGET,shift={(0,0)},
+scale=1,every node/.append style={scale=1}]
+\scoped[on background layer]
+\pic at(0,0) {cyl={scalefac=1.95,picname=1-CYL}};
+\node[align=center]at($(1-CYL.before top)!0.5!(1-CYL.after top)$){Target\\ (MPP database)};
+%%
+\begin{scope}[local bounding box=GEAR,shift={(-0.80,0.3)},
+scale=1,every node/.append style={scale=1}]
+\colorlet{black}{brown!70!black}
+\fill[draw=none,fill=black,even odd rule,xshift=-2mm]coordinate(GE1)\gear{10}{0.23}{0.28}{10}{2}{0.1};
+\fill[draw=none,fill=black,even odd rule,xshift=2.9mm,yshift=-0.6mm]coordinate(GE2)\gear{10}{0.18}{0.22}{10}{2}{0.08};
+\fill[draw=none,fill=black,even odd rule,xshift=-5.7mm,yshift=-2.8mm]coordinate(GE3)\gear{10}{0.15}{0.19}{10}{2}{0.08};
+\node[draw=none,inner xsep=8,inner ysep=8,yshift=0mm,
+           fill=none,fit=(GE1)(GE2)(GE3),line width=1.0pt](BB1){};
+\node[below=-2pt of BB1,align=center]{Staging\\ tables};
+\end{scope}
+
+\begin{scope}[local bounding box=TAB,shift={(0.1,-0.25)},
+scale=1,every node/.append style={scale=1}]
+  \pic at (0,0) {tableicon={scalefac=0.35,channelcolor=red,picname=T1}}coordinate(GE1);
+  \pic at (0.85,0){tableicon={scalefac=0.254,channelcolor=green,picname=T2}}coordinate(GE2);
+  \pic at (0.85,0.5){tableicon={scalefac=0.23,channelcolor=cyan,picname=T3}}coordinate(GE3);
+    \pic at (0.15,0.65){tableicon={scalefac=0.18,channelcolor=orange,picname=T4}}coordinate(GE4);
+\scoped[on background layer]
+\node[draw=black!60,inner xsep=4,inner ysep=5,yshift=0.5mm,
+           fill=yellow!20,fit=(DOT1)(GOT2)(GOT3),line width=1.0pt](BB2){};
+\node[below=1pt of BB2,align=center]{Final\\ tables};
+\end{scope}
+\end{scope}
+
+\begin{scope}[local bounding box=SOURCE,shift={(-4.5,0)},
+scale=1,every node/.append style={scale=1}]
+\begin{scope}[local bounding box=SOURCE1,shift={(0,1.8)},
+scale=1,every node/.append style={scale=1}]
+\pic at(0,0) {cyl={scalefac=0.75,channelcolor=violet!80!,picname=2-CYL}};
+\node at(2-CYL){Source 1};
+\end{scope}
+
+\begin{scope}[local bounding box=SOURCE2,shift={(0,0.1)},
+scale=1,every node/.append style={scale=1}]
+\scoped[on background layer]
+\pic at(0,0) {cyl={scalefac=0.75,channelcolor=orange!80!,picname=3-CYL}};
+\node at(3-CYL){Source 2};
+\end{scope}
+
+\begin{scope}[local bounding box=SOURCE3,shift={(-0.15,-1.2)},
+scale=1,every node/.append style={scale=1}]
+\foreach \j in {1,2,3} {
+\pic at ({\j*0.15}, {-0.15*\j}) {channel={scalefac=1.15,channelcolor=green!40!,picname=\j-CH1}};
+}
+\node at(3-CH1){Source 3};
+\end{scope}
+\foreach \j in {1,2,3} {
+\draw[Line,-latex,shorten >=10pt,shorten <=10pt](SOURCE\j.east)--(TARGET.west);
+}
+\end{scope}
+\path[red](3-CH1.south)--++(0,-0.6)-|coordinate[pos=0.35](SR1)(1-CYL.south);
+\node[single arrow, draw=black,thick, fill=VioletL,
+      minimum width = 17pt, single arrow head extend=3pt,
+      minimum height=9mm](AR1)at(SR1) {};
+\node[left=6pt of AR1,anchor=east]{Extract \& Load};
+\node[right=6pt of AR1,anchor=west]{Transform};
+\node[below=8pt of AR1]{\normalsize E \textcolor{red}{$\to$ L $\to$ T}};
+\end{scope}
+%%%%%%%%%%%%%
+%LEFT
+\begin{scope}[local bounding box=LEFT,shift={(-8,0)},
+scale=1,every node/.append style={scale=1}]
+\begin{scope}[local bounding box=TARGET,shift={(0,0)},
+scale=1,every node/.append style={scale=1}]
+\pic at(0,0) {cyl={scalefac=1.25,picname=1-CYL}};
+\node at(1-CYL){Target};
+\end{scope}
+%%
+\begin{scope}[local bounding box=GEAR,shift={(-3.2,0.3)},
+scale=1.5,every node/.append style={scale=1}]
+\colorlet{black}{brown!70!black}
+\fill[draw=none,fill=black,even odd rule,xshift=-2mm]coordinate(GE1)\gear{10}{0.23}{0.28}{10}{2}{0.1};
+\fill[draw=none,fill=black,even odd rule,xshift=2.9mm,yshift=-0.6mm]coordinate(GE2)\gear{10}{0.18}{0.22}{10}{2}{0.08};
+\fill[draw=none,fill=black,even odd rule,xshift=-5.7mm,yshift=-2.8mm]coordinate(GE3)\gear{10}{0.15}{0.19}{10}{2}{0.08};
+\node[draw=none,inner xsep=8,inner ysep=8,yshift=0mm,
+           fill=none,fit=(GE1)(GE2)(GE3),line width=1.0pt](BB1){};
+\end{scope}
+
+\begin{scope}[local bounding box=SOURCE,shift={(-6.9,-0.14)},
+scale=1,every node/.append style={scale=1}]
+\begin{scope}[local bounding box=SOURCE1,shift={(0,1.8)},
+scale=1,every node/.append style={scale=1}]
+\pic at(0,0) {cyl={scalefac=0.75,channelcolor=violet!80!,picname=2-CYL}};
+\node at(2-CYL){Source 1};
+\end{scope}
+
+\begin{scope}[local bounding box=SOURCE2,shift={(0,0.1)},
+scale=1,every node/.append style={scale=1}]
+\scoped[on background layer]
+\pic at(0,0) {cyl={scalefac=0.75,channelcolor=orange!80!,picname=3-CYL}};
+\node at(3-CYL){Source 2};
+\end{scope}
+
+\begin{scope}[local bounding box=SOURCE3,shift={(-0.15,-1.2)},
+scale=1,every node/.append style={scale=1}]
+\foreach \j in {1,2,3} {
+\pic at ({\j*0.15}, {-0.15*\j}) {channel={scalefac=1.15,channelcolor=green!40!,picname=\j-CH1}};
+}
+\node at(3-CH1){Source 3};
+\end{scope}
+\foreach \j in {1,2,3} {
+\draw[Line,-latex,shorten >=10pt,shorten <=10pt](SOURCE\j.east)--(BB1.west);
+}\draw[Line,-latex,shorten >=5pt,shorten <=5pt](BB1.08)--(TARGET.west);
+\end{scope}
+\path[red](3-CH1.south)--++(0,-0.5)-|coordinate[pos=0.35](SR1)(1-CYL.south);
+\node[single arrow, draw=black,thick, fill=VioletL,
+      minimum width = 17pt, single arrow head extend=3pt,
+      minimum height=9mm](AR1)at(SR1) {};
+\node[left=6pt of AR1,anchor=east](TRA){Transform};
+\node[right=6pt of AR1,anchor=west]{Load};
+\node[left=4pt of TRA,single arrow, draw=black,thick, fill=VioletL,
+      minimum width = 17pt, single arrow head extend=3pt,
+      minimum height=9mm](AR2) {};
+\node[left=6pt of AR2,anchor=east]{Extract};
+\node[below=8pt of TRA]{\normalsize E \textcolor{red}{$\to$ T $\to$ L}};
+\end{scope}
+\draw[line width=2pt,red!40]($(LEFT.north east)!0.5!(RIGHT.north west)$)--
+($(LEFT.south east)!0.5!(RIGHT.south west)$);
+\end{tikzpicture}
+```
+Key differences between Extract, Transform, Load (ETL) versus Extract, Load, Transform (ELT).
+:::
 
 ETL is a well-established paradigm in which data is first gathered from a source, then transformed to match the target schema or model, and finally loaded into a data warehouse or other repository. This approach typically results in data being stored in a ready-to-query format, which can be advantageous for ML systems that require consistent, pre-processed data. For instance, an ML system predicting customer churn might use ETL to standardize and aggregate customer interaction data from multiple sources before loading it into a format suitable for model training [@inmon2005building].
 
@@ -635,7 +832,102 @@ Processing pipelines bring together the various data processing steps into a coh
 
 Modern ML frameworks and tools often provide capabilities for building and managing data processing pipelines. For instance, Apache Beam and TensorFlow Transform allow developers to define data processing steps that can be applied consistently during both model training and serving.
 
-Effective pipeline design involves considerations such as modularity, scalability, and version control. Modular pipelines allow for easy updates and maintenance of individual processing steps. Version control for pipelines is crucial, ensuring that changes in data processing can be tracked and correlated with changes in model performance.
+Effective pipeline design involves considerations such as modularity, scalability, and version control. Modular pipelines allow for easy updates and maintenance of individual processing steps. Version control for pipelines is crucial, ensuring that changes in data processing can be tracked and correlated with changes in model performance. This modular breakdown of pipeline components is well illustrated by TensorFlow Extended in @fig-tfx-pipeline-example, which shows the complete flow from initial data ingestion through to final model deployment.
+
+::: {#fig-tfx-pipeline-example fig-env="figure" fig-pos="htb"}
+```{.tikz}
+\begin{tikzpicture}[line join=round,font=\usefont{T1}{phv}{m}{n}\small]
+\tikzset{%
+    Line/.style={line width=0.75pt,black!50,text=black
+},
+  Box/.style={align=flush center,
+    inner xsep=2pt,
+    node distance=0.45,
+    draw=BlueLine,
+    line width=0.75pt,
+     top color=white, bottom color=BlueL,
+    text width=27mm,
+    minimum width=27mm, minimum height=8mm
+  },
+  Box2/.style={Box,draw=GreenLine,
+    top color=white, bottom color=GreenL
+  },
+}
+
+\tikzset{
+channel/.pic={
+\pgfkeys{/channel/.cd, #1}
+\begin{scope}[yscale=\scalefac,xscale=\scalefac,every node/.append style={scale=\scalefac}]
+\draw[draw=BrownLine,fill=BrownLine!10](0,0.20)coordinate(W1)--
+(0.75,-0.20)coordinate(W2)coordinate(\picname-W2)--(1.75,0.4)coordinate(W3)--
+(1.0,0.8)coordinate(W4)coordinate(\picname-W4)--cycle;
+\draw[BrownLine,shorten <=4pt,shorten >=5pt]($(W4)!0.3!(W1)$)--($(W3)!0.3!(W2)$);
+\draw[BrownLine,shorten <=4pt,shorten >=7pt]($(W4)!0.5!(W1)$)--($(W3)!0.5!(W2)$);
+\draw[BrownLine,shorten <=4pt,shorten >=9pt]($(W4)!0.7!(W1)$)--($(W3)!0.7!(W2)$);
+\end{scope}
+        },
+}
+\pgfkeys{
+  /channel/.cd,
+  channelcolor/.store in=\channelcolor,
+  drawchannelcolor/.store in=\drawchannelcolor,
+  scalefac/.store in=\scalefac,
+  picname/.store in=\picname,
+  channelcolor=BrownLine,
+  drawchannelcolor=BrownLine,
+  scalefac=1,
+  picname=C
+}
+
+\node[Box](B1){ExampleGen};
+\node[Box,below=of B1](B2){StatisticsGen};
+\node[Box,below=of B2](B3){SchemaGen};
+\node[Box,left=of B3](B4){Example Validator};
+\node[Box,right=of B3](B5){Transform};
+\node[Box2,below left=0.7 and -0.7 of B5](B6){Tuner};
+\node[Box2,below right=0.7 and -0.7 of B5](B7){Trainer};
+\node[Box2,below left=0.7 and -0.7 of B7](B8){Evaluator};
+\node[Box2,below right=0.7 and -0.7 of B7](B9){Infra Validator};
+\node[Box2,below=of B9](B10){Pusher};
+%
+\draw[Line,-latex](B1)edge (B2) (B2)edge (B3)
+(B2) -|(B4);
+\draw[Line,-latex](B1)-|(B5);
+\draw[Line,-latex](B5)--++(0,-0.75)-|(B6);
+\draw[Line,-latex](B5)--++(0,-0.75)-|(B7);
+\draw[Line,-latex](B7)--++(0,-0.75)-|(B8);
+\draw[Line,-latex](B7)--++(0,-0.75)-|(B9);
+\draw[Line](B5)--(B3);
+\draw[Line,-latex](B9)--(B10);
+%
+\begin{scope}[local bounding box=F1,shift={($(B10)+(-4.6,-2.25)$)},
+scale=1,every node/.append style={scale=1}]
+\foreach \j in {1,2,3} {
+\pic at ({\j*0.02}, {0.16*\j}) {channel={scalefac=0.8,picname=1\j}};
+}
+\node[below=3pt of 11-W2,align=center]{Tensorflow\\ serving};
+\end{scope}
+\begin{scope}[local bounding box=F2,shift={($(B10)+(-2.6,-2.25)$)},
+scale=1,every node/.append style={scale=1}]
+\foreach \j in {1,2,3} {
+\pic at ({\j*0.02}, {0.16*\j}) {channel={scalefac=0.8,picname=2\j}};
+}
+\node[below=3pt of 21-W2,align=center]{Tensorflow\\ JS};
+\end{scope}
+\begin{scope}[local bounding box=F3,shift={($(B10)+(-0.6,-2.25)$)},
+scale=1,every node/.append style={scale=1}]
+\foreach \j in {1,2,3} {
+\pic at ({\j*0.02}, {0.16*\j}) {channel={scalefac=0.8,picname=3\j}};
+}
+\node[below=3pt of 31-W2,align=center]{Tensorflow\\ Lite};
+\end{scope}
+\foreach \j in {1,2,3} {
+\draw[Line,-latex](B10)--++(0,-0.7)-|(\j3-W4);
+}
+\end{tikzpicture}
+```
+Example breakdown of the entire data to model processing pipeline for TensorFlow Extended.
+:::
 
 ### Scalability Considerations
 
@@ -1021,7 +1313,144 @@ What makes feature stores particularly interesting is their role in solving seve
 
 Another fascinating aspect of feature stores is their ability to promote feature reuse across different models and teams within an organization. By centralizing feature computation and storage, feature stores can significantly reduce redundant work. For instance, if multiple teams are working on different models that require similar features (e.g., customer lifetime value in a retail context), these features can be computed once and reused across projects, improving efficiency and consistency.
 
-Feature stores also play a role in managing the temporal aspects of features. Many ML use cases require correct point-in-time feature values, especially in scenarios involving time-series data or where historical context is important. Feature stores typically offer time-travel capabilities, allowing data scientists to retrieve feature values as they were at any point in the past. This is crucial for training models on historical data and for ensuring consistency between training and serving environments.
+Feature stores also play a role in managing the temporal aspects of features. Many ML use cases require correct point-in-time feature values, especially in scenarios involving time-series data or where historical context is important. Feature stores typically offer time-travel capabilities, allowing data scientists to retrieve feature values as they were at any point in the past. This is crucial for training models on historical data and for ensuring consistency between training and serving environments, as illustrated in @fig-feature-store-overview which shows how data flows through these systems to eventually yield a model.
+
+::: {#fig-feature-store-overview fig-env="figure" fig-pos="htb"}
+```{.tikz}
+\begin{tikzpicture}[line cap=round,line join=round,font=\usefont{T1}{phv}{m}{n}\small]
+\tikzset{%
+LineA/.style={line width=4pt,violet!40,text=black,-{Triangle[width=1.8*6pt,length=2.2*6pt]}},
+Line/.style={line width=1.5pt,,violet!40,text=black},
+Box/.style={align=flush center,
+    inner xsep=4pt,
+    node distance=0.5,
+    line width=0.75pt,
+    fill= BrownL,draw= BrownLine,
+    minimum height=10mm
+  }
+}
+\tikzset{%
+ LineST/.style={-{Circle[\channelcolor,fill=white,length=13pt]},draw=\channelcolor,line width=\Linewidth,rounded corners},
+ ellipseST/.style={fill=\channelcolor,ellipse,minimum width = 2.5mm, inner sep=2pt, minimum height =1.5mm},
+ BoxST/.style={line width=\Linewidth,fill=white,draw=\channelcolor,rectangle,minimum width=56,minimum height=16,rounded corners},
+ pics/streaming/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=STREAMING,scale=\scalefac, every node/.append style={transform shape}]
+\node[BoxST,minimum width=44,minimum height=48](\picname-RE1){};
+\foreach \i/\j in{1/north,2/center,3/south}{
+\node[BoxST](\picname-GR\i)at(\picname-RE1.\j){};
+\node[ellipseST]at($(\picname-GR\i.west)!0.2!(\picname-GR\i.east)$){};
+\node[ellipseST]at($(\picname-GR\i.west)!0.4!(\picname-GR\i.east)$){};
+}
+\draw[LineST](\picname-GR1.40)--++(0,0.5)--++(1,0)coordinate(\picname-C1);
+\draw[LineST](\picname-GR1)--++(2,0)coordinate(\picname-C2);
+\draw[LineST](\picname-GR2)--++(1.8,0)coordinate(\picname-C3);
+\draw[LineST](\picname-GR3)--++(2,0)coordinate(\picname-C4);
+\draw[LineST](\picname-GR3.320)--++(0,-0.5)--++(1,0)coordinate(\picname-C5);
+\draw[LineST](\picname-GR3.220)--++(0,-0.5)--++(-1,0)coordinate(\picname-C6);
+\draw[LineST](\picname-GR3)--++(-2,0)coordinate(\picname-C7);
+\draw[LineST](\picname-GR2)--++(-1.8,0)coordinate(\picname-C8);
+\draw[LineST](\picname-GR1)--++(-2,0)coordinate(\picname-C9);
+\draw[LineST](\picname-GR1.140)--++(0,0.5)--++(-1,0)coordinate(\picname-C10);
+ \end{scope}
+     }
+  }
+}
+\tikzset{mycylinder/.style={cylinder, shape border rotate=90, aspect=1.3, draw, fill=white,
+minimum width=25mm,minimum height=11mm,line width=\Linewidth,node distance=-0.15},
+pics/data/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=STREAMING,scale=\scalefac, every node/.append style={transform shape}]
+\node[mycylinder,fill=\channelcolor!50] (A) {};
+\node[mycylinder, above=of A,fill=\channelcolor!30] (B) {};
+\node[mycylinder, above=of B,fill=\channelcolor!10] (C) {};
+ \end{scope}
+     }
+  }
+}
+\tikzset{%
+ LinePE/.style={line width=\Linewidth,draw=\drawchannelcolor,fill=\channelcolor},
+ ellipsePE/.style={line width=\Linewidth,draw=\drawchannelcolor,fill=\channelcolor,fill=\channelcolor,ellipse,minimum width = 2.5mm, inner sep=2pt,minimum width=29,
+ minimum height=40},
+ pics/person/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=PERSON,scale=\scalefac, every node/.append style={transform shape}]
+\node[ellipsePE](\picname-EL1)at(0,0.44){};
+\draw[LinePE](-0.6,0)to[out=210,in=85](-1.1,-1)
+to[out=270,in=180](-0.9,-1.2)to(0.9,-1.2)to[out=0,in=270](1.1,-1)
+to[out=85,in=325](0.6,0)to[out=250,in=290,distance=17](-0.6,0);
+ \end{scope}
+     }
+  }
+}
+\pgfkeys{
+  /channel/.cd,
+  channelcolor/.store in=\channelcolor,
+  drawchannelcolor/.store in=\drawchannelcolor,
+  scalefac/.store in=\scalefac,
+  Linewidth/.store in=\Linewidth,
+  picname/.store in=\picname,
+  channelcolor=BrownLine,
+  drawchannelcolor=BrownLine,
+  scalefac=1,
+  Linewidth=1.6pt,
+  picname=C
+}
+
+\begin{scope}[local bounding box=STREAMING1,shift={($(0,0)+(0,0)$)},scale=1, every node/.append style={transform shape}]
+\pic[shift={(0,0)}] at  (0,0){streaming={scalefac=0.7,picname=1,channelcolor=BlueLine, Linewidth=2.5pt}};
+ \end{scope}
+
+ \begin{scope}[local bounding box=DATA1,shift={($(STREAMING1)+(0,-6.0)$)},
+scale=0.9, every node/.append style={transform shape}]
+\pic[shift={(0,0)}] at  (0,0){data={scalefac=1,picname=1,channelcolor=red, Linewidth=1.0pt}};
+ \end{scope}
+
+\begin{scope}[local bounding box=FEATURE,shift={($(DATA1)+(9.8,4.7)$)},
+scale=1, every node/.append style={transform shape}]
+\node[Box,text width=76mm](B1){Monitoring};
+\node[Box,below=of B1.south west,minimum width=26mm,anchor=north west](B2){Transformations};
+\node[Box,below=of B1.south east,minimum width=20mm,anchor=north east](B3){Serving};
+\node[Box, minimum width=20mm](B4)at($(B2.east)!0.5!(B3.west)$){Storage};
+%
+\node[Box,text width=76mm,fill= BrownL,below=2 of B1, draw= BrownLine](B5){Registry};
+\scoped[on background layer]
+\node[draw=BackLine,inner xsep=13,line width=0.75pt,inner ysep=28,
+fill=BackColor!30,yshift=6,fit=(B1)(B5)](BB1){};
+\node[below=1pt of BB1.north,anchor=north]{\textbf{Feature Store}};
+\end{scope}
+
+ \begin{scope}[local bounding box=PERSON1,shift={($(FEATURE)+(0,-5.0)$)},scale=1, every node/.append style={transform shape}]
+\pic[shift={(0,0)}] at  (0,0){person={scalefac=0.8,picname=1,drawchannelcolor=BrownLine,
+channelcolor=none, Linewidth=1.5pt}};
+ \end{scope}
+
+ \node[Box,right=20mm of PERSON.east,minimum width=26mm,
+       fill=GreenL,draw=GreenLine](MT){Model training};
+ \node[Box,above right=10mm and 30mm of FEATURE.east,minimum width=26mm,
+       fill=OrangeL,draw=OrangeLine](MS){Model serving};
+%
+\draw[LineA,shorten <=5pt](PERSON1)--node[right,align=center,pos=0.31]{Define feature}(B5);
+\draw[LineA](PERSON1)--(MT);
+\draw[LineA,shorten <=4pt](B5.190)|-node[left,align=center,pos=0.31]{Search and\\discover features}(PERSON1);
+\draw[Line,shorten <=4pt,rounded corners](STREAMING1.east)--++(2.5,0)|-
+node[above left=14pt and 7pt,pos=0.2]{Ingest data}(BB1.175);
+\draw[Line,shorten <=4pt,rounded corners](DATA1.east)--++(2.8,0)|-(BB1.185);
+\draw[Line,rounded corners](MS.west)--++(-2.0,0)|-
+node[above right=14pt and -3pt,pos=0.2,align=center]{Fetch feature\\ vectors}(BB1.5);
+\draw[Line,rounded corners](MT.east)--++(1.0,0)|-
+node[right=6pt,pos=0.25,align=center]{Fetch training\\ dataset}(BB1.355);
+%
+\node[below =4pt of PERSON1]{Data Scientist};
+\node[below =4pt of DATA1]{Batch data};
+\node[below =14pt of STREAMING1]{Streaming data};
+\end{tikzpicture}
+```
+High-level overview of feature stores interact with data, users and model training and deployment.
+:::
 
 The performance characteristics of feature stores are particularly intriguing from a storage perspective. They need to support both high-throughput batch retrieval for model training and low-latency lookups for online inference. This often leads to hybrid architectures where feature stores maintain both an offline store (optimized for batch operations) and an online store (optimized for real-time serving). Synchronization between these stores becomes a critical consideration.
 
@@ -1083,7 +1512,213 @@ In production, KWS systems require careful consideration of edge storage require
 
 Data governance is a significant component in the development and deployment of ML systems. It encompasses a set of practices and policies that ensure data is accurate, secure, compliant, and ethically used throughout the ML lifecycle. As ML systems become increasingly integral to decision-making processes across various domains, the importance of robust data governance has grown significantly.
 
-One of the central challenges of data governance is addressing the unique complexities posed by ML workflows. These workflows often involve opaque processes, such as feature engineering and model training, which can obscure how data is being used. Governance practices aim to tackle these issues by focusing on maintaining data privacy, ensuring fairness, and providing transparency in decision-making processes. These practices go beyond traditional data management to address the evolving needs of ML systems.
+One of the central challenges of data governance is addressing the unique complexities posed by ML workflows. These workflows often involve opaque processes, such as feature engineering and model training, which can obscure how data is being used. As shown in @fig-data-governance-pillars, governance practices aim to tackle these issues by focusing on maintaining data privacy, ensuring fairness, and providing transparency in decision-making processes. These practices go beyond traditional data management to address the evolving needs of ML systems.
+
+::: {#fig-data-governance-pillars fig-env="figure" fig-pos="htb"}
+```{.tikz}
+\begin{tikzpicture}[line join=round,font=\small\usefont{T1}{phv}{m}{n}]
+\definecolor{Siva}{RGB}{161,152,130}
+% #1 number of teeths
+% #2 radius intern
+% #3 radius extern
+% #4 angle from start to end of the first arc
+% #5 angle to decale the second arc from the first
+% #6 inner radius to cut off
+\newcommand{\gear}[6]{%
+  (0:#2)
+  \foreach \i [evaluate=\i as \n using {\i-1)*360/#1}] in {1,...,#1}{%
+    arc (\n:\n+#4:#2) {[rounded corners=1.5pt] -- (\n+#4+#5:#3)
+    arc (\n+#4+#5:\n+360/#1-#5:#3)} --  (\n+360/#1:#2)
+  }%
+  (0,0) circle[radius=#6]
+}
+\tikzset{%
+planet/.style = {circle, draw=none,
+semithick, fill=blue!30,
+                    font=\usefont{T1}{phv}{m}{n}\bfseries, ball color=cyan!70,shading angle=-15,
+                    text width=27mm, inner sep=1mm,align=center}, %<---
+satellite/.style = {circle, draw=none, semithick, fill=#1!30,
+                    text width=18mm, inner sep=1pt, align=flush center,minimum size=21mm},%<---
+arr/.style = {-{Triangle[length=3mm,width=6mm]}, color=#1,
+                    line width=3mm, shorten <=1mm, shorten >=1mm}
+}
+
+% planets
+\node[draw=BackLine!50,line width=5pt,circle,minimum size=216.8]{};
+\node (p)   [planet]    {Data\\ Governance };
+% satellites
+\foreach \i [count=\k] in {red,cyan, purple, green!80!black!70!, orange, yellow,brown!80!,violet}
+{
+\node (s\k) [satellite=\i,font=\footnotesize\usefont{T1}{phv}{m}{n}] at (\k*45:3.8) {};
+%\draw[arr=\i] (p) -- (s\k);
+}
+
+\def\ra{24mm}
+\foreach \i [count=\k] in{-45,0,45,90,135,180,225,270}{
+\pgfmathtruncatemacro{\newX}{\i + 180} %
+\draw[BrownLine, line width=0.75pt,{Circle[BrownLine,length=4pt]}-{Circle[BrownLine,length=4pt]}]
+   (s\k)+(\i:0.5*\ra) arc[start angle=\i, end angle=\newX, radius=0.5*\ra];
+}
+\begin{scope}[local bounding box=GEARS,shift={($(s4)+(0.2,0.3)$)},scale=1.5, every node/.append style={transform shape}]
+%smaller
+\begin{scope}[scale=0.1, every node/.append style={transform shape}]
+\fill[red,even odd rule] \gear{10}{1.9}{1.4}{10}{2}{0.6}coordinate(GER2);
+\end{scope}
+%biger
+\begin{scope}[scale=0.15, every node/.append style={transform shape},
+shift={(-1.8,-2.08)}]
+\fill[red!90,even odd rule] \gear{10}{1.9}{1.4}{11}{2}{0.6}coordinate(GER2);
+\end{scope}
+\end{scope}
+%
+%Persons
+\begin{scope}[shift={($(s2)+(-0.1,0.23)$)},scale=0.65,line width=1.0pt]
+\begin{scope}[shift={(0.3,0.3)}]%person2-back
+\coordinate (head-center) at (0,0);
+\coordinate (top) at ([yshift=-2mm]head-center);
+\coordinate (left) at ([yshift=-10mm,xshift=-7mm]head-center);
+\coordinate (right) at ([yshift=-10mm,xshift=7mm]head-center);
+\draw[rounded corners=1.5mm,fill=Green!70]
+  (top) to [out=-10,in=100]
+  (right) to [bend left=15]
+  (left) to [out=80,in=190]
+  (top);
+ \draw[fill=yellow] (head-center) circle (0.35);
+\end{scope}
+\begin{scope}%person1
+\coordinate (head-center) at (0,0);
+\coordinate (top) at ([yshift=-2mm]head-center);
+\coordinate (left) at ([yshift=-10mm,xshift=-7mm]head-center);
+\coordinate (right) at ([yshift=-10mm,xshift=7mm]head-center);
+\draw[rounded corners=1.5mm,fill=Green!70]
+  (top) to [out=-10,in=100]
+  (right) to [bend left=15]
+  (left) to [out=80,in=190]
+  (top);
+  \draw[fill=yellow] (head-center) circle (0.35);
+\end{scope}
+\end{scope}
+%%
+\begin{scope}[shift={($(s3)+(-0.42,0.15)$)},scale=0.30,line width=1.0pt]
+\colorlet{black}{violet}
+\draw[fill=black,draw=black](0,0)--(2.7,0)--++(270:1.6)to[out=270,in=0](1.85,-2.45)
+--++(180:1.1)to[out=180,in=270](0,-1.3)--cycle;
+\draw[draw=none,fill=white](1.32,-0.9)+(230:0.3)
+arc[start angle=230, end angle=-50, radius=0.3]--++(280:0.75)--++(180:0.62)--cycle;
+\path[red](0.27,0)circle(1pt)coordinate(K1);
+\path[red](0.57,0)circle(1pt)coordinate(K2);
+\path[red](2.10,0)circle(1pt)coordinate(K3);
+\path[red](2.4,0)circle(1pt)coordinate(K4);
+
+\path[green](K1)--++(90:0.6)coordinate(KK1);
+\path[green](K2)--++(90:0.5)coordinate(KK2);
+\path[green](K4)--++(90:0.6)coordinate(KK4);
+\path[green](K3)--++(90:0.5)coordinate(KK3);
+\draw[fill=black,draw=black](K1)--(KK1)to[out=90,in=90,distance=37](KK4)--(K4)
+--(K3)--(KK3)to[out=90,in=90,distance=29](KK2)--(K2)--cycle;
+\end{scope}
+%cloud
+\colorlet{red}{red}
+\begin{scope}[shift={($(s6)+(-0.54,-0.49)$)},scale=0.70,line width=1.0pt]
+\draw[red,line width=1.5pt](0,0)to[out=170,in=180,distance=11](0.1,0.61)
+to[out=90,in=105,distance=17](1.07,0.71)
+to[out=20,in=75,distance=7](1.48,0.36)
+to[out=350,in=0,distance=7](1.48,0)--(0,0);
+\draw[red,line width=1.5pt](0.27,0.71)to[bend left=25](0.49,0.96);
+\draw[red,line width=1.5pt](0.67,1.21)to[out=55,in=90,distance=13](1.5,0.96)
+to[out=360,in=30,distance=9](1.68,0.42);
+\end{scope}
+%quality
+\begin{scope}[shift={($(s5)+(0.0,-0.03)$)},scale=0.70,every node/.append style={transform shape}]
+ \node[draw, minimum width  =20mm, minimum height = 12mm, inner sep      = 0pt,
+        rounded corners,draw = BlueLine, fill=cyan!10, line width=2.0pt](COM){};
+ \draw[draw = BlueLine,line width=1.0pt]
+ ($(COM.north west)!0.85!(COM.south west)$)-- ($(COM.north east)!0.85!(COM.south east)$);
+\node[GreenLine](CB1) at ($(COM.north west)!0.25!(COM.south west)+(0.3,0)$){
+\mbox{\ooalign{$\checkmark$\cr\hidewidth$\square$\hidewidth\cr}}};
+\node[GreenLine](CB2) at ($(COM.north west)!0.6!(COM.south west)+(0.3,0)$){
+\makebox[0pt][l]{$\square$}\raisebox{.15ex}{\hspace{0.1em}$\checkmark$}};
+ \draw[GreenLine,decoration={zigzag,segment length=4pt, amplitude=0.5pt},decorate]($(CB1)+(0.3,0.05)$)--++(0:1.3);
+\draw[GreenLine,decoration={zigzag,segment length=4pt, amplitude=0.5pt},decorate]($(CB1)+(0.3,-0.12)$)--++(0:1.0);
+  \draw[GreenLine,decoration={zigzag,segment length=4pt, amplitude=0.5pt},decorate]($(CB2)+(0.3,0.05)$)--++(0:1.3);
+\draw[GreenLine,decoration={zigzag,segment length=4pt, amplitude=0.5pt},decorate]($(CB2)+(0.3,-0.12)$)--++(0:1.0);
+\end{scope}
+%
+\tikzset{mycylinder/.style={cylinder, shape border rotate=90, aspect=1.3, draw, fill=white,
+minimum width=25mm,minimum height=11mm,line width=\Linewidth,node distance=-0.15},
+pics/data/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=STREAMING,scale=\scalefac, every node/.append style={transform shape}]
+\node[mycylinder,fill=\channelcolor!50] (A) {};
+\node[mycylinder, above=of A,fill=\channelcolor!30] (B) {};
+\node[mycylinder, above=of B,fill=\channelcolor!10] (C) {};
+ \end{scope}
+     }
+  }
+}
+\pgfkeys{
+  /channel/.cd,
+  channelcolor/.store in=\channelcolor,
+  drawchannelcolor/.store in=\drawchannelcolor,
+  scalefac/.store in=\scalefac,
+  Linewidth/.store in=\Linewidth,
+  picname/.store in=\picname,
+  channelcolor=BrownLine,
+  drawchannelcolor=BrownLine,
+  scalefac=1,
+  Linewidth=1.6pt,
+  picname=C
+}
+%Data
+\begin{scope}[shift={($(s8)+(0.03,-0.43)$)},scale=0.40,every node/.append style={transform shape}]
+scale=1, every node/.append style={transform shape}]
+\pic[shift={(0,0)}] at  (0,0){data={scalefac=1,picname=1,channelcolor=BlueLine, Linewidth=0.7pt}};
+ \end{scope}
+ %policies
+\newcommand{\tikzxmark}{%
+\tikz[scale=0.18] {
+    \draw[line width=0.7,line cap=round] (0,0) to [bend left=6] (1,1);
+    \draw[line width=0.7,line cap=round] (0.2,0.95) to [bend right=3] (0.8,0.05);
+}}
+\begin{scope}[shift={($(s1)+(0.04,-0.03)$)},scale=0.70,every node/.append style={transform shape}]
+ \node[draw, minimum width  =15mm, minimum height = 20mm, inner sep = 0pt,
+        rounded corners,draw = BrownLine, fill=BrownL!10, line width=1.0pt](COM){};
+\node[GreenLine](CB1) at ($(COM.north west)!0.25!(COM.south west)+(0.3,0)$){
+\mbox{\ooalign{$\checkmark$\cr\hidewidth$\square$\hidewidth\cr}}};
+\node[GreenLine](CB2) at ($(COM.north west)!0.5!(COM.south west)+(0.3,0)$){
+\makebox[0pt][l]{$\square$}\raisebox{.15ex}{\hspace{0.1em}\tikzxmark}};
+\node[GreenLine](CB3) at ($(COM.north west)!0.75!(COM.south west)+(0.3,0)$){
+\makebox[0pt][l]{$\square$}\raisebox{.15ex}{\hspace{0.1em}\tikzxmark}};
+ \draw[GreenLine,decoration={zigzag,segment length=4pt, amplitude=0.5pt},decorate]($(CB1)+(0.3,0.05)$)--++(0:0.8);
+\draw[GreenLine,decoration={zigzag,segment length=4pt, amplitude=0.5pt},decorate]($(CB1)+(0.3,-0.12)$)--++(0:0.7);
+  \draw[GreenLine,decoration={zigzag,segment length=4pt, amplitude=0.5pt},decorate]($(CB2)+(0.3,0.05)$)--++(0:0.8);
+\draw[GreenLine,decoration={zigzag,segment length=4pt, amplitude=0.5pt},decorate]($(CB2)+(0.3,-0.12)$)--++(0:0.6);
+  \draw[GreenLine,decoration={zigzag,segment length=4pt, amplitude=0.5pt},decorate]($(CB3)+(0.3,0.05)$)--++(0:0.8);
+\draw[GreenLine,decoration={zigzag,segment length=4pt, amplitude=0.5pt},decorate]($(CB3)+(0.3,-0.12)$)--++(0:0.6);
+\end{scope}
+%graph
+\begin{scope}[shift={($(s7)+(-0.35,-0.51)$)},scale=0.50,every node/.append style={transform shape}]
+\draw[line width=2.0pt,RedLine](-0.20,0)--(2,0);
+\draw[line width=2.0pt,RedLine](-0.20,0)--(-0.20,2);
+\foreach \i/\vi in {0/10,0.5/17,1/9,1.5/5}{
+\node[draw, minimum width  =4mm, minimum height = \vi mm, inner sep = 0pt,
+      draw = RedLine, fill=RedL!40, line width=1.0pt,anchor=south west](COM)at(\i,0.2){};
+}
+\end{scope}
+%
+\node[above=5pt of s2]{Organization};
+\node[left=5pt of s3]{Data Security};
+\node[left=5pt of s4]{Data Operations};
+\node[left=5pt of s5,align=center]{Data quality \&\\ master Data};
+\node[below=5pt of s6]{Data Sourcing};
+\node[right=5pt of s7,align=center]{Data  \& \\ analytic definitions};
+\node[right=5pt of s8]{Data  catalogs};
+\node[right=5pt of s1]{Policies};
+\end{tikzpicture}
+```
+The many pillars of data governance.
+:::
 
 Security and access control form an essential aspect of data governance. Implementing measures to protect data from unauthorized access or breaches is critical in ML systems, which often deal with sensitive or proprietary information. For instance, a healthcare application may require granular access controls to ensure that only authorized personnel can view patient data. Encrypting data both at rest and in transit is another common approach to safeguarding information while enabling secure collaboration among ML teams.
 

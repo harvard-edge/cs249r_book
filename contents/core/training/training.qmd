@@ -1639,42 +1639,41 @@ The hybrid approach proceeds in three main phases, as illustrated in @fig-mixed-
 
 ::: {#fig-mixed-precision fig-env="figure" fig-pos="htb"}
 ```{.tikz}
-\begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\small]
-\tikzset{Line/.style={line width=1.0pt,black!50
-},
-  Box/.style={inner xsep=2pt,
-    draw=VioletLine2,
+\begin{tikzpicture}[line join=round,font=\small\usefont{T1}{phv}{m}{n}]
+\tikzset{%
+LineD/.style={line width=1.0pt,black!50,text=black,align=center},
+Line/.style={red!30,line width=3pt,-{Triangle[width=1.8*6pt,length=0.8*6pt]},text=black,align=center},
+Box/.style={inner xsep=2pt,
+    node distance=2.7,
+    draw=GreenLine,
+    fill=GreenL,
     line width=0.75pt,
-    node distance=1.1,
-    fill=VioletL2,
     align=flush center,
-    text width=18mm,
-    minimum width=20mm,
-    minimum height=10mm
+    text width=22mm,
+    minimum width=22mm, minimum height=9.5mm
   },
+Box2/.style={Box,fill=BlueL, draw=BlueLine},
+Box3/.style={Box,fill=BrownL, draw=BrownLine},
 }
-\node[Box](B1){Model\\ FP16};
-\node[Box,right=of B1](B2){Gradients FP16};
-\node[Box,right=of B2](B3){Gradients FP32};
-\node[Box,right=of B3](B4){Weights FP32};
-\node[Box,right=of B4](B5){Weights FP16};
+
+\node[Box](B1){FP 32 Master Weights};
+\node[Box,right=of B1](B2){FP 32 Gradients};
+\node[Box2,right=of B2](B3){Scaled FP 32 Gradients};
+\node[Box2,below right=0.5 and 1.1 of B3](B4){Scaled FP 16 Gradients};
+\node[Box3,below=2of B1](B11){FP 16\\ Weights};
+\node[Box3,below=2of B2](B22){FP 16 Loss};
+\node[Box2,below=2of B3](B33){Scaled FP 32 Loss};
 %
-\scoped[on background layer]
-\node[draw=BackLine,inner xsep=4mm,
-line width=0.75pt,
-inner ysep=6mm,
-fill=BackColor,yshift=2mm,
-fit=(B2)(B4)](BB){};
-\node[below=1pt of BB.north,anchor=north]{Optimizer};
-%
-\foreach \x in {1,2,3,4} {
-    \pgfmathtruncatemacro{\newX}{\x + 1}  %
-    \draw[-latex,Line] (B\x) -- (B\newX);
-}
-\draw[Line,-latex](B1.south)--++(270:1)-|(B5);
+\draw[Line,-latex](B4)|-node[above,pos=0.75]{4. Copy}(B3);
+\draw[Line,-latex](B3)--node[above]{5. Remove scale, \\(+clip, etc.)}(B2);
+\draw[Line,-latex](B2)--node[above]{6. Apply}(B1);
+\draw[Line,-latex](B1)--node[right]{7. Copy}(B11);
+\draw[Line,-latex](B11)--node[above]{1. Forward\\ Pass}(B22);
+\draw[Line,-latex](B22)--node[above]{2. Loss\\ Scaling}(B33);
+\draw[Line,-latex](B33)-|node[above,pos=0.25]{3. Backprop}(B4);
 \end{tikzpicture}
 ```
-Mixed preicision training flow.
+Mixed precision training flow.
 :::
 
 Modern hardware architectures are specifically designed to accelerate reduced precision computations. GPUs from NVIDIA include Tensor Cores[^fn-tensorcores] optimized for FP16 and bfloat16 operations [@nvidia_tensors_fp16_2017]. Google's TPUs natively support bfloat16, as this format was specifically designed for machine learning workloads. These architectural optimizations typically enable an order of magnitude higher computational throughput for reduced precision operations compared to FP32, making mixed-precision training particularly efficient on modern hardware.
@@ -1839,13 +1838,110 @@ The key steps in gradient accumulation are:
 
 Activation checkpointing reduces memory usage during the backward pass by discarding and selectively recomputing activations. In standard training, activations from the forward pass are stored in memory for use in gradient computations during backpropagation. However, these activations can consume significant memory, particularly in deep networks.
 
-With checkpointing, only a subset of the activations is retained during the forward pass. When gradients need to be computed during the backward pass, the discarded activations are recomputed on demand by re-executing parts of the forward pass. This approach trades computational efficiency for memory savings, as the recomputation increases training time but allows deeper models to be trained within limited memory constraints.
+With checkpointing, only a subset of the activations is retained during the forward pass. When gradients need to be computed during the backward pass, the discarded activations are recomputed on demand by re-executing parts of the forward pass, as illustrated in @fig-activation-checkpointing. This approach trades computational efficiency for memory savings, as the recomputation increases training time but allows deeper models to be trained within limited memory constraints. The figure shows how memory is saved by avoiding storage of unnecessarily large intermediate tensors from the forward pass, and simply recomputing them on demand in the backwards pass.
 
 The implementation involves:
 
 1. Splitting the model into segments.
 2. Retaining activations only at the boundaries of these segments during the forward pass.
 3. Recomputing activations for intermediate layers during the backward pass when needed.
+
+::: {#fig-activation-checkpointing fig-env="figure" fig-pos="htb"}
+```{.tikz}
+\begin{tikzpicture}[line cap=round,line join=round,font=\small\usefont{T1}{phv}{m}{n}]
+\tikzset{%
+Line/.style={line width=1.0pt,black!50,text=black,align=center},
+Box/.style={inner xsep=2pt,
+    node distance=3.2,
+    draw=GreenLine,
+    line width=0.75pt,
+    fill=GreenL,
+    align=flush center,
+    minimum width=22mm, minimum height=9.5mm
+  }
+}
+
+\tikzset{pics/graph/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\node[circle, draw=\drawchannelcolor, fill=\channelcolor!90, minimum width=8mm,
+line width=\Linewidth,\ifbox@dashed dashed\fi](\picname){};
+     }
+  }
+}
+\newif\ifbox@dashed
+\box@dashedfalse % default: not dashed
+\pgfkeys{
+  /channel/.cd,
+  channelcolor/.store in=\channelcolor,
+  drawchannelcolor/.store in=\drawchannelcolor,
+  scalefac/.store in=\scalefac,
+  Linewidth/.store in=\Linewidth,
+  picname/.store in=\picname,
+  channelcolor=BrownLine,
+  drawchannelcolor=BrownLine,
+  scalefac=1,
+  Linewidth=1.0pt,
+  dashed/.is if=box@dashed,
+  dashed/.default=true,
+  picname=C
+}
+
+\begin{scope}[local bounding box=CIRCLES1,shift={($(0,0)+(0,0)$)},
+scale=1, every node/.append style={transform shape}]
+\foreach \i/\cl/\da in{1/GreenL/,2/white/,3/BlueL/dashed,4/white/,5/GreenL/}{
+\pic[shift={(0,0)}] at  (1.75*\i,0){graph={picname=1C\i,Linewidth=1.0pt,
+    channelcolor=\cl,\da,drawchannelcolor=BrownLine}};
+    }
+\foreach \j in{1,2,3,4}{
+\pgfmathtruncatemacro{\newX}{\j + 1} %
+\draw[Line,-latex](1C\j)--(1C\newX);
+}
+\foreach \i/\cl/\da in{1/white/,2/white/,3/white/,4/BrownLine!40!/,5/GreenL/}{
+\pic[shift={(1.75,0)}] at  (1.75*\i,-1.5){graph={picname=2C\i,Linewidth=1.0pt,
+    channelcolor=\cl,\da,drawchannelcolor=BrownLine}};
+    }
+\foreach \j in{1,2,3,4}{
+\pgfmathtruncatemacro{\newX}{\j + 1} %
+\draw[Line,latex-](2C\j)--(2C\newX);
+\draw[Line,-latex](1C\newX)--(2C\j);
+}
+\node[above= 4pt of 1C3]{\textbf{Forward pass}};
+\node[below= 4pt of 2C3]{\textbf{Backward pass}};
+\draw[](1C3.center)--++(198:3.4)node[below]{Checkpoint};
+\draw[](2C4.center)--++(44:2.4)node[right,align=left]{Green nodes are the ones\\
+kept in memory to compute\\ the gradient update for this\\ node};
+\end{scope}
+
+\begin{scope}[local bounding box=CIRCLES1,shift={($(0,0)+(0,-4.3)$)},
+scale=1, every node/.append style={transform shape}]
+\foreach \i/\cl/\da in{1/GreenL/,2/white/,3/BlueL/dashed,4/GreenL/,5/VioletL/}{
+\pic[shift={(0,0)}] at  (1.75*\i,0){graph={picname=1C\i,Linewidth=1.0pt,
+    channelcolor=\cl,\da,drawchannelcolor=BrownLine}};
+    }
+\foreach \j in{1,2,3,4}{
+\pgfmathtruncatemacro{\newX}{\j + 1} %
+\draw[Line,-latex](1C\j)--(1C\newX);
+}
+\foreach \i/\cl/\da in{1/white/,2/white/,3/BrownLine!40!/,4/GreenL/,5/white/}{
+\pic[shift={(1.75,0)}] at  (1.75*\i,-1.5){graph={picname=2C\i,Linewidth=1.0pt,
+    channelcolor=\cl,\da,drawchannelcolor=BrownLine}};
+    }
+\foreach \j in{1,2,3,4}{
+\pgfmathtruncatemacro{\newX}{\j + 1} %
+\draw[Line,latex-](2C\j)--(2C\newX);
+\draw[Line,-latex](1C\newX)--(2C\j);
+}
+\draw[](1C5.center)--++(0,1)--++(-2.4,0)node[left,align=left]{This node is being recomputed\\
+   and kept in memory temporarily};
+\draw[](1C3.center)--++(198:3.4)node[below]{Checkpoint};
+\draw[](2C3.center)--++(24:3.8)node[right,align=left]{Green nodes are the ones\\
+  kept in memory to compute\\ the gradient update for this\\ node};
+\end{scope}
+\end{tikzpicture}
+```
+Diagram showing how activation checkpointing helps to reduce memory usage during training.
+:::
 
 Frameworks like PyTorch provide tools such as `torch.utils.checkpoint` to simplify this process. Checkpointing is particularly effective for very deep architectures, such as transformers or large convolutional networks, where the memory required for storing activations can exceed the GPU's capacity.
 
