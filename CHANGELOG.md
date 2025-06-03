@@ -1,10 +1,10 @@
-_Last Updated: Jun 02, 2025_
+_Last Updated: Jun 03, 2025_
 
 ## 2025 Changes
 
-### 📅 Published on Jun 02, 2025
+### 📅 Published on Jun 03, 2025
 
-15 files updated (7688 lines added, 2971 lines removed)
+15 files updated (7799 lines added, 2999 lines removed)
 
 <details open>
   <summary>**Major Updates**</summary>
@@ -14,10 +14,10 @@ _Last Updated: Jun 02, 2025_
 - **AI Training**: <span style="color:green">++++</span><span style="color:red">-</span> (173 lines added, 46 lines removed)
 - **DL Primer**: <span style="color:green">+++++</span><span style="color:red"></span> (210 lines added, 10 lines removed)
 - **DNN Architectures**: <span style="color:green">+++++</span><span style="color:red"></span> (781 lines added, 92 lines removed)
-- **Data Engineering**: <span style="color:green">+++</span><span style="color:red">--</span> (1310 lines added, 681 lines removed)
+- **Data Engineering**: <span style="color:green">+++</span><span style="color:red">--</span> (1315 lines added, 686 lines removed)
 - **Efficient AI**: <span style="color:green">+++++</span><span style="color:red"></span> (205 lines added, 37 lines removed)
 - **ML Operations**: <span style="color:green">+++++</span><span style="color:red"></span> (701 lines added, 75 lines removed)
-- **Responsible AI**: <span style="color:green">+++</span><span style="color:red">--</span> (853 lines added, 596 lines removed)
+- **Responsible AI**: <span style="color:green">+++</span><span style="color:red">--</span> (959 lines added, 619 lines removed)
 - **Security & Privacy**: <span style="color:green">+++</span><span style="color:red">--</span> (1243 lines added, 1146 lines removed)
 
 </details>
