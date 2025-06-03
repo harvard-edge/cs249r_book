@@ -42,7 +42,7 @@
 
 Thanks to your support, we’ve developed and distributed TinyML hardware kits to learners in underserved regions. Partnerships with organizations like [Arduino](https://store.arduino.cc/products/nicla-vision) and [SEEED Studio](https://www.seeedstudio.com/XIAO-ESP32S3-Sense-p-5639.html) have helped bring hands-on AI education to new communities around the world.
 
-📰 Learn more in this [Science article](https://www.science.org/content/article/what-s-tinyml-global-south-s-alternative-power-hungry-pricey-ai) about how TinyML is reshaping AI access in the Global South.
+📰 Learn more in this [Science article](https://www.science.org/doi/epdf/10.1126/science.adw7713) about how TinyML is reshaping AI access in the Global South.
 
 ---
 
