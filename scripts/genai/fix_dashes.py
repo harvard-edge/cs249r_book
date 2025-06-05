@@ -15,23 +15,36 @@ logging.basicConfig(level=logging.INFO)
 DASH_PATTERN = re.compile(r'—([^—]+?)—')
 PARAGRAPH_SPLIT_PATTERN = re.compile(r'\n\s*\n')
 
-# === Prompt Templates ===
+# === Prompt Template ===
 PROMPT_TEMPLATE = (
-    "You will receive a paragraph of formal academic writing that contains one or more em-dash clauses (—like this—). "
+    "You will receive a paragraph or a Markdown bullet point that contains one or more em-dash clauses (—like this—). "
     "Your task is to rewrite all em-dash clauses using a more formal structure, such as commas or parentheses. "
-    "Do not modify any other part of the paragraph. Preserve Markdown formatting including citations (e.g., [@ref]), bold, italics, and inline code.\n\n"
-    "Return a JSON object with:\n"
+    "Use the full paragraph or bullet as context. Do not change any other part of the paragraph. "
+    "Preserve all Markdown formatting, including:\n"
+    "- List bullets (e.g., '- This point')\n"
+    "- Bold or italic text\n"
+    "- Inline code\n"
+    "- Citations like [@ref]\n"
+    "Do not flatten bullets into a single paragraph. Maintain newlines and structure.\n\n"
+    "Return a JSON object with three fields:\n"
     "- 'original_clause': the clause inside the em dashes\n"
     "- 'revised_clause': the rewritten clause\n"
-    "- 'revised_paragraph': the full paragraph with the clause replaced\n\n"
+    "- 'revised_paragraph': the full paragraph with only the clause(s) changed\n\n"
     "Examples:\n"
     "Original: These tools—including JAX, PyTorch, and TensorFlow—enable large-scale model training.\n"
     "Return:\n"
-    "{{\n"
+    "{\n"
     "  \"original_clause\": \"including JAX, PyTorch, and TensorFlow\",\n"
     "  \"revised_clause\": \"including JAX, PyTorch, and TensorFlow,\",\n"
     "  \"revised_paragraph\": \"These tools, including JAX, PyTorch, and TensorFlow, enable large-scale model training.\"\n"
-    "}}\n\n"
+    "}\n\n"
+    "Original: - The energy cost of training vs. inference—analyzing how different phases of AI impact sustainability.\n"
+    "Return:\n"
+    "{\n"
+    "  \"original_clause\": \"analyzing how different phases of AI impact sustainability\",\n"
+    "  \"revised_clause\": \"analyzing how different phases of AI impact sustainability,\",\n"
+    "  \"revised_paragraph\": \"- The energy cost of training vs. inference, analyzing how different phases of AI impact sustainability.\"\n"
+    "}\n\n"
     "Now process this paragraph:\n"
     "\"{}\""
 )
@@ -66,10 +79,9 @@ def rewrite_paragraph_json(paragraph: str) -> dict:
         }
 
 def run_fix_pipeline(paragraph: str) -> dict:
-    """Apply one or more rewrite functions. Currently just em-dash fix."""
     return rewrite_paragraph_json(paragraph)
 
-# === Output Helpers ===
+# === Highlight Helpers ===
 
 RED = "\033[31m"
 GREEN = "\033[32m"
@@ -81,6 +93,18 @@ def highlight_original(para, clause):
 def highlight_revised(para, clause):
     return para.replace(clause or "", f"{GREEN}{clause}{END}", 1) if clause else para
 
+def split_paragraphs_respecting_bullets(text: str) -> List[str]:
+    """Split text into paragraphs and bullet lines for LLM-friendly processing."""
+    paragraphs = PARAGRAPH_SPLIT_PATTERN.split(text)
+    result = []
+    for para in paragraphs:
+        lines = para.strip().splitlines()
+        if all(line.strip().startswith("- ") for line in lines if line.strip()):
+            result.extend([line.strip() for line in lines if line.strip()])
+        else:
+            result.append(para.strip())
+    return result
+
 # === Main Processing ===
 
 def process_file(file_path, mode="interactive", batch_size=5):
@@ -88,25 +112,19 @@ def process_file(file_path, mode="interactive", batch_size=5):
     with open(file_path, "r", encoding="utf-8") as f:
         content = f.read()
 
-    paragraphs = PARAGRAPH_SPLIT_PATTERN.split(content)
+    paragraphs = split_paragraphs_respecting_bullets(content)
     updated_paragraphs = list(paragraphs)
     changed = False
 
-    if mode == "batch":
-        logging.info(f"📦 Batch mode (batch size = {batch_size})")
-        for i, para in enumerate(paragraphs):
-            if not DASH_PATTERN.search(para):
-                continue
-            result = run_fix_pipeline(para)
-            updated_paragraphs[i] = result["revised_paragraph"]
-            changed = True
-    else:
-        logging.info("📝 Interactive mode")
-        for i, para in enumerate(paragraphs):
-            if not DASH_PATTERN.search(para):
-                continue
-            result = run_fix_pipeline(para)
-            revised = result["revised_paragraph"]
+    for i, para in enumerate(paragraphs):
+        if not DASH_PATTERN.search(para):
+            continue
+        result = run_fix_pipeline(para)
+        revised = result["revised_paragraph"]
+        if revised == para:
+            continue
+
+        if mode == "interactive":
             print("\n--- Original ---")
             print(highlight_original(para, result["original_clause"]))
             print("\n--- Proposed ---")
@@ -115,6 +133,9 @@ def process_file(file_path, mode="interactive", batch_size=5):
             updated_paragraphs[i] = revised if choice == "y" else para
             if choice == "y":
                 changed = True
+        else:
+            updated_paragraphs[i] = revised
+            changed = True
 
     if changed:
         with open(file_path, "w", encoding="utf-8") as f:
@@ -132,12 +153,12 @@ def process_directory(directory, mode, batch_size):
 # === CLI ===
 
 def main():
-    parser = argparse.ArgumentParser(description="Rewrite em-dash clauses using OpenAI.")
+    parser = argparse.ArgumentParser(description="Rewrite em-dash clauses in Markdown or academic paragraphs using OpenAI.")
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("-f", "--file", type=str, help="Path to a .qmd file.")
-    group.add_argument("-d", "--directory", type=str, help="Path to a directory of .qmd files.")
+    group.add_argument("-f", "--file", type=str, help="Path to a specific .qmd file.")
+    group.add_argument("-d", "--directory", type=str, help="Path to directory of .qmd files.")
     parser.add_argument("--mode", type=str, choices=["interactive", "batch"], default="batch", help="Rewrite mode.")
-    parser.add_argument("--batch-size", type=int, default=5, help="Batch size (currently unused).")
+    parser.add_argument("--batch-size", type=int, default=5, help="Batch size (for future use).")
     args = parser.parse_args()
 
     if args.file:
