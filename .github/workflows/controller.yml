@@ -1,51 +1,49 @@
 name: '🎮 Controller'
 
 on:
-  workflow_dispatch:  # Manual trigger
+  workflow_dispatch:  # 🚦 Manual trigger
   push:
     branches: [main, dev]
   pull_request:
     branches: [main, dev]
-    
+
 jobs:
   checkout:
+    name: 📥 Checkout Code
     runs-on: ubuntu-latest
     steps:
-      - name: 📥 Checkout repository
+      - name: 📦 Clone Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Fetch full history for changelog
+          fetch-depth: 0  # 📚 Full history for changelog
 
-  # Quality Check Jobs (Run on all events)
   structure-check:
+    name: 🧱 Structure Check
     needs: checkout
     uses: ./.github/workflows/structure-check.yml
 
   link-check:
+    name: 🔗 Link Check
     needs: checkout
     uses: ./.github/workflows/link-check.yml
 
   lint-markdown:
+    name: 🧹 Markdown Lint
     needs: checkout
     uses: ./.github/workflows/lint-markdown.yml
 
-  # Metadata Update Jobs (Run Only After Merge to branches, not on PRs)
-  update-changelog:
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    needs: [structure-check, link-check, lint-markdown]
-    uses: ./.github/workflows/update-changelog.yml
-
   update-contributors:
+    name: 👥 Update Contributors
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     needs: [structure-check, link-check, lint-markdown]
     uses: ./.github/workflows/update-contributors.yml
-          
-  # Build Jobs (Only run on pushes to branches, not on PRs)
+
   build-dev:
-    name: 🔧 Development Build
+    name: 🧪 Build
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/dev'
-    needs: [update-changelog, update-contributors]
+    needs: [update-contributors]
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
         format: [html, pdf]
@@ -60,10 +58,11 @@ jobs:
       SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
 
   build-main:
-    name: 🚀 Production Build
+    name: 🚀 Build Production Release
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
-    needs: [update-changelog, update-contributors]
+    needs: [update-contributors]
     strategy:
+      fail-fast: false
       matrix:
         format: [html, pdf]
     uses: ./.github/workflows/quarto-build.yml
@@ -77,88 +76,51 @@ jobs:
       SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
 
   report-status:
+    name: 📊 Final Status Report
     needs: [
       structure-check, 
       link-check, 
       lint-markdown,
-      update-changelog,
       update-contributors,
       build-dev,
       build-main
     ]
     runs-on: ubuntu-latest
     steps:
-      - name: 📊 Create Status Report
+      - name: 📋 Generate Report Summary
         shell: bash
         run: |
-          {
-            echo "# 📊 Workflow Status Report"
-            echo
-            echo "## 🔍 Quality Checks"
-            echo "- Structure Check: ${{ needs.structure-check.result == 'success' && '✅ Passed' || '❌ Failed' }}"
-            echo "- Link Check: ${{ needs.link-check.result == 'success' && '✅ Passed' || '❌ Failed' }}"
-            echo "- Markdown Lint: ${{ needs.lint-markdown.result == 'success' && '✅ Passed' || '❌ Failed' }}"
-            echo
-            
-            # Check for metadata update jobs (may not run on PRs)
-            if [[ "${{ contains(needs.*.result, 'update-changelog.result') }}" == "true" ]]; then
-              echo "## 📝 Metadata Updates"
-              echo "- Changelog: ${{ needs.update-changelog.result == 'success' && '✅ Updated' || needs.update-changelog.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }}"
-              echo "- Contributors: ${{ needs.update-contributors.result == 'success' && '✅ Updated' || needs.update-contributors.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }}"
-              echo
-            fi
-            
-            # Check for PR validation (only runs on PRs)
-            if [[ "${{ contains(needs.*.result, 'validate-build.result') }}" == "true" ]]; then
-              echo "## 🧪 PR Validation"
-              echo "- Build Check: ${{ needs.validate-build.result == 'success' && '✅ Passed' || needs.validate-build.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }}"
-              echo
-            fi
-            
-            # Check for dev builds
-            if [[ "${{ contains(needs.*.result, 'build-dev.result') }}" == "true" ]]; then
-              echo "## 🔧 Development Build"
-              echo "- Full Dev Build: ${{ needs.build-dev.result == 'success' && '✅ Success' || needs.build-dev.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }}"
-              echo
-            fi
-            
-            # Check for production builds
-            if [[ "${{ contains(needs.*.result, 'build-main.result') }}" == "true" ]]; then
-              echo "## 🚀 Production Build"
-              echo "- Main Build: ${{ needs.build-main.result == 'success' && '✅ Success' || needs.build-main.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }}"
-              echo
-            fi
-            
-            echo "---"
-            echo "⏰ Completed at: $(date '+%Y-%m-%d %H:%M:%S')"
-          } >> $GITHUB_STEP_SUMMARY
-          
-          # Check overall status
+          echo "# 📊 Workflow Status Report" >> $GITHUB_STEP_SUMMARY
+          echo >> $GITHUB_STEP_SUMMARY
+          echo "## 🔍 Quality Checks" >> $GITHUB_STEP_SUMMARY
+          echo "- Structure Check: ${{ needs.structure-check.result == 'success' && '✅ Passed' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Link Check: ${{ needs.link-check.result == 'success' && '✅ Passed' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Markdown Lint: ${{ needs.lint-markdown.result == 'success' && '✅ Passed' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
+          echo >> $GITHUB_STEP_SUMMARY
+
+          echo "## 🧪 Development Build" >> $GITHUB_STEP_SUMMARY
+          echo "- Status: ${{ needs.build-dev.result == 'success' && '✅ Success' || needs.build-dev.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
+          echo >> $GITHUB_STEP_SUMMARY
+
+          echo "## 🚀 Production Build" >> $GITHUB_STEP_SUMMARY
+          echo "- Status: ${{ needs.build-main.result == 'success' && '✅ Success' || needs.build-main.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
+          echo >> $GITHUB_STEP_SUMMARY
+
+          echo "## 📝 Metadata Updates" >> $GITHUB_STEP_SUMMARY
+          echo "- Contributors: ${{ needs.update-contributors.result == 'success' && '✅ Updated' || needs.update-contributors.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
+          echo >> $GITHUB_STEP_SUMMARY
+
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "⏰ Completed at: $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_STEP_SUMMARY
+
           FAILED=0
           [[ "${{ needs.structure-check.result }}" != "success" ]] && FAILED=1
           [[ "${{ needs.link-check.result }}" != "success" ]] && FAILED=1
           [[ "${{ needs.lint-markdown.result }}" != "success" ]] && FAILED=1
-          
-          if [[ "${{ contains(needs.*.result, 'update-changelog.result') }}" == "true" && "${{ needs.update-changelog.result }}" != "skipped" ]]; then
-            [[ "${{ needs.update-changelog.result }}" != "success" ]] && FAILED=1
-          fi
-          
-          if [[ "${{ contains(needs.*.result, 'update-contributors.result') }}" == "true" && "${{ needs.update-contributors.result }}" != "skipped" ]]; then
-            [[ "${{ needs.update-contributors.result }}" != "success" ]] && FAILED=1
-          fi
-          
-          if [[ "${{ contains(needs.*.result, 'validate-build.result') }}" == "true" && "${{ needs.validate-build.result }}" != "skipped" ]]; then
-            [[ "${{ needs.validate-build.result }}" != "success" ]] && FAILED=1
-          fi
-          
-          if [[ "${{ contains(needs.*.result, 'build-dev.result') }}" == "true" && "${{ needs.build-dev.result }}" != "skipped" ]]; then
-            [[ "${{ needs.build-dev.result }}" != "success" ]] && FAILED=1
-          fi
-          
-          if [[ "${{ contains(needs.*.result, 'build-main.result') }}" == "true" && "${{ needs.build-main.result }}" != "skipped" ]]; then
-            [[ "${{ needs.build-main.result }}" != "success" ]] && FAILED=1
-          fi
-          
+          [[ "${{ needs.update-contributors.result }}" != "success" && "${{ needs.update-contributors.result }}" != "skipped" ]] && FAILED=1
+          [[ "${{ needs.build-dev.result }}" != "success" && "${{ needs.build-dev.result }}" != "skipped" ]] && FAILED=1
+          [[ "${{ needs.build-main.result }}" != "success" && "${{ needs.build-main.result }}" != "skipped" ]] && FAILED=1
+
           if [[ $FAILED -eq 1 ]]; then
             echo "::error::❌ One or more workflow steps failed"
             exit 1
