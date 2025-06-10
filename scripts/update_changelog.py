@@ -66,6 +66,16 @@ chapter_lookup = [
     ("contents/labs/raspi/object_detection/object_detection.qmd", "Pi Object Detection", 114),
     ("contents/labs/raspi/llm/llm.qmd", "Pi Large Language Models", 115),
     ("contents/labs/raspi/vlm/vlm.qmd", "Pi Vision Language Models", 116),
+    
+    # Frontmatter
+    ("contents/frontmatter/foreword.qmd", "Foreword", 200),
+    ("contents/frontmatter/about/about.qmd", "About", 201),
+    ("contents/frontmatter/changelog/changelog.qmd", "Changelog", 202),
+    ("contents/frontmatter/acknowledgements/acknowledgements.qmd", "Acknowledgements", 203),
+    ("contents/frontmatter/ai/socratiq.qmd", "SocraticAI", 204),
+    
+    # Appendix
+    ("contents/appendix/phd_survival_guide.qmd", "PhD Survival Guide", 300),
 ]
 
 def load_chapter_order():
@@ -128,10 +138,12 @@ def extract_chapter_title(file_path):
         if fname == file_path:
             if number <= 20:
                 return f"Chapter {number}: {title}"
-            elif number <= 100:
+            elif number <= 199:
                 return f"Lab: {title}"
+            elif number <= 299:
+                return title  # Frontmatter - just use title
             else:
-                return f"Lab: {title}"
+                return title  # Appendix - just use title
     
     # Fallback: try basename matching for backwards compatibility
     base = os.path.basename(file_path)
@@ -139,14 +151,22 @@ def extract_chapter_title(file_path):
         if os.path.basename(fname) == base:
             if number <= 20:
                 return f"Chapter {number}: {title}"
-            else:
+            elif number <= 199:
                 return f"Lab: {title}"
+            elif number <= 299:
+                return title
+            else:
+                return title
     
     # Final fallback: generate from path
     if "contents/core/" in file_path:
         return f"Chapter: {base.replace('_', ' ').replace('.qmd', '').title()}"
     elif "contents/labs/" in file_path:
         return f"Lab: {base.replace('_', ' ').replace('.qmd', '').title()}"
+    elif "contents/frontmatter/" in file_path:
+        return base.replace('_', ' ').replace('.qmd', '').title()
+    elif "contents/appendix/" in file_path:
+        return base.replace('_', ' ').replace('.qmd', '').title()
     else:
         return base.replace('_', ' ').replace('.qmd', '').title()
 
@@ -233,7 +253,7 @@ def format_friendly_date(date_str):
 def normalized_path(path):
     return os.path.normpath(path).lower()
 
-def generate_entry(start_date, end_date=None, verbose=False):
+def generate_entry(start_date, end_date=None, verbose=False, is_latest=False):
     if verbose:
         print(f"📁 Processing changes from {start_date} to {end_date or 'now'}")
     changes = get_changes_in_dev_since(start_date, end_date, verbose=verbose)
@@ -254,7 +274,7 @@ def generate_entry(start_date, end_date=None, verbose=False):
     current_date = datetime.now().strftime('%b %d, %Y') if not end_date else format_friendly_date(end_date)
     entry = f"### 📅 Published on {current_date}\n\n"
 
-    chapters, labs = [], []
+    frontmatter, chapters, labs, appendix = [], [], [], []
 
     ordered_files = sorted(
         changes_by_file,
@@ -270,19 +290,36 @@ def generate_entry(start_date, end_date=None, verbose=False):
         total = added + removed
         if verbose:
             print(f"🔍 Summarizing {file_path} ({added}+ / {removed}-) [{idx}/{total_files}]")
+        
+        # Skip references
+        if "references.qmd" in file_path:
+            continue
+            
         commit_msgs = get_commit_messages_for_file(file_path, start_date, end_date, verbose=verbose)
         summary = summarize_changes_with_openai(file_path, commit_msgs, verbose=verbose)
         
-        # Categorize by content type instead of size
-        if "contents/labs/" in file_path:
+        # Categorize by content type
+        if "contents/frontmatter/" in file_path:
+            frontmatter.append(summary)
+        elif "contents/labs/" in file_path:
             labs.append(summary)
+        elif "contents/appendix/" in file_path:
+            appendix.append(summary)
         else:
             chapters.append(summary)
 
+    # Determine if sections should be open or closed
+    details_state = "open" if is_latest else ""
+
+    # Add sections in order: Frontmatter, Chapters, Labs, Appendix
+    if frontmatter:
+        entry += f"<details {details_state}>\n<summary>**📄 Frontmatter**</summary>\n\n" + "\n".join(sort_by_chapter_order(frontmatter)) + "\n\n</details>\n\n"
     if chapters:
-        entry += "<details open>\n<summary>**📖 Chapter Updates**</summary>\n\n" + "\n".join(sort_by_chapter_order(chapters)) + "\n\n</details>\n\n"
+        entry += f"<details {details_state}>\n<summary>**📖 Chapters**</summary>\n\n" + "\n".join(sort_by_chapter_order(chapters)) + "\n\n</details>\n\n"
     if labs:
-        entry += "<details open>\n<summary>**🧑‍💻 Lab Updates**</summary>\n\n" + "\n".join(sort_by_chapter_order(labs)) + "\n\n</details>\n"
+        entry += f"<details {details_state}>\n<summary>**🧑‍💻 Labs**</summary>\n\n" + "\n".join(sort_by_chapter_order(labs)) + "\n\n</details>\n\n"
+    if appendix:
+        entry += f"<details {details_state}>\n<summary>**📚 Appendix**</summary>\n\n" + "\n".join(sort_by_chapter_order(appendix)) + "\n\n</details>\n"
 
     return entry
 
@@ -357,7 +394,7 @@ def generate_changelog(mode="incremental", verbose=False):
             pub_year = extract_year_from_date(current_date)
             
             print(f"📅 Processing period {i+1}/{len(unique_dates)-1}: {format_friendly_date(previous_date)} → {format_friendly_date(current_date)} [{pub_year}]")
-            entry = generate_entry(previous_date, current_date, verbose=verbose)
+            entry = generate_entry(previous_date, current_date, verbose=verbose, is_latest=(i==0))
             if entry:
                 entries_by_year[pub_year].append(entry)
         
@@ -376,7 +413,7 @@ def generate_changelog(mode="incremental", verbose=False):
     else:
         if verbose:
             print("⚡ Running incremental update...")
-        entry = generate_entry(latest_date, verbose=verbose)
+        entry = generate_entry(latest_date, verbose=verbose, is_latest=True)
         if not entry:
             return "_No updates found._"
         
