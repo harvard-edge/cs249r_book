@@ -1,3 +1,9 @@
+# Book Changelog
+
+This Machine Learning Systems textbook is constantly evolving. This changelog automatically records all updates and improvements, helping you stay informed about what’s new and refined.
+
+## 2025 Changes
+
 ### 📅 Published on Jun 10, 2025
 
 <details open>
@@ -546,11 +552,13 @@
 <summary>**📖 Chapters**</summary>
 
 - **Chapter 4: DNN Architectures**: The "dnn_architectures.qmd" file in the core section has been updated to remove unnecessary commented text and incorporate suggested fixes from user Bravo.
-- **Chapter 20: Conclusion**: The conclusion chapter of the machine learning systems textbook has been updated with suggested fixes from Bravo. --- --- --- ---
+- **Chapter 20: Conclusion**: The conclusion chapter of the machine learning systems textbook has been updated with suggested fixes from Bravo.
 - **Chapter: Generative Ai**: The 'Generative AI' chapter in the machine learning systems textbook has been updated to remove unnecessary commented text.
 
 </details>
 ---
+
+## 2024 Changes
 
 ### 📅 Published on Nov 19, 2024
 
@@ -1262,7 +1270,7 @@
 <details >
 <summary>**🧑‍💻 Labs**</summary>
 
-- **Niclav Sys**: The updates to the 'niclav_sys.qmd' file include corrections to the links and the addition of (Non-) ASCII checker scripts, along with associated fixes. --- --- ---
+- **Niclav Sys**: The updates to the 'niclav_sys.qmd' file include corrections to the links and the addition of (Non-) ASCII checker scripts, along with associated fixes.
 
 </details>
 ---
@@ -1278,7 +1286,7 @@
 - **Chapter 13: ML Operations**: The MCU example for smartwatch in the operations chapter has been updated and a new reference citation has been added.
 - **Chapter 14: On-Device Learning**: The updates to the file primarily focused on correcting the rendering of itemised lists in the 'On-Device Learning' chapter.
 - **Chapter 15: Security & Privacy**: The video rendering issue in the Privacy section has been fixed, and improvements have been made to the hyperlinking in the GDPR and CCPA sections of the Security chapter, including added clarity on the CCPA summary.
-- **Chapter 17: Sustainable AI**: The updates to the sustainable AI section of the machine learning systems textbook include the addition of a citation for the OECD blueprint paper. --- --- --- ---
+- **Chapter 17: Sustainable AI**: The updates to the sustainable AI section of the machine learning systems textbook include the addition of a citation for the OECD blueprint paper.
 - **Chapter 19: AI for Good**: The "AI for Good" chapter has been updated to fix video rendering issues and resolve problems with YouTube shortened URLs.
 
 </details>
@@ -1306,6 +1314,8 @@
 
 </details>
 ---
+
+## 2023 Changes
 
 ### 📅 Published on Dec 19, 2023
 
