@@ -12,13 +12,16 @@ client = OpenAI()
 logging.basicConfig(level=logging.INFO)
 
 # === Constants ===
-DASH_PATTERN = re.compile(r'—([^—]+?)—')
+# Updated pattern to catch both em-dashes and triple hyphens
+DASH_PATTERN = re.compile(r'(?:—([^—]+?)—|(\w)---(\w))')
 PARAGRAPH_SPLIT_PATTERN = re.compile(r'\n\s*\n')
 
 # === Prompt Template ===
 PROMPT_TEMPLATE = (
-    "You will receive a paragraph or a Markdown bullet point that contains one or more em-dash clauses (—like this—). "
-    "Your task is to rewrite all em-dash clauses using a more formal structure, such as commas or parentheses. "
+    "You will receive a paragraph or a Markdown bullet point that contains one or more em-dash clauses (—like this—) "
+    "or triple-hyphen constructions (word---word). "
+    "Your task is to rewrite all em-dash clauses and triple-hyphen constructions using a more formal structure, "
+    "such as commas, parentheses, or proper punctuation. "
     "Use the full paragraph or bullet as context. Do not change any other part of the paragraph. "
     "Preserve all Markdown formatting, including:\n"
     "- List bullets (e.g., '- This point')\n"
@@ -27,29 +30,46 @@ PROMPT_TEMPLATE = (
     "- Citations like [@ref]\n"
     "Do not flatten bullets into a single paragraph. Maintain newlines and structure.\n\n"
     "Return a JSON object with three fields:\n"
-    "- 'original_clause': the clause inside the em dashes\n"
+    "- 'original_clause': the clause inside the em dashes or the triple-hyphen construction\n"
     "- 'revised_clause': the rewritten clause\n"
     "- 'revised_paragraph': the full paragraph with only the clause(s) changed\n\n"
     "Examples:\n"
     "Original: These tools—including JAX, PyTorch, and TensorFlow—enable large-scale model training.\n"
     "Return:\n"
-    "{\n"
+    "{{\n"
     "  \"original_clause\": \"including JAX, PyTorch, and TensorFlow\",\n"
     "  \"revised_clause\": \"including JAX, PyTorch, and TensorFlow,\",\n"
     "  \"revised_paragraph\": \"These tools, including JAX, PyTorch, and TensorFlow, enable large-scale model training.\"\n"
-    "}\n\n"
+    "}}\n\n"
+    "Original: The performance---especially in high-demand scenarios---was impressive.\n"
+    "Return:\n"
+    "{{\n"
+    "  \"original_clause\": \"performance---especially in high-demand scenarios---was\",\n"
+    "  \"revised_clause\": \"performance, especially in high-demand scenarios, was\",\n"
+    "  \"revised_paragraph\": \"The performance, especially in high-demand scenarios, was impressive.\"\n"
+    "}}\n\n"
     "Original: - The energy cost of training vs. inference—analyzing how different phases of AI impact sustainability.\n"
     "Return:\n"
-    "{\n"
+    "{{\n"
     "  \"original_clause\": \"analyzing how different phases of AI impact sustainability\",\n"
     "  \"revised_clause\": \"analyzing how different phases of AI impact sustainability,\",\n"
     "  \"revised_paragraph\": \"- The energy cost of training vs. inference, analyzing how different phases of AI impact sustainability.\"\n"
-    "}\n\n"
+    "}}\n\n"
     "Now process this paragraph:\n"
     "\"{}\""
 )
 
 # === Rewrite Logic ===
+
+def has_dash_pattern(text: str) -> bool:
+    """Check if text contains em-dash clauses or triple-hyphen patterns."""
+    # Check for em-dash pattern
+    if re.search(r'—([^—]+?)—', text):
+        return True
+    # Check for triple-hyphen pattern between word characters
+    if re.search(r'\w---\w', text):
+        return True
+    return False
 
 def rewrite_paragraph_json(paragraph: str) -> dict:
     prompt = PROMPT_TEMPLATE.format(paragraph)
@@ -117,7 +137,8 @@ def process_file(file_path, mode="interactive", batch_size=5):
     changed = False
 
     for i, para in enumerate(paragraphs):
-        if not DASH_PATTERN.search(para):
+        # Use the updated function to check for both patterns
+        if not has_dash_pattern(para):
             continue
         result = run_fix_pipeline(para)
         revised = result["revised_paragraph"]
@@ -153,7 +174,7 @@ def process_directory(directory, mode, batch_size):
 # === CLI ===
 
 def main():
-    parser = argparse.ArgumentParser(description="Rewrite em-dash clauses in Markdown or academic paragraphs using OpenAI.")
+    parser = argparse.ArgumentParser(description="Rewrite em-dash clauses and triple-hyphen constructions in Markdown or academic paragraphs using OpenAI.")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("-f", "--file", type=str, help="Path to a specific .qmd file.")
     group.add_argument("-d", "--directory", type=str, help="Path to directory of .qmd files.")
