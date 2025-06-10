@@ -2,18 +2,17 @@
 
 ### 📅 Published on May 14, 2025
 
-<details close>
+<details open>
 <summary>**📖 Chapter Updates**</summary>
 
 - **Chapter 14: On-Device Learning**: The on-device learning content has been refactored and clarified, with updates made to chapter 14.
 
 </details>
-
-
+---
 
 ### 📅 Published on May 04, 2025
 
-<details close>
+<details >
 <summary>**📖 Chapter Updates**</summary>
 
 - **Chapter 1: Introduction**: The introduction chapter of the machine learning systems textbook has been updated.
@@ -37,7 +36,7 @@
 
 </details>
 
-<details close>
+<details >
 <summary>**🧑‍💻 Lab Updates**</summary>
 
 - **Lab: Arduino Setup**: The instructions in the Nicla Setup section of the Arduino lab in the machine learning systems textbook have been updated and clarified.
@@ -61,18 +60,25 @@
 - **Lab: Xiao Esp32S3**: The LABS part 2 section of the seeed xiao esp32s3 chapter has been updated.
 
 </details>
-
+---
 
 ### 📅 Published on Mar 25, 2025
 
-<details close>
-<summary>**📖 Chapter Updates**</summary>
+<details >
+<summary>**📄 Frontmatter**</summary>
 
 - **Foreword**: The foreword section of the machine learning systems textbook has been updated based on feedback from vale testing.
 - **About**: The 'About' section in the frontmatter has been updated based on vale testing results.
 - **Acknowledgements**: The contributors list in the acknowledgements section has been updated.
 - **Socratiq**: The updates to the machine learning systems textbook include the correction of all broken links in the contents/frontmatter/ai/socratiq.qmd file.
-- **Phd Survival Guide**: The "phd_survival_guide.qmd" file in the appendix of the machine learning systems textbook has been updated to fix all broken links.
+- **Chapter: Generative Ai**: The generative AI chapter in the machine learning systems textbook has been initially reviewed and updated.
+- **Chapter: Old Sus Ai**: The 'old_sus_ai.qmd' file in the 'sustainable_ai' section of the core contents has been updated with improvements and the removal of outdated content.
+
+</details>
+
+<details >
+<summary>**📖 Chapter Updates**</summary>
+
 - **Chapter 1: Introduction**: The introduction.qmd file in the core introduction section underwent a review of section headers after an auto-update, a first pass-through for edits, and an update to chapter 1. Additionally, an unfinished sentence was completed.
 - **Chapter 2: ML Systems**: The machine learning systems textbook has been updated with the addition of footnotes, the correction of missing references, and the removal of short section headers in the machine learning systems chapter. Additionally, the second chapter of the book has been updated.
 - **Chapter 3: DL Primer**: The dl_primer chapter was updated with a new definition, footnotes were revised, and the section headers were reviewed after an auto-update.
@@ -93,12 +99,10 @@
 - **Chapter 18: Robust AI**: The updates to the "Robust AI" chapter include an improved purpose and updated learning objectives, along with revisions to the conclusion and footnotes. New text has been added, including an introduction paragraph, a discussion on shifts, and sections on poisoning attacks and transient faults. The attacks section has been updated, and minor tweaks have been made to the detection and mitigation sections. The overview has been improved with an added introduction, and the real-world section has been enhanced. All broken links have been fixed and dead section links removed.
 - **Chapter 19: AI for Good**: The updates to the "AI for Good" chapter include the addition of new definitions, a review and correction of all broken links, and modifications to the footnotes for consistency.
 - **Chapter 20: Conclusion**: The conclusion section of the machine learning systems textbook has been revised and unnecessary sections have been removed in the first pass through.
-- **Chapter: Generative Ai**: The generative AI chapter in the machine learning systems textbook has been initially reviewed and updated.
-- **Chapter: Old Sus Ai**: The 'old_sus_ai.qmd' file in the 'sustainable_ai' section of the core contents has been updated with improvements and the removal of outdated content.
 
 </details>
 
-<details close>
+<details >
 <summary>**🧑‍💻 Lab Updates**</summary>
 
 - **Lab: Arduino Setup**: The setup.qmd file in the Arduino Nicla Vision lab has been updated with all broken links fixed.
@@ -117,15 +121,28 @@
 
 </details>
 
+<details >
+<summary>**📚 Appendix**</summary>
+
+- **Phd Survival Guide**: The "phd_survival_guide.qmd" file in the appendix of the machine learning systems textbook has been updated to fix all broken links.
+
+</details>
+---
 
 ### 📅 Published on Mar 03, 2025
 
-<details close>
-<summary>**📖 Chapter Updates**</summary>
+<details >
+<summary>**📄 Frontmatter**</summary>
 
 - **About**: The update does not contain any meaningful content-level changes such as new sections, rewrites, example additions, or figure changes. It only includes formatting adjustments.
 - **Acknowledgements**: The acknowledgements section has been updated with a revised list of contributors.
 - **Socratiq**: The changelog does not indicate any content-level changes such as new sections, rewrites, example additions, or figure changes. The updates were primarily focused on formatting and linting corrections.
+
+</details>
+
+<details >
+<summary>**📖 Chapter Updates**</summary>
+
 - **Chapter 1: Introduction**: The changelog does not contain any meaningful content-level changes such as new sections, rewrites, example additions, or figure changes. The updates were primarily focused on formatting adjustments and lint fixes.
 - **Chapter 2: ML Systems**: The changelog does not indicate any content-level changes such as new sections, rewrites, example additions, or figure changes. All the updates pertain to formatting and linting fixes.
 - **Chapter 3: DL Primer**: The chapter 3 of the machine learning systems textbook has been updated.
@@ -148,7 +165,7 @@
 
 </details>
 
-<details close>
+<details >
 <summary>**🧑‍💻 Lab Updates**</summary>
 
 - **Lab: Labs Overview**: The changelog does not indicate any content-level changes such as new sections, rewrites, example additions, or figure changes in the machine learning systems textbook. The updates were related to linting fixes and undoing incorrect linting of QMD files.
@@ -162,31 +179,35 @@
 - **Lab: Nicla Vision**: The arduino/nicla_vision LABS section of the machine learning systems textbook has been updated.
 
 </details>
-
+---
 
 ### 📅 Published on Feb 08, 2025
 
-<details close>
-<summary>**📖 Chapter Updates**</summary>
+<details >
+<summary>**📄 Frontmatter**</summary>
 
 - **Acknowledgements**: The acknowledgements section has been updated to include new contributors.
 - **Socratiq**: The socratiq.qmd file in the AI section of the frontmatter contents has been updated with a link to the Socratiq research paper.
 
 </details>
-
-
+---
 
 ### 📅 Published on Feb 07, 2025
 
-<details close>
-<summary>**📖 Chapter Updates**</summary>
+<details >
+<summary>**📄 Frontmatter**</summary>
 
 - **Index**: The precheck has been updated to only run on qmd and bib files in the frontmatter section of the machine learning systems textbook.
 - **About**: The precheck process has been updated to only run on qmd and bib files in the 'About' section.
 - **Changelog**: The changelog for the machine learning systems textbook has been automatically updated multiple times, with significant trimming of the text and an update to include it in the frontmatter.
 - **Acknowledgements**: The acknowledgements section has been updated multiple times to include new contributors to the machine learning systems textbook.
 - **Socratiq**: The precheck has been updated to only run on qmd and bib files in the 'socratiq.qmd' section of the AI chapter.
-- **Phd Survival Guide**: The precheck process has been updated to only run on qmd and bib files in the PhD survival guide appendix.
+
+</details>
+
+<details >
+<summary>**📖 Chapter Updates**</summary>
+
 - **Chapter 1: Introduction**: The introduction chapter has been updated with a summary, and the code has been revised to remove a library in use, now utilizing only _quarto.yml. Additionally, the precheck has been updated to run exclusively on qmd and bib files.
 - **Chapter 2: ML Systems**: The ml_systems.qmd file has been updated with corrections and a precheck has been implemented to only run on qmd and bib files.
 - **Chapter 3: DL Primer**: The precheck has been updated to only run on qmd and bib files in the "Deep Learning Primer" chapter.
@@ -210,7 +231,7 @@
 
 </details>
 
-<details close>
+<details >
 <summary>**🧑‍💻 Lab Updates**</summary>
 
 - **Lab: Labs Overview**: The precheck process has been updated to only run on qmd and bib files in the 'overview' lab of the machine learning systems textbook.
@@ -236,13 +257,26 @@
 
 </details>
 
+<details >
+<summary>**📚 Appendix**</summary>
+
+- **Phd Survival Guide**: The precheck process has been updated to only run on qmd and bib files in the PhD survival guide appendix.
+
+</details>
+---
 
 ### 📅 Published on Feb 02, 2025
 
-<details close>
-<summary>**📖 Chapter Updates**</summary>
+<details >
+<summary>**📄 Frontmatter**</summary>
 
 - **Acknowledgements**: The acknowledgements section has been updated with the addition of new contributors.
+
+</details>
+
+<details >
+<summary>**📖 Chapter Updates**</summary>
+
 - **Chapter 1: Introduction**: The titles of all callout sections in the Introduction chapter have been updated to title block format.
 - **Chapter 2: ML Systems**: The callout titles in the "ML Systems" chapter have been updated to a title block format.
 - **Chapter 3: DL Primer**: The callout titles in the "Deep Learning Primer" chapter have been updated to the title block format.
@@ -264,16 +298,21 @@
 - **Chapter 19: AI for Good**: The titles of all callouts in the "AI for Good" chapter have been updated to the title block format.
 
 </details>
-
-
+---
 
 ### 📅 Published on Jan 28, 2025
 
-<details close>
-<summary>**📖 Chapter Updates**</summary>
+<details >
+<summary>**📄 Frontmatter**</summary>
 
 - **Acknowledgements**: The acknowledgements section has been updated multiple times to include new contributors, and logos have been added.
-- **Phd Survival Guide**: The appendix file "phd_survival_guide.qmd" has been updated with additional favorite resources and an updated link.
+- **Painting Pots**: The appendix section of the machine learning systems textbook has been updated with new examples and figures in the 'painting_pots.qmd' file, along with significant rewrites for improved clarity and understanding.
+
+</details>
+
+<details >
+<summary>**📖 Chapter Updates**</summary>
+
 - **Chapter 1: Introduction**: The redundant case study in the Introduction section of the core content has been removed.
 - **Chapter 2: ML Systems**: The ml_systems.qmd file has been updated with the addition of some radar plots.
 - **Chapter 4: DNN Architectures**: The dnn_architectures.qmd file in the core section has been updated with modifications based on Bravo's recommendations and some wording adjustments.
@@ -285,11 +324,10 @@
 - **Chapter 10: Model Optimizations**: The "Optimizations" chapter in the machine learning systems textbook has been updated to remove dead references.
 - **Chapter 11: AI Acceleration**: The "Hardware Acceleration" section in the machine learning systems textbook has been updated to remove certain references.
 - **Chapter 19: AI for Good**: The "AI for Good" chapter has been updated with new learning objectives, additional references, and spotlight use cases. It also includes added multimedia content such as videos and images, alongside text modifications for clarity and improvement.
-- **Painting Pots**: The appendix section of the machine learning systems textbook has been updated with new examples and figures in the 'painting_pots.qmd' file, along with significant rewrites for improved clarity and understanding.
 
 </details>
 
-<details close>
+<details >
 <summary>**🧑‍💻 Lab Updates**</summary>
 
 - **Lab: Pi Image Classification**: The image_classification.qmd file in the Raspberry Pi labs section has been updated with new content, including potential rewrites, additional examples, and changes to figures related to image classification.
@@ -297,15 +335,28 @@
 
 </details>
 
+<details >
+<summary>**📚 Appendix**</summary>
+
+- **Phd Survival Guide**: The appendix file "phd_survival_guide.qmd" has been updated with additional favorite resources and an updated link.
+
+</details>
+---
 
 ### 📅 Published on Jan 17, 2025
 
-<details close>
-<summary>**📖 Chapter Updates**</summary>
+<details >
+<summary>**📄 Frontmatter**</summary>
 
 - **About**: The 'About' section has been updated with new content, including additional examples, revisions of existing sections, and modifications to figures for improved clarity and understanding.
 - **Acknowledgements**: The acknowledgements section has been updated with the addition of new contributors.
 - **Socratiq**: Without specific details from the commit messages, it's impossible to provide a summary of the content-level changes in the file contents/frontmatter/ai/socratiq.qmd. Please provide detailed commit messages.
+
+</details>
+
+<details >
+<summary>**📖 Chapter Updates**</summary>
+
 - **Chapter 1: Introduction**: The introduction chapter has been updated to address Bravo's feedback.
 - **Chapter 2: ML Systems**: The ml_systems.qmd file was updated to fix issues that arose from a previous merge, with no specific content-level changes like new sections, rewrites, example additions, or figure changes mentioned.
 - **Chapter 3: DL Primer**: Without specific commit messages detailing the changes made to the file, it's impossible to provide a summary of content-level changes such as new sections, rewrites, example additions, or figure changes. Please provide detailed commit messages.
@@ -316,53 +367,69 @@
 
 </details>
 
-<details close>
+<details >
 <summary>**🧑‍💻 Lab Updates**</summary>
 
 - **Lab: Pi Large Language Models**: The lab content in the Raspberry Pi section of the machine learning systems textbook has been updated to correct copyediting leftovers.
 - **Lab: Pi Vision Language Models**: The vlm.qmd file in the raspi lab section of the machine learning systems textbook has been updated with meaningful content-level changes.
 
 </details>
-
+---
 
 ### 📅 Published on Jan 12, 2025
 
-<details close>
-<summary>**📖 Chapter Updates**</summary>
+<details >
+<summary>**📄 Frontmatter**</summary>
 
 - **Acknowledgements**: The acknowledgements section has been updated to include new contributors to the project.
+
+</details>
+
+<details >
+<summary>**📖 Chapter Updates**</summary>
+
 - **Chapter 1: Introduction**: The introduction section has undergone adjustments in the section headers and resolved a broken merge issue.
 - **Chapter 2: ML Systems**: The updates to the machine learning systems textbook include the addition of a definition for hybrid ML, a new decision playbook framework, and updated definitions for each section. There's also a new analogy related to tectonics introduced.
 - **Chapter 5: AI Workflow**: The workflow chapter in the machine learning systems textbook has been updated with Zishen's fixes and unnecessary grammar fix requests have been removed.
 - **Chapter 6: Data Engineering**: The data engineering chapter has been updated with a new data labeling section, several fixes from Zishen and Bravo, and a replacement of a previously locked figure which had caused build issues.
 
 </details>
-
-
+---
 
 ### 📅 Published on Jan 11, 2025
 
-<details close>
-<summary>**📖 Chapter Updates**</summary>
+<details >
+<summary>**📄 Frontmatter**</summary>
 
 - **About**: The "about.qmd" section of the machine learning systems textbook has been edited.
 - **Acknowledgements**: The acknowledgements section has been updated to include new contributors.
 - **Socratiq**: The socratiq.qmd file in the AI section of the frontmatter has been edited.
+
+</details>
+
+<details >
+<summary>**📖 Chapter Updates**</summary>
+
 - **Chapter 1: Introduction**: The introduction.qmd file in the core introduction section has been updated with added footnotes.
 - **Chapter 2: ML Systems**: The core ML systems chapter has been updated with the addition of a decision playbook framework, updated definitions, and each section now includes specific definitions. A tectonic analogy has also been incorporated.
 - **Chapter 5: AI Workflow**: The workflow chapter in the machine learning systems textbook has been updated to improve the clarity of the content by removing unnecessary grammar fix requests.
 - **Chapter 6: Data Engineering**: The data engineering chapter has been updated with improvements and tweaks, including the addition of references. Specific updates were made to the sections on synthetic data, crowdsourcing, web scraping, and problem definition. The overview section also received minor updates.
 
 </details>
-
-
+---
 
 ### 📅 Published on Jan 09, 2025
 
-<details close>
-<summary>**📖 Chapter Updates**</summary>
+<details >
+<summary>**📄 Frontmatter**</summary>
 
 - **Acknowledgements**: The acknowledgements section has been updated to include new contributors.
+
+</details>
+
+<details >
+<summary>**📖 Chapter Updates**</summary>
+
 - **Chapter 1: Introduction**: The introduction.qmd file in the core/introduction section of the machine learning systems textbook has been updated based on Marco's feedback.
 - **Chapter 5: AI Workflow**: The workflow chapter in the machine learning systems textbook has been updated to address and fix feedback from Bravo.
 - **Chapter 6: Data Engineering**: The data_engineering.qmd file in the core content of the machine learning systems textbook has been updated to improve the grammar and clarity of the content.
@@ -372,31 +439,41 @@
 - **Chapter 16: Responsible AI**: The responsible AI section of the core contents has been updated to address and incorporate Bravo's feedback.
 
 </details>
-
-
+---
 
 ### 📅 Published on Jan 07, 2025
 
-<details close>
-<summary>**📖 Chapter Updates**</summary>
+<details >
+<summary>**📄 Frontmatter**</summary>
 
 - **Foreword**: The foreword of the machine learning systems textbook has been updated with modifications in the wording.
 - **Acknowledgements**: The acknowledgements section has been updated to include new contributors.
+
+</details>
+
+<details >
+<summary>**📖 Chapter Updates**</summary>
+
 - **Chapter 1: Introduction**: The introduction section has been updated to clarify the distinction between Artificial Intelligence and Machine Learning.
 - **Chapter 3: DL Primer**: The dl_primer.qmd file in the core section was updated with new images and code to better explain the training loop and inference process, including the addition of code snapshots for sections 3.5 and 3.6. The caption for a figure was also updated.
 - **Chapter 4: DNN Architectures**: The "DNN Architectures" section of the Machine Learning Systems textbook has been updated with new images and added visualization figures and tools as per Zishen's recommendation in Chapter 4.
 
 </details>
-
-
+---
 
 ### 📅 Published on Jan 03, 2025
 
-<details close>
-<summary>**📖 Chapter Updates**</summary>
+<details >
+<summary>**📄 Frontmatter**</summary>
 
 - **Acknowledgements**: The acknowledgements section has been updated to include new contributors.
 - **Socratiq**: The 'socratiq.qmd' file in the AI section of the frontmatter has been updated with fixes addressing content-level changes.
+
+</details>
+
+<details >
+<summary>**📖 Chapter Updates**</summary>
+
 - **Chapter 1: Introduction**: The introduction chapter of the machine learning systems textbook has been updated with fixes to content-level issues.
 - **Chapter 2: ML Systems**: The ML Systems chapter in the machine learning systems textbook has been updated with fixes to content, including corrections and improvements to sections, examples, and figures.
 - **Chapter 4: DNN Architectures**: The "DNN Architectures" chapter in the machine learning systems textbook has been updated with fixes to the content.
@@ -404,27 +481,31 @@
 - **Chapter 20: Conclusion**: The conclusion chapter of the machine learning systems textbook has been updated with fixes.
 
 </details>
-
-
+---
 
 ### 📅 Published on Jan 02, 2025
 
-<details close>
-<summary>**📖 Chapter Updates**</summary>
+<details >
+<summary>**📄 Frontmatter**</summary>
 
 - **Acknowledgements**: The acknowledgements section has been updated to include new contributors.
-- **Chapter 4: DNN Architectures**: The "dnn_architectures.qmd" file in the core section has been updated to remove unnecessary commented text and incorporate suggested fixes from user Bravo.
-- **Chapter 20: Conclusion**: The conclusion chapter of the machine learning systems textbook has been updated with suggested fixes from Bravo.
 - **Chapter: Generative Ai**: The 'Generative AI' chapter in the machine learning systems textbook has been updated to remove unnecessary commented text.
 
 </details>
 
+<details >
+<summary>**📖 Chapter Updates**</summary>
 
+- **Chapter 4: DNN Architectures**: The "dnn_architectures.qmd" file in the core section has been updated to remove unnecessary commented text and incorporate suggested fixes from user Bravo.
+- **Chapter 20: Conclusion**: The conclusion chapter of the machine learning systems textbook has been updated with suggested fixes from Bravo.
+
+</details>
+---
 
 ### 📅 Published on Jan 01, 2025
 
-<details close>
-<summary>**📖 Chapter Updates**</summary>
+<details >
+<summary>**📄 Frontmatter**</summary>
 
 - **Index**: The abstract in the frontmatter of the machine learning systems textbook has been updated.
 - **Foreword**: The foreword of the machine learning systems textbook has been substantially updated and reorganized with additional thoughts and improvements in the flow of content.
@@ -434,6 +515,23 @@
 - **Socratiq**: The content in the 'socratiq.qmd' file has been reorganized.
 - **Socratiq**: The "socratiq.qmd" file in the AI section has been moved to the frontmatter directory, indicating a possible reorganization of the textbook's content structure.
 - **Socratiq**: The updates to the machine learning systems textbook include a reorganization of content, fixing of broken links, resolving an issue identified by Bravo, incorporating Bravo's feedback, minor text updates, and the addition of an AI podcast.
+- **Chapter: References**: The references section in the core content of the machine learning systems textbook has been reorganized.
+- **Chapter: About**: The "About" section of the machine learning systems textbook has been reorganized and updated with the addition of Bloom's taxonomy. The book's outline has also been revised, and updates have been made to the new Chapter 4, including some fixes.
+- **Chapter: Dnn Architectures}**: The file has been renamed and possibly moved from "dl_architectures" to "dnn_architectures", indicating a shift in focus from deep learning architectures in general to deep neural network architectures specifically.
+- **Chapter: Dl Architectures**: The chapter on deep learning architectures has been rewritten with a focus on machine learning systems, the purpose of the chapter has been updated twice, a new cover image has been added, learning objectives have been fixed and Colabs have been added, and the bibliography name has been corrected. The file structure has also been reorganized.
+- **Chapter: Acknowledgements**: The acknowledgements section has been significantly updated with the addition of new contributors, and the readme file has been revised multiple times. Additionally, logos have been added, and there was a reorganization of some content.
+- **Chapter: Dl Primer}**: The Artificial Neural Networks primer has been renamed and updated to a Deep Learning primer, reflecting a broader and more in-depth coverage of the topic.
+- **Chapter: Ann Primer**: The Artificial Neural Networks Primer chapter has been updated with new sections, additional examples, and changes to figures to enhance understanding of the topic.
+- **Chapter: Ann Primer}**: The file has been renamed from "nn_primer" to "ann_primer" indicating a possible shift in focus from neural networks to artificial neural networks.
+- **Chapter: Nn Primer**: The core content of the 'nn_primer.qmd' file has been updated to include new sections on neural network basics, a comprehensive rewrite of the backpropagation explanation, the addition of practical examples for better understanding, and modifications in figures for improved visual representation.
+- **Chapter: Nn Primer}**: The file has been relocated and renamed from "dl_primer/dl_primer_new.qmd" to "nn_primer/nn_primer.qmd".
+- **Chapter: Dl Primer New**: The Deep Learning Primer chapter has been updated with new sections on advanced concepts, rewrites of existing content for clarity, additions of practical examples, and changes in figures for better understanding.
+
+</details>
+
+<details >
+<summary>**📖 Chapter Updates**</summary>
+
 - **Chapter 1: Introduction**: The introduction.qmd file in the core introduction section of the machine learning systems textbook has been updated with adjustments to the file path and incorporation of feedback from Bravo.
 - **Chapter 2: ML Systems**: The machine learning systems textbook has been updated with improvements to Chapter 2, including the addition of system aspects. The flow of content has been enhanced and a duplicate section has been removed. The Mobile ML section has been updated and a Hybrid section has been added. An example system has been included to provide a practical perspective. The text in the figure has been better connected and the location of the figure and its caption have been updated.
 - **Chapter 3: DL Primer**: The DL Primer chapter was reviewed and updated with a refined purpose, and the file structure was reorganized. The title was also restored due to its link with giscus comments.
@@ -454,56 +552,56 @@
 - **Chapter 18: Robust AI**: The robust AI chapter has been significantly updated with a smoother transition between TMR, DMR, and hot spares, a clearer explanation of gradient norm and a more focused discussion on BNN. The introduction to faults has been reframed, and the examples have been narrowed down to focus specifically on ML faults. A new figure has been added for better alignment with the text, and an image of a Jeff Dean slide has been replaced with a recreated image. A duplicate section from chapter 14 has been removed, and the purpose of the chapter has been updated. Some bullet points and images that were out of place or sounded similar have been revised or removed, and distracting information has been eliminated, with the SDC example now more closely related to ML.
 - **Chapter 19: AI for Good**: The "AI for Good" chapter has been updated with a revised purpose.
 - **Chapter 20: Conclusion**: The conclusion chapter has been updated with some adjustments to the wording and a new reference to chapter 4.
-- **Chapter: References**: The references section in the core content of the machine learning systems textbook has been reorganized.
-- **Chapter: About**: The "About" section of the machine learning systems textbook has been reorganized and updated with the addition of Bloom's taxonomy. The book's outline has also been revised, and updates have been made to the new Chapter 4, including some fixes.
-- **Chapter: Dnn Architectures}**: The file has been renamed and possibly moved from "dl_architectures" to "dnn_architectures", indicating a shift in focus from deep learning architectures in general to deep neural network architectures specifically.
-- **Chapter: Dl Architectures**: The chapter on deep learning architectures has been rewritten with a focus on machine learning systems, the purpose of the chapter has been updated twice, a new cover image has been added, learning objectives have been fixed and Colabs have been added, and the bibliography name has been corrected. The file structure has also been reorganized.
-- **Chapter: Acknowledgements**: The acknowledgements section has been significantly updated with the addition of new contributors, and the readme file has been revised multiple times. Additionally, logos have been added, and there was a reorganization of some content.
 - **Chapter 3: DL Primer**: This update includes a new section on deep learning primers, additional examples for better understanding, and changes to figures in the artificial neural networks primer chapter of the machine learning systems textbook.
-- **Chapter: Dl Primer}**: The Artificial Neural Networks primer has been renamed and updated to a Deep Learning primer, reflecting a broader and more in-depth coverage of the topic.
-- **Chapter: Ann Primer**: The Artificial Neural Networks Primer chapter has been updated with new sections, additional examples, and changes to figures to enhance understanding of the topic.
-- **Chapter: Ann Primer}**: The file has been renamed from "nn_primer" to "ann_primer" indicating a possible shift in focus from neural networks to artificial neural networks.
 - **Chapter 3: DL Primer**: The "Neural Networks Primer" has been renamed to "Artificial Neural Networks Primer" and updated with new examples, rewrites, and figure changes for improved understanding.
-- **Chapter: Nn Primer**: The core content of the 'nn_primer.qmd' file has been updated to include new sections on neural network basics, a comprehensive rewrite of the backpropagation explanation, the addition of practical examples for better understanding, and modifications in figures for improved visual representation.
 - **Chapter 3: DL Primer**: The machine learning systems textbook has been updated with additional examples in the neural networks primer section, a comprehensive rewrite of the deep learning primer, and changes to several figures for better clarity and understanding.
-- **Chapter: Nn Primer}**: The file has been relocated and renamed from "dl_primer/dl_primer_new.qmd" to "nn_primer/nn_primer.qmd".
-- **Chapter: Dl Primer New**: The Deep Learning Primer chapter has been updated with new sections on advanced concepts, rewrites of existing content for clarity, additions of practical examples, and changes in figures for better understanding.
 
 </details>
 
-<details close>
+<details >
 <summary>**🧑‍💻 Lab Updates**</summary>
 
 - **Lab: Labs Overview**: The VLM has been added to the main table in the 'overview.qmd' section of the labs in the machine learning systems textbook.
 - **Lab: Pi Vision Language Models**: A new lab on Variable Length Markov Models (VLMs) has been added to the Raspberry Pi section of the textbook.
-- **Lab: Raspi**: A new lab titled "vlm" has been included in the contents/labs/raspi/raspi.qmd file.
+- **Lab: Raspi**: A new lab titled "vlm" has been included in the contents/labs/raspi/raspi.qmd file. ---
 
 </details>
-
-
 ---
 
 ## 2024 Changes
 
 ### 📅 Published on Nov 19, 2024
 
-<details close>
-<summary>**📖 Chapter Updates**</summary>
+<details >
+<summary>**📄 Frontmatter**</summary>
 
 - **Socratiq**: The updated machine learning systems textbook now includes an AI podcast, a blog on updated widget suggestions, support for .png format for gif images in the PDF build, and a new toggle button switch feature. There have also been changes to the text, relocation of button text, and the 'widget_access' has been renamed to 'socratiq'.
-- **Chapter 15: Security & Privacy**: The privacy and security chapter in the machine learning systems textbook has been updated with a new section on machine unlearning, a reordered table for improved readability, and a new federated case study replacing a previously discussed one. The explanations of power consumption attacks have been clarified with the help of revised figures. The introduction of the section has been made less academic, and the explanations throughout the chapter are now less repetitive and clearer. Definitions have been grouped for better understanding, and case studies have been renamed for consistency.
-- **Chapter 16: Responsible AI**: The updates to the responsible_ai.qmd file include a revised figure placement, a summary of policies listed in the chapter, and a clarification of the figure explanation.
-- **Chapter 17: Sustainable AI**: The updates to the Sustainable AI chapter include the addition of a new water footprint image, a new Life Cycle Assessment (LCA) figure, and the removal of a repeated statement.
-- **Chapter 19: AI for Good**: The section on AI for Good has been updated to include a motivation for using TinyML.
 - **Chapter: Acknowledgements**: The acknowledgements section has been updated multiple times to include new contributors to the textbook.
 
 </details>
 
+<details >
+<summary>**📖 Chapter Updates**</summary>
 
+- **Chapter 15: Security & Privacy**: The privacy and security chapter in the machine learning systems textbook has been updated with a new section on machine unlearning, a reordered table for improved readability, and a new federated case study replacing a previously discussed one. The explanations of power consumption attacks have been clarified with the help of revised figures. The introduction of the section has been made less academic, and the explanations throughout the chapter are now less repetitive and clearer. Definitions have been grouped for better understanding, and case studies have been renamed for consistency.
+- **Chapter 16: Responsible AI**: The updates to the responsible_ai.qmd file include a revised figure placement, a summary of policies listed in the chapter, and a clarification of the figure explanation.
+- **Chapter 17: Sustainable AI**: The updates to the Sustainable AI chapter include the addition of a new water footprint image, a new Life Cycle Assessment (LCA) figure, and the removal of a repeated statement.
+- **Chapter 19: AI for Good**: The section on AI for Good has been updated to include a motivation for using TinyML.
+
+</details>
+---
 
 ### 📅 Published on Nov 16, 2024
 
-<details close>
+<details >
+<summary>**📄 Frontmatter**</summary>
+
+- **Chapter: Acknowledgements**: The acknowledgements section has been updated with new contributors, the preface material has been reorganized, and there have been updates to ensure correct number building, although full build testing is still in progress.
+- **Chapter: About**: The 'about.qmd' file in the core section has been updated with a fixed relative path and a reorganization of the file content.
+
+</details>
+
+<details >
 <summary>**📖 Chapter Updates**</summary>
 
 - **Chapter 1: Introduction**: The updates to the machine learning systems textbook do not include any content-level changes such as new sections, rewrites, example additions, or figure changes. The changes were primarily focused on fixing reference links, adjusting definition formatting, and correcting style consistency.
@@ -525,12 +623,10 @@
 - **Chapter 18: Robust AI**: The Introduction section in the Robust AI chapter has been replaced with an Overview section.
 - **Chapter 19: AI for Good**: The "Introduction" section in the "AI for Good" chapter has been replaced with an "Overview" section.
 - **Chapter 20: Conclusion**: The "Introduction" section in the "Conclusion" chapter has been renamed to "Overview".
-- **Chapter: Acknowledgements**: The acknowledgements section has been updated with new contributors, the preface material has been reorganized, and there have been updates to ensure correct number building, although full build testing is still in progress.
-- **Chapter: About**: The 'about.qmd' file in the core section has been updated with a fixed relative path and a reorganization of the file content.
 
 </details>
 
-<details close>
+<details >
 <summary>**🧑‍💻 Lab Updates**</summary>
 
 - **Lab: Arduino Setup**: The Introduction section in the contents/labs/arduino/nicla_vision/setup/setup.qmd file has been replaced with an Overview section.
@@ -551,16 +647,38 @@
 - **Lab: Dsp Spectral Features Block**: The Introduction section of the dsp_spectral_features_block.qmd file has been replaced with an Overview section.
 
 </details>
-
+---
 
 ### 📅 Published on Nov 15, 2024
 
-<details close>
-<summary>**📖 Chapter Updates**</summary>
+<details >
+<summary>**📄 Frontmatter**</summary>
 
 - **Acknowledgements**: The acknowledgements section has been moved to the core directory.
 - **Socratiq**: The SocratiQ bot section has been drafted.
 - **Socratiq**: The SocratiQ bot draft has been created and a QMD file has been set up for the llm bot.
+- **Chapter: Acknowledgements**: The acknowledgements section has been updated with potential modifications and the structure of the textbook has been enhanced with the creation of new 'labs' and 'core' folders.
+- **Chapter: About**: contents/core/about.qmd. Please provide the commit messages for this file.
+- **Chapter: Case Studies**: The case studies section of the core contents in the machine learning systems textbook has been updated with new examples, additional figures, and significant rewrites for improved understanding.
+- **Chapter: Community**: The community chapter in the machine learning systems textbook has been updated with new sections, rewrites, the addition of examples, and changes to figures.
+- **Chapter: Contributors**: Without the specific details from the commit messages, I'm unable to provide a summary of the content-level changes. Please provide the commit messages for the updated file.
+- **Chapter: Conventions**: The conventions.qmd file in the core section of the machine learning systems textbook has been updated with new sections, rewrites, example additions, and figure changes.
+- **Chapter: Copyright**: The copyright section of the core contents has been updated.
+- **Chapter: Dedication**: The dedication section of the machine learning systems textbook has been updated.
+- **Chapter: Foreword**: The foreword of the machine learning systems textbook has been updated with new sections, rewrites, additional examples, and changes to figures.
+- **Chapter: Front**: Without the specific commit messages, I'm unable to provide a summary of the content-level changes. Please provide the commit messages for the updated file.
+- **Chapter: Learning Resources**: The updated file includes new sections on advanced machine learning concepts, rewrites of certain topics for clarity, additions of practical examples to aid understanding, and changes in figures for better visualization.
+- **Chapter: Summary**: The core summary section of the machine learning systems textbook has been updated with new sections, rewrites, additional examples, and changes in figures.
+- **Chapter: Tools**: Without the specific commit messages, I can't provide a summary of the changes made to the "contents/core/tools.qmd" file of the machine learning systems textbook. Please provide the commit messages to proceed.
+- **Chapter: Zoo Datasets**: The zoo_datasets.qmd file in the machine learning systems textbook has been updated with new sections, example additions, and figure changes.
+- **Chapter: Zoo Models**: The zoo_models.qmd file has been updated with new sections on different machine learning models, rewrites of existing content for clarity, additions of practical examples for better understanding, and changes in figures for improved visualization.
+- **Generative Ai**: The "Generative AI" chapter in the core section of the textbook has been updated, including changes to the content such as the addition of new sections, rewrites of existing sections, the inclusion of new examples, and modifications to figures.
+
+</details>
+
+<details >
+<summary>**📖 Chapter Updates**</summary>
+
 - **Chapter 1: Introduction**: The introduction section of the machine learning systems textbook has been significantly improved with updated definitions, inclusion of case studies, and addition of video/image links to the case studies. The text flow about the book has been enhanced and instructions for learners have been added. The 'AI engineering' section now includes thoughts on CE, and the 'debt' section has been blended. The 'pillars' figure now has added text and reference. Feedback from Jason and Zishen has been incorporated into the revisions.
 - **Chapter 2: ML Systems**: The Introduction section has been replaced with an Overview, the labs portion has been removed from the chapters, and new labs/core folders have been created.
 - **Chapter 3: DL Primer**: The Introduction section in the 'dl_primer.qmd' file has been replaced with an Overview, the labs portion has been removed from chapters, and new labs/core folders have been created.
@@ -580,21 +698,6 @@
 - **Chapter 18: Robust AI**: The introduction section in the 'Robust AI' chapter has been replaced with an overview, the labs portion from the chapters has been removed, and new labs/core folders have been created.
 - **Chapter 19: AI for Good**: The Introduction section in the AI for Good chapter has been replaced with an Overview, the labs portion from the chapters has been removed, and new labs/core folders have been created.
 - **Chapter 20: Conclusion**: The "Introduction" section in the conclusion chapter has been renamed to "Overview", and new "labs" and "core" folders have been created.
-- **Chapter: Acknowledgements**: The acknowledgements section has been updated with potential modifications and the structure of the textbook has been enhanced with the creation of new 'labs' and 'core' folders.
-- **Chapter: About**: contents/core/about.qmd. Please provide the commit messages for this file.
-- **Chapter: Case Studies**: The case studies section of the core contents in the machine learning systems textbook has been updated with new examples, additional figures, and significant rewrites for improved understanding.
-- **Chapter: Community**: The community chapter in the machine learning systems textbook has been updated with new sections, rewrites, the addition of examples, and changes to figures.
-- **Chapter: Contributors**: Without the specific details from the commit messages, I'm unable to provide a summary of the content-level changes. Please provide the commit messages for the updated file.
-- **Chapter: Conventions**: The conventions.qmd file in the core section of the machine learning systems textbook has been updated with new sections, rewrites, example additions, and figure changes.
-- **Chapter: Copyright**: The copyright section of the core contents has been updated.
-- **Chapter: Dedication**: The dedication section of the machine learning systems textbook has been updated.
-- **Chapter: Foreword**: The foreword of the machine learning systems textbook has been updated with new sections, rewrites, additional examples, and changes to figures.
-- **Chapter: Front**: Without the specific commit messages, I'm unable to provide a summary of the content-level changes. Please provide the commit messages for the updated file.
-- **Chapter: Learning Resources**: The updated file includes new sections on advanced machine learning concepts, rewrites of certain topics for clarity, additions of practical examples to aid understanding, and changes in figures for better visualization.
-- **Chapter: Summary**: The core summary section of the machine learning systems textbook has been updated with new sections, rewrites, additional examples, and changes in figures.
-- **Chapter: Tools**: Without the specific commit messages, I can't provide a summary of the changes made to the "contents/core/tools.qmd" file of the machine learning systems textbook. Please provide the commit messages to proceed.
-- **Chapter: Zoo Datasets**: The zoo_datasets.qmd file in the machine learning systems textbook has been updated with new sections, example additions, and figure changes.
-- **Chapter: Zoo Models**: The zoo_models.qmd file has been updated with new sections on different machine learning models, rewrites of existing content for clarity, additions of practical examples for better understanding, and changes in figures for improved visualization.
 - **Chapter 19: AI for Good**: The "AI for Good" chapter has been moved to the "Core" section, with updates including new sections, rewrites, example additions, and figure changes.
 - **Chapter 12: Benchmarking AI**: The "Benchmarking" chapter in the core section has been updated with new sections, additional examples, and modifications to figures to enhance understanding of machine learning system performance evaluation.
 - **Chapter 20: Conclusion**: The conclusion section of the machine learning systems textbook has been moved to the core directory.
@@ -602,7 +705,6 @@
 - **Chapter 3: DL Primer**: The dl_primer.qmd file in the core directory has been updated with potential content-level changes such as new sections, rewrites, example additions, or figure changes.
 - **Chapter 9: Efficient AI**: The "Efficient AI" chapter in the core section has been updated with new content, including additional examples and changes in figures for better understanding.
 - **Chapter 7: AI Frameworks**: The "Frameworks" chapter in the core section of the machine learning systems textbook has been updated with new content, including additional examples and revisions to existing sections.
-- **Generative Ai**: The "Generative AI" chapter in the core section of the textbook has been updated, including changes to the content such as the addition of new sections, rewrites of existing sections, the inclusion of new examples, and modifications to figures.
 - **Chapter 11: AI Acceleration**: The "hw_acceleration.qmd" file has been moved to the "core" directory, indicating a possible reorganization of content. The specific content-level changes are not provided in the commit messages, so further details are not available.
 - **Chapter 1: Introduction**: The Introduction chapter in the core section of the machine learning systems textbook has been updated.
 - **Chapter 2: ML Systems**: The "ml_systems.qmd" file has been moved to the "core" directory and updated with new sections, rewrites, example additions, and figure changes to enhance the understanding of machine learning systems.
@@ -636,7 +738,7 @@
 
 </details>
 
-<details close>
+<details >
 <summary>**🧑‍💻 Lab Updates**</summary>
 
 - **Lab: Labs Overview**: The 'overview.qmd' file in the 'labs' section of the machine learning systems textbook has been restructured for clarity and to resolve the PART issue.
@@ -662,14 +764,20 @@
 - **Lab: Xiao Esp32S3**: " with ": " or "** : " in the file contents/labs/seeed/xiao_esp32s3/xiao_esp32s3.qmd.
 
 </details>
-
+---
 
 ### 📅 Published on Sep 20, 2024
 
-<details close>
-<summary>**📖 Chapter Updates**</summary>
+<details >
+<summary>**📄 Frontmatter**</summary>
 
 - **Dsp Spectral Features Block**: The dsp_spectral_features_block.qmd file has been updated with new sections on spectral features in machine learning, additional examples to enhance understanding, and modifications in figures for better visual representation.
+
+</details>
+
+<details >
+<summary>**📖 Chapter Updates**</summary>
+
 - **Chapter 1: Introduction**: The introduction chapter has been revised with all sections now complete, broken figure references have been fixed, and content related to embedded AI has been removed. Additionally, changes have been accepted in the data engineering and efficient AI chapters to resolve merge conflicts.
 - **Chapter 3: DL Primer**: The changelog for the machine learning systems textbook includes the completion and revision of all chapters, the fixing of broken links and reference build issues, and the correction of figure references.
 - **Chapter 19: AI for Good**: The AI for Good chapter has been fully revised and completed, with corrections made to broken and figure references.
@@ -687,15 +795,15 @@
 - **Chapter 12: Benchmarking AI**: The "Benchmarking" section in the machine learning systems textbook has been updated with revisions to all chapters, removal of unnecessary figures, and resolution of merge conflicts in the data engineering and efficient AI chapters by accepting incoming changes.
 - **Chapter 2: ML Systems**: All chapters in the machine learning systems textbook have been revised and completed.
 - **Chapter 20: Conclusion**: The conclusion chapter has been updated with new sections on the future of machine learning systems, rewrites of existing content for clarity, the addition of practical examples, and changes to figures for better visual representation.
-- **Lab: Arduino Image Classification**: The image_classification.qmd file has been updated with new sections on advanced classification techniques, rewritten explanations for better comprehension, added practical examples for hands-on understanding, and modified figures for enhanced visual representation.
 - **Chapter 16: Responsible AI**: The responsible_ai.qmd file has been updated with new sections on ethical considerations in AI, rewrites of certain sections for improved clarity, additions of practical examples to illustrate concepts, and changes in figures for better visualization.
 - **Chapter 18: Robust AI**: The robust_ai.qmd file has been updated with new sections on robust AI principles, significant rewrites of existing content for clarity, the addition of practical examples to illustrate key concepts, and changes to figures for improved visual representation.
 
 </details>
 
-<details close>
+<details >
 <summary>**🧑‍💻 Lab Updates**</summary>
 
+- **Lab: Arduino Image Classification**: The image_classification.qmd file has been updated with new sections on advanced classification techniques, rewritten explanations for better comprehension, added practical examples for hands-on understanding, and modified figures for enhanced visual representation.
 - **Lab: Lab Setup**: The "Getting Started" lab in the machine learning systems textbook has been updated with fixes from BravoBaldo, including content-level changes such as new sections, rewrites, example additions, and figure changes.
 - **Lab: Arduino Setup**: The setup.qmd file in the Arduino Nicla Vision lab has been updated with new sections, rewrites, example additions, and figure changes to enhance the understanding of the setup process.
 - **Lab: Arduino Image Classification**: The image_classification.qmd file in the Arduino Nicla Vision lab has been updated with new content, including additional examples and revisions to the image classification section.
@@ -720,11 +828,11 @@
 - **Lab: Shared**: The shared.qmd file in the labs section has been updated with new sections, rewrites, example additions, and figure changes to enhance the understanding of machine learning systems.
 
 </details>
-
+---
 
 ### 📅 Published on Sep 12, 2024
 
-<details close>
+<details >
 <summary>**📖 Chapter Updates**</summary>
 
 - **Chapter 20: Conclusion**: The conclusion chapter of the machine learning systems textbook has been updated based on feedback from Baldo.
@@ -735,29 +843,28 @@
 
 </details>
 
-<details close>
+<details >
 <summary>**🧑‍💻 Lab Updates**</summary>
 
 - **Lab: Pi Image Classification**: The image classification lab in the Raspberry Pi section has been updated with corrected links and typos.
 - **Lab: Pi Object Detection**: The Object Detection Lab has been uploaded in the 'raspi' section under 'labs', providing new content and practical examples on object detection using Raspberry Pi.
 
 </details>
-
+---
 
 ### 📅 Published on Sep 06, 2024
 
-<details close>
+<details >
 <summary>**📖 Chapter Updates**</summary>
 
 - **Chapter 16: Responsible AI**: The responsible AI chapter in the machine learning systems textbook has been updated with corrections to the bibliography and text content.
 
 </details>
-
-
+---
 
 ### 📅 Published on Sep 04, 2024
 
-<details close>
+<details >
 <summary>**📖 Chapter Updates**</summary>
 
 - **Chapter 1: Introduction**: The captions for even side pages in the introduction have been corrected.
@@ -781,18 +888,18 @@
 
 </details>
 
-<details close>
+<details >
 <summary>**🧑‍💻 Lab Updates**</summary>
 
 - **Lab: Arduino Image Classification**: The image_classification.qmd file in the Arduino Nicla Vision lab has been updated with grammar corrections to improve readability.
 - **Lab: Kws Feature Eng**: The updates to the file contents/labs/shared/kws_feature_eng/kws_feature_eng.qmd consist of grammar corrections, but no content-level changes such as new sections, rewrites, example additions, or figure changes have been made.
 
 </details>
-
+---
 
 ### 📅 Published on Sep 02, 2024
 
-<details close>
+<details >
 <summary>**📖 Chapter Updates**</summary>
 
 - **Chapter 11: AI Acceleration**: The hw_acceleration.qmd file in the machine learning systems textbook has been updated with a more student-focused explanation of hardware design principles, an introduction, and a corrected table.
@@ -801,18 +908,18 @@
 
 </details>
 
-<details close>
+<details >
 <summary>**🧑‍💻 Lab Updates**</summary>
 
 - **Lab: Raspberry Pi Setup**: The setup.qmd file in the raspi lab section of the machine learning systems textbook has been updated and new files have been uploaded.
 - **Lab: Pi Image Classification**: The image_classification.qmd file in the Raspi lab section has been updated with new files, potentially including additional examples, figures, or sections related to image classification.
 
 </details>
-
+---
 
 ### 📅 Published on Aug 29, 2024
 
-<details close>
+<details >
 <summary>**📖 Chapter Updates**</summary>
 
 - **Chapter 13: ML Operations**: The contents/ops/ops.qmd file has been updated with fixes based on suggestions from BravoBaldo, potentially involving changes to sections, rewrites, additional examples, or figure modifications.
@@ -820,7 +927,7 @@
 
 </details>
 
-<details close>
+<details >
 <summary>**🧑‍💻 Lab Updates**</summary>
 
 - **Lab: Pi Image Classification**: New files have been uploaded to the 'image_classification' lab in the 'raspi' section of the machine learning systems textbook.
@@ -828,11 +935,11 @@
 - **Lab: Labs**: The labs.qmd file in the machine learning systems textbook has been updated to fix an issue with table merging.
 
 </details>
-
+---
 
 ### 📅 Published on Aug 27, 2024
 
-<details close>
+<details >
 <summary>**📖 Chapter Updates**</summary>
 
 - **Chapter 12: Benchmarking AI**: The benchmarking chapter in the machine learning systems textbook has been updated with fixes and improvements, thanks to contributions from @BravoBaldo.
@@ -846,18 +953,18 @@
 
 </details>
 
-<details close>
+<details >
 <summary>**🧑‍💻 Lab Updates**</summary>
 
 - **Lab: Labs**: The file update includes new sections added to the labs, rewrites of existing content for clarity, the inclusion of additional examples for better understanding, and changes to figures for improved visualization.
 - **Lab: Xiao Esp32S3**: The table in the "Seeed Xiao ESP32S3" lab section has been corrected for better readability and understanding.
 
 </details>
-
+---
 
 ### 📅 Published on Aug 22, 2024
 
-<details close>
+<details >
 <summary>**📖 Chapter Updates**</summary>
 
 - **Chapter 19: AI for Good**: The AI for Good chapter in the machine learning systems textbook has been updated with the use of subscript.
@@ -866,7 +973,7 @@
 
 </details>
 
-<details close>
+<details >
 <summary>**🧑‍💻 Lab Updates**</summary>
 
 - **Lab: Raspberry Pi Setup**: The setup.qmd file in the raspi setup lab has been updated with new files uploaded.
@@ -874,15 +981,20 @@
 - **Lab: Raspi**: The raspi.qmd file in the labs section has been updated with new content, although the specific changes are not detailed in the commit message.
 
 </details>
-
+---
 
 ### 📅 Published on Aug 21, 2024
 
-<details close>
-<summary>**📖 Chapter Updates**</summary>
+<details >
+<summary>**📄 Frontmatter**</summary>
 
 - **Dsp Spectral Features Block**: The 'dsp_spectral_features_block' section of the machine learning systems textbook has been updated to remove redundant code.
-- **Lab: Arduino Image Classification**: The "Image Classification" section of the machine learning systems textbook has been updated to remove unnecessary code and improve the overall functionality.
+
+</details>
+
+<details >
+<summary>**📖 Chapter Updates**</summary>
+
 - **Chapter 10: Model Optimizations**: The optimizations chapter in the machine learning systems textbook has been updated with pivotal and delve fixes, and enhancements have been made for better utilization.
 - **Chapter 6: Data Engineering**: The data engineering chapter has been updated with enhanced explanations, pivotal and delve fixes, and potentially the utilization of new methods or tools.
 - **Chapter 7: AI Frameworks**: The "Frameworks" chapter in the machine learning systems textbook has been updated with enhanced content, the utilization of new examples, and fixes in the "Delve" section.
@@ -904,9 +1016,10 @@
 
 </details>
 
-<details close>
+<details >
 <summary>**🧑‍💻 Lab Updates**</summary>
 
+- **Lab: Arduino Image Classification**: The "Image Classification" section of the machine learning systems textbook has been updated to remove unnecessary code and improve the overall functionality.
 - **Lab: Lab Setup**: The "getting_started.qmd" file in the machine learning systems textbook has been updated with the initial version of the Raspberry Pi section.
 - **Lab: Arduino Image Classification**: The image_classification.qmd file in the Arduino Nicla Vision lab has been updated with enhancements and fixes, potentially improving the explanation or examples related to image classification.
 - **Lab: XIAO Image Classification**: The "image_classification.qmd" file in the "seeed/xiao_esp32s3" lab section has been updated with fixes to the delve.
@@ -919,11 +1032,11 @@
 - **Lab: Raspi**: The initial version of the Raspberry Pi section has been added to the labs content of the machine learning systems textbook.
 
 </details>
-
+---
 
 ### 📅 Published on Aug 15, 2024
 
-<details close>
+<details >
 <summary>**📖 Chapter Updates**</summary>
 
 - **Chapter 11: AI Acceleration**: The hw_acceleration.qmd file in the machine learning systems textbook has been updated with corrections to table references, enhancements, and necessary fixes. Additionally, the table has been updated and converted into a grid table.
@@ -937,7 +1050,6 @@
 - **Chapter 3: DL Primer**: The "dl_primer.qmd" file in the machine learning systems textbook has been updated with enhancements and corrections to improve the content's clarity and accuracy.
 - **Chapter 9: Efficient AI**: The 'Efficient AI' chapter in the machine learning systems textbook has been updated with enhanced content, detailed explanations, and potential revisions in examples and figures. The changes also include fixes and improvements from the 'dev' branch.
 - **Chapter 7: AI Frameworks**: The updates to the "Frameworks" chapter in the machine learning systems textbook include enhancements and fixes to the content, as well as the utilization of new examples.
-- **Lab: Arduino Image Classification**: The image_classification.qmd file in the machine learning systems textbook has been updated to improve and fix the content related to image classification.
 - **Chapter 1: Introduction**: The introduction chapter of the machine learning systems textbook has been updated with enhanced explanations and corrections to provide a more in-depth understanding.
 - **Chapter 2: ML Systems**: The ml_systems.qmd file in the machine learning systems textbook has been updated with pivotal fixes, enhanced features, and improved utilization methods.
 - **Chapter 14: On-Device Learning**: The on-device learning chapter has been updated with enhancements and fixes, the utilization of a new grid table, and possibly new examples or figures.
@@ -948,29 +1060,30 @@
 
 </details>
 
-<details close>
+<details >
 <summary>**🧑‍💻 Lab Updates**</summary>
 
+- **Lab: Arduino Image Classification**: The image_classification.qmd file in the machine learning systems textbook has been updated to improve and fix the content related to image classification.
 - **Lab: Arduino Image Classification**: The image classification section in the Arduino Nicla Vision lab has been enhanced and fixed.
 - **Lab: XIAO Image Classification**: The "image_classification.qmd" file in the "seeed/xiao_esp32s3/image_classification" lab has been updated with fixes to the delve section.
 - **Lab: XIAO Keyword Spotting**: The updates include the utilization of the Xiao ESP32S3 for keyword spotting in the 'Seeed' lab section of the machine learning systems textbook.
 
 </details>
-
+---
 
 ### 📅 Published on Aug 07, 2024
 
-<details close>
-<summary>**📖 Chapter Updates**</summary>
+<details >
+<summary>**📄 Frontmatter**</summary>
 
 - **Dsp Spectral Features Block**: The image width issues for PDF rendering in the dsp_spectral_features_block section have been fixed.
-- **Lab: Arduino Image Classification**: The image width issues for PDF rendering in the image classification section have been fixed.
 
 </details>
 
-<details close>
+<details >
 <summary>**🧑‍💻 Lab Updates**</summary>
 
+- **Lab: Arduino Image Classification**: The image width issues for PDF rendering in the image classification section have been fixed.
 - **Lab: Arduino Setup**: The image width issues for PDF rendering in the 'Arduino Nicla Vision Setup' lab section have been fixed.
 - **Lab: Arduino Image Classification**: The image width issues for PDF rendering in the 'image_classification.qmd' section of the Arduino Nicla Vision lab have been fixed.
 - **Lab: Arduino Object Detection**: The object detection section in the Arduino Nicla Vision lab has been updated to fix issues with image width for PDF rendering.
@@ -985,15 +1098,20 @@
 - **Lab: Dsp Spectral Features Block**: The image width issues for PDF rendering in the dsp_spectral_features_block section of the labs have been fixed.
 
 </details>
-
+---
 
 ### 📅 Published on Aug 06, 2024
 
-<details close>
-<summary>**📖 Chapter Updates**</summary>
+<details >
+<summary>**📄 Frontmatter**</summary>
 
 - **Dsp Spectral Features Block**: The image width issues for PDF rendering in the dsp_spectral_features_block section have been fixed.
-- **Lab: Arduino Image Classification**: The image width issues for PDF rendering have been fixed, redundant elements have been removed, and all broken video links in the image classification section have been corrected.
+
+</details>
+
+<details >
+<summary>**📖 Chapter Updates**</summary>
+
 - **Chapter 7: AI Frameworks**: ' for consistency. Feedback from students has been incorporated and broken links have been fixed.
 - **Chapter 13: ML Operations**: The updated file includes fixes for broken URL links and tables that weren't previously updated for Grid formatting. Additionally, the "Credit" section has been updated to "Source," with a consistent formatting style.
 - **Chapter 18: Robust AI**: " for consistency.
@@ -1015,9 +1133,10 @@
 
 </details>
 
-<details close>
+<details >
 <summary>**🧑‍💻 Lab Updates**</summary>
 
+- **Lab: Arduino Image Classification**: The image width issues for PDF rendering have been fixed, redundant elements have been removed, and all broken video links in the image classification section have been corrected.
 - **Lab: Arduino Setup**: The setup.qmd file in the Arduino Nicla Vision lab has been updated to fix image width issues for PDF rendering.
 - **Lab: Arduino Image Classification**: The updates to the image_classification.qmd file in the Arduino Nicla Vision lab include fixes to image width issues for PDF rendering, removal of redundant elements, and corrections to broken video links.
 - **Lab: Arduino Object Detection**: The updates to the object_detection.qmd file in the Arduino Nicla Vision lab include corrections to image width for proper PDF rendering and the fixing of all remaining broken video links.
@@ -1035,44 +1154,54 @@
 - **Lab: Xiao Esp32S3**: The 'Source' section in the 'seeed/xiao_esp32s3' lab content has been updated.
 
 </details>
-
+---
 
 ### 📅 Published on Jun 25, 2024
 
-<details close>
+<details >
 <summary>**📖 Chapter Updates**</summary>
 
 - **Chapter 3: DL Primer**: The link for video 3.1 in the "dl_primer" section has been fixed.
 
 </details>
-
-
+---
 
 ### 📅 Published on Jun 20, 2024
 
-<details close>
+<details >
 <summary>**📖 Chapter Updates**</summary>
 
 - **Chapter 2: ML Systems**: The ml_systems.qmd file has been updated to fix a broken reference build and incorporate feedback from a student's perspective, potentially involving modifications to sections, examples, or figures.
 
 </details>
 
-<details close>
+<details >
 <summary>**🧑‍💻 Lab Updates**</summary>
 
 - **Lab: Shared**: The shared.qmd file in the labs section has been updated to fix broken links.
 
 </details>
-
+---
 
 ### 📅 Published on Jun 19, 2024
 
-<details close>
-<summary>**📖 Chapter Updates**</summary>
+<details >
+<summary>**📄 Frontmatter**</summary>
 
 - **Acknowledgements**: The acknowledgements page has been updated with comments disabled on certain pages.
 - **Kws Feature Eng**: The kws_feature_eng.qmd file in the labs/shared directory has been updated, reflecting changes in the machine learning systems textbook.
 - **Dsp Spectral Features Block**: The updates to the "dsp_spectral_features_block.qmd" file include a fix to the resources and a minor modification in the title.
+- **Kws}**: The kws_nicla.qmd file has been relocated from the kws_nicla directory to the labs/arduino/nicla_vision/kws directory, indicating a possible reorganization or restructuring of the content.
+- **Motion Classification}**: The motion classification content has been relocated from the 'motion_classify_ad' directory to the 'labs/arduino/nicla_vision/motion_classification' directory, indicating a possible reorganization or refinement of the content structure.
+- **Setup}**: The file 'niclav_sys.qmd' has been relocated to 'labs/arduino/nicla_vision/setup/setup.qmd', indicating a possible reorganization of content or change in the structure of the textbook.
+- **Object Detection Fomo**: The object detection FOMO chapter has been updated with the integration of new lab exercises.
+- **Generative Ai**: The changelog does not provide specific details about content-level changes such as new sections, rewrites, example additions, or figure changes. The updates mentioned are only related to wording tweaks, which are considered formatting or typo-only changes.
+
+</details>
+
+<details >
+<summary>**📖 Chapter Updates**</summary>
+
 - **Chapter 12: Benchmarking AI**: The benchmarking chapter in the machine learning systems textbook has been updated with additional figures, including the mlperf training progress figure. Some content has been trimmed and updated, with specific changes influenced by Colby's updates.
 - **Chapter 6: Data Engineering**: The changelog does not contain any content-level changes such as new sections, rewrites, example additions, or figure changes. The updates were only related to citation formatting and markdown lint fixes.
 - **Chapter 11: AI Acceleration**: A link to Google's Edge TPU website has been added.
@@ -1083,7 +1212,6 @@
 - **Chapter 3: DL Primer**: The changelog does not contain any meaningful content-level changes such as new sections, rewrites, example additions, or figure changes. All updates pertain to formatting and typo corrections.
 - **Chapter 9: Efficient AI**: A reference to missing videos was added to the "Efficient AI" chapter.
 - **Chapter 7: AI Frameworks**: The changelog does not contain any meaningful content-level changes such as new sections, rewrites, example additions, or figure changes.
-- **Lab: Arduino Image Classification**: The changelog does not indicate any meaningful content-level changes such as new sections, rewrites, example additions, or figure changes to the image_classification.qmd file. The commit message only mentions "MD lint fixes," which are typically formatting or typo corrections.
 - **Chapter 1: Introduction**: The introduction material has been updated with improvements based on feedback from the Data review team, and the foreword content has been removed. There was also a correction made to an error in a file reference.
 - **Chapter 2: ML Systems**: The content of the machine learning systems textbook has been enhanced based on feedback and suggestions from the Data review team.
 - **Chapter 14: On-Device Learning**: The changelog does not indicate any content-level changes such as new sections, rewrites, example additions, or figure changes to the on-device learning chapter. The changes were related to Markdown lint fixes, which are formatting or typo corrections.
@@ -1093,17 +1221,13 @@
 - **Chapter 17: Sustainable AI**: The changelog does not indicate any meaningful content-level changes such as new sections, rewrites, example additions, or figure changes. The update only includes markdown lint fixes, which are formatting adjustments.
 - **Chapter 8: AI Training**: The changelog does not contain any meaningful content-level changes such as new sections, rewrites, example additions, or figure changes.
 - **Chapter 5: AI Workflow**: The update does not include any content-level changes such as new sections, rewrites, example additions, or figure changes. The changes were related to Markdown lint fixes, which are formatting adjustments.
-- **Kws}**: The kws_nicla.qmd file has been relocated from the kws_nicla directory to the labs/arduino/nicla_vision/kws directory, indicating a possible reorganization or restructuring of the content.
-- **Motion Classification}**: The motion classification content has been relocated from the 'motion_classify_ad' directory to the 'labs/arduino/nicla_vision/motion_classification' directory, indicating a possible reorganization or refinement of the content structure.
-- **Setup}**: The file 'niclav_sys.qmd' has been relocated to 'labs/arduino/nicla_vision/setup/setup.qmd', indicating a possible reorganization of content or change in the structure of the textbook.
-- **Object Detection Fomo**: The object detection FOMO chapter has been updated with the integration of new lab exercises.
-- **Generative Ai**: The changelog does not provide specific details about content-level changes such as new sections, rewrites, example additions, or figure changes. The updates mentioned are only related to wording tweaks, which are considered formatting or typo-only changes.
 
 </details>
 
-<details close>
+<details >
 <summary>**🧑‍💻 Lab Updates**</summary>
 
+- **Lab: Arduino Image Classification**: The changelog does not indicate any meaningful content-level changes such as new sections, rewrites, example additions, or figure changes to the image_classification.qmd file. The commit message only mentions "MD lint fixes," which are typically formatting or typo corrections.
 - **Lab: Lab Setup**: The "Getting Started" section of the machine learning systems textbook has been updated with new content and an updated overview section. Additionally, a placeholder for more detailed information has been created.
 - **Lab: Arduino Setup**: The setup.qmd file in the Arduino Nicla Vision lab has been updated with corrected resources, renamed sections, and has been integrated into the labs.
 - **Lab: Arduino Image Classification**: The image_classification.qmd file in the Arduino Nicla Vision lab has been updated with the integration of the lab into the main content, addition of all necessary Arduino lab files, and a fix to the resources used in the lab.
@@ -1136,11 +1260,18 @@
 - **Lab: Seeed Xiao Esp32S3**: The contents/labs/seeed_xiao_esp32S3.qmd file has been updated with new sections, rewrites, example additions, and figure changes.
 
 </details>
-
+---
 
 ### 📅 Published on Jun 11, 2024
 
-<details close>
+<details >
+<summary>**📄 Frontmatter**</summary>
+
+- **Generative Ai**: The "Generative AI" section of the machine learning systems textbook has been updated with the addition of upcoming content text.
+
+</details>
+
+<details >
 <summary>**📖 Chapter Updates**</summary>
 
 - **Chapter 11: AI Acceleration**: The hw_acceleration.qmd file in the machine learning systems textbook has been updated with video callouts and end of section resources, along with improvements in cross-references for videos. Additionally, all exercise callout blocks have been folded for a more streamlined appearance.
@@ -1160,15 +1291,20 @@
 - **Chapter 17: Sustainable AI**: Video callouts and end of section resources were added to the sustainable AI chapter, and all exercise call out blocks were folded for a cleaner look.
 - **Chapter 8: AI Training**: Added video callouts and end of section resources, improved the presentation of exercise call out blocks, and fixed the rendering of tables in the training chapter of the machine learning systems textbook.
 - **Chapter 5: AI Workflow**: Video callouts and end of section resources have been added to the workflow chapter of the machine learning systems textbook.
-- **Generative Ai**: The "Generative AI" section of the machine learning systems textbook has been updated with the addition of upcoming content text.
 
 </details>
-
-
+---
 
 ### 📅 Published on Jun 01, 2024
 
-<details close>
+<details >
+<summary>**📄 Frontmatter**</summary>
+
+- **Generative Ai**: The updates to the 'Generative AI' chapter include fixes to issues related to incorrect rendering.
+
+</details>
+
+<details >
 <summary>**📖 Chapter Updates**</summary>
 
 - **Chapter 19: AI for Good**: The AI for Good chapter has been updated with improvements to the Colab badge, modifications to the 'coming soon' section now featuring bullet points, and adjustments to the default note for slides to enhance PDF rendering.
@@ -1186,23 +1322,33 @@
 - **Chapter 17: Sustainable AI**: The Colab badge that was broken during a previous global replacement has been fixed, and the 'Coming Soon' section has been updated with bullet points.
 - **Chapter 8: AI Training**: The Colab badge that was broken during a global replacement in a previous commit has been fixed, and the '@exr-' notation is now being used for Colabs. The 'coming soon' section has been updated with bullet points. The default note for slides has been adjusted to ensure it renders well in PDF format.
 - **Chapter 9: Efficient AI**: The updates to the machine learning systems textbook include corrections to rendering issues and headers in the "Efficient AI" chapter, as well as adjustments to the default note for slides to ensure optimal rendering in PDF format.
-- **Generative Ai**: The updates to the 'Generative AI' chapter include fixes to issues related to incorrect rendering.
 - **Chapter 16: Responsible AI**: The "Coming Soon" section in the Responsible AI chapter has been updated with bullet points, and the default note for slides has been adjusted to improve PDF rendering.
 - **Chapter 5: AI Workflow**: The "Coming Soon" section in the workflow chapter has been updated with bullet points, and the default note for slides has been adjusted for optimal PDF rendering.
 - **Chapter 1: Introduction**: The introduction section of the machine learning systems textbook has been enhanced for better readability and grammar, and the reference or URL links that were previously removed have been reinstated.
 
 </details>
-
-
+---
 
 ### 📅 Published on May 26, 2024
 
-<details close>
-<summary>**📖 Chapter Updates**</summary>
+<details >
+<summary>**📄 Frontmatter**</summary>
 
 - **Acknowledgements**: The acknowledgements.qmd file has been initiated with its first draft and image logos have been added.
 - **Kws Feature Eng**: The changelog does not contain any content-level changes such as new sections, rewrites, example additions, or figure changes, only punctuation fixes were made.
 - **Dsp Spectral Features Block**: The changelog does not contain any meaningful content-level changes like new sections, rewrites, example additions, or figure changes, as the updates were only related to punctuation and grammar corrections.
+- **Generative Ai**: The generative_ai.qmd file has been updated with added section headers for cross-referencing.
+- **Motion Classify Ad**: The changelog does not contain any meaningful content-level changes such as new sections, rewrites, example additions, or figure changes, as the update only pertains to punctuation fixes.
+- **Niclav Sys**: The changelog does not contain any meaningful content-level changes such as new sections, rewrites, example additions, or figure changes. The updates were only related to punctuation fixes.
+- **Embedded Ml**: The embedded machine learning section of the textbook has been updated with edits to chapters 1-4.
+- **Ml Systems}**: The embedded systems chapter has been moved and updated to focus on machine learning systems, with new sections added, examples updated, and figures revised to align with the new focus.
+- **Embedded Sys**: The embedded systems section of the machine learning systems textbook has been updated with edits to chapters 1-4, the addition of more slides, and a change in settings to prevent collapse.
+
+</details>
+
+<details >
+<summary>**📖 Chapter Updates**</summary>
+
 - **Chapter 10: Model Optimizations**: The optimizations.qmd file in the machine learning systems textbook has been updated with the addition of new sections for cross-referencing, more slides, and exercises. Videos and captions for the videos and tables have also been added. Broken links have been fixed, and a local save option has been implemented for PDF builds that don't support remote links. The figure captions and references have been corrected, and the SVG has been converted to PNG for PDF builds.
 - **Chapter 18: Robust AI**: The Robust AI chapter has been significantly updated with the addition of new sections, including a resources section and learning objectives. There have been several changes to the figures, including the addition of new images, renaming, and fixing of paths and references. The chapter has also been proofread multiple times, resulting in grammar and punctuation fixes, and the text has been restructured into paragraphs for better readability. Contributions from Prof. Song Han and Prof. Yanjing have been incorporated, and all Colabs have been added to robust_ai.qmd.
 - **Chapter 20: Conclusion**: The conclusion section of the machine learning systems textbook has been updated with minor grammar fixes and improvements, particularly around the discussion of frameworks. Additionally, a new cover image has been added, and the initial draft of the conclusion has been written.
@@ -1221,22 +1367,29 @@
 - **Chapter 11: AI Acceleration**: The hw_acceleration.qmd file in the machine learning systems textbook has been updated with added section headers for cross-referencing, fixed broken links, corrected figure captions and references, and added short captions for videos. In addition, the SVG has been fixed to PNG for colab-badge.svg to enable PDF builds, and the file hw_acceleration.qmd has been updated.
 - **Chapter 2: ML Systems**: The updated file includes added section headers for cross-referencing, fixed figure captions and references, captions added to all tables, and a word change from "algorithms" to "models". The "Embedded Systems" section was removed to focus solely on ML systems. There were also edits made to chapters 1-4, and the final colabs were added.
 - **Chapter 16: Responsible AI**: The "Responsible AI" chapter in the machine learning systems textbook has been updated with added section headers for cross-referencing, fixed broken links, and included short captions for the videos.
-- **Generative Ai**: The generative_ai.qmd file has been updated with added section headers for cross-referencing.
 - **Chapter 1: Introduction**: The introduction chapter has been enhanced with the addition of section headers for cross-referencing, a cover image, and an image for Mark's article. A reference section and structure have also been introduced.
-- **Lab: Arduino Image Classification**: No content-level changes were made to the image_classification.qmd file, only punctuation fixes were implemented.
-- **Motion Classify Ad**: The changelog does not contain any meaningful content-level changes such as new sections, rewrites, example additions, or figure changes, as the update only pertains to punctuation fixes.
-- **Niclav Sys**: The changelog does not contain any meaningful content-level changes such as new sections, rewrites, example additions, or figure changes. The updates were only related to punctuation fixes.
-- **Embedded Ml**: The embedded machine learning section of the textbook has been updated with edits to chapters 1-4.
-- **Ml Systems}**: The embedded systems chapter has been moved and updated to focus on machine learning systems, with new sections added, examples updated, and figures revised to align with the new focus.
-- **Embedded Sys**: The embedded systems section of the machine learning systems textbook has been updated with edits to chapters 1-4, the addition of more slides, and a change in settings to prevent collapse.
 
 </details>
 
+<details >
+<summary>**🧑‍💻 Lab Updates**</summary>
 
+- **Lab: Arduino Image Classification**: No content-level changes were made to the image_classification.qmd file, only punctuation fixes were implemented.
+
+</details>
+---
 
 ### 📅 Published on Mar 21, 2024
 
-<details close>
+<details >
+<summary>**📄 Frontmatter**</summary>
+
+- **Embedded Ml**: The "Embedded ML" chapter has been updated with an enriched "Resources" section, which now includes introductory text for each part and has a collapse feature enabled. More slides have been added and moved to the end of the page. An empty "Resources" section has been added to the end of all QMDs with corresponding headers. The exercises section has been cleaned up for better clarity and organization.
+- **Embedded Sys**: The "Resources" section in the "Embedded Systems" chapter has been updated with introductory text for each part and a new feature to collapse content has been added. Additionally, more slides have been included and moved to the end of the page.
+
+</details>
+
+<details >
 <summary>**📖 Chapter Updates**</summary>
 
 - **Chapter 6: Data Engineering**: The data_engineering.qmd file has been updated with examples on how to refer to exercises, an introduction text for each part in the Resources section, exercise callouts, and a new "Resources" section at the end of all QMDs. Additionally, slides have been moved to the end of the page.
@@ -1244,8 +1397,6 @@
 - **Chapter 12: Benchmarking AI**: The "Benchmarking" chapter in the machine learning systems textbook has been updated with a new "Resources" section at the end, which now includes introductory text for each part. Additionally, the slides have been relocated to the end of the page.
 - **Chapter 3: DL Primer**: The "Resources" section in the "dl_primer.qmd" file has been updated with introductory text for each part and a collapse feature has been enabled. More slides have been added and moved to the end of the page. An empty "Resources" section with headers has also been added to the end of all QMDs.
 - **Chapter 9: Efficient AI**: The "Resources" section was added to all QMDs with introductory text for each part and a new feature to collapse the section was enabled. Additionally, more slides were incorporated into the content.
-- **Embedded Ml**: The "Embedded ML" chapter has been updated with an enriched "Resources" section, which now includes introductory text for each part and has a collapse feature enabled. More slides have been added and moved to the end of the page. An empty "Resources" section has been added to the end of all QMDs with corresponding headers. The exercises section has been cleaned up for better clarity and organization.
-- **Embedded Sys**: The "Resources" section in the "Embedded Systems" chapter has been updated with introductory text for each part and a new feature to collapse content has been added. Additionally, more slides have been included and moved to the end of the page.
 - **Chapter 7: AI Frameworks**: The "Frameworks" chapter in the machine learning systems textbook has been updated with an introduction to each part in the "Resources" section, which has also been made collapsible. More slides have been added and moved to the end of the page. Additionally, the chapter has been updated with Colab integration.
 - **Chapter 11: AI Acceleration**: The "hw_acceleration.qmd" file has been updated with an added "Resources" section at the end, which includes introductory text for each part.
 - **Chapter 14: On-Device Learning**: The "On-Device Learning" chapter has been updated with an introduction text for each part in the Resources section, more slides have been added, and these slides have been moved to the end of the page. Additionally, an empty "Resources" section with headers has been added to the end of all QMDs.
@@ -1258,27 +1409,28 @@
 - **Chapter 5: AI Workflow**: The "Resources" section in the workflow.qmd file has been updated with introductory text for each part and a new feature to collapse these sections has been added. Additionally, the slides have been relocated to the end of the page. An empty "Resources" section has also been added to all QMDs along with headers.
 
 </details>
-
-
-
-### 📅 Published on Mar 13, 2024
-
-
+---
 
 ### 📅 Published on Mar 12, 2024
 
-<details close>
+<details >
+<summary>**📄 Frontmatter**</summary>
+
+- **Niclav Sys**: The updates to the 'niclav_sys.qmd' file include corrections to the links and the addition of (Non-) ASCII checker scripts, along with associated fixes.
+- **Embedded Ml**: The embedded machine learning chapter has been updated with the removal of debug code, the addition of a nested example, more slides, and custom callouts. Furthermore, arrow capability has been added to the style file along with checks.
+- **Embedded Sys**: The embedded systems chapter has been updated with additional slides and the inclusion of (Non-) ASCII checker scripts, along with corresponding fixes.
+
+</details>
+
+<details >
 <summary>**📖 Chapter Updates**</summary>
 
 - **Chapter 11: AI Acceleration**: The 'hw_acceleration.qmd' file in the machine learning systems textbook has been updated with the removal of a figure reference in the text, deletion of the mermaid section, and the addition of Non-ASCII checker scripts.
-- **Niclav Sys**: The updates to the 'niclav_sys.qmd' file include corrections to the links and the addition of (Non-) ASCII checker scripts, along with associated fixes.
-- **Embedded Ml**: The embedded machine learning chapter has been updated with the removal of debug code, the addition of a nested example, more slides, and custom callouts. Furthermore, arrow capability has been added to the style file along with checks.
 - **Chapter 7: AI Frameworks**: The updates to the "Frameworks" chapter of the machine learning systems textbook include the addition of Colab notebooks, more slides, fixes to the notes from the previous week, and the implementation of (Non-) ASCII checker scripts.
 - **Chapter 6: Data Engineering**: The data engineering chapter has been updated with new colab notebooks, more slides have been added, a web scraping exercise has been introduced after a subsection and also at the end as a separate part, last week's notes have been corrected, (Non-) ASCII checker scripts have been added and fixed, and six chapters have been updated.
 - **Chapter 19: AI for Good**: The "AI for Good" chapter has been updated with additional slides and implemented (Non-) ASCII checker scripts, along with corresponding fixes.
 - **Chapter 12: Benchmarking AI**: The benchmarking chapter in the machine learning systems textbook has been updated with additional slides, corrections to the previous week's notes, the inclusion of (Non-) ASCII checker scripts, and content spanning six new chapters.
 - **Chapter 3: DL Primer**: The dl_primer.qmd file in the machine learning systems textbook has been updated with additional slides and the implementation of (Non-) ASCII checker scripts, along with corresponding fixes.
-- **Embedded Sys**: The embedded systems chapter has been updated with additional slides and the inclusion of (Non-) ASCII checker scripts, along with corresponding fixes.
 - **Chapter 14: On-Device Learning**: The "On-Device Learning" chapter has been updated with additional slides and the inclusion of (Non-) ASCII checker scripts, along with corresponding fixes.
 - **Chapter 13: ML Operations**: The ops.qmd file in the machine learning systems textbook has been updated with additional slides, corrections to the previous week's notes, and the inclusion of (Non-) ASCII checker scripts.
 - **Chapter 15: Security & Privacy**: The "Privacy and Security" section of the machine learning systems textbook has been updated with additional slides, corrected notes from the previous week, and content spanning six new chapters.
@@ -1290,12 +1442,11 @@
 - **Chapter 9: Efficient AI**: The 'efficient_ai' chapter has been updated with the addition of non-ASCII checker scripts and relevant fixes.
 
 </details>
-
-
+---
 
 ### 📅 Published on Feb 03, 2024
 
-<details close>
+<details >
 <summary>**📖 Chapter Updates**</summary>
 
 - **Chapter 12: Benchmarking AI**: The benchmarking chapter in the machine learning systems textbook has been updated to improve list consistency and remove unpopulated list items.
@@ -1308,12 +1459,19 @@
 - **Chapter 17: Sustainable AI**: The updates to the sustainable AI section of the machine learning systems textbook include the addition of a citation for the OECD blueprint paper.
 
 </details>
-
-
+---
 
 ### 📅 Published on Feb 02, 2024
 
-<details close>
+<details >
+<summary>**📄 Frontmatter**</summary>
+
+- **Embedded Sys**: The 'embedded_sys.qmd' file has been updated with automatic updates to all bibtex references.
+- **Embedded Ml**: The embedded machine learning chapter has been updated with new PNG images.
+
+</details>
+
+<details >
 <summary>**📖 Chapter Updates**</summary>
 
 - **Chapter 19: AI for Good**: The 'AI for Good' chapter has been updated with corrections to broken image references/links, addition of four new chapters, and automatic updates to all bibtex references.
@@ -1326,45 +1484,44 @@
 - **Chapter 12: Benchmarking AI**: The benchmarking chapter in the machine learning systems textbook has been updated with corrected reference rendering, four new chapters, and automatic updates to all bibtex references.
 - **Chapter 10: Model Optimizations**: A reference for quantization-aware pruning was added, an incomplete sparsity matrix filter illustration was removed as it was included further below, and all bibtex references were updated automatically in the optimizations chapter.
 - **Chapter 14: On-Device Learning**: The on-device learning chapter in the machine learning systems textbook has been updated with changes including the removal of a hyperlinked image due to a non-existent source, and updates to a bullet list.
-- **Embedded Sys**: The 'embedded_sys.qmd' file has been updated with automatic updates to all bibtex references.
 - **Chapter 8: AI Training**: The "Training" chapter in the machine learning systems textbook has been updated with automatic updates to all bibtex references.
-- **Embedded Ml**: The embedded machine learning chapter has been updated with new PNG images.
 - **Chapter 3: DL Primer**: The dl_primer.qmd file has been updated with the replacement of svg images with png for pdf builds.
 
 </details>
-
-
+---
 
 ### 📅 Published on Jan 02, 2024
 
-<details close>
-<summary>**📖 Chapter Updates**</summary>
+<details >
+<summary>**📄 Frontmatter**</summary>
 
 - **Niclav Sys**: No meaningful content-level changes were made in this update.
-- **Chapter 7: AI Frameworks**: The 'frameworks.qmd' file in the machine learning systems textbook has been updated to correct a callout-tip error and a minor syntax error.
 
 </details>
 
+<details >
+<summary>**📖 Chapter Updates**</summary>
 
+- **Chapter 7: AI Frameworks**: The 'frameworks.qmd' file in the machine learning systems textbook has been updated to correct a callout-tip error and a minor syntax error. ---
 
+</details>
 ---
 
 ## 2023 Changes
 
 ### 📅 Published on Dec 19, 2023
 
-<details close>
+<details >
 <summary>**📖 Chapter Updates**</summary>
 
 - **Chapter 10: Model Optimizations**: The optimizations chapter in the machine learning systems textbook has been updated with added figures and corrections to broken references.
 
 </details>
-
-
+---
 
 ### 📅 Published on Dec 18, 2023
 
-<details close>
+<details >
 <summary>**📖 Chapter Updates**</summary>
 
 - **Chapter 12: Benchmarking AI**: The content of the 'benchmarking' section has been migrated to the 'benchmarks/leaderboards' section, and an issue causing more than two references to show up due to incorrect use of comma instead of semicolon as a separator has been fixed.
@@ -1373,12 +1530,11 @@
 - **Chapter 7: AI Frameworks**: The frameworks chapter in the machine learning systems textbook has been updated with modifications to the frameworks colab, courtesy of contributions from Marcelo.
 
 </details>
-
-
+---
 
 ### 📅 Published on Dec 13, 2023
 
-<details close>
+<details >
 <summary>**📖 Chapter Updates**</summary>
 
 - **Chapter 7: AI Frameworks**: The frameworks chapter has been updated with improvements to the Colab section, thanks to contributions from Marcelo.
@@ -1388,94 +1544,120 @@
 - **Chapter 10: Model Optimizations**: The reference for the attention paper has been updated in the optimizations section.
 
 </details>
-
-
+---
 
 ### 📅 Published on Dec 12, 2023
 
-<details close>
+<details >
+<summary>**📄 Frontmatter**</summary>
+
+- **Generative Ai**: The generative_ai.qmd file in the machine learning systems textbook has been cleaned up for improved readability and understanding.
+- **Embedded Ml**: The embedded machine learning chapter has been updated with word changes for improved clarity and understanding.
+- **Embedded Sys**: The "embedded_sys.qmd" file was updated to ensure consistency in the usage of the term "TinyML" throughout the text.
+- **Kws Nicla**: The TinyML terminology has been updated for consistency throughout the kws_nicla.qmd file.
+
+</details>
+
+<details >
 <summary>**📖 Chapter Updates**</summary>
 
 - **Chapter 12: Benchmarking AI**: The "Benchmarking" section of the machine learning systems textbook has been updated for consistency in terminology, changing 'tinyML' to 'TinyML' throughout.
 - **Chapter 8: AI Training**: The DL primer activation function was removed from the training content and the computation graph was moved to the training section.
 - **Chapter 10: Model Optimizations**: The optimizations.qmd file has been updated with a corrected reference for the attention paper and the term 'tinyML' has been standardized to 'TinyML' for consistency.
 - **Chapter 3: DL Primer**: The DL primer activation function has been removed and the computation graph has been relocated to the training section.
-- **Generative Ai**: The generative_ai.qmd file in the machine learning systems textbook has been cleaned up for improved readability and understanding.
 - **Chapter 18: Robust AI**: The robust_ai.qmd file in the machine learning systems textbook has been cleaned up for improved clarity and comprehension.
 - **Chapter 6: Data Engineering**: The term "tinyML" has been updated to "TinyML" for consistency throughout the content in the data engineering chapter.
-- **Embedded Ml**: The embedded machine learning chapter has been updated with word changes for improved clarity and understanding.
-- **Embedded Sys**: The "embedded_sys.qmd" file was updated to ensure consistency in the usage of the term "TinyML" throughout the text.
 - **Chapter 11: AI Acceleration**: The "hw_acceleration" section of the machine learning systems textbook has been updated to ensure consistent use of the term "TinyML".
 - **Chapter 14: On-Device Learning**: The 'On-Device Learning' chapter in the machine learning systems textbook has been updated with word changes to improve clarity and comprehension.
 - **Chapter 7: AI Frameworks**: The TinyML terminology has been standardized throughout the content in the "Frameworks" chapter.
-- **Lab: Arduino Image Classification**: The image_classification.qmd file was updated to maintain consistency in the use of the term "TinyML" throughout the text.
-- **Kws Nicla**: The TinyML terminology has been updated for consistency throughout the kws_nicla.qmd file.
 - **Chapter 16: Responsible AI**: The "Responsible AI" chapter in the machine learning systems textbook has been updated for consistency, with the term "tinyML" now standardized to "TinyML".
 - **Chapter 5: AI Workflow**: The "workflow.qmd" file in the machine learning systems textbook has been updated to ensure consistency in the usage of the term "TinyML".
 
 </details>
 
+<details >
+<summary>**🧑‍💻 Lab Updates**</summary>
 
+- **Lab: Arduino Image Classification**: The image_classification.qmd file was updated to maintain consistency in the use of the term "TinyML" throughout the text.
+
+</details>
+---
 
 ### 📅 Published on Dec 11, 2023
 
-<details close>
-<summary>**📖 Chapter Updates**</summary>
+<details >
+<summary>**📄 Frontmatter**</summary>
 
 - **Kws Feature Eng**: The kws_feature_eng.qmd file in the machine learning systems textbook has undergone a significant reorganization into a new folder structure, with the creation of subfolders within the images/ based on file type and the distribution of references files into individual chapters.
 - **Dsp Spectral Features Block**: The dsp_spectral_features_block chapter has undergone a significant reorganization with distributed references, creation of subfolders within images based on file type, and a massive restructuring of files into a new folder structure.
+- **Generative Ai**: The generative_ai.qmd file has undergone a significant reorganization into a new folder structure, with image subfolders now categorized based on file type, and each chapter now containing its own separate references files.
+- **Embedded Ml**: The embedded machine learning chapter underwent a significant reorganization of its files into a new folder structure, distributed references so each chapter has its own reference files, and created subfolders within images based on file type.
+- **Embedded Sys**: The TinyML terminology has been standardized throughout the text, references have been distributed so each chapter has its own files, and a significant reorganization of files into a new folder structure has been implemented.
+- **Kws Nicla**: The textbook has undergone a significant reorganization with files being distributed into a new folder structure, including the creation of subfolders within the images folder based on file type. Additionally, each chapter now has its own references files.
+- **Motion Classify Ad**: The motion_classify_ad.qmd file in the machine learning systems textbook has undergone a significant reorganization into a new folder structure, with the creation of subfolders within the 'images/' directory based on file type, and the distribution of reference files to their respective chapters.
+- **Niclav Sys**: The textbook has undergone a massive reorganization with files being sorted into a new folder structure, each chapter now has its own references files, and subfolders have been created within the images folder based on file type.
+- **Object Detection Fomo**: The object_detection_fomo.qmd file has undergone a significant reorganization into a new folder structure, with the addition of individual reference files for each chapter and the creation of subfolders within the images folder based on file type.
+
+</details>
+
+<details >
+<summary>**📖 Chapter Updates**</summary>
+
 - **Chapter 3: DL Primer**: The Deep Learning primer section on activation function was removed and the computation graph was moved to the training section, a massive reorganization of files into a new folder structure was implemented, and distributed references were introduced so each chapter now has its own reference files. Additionally, subfolders were created within the images folder based on file type.
 - **Chapter 8: AI Training**: The DL primer activation function has been removed and the computation graph has been moved to the training section. There has also been a significant reorganization of the files into a new folder structure, including the creation of subfolders within the images folder based on file type. Additionally, references have been distributed so that each chapter now has its own reference files, and these references have been corrected to appear before the period.
-- **Generative Ai**: The generative_ai.qmd file has undergone a significant reorganization into a new folder structure, with image subfolders now categorized based on file type, and each chapter now containing its own separate references files.
 - **Chapter 18: Robust AI**: The robust_ai.qmd file has undergone a significant reorganization into a new folder structure, and references have been distributed so that each chapter now has its own reference files.
 - **Chapter 12: Benchmarking AI**: The benchmarking chapter in the machine learning systems textbook has undergone a significant reorganization of its file structure, including the creation of subfolders within the images directory based on file type, and the distribution of references so that each chapter now has its own reference files.
 - **Chapter 6: Data Engineering**: The textbook has undergone a significant reorganization with files moved into a new folder structure, and references have been distributed so that each chapter now has its own reference files. Additionally, the term "tinyML" has been updated to "TinyML" for consistency throughout the text.
-- **Embedded Ml**: The embedded machine learning chapter underwent a significant reorganization of its files into a new folder structure, distributed references so each chapter has its own reference files, and created subfolders within images based on file type.
-- **Embedded Sys**: The TinyML terminology has been standardized throughout the text, references have been distributed so each chapter has its own files, and a significant reorganization of files into a new folder structure has been implemented.
 - **Chapter 11: AI Acceleration**: The hw_acceleration.qmd file has been updated with changes in future trends related to hardware acceleration, added references for Machine Learning/Reinforcement Learning for Architecture DSE, GA, RL for chip floorplanning, and RL for logic synthesis. The file structure has also been massively reorganized, including the creation of subfolders within the images folder based on file type.
 - **Chapter 14: On-Device Learning**: The ondevice_learning.qmd file has undergone a significant reorganization into a new folder structure, with the creation of subfolders within images/ based on filetype. Additionally, the chapter now has its own references file due to the distribution of references.
 - **Chapter 7: AI Frameworks**: The textbook has undergone a significant reorganization with files sorted into a new folder structure, including the creation of subfolders within the images directory based on file type. Each chapter now has its own dedicated references files. A broken URL has been fixed.
-- **Lab: Arduino Image Classification**: The image classification chapter has undergone a significant reorganization of its files into a new folder structure, including the creation of subfolders within the images folder based on filetype. Additionally, each chapter now has its own dedicated references files.
-- **Kws Nicla**: The textbook has undergone a significant reorganization with files being distributed into a new folder structure, including the creation of subfolders within the images folder based on file type. Additionally, each chapter now has its own references files.
 - **Chapter 10: Model Optimizations**: The optimizations.qmd file in the machine learning systems textbook has been updated with two missing references and a duplicate sentence about the lottery ticket hypothesis has been removed. Additionally, the file structure has undergone a massive reorganization, with the creation of subfolders within images/ based on filetype, and the distribution of references so each chapter has its own files. A new feature has also been added for book generation.
 - **Chapter 16: Responsible AI**: The textbook has undergone a massive reorganization with files being distributed into a new folder structure, including the creation of subfolders within the images folder based on file type. Additionally, each chapter now has its own separate references files.
 - **Chapter 5: AI Workflow**: The workflow chapter of the machine learning systems textbook has undergone a massive reorganization of files into a new folder structure, with the creation of subfolders within the images folder based on file type, and the distribution of references so each chapter now has its own reference files.
 - **Chapter 9: Efficient AI**: The "Efficient AI" chapter of the machine learning systems textbook has been updated with references to mentioned datasets, ResNet-SE, and ResNeXt papers. The chapter also underwent a reorganization of files into a new folder structure, and the addition of a cover image. Furthermore, a broken figure has been fixed, and references have been distributed so that each chapter now has its own reference files.
 - **Chapter 19: AI for Good**: The AI for Good chapter underwent a significant reorganization of its files into a new folder structure, with the creation of subfolders within the images folder based on file type, and the distribution of references files to each individual chapter.
-- **Motion Classify Ad**: The motion_classify_ad.qmd file in the machine learning systems textbook has undergone a significant reorganization into a new folder structure, with the creation of subfolders within the 'images/' directory based on file type, and the distribution of reference files to their respective chapters.
-- **Niclav Sys**: The textbook has undergone a massive reorganization with files being sorted into a new folder structure, each chapter now has its own references files, and subfolders have been created within the images folder based on file type.
-- **Object Detection Fomo**: The object_detection_fomo.qmd file has undergone a significant reorganization into a new folder structure, with the addition of individual reference files for each chapter and the creation of subfolders within the images folder based on file type.
 - **Chapter 13: ML Operations**: The ops.qmd file in the machine learning systems textbook has been significantly reorganized with distributed references for each chapter, creation of subfolders within images based on file type, and a massive restructuring of the files into a new folder structure.
 - **Chapter 15: Security & Privacy**: The privacy and security chapter in the machine learning systems textbook has been reorganized with distributed references, meaning each chapter now has its own references files. Additionally, the images have been sorted into subfolders based on file type.
 - **Chapter 17: Sustainable AI**: The sustainable_ai.qmd file has undergone a significant reorganization into a new folder structure, with the addition of distributed references where each chapter now has its own reference files, and the creation of subfolders within the images folder based on file type.
 
 </details>
 
+<details >
+<summary>**🧑‍💻 Lab Updates**</summary>
 
+- **Lab: Arduino Image Classification**: The image classification chapter has undergone a significant reorganization of its files into a new folder structure, including the creation of subfolders within the images folder based on filetype. Additionally, each chapter now has its own dedicated references files.
+
+</details>
+---
 
 ### 📅 Published on Dec 10, 2023
 
-<details close>
-<summary>**📖 Chapter Updates**</summary>
+<details >
+<summary>**📄 Frontmatter**</summary>
 
 - **Kws Feature Eng**: The update involved a massive reorganization of files into a new folder structure and the creation of subfolders within the images folder based on file type.
 - **Dsp Spectral Features Block**: The file contents/dsp_spectral_features_block/dsp_spectral_features_block.qmd has been extensively reorganized for better structure, and subfolders have been created within the images/ directory based on file type.
+- **Embedded Ml**: The updates involved a major reorganization of the files into a new folder structure and the creation of subfolders within the images folder based on file type for the 'Embedded Machine Learning' chapter.
+- **Embedded Sys**: The embedded systems chapter has undergone a significant reorganization of files into a new folder structure, and subfolders have been created within the images directory based on file type.
+- **Generative Ai**: The changelog does not provide specific content-level changes such as new sections, rewrites, example additions, or figure changes in the "generative_ai.qmd" file. The updates mentioned are related to file and folder organization, specifically the creation of subfolders within the "images/" directory based on file type and a massive reorganization of files.
+- **Kws Nicla**: The file contents/kws_nicla/kws_nicla.qmd has been significantly reorganized with a new folder structure, and subfolders have been created within the images/ directory based on file type.
+- **Motion Classify Ad**: The file motion_classify_ad.qmd in the machine learning systems textbook has undergone a significant reorganization, with files being systematically arranged into a new folder structure, and subfolders being created within the images folder based on file type.
+- **Niclav Sys**: The textbook has undergone a massive reorganization with files being sorted into a new folder structure, and subfolders have been created within the images folder based on file type.
+- **Object Detection Fomo**: The object_detection_fomo.qmd file has undergone a significant reorganization with the creation of subfolders within the images/ directory based on file type.
+
+</details>
+
+<details >
+<summary>**📖 Chapter Updates**</summary>
+
 - **Chapter 8: AI Training**: The training.qmd file has undergone a significant reorganization into a new folder structure, and the images have been sorted into subfolders based on their file type.
 - **Chapter 19: AI for Good**: The update involved a major reorganization of files into a new folder structure and the creation of subfolders within the 'images/' directory based on file type.
 - **Chapter 12: Benchmarking AI**: The benchmarking chapter in the machine learning systems textbook has undergone a significant reorganization of its files and images into a new folder structure for improved navigation and accessibility.
 - **Chapter 6: Data Engineering**: The data_engineering.qmd file has been significantly reorganized with a new folder structure, and subfolders have been created within the images directory based on file type.
 - **Chapter 3: DL Primer**: The updates involved a major reorganization of files into a new folder structure and the creation of subfolders within the images folder based on file type.
 - **Chapter 9: Efficient AI**: The file efficient_ai.qmd in the 'efficient_ai' section has undergone a significant reorganization with files being sorted into a new folder structure, and subfolders have been created within 'images/' based on file type.
-- **Embedded Ml**: The updates involved a major reorganization of the files into a new folder structure and the creation of subfolders within the images folder based on file type for the 'Embedded Machine Learning' chapter.
-- **Embedded Sys**: The embedded systems chapter has undergone a significant reorganization of files into a new folder structure, and subfolders have been created within the images directory based on file type.
 - **Chapter 7: AI Frameworks**: The contents/frameworks/frameworks.qmd file has been significantly restructured with a massive reorganization of the files into a new folder structure, and the creation of subfolders within the images/ directory based on filetype.
-- **Generative Ai**: The changelog does not provide specific content-level changes such as new sections, rewrites, example additions, or figure changes in the "generative_ai.qmd" file. The updates mentioned are related to file and folder organization, specifically the creation of subfolders within the "images/" directory based on file type and a massive reorganization of files.
 - **Chapter 11: AI Acceleration**: The hw_acceleration.qmd file in the machine learning systems textbook has been significantly reorganized, with a new folder structure implemented and subfolders created within the images directory based on file type.
-- **Lab: Arduino Image Classification**: The image_classification.qmd file has been significantly restructured with a new organization of files into specific subfolders within images/, based on their file types.
-- **Kws Nicla**: The file contents/kws_nicla/kws_nicla.qmd has been significantly reorganized with a new folder structure, and subfolders have been created within the images/ directory based on file type.
-- **Motion Classify Ad**: The file motion_classify_ad.qmd in the machine learning systems textbook has undergone a significant reorganization, with files being systematically arranged into a new folder structure, and subfolders being created within the images folder based on file type.
-- **Niclav Sys**: The textbook has undergone a massive reorganization with files being sorted into a new folder structure, and subfolders have been created within the images folder based on file type.
-- **Object Detection Fomo**: The object_detection_fomo.qmd file has undergone a significant reorganization with the creation of subfolders within the images/ directory based on file type.
 - **Chapter 14: On-Device Learning**: The update involved a significant reorganization of files into a new folder structure and the creation of subfolders within the images directory based on file type.
 - **Chapter 13: ML Operations**: The ops.qmd file in the machine learning systems textbook has been significantly reorganized, with a new folder structure implemented and subfolders created within the images folder based on file type.
 - **Chapter 10: Model Optimizations**: The optimizations chapter in the machine learning systems textbook has undergone a significant reorganization of its file and folder structure, and subfolders have been created within the images section based on file type.
@@ -1484,5 +1666,12 @@
 - **Chapter 17: Sustainable AI**: The update involved a major reorganization of files into a new folder structure and the creation of subfolders within the images directory based on file type.
 - **Chapter 5: AI Workflow**: The workflow.qmd file has been significantly reorganized with a new folder structure, and subfolders have been created within the images directory based on file type.
 - **Chapter 18: Robust AI**: The robust_ai.qmd file in the machine learning systems textbook has undergone a significant reorganization for improved structure and accessibility.
+
+</details>
+
+<details >
+<summary>**🧑‍💻 Lab Updates**</summary>
+
+- **Lab: Arduino Image Classification**: The image_classification.qmd file has been significantly restructured with a new organization of files into specific subfolders within images/, based on their file types.
 
 </details>
