@@ -3,6 +3,7 @@ import re
 import os
 import argparse
 import yaml
+import time
 from collections import defaultdict
 from datetime import datetime
 from openai import OpenAI
@@ -12,31 +13,59 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 CHANGELOG_FILE = "CHANGELOG.md"
 QUARTO_YML_FILE = "_quarto.yml"
 GITHUB_REPO_URL = "https://github.com/harvard-edge/cs249r_book/"
-MAJOR_CHANGE_THRESHOLD = 200
+# Removed MAJOR_CHANGE_THRESHOLD since we're organizing by content type now
+OPENAI_DELAY = 1  # seconds between API calls
 
 chapter_order = []
 
+# Updated to match your actual file structure
 chapter_lookup = [
-    ("introduction.qmd", "Introduction", 1),
-    ("ml_systems.qmd", "ML Systems", 2),
-    ("dl_primer.qmd", "DL Primer", 3),
-    ("dnn_architectures.qmd", "DNN Architectures", 4),
-    ("workflow.qmd", "AI Workflow", 5),
-    ("data_engineering.qmd", "Data Engineering", 6),
-    ("frameworks.qmd", "AI Frameworks", 7),
-    ("training.qmd", "AI Training", 8),
-    ("efficient_ai.qmd", "Efficient AI", 9),
-    ("optimizations.qmd", "Model Optimizations", 10),
-    ("hw_acceleration.qmd", "AI Acceleration", 11),
-    ("benchmarking.qmd", "Benchmarking AI", 12),
-    ("ops.qmd", "ML Operations", 13),
-    ("ondevice_learning.qmd", "On-Device Learning", 14),
-    ("privacy_security.qmd", "Security & Privacy", 15),
-    ("responsible_ai.qmd", "Responsible AI", 16),
-    ("sustainable_ai.qmd", "Sustainable AI", 17),
-    ("robust_ai.qmd", "Robust AI", 18),
-    ("ai_for_good.qmd", "AI for Good", 19),
-    ("conclusion.qmd", "Conclusion", 20),
+    # MAIN chapters
+    ("contents/core/introduction/introduction.qmd", "Introduction", 1),
+    ("contents/core/ml_systems/ml_systems.qmd", "ML Systems", 2),
+    ("contents/core/dl_primer/dl_primer.qmd", "DL Primer", 3),
+    ("contents/core/dnn_architectures/dnn_architectures.qmd", "DNN Architectures", 4),
+    ("contents/core/workflow/workflow.qmd", "AI Workflow", 5),
+    ("contents/core/data_engineering/data_engineering.qmd", "Data Engineering", 6),
+    ("contents/core/frameworks/frameworks.qmd", "AI Frameworks", 7),
+    ("contents/core/training/training.qmd", "AI Training", 8),
+    ("contents/core/efficient_ai/efficient_ai.qmd", "Efficient AI", 9),
+    ("contents/core/optimizations/optimizations.qmd", "Model Optimizations", 10),
+    ("contents/core/hw_acceleration/hw_acceleration.qmd", "AI Acceleration", 11),
+    ("contents/core/benchmarking/benchmarking.qmd", "Benchmarking AI", 12),
+    ("contents/core/ops/ops.qmd", "ML Operations", 13),
+    ("contents/core/ondevice_learning/ondevice_learning.qmd", "On-Device Learning", 14),
+    ("contents/core/privacy_security/privacy_security.qmd", "Security & Privacy", 15),
+    ("contents/core/responsible_ai/responsible_ai.qmd", "Responsible AI", 16),
+    ("contents/core/sustainable_ai/sustainable_ai.qmd", "Sustainable AI", 17),
+    ("contents/core/robust_ai/robust_ai.qmd", "Robust AI", 18),
+    ("contents/core/ai_for_good/ai_for_good.qmd", "AI for Good", 19),
+    ("contents/core/conclusion/conclusion.qmd", "Conclusion", 20),
+    
+    # LAB sections
+    ("contents/labs/overview.qmd", "Labs Overview", 100),
+    ("contents/labs/getting_started.qmd", "Lab Setup", 101),
+    
+    # Arduino Nicla Vision Labs
+    ("contents/labs/arduino/nicla_vision/setup/setup.qmd", "Arduino Setup", 102),
+    ("contents/labs/arduino/nicla_vision/image_classification/image_classification.qmd", "Arduino Image Classification", 103),
+    ("contents/labs/arduino/nicla_vision/object_detection/object_detection.qmd", "Arduino Object Detection", 104),
+    ("contents/labs/arduino/nicla_vision/kws/kws.qmd", "Arduino Keyword Spotting", 105),
+    ("contents/labs/arduino/nicla_vision/motion_classification/motion_classification.qmd", "Arduino Motion Classification", 106),
+    
+    # Seeed XIAO ESP32S3 Labs
+    ("contents/labs/seeed/xiao_esp32s3/setup/setup.qmd", "XIAO Setup", 107),
+    ("contents/labs/seeed/xiao_esp32s3/image_classification/image_classification.qmd", "XIAO Image Classification", 108),
+    ("contents/labs/seeed/xiao_esp32s3/object_detection/object_detection.qmd", "XIAO Object Detection", 109),
+    ("contents/labs/seeed/xiao_esp32s3/kws/kws.qmd", "XIAO Keyword Spotting", 110),
+    ("contents/labs/seeed/xiao_esp32s3/motion_classification/motion_classification.qmd", "XIAO Motion Classification", 111),
+    
+    # Raspberry Pi Labs
+    ("contents/labs/raspi/setup/setup.qmd", "Raspberry Pi Setup", 112),
+    ("contents/labs/raspi/image_classification/image_classification.qmd", "Pi Image Classification", 113),
+    ("contents/labs/raspi/object_detection/object_detection.qmd", "Pi Object Detection", 114),
+    ("contents/labs/raspi/llm/llm.qmd", "Pi Large Language Models", 115),
+    ("contents/labs/raspi/vlm/vlm.qmd", "Pi Vision Language Models", 116),
 ]
 
 def load_chapter_order():
@@ -79,20 +108,47 @@ def load_chapter_order():
 
     print(f"📚 Loaded {len(chapter_order)} chapters from _quarto.yml")
 
-def run_git_command(cmd, verbose=False):
-    if verbose:
-        print(f"📦 Running: {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise RuntimeError(f"Git command failed: {' '.join(cmd)}\n{result.stderr}")
-    return result.stdout.strip()
+def run_git_command(cmd, verbose=False, retries=3):
+    for attempt in range(retries):
+        if verbose:
+            print(f"📦 Running: {' '.join(cmd)} (attempt {attempt + 1})")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            return result.stdout.strip()
+        
+        if attempt < retries - 1:
+            print(f"⚠️ Git command failed, retrying in 2s: {result.stderr}")
+            time.sleep(2)
+        else:
+            raise RuntimeError(f"Git command failed after {retries} attempts: {' '.join(cmd)}\n{result.stderr}")
 
 def extract_chapter_title(file_path):
+    # Try exact path match first
+    for fname, title, number in chapter_lookup:
+        if fname == file_path:
+            if number <= 20:
+                return f"Chapter {number}: {title}"
+            elif number <= 100:
+                return f"Lab: {title}"
+            else:
+                return f"Lab: {title}"
+    
+    # Fallback: try basename matching for backwards compatibility
     base = os.path.basename(file_path)
     for fname, title, number in chapter_lookup:
-        if fname == base:
-            return f"Chapter {number}: {title}"
-    return base.replace('_', ' ').replace('.qmd', '').title()
+        if os.path.basename(fname) == base:
+            if number <= 20:
+                return f"Chapter {number}: {title}"
+            else:
+                return f"Lab: {title}"
+    
+    # Final fallback: generate from path
+    if "contents/core/" in file_path:
+        return f"Chapter: {base.replace('_', ' ').replace('.qmd', '').title()}"
+    elif "contents/labs/" in file_path:
+        return f"Lab: {base.replace('_', ' ').replace('.qmd', '').title()}"
+    else:
+        return base.replace('_', ' ').replace('.qmd', '').title()
 
 def sort_by_chapter_order(updates):
     def extract_path(update):
@@ -119,7 +175,7 @@ def get_commit_messages_for_file(file_path, since, until=None, verbose=False):
     cmd += ["origin/dev", "--", file_path]
     return run_git_command(cmd, verbose=verbose)
 
-def summarize_changes_with_openai(file_path, commit_messages, verbose=False):
+def summarize_changes_with_openai(file_path, commit_messages, verbose=False, max_retries=3):
     chapter_title = extract_chapter_title(file_path)
     if verbose:
         print(f"🤖 Calling OpenAI for: {file_path} -- {chapter_title}")
@@ -135,31 +191,38 @@ Ignore formatting or typo-only changes.
 
 Only return the summary sentence (not the bullet or chapter title)."""
 
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4",
-            temperature=0.3,
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant writing changelog summaries."},
-                {"role": "user", "content": prompt}
-            ]
-        )
+    for attempt in range(max_retries):
+        try:
+            # Add delay to avoid rate limiting
+            if attempt > 0:
+                time.sleep(OPENAI_DELAY * (2 ** attempt))  # exponential backoff
+            
+            response = client.chat.completions.create(
+                model="gpt-4",
+                temperature=0.3,
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant writing changelog summaries."},
+                    {"role": "user", "content": prompt}
+                ]
+            )
 
-        summary = response.choices[0].message.content.strip()
+            summary = response.choices[0].message.content.strip()
 
-        if not summary:
-            return f"- **{chapter_title}**: _(no meaningful changes detected)_"
+            if not summary:
+                return f"- **{chapter_title}**: _(no meaningful changes detected)_"
 
-        clean_summary = summary.partition(":")[-1].strip()
-        if not clean_summary:
-            clean_summary = summary  # fallback if no colon was present
+            clean_summary = summary.partition(":")[-1].strip()
+            if not clean_summary:
+                clean_summary = summary  # fallback if no colon was present
 
-        return f"- **{chapter_title}**: {clean_summary}"
+            # Add delay after successful call
+            time.sleep(OPENAI_DELAY)
+            return f"- **{chapter_title}**: {clean_summary}"
 
-    except Exception as e:
-        print(f"⚠️ OpenAI failed for {file_path}: {e}")
-        return f"- **{chapter_title}**: _(unable to summarize; see commits manually)_"
-
+        except Exception as e:
+            print(f"⚠️ OpenAI attempt {attempt + 1} failed for {file_path}: {e}")
+            if attempt == max_retries - 1:
+                return f"- **{chapter_title}**: _(unable to summarize; see commits manually)_"
 
 def format_friendly_date(date_str):
     try:
@@ -191,7 +254,7 @@ def generate_entry(start_date, end_date=None, verbose=False):
     current_date = datetime.now().strftime('%b %d, %Y') if not end_date else format_friendly_date(end_date)
     entry = f"### 📅 Published on {current_date}\n\n"
 
-    major, minor = [], []
+    chapters, labs = [], []
 
     ordered_files = sorted(
         changes_by_file,
@@ -201,25 +264,30 @@ def generate_entry(start_date, end_date=None, verbose=False):
         )
     )
 
-    for file_path in ordered_files:
+    total_files = len(ordered_files)
+    for idx, file_path in enumerate(ordered_files, 1):
+        added, removed = changes_by_file[file_path]
         total = added + removed
         if verbose:
-            print(f"🔍 Summarizing {file_path} ({added}+ / {removed}-)")
+            print(f"🔍 Summarizing {file_path} ({added}+ / {removed}-) [{idx}/{total_files}]")
         commit_msgs = get_commit_messages_for_file(file_path, start_date, end_date, verbose=verbose)
         summary = summarize_changes_with_openai(file_path, commit_msgs, verbose=verbose)
-        if total > MAJOR_CHANGE_THRESHOLD:
-            major.append(summary)
+        
+        # Categorize by content type instead of size
+        if "contents/labs/" in file_path:
+            labs.append(summary)
         else:
-            minor.append(summary)
+            chapters.append(summary)
 
-    if major:
-        entry += "<details open>\n<summary>**Major Updates**</summary>\n\n" + "\n".join(sort_by_chapter_order(major)) + "\n\n</details>\n\n"
-    if minor:
-        entry += "<details open>\n<summary>**Minor Updates**</summary>\n\n" + "\n".join(sort_by_chapter_order(minor)) + "\n\n</details>\n"
+    if chapters:
+        entry += "<details open>\n<summary>**📖 Chapter Updates**</summary>\n\n" + "\n".join(sort_by_chapter_order(chapters)) + "\n\n</details>\n\n"
+    if labs:
+        entry += "<details open>\n<summary>**🧑‍💻 Lab Updates**</summary>\n\n" + "\n".join(sort_by_chapter_order(labs)) + "\n\n</details>\n"
 
     return entry
 
 def generate_changelog(mode="incremental", verbose=False):
+    print("🔄 Fetching latest Git data...")
     run_git_command(["git", "fetch", "origin", "gh-pages:refs/remotes/origin/gh-pages"], verbose=verbose)
     run_git_command(["git", "fetch", "origin", "dev:refs/remotes/origin/dev"], verbose=verbose)
 
@@ -228,31 +296,93 @@ def generate_changelog(mode="incremental", verbose=False):
         parts = output.split(" ", 1)
         return (parts[0], parts[1]) if len(parts) == 2 else (None, None)
 
+    def get_all_gh_pages_commits():
+        output = run_git_command(["git", "log", "--pretty=format:%H %ad", "--date=iso", "origin/gh-pages"], verbose=verbose)
+        commits = []
+        for line in output.splitlines():
+            parts = line.split(" ", 1)
+            if len(parts) == 2:
+                commits.append((parts[0], parts[1]))
+        return commits
+
+    def extract_year_from_date(date_str):
+        try:
+            return datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z").year
+        except:
+            return datetime.now().year
+
     latest_commit, latest_date = get_latest_gh_pages_commit()
-    intro = f""
-    sections = []
 
     if mode == "full":
         if verbose:
             print("🔁 Running full regeneration...")
-        commits = run_git_command(["git", "log", "--pretty=format:%H %ad", "--date=iso", "origin/gh-pages"], verbose=verbose).splitlines()
-        commits = [(c.split(" ")[0], " ".join(c.split(" ")[1:])) for c in commits]
-        for i in range(len(commits) - 1):
-            entry = generate_entry(commits[i + 1][1], commits[i][1], verbose=verbose)
+        commits = get_all_gh_pages_commits()
+        
+        # Group commits by date (YYYY-MM-DD) to merge same-day publishes
+        def extract_date_only(date_str):
+            try:
+                return datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z").strftime("%Y-%m-%d")
+            except:
+                return date_str.split()[0]  # fallback to first part
+        
+        # Group commits by publication date
+        commits_by_date = defaultdict(list)
+        for commit, date in commits:
+            date_key = extract_date_only(date)
+            commits_by_date[date_key].append((commit, date))
+        
+        # Sort dates and get unique publication periods
+        unique_dates = sorted(commits_by_date.keys(), reverse=True)  # newest first
+        print(f"📊 Found {len(unique_dates)} unique publication dates...")
+        
+        # Group entries by year
+        entries_by_year = defaultdict(list)
+        
+        for i in range(len(unique_dates) - 1):
+            current_date_key = unique_dates[i]
+            previous_date_key = unique_dates[i + 1]
+            
+            # Get the latest commit from current date for the "published on" date
+            current_commits = commits_by_date[current_date_key]
+            latest_current = max(current_commits, key=lambda x: x[1])  # latest timestamp
+            
+            # Get the earliest commit from previous date as the "since" date
+            previous_commits = commits_by_date[previous_date_key]
+            earliest_previous = min(previous_commits, key=lambda x: x[1])  # earliest timestamp
+            
+            current_date = latest_current[1]
+            previous_date = earliest_previous[1]
+            
+            # Extract year from current_date (the publication date)
+            pub_year = extract_year_from_date(current_date)
+            
+            print(f"📅 Processing period {i+1}/{len(unique_dates)-1}: {format_friendly_date(previous_date)} → {format_friendly_date(current_date)} [{pub_year}]")
+            entry = generate_entry(previous_date, current_date, verbose=verbose)
             if entry:
-                sections.append(entry)
+                entries_by_year[pub_year].append(entry)
+        
+        if not entries_by_year:
+            return "_No updates found._"
+        
+        # Build output with year headers, newest years first
+        output_sections = []
+        for year in sorted(entries_by_year.keys(), reverse=True):
+            year_header = f"## {year} Changes"
+            year_entries = "\n\n".join(entries_by_year[year])
+            output_sections.append(f"{year_header}\n\n{year_entries}")
+        
+        return "\n\n---\n\n".join(output_sections) + "\n"
+        
     else:
         if verbose:
             print("⚡ Running incremental update...")
         entry = generate_entry(latest_date, verbose=verbose)
-        if entry:
-            sections.append(entry)
-
-    if not sections:
-        return intro + "_No updates found._"
-
-    year = datetime.now().year
-    return "\n\n".join(sections) + "\n"
+        if not entry:
+            return "_No updates found._"
+        
+        current_year = datetime.now().year
+        year_header = f"## {current_year} Changes"
+        return f"{year_header}\n\n{entry}"
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate changelog for ML systems book.")
@@ -268,7 +398,8 @@ if __name__ == "__main__":
 
     try:
         load_chapter_order()
-        new_entry = generate_changelog(mode=mode, verbose=args.verbose)  # returns just the `📅 Published on ...` block
+        print(f"🚀 Starting changelog generation in {mode} mode...")
+        new_entry = generate_changelog(mode=mode, verbose=args.verbose)
 
         if args.test:
             print("🧪 TEST OUTPUT ONLY:\n")
@@ -295,12 +426,21 @@ if __name__ == "__main__":
             cleaned_existing = "\n".join(filtered_lines).strip()
 
             # Prepend the new entry with correct year section
-            updated_content = f"{year_header}\n\n{new_entry.strip()}\n---\n\n{cleaned_existing}"
+            if mode == "full":
+                # For full mode, replace entire content (already includes year headers)
+                updated_content = new_entry.strip()
+            else:
+                # For incremental, prepend to existing
+                updated_content = f"{new_entry.strip()}\n---\n\n{cleaned_existing}"
 
             with open(CHANGELOG_FILE, "w", encoding="utf-8") as f:
                 f.write(updated_content.strip() + "\n")
 
             print(f"\n✅ Changelog written to {CHANGELOG_FILE}")
+            
+    except KeyboardInterrupt:
+        print(f"\n⚠️ Process interrupted by user")
     except Exception as e:
         print(f"❌ Error: {e}")
-
+        import traceback
+        traceback.print_exc()
