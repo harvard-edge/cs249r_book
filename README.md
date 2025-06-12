@@ -24,20 +24,20 @@
     <img src="https://img.shields.io/badge/PDF-Download-blue" alt="Download PDF"/>
   </a>
   <img src="https://img.shields.io/badge/Made%20with-Quarto-8A2BE2" alt="Made with Quarto"/>
-  <a href="https://github.com/harvard-edge/cs249r_book/blob/main/LICENSE">
-    <img src="https://img.shields.io/github/license/harvard-edge/cs249r_book" alt="License"/>
+  <a href="https://creativecommons.org/licenses/by-nc-nd/4.0/">
+    <img src="https://img.shields.io/badge/License-CC%20BY--NC--ND%204.0-lightgrey.svg" alt="CC BY-NC-ND 4.0 License"/>
   </a>
 </p>
 
 <!-- 🌍 Community & Engagement -->
 <p align="center">
-  <a href="https://github.com/harvard-edge/cs249r_book/stargazers">
-    <img src="https://img.shields.io/github/stars/harvard-edge/cs249r_book?style=social" alt="GitHub Stars"/>
-  </a>
   <a href="https://github.com/harvard-edge/cs249r_book">
     <img src="https://img.shields.io/github/all-contributors/harvard-edge/cs249r_book?color=ee8449&label=Contributors" alt="Contributors"/>
   </a>
   <img src="https://img.shields.io/badge/Open%20Source-%E2%9D%A4-ff69b4" alt="Open Source Love"/>
+  <a href="https://github.com/harvard-edge/cs249r_book/stargazers">
+    <img src="https://img.shields.io/github/stars/harvard-edge/cs249r_book?style=social" alt="GitHub Stars"/>
+  </a>
 </p>
 
 
