@@ -24,8 +24,8 @@
     <img src="https://img.shields.io/badge/PDF-Download-blue" alt="Download PDF"/>
   </a>
   <img src="https://img.shields.io/badge/Made%20with-Quarto-8A2BE2" alt="Made with Quarto"/>
-  <a href="https://creativecommons.org/licenses/by-nc-nd/4.0/">
-    <img src="https://licensebuttons.net/l/by-nc-nd/4.0/88x31.png" alt="CC BY-NC-ND 4.0"/>
+  <a href="https://github.com/harvard-edge/cs249r_book/blob/main/LICENSE">
+    <img src="https://img.shields.io/github/license/harvard-edge/cs249r_book" alt="License"/>
   </a>
 </p>
 
