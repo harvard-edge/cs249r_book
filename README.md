@@ -5,23 +5,41 @@
   <img src="cover-image-transparent.png" height="400" alt="Cover Image"/>
 </p>
 
+<!-- 🧱 Build & Deployment -->
 <p align="center">
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/controller.yml">
     <img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/controller.yml?label=Build" alt="Build Status"/>
   </a>
-  <a href="https://harvard-edge.github.io/cs249r_book/">
-    <img src="https://img.shields.io/website?url=https://harvard-edge.github.io/cs249r_book/&label=Website" alt="Website"/>
-  </a>
-  <a href="https://github.com/harvard-edge/cs249r_book/commits/main">
-    <img src="https://img.shields.io/github/last-commit/harvard-edge/cs249r_book/main?label=Latest%20Release" alt="Main Branch Updated"/>
+  <a href="https://mlsysbook.ai">
+    <img src="https://img.shields.io/website?url=https://mlsysbook.ai&label=Site%20Live" alt="Website"/>
   </a>
   <a href="https://github.com/harvard-edge/cs249r_book/commits/main">
     <img src="https://img.shields.io/github/last-commit/harvard-edge/cs249r_book?label=Last%20Commit" alt="Last Commit"/>
   </a>
+</p>
+
+<!-- 📘 Project & Content -->
+<p align="center">
+  <a href="https://mlsysbook.ai/Machine-Learning-Systems.pdf">
+    <img src="https://img.shields.io/badge/PDF-Download-blue" alt="Download PDF"/>
+  </a>
+  <img src="https://img.shields.io/badge/Made%20with-Quarto-8A2BE2" alt="Made with Quarto"/>
+  <a href="https://github.com/harvard-edge/cs249r_book/blob/main/LICENSE">
+    <img src="https://img.shields.io/github/license/harvard-edge/cs249r_book" alt="License"/>
+  </a>
+</p>
+
+<!-- 🌍 Community & Engagement -->
+<p align="center">
+  <a href="https://github.com/harvard-edge/cs249r_book/stargazers">
+    <img src="https://img.shields.io/github/stars/harvard-edge/cs249r_book?style=social" alt="GitHub Stars"/>
+  </a>
   <a href="https://github.com/harvard-edge/cs249r_book">
     <img src="https://img.shields.io/github/all-contributors/harvard-edge/cs249r_book?color=ee8449&label=Contributors" alt="Contributors"/>
   </a>
+  <img src="https://img.shields.io/badge/Open%20Source-%E2%9D%A4-ff69b4" alt="Open Source Love"/>
 </p>
+
 
 ---
 
