@@ -105,6 +105,14 @@ For a complete setup guide, including dependency installation, see [BUILD.md](BU
 
 ---
 
+## 🛡️ License
+
+This book is published under a [Creative Commons Attribution–NonCommercial–NoDerivatives 4.0 International (CC BY-NC-ND 4.0)](https://creativecommons.org/licenses/by-nc-nd/4.0/) license.
+
+You are free to share the material for **non-commercial purposes** with proper attribution. No derivatives or commercial use are permitted without permission.
+
+---
+
 ## 👥 Contributors
 
 This project follows the [all-contributors](https://allcontributors.org) specification. Contributions of any kind are welcome!
