@@ -254,7 +254,7 @@ jobs:
         with:
           path: |
             ${{ env.R_LIBS_USER }}
-          key: r-pkgs-${{ runner.os }}-${{ inputs.r-version }}-${{ hashFiles('**/install_packages.R') }}
+          key: r-pkgs-${{ runner.os }}-${{ inputs.r-version }}-${{ hashFiles('**/install_packages.R', '**/*.qmd') }}
           restore-keys: |
             r-pkgs-${{ runner.os }}-${{ inputs.r-version }}-
 
@@ -327,22 +327,6 @@ jobs:
         with:
             to: epub     
       
-      - name: 📤 Upload PDF and TeX files as artifact
-        if: inputs.format == 'pdf' || inputs.format == 'all'
-        uses: actions/upload-artifact@v4
-        with:
-          name: rendered-book
-          path: |
-            _book/**/*.pdf
-            _book/**/*.tex
-      
-      - name: 📤 Upload EPUB file as artifact
-        if: inputs.format == 'epub' || inputs.format == 'all'
-        uses: actions/upload-artifact@v4
-        with:
-          name: rendered-epub
-          path: _book/**/*.epub
-      
       - name: 📋 Check Quarto Build Output
         shell: bash
         run: |
@@ -413,28 +397,45 @@ jobs:
             Write-Warning "⚠️ Compression failed but continuing"
           }
           
-      - name: 📤 Upload artifact
-        if: github.event_name == 'pull_request' || inputs.deploy == false
+      - name: 📤 Upload _book directory as artifact
+        if: github.event_name == 'pull_request' || inputs.deploy == false || inputs.format != 'html'
         uses: actions/upload-artifact@v4
         with:
           name: _book-${{ inputs.os }}-${{ inputs.format }}
           path: _book
 
-      # Push to dev site
       - name: 🚀 Stage to Dev Site
-        if: inputs.target == 'dev' && runner.os == 'Linux' && inputs.deploy == true
-        uses: cpina/github-action-push-to-another-repository@v1.7.2
+        if: inputs.target == 'dev' && inputs.deploy == true && inputs.format == 'html' && runner.os == 'Linux'
+        shell: bash
         env:
           SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
-        with:
-          source-directory: '_book'
-          destination-github-username: 'harvard-edge'
-          destination-repository-name: 'cs249r_book_dev'
-          user-email: khoshnevis.naeem@gmail.com
-          target-branch: 'main'
-          target-directory: 'docs'
-          commit-message: |
-            📚 Push dev branch build
+        run: |
+          echo "🔐 Starting ssh-agent..."
+          eval "$(ssh-agent -s)"
+          echo "$SSH_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
+
+          git config --global user.email "khoshnevis.naeem@gmail.com"
+          git config --global user.name "github-actions"
+
+          echo "🔄 Cloning target repo..."
+          git clone --depth=1 git@github.com:harvard-edge/cs249r_book_dev.git target-repo
+          cd target-repo
+          git checkout main
+          git pull origin main
+
+          echo "🧹 Cleaning existing docs/"
+          rm -rf docs
+          cp -r "${GITHUB_WORKSPACE}/_book" docs
+          rm -f docs/CNAME  # remove if present
+
+          echo "🔍 Validating deployment content..."
+          test -f docs/index.html || (echo "❌ index.html missing" && exit 1)
+          [ "$(ls -1 docs | wc -l)" -gt 3 ] || (echo "❌ docs/ too empty — something went wrong" && exit 1)
+
+          echo "📦 Committing and pushing changes..."
+          git add docs
+          git commit -m "📚 Push dev branch build (manual version)" || echo "🟡 Nothing to commit"
+          git push origin main
 
       - name: 📋 Dev Deployment Info
         if: inputs.target == 'dev' && runner.os == 'Linux' && inputs.deploy == true
