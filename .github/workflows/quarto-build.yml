@@ -32,7 +32,7 @@ on:
         required: false
         type: string
         default: 'all'
-        description: 'Format to build (html/pdf/all)'
+        description: 'Format to build (html/pdf/epub/all)'
       deploy:
         required: false
         type: boolean
@@ -54,7 +54,7 @@ jobs:
       name: ${{ inputs.environment }}
     env:
       R_LIBS_USER: ${{ github.workspace }}/.r-lib
-      #QUARTO_LOG_LEVEL: DEBUG
+      QUARTO_LOG_LEVEL: DEBUG
 
     steps:
       - name: 🔍 Validate inputs
@@ -67,7 +67,7 @@ jobs:
           Write-Output "👉 Format: ${{ inputs.format }}"
           Write-Output "👉 Deploy: ${{ inputs.deploy }}"
           
-          $valid_formats = @("html", "pdf", "all")
+          $valid_formats = @("html", "pdf", "epub", "all")
           if ("${{ inputs.format }}" -notin $valid_formats) {
             Write-Error "❌ Format must be one of: $($valid_formats -join ', ')"
             exit 1
@@ -152,12 +152,10 @@ jobs:
             libcurl4-openssl-dev \
             libjpeg-dev \
             libtiff5-dev \
-            libpng-dev \
-            dvisvgm \
-            pdf2svg
+            libpng-dev
 
           echo "✅ Linux dependencies installed"
-
+                
       - name: 🎨 Install Inkscape and font dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -212,7 +210,7 @@ jobs:
           inkscape --version
 
       - name: 📦 Install & Update TeX Live 
-        if: inputs.format != 'none'
+        if: inputs.format == 'pdf' || inputs.format == 'epub' || inputs.format == 'all'
         uses: teatimeguest/setup-texlive-action@v3
         with:
           version: 2025
@@ -255,7 +253,7 @@ jobs:
         with:
           path: |
             ${{ env.R_LIBS_USER }}
-          key: r-pkgs-${{ runner.os }}-${{ inputs.r-version }}-${{ hashFiles('**/install_packages.R') }}
+          key: r-pkgs-${{ runner.os }}-${{ inputs.r-version }}-${{ hashFiles('**/install_packages.R', '**/*.qmd') }}
           restore-keys: |
             r-pkgs-${{ runner.os }}-${{ inputs.r-version }}-
 
@@ -322,6 +320,12 @@ jobs:
         with:
             to: titlepage-pdf
 
+      - name: 🔨 Render Quarto Project (EPUB)
+        if: inputs.format == 'epub' || inputs.format == 'all'
+        uses: quarto-dev/quarto-actions/render@v2
+        with:
+            to: epub     
+      
       - name: 📋 Check Quarto Build Output
         shell: bash
         run: |
@@ -392,8 +396,8 @@ jobs:
             Write-Warning "⚠️ Compression failed but continuing"
           }
           
-      - name: 📤 Upload artifact
-        if: github.event_name == 'pull_request' || inputs.deploy == false
+      - name: 📤 Upload _book directory as artifact
+        if: github.event_name == 'pull_request' || inputs.deploy == false || inputs.format != 'html'
         uses: actions/upload-artifact@v4
         with:
           name: _book-${{ inputs.os }}-${{ inputs.format }}
@@ -431,7 +435,6 @@ jobs:
           git add docs
           git commit -m "📚 Push dev branch build (manual version)" || echo "🟡 Nothing to commit"
           git push origin main
-
 
       - name: 📋 Dev Deployment Info
         if: inputs.target == 'dev' && runner.os == 'Linux' && inputs.deploy == true
@@ -487,4 +490,4 @@ jobs:
             - TeX Live: $texLiveStatus
             - R Packages: ${{ steps.cache-r-packages.outputs.cache-hit == 'true' && '✅ Hit' || '❌ Miss' }}
           ⏰ Completed at: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-          "@ | Add-Content $env:GITHUB_STEP_SUMMARY
+          "@ | Add-Content $env:GITHUB_STEP_SUMMARY 

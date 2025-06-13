@@ -158,17 +158,49 @@ def extract_chapter_title(file_path):
             else:
                 return title
     
+    # Special handling for common chapter files that don't match lookup
+    base = os.path.basename(file_path).replace('.qmd', '')
+    
+    # Map common chapter files to proper titles
+    chapter_mappings = {
+        'generative_ai': 'Chapter: Generative AI',
+        'embedded_ml': 'Chapter: Embedded ML', 
+        'embedded_sys': 'Chapter: Embedded Systems',
+        'ml_systems': 'Chapter 2: ML Systems',
+        'dl_primer': 'Chapter 3: DL Primer',
+        'dnn_architectures': 'Chapter 4: DNN Architectures',
+        'workflow': 'Chapter 5: AI Workflow',
+        'data_engineering': 'Chapter 6: Data Engineering',
+        'frameworks': 'Chapter 7: AI Frameworks',
+        'training': 'Chapter 8: AI Training',
+        'efficient_ai': 'Chapter 9: Efficient AI',
+        'optimizations': 'Chapter 10: Model Optimizations',
+        'hw_acceleration': 'Chapter 11: AI Acceleration',
+        'benchmarking': 'Chapter 12: Benchmarking AI',
+        'ops': 'Chapter 13: ML Operations',
+        'ondevice_learning': 'Chapter 14: On-Device Learning',
+        'privacy_security': 'Chapter 15: Security & Privacy',
+        'responsible_ai': 'Chapter 16: Responsible AI',
+        'sustainable_ai': 'Chapter 17: Sustainable AI',
+        'robust_ai': 'Chapter 18: Robust AI',
+        'ai_for_good': 'Chapter 19: AI for Good',
+        'conclusion': 'Chapter 20: Conclusion'
+    }
+    
+    if base in chapter_mappings:
+        return chapter_mappings[base]
+    
     # Final fallback: generate from path
     if "contents/core/" in file_path:
-        return f"Chapter: {base.replace('_', ' ').replace('.qmd', '').title()}"
+        return f"Chapter: {base.replace('_', ' ').title()}"
     elif "contents/labs/" in file_path:
-        return f"Lab: {base.replace('_', ' ').replace('.qmd', '').title()}"
+        return f"Lab: {base.replace('_', ' ').title()}"
     elif "contents/frontmatter/" in file_path:
-        return base.replace('_', ' ').replace('.qmd', '').title()
+        return base.replace('_', ' ').title()
     elif "contents/appendix/" in file_path:
-        return base.replace('_', ' ').replace('.qmd', '').title()
+        return base.replace('_', ' ').title()
     else:
-        return base.replace('_', ' ').replace('.qmd', '').title()
+        return base.replace('_', ' ').title()
 
 def sort_by_chapter_order(updates):
     def extract_path(update):
