@@ -1,7 +1,3 @@
-# Book Changelog
-
-This Machine Learning Systems textbook is constantly evolving. This changelog automatically records all updates and improvements, helping you stay informed about what’s new and refined.
-
 ## 2025 Changes
 
 ### 📅 Published on Jun 10, 2025
