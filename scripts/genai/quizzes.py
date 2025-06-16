@@ -7,30 +7,84 @@ from pathlib import Path
 from openai import OpenAI, APIError
 from slugify import slugify
 import gradio as gr
+import sys
+import tempfile
+import shutil
+import time
 
 # Client is initialized in main() after logging is set up
+
+# --- Global Callout Type Definitions ---
+QUIZ_CALLOUT_CLASS = ".callout-important"
+ANSWER_CALLOUT_CLASS = ".callout-tip"
 
 # --- Constants ---
 STOPWORDS = {"in", "of", "the", "and", "to", "for", "on", "a", "an", "with", "by"}
 
 SYSTEM_PROMPT = """
 You are a helpful assistant for a university-level textbook on machine learning systems.
-Your task is to generate 1 to 5 self-check questions and answers based on the section provided.
-These questions should help students and learners reflect on and test their understanding.
-These are self-check quizzes, not homework assignments to pause and reflect.
-The questions should be appropriate for a university-level course.
+Your task is to first evaluate whether a quiz would be pedagogically valuable for the given section, and if so, generate 1 to 5 self-check questions and answers.
 
-Guidelines:
-- Focus on conceptual understanding, system-level reasoning, and meaningful tradeoffs.
-- Avoid surface-level recall or trivia.
-- Use clear, academically appropriate language.
-- Include at least one question about a system design tradeoff or implication.
-- If applicable, include a question that addresses a common misconception.
-- Do not repeat exact phrasing from the source text.
-- Keep in mind that the questions should ideally be focused on machine learning systems, not just machine learning.
+First, evaluate if this section warrants a quiz by considering:
+1. Does it contain concepts that students need to actively understand and apply?
+2. Are there potential misconceptions that need to be addressed?
+3. Does it present system design tradeoffs or implications that students should reflect on?
+4. Does it build on previous knowledge in ways that should be reinforced?
+
+Sections that typically DO NOT need quizzes:
+- Pure introductions or context-setting sections
+- Sections that primarily tell a story or provide historical context
+- Sections that are purely descriptive without conceptual depth
+- Sections that are primarily motivational or overview in nature
+
+Sections that typically DO need quizzes:
+- Sections that introduce new technical concepts
+- Sections that present system design decisions or tradeoffs
+- Sections that address common misconceptions
+- Sections that require application of concepts
+- Sections that build on previous knowledge in important ways
+
+If you determine a quiz is NOT needed, return this JSON:
+{
+    "quiz_needed": false,
+    "rationale": "Explanation of why this section doesn't need a quiz (e.g., context-setting, descriptive only, no actionable concepts)."
+}
+
+If you determine a quiz IS needed, return this JSON:
+{
+    "quiz_needed": true,
+    "rationale": {
+        "focus_areas": ["List of 2–3 key areas this section focuses on"],
+        "question_strategy": "Brief explanation of why these question types were chosen and how they build understanding",
+        "difficulty_progression": "How the questions progress in complexity and support deeper learning",
+        "integration": "How these questions connect with concepts introduced earlier in the chapter or textbook (if applicable)",
+        "ranking_explanation": "Explanation of why questions are ordered this way and how they support learning"
+    },
+    "questions": [
+        {
+            "question": "The question text",
+            "answer": "The answer text (limit to ~75–150 words total for question + answer)",
+            "learning_objective": "What specific understanding or skill this question tests"
+        }
+    ]
+}
+
+Guidelines for questions (only if quiz_needed is true):
+- Focus on conceptual understanding, system-level reasoning, and meaningful tradeoffs
+- Avoid surface-level recall or trivia
+- Use clear, academically appropriate language
+- Include at least one question about a system design tradeoff or implication
+- If applicable, include a question that addresses a common misconception
+- Do not repeat exact phrasing from the source text
+- Prioritize questions relevant to *machine learning systems*, not just general ML
+- Keep answers concise and informative (~75–150 words total per Q&A)
+
+Special format rules:
+- For fill-in-the-blank questions: The blank should be a single word or short phrase, clearly indicated as ____ (four underscores). The answer field should contain only the missing word or phrase.
+- For multiple choice: Include answer options directly in the question text (e.g., A), B), C)), each on a new line. The answer field must specify the correct letter and include a short justification (e.g., "B) Correct answer text. This is correct because...").
 
 Question Types (use a mix based on what best tests understanding):
-- Multiple Choice Questions (MCQ) with clear, unambiguous options
+- Multiple Choice Questions (MCQ)
 - Short answer explanations requiring conceptual understanding
 - Scenario-based questions that test application of concepts
 - "Why" questions that probe deeper understanding
@@ -38,7 +92,6 @@ Question Types (use a mix based on what best tests understanding):
 - Comparison questions that test understanding of tradeoffs
 - Fill-in-the-blank for key concepts
 - True/False with justification required
-Choose the question type that will most effectively test understanding of each concept.
 
 Bloom's Taxonomy Levels (aim for a mix):
 - Remember: Basic recall of facts, terms, concepts
@@ -47,44 +100,6 @@ Bloom's Taxonomy Levels (aim for a mix):
 - Analyze: Draw connections among ideas
 - Evaluate: Justify a stand or decision
 - Create: Produce new or original work
-
-Ranking Guidelines:
-- Rank questions by their learning effectiveness, with the most impactful questions first
-- Prioritize questions that test deep understanding over surface knowledge
-- Place system design and tradeoff questions at the top
-- Put basic recall or definition questions last
-- Consider which questions will most effectively reinforce key concepts
-- Order questions to build understanding progressively
-- Ensure each question adds unique value to the learning experience
-
-Progressive Improvement:
-- Review any previously asked questions provided in the prompt
-- Ensure your new questions are distinct from previous ones
-- Build upon concepts covered in earlier sections
-- Progress from basic understanding to more complex applications
-- Later questions should integrate multiple concepts from earlier sections
-
-Return the output in valid JSON format with the following structure:
-{
-    "rationale": {
-        "focus_areas": ["List of 2-3 key areas this section focuses on"],
-        "question_strategy": "Brief explanation of why these question types were chosen and how they build understanding",
-        "difficulty_progression": "How the questions progress in complexity and learning effectiveness",
-        "integration": "How these questions connect with previous sections (if applicable)",
-        "ranking_explanation": "Explanation of why questions are ordered this way and how they support learning"
-    },
-    "questions": [
-        {
-            "question": "The question text",
-            "answer": "The answer text",
-            "learning_objective": "What specific understanding or skill this question tests"
-        }
-    ]
-}
-
-For MCQs, format the answer as "Correct option: [letter]. [explanation]"
-For True/False, format as "Answer: [True/False]. [explanation]"
-For other types, provide a clear, concise answer that demonstrates understanding.
 """
 
 # --- Core Functions ---
@@ -97,23 +112,30 @@ def clean_slug(title):
     logging.debug(f"Cleaned title '{title}' to slug '{slug}'")
     return slug
 
+def strip_quiz_callouts(text):
+    """Remove any existing Self-Check Quiz callout blocks from the text."""
+    return re.sub(r"::: \{\.callout-important title=\"Self-Check Quiz\"[\s\S]*?:::\n?", "", text)
+
 def build_user_prompt(section_title, section_text, chapter_title=None, previous_sections=None):
     """Constructs the user prompt for the language model."""
-    prefix = f"This section is titled \"{section_title}\"."
+    # Strip quiz callouts from section_text
+    section_text = strip_quiz_callouts(section_text)
+    prefix = f'This section is titled "{section_title}".'
     if chapter_title:
-        prefix += f" It appears in the chapter \"{chapter_title}\"."
+        prefix += f' It appears in the chapter "{chapter_title}".'
     
     previous_context = ""
     if previous_sections:
         previous_context = "\n\nPrevious sections in this chapter:\n"
         for prev_title, prev_content in previous_sections:
-            # Extract any existing quizzes from previous content
+            # Strip quiz callouts from previous content
+            prev_content_clean = strip_quiz_callouts(prev_content)
+            # Extract any existing quizzes from previous content (for reference, but now always empty)
             quiz_pattern = re.compile(r":::.*?title=\"Self-Check Quiz\".*?:::", re.DOTALL)
             quiz_match = quiz_pattern.search(prev_content)
             quiz_text = quiz_match.group(0) if quiz_match else "No quiz in this section"
-            
             previous_context += f"\nSection: {prev_title}\n"
-            previous_context += f"Content Summary: {prev_content[:200]}...\n"
+            previous_context += f"Content Summary: {prev_content_clean[:200]}...\n"
             previous_context += f"Quiz: {quiz_text}\n"
     
     prompt = f"""
@@ -154,8 +176,8 @@ def extract_sections(markdown_text):
     chapter_title = chapter_match.group(1).strip() if chapter_match else None
     logging.debug(f"Extracted chapter title: {chapter_title}")
     
-    # Extract sections
-    pattern = re.compile(r"^##\s+(.*)", re.MULTILINE)
+    # Extract only level-2 sections (##), not deeper
+    pattern = re.compile(r"^##\s+([^#\n]+)", re.MULTILINE)
     matches = list(pattern.finditer(markdown_text))
     sections = []
     for i, match in enumerate(matches):
@@ -172,24 +194,44 @@ def call_openai(client, system_prompt, user_prompt, model="gpt-4"):
     """Calls the OpenAI API and handles potential errors."""
     logging.info(f"Calling OpenAI API with model '{model}'...")
     try:
+        # Remove response_format for models that don't support it
         response = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            temperature=0.4,
-            response_format={"type": "json_object"}
+            temperature=0.4
         )
         content = response.choices[0].message.content
         logging.debug(f"Raw response content from OpenAI: {content}")
         
-        data = json.loads(content)
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError:
+            # If the response isn't valid JSON, try to extract JSON from the text
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            if json_match:
+                try:
+                    data = json.loads(json_match.group(0))
+                except json.JSONDecodeError:
+                    logging.error("Failed to parse JSON from response")
+                    return {
+                        "quiz_needed": False,
+                        "rationale": "Failed to parse response as JSON"
+                    }
+            else:
+                logging.error("No JSON found in response")
+                return {
+                    "quiz_needed": False,
+                    "rationale": "No JSON found in response"
+                }
         
         # Ensure we always return a dictionary with the expected structure
         if isinstance(data, list):
             # Convert list to expected dictionary format
             return {
+                "quiz_needed": True,
                 "rationale": {
                     "focus_areas": ["Key concepts from the section"],
                     "question_strategy": "Questions designed to test understanding of core concepts",
@@ -199,81 +241,62 @@ def call_openai(client, system_prompt, user_prompt, model="gpt-4"):
                 "questions": data
             }
         elif isinstance(data, dict):
-            # If it's already a dict but missing rationale, add default rationale
-            if "rationale" not in data:
+            # If it's already a dict but missing quiz_needed, add it
+            if "quiz_needed" not in data:
+                data["quiz_needed"] = True
+            # If it's missing rationale but has questions, add default rationale
+            if "rationale" not in data and "questions" in data:
                 data["rationale"] = {
                     "focus_areas": ["Key concepts from the section"],
                     "question_strategy": "Questions designed to test understanding of core concepts",
                     "difficulty_progression": "Questions progress from basic to advanced concepts",
                     "integration": "Questions build on fundamental concepts"
                 }
-            # If it's missing questions but has other fields, wrap them in questions
-            if "questions" not in data:
-                questions = []
-                for key, value in data.items():
-                    if key != "rationale":
-                        if isinstance(value, list):
-                            questions.extend(value)
-                        else:
-                            questions.append(value)
-                data["questions"] = questions
             return data
         else:
             logging.warning(f"Unexpected JSON structure from OpenAI: {type(data)}")
             return {
-                "rationale": {
-                    "focus_areas": ["Key concepts from the section"],
-                    "question_strategy": "Questions designed to test understanding of core concepts",
-                    "difficulty_progression": "Questions progress from basic to advanced concepts",
-                    "integration": "Questions build on fundamental concepts"
-                },
-                "questions": []
+                "quiz_needed": False,
+                "rationale": "Unexpected response structure"
             }
 
     except APIError as e:
         logging.error(f"OpenAI API error: {e}")
         return {
-            "rationale": {
-                "focus_areas": ["Error occurred"],
-                "question_strategy": "Failed to generate questions",
-                "difficulty_progression": "N/A",
-                "integration": "N/A"
-            },
-            "questions": []
-        }
-    except json.JSONDecodeError as e:
-        logging.error(f"Failed to parse OpenAI JSON response: {e}")
-        logging.debug(f"Problematic raw content: {content}")
-        return {
-            "rationale": {
-                "focus_areas": ["Error occurred"],
-                "question_strategy": "Failed to parse response",
-                "difficulty_progression": "N/A",
-                "integration": "N/A"
-            },
-            "questions": []
+            "quiz_needed": False,
+            "rationale": f"API error: {str(e)}"
         }
     except Exception as e:
         logging.error(f"An unexpected error occurred in call_openai: {e}")
         return {
-            "rationale": {
-                "focus_areas": ["Error occurred"],
-                "question_strategy": "Unexpected error",
-                "difficulty_progression": "N/A",
-                "integration": "N/A"
-            },
-            "questions": []
+            "quiz_needed": False,
+            "rationale": f"Unexpected error: {str(e)}"
         }
 
 def format_quiz_block(qa_pairs, answer_ref):
     """Formats the questions into a Quarto callout block."""
+    # Check if quiz is needed
+    if isinstance(qa_pairs, dict) and not qa_pairs.get("quiz_needed", True):
+        return ""  # Return empty string if no quiz is needed
+    
     # Extract questions from the nested structure
     questions = qa_pairs.get("questions", qa_pairs) if isinstance(qa_pairs, dict) else qa_pairs
     
-    # Format questions without learning objectives
-    formatted_questions = [f"{i+1}. {qa['question']}" for i, qa in enumerate(questions)]
+    # If there are no questions or questions is empty, return empty string
+    if not questions or (isinstance(questions, list) and len(questions) == 0):
+        return ""
     
-    return f"""::: {{.callout-important title="Self-Check Quiz" collapse="true"}}
+    # Extract slug from answer_ref (e.g., 'answer-my-slug' -> 'my-slug')
+    slug = answer_ref.replace("answer-", "")
+    quiz_id = f"question-{slug}"
+
+    # Always number questions, even if there is only one
+    if isinstance(questions, list):
+        formatted_questions = [f"Q: {qa['question']}" if isinstance(qa, dict) else f"Q: {qa}" for qa in questions]
+    else:
+        formatted_questions = [f"Q: {questions}"]
+    
+    return f"""::: {{{QUIZ_CALLOUT_CLASS} title=\"Self-Check Quiz\" collapse=\"true\" #{quiz_id}}}
 
 {"\n\n".join(formatted_questions)}
 
@@ -284,13 +307,22 @@ See @{answer_ref}.
 
 def format_answer_block(slug, qa_pairs):
     """Formats the answers into a Quarto callout block."""
+    # Check if quiz is needed
+    if isinstance(qa_pairs, dict) and not qa_pairs.get("quiz_needed", True):
+        return ""  # Return empty string if no quiz is needed
+    
     # Extract questions from the nested structure
     questions = qa_pairs.get("questions", qa_pairs) if isinstance(qa_pairs, dict) else qa_pairs
     
-    # Format Q&A pairs without learning objectives
+    # If there are no questions or questions is empty, return empty string
+    if not questions or (isinstance(questions, list) and len(questions) == 0):
+        return ""
+    
+    # Format Q&A pairs with consistent numbering
     lines = [f"**{i+1}. {qa['question']}**\n\n{qa['answer']}" for i, qa in enumerate(questions)]
     
-    return f"""::: {{.callout-tip #answer-{slug} title="Quiz Answers" collapse="true"}}
+    # Ensure consistent callout formatting: .callout-type title="..." collapse="true" #id
+    return f"""::: {{{ANSWER_CALLOUT_CLASS} title=\"Quiz Answers\" collapse=\"true\" #answer-{slug}}}
 
 {"\n\n".join(lines)}
 :::
@@ -299,11 +331,12 @@ def format_answer_block(slug, qa_pairs):
 
 # --- GUI Mode ---
 
-def launch_gui_mode(client, sections, qa_by_section, filepath, model):
+def launch_gui_mode(client, sections, qa_by_section, filepath, model, pre_select_all=False, tmp_path=None):
     """Launches an interactive Gradio GUI to review and select Q&A pairs."""
     logging.info("Preparing to launch GUI mode...")
     final_answers = []
     total_sections = len(sections)
+    selected_indices_by_section = {}  # NEW: Track selections per section
     
     # Extract chapter title from the first section if available
     chapter_title = None
@@ -371,26 +404,60 @@ def launch_gui_mode(client, sections, qa_by_section, filepath, model):
             choices = []
             
             if qa_pairs:
-                if isinstance(qa_pairs, dict) and "rationale" in qa_pairs:
-                    rationale = qa_pairs["rationale"]
-                    rationale_text = (
-                        f"Focus Areas: {', '.join(rationale['focus_areas'])}\n"
-                        f"Strategy: {rationale['question_strategy']}\n"
-                        f"Progression: {rationale['difficulty_progression']}\n"
-                        f"Integration: {rationale['integration']}\n"
-                        f"Ranking: {rationale.get('ranking_explanation', 'Questions ordered by learning effectiveness')}"
-                    )
-                
-                # Add questions
-                questions = qa_pairs.get("questions", qa_pairs) if isinstance(qa_pairs, dict) else qa_pairs
-                for i, qa in enumerate(questions):
-                    formatted_content = f"{i+1}. {qa['question']}\n\n{qa['answer']}"
-                    if 'learning_objective' in qa:
-                        formatted_content += f"\n\nLearning Objective: {qa['learning_objective']}"
-                    choices.append((formatted_content, i))
+                # If quiz_needed is explicitly False, show only rationale, no Q&A pairs
+                if isinstance(qa_pairs, dict) and qa_pairs.get("quiz_needed", True) is False:
+                    rationale = qa_pairs.get("rationale", "No quiz needed for this section.")
+                    rationale_text = str(rationale)
+                    choices = []
+                else:
+                    if isinstance(qa_pairs, dict):
+                        if "rationale" in qa_pairs:
+                            rationale = qa_pairs["rationale"]
+                            if isinstance(rationale, dict):
+                                rationale_text = (
+                                    f"Focus Areas: {', '.join(rationale['focus_areas'])}\n"
+                                    f"Strategy: {rationale['question_strategy']}\n"
+                                    f"Progression: {rationale['difficulty_progression']}\n"
+                                    f"Integration: {rationale['integration']}\n"
+                                    f"Ranking: {rationale.get('ranking_explanation', 'Questions ordered by learning effectiveness')}"
+                                )
+                            else:
+                                rationale_text = str(rationale)
+                        
+                        # Add questions
+                        questions = qa_pairs.get("questions", qa_pairs)
+                        if isinstance(questions, list):
+                            for i, qa in enumerate(questions):
+                                if isinstance(qa, dict):
+                                    formatted_content = f"{i+1}. {qa['question']}\n\n{qa['answer']}"
+                                    if 'learning_objective' in qa:
+                                        formatted_content += f"\n\nLearning Objective: {qa['learning_objective']}"
+                                    choices.append((formatted_content, i))
+                                else:
+                                    # Handle case where qa is a string
+                                    choices.append((f"{i+1}. {qa}", i))
+                        else:
+                            # Handle case where questions is a string
+                            choices.append((f"1. {questions}", 0))
+                    else:
+                        # Handle case where qa_pairs is a list
+                        for i, qa in enumerate(qa_pairs):
+                            if isinstance(qa, dict):
+                                formatted_content = f"{i+1}. {qa['question']}\n\n{qa['answer']}"
+                                if 'learning_objective' in qa:
+                                    formatted_content += f"\n\nLearning Objective: {qa['learning_objective']}"
+                                choices.append((formatted_content, i))
+                            else:
+                                # Handle case where qa is a string
+                                choices.append((f"{i+1}. {qa}", i))
             
-            # Start with no questions selected
-            return progress_text, title, text, rationale_text, gr.update(choices=choices, value=[]), gr.update(visible=True), gr.update(visible=True), gr.update(visible=True)
+            # Restore previous selection if available
+            if title in selected_indices_by_section:
+                initial_value = selected_indices_by_section[title]
+            else:
+                initial_value = list(range(len(choices))) if pre_select_all else []
+            
+            return progress_text, title, text, rationale_text, gr.update(choices=choices, value=initial_value), gr.update(visible=True), gr.update(visible=True), gr.update(visible=True)
 
         def regenerate_questions(index, custom_guidance_text):
             if index >= total_sections:
@@ -416,33 +483,41 @@ def launch_gui_mode(client, sections, qa_by_section, filepath, model):
                 qa_pairs = call_openai(client, SYSTEM_PROMPT, user_prompt, model=model)
                 
                 if qa_pairs:
-                    qa_by_section[title] = qa_pairs
-                    questions = qa_pairs.get("questions", qa_pairs) if isinstance(qa_pairs, dict) else qa_pairs
-                    logging.info(f"Successfully regenerated {len(questions)} Q&A pairs for section: '{title}'")
-                    
-                    # Extract rationale and questions
-                    rationale_text = ""
-                    choices = []
-                    
-                    if isinstance(qa_pairs, dict) and "rationale" in qa_pairs:
-                        rationale = qa_pairs["rationale"]
-                        rationale_text = (
-                            f"Focus Areas: {', '.join(rationale['focus_areas'])}\n"
-                            f"Strategy: {rationale['question_strategy']}\n"
-                            f"Progression: {rationale['difficulty_progression']}\n"
-                            f"Integration: {rationale['integration']}\n"
-                            f"Ranking: {rationale.get('ranking_explanation', 'Questions ordered by learning effectiveness')}"
-                        )
-                    
-                    # Add questions
-                    for i, qa in enumerate(questions):
-                        formatted_content = f"{i+1}. {qa['question']}\n\n{qa['answer']}"
-                        if 'learning_objective' in qa:
-                            formatted_content += f"\n\nLearning Objective: {qa['learning_objective']}"
-                        choices.append((formatted_content, i))
-                    
-                    # Start with no questions selected
-                    yield gr.update(choices=choices, value=[]), gr.update(value=rationale_text), gr.update(value="✅ Questions regenerated!")
+                    # Check if quiz is needed
+                    if isinstance(qa_pairs, dict) and not qa_pairs.get("quiz_needed", True):
+                        qa_by_section[title] = qa_pairs
+                        yield gr.update(choices=[], value=[]), gr.update(value=str(qa_pairs.get("rationale", "No quiz needed for this section."))), gr.update(value="✅ Section marked as not needing a quiz")
+                    else:
+                        qa_by_section[title] = qa_pairs
+                        questions = qa_pairs.get("questions", qa_pairs) if isinstance(qa_pairs, dict) else qa_pairs
+                        logging.info(f"Successfully regenerated {len(questions)} Q&A pairs for section: '{title}'")
+                        
+                        # Extract rationale and questions
+                        rationale_text = ""
+                        choices = []
+                        
+                        if isinstance(qa_pairs, dict) and "rationale" in qa_pairs:
+                            rationale = qa_pairs["rationale"]
+                            if isinstance(rationale, dict):
+                                rationale_text = (
+                                    f"Focus Areas: {', '.join(rationale['focus_areas'])}\n"
+                                    f"Strategy: {rationale['question_strategy']}\n"
+                                    f"Progression: {rationale['difficulty_progression']}\n"
+                                    f"Integration: {rationale['integration']}\n"
+                                    f"Ranking: {rationale.get('ranking_explanation', 'Questions ordered by learning effectiveness')}"
+                                )
+                            else:
+                                rationale_text = str(rationale)
+                        
+                        # Add questions
+                        for i, qa in enumerate(questions):
+                            formatted_content = f"{i+1}. {qa['question']}\n\n{qa['answer']}"
+                            if 'learning_objective' in qa:
+                                formatted_content += f"\n\nLearning Objective: {qa['learning_objective']}"
+                            choices.append((formatted_content, i))
+                        
+                        # Start with no questions selected
+                        yield gr.update(choices=choices, value=[]), gr.update(value=rationale_text), gr.update(value="✅ Questions regenerated!")
                 else:
                     yield gr.update(choices=[], value=[]), gr.update(value="Failed to generate questions"), gr.update(value="⚠️ Failed to generate questions")
             except Exception as e:
@@ -469,9 +544,14 @@ def launch_gui_mode(client, sections, qa_by_section, filepath, model):
                 user_prompt = build_user_prompt(title, text, chapter_title, previous_sections)
                 qa_pairs = call_openai(client, SYSTEM_PROMPT, user_prompt, model=model)
                 if qa_pairs:
-                    qa_by_section[title] = qa_pairs
-                    questions = qa_pairs.get("questions", qa_pairs) if isinstance(qa_pairs, dict) else qa_pairs
-                    logging.info(f"Successfully generated {len(questions)} Q&A pairs for section: '{title}'")
+                    # Check if quiz is needed
+                    if isinstance(qa_pairs, dict) and not qa_pairs.get("quiz_needed", True):
+                        logging.info(f"No quiz needed for section: '{title}'")
+                        qa_by_section[title] = qa_pairs
+                    else:
+                        questions = qa_pairs.get("questions", qa_pairs) if isinstance(qa_pairs, dict) else qa_pairs
+                        logging.info(f"Successfully generated {len(questions)} Q&A pairs for section: '{title}'")
+                        qa_by_section[title] = qa_pairs
                 else:
                     logging.warning(f"No Q&A pairs were generated for section: '{title}'")
             
@@ -487,6 +567,21 @@ def launch_gui_mode(client, sections, qa_by_section, filepath, model):
             if index < total_sections:
                 title, _ = sections[index]
                 qa_pairs = qa_by_section.get(title, [])
+                
+                # Save the user's selection for this section
+                selected_indices_by_section[title] = list(selected_indices)
+                
+                # Check if quiz is needed
+                if isinstance(qa_pairs, dict) and not qa_pairs.get("quiz_needed", True):
+                    # For sections that don't need a quiz, save an empty list
+                    for i, (existing_title, _) in enumerate(final_answers):
+                        if existing_title == title:
+                            final_answers[i] = (title, [])
+                            break
+                    else:
+                        final_answers.append((title, []))
+                    logging.info(f"Section '{title}' marked as not needing a quiz")
+                    return gr.update(value="✅ Section marked as not needing a quiz")
                 
                 # Get the questions list from the nested structure
                 questions = qa_pairs.get("questions", qa_pairs) if isinstance(qa_pairs, dict) else qa_pairs
@@ -511,11 +606,15 @@ def launch_gui_mode(client, sections, qa_by_section, filepath, model):
             return gr.update()
 
         def write_and_exit():
+            # print("--- ENTERING WRITE_AND_EXIT FUNCTION ---") # DEBUG: Check if function is called
             if not final_answers:
                 return gr.update(value="⚠️ No sections saved!")
             
             logging.info(f"Proceeding to write {len(final_answers)} updated sections to file.")
-            with open(filepath, "r", encoding="utf-8") as f:
+
+            # Start with the cleaned content that was written to tmp_path initially
+            # We need to read it back because 'content' is not directly accessible here
+            with open(tmp_path, "r", encoding="utf-8") as f:
                 modified_content = f.read()
 
             answer_blocks = []
@@ -525,19 +624,53 @@ def launch_gui_mode(client, sections, qa_by_section, filepath, model):
                 quiz_block = format_quiz_block(qa_pairs, f"answer-{slug}")
                 answer_block = format_answer_block(slug, qa_pairs)
                 
-                section_pattern = re.compile(rf"(^##\s+{re.escape(title)}\s*\n)(.*?)(?=^##|\Z)", re.DOTALL | re.MULTILINE)
-                modified_content = section_pattern.sub(lambda m: m.group(0).rstrip() + "\n\n" + quiz_block + "\n", modified_content, count=1)
+                # Insert quiz only at the end of the ## section, after all its content (including any ### or deeper)
+                section_pattern = re.compile(rf"(^##\s+{re.escape(title)}\s*\n)(.*?)(?=^##\s|\Z)", re.DOTALL | re.MULTILINE)
+                def insert_quiz_at_end(match):
+                    section_text = match.group(0).rstrip()
+                    # Remove any existing quiz callout in this section
+                    section_text = re.sub(r"::: {\.callout-important title=\"Self-Check Quiz\"[\s\S]*?:::\n?", "", section_text)
+                    # Only insert if not already present
+                    if quiz_block.strip() and quiz_block.strip() not in section_text:
+                        return section_text + "\n\n" + quiz_block + "\n"
+                    else:
+                        return section_text
+                modified_content = section_pattern.sub(insert_quiz_at_end, modified_content, count=1)
                 answer_blocks.append(answer_block)
 
-            if answer_blocks:
+            # Only add non-empty answer blocks
+            nonempty_answer_blocks = [b for b in answer_blocks if b.strip() and not b.strip().isspace() and not b.strip().startswith('::: {.callout-tip') or (b.strip() and 'answer-' in b)]
+            if nonempty_answer_blocks:
                 logging.info("Appending final 'Quiz Answers' block to the document.")
                 if not re.search(r"^##\s+Quiz Answers", modified_content, re.MULTILINE):
-                     modified_content += "\n\n## Quiz Answers\n"
-                modified_content += "\n" + "\n\n".join(answer_blocks)
+                    modified_content += "\n\n## Quiz Answers\n"
+                modified_content += "\n" + "\n\n".join(nonempty_answer_blocks)
 
-            with open(filepath, "w", encoding="utf-8") as f:
+            # Write the final content back to the temporary file
+            logging.info(f"Writing final content to temporary file: {tmp_path}")
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 f.write(modified_content)
+            logging.info(f"Successfully wrote updated content to temporary file. Size: {os.path.getsize(tmp_path)} bytes")
+
+            # --- Final Overwrite and Cleanup ---
+            logging.info(f"Overwriting original file: {filepath}")
+            shutil.copy2(tmp_path, filepath)
+            logging.info(f"Successfully updated original file. New size: {os.path.getsize(filepath)} bytes")
+            
+            # Clean up the temporary file
+            if os.path.exists(tmp_path):
+                logging.info(f"Cleaning up temporary file: {tmp_path}")
+                os.unlink(tmp_path)
+                logging.info("Temporary file removed successfully.")
+
             logging.info(f"GUI mode: Successfully updated file: {filepath}")
+            
+            # --- Exit the app and process ---
+            try:
+                demo.close()
+            except Exception:
+                pass
+            sys.exit(0)
             return gr.update(value="✅ File written successfully!")
 
         # Initial Load for the first section
@@ -576,7 +709,6 @@ def launch_gui_mode(client, sections, qa_by_section, filepath, model):
         
         write_exit_btn.click(
             fn=write_and_exit,
-            inputs=[],
             outputs=[write_exit_btn]
         )
 
@@ -599,83 +731,205 @@ def launch_gui_mode(client, sections, qa_by_section, filepath, model):
 
 # --- Main File Processing Logic ---
 
-def process_file(client, filepath, gui=False, model="gpt-4"):
+def clean_existing_quiz_blocks(markdown_text):
+    """
+    Remove all quiz and answer callouts, and the entire '## Quiz Answers' section with its content.
+    Returns:
+        cleaned_text (str): the cleaned markdown
+        changed (bool): whether anything was removed
+        quiz_removed_count (int): number of quiz blocks removed
+        answer_removed_count (int): number of answer blocks removed
+    """
+    original_len = len(markdown_text)
+    quiz_removed_count = 0
+    answer_removed_count = 0
+
+    # --- Remove quiz callouts ---
+    quiz_callout_pattern = re.compile(
+        r":::\s*\{[^}]*?" + re.escape(QUIZ_CALLOUT_CLASS) + r"[^}]*?#question-[^}]*?\}[\s\S]*?:::\s*\n?",
+        re.DOTALL | re.IGNORECASE
+    )
+    cleaned, quiz_removed_count = quiz_callout_pattern.subn("", markdown_text)
+
+    # --- Remove all answer callouts ---
+    # Match any block with .callout-tip (answer block), even without #answer-id
+    answer_callout_pattern = re.compile(
+        r":::\s*\{[^}]*?" + re.escape(ANSWER_CALLOUT_CLASS) + r"[^}]*?\}[\s\S]*?:::\s*\n?",
+        re.DOTALL | re.IGNORECASE
+    )
+    cleaned, answer_removed_count = answer_callout_pattern.subn("", cleaned)
+
+    # --- Remove the entire '## Quiz Answers' section (header + all content) ---
+    quiz_answers_section_pattern = re.compile(
+        r"^##\s+Quiz Answers\s*\n([\s\S]*?)(?=^##\s|\Z)", re.MULTILINE
+    )
+    cleaned, section_removed_count = quiz_answers_section_pattern.subn("", cleaned)
+
+    changed = len(cleaned) != original_len
+    return cleaned, changed, quiz_removed_count, answer_removed_count
+
+def process_file(client, filepath, mode="batch", model="gpt-4"):
     """Orchestrates the processing of a single markdown file."""
     logging.info(f"--- Starting processing for: {filepath} ---")
+    tmp_path = None  # Initialize tmp_path
     try:
+        # Read original file
         with open(filepath, "r", encoding="utf-8") as f:
             content = f.read()
         logging.info(f"Successfully read file with {len(content)} characters.")
+
+        # Clean up any existing quiz/answer callouts
+        content, cleaned_something, quiz_count, answer_count = clean_existing_quiz_blocks(content)
+        if cleaned_something:
+            logging.info(f"Cleaned up existing content: Removed {quiz_count} quiz callout(s) and {answer_count} answer callout(s).")
+        
+        # Create a temporary file
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.tmp', encoding='utf-8') as tmp:
+            tmp_path = tmp.name
+            tmp.write(content)
+        logging.info(f"Created temporary file at: {tmp_path}")
+        logging.info(f"Temporary file size: {os.path.getsize(tmp_path)} bytes")
+
+        # Now process the cleaned content
+        chapter_title, sections = extract_sections(content)
+        if not sections:
+            logging.warning(f"No level-2 sections (## Section Title) found. Nothing to process.")
+            logging.info(f"--- Finished processing for: {filepath} ---")
+            return
+            
+        qa_by_section = {}
+                
+        if mode == "review":
+            # For review mode, generate questions for all sections first
+            logging.info("Generating questions for all sections...")
+            for title, section_text in sections:
+                logging.info(f"Processing section: '{title}'")
+                user_prompt = build_user_prompt(title, section_text, chapter_title)
+                qa_pairs = call_openai(client, SYSTEM_PROMPT, user_prompt, model=model)
+                if qa_pairs:
+                    questions = qa_pairs.get("questions", qa_pairs) if isinstance(qa_pairs, dict) else qa_pairs
+                    logging.info(f"Successfully generated {len(questions)} Q&A pairs for section: '{title}'")
+                    qa_by_section[title] = qa_pairs
+                else:
+                    logging.warning(f"No Q&A pairs were generated for section: '{title}'")
+            
+            # Launch GUI with all questions pre-selected
+            launch_gui_mode(client, sections, qa_by_section, filepath, model, pre_select_all=True, tmp_path=tmp_path)
+        
+        elif mode == "interactive":
+            # For interactive mode, only generate questions for the first section initially
+            if sections:
+                title, text = sections[0]
+                logging.info(f"Generating initial questions for first section: '{title}'")
+                user_prompt = build_user_prompt(title, text, chapter_title)
+                qa_pairs = call_openai(client, SYSTEM_PROMPT, user_prompt, model=model)
+                if qa_pairs:
+                    qa_by_section[title] = qa_pairs
+                    questions = qa_pairs.get("questions", qa_pairs) if isinstance(qa_pairs, dict) else qa_pairs
+                    logging.info(f"Successfully generated {len(questions)} Q&A pairs for first section")
+                else:
+                    logging.warning(f"No Q&A pairs were generated for first section")
+            
+            # Launch GUI with only first section's questions
+            launch_gui_mode(client, sections, qa_by_section, filepath, model, tmp_path=tmp_path)
+        
+        else:  # batch mode
+            # For batch mode, process all sections and write to file
+            logging.info("Running in batch mode. Writing all generated quizzes to file...")
+            for title, section_text in sections:
+                logging.info(f"Processing section: '{title}'")
+                user_prompt = build_user_prompt(title, section_text, chapter_title)
+                qa_pairs = call_openai(client, SYSTEM_PROMPT, user_prompt, model=model)
+                if qa_pairs:
+                    questions = qa_pairs.get("questions", qa_pairs) if isinstance(qa_pairs, dict) else qa_pairs
+                    logging.info(f"Successfully generated {len(questions)} Q&A pairs for section: '{title}'")
+                    qa_by_section[title] = qa_pairs
+                else:
+                    logging.warning(f"No Q&A pairs were generated for section: '{title}'")
+
+            if not qa_by_section:
+                logging.warning("No questions were generated for any section. No changes will be made.")
+                logging.info(f"--- Finished processing for: {filepath} ---")
+                return
+
+            modified_content = content
+            answer_blocks = []
+
+            logging.info(f"Starting to insert {len(qa_by_section)} quiz sections into the document...")
+            for title, qa_pairs in qa_by_section.items():
+                logging.info(f"Processing quiz insertion for section: '{title}'")
+                slug = clean_slug(title)
+                quiz_block = format_quiz_block(qa_pairs, f"answer-{slug}")
+                answer_block = format_answer_block(slug, qa_pairs)
+                
+                if quiz_block.strip():
+                    logging.info(f"Generated quiz block for section '{title}' ({len(quiz_block)} chars)")
+                else:
+                    logging.info(f"No quiz block generated for section '{title}' (quiz not needed)")
+                
+                if answer_block.strip():
+                    logging.info(f"Generated answer block for section '{title}' ({len(answer_block)} chars)")
+                    answer_blocks.append(answer_block)
+                else:
+                    logging.info(f"No answer block generated for section '{title}' (quiz not needed)")
+                
+                # Insert quiz only at the end of the ## section, after all its content (including any ### or deeper)
+                section_pattern = re.compile(rf"(^##\s+{re.escape(title)}\s*\n)(.*?)(?=^##\s|\Z)", re.DOTALL | re.MULTILINE)
+                def insert_quiz_at_end(match):
+                    section_text = match.group(0).rstrip()
+                    # Remove any existing quiz callout in this section
+                    section_text = re.sub(r"::: {\.callout-important title=\"Self-Check Quiz\"[\s\S]*?:::\n?", "", section_text)
+                    # Only insert if not already present
+                    if quiz_block.strip() and quiz_block.strip() not in section_text:
+                        logging.info(f"Inserting quiz block into section '{title}'")
+                        return section_text + "\n\n" + quiz_block + "\n"
+                    else:
+                        logging.info(f"Quiz block already present in section '{title}' or empty, skipping insertion")
+                        return section_text
+                modified_content = section_pattern.sub(insert_quiz_at_end, modified_content, count=1)
+
+            # Only add non-empty answer blocks
+            nonempty_answer_blocks = [b for b in answer_blocks if b.strip() and not b.strip().isspace() and not b.strip().startswith('::: {.callout-tip') or (b.strip() and 'answer-' in b)]
+            logging.info(f"Found {len(nonempty_answer_blocks)} non-empty answer blocks to append")
+            
+            if nonempty_answer_blocks:
+                logging.info("Appending final 'Quiz Answers' block.")
+                if not re.search(r"^##\s+Quiz Answers", modified_content, re.MULTILINE):
+                    logging.info("Adding 'Quiz Answers' section header")
+                    modified_content += "\n\n## Quiz Answers\n"
+                else:
+                    logging.info("'Quiz Answers' section header already exists")
+                
+                logging.info(f"Appending {len(nonempty_answer_blocks)} answer blocks")
+                modified_content += "\n" + "\n\n".join(nonempty_answer_blocks)
+            else:
+                logging.info("No answer blocks to append")
+
+            # Write the final content to the temporary file
+            logging.info(f"Writing modified content to temporary file: {tmp_path}")
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(modified_content)
+            logging.info(f"Successfully wrote updated content to temporary file. Size: {os.path.getsize(tmp_path)} bytes")
+
+            # Overwrite the original file with the temporary file's contents
+            logging.info(f"Overwriting original file: {filepath}")
+            shutil.copy2(tmp_path, filepath)
+            logging.info(f"Successfully updated original file. New size: {os.path.getsize(filepath)} bytes")
+
     except FileNotFoundError:
         logging.error(f"File not found: {filepath}")
         return
-
-    chapter_title, sections = extract_sections(content)
-    if not sections:
-        logging.warning(f"No level-2 sections (## Section Title) found. Nothing to process.")
-        logging.info(f"--- Finished processing for: {filepath} ---")
+    except Exception as e:
+        logging.error(f"An error occurred while processing {filepath}: {str(e)}")
         return
-        
-    qa_by_section = {}
-    
-    if gui:
-        # For GUI mode, only generate questions for the first section initially
-        if sections:
-            title, text = sections[0]
-            logging.info(f"Generating initial questions for first section: '{title}'")
-            user_prompt = build_user_prompt(title, text, chapter_title)
-            qa_pairs = call_openai(client, SYSTEM_PROMPT, user_prompt, model=model)
-            if qa_pairs:
-                qa_by_section[title] = qa_pairs
-                questions = qa_pairs.get("questions", qa_pairs) if isinstance(qa_pairs, dict) else qa_pairs
-                logging.info(f"Successfully generated {len(questions)} Q&A pairs for first section")
-            else:
-                logging.warning(f"No Q&A pairs were generated for first section")
-        
-        launch_gui_mode(client, sections, qa_by_section, filepath, model)
-    else:
-        # For non-GUI mode, process all sections
-        logging.info("Running in non-GUI mode. Writing all generated quizzes to file...")
-        for title, section_text in sections:
-            logging.info(f"Processing section: '{title}'")
-            user_prompt = build_user_prompt(title, section_text, chapter_title)
-            qa_pairs = call_openai(client, SYSTEM_PROMPT, user_prompt, model=model)
-            if qa_pairs:
-                questions = qa_pairs.get("questions", qa_pairs) if isinstance(qa_pairs, dict) else qa_pairs
-                logging.info(f"Successfully generated {len(questions)} Q&A pairs for section: '{title}'")
-                qa_by_section[title] = qa_pairs
-            else:
-                logging.warning(f"No Q&A pairs were generated for section: '{title}'")
-
-        if not qa_by_section:
-            logging.warning("No questions were generated for any section. No changes will be made.")
-            logging.info(f"--- Finished processing for: {filepath} ---")
-            return
-
-        modified_content = content
-        answer_blocks = []
-
-        for title, qa_pairs in qa_by_section.items():
-            logging.debug(f"Inserting quiz for section '{title}' into content.")
-            slug = clean_slug(title)
-            quiz_block = format_quiz_block(qa_pairs, f"answer-{slug}")
-            answer_block = format_answer_block(slug, qa_pairs)
-            
-            section_pattern = re.compile(rf"(^##\s+{re.escape(title)}\s*\n)(.*?)(?=^##|\Z)", re.DOTALL | re.MULTILINE)
-            modified_content = section_pattern.sub(lambda m: m.group(0).rstrip() + "\n\n" + quiz_block + "\n", modified_content, count=1)
-            answer_blocks.append(answer_block)
-
-        if answer_blocks:
-            logging.info("Appending final 'Quiz Answers' block.")
-            if not re.search(r"^##\s+Quiz Answers", modified_content, re.MULTILINE):
-                 modified_content += "\n\n## Quiz Answers\n"
-            modified_content += "\n" + "\n\n".join(answer_blocks)
-
-        with open(filepath, "w", encoding="utf-8") as f:
-            f.write(modified_content)
-        logging.info(f"Non-GUI mode: Successfully updated file.")
-    
-    logging.info(f"--- Finished processing for: {filepath} ---")
+    finally:
+        # Clean up the temporary file if it still exists
+        if tmp_path and os.path.exists(tmp_path):
+            # This block will be simplified. The temporary file will be handled by GUI mode.
+            # For batch mode, it's already handled, so this is primarily for error cleanup if GUI didn't launch.
+            logging.info(f"Cleaning up leftover temporary file: {tmp_path}")
+            os.unlink(tmp_path)
+            logging.info("Leftover temporary file removed successfully.")
 
 def main():
     """Parses command-line arguments and starts the processing."""
@@ -685,8 +939,12 @@ def main():
     )
     parser.add_argument("-f", "--file", help="Path to a single markdown (.qmd/.md) file.")
     parser.add_argument("-d", "--dir", help="Path to a directory containing markdown files to process.")
-    parser.add_argument("--gui", action="store_true", help="Run in interactive GUI mode for reviewing questions.")
-    parser.add_argument("--model", default="gpt-4o", help="The OpenAI model to use (e.g., 'gpt-4', 'gpt-4-turbo').")
+    parser.add_argument("--mode", required=True, choices=["batch", "review", "interactive"],
+        help="""Mode of operation:
+        batch: Process all sections and write to file without review
+        review: Batch process all sections first, then review them
+        interactive: Generate and review questions one section at a time""")
+    parser.add_argument("--model", default="gpt-4", help="The OpenAI model to use (e.g., 'gpt-4', 'gpt-4-turbo').")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose (DEBUG) logging.")
     
     args = parser.parse_args()
@@ -711,7 +969,7 @@ def main():
         return
 
     if args.file:
-        process_file(client, Path(args.file), gui=args.gui, model=args.model)
+        process_file(client, Path(args.file), mode=args.mode, model=args.model)
     elif args.dir:
         directory = Path(args.dir)
         if not directory.is_dir():
@@ -723,7 +981,7 @@ def main():
             for name in files:
                 if name.endswith((".qmd", ".md")):
                     filepath = Path(root) / name
-                    process_file(client, filepath, gui=args.gui, model=args.model)
+                    process_file(client, filepath, mode=args.mode, model=args.model)
                 else:
                     logging.debug(f"Skipping non-markdown file: {name}")
     else:
