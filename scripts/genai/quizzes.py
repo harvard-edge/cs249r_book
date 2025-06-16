@@ -15,8 +15,8 @@ import time
 # Client is initialized in main() after logging is set up
 
 # --- Global Callout Type Definitions ---
-QUIZ_CALLOUT_CLASS = ".callout-important"
-ANSWER_CALLOUT_CLASS = ".callout-tip"
+QUIZ_CALLOUT_CLASS = ".callout-question"
+ANSWER_CALLOUT_CLASS = ".callout-answer"
 
 # --- Constants ---
 STOPWORDS = {"in", "of", "the", "and", "to", "for", "on", "a", "an", "with", "by"}
@@ -300,7 +300,7 @@ def format_quiz_block(qa_pairs, answer_ref):
 
 {"\n\n".join(formatted_questions)}
 
-See @{answer_ref}.
+See \\ref{{{answer_ref}}}.
 :::
 
 """
