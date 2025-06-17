@@ -195,7 +195,8 @@ def extract_sections(markdown_text):
         start = match.start()
         # End is either the start of next section or end of file
         end = matches[i + 1].start() if i + 1 < len(matches) else len(markdown_text)
-        content = markdown_text[start:end].strip()
+        # Don't strip the content to preserve newlines
+        content = markdown_text[start:end]
         sections.append((title, content))
         logging.info(f"Found section {i+1}: {title}")
     
@@ -897,7 +898,6 @@ def process_file(client, filepath, mode="batch", model="gpt-4o"):
                         # If quiz_block is empty or already present, just return the cleaned content (with two newlines)
                         return section_text
                 modified_content = section_pattern.sub(insert_quiz_at_end, modified_content, count=1)
-                answer_blocks.append(answer_block)
 
             # Only add non-empty answer blocks
             nonempty_answer_blocks = [b for b in answer_blocks if b.strip() and not b.strip().isspace() and not b.strip().startswith('::: {.callout-tip') or (b.strip() and 'answer-' in b)]
