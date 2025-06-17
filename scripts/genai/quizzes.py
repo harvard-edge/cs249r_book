@@ -375,24 +375,13 @@ def format_answer_block(slug, qa_pairs):
 
 # --- GUI Mode ---
 
-def launch_gui_mode(client, sections, qa_by_section, filepath, model, pre_select_all=False, tmp_path=None):
+def launch_gui_mode(client, sections, qa_by_section, filepath, model, pre_select_all=False, tmp_path=None, chapter_title=None):
     """Launches an interactive Gradio GUI to review and select Q&A pairs."""
     logging.info("Preparing to launch GUI mode...")
     final_answers = []
     total_sections = len(sections)
     selected_indices_by_section = {}  # NEW: Track selections per section
     
-    # Extract chapter title from the first section if available
-    chapter_title = None
-    if sections:
-        # Try to find chapter title in the first section's content
-        first_section_text = sections[0][1]
-        chapter_pattern = re.compile(r"^#\s+(.*)", re.MULTILINE)
-        chapter_match = chapter_pattern.search(first_section_text)
-        if chapter_match:
-            chapter_title = chapter_match.group(1).strip()
-            logging.info(f"Found chapter title: {chapter_title}")
-
     with gr.Blocks(title="Quiz Generator Review", theme=gr.themes.Soft()) as demo:
         progress_bar = gr.Markdown(f"### Section 1 of {total_sections}")
         
@@ -680,7 +669,6 @@ def launch_gui_mode(client, sections, qa_by_section, filepath, model, pre_select
                     else:
                         return section_text
                 modified_content = section_pattern.sub(insert_quiz_at_end, modified_content, count=1)
-                answer_blocks.append(answer_block)
 
             # Only add non-empty answer blocks
             nonempty_answer_blocks = [b for b in answer_blocks if b.strip() and not b.strip().isspace() and not b.strip().startswith('::: {.callout-tip') or (b.strip() and 'answer-' in b)]
@@ -804,10 +792,11 @@ def clean_existing_quiz_blocks(markdown_text):
 
     # --- Remove the entire '## Quiz Answers' section (header + all content) ---
     quiz_answers_section_pattern = re.compile(
-        r"^##\s+Quiz Answers\s*\n([\s\S]*?)(?=^##\s|\Z)", re.MULTILINE
+        r"(^##\s+" + re.escape("Quiz Answers") + r"[\s\S]*?)(?=^##\s|\Z)", re.MULTILINE
     )
     cleaned, section_removed_count = quiz_answers_section_pattern.subn("", cleaned)
 
+    logging.debug(f"Cleaned section removed count: {section_removed_count}")
     changed = len(cleaned) != original_len
     return cleaned, changed, quiz_removed_count, answer_removed_count
 
@@ -857,7 +846,7 @@ def process_file(client, filepath, mode="batch", model="gpt-4o"):
                     logging.warning(f"No Q&A pairs were generated for section: '{title}'")
             
             # Launch GUI with all questions pre-selected
-            launch_gui_mode(client, sections, qa_by_section, filepath, model, pre_select_all=True, tmp_path=tmp_path)
+            launch_gui_mode(client, sections, qa_by_section, filepath, model, pre_select_all=True, tmp_path=tmp_path, chapter_title=chapter_title)
         
         elif mode == "interactive":
             # For interactive mode, only generate questions for the first section initially
@@ -874,7 +863,7 @@ def process_file(client, filepath, mode="batch", model="gpt-4o"):
                     logging.warning(f"No Q&A pairs were generated for first section")
             
             # Launch GUI with only first section's questions
-            launch_gui_mode(client, sections, qa_by_section, filepath, model, tmp_path=tmp_path)
+            launch_gui_mode(client, sections, qa_by_section, filepath, model, tmp_path=tmp_path, chapter_title=chapter_title)
         
         else:  # batch mode
             # For batch mode, process all sections and write to file
@@ -928,7 +917,6 @@ def process_file(client, filepath, mode="batch", model="gpt-4o"):
                     else:
                         return section_text
                 modified_content = section_pattern.sub(insert_quiz_at_end, modified_content, count=1)
-                answer_blocks.append(answer_block)
 
             # Only add non-empty answer blocks
             nonempty_answer_blocks = [b for b in answer_blocks if b.strip() and not b.strip().isspace() and not b.strip().startswith('::: {.callout-tip') or (b.strip() and 'answer-' in b)]
