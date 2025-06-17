@@ -18,6 +18,11 @@ import time
 QUIZ_CALLOUT_CLASS = ".callout-question"
 ANSWER_CALLOUT_CLASS = ".callout-answer"
 
+# --- Global Reference and ID Prefixes ---
+REFERENCE_TEXT = "See Answer"
+QUESTION_ID_PREFIX = "question-"
+ANSWER_ID_PREFIX = "answer-"
+
 # --- Constants ---
 STOPWORDS = {"in", "of", "the", "and", "to", "for", "on", "a", "an", "with", "by"}
 
@@ -288,8 +293,8 @@ def format_quiz_block(qa_pairs, answer_ref):
         return ""
     
     # Extract slug from answer_ref (e.g., 'answer-my-slug' -> 'my-slug')
-    slug = answer_ref.replace("answer-", "")
-    quiz_id = f"question-{slug}"
+    slug = answer_ref.replace(ANSWER_ID_PREFIX, "")
+    quiz_id = f"{QUESTION_ID_PREFIX}{slug}"
 
     # Always number questions, even if there is only one
     if isinstance(questions, list):
@@ -297,11 +302,11 @@ def format_quiz_block(qa_pairs, answer_ref):
     else:
         formatted_questions = [f"1. {questions}"]
     
-    return f"""::: {{{QUIZ_CALLOUT_CLASS} title=\"Self-Check Quiz\" collapse=\"true\" #{quiz_id}}}
+    return f"""::: {{{QUIZ_CALLOUT_CLASS} #{quiz_id}}}
 
 {"\n\n".join(formatted_questions)}
 
-See \\ref{{{answer_ref}}}.
+{REFERENCE_TEXT} \\ref{{{answer_ref}}}.
 :::
 
 """
@@ -322,8 +327,8 @@ def format_answer_block(slug, qa_pairs):
     # Format Q&A pairs with consistent numbering
     lines = [f"**{i+1}. {qa['question']}**\n\n{qa['answer']}" for i, qa in enumerate(questions)]
     
-    # Ensure consistent callout formatting: .callout-type title="..." collapse="true" #id
-    return f"""::: {{{ANSWER_CALLOUT_CLASS} title=\"Quiz Answers\" collapse=\"true\" #answer-{slug}}}
+    # Ensure consistent callout formatting
+    return f"""::: {{{ANSWER_CALLOUT_CLASS} #{ANSWER_ID_PREFIX}{slug}}}
 
 {"\n\n".join(lines)}
 :::
@@ -622,7 +627,7 @@ def launch_gui_mode(client, sections, qa_by_section, filepath, model, pre_select
             for title, qa_pairs in final_answers:
                 logging.debug(f"Formatting and inserting quiz for section: '{title}'")
                 slug = clean_slug(title)
-                quiz_block = format_quiz_block(qa_pairs, f"answer-{slug}")
+                quiz_block = format_quiz_block(qa_pairs, f"{ANSWER_ID_PREFIX}{slug}")
                 answer_block = format_answer_block(slug, qa_pairs)
                 
                 # Insert quiz only at the end of the ## section, after all its content (including any ### or deeper)
@@ -860,7 +865,7 @@ def process_file(client, filepath, mode="batch", model="gpt-4o"):
             for title, qa_pairs in qa_by_section.items():
                 logging.info(f"Processing quiz insertion for section: '{title}'")
                 slug = clean_slug(title)
-                quiz_block = format_quiz_block(qa_pairs, f"answer-{slug}")
+                quiz_block = format_quiz_block(qa_pairs, f"{ANSWER_ID_PREFIX}{slug}")
                 answer_block = format_answer_block(slug, qa_pairs)
                 
                 if quiz_block.strip():
