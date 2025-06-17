@@ -293,9 +293,9 @@ def format_quiz_block(qa_pairs, answer_ref):
 
     # Always number questions, even if there is only one
     if isinstance(questions, list):
-        formatted_questions = [f"* {qa['question']}" if isinstance(qa, dict) else f"* {qa}" for qa in questions]
+        formatted_questions = [f"{i+1}. {qa['question']}" if isinstance(qa, dict) else f"{i+1}. {qa}" for i, qa in enumerate(questions)]
     else:
-        formatted_questions = [f"* {questions}"]
+        formatted_questions = [f"1. {questions}"]
     
     return f"""::: {{{QUIZ_CALLOUT_CLASS} title=\"Self-Check Quiz\" collapse=\"true\" #{quiz_id}}}
 
