@@ -23,7 +23,7 @@ STOPWORDS = {"in", "of", "the", "and", "to", "for", "on", "a", "an", "with", "by
 
 SYSTEM_PROMPT = """
 You are a helpful assistant for a university-level textbook on machine learning systems.
-Your task is to first evaluate whether a quiz would be pedagogically valuable for the given section, and if so, generate 1 to 5 self-check questions and answers.
+Your task is to first evaluate whether a quiz would be pedagogically valuable for the given section, and if so, generate 1 to 5 self-check questions and answers. Decide the number of questions based on the section's length and complexity.
 
 First, evaluate if this section warrants a quiz by considering:
 1. Does it contain concepts that students need to actively understand and apply?
