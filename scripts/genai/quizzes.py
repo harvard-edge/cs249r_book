@@ -315,7 +315,9 @@ def format_quiz_block(qa_pairs, answer_ref):
     else:
         formatted_questions = [f"1. {questions}"]
     
-    return f"""::: {{{QUIZ_CALLOUT_CLASS} #{quiz_id}}}
+    return f"""
+
+::: {{{QUIZ_CALLOUT_CLASS} #{quiz_id}}}
 
 {"\n\n".join(formatted_questions)}
 
