@@ -177,7 +177,8 @@ def extract_sections(markdown_text):
     logging.debug(f"Extracted chapter title: {chapter_title}")
     
     # Extract only level-2 sections (##), not deeper
-    pattern = re.compile(r"^##\s+([^#\n]+)", re.MULTILINE)
+    # Modified pattern to ensure proper spacing between sections
+    pattern = re.compile(r"\n##\s+([^#\n]+)", re.MULTILINE)
     matches = list(pattern.finditer(markdown_text))
     sections = []
     for i, match in enumerate(matches):
@@ -190,7 +191,7 @@ def extract_sections(markdown_text):
     logging.info(f"Extraction complete. Found {len(sections)} sections.")
     return chapter_title, sections
 
-def call_openai(client, system_prompt, user_prompt, model="gpt-4"):
+def call_openai(client, system_prompt, user_prompt, model="gpt-4o"):
     """Calls the OpenAI API and handles potential errors."""
     logging.info(f"Calling OpenAI API with model '{model}'...")
     try:
@@ -292,9 +293,9 @@ def format_quiz_block(qa_pairs, answer_ref):
 
     # Always number questions, even if there is only one
     if isinstance(questions, list):
-        formatted_questions = [f"Q: {qa['question']}" if isinstance(qa, dict) else f"Q: {qa}" for qa in questions]
+        formatted_questions = [f"* {qa['question']}" if isinstance(qa, dict) else f"* {qa}" for qa in questions]
     else:
-        formatted_questions = [f"Q: {questions}"]
+        formatted_questions = [f"* {questions}"]
     
     return f"""::: {{{QUIZ_CALLOUT_CLASS} title=\"Self-Check Quiz\" collapse=\"true\" #{quiz_id}}}
 
@@ -768,7 +769,7 @@ def clean_existing_quiz_blocks(markdown_text):
     changed = len(cleaned) != original_len
     return cleaned, changed, quiz_removed_count, answer_removed_count
 
-def process_file(client, filepath, mode="batch", model="gpt-4"):
+def process_file(client, filepath, mode="batch", model="gpt-4o"):
     """Orchestrates the processing of a single markdown file."""
     logging.info(f"--- Starting processing for: {filepath} ---")
     tmp_path = None  # Initialize tmp_path
@@ -944,7 +945,7 @@ def main():
         batch: Process all sections and write to file without review
         review: Batch process all sections first, then review them
         interactive: Generate and review questions one section at a time""")
-    parser.add_argument("--model", default="gpt-4", help="The OpenAI model to use (e.g., 'gpt-4', 'gpt-4-turbo').")
+    parser.add_argument("--model", default="gpt-4o", help="The OpenAI model to use (e.g., 'gpt-4o', 'gpt-4o-mini').")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose (DEBUG) logging.")
     
     args = parser.parse_args()
