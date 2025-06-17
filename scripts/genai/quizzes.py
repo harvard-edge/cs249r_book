@@ -184,54 +184,29 @@ def extract_sections(markdown_text):
     # Normalize newlines
     markdown_text = markdown_text.replace('\r\n', '\n').replace('\r', '\n')
     
-    # Step 1: Find all headers and their positions
-    # Regex to find any header (level 1 to 6)
-    all_headers_pattern = re.compile(r'(^(#+)\s+.*)', re.MULTILINE)
-    
-    header_info = [] # Stores (level, title, start_index, end_index)
-    
-    for match in all_headers_pattern.finditer(markdown_text):
-        full_line = match.group(1)
-        level = len(match.group(2)) # Count '#' characters
-        title = full_line[level:].strip()
-        start_index = match.start()
-        header_info.append({'level': level, 'title': title, 'start': start_index})
-    
-    # Populate end_index for each header (start of next header or end of text)
-    for i in range(len(header_info)):
-        if i + 1 < len(header_info):
-            header_info[i]['end'] = header_info[i+1]['start']
-        else:
-            header_info[i]['end'] = len(markdown_text)
-            
-    logging.debug(f"Parsed header info: {header_info}")
-
-    # Step 2: Group content by level-2 sections
+    # Find all ## sections
     sections = []
-    current_level2_title = None
-    current_level2_content_parts = []
-
-    for h_info in header_info:
-        if h_info['level'] == 2: # Found a level-2 header, start a new section
-            # Save the previously accumulated section
-            if current_level2_title is not None:
-                sections.append((current_level2_title, "\n".join(current_level2_content_parts)))
-
-            # Start a new level-2 section
-            current_level2_title = h_info['title']
-            current_level2_content_parts = [markdown_text[h_info['start']:h_info['end']]] # Add the header line and its initial content
-            
-        elif current_level2_title is not None: # Add to current level-2 section if one is active
-            # Add the header line and its content to the current level-2 section's content
-            current_level2_content_parts.append(markdown_text[h_info['start']:h_info['end']])
-        else:
-            logging.warning(f"Found content or header '{h_info['title']}' (Level {h_info['level']}) before any Level 2 section. Skipping for now.")
-
-    # Add the last level-2 section
-    if current_level2_title is not None:
-        sections.append((current_level2_title, "\n".join(current_level2_content_parts)))
+    section_pattern = re.compile(r'^##\s+(.*?)$', re.MULTILINE)
+    matches = list(section_pattern.finditer(markdown_text))
+    
+    # Process each section
+    for i, match in enumerate(matches):
+        title = match.group(1).strip()
+        start = match.start()
+        # End is either the start of next section or end of file
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(markdown_text)
+        content = markdown_text[start:end].strip()
+        sections.append((title, content))
+        logging.info(f"Found section {i+1}: {title}")
     
     logging.info(f"Extraction complete. Found {len(sections)} level-2 sections.")
+    # Print all sections found
+    print("\nSections found:")
+    print("=" * 50)
+    for i, (title, _) in enumerate(sections, 1):
+        print(f"{i}. {title}")
+    print("=" * 50)
+    
     return chapter_title, sections
 
 def call_openai(client, system_prompt, user_prompt, model="gpt-4o"):
@@ -660,15 +635,17 @@ def launch_gui_mode(client, sections, qa_by_section, filepath, model, pre_select
                 # Insert quiz only at the end of the ## section, after all its content (including any ### or deeper)
                 section_pattern = re.compile(rf"(^##\s+{re.escape(title)}\s*\n)(.*?)(?=^##\s|\Z)", re.DOTALL | re.MULTILINE)
                 def insert_quiz_at_end(match):
-                    section_text = match.group(0)
+                    section_text = match.group(0).rstrip('\n') # Remove trailing newlines to control spacing
                     # Remove any existing quiz callout in this section
                     section_text = re.sub(r"::: \{\.callout-important title=\"Self-Check Quiz\"[\s\S]*?:::\n?", "", section_text)
-                    # Only insert if not already present
+                    # Only insert if quiz_block is not empty and not already present
                     if quiz_block.strip() and quiz_block.strip() not in section_text:
-                        return section_text + "\n\n" + quiz_block + "\n"
+                        return section_text + quiz_block # Removed extra '\n'
                     else:
+                        # If quiz_block is empty or already present, just return the cleaned content (with two newlines)
                         return section_text
                 modified_content = section_pattern.sub(insert_quiz_at_end, modified_content, count=1)
+                answer_blocks.append(answer_block)
 
             # Only add non-empty answer blocks
             nonempty_answer_blocks = [b for b in answer_blocks if b.strip() and not b.strip().isspace() and not b.strip().startswith('::: {.callout-tip') or (b.strip() and 'answer-' in b)]
@@ -908,15 +885,17 @@ def process_file(client, filepath, mode="batch", model="gpt-4o"):
                 # Insert quiz only at the end of the ## section, after all its content (including any ### or deeper)
                 section_pattern = re.compile(rf"(^##\s+{re.escape(title)}\s*\n)(.*?)(?=^##\s|\Z)", re.DOTALL | re.MULTILINE)
                 def insert_quiz_at_end(match):
-                    section_text = match.group(0)
+                    section_text = match.group(0).rstrip('\n') # Remove trailing newlines to control spacing
                     # Remove any existing quiz callout in this section
                     section_text = re.sub(r"::: \{\.callout-important title=\"Self-Check Quiz\"[\s\S]*?:::\n?", "", section_text)
-                    # Only insert if not already present
+                    # Only insert if quiz_block is not empty and not already present
                     if quiz_block.strip() and quiz_block.strip() not in section_text:
-                        return section_text + "\n\n" + quiz_block + "\n"
+                        return section_text + quiz_block # Removed extra '\n'
                     else:
+                        # If quiz_block is empty or already present, just return the cleaned content (with two newlines)
                         return section_text
                 modified_content = section_pattern.sub(insert_quiz_at_end, modified_content, count=1)
+                answer_blocks.append(answer_block)
 
             # Only add non-empty answer blocks
             nonempty_answer_blocks = [b for b in answer_blocks if b.strip() and not b.strip().isspace() and not b.strip().startswith('::: {.callout-tip') or (b.strip() and 'answer-' in b)]
