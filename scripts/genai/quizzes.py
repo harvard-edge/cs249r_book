@@ -86,7 +86,6 @@ Guidelines for questions (only if quiz_needed is true):
 
 Special format rules:
 - For fill-in-the-blank questions: The blank should be a single word or short phrase, clearly indicated as ____ (four underscores). The answer field should contain only the missing word or phrase followed by a period (e.g., "Computing.") along with a brief explanation.
-- For fill-in-the-blank questions: The blank should be a single word or short phrase, clearly indicated as ____ (four underscores). The answer field should contain only the missing word or phrase followed by a period (e.g., "Computing.") along with a brief explanation.
 - For multiple choice: Include answer options directly in the question text (e.g., A), B), C)), each on a new line. The answer field must start with the correct letter followed by a period with a lead-in sentence, then the answer text and justification (e.g., "The answer is B. The gradual change in statistical properties of data over time. This is correct because data drift refers to changes in data patterns that can affect model performance.").
 
 Question Types (use a mix based on what best tests understanding):
@@ -147,7 +146,7 @@ def determine_question_count(text):
 
 def strip_quiz_callouts(text):
     """Remove any existing Self-Check Quiz callout blocks from the text."""
-    return re.sub(r"::: \{\.callout-important title=\"Self-Check Quiz\"[\s\S]*?:::\n?", "", text)
+    return re.sub(rf"::: \{{{QUIZ_CALLOUT_CLASS}[\s\S]*?:::\n?", "", text)
 
 def build_user_prompt(section_title, section_text, chapter_title=None, previous_sections=None):
     """Constructs the user prompt for the language model."""
@@ -337,7 +336,7 @@ def format_quiz_block(qa_pairs, answer_ref):
     if not questions or (isinstance(questions, list) and len(questions) == 0):
         return ""
     
-    # Extract slug from answer_ref (e.g., 'answer-my-slug' -> 'my-slug')
+    # Extract slug from answer_ref (e.g., 'quiz-answer-my-slug' -> 'my-slug')
     slug = answer_ref.replace(ANSWER_ID_PREFIX, "")
     quiz_id = f"{QUESTION_ID_PREFIX}{slug}"
 
@@ -668,29 +667,28 @@ def launch_gui_mode(client, sections, qa_by_section, filepath, model, pre_select
                 
                 # Insert quiz only at the end of the ## section, after all its content (including any ### or deeper)
                 section_pattern = re.compile(rf"(^##\s+{re.escape(title)}\s*\n)(.*?)(?=^##\s|\Z)", re.DOTALL | re.MULTILINE)
-                def insert_quiz_at_end(match):
-                    section_text = match.group(0).rstrip('\n') # Remove trailing newlines to control spacing
-                    # Remove any existing quiz callout in this section
-                    section_text = re.sub(r"::: \{\.callout-important title=\"Self-Check Quiz\"[\s\S]*?:::\n?", "", section_text)
-                    # Only insert if quiz_block is not empty and not already present
-                    if quiz_block.strip() and quiz_block.strip() not in section_text:
-                        return section_text.rstrip() + '\n\n' + quiz_block.strip() + '\n\n'
-                    else:
-                        # If quiz_block is empty or already present, just return the cleaned content (with two newlines)
-                        return section_text + '\n\n'
-                modified_content = section_pattern.sub(insert_quiz_at_end, modified_content, count=1)
+                modified_content = section_pattern.sub(lambda m: insert_quiz_at_end(m, quiz_block), modified_content, count=1)
                 answer_blocks.append(answer_block)
 
             # Only add non-empty answer blocks
-            nonempty_answer_blocks = [b for b in answer_blocks if b.strip() and not b.strip().isspace() and not b.strip().startswith('::: {.callout-tip') or (b.strip() and 'answer-' in b)]
+            nonempty_answer_blocks = [b for b in answer_blocks if b.strip() and not b.strip().isspace() and ANSWER_ID_PREFIX in b]
+            logging.info(f"Found {len(nonempty_answer_blocks)} non-empty answer blocks to append")
+            
             if nonempty_answer_blocks:
-                logging.info("Appending final 'Quiz Answers' block to the document.")
+                logging.info("Appending final 'Quiz Answers' block.")
                 if not re.search(r"^##\s+Quiz Answers", modified_content, re.MULTILINE):
+                    logging.info("Adding 'Quiz Answers' section header")
                     modified_content += "\n\n## Quiz Answers\n"
+                else:
+                    logging.info("'Quiz Answers' section header already exists")
+                
+                logging.info(f"Appending {len(nonempty_answer_blocks)} answer blocks")
                 modified_content += "\n" + "\n\n".join(nonempty_answer_blocks)
+            else:
+                logging.info("No answer blocks to append")
 
             # Write the final content back to the temporary file
-            logging.info(f"Writing final content to temporary file: {tmp_path}")
+            logging.info(f"Writing modified content to temporary file: {tmp_path}")
             with open(tmp_path, "w", encoding="utf-8") as f:
                 f.write(modified_content)
             logging.info(f"Successfully wrote updated content to temporary file. Size: {os.path.getsize(tmp_path)} bytes")
@@ -811,6 +809,16 @@ def clean_existing_quiz_blocks(markdown_text):
     changed = len(cleaned) != original_len
     return cleaned, changed, quiz_removed_count, answer_removed_count
 
+def insert_quiz_at_end(match, quiz_block):
+    """Helper function to insert quiz block at the end of a section."""
+    section_text = match.group(0)  # Keep original newlines
+    # Remove any existing quiz callout in this section
+    section_text = re.sub(rf"::: \{{{QUIZ_CALLOUT_CLASS}[\s\S]*?:::\n?", "", section_text)
+    # Only insert if quiz_block is not empty and not already present
+    if quiz_block.strip() and quiz_block.strip() not in section_text:
+        return section_text.rstrip() + '\n\n' + quiz_block.strip() + '\n\n'
+    return section_text  # Return original section text with its newlines intact
+
 def process_file(client, filepath, mode="batch", model="gpt-4o"):
     """Orchestrates the processing of a single markdown file."""
     logging.info(f"--- Starting processing for: {filepath} ---")
@@ -918,20 +926,10 @@ def process_file(client, filepath, mode="batch", model="gpt-4o"):
                 
                 # Insert quiz only at the end of the ## section, after all its content (including any ### or deeper)
                 section_pattern = re.compile(rf"(^##\s+{re.escape(title)}\s*\n)(.*?)(?=^##\s|\Z)", re.DOTALL | re.MULTILINE)
-                def insert_quiz_at_end(match):
-                    section_text = match.group(0).rstrip('\n') # Remove trailing newlines to control spacing
-                    # Remove any existing quiz callout in this section
-                    section_text = re.sub(r"::: \{\.callout-important title=\"Self-Check Quiz\"[\s\S]*?:::\n?", "", section_text)
-                    # Only insert if quiz_block is not empty and not already present
-                    if quiz_block.strip() and quiz_block.strip() not in section_text:
-                        return section_text + quiz_block # Removed extra '\n'
-                    else:
-                        # If quiz_block is empty or already present, just return the cleaned content (with two newlines)
-                        return section_text + '\n\n'
-                modified_content = section_pattern.sub(insert_quiz_at_end, modified_content, count=1)
+                modified_content = section_pattern.sub(lambda m: insert_quiz_at_end(m, quiz_block), modified_content, count=1)
 
             # Only add non-empty answer blocks
-            nonempty_answer_blocks = [b for b in answer_blocks if b.strip() and not b.strip().isspace() and not b.strip().startswith('::: {.callout-tip') or (b.strip() and 'answer-' in b)]
+            nonempty_answer_blocks = [b for b in answer_blocks if b.strip() and not b.strip().isspace() and ANSWER_ID_PREFIX in b]
             logging.info(f"Found {len(nonempty_answer_blocks)} non-empty answer blocks to append")
             
             if nonempty_answer_blocks:
@@ -967,8 +965,6 @@ def process_file(client, filepath, mode="batch", model="gpt-4o"):
     finally:
         # Clean up the temporary file if it still exists
         if tmp_path and os.path.exists(tmp_path):
-            # This block will be simplified. The temporary file will be handled by GUI mode.
-            # For batch mode, it's already handled, so this is primarily for error cleanup if GUI didn't launch.
             logging.info(f"Cleaning up leftover temporary file: {tmp_path}")
             os.unlink(tmp_path)
             logging.info("Leftover temporary file removed successfully.")
