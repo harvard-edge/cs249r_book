@@ -643,7 +643,7 @@ def launch_gui_mode(client, sections, qa_by_section, filepath, model, pre_select
                     section_text = re.sub(r"::: \{\.callout-important title=\"Self-Check Quiz\"[\s\S]*?:::\n?", "", section_text)
                     # Only insert if quiz_block is not empty and not already present
                     if quiz_block.strip() and quiz_block.strip() not in section_text:
-                        return section_text + quiz_block # Removed extra '\n'
+                        return section_text.rstrip() + '\n\n' + quiz_block.strip() + '\n\n'
                     else:
                         # If quiz_block is empty or already present, just return the cleaned content (with two newlines)
                         return section_text
@@ -896,7 +896,7 @@ def process_file(client, filepath, mode="batch", model="gpt-4o"):
                         return section_text + quiz_block # Removed extra '\n'
                     else:
                         # If quiz_block is empty or already present, just return the cleaned content (with two newlines)
-                        return section_text
+                        return section_text + '\n\n'
                 modified_content = section_pattern.sub(insert_quiz_at_end, modified_content, count=1)
 
             # Only add non-empty answer blocks
