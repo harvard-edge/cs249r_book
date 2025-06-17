@@ -15,13 +15,13 @@ import time
 # Client is initialized in main() after logging is set up
 
 # --- Global Callout Type Definitions ---
-QUIZ_CALLOUT_CLASS = ".callout-question"
-ANSWER_CALLOUT_CLASS = ".callout-answer"
+QUIZ_CALLOUT_CLASS = ".callout-quiz-question"
+ANSWER_CALLOUT_CLASS = ".callout-quiz-answer"
 
 # --- Global Reference and ID Prefixes ---
 REFERENCE_TEXT = "See Answer"
-QUESTION_ID_PREFIX = "question-"
-ANSWER_ID_PREFIX = "answer-"
+QUESTION_ID_PREFIX = "quiz-question-"
+ANSWER_ID_PREFIX = "quiz-answer-"
 
 # --- Constants ---
 STOPWORDS = {"in", "of", "the", "and", "to", "for", "on", "a", "an", "with", "by"}
@@ -181,18 +181,45 @@ def extract_sections(markdown_text):
     chapter_title = chapter_match.group(1).strip() if chapter_match else None
     logging.debug(f"Extracted chapter title: {chapter_title}")
     
-    # Extract only level-2 sections (##), not deeper
-    # Modified pattern to ensure proper spacing between sections
-    pattern = re.compile(r"\n##\s+([^#\n]+)", re.MULTILINE)
-    matches = list(pattern.finditer(markdown_text))
+    # Preprocess the content to ensure proper spacing
+    # First, normalize all newlines to \n
+    markdown_text = markdown_text.replace('\r\n', '\n').replace('\r', '\n')
+    
+    # First pass: ensure there's a newline before any section header
+    # This handles cases where content runs directly into a section header
+    markdown_text = re.sub(r'([^\n])(##\s+)', r'\1\n\n\2', markdown_text)
+    
+    # Process the content line by line
+    lines = markdown_text.split('\n')
+    processed_lines = []
+    i = 0
+    
+    while i < len(lines):
+        line = lines[i]
+        
+        # If this is a section header
+        if line.startswith('## '):
+            # If previous line exists and has content, add a blank line
+            if i > 0 and lines[i-1].strip():
+                processed_lines.append('')
+            processed_lines.append(line)
+        else:
+            processed_lines.append(line)
+        i += 1
+    
+    # Join the processed lines back together
+    processed_text = '\n'.join(processed_lines)
+    
+    # Now extract sections from the processed text
+    section_pattern = re.compile(r'^##\s+([^\n]+)\n(.*?)(?=^##\s|\Z)', re.MULTILINE | re.DOTALL)
     sections = []
-    for i, match in enumerate(matches):
+    
+    for match in section_pattern.finditer(processed_text):
         title = match.group(1).strip()
-        start = match.end()
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(markdown_text)
-        content = markdown_text[start:end].strip()
+        content = match.group(2).strip()
         sections.append((title, content))
         logging.debug(f"  - Extracted section: '{title}'")
+    
     logging.info(f"Extraction complete. Found {len(sections)} sections.")
     return chapter_title, sections
 
@@ -752,13 +779,12 @@ def clean_existing_quiz_blocks(markdown_text):
 
     # --- Remove quiz callouts ---
     quiz_callout_pattern = re.compile(
-        r":::\s*\{[^}]*?" + re.escape(QUIZ_CALLOUT_CLASS) + r"[^}]*?#question-[^}]*?\}[\s\S]*?:::\s*\n?",
+        r":::\s*\{[^}]*?" + re.escape(QUIZ_CALLOUT_CLASS) + r"[^}]*?\}[\s\S]*?:::\s*\n?",
         re.DOTALL | re.IGNORECASE
     )
     cleaned, quiz_removed_count = quiz_callout_pattern.subn("", markdown_text)
 
     # --- Remove all answer callouts ---
-    # Match any block with .callout-tip (answer block), even without #answer-id
     answer_callout_pattern = re.compile(
         r":::\s*\{[^}]*?" + re.escape(ANSWER_CALLOUT_CLASS) + r"[^}]*?\}[\s\S]*?:::\s*\n?",
         re.DOTALL | re.IGNORECASE
