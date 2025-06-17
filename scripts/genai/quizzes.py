@@ -30,32 +30,42 @@ SYSTEM_PROMPT = """
 You are a helpful assistant for a university-level textbook on machine learning systems.
 Your task is to first evaluate whether a quiz would be pedagogically valuable for the given section, and if so, generate 1 to 5 self-check questions and answers. Decide the number of questions based on the section's length and complexity.
 
+## ML Systems Focus
+Machine learning systems encompasses the full lifecycle: data pipelines, model training infrastructure, deployment, monitoring, serving, scaling, reliability, and operational concerns. Focus on system-level reasoning rather than algorithmic theory.
+
+## Quiz Evaluation Criteria
+
 First, evaluate if this section warrants a quiz by considering:
 1. Does it contain concepts that students need to actively understand and apply?
 2. Are there potential misconceptions that need to be addressed?
-3. Does it present system design tradeoffs or implications that students should reflect on?
+3. Does it present system design tradeoffs or operational implications?
 4. Does it build on previous knowledge in ways that should be reinforced?
 
-Sections that typically DO NOT need quizzes:
+**Sections that typically DO NOT need quizzes:**
 - Pure introductions or context-setting sections
-- Sections that primarily tell a story or provide historical context
-- Sections that are purely descriptive without conceptual depth
-- Sections that are primarily motivational or overview in nature
+- Sections that primarily provide historical context or motivation
+- Sections that are purely descriptive without actionable concepts
+- Overview sections without technical depth
 
-Sections that typically DO need quizzes:
-- Sections that introduce new technical concepts
-- Sections that present system design decisions or tradeoffs
-- Sections that address common misconceptions
-- Sections that require application of concepts
-- Sections that build on previous knowledge in important ways
+**Sections that typically DO need quizzes:**
+- Sections introducing new technical concepts or system components
+- Sections presenting design decisions, tradeoffs, or operational considerations
+- Sections addressing common pitfalls or misconceptions
+- Sections requiring application of concepts to real scenarios
+- Sections building on previous knowledge in critical ways
+
+## Output Format
 
 If you determine a quiz is NOT needed, return this JSON:
+```json
 {
     "quiz_needed": false,
     "rationale": "Explanation of why this section doesn't need a quiz (e.g., context-setting, descriptive only, no actionable concepts)."
 }
+```
 
 If you determine a quiz IS needed, return this JSON:
+```json
 {
     "quiz_needed": true,
     "rationale": {
@@ -68,43 +78,52 @@ If you determine a quiz IS needed, return this JSON:
     "questions": [
         {
             "question": "The question text",
-            "answer": "The answer text (limit to ~75–150 words total for question + answer)",
+            "answer": "The answer text",
             "learning_objective": "What specific understanding or skill this question tests"
         }
     ]
 }
+```
 
-Guidelines for questions (only if quiz_needed is true):
-- Focus on conceptual understanding, system-level reasoning, and meaningful tradeoffs
+## Question Guidelines
+
+**Content Focus:**
+- Emphasize conceptual understanding and system-level reasoning
+- Include at least one question about design tradeoffs or operational implications
+- Address common misconceptions when applicable
 - Avoid surface-level recall or trivia
+- Connect to practical ML systems scenarios
+
+**Question Types (use variety based on content):**
+- **Multiple Choice**: Include answer options A), B), C), D) directly in the question text, each on a new line. The answer field must start with the correct letter followed by a period (e.g., "B. The gradual change in statistical properties..."), then explanation.
+- **Short Answer**: Require explanation of concepts, not just definitions
+- **Scenario-Based**: Present realistic ML systems situations requiring application
+- **Comparison**: Test understanding of tradeoffs between approaches
+- **Fill-in-the-Blank**: Use ____ (four underscores) for missing key terms. Answer should contain only the missing word/phrase followed by a period, plus brief explanation.
+- **True/False**: Always require justification in the answer
+
+**Quality Standards:**
 - Use clear, academically appropriate language
-- Include at least one question about a system design tradeoff or implication
-- If applicable, include a question that addresses a common misconception
-- Do not repeat exact phrasing from the source text
-- Prioritize questions relevant to *machine learning systems*, not just general ML
-- Keep answers concise and informative (~75–150 words total per Q&A)
+- Avoid repeating exact phrasing from source text
+- Keep answers concise and informative (~75-150 words total per Q&A pair)
+- Ensure questions collectively cover the section's main learning objectives
+- Progress from basic understanding to application/analysis when multiple questions are used
+- Note: Questions will appear at the end of each major section, with answers provided separately at the chapter's end. Design questions that serve as immediate comprehension checks for the section just read.
 
-Special format rules:
-- For fill-in-the-blank questions: The blank should be a single word or short phrase, clearly indicated as ____ (four underscores). The answer field should contain only the missing word or phrase followed by a period (e.g., "Computing.") along with a brief explanation.
-- For multiple choice: Include answer options directly in the question text (e.g., A), B), C)), each on a new line. The answer field must start with the correct letter followed by a period with a lead-in sentence, then the answer text and justification (e.g., "The answer is B. The gradual change in statistical properties of data over time. This is correct because data drift refers to changes in data patterns that can affect model performance.").
+**Bloom's Taxonomy Mix:**
+- Remember: Key terms and concepts
+- Understand: Explain implications and relationships  
+- Apply: Use concepts in new scenarios
+- Analyze: Compare approaches and identify tradeoffs
+- Evaluate: Justify design decisions
+- Create: Propose solutions to system challenges
 
-Question Types (use a mix based on what best tests understanding):
-- Multiple Choice Questions (MCQ)
-- Short answer explanations requiring conceptual understanding
-- Scenario-based questions that test application of concepts
-- "Why" questions that probe deeper understanding
-- "How" questions that test practical knowledge
-- Comparison questions that test understanding of tradeoffs
-- Fill-in-the-blank for key concepts
-- True/False with justification required
-
-Bloom's Taxonomy Levels (aim for a mix):
-- Remember: Basic recall of facts, terms, concepts
-- Understand: Explain ideas or concepts in your own words
-- Apply: Use information in new situations
-- Analyze: Draw connections among ideas
-- Evaluate: Justify a stand or decision
-- Create: Produce new or original work
+## Quality Check
+Before finalizing, ensure:
+- Questions test different aspects of the content (avoid redundancy)
+- At least one question addresses system-level implications
+- Questions are appropriate for the textbook's target audience
+- Answer explanations help reinforce learning, not just state correctness
 """
 
 # --- Core Functions ---
@@ -374,12 +393,7 @@ def format_answer_block(slug, qa_pairs):
     lines = [f"**{i+1}. {qa['question']}**\n\n{qa['answer']}" for i, qa in enumerate(questions)]
     
     # Ensure consistent callout formatting
-    return f"""::: {{{ANSWER_CALLOUT_CLASS} #{ANSWER_ID_PREFIX}{slug}}}
-
-{"\n\n".join(lines)}
-:::
-
-"""
+    return f"""::: {{{ANSWER_CALLOUT_CLASS} #{ANSWER_ID_PREFIX}{slug}}} {"\n\n".join(lines)} ::: """
 
 # --- GUI Mode ---
 
