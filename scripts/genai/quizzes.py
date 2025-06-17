@@ -85,8 +85,9 @@ Guidelines for questions (only if quiz_needed is true):
 - Keep answers concise and informative (~75–150 words total per Q&A)
 
 Special format rules:
-- For fill-in-the-blank questions: The blank should be a single word or short phrase, clearly indicated as ____ (four underscores). The answer field should contain only the missing word or phrase.
-- For multiple choice: Include answer options directly in the question text (e.g., A), B), C)), each on a new line. The answer field must specify the correct letter and include a short justification (e.g., "B) Correct answer text. This is correct because...").
+- For fill-in-the-blank questions: The blank should be a single word or short phrase, clearly indicated as ____ (four underscores). The answer field should contain only the missing word or phrase followed by a period (e.g., "Computing.") along with a brief explanation.
+- For fill-in-the-blank questions: The blank should be a single word or short phrase, clearly indicated as ____ (four underscores). The answer field should contain only the missing word or phrase followed by a period (e.g., "Computing.") along with a brief explanation.
+- For multiple choice: Include answer options directly in the question text (e.g., A), B), C)), each on a new line. The answer field must start with the correct letter followed by a period with a lead-in sentence, then the answer text and justification (e.g., "The answer is B. The gradual change in statistical properties of data over time. This is correct because data drift refers to changes in data patterns that can affect model performance.").
 
 Question Types (use a mix based on what best tests understanding):
 - Multiple Choice Questions (MCQ)
@@ -117,6 +118,33 @@ def clean_slug(title):
     logging.debug(f"Cleaned title '{title}' to slug '{slug}'")
     return slug
 
+def determine_question_count(text):
+    """Determines the number of questions to generate based on section length.
+    
+    Guidelines:
+    - Short (<200 words): 0-1 questions
+    - Medium (200-500 words): 2-3 questions
+    - Long (>500 words or dense math): 3-5 questions
+    
+    Args:
+        text (str): The section text to analyze
+        
+    Returns:
+        tuple: (min_questions, max_questions)
+    """
+    # Count words (simple whitespace-based count)
+    word_count = len(text.split())
+    
+    # Check for dense math content (presence of math delimiters)
+    has_math = bool(re.search(r'\$.*?\$|\$\$.*?\$\$|\\\(.*?\\\)|\\\[.*?\\\]', text))
+    
+    if word_count < 200:
+        return (0, 1)
+    elif word_count < 500 and not has_math:
+        return (2, 3)
+    else:
+        return (3, 5)
+
 def strip_quiz_callouts(text):
     """Remove any existing Self-Check Quiz callout blocks from the text."""
     return re.sub(r"::: \{\.callout-important title=\"Self-Check Quiz\"[\s\S]*?:::\n?", "", text)
@@ -128,6 +156,9 @@ def build_user_prompt(section_title, section_text, chapter_title=None, previous_
     prefix = f'This section is titled "{section_title}".'
     if chapter_title:
         prefix += f' It appears in the chapter "{chapter_title}".'
+    
+    # Determine question count based on section length
+    min_questions, max_questions = determine_question_count(section_text)
     
     previous_context = ""
     if previous_sections:
@@ -149,7 +180,7 @@ def build_user_prompt(section_title, section_text, chapter_title=None, previous_
 Section content:
 {section_text}{previous_context}
 
-Generate a self-check quiz with 3 to 5 well-structured questions and answers based on this section.
+Generate a self-check quiz with {min_questions} to {max_questions} well-structured questions and answers based on this section.
 Include a rationale explaining your question generation strategy and focus areas.
 
 Return your response in this exact JSON format:
@@ -646,7 +677,7 @@ def launch_gui_mode(client, sections, qa_by_section, filepath, model, pre_select
                         return section_text.rstrip() + '\n\n' + quiz_block.strip() + '\n\n'
                     else:
                         # If quiz_block is empty or already present, just return the cleaned content (with two newlines)
-                        return section_text
+                        return section_text + '\n\n'
                 modified_content = section_pattern.sub(insert_quiz_at_end, modified_content, count=1)
                 answer_blocks.append(answer_block)
 
