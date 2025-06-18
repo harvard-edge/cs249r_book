@@ -76,25 +76,35 @@ def generate_hash_suffix(title, filepath):
     hash_input = f"{title}-{filepath}".encode("utf-8")
     return hashlib.sha1(hash_input).hexdigest()[:4]
 
+def clean_text_for_id(text):
+    """Clean text to be used in an ID."""
+    # Convert to lowercase
+    text = text.lower()
+    # Replace spaces and underscores with hyphens
+    text = re.sub(r'[\s_]+', '-', text)
+    # Remove any non-alphanumeric characters except hyphens
+    text = re.sub(r'[^a-z0-9-]', '', text)
+    # Replace multiple hyphens with single hyphen
+    text = re.sub(r'-+', '-', text)
+    # Remove leading/trailing hyphens
+    text = text.strip('-')
+    return text
+
+def is_properly_formatted_id(section_id, title, file_path):
+    """Check if a section ID follows the correct format by comparing with a freshly generated one."""
+    # Generate what the ID should be
+    expected_id = generate_section_id(title, file_path, set(), None)
+    return section_id == expected_id
+
 def generate_section_id(title, file_path, existing_ids, chapter_title=None):
     """Generate a unique section ID based on the title and file path."""
     # Clean the title - stop at any curly braces
     if "{" in title:
         title = title[:title.find("{")].strip()
     
-    # Clean the title
-    clean_title = title.lower().strip()
-    # Replace spaces and underscores with hyphens
-    clean_title = re.sub(r'[\s_]+', '-', clean_title)
-    # Remove any non-alphanumeric characters except hyphens
-    clean_title = re.sub(r'[^a-z0-9-]', '', clean_title)
-    # Replace multiple hyphens with single hyphen
-    clean_title = re.sub(r'-+', '-', clean_title)
-    # Remove leading/trailing hyphens
-    clean_title = clean_title.strip('-')
-    
-    # Get the file name without extension
-    file_name = os.path.splitext(os.path.basename(file_path))[0]
+    # Clean the title and file name
+    clean_title = clean_text_for_id(title)
+    file_name = clean_text_for_id(os.path.splitext(os.path.basename(file_path))[0])
     
     # Generate a unique hash using the existing function
     hash_suffix = generate_hash_suffix(title, file_path)
@@ -137,28 +147,6 @@ def show_diff(original, modified, filename):
     )
     for line in diff:
         print(line)
-
-def is_properly_formatted_id(section_id):
-    """Check if a section ID follows the correct format."""
-    # Pattern: sec-<chapter>-<sectiontitle>-<hashid>
-    pattern = r'^sec-[a-z0-9-]+-[a-z0-9-]+-[a-f0-9]{4}$'
-    if not re.match(pattern, section_id):
-        return False
-    
-    # Split into parts
-    parts = section_id.split('-')
-    if len(parts) < 4:  # sec, chapter, section, hash
-        return False
-    
-    # Check prefix
-    if not parts[0] == 'sec':
-        return False
-    
-    # Check hash is 4 characters
-    if len(parts[-1]) != 4:
-        return False
-    
-    return True
 
 def process_markdown_file(file_path, auto_yes=False, dry_run=False, force=False):
     """Process a single Markdown file."""
@@ -254,7 +242,7 @@ def process_markdown_file(file_path, auto_yes=False, dry_run=False, force=False)
                     else:
                         # Single section ID found
                         existing_id = existing_id_matches[0]
-                        if not is_properly_formatted_id(existing_id):
+                        if not is_properly_formatted_id(existing_id, title, file_path):
                             if force or auto_yes or input(f"\nFound improperly formatted ID in '{title}': {existing_id}\nRegenerate with proper format? (y/n): ").lower() == 'y':
                                 # Remove existing ID
                                 existing_attrs = re.sub(r'\{#sec-[^}]+\}', '', existing_attrs)
