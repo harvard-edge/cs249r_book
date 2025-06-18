@@ -265,6 +265,7 @@ class QuizEditorGradio:
         self.initial_file_path = initial_file_path
         self.original_qmd_content = None
         self.qmd_file_path = None
+        self.question_states = {}  # Track checked/unchecked state for each question
         
     def load_quiz_file(self, file_path=None):
         """Load a quiz JSON file"""
@@ -272,26 +273,29 @@ class QuizEditorGradio:
         path_to_load = file_path or self.initial_file_path
         
         if not path_to_load:
-            return "No file path provided", "No file loaded", "No sections", "", "", "Ready"
+            return "No file path provided", "No file loaded", "No sections", "", ""
             
         try:
             # Check if file exists
             if not os.path.exists(path_to_load):
-                return f"File not found: {path_to_load}", "File not found", "No sections", "", "", f"Error: File {path_to_load} does not exist"
+                return f"File not found: {path_to_load}", "File not found", "No sections", "", ""
             
             with open(path_to_load, 'r', encoding='utf-8') as f:
                 self.quiz_data = json.load(f)
             
             # Validate JSON structure
             if not isinstance(self.quiz_data, dict):
-                return f"Invalid JSON structure in {path_to_load}", "Invalid file format", "No sections", "", "", "Error: File is not a valid JSON object"
+                return f"Invalid JSON structure in {path_to_load}", "Invalid file format", "No sections", "", ""
             
             self.sections = self.quiz_data.get('sections', [])
             if not self.sections:
-                return f"No sections found in {path_to_load}", "No sections found", "No sections", "", "", f"Loaded {path_to_load} but no sections found"
+                return f"No sections found in {path_to_load}", "No sections found", "No sections", "", ""
             
             # Try to load the original .qmd file
             self.load_original_qmd_file(path_to_load)
+            
+            # Initialize question states for all sections
+            self.initialize_question_states()
             
             self.current_section_index = 0
             
@@ -299,15 +303,36 @@ class QuizEditorGradio:
             section = self.sections[0]
             title = f"{section['section_title']} ({section['section_id']})"
             section_text = self.get_full_section_content(section)
-            questions_text = self.format_questions(section)
+            questions_text = self.format_questions_with_buttons(section)
             nav_text = f"Section 1 of {len(self.sections)}"
             
-            return title, nav_text, section_text, questions_text, f"Loaded {len(self.sections)} sections"
+            return title, nav_text, section_text, questions_text, ""
             
         except json.JSONDecodeError as e:
-            return f"Invalid JSON in {path_to_load}: {str(e)}", "JSON Error", "No sections", "", f"Error: Invalid JSON format - {str(e)}"
+            return f"Invalid JSON in {path_to_load}: {str(e)}", "JSON Error", "No sections", "", ""
         except Exception as e:
-            return f"Error loading {path_to_load}: {str(e)}", "Error loading file", "No sections", "", f"Error: {str(e)}"
+            return f"Error loading {path_to_load}: {str(e)}", "Error loading file", "No sections", "", ""
+    
+    def initialize_question_states(self):
+        """Initialize checked state for all questions (all checked by default)"""
+        self.question_states = {}
+        for i, section in enumerate(self.sections):
+            section_id = section['section_id']
+            quiz_data = section.get('quiz_data', {})
+            if quiz_data.get('quiz_needed', False):
+                questions = quiz_data.get('questions', [])
+                self.question_states[section_id] = [True] * len(questions)  # All checked by default
+    
+    def update_question_state(self, section_id, question_index, checked):
+        """Update the checked state of a question"""
+        if section_id not in self.question_states:
+            self.question_states[section_id] = []
+        
+        # Ensure the list is long enough
+        while len(self.question_states[section_id]) <= question_index:
+            self.question_states[section_id].append(True)
+        
+        self.question_states[section_id][question_index] = checked
     
     def load_original_qmd_file(self, quiz_file_path):
         """Try to load the original .qmd file based on the quiz file path"""
@@ -376,8 +401,8 @@ class QuizEditorGradio:
         """Load quiz from a file path string"""
         return self.load_quiz_file(file_path)
     
-    def format_questions(self, section):
-        """Format questions for display"""
+    def format_questions_with_buttons(self, section):
+        """Format questions for display with status indicators"""
         quiz_data = section.get('quiz_data', {})
         
         if not quiz_data.get('quiz_needed', False):
@@ -387,24 +412,90 @@ class QuizEditorGradio:
         if not questions:
             return "No questions available"
         
+        section_id = section['section_id']
+        question_states = self.question_states.get(section_id, [True] * len(questions))
+        
         formatted = []
-        for i, question in enumerate(questions, 1):
-            q_text = f"**Q{i}:** {question['question']}\n\n"
+        formatted.append("**Question Status (all questions will be kept by default):**\n\n")
+        formatted.append("*Note: Currently showing question status. Use Save & Exit to keep all questions, or edit the JSON file manually to remove unwanted questions.*\n\n")
+        
+        for i, question in enumerate(questions):
+            checked = question_states[i] if i < len(question_states) else True
+            status = "✅ WILL KEEP" if checked else "❌ WILL REMOVE"
+            
+            q_text = f"**Q{i+1}:** {question['question']}\n\n"
             a_text = f"**A:** {question['answer']}\n\n"
             
             if 'learning_objective' in question:
-                obj_text = f"*Learning Objective:* {question['learning_objective']}\n\n"
+                obj_text = f"**Learning Objective:** {question['learning_objective']}\n\n"
             else:
                 obj_text = ""
             
-            formatted.append(f"{q_text}{a_text}{obj_text}---\n\n")
+            formatted.append(f"{q_text}{a_text}{obj_text}**Status:** {status}\n\n---\n\n")
         
         return "".join(formatted)
+    
+    def save_changes(self):
+        """Save the current quiz data with removed questions"""
+        if not self.quiz_data:
+            return "No data to save"
+        
+        # Create a copy of the data to modify
+        modified_data = json.loads(json.dumps(self.quiz_data))
+        
+        # Remove unchecked questions from each section
+        for section in modified_data['sections']:
+            section_id = section['section_id']
+            quiz_data = section.get('quiz_data', {})
+            
+            if quiz_data.get('quiz_needed', False):
+                questions = quiz_data.get('questions', [])
+                question_states = self.question_states.get(section_id, [True] * len(questions))
+                
+                # Keep only checked questions
+                kept_questions = []
+                for i, question in enumerate(questions):
+                    if i < len(question_states) and question_states[i]:
+                        kept_questions.append(question)
+                
+                # Update the questions list
+                quiz_data['questions'] = kept_questions
+                
+                # Update rationale if no questions remain
+                if not kept_questions:
+                    quiz_data['quiz_needed'] = False
+                    quiz_data['rationale'] = "All questions were removed by user"
+        
+        # Save to the original file
+        try:
+            with open(self.initial_file_path, 'w', encoding='utf-8') as f:
+                json.dump(modified_data, f, indent=2, ensure_ascii=False)
+            return f"Saved changes to {os.path.basename(self.initial_file_path)}"
+        except Exception as e:
+            return f"Error saving file: {str(e)}"
+    
+    def toggle_question(self, section_id, question_index):
+        """Toggle the checked state of a question"""
+        if section_id not in self.question_states:
+            self.question_states[section_id] = []
+        
+        # Ensure the list is long enough
+        while len(self.question_states[section_id]) <= question_index:
+            self.question_states[section_id].append(True)
+        
+        # Toggle the state
+        self.question_states[section_id][question_index] = not self.question_states[section_id][question_index]
+        
+        # Return updated questions display
+        section = next((s for s in self.sections if s['section_id'] == section_id), None)
+        if section:
+            return self.format_questions_with_buttons(section)
+        return "Error updating question"
     
     def navigate_section(self, direction):
         """Navigate to previous or next section"""
         if not self.sections:
-            return "No file loaded", "No sections", "", "", "No sections available"
+            return ["No file loaded", "No sections", "No content loaded"] + [False] * 5 + [""] * 5
         
         if direction == "prev" and self.current_section_index > 0:
             self.current_section_index -= 1
@@ -414,14 +505,160 @@ class QuizEditorGradio:
         section = self.sections[self.current_section_index]
         title = f"{section['section_title']} ({section['section_id']})"
         section_text = self.get_full_section_content(section)
-        questions_text = self.format_questions(section)
         nav_text = f"Section {self.current_section_index + 1} of {len(self.sections)}"
         
-        return title, nav_text, section_text, questions_text, f"Showing section {self.current_section_index + 1}"
+        # Prepare checkbox states and question texts
+        quiz_data = section.get('quiz_data', {})
+        checkbox_states = [False] * 5
+        question_texts = [""] * 5
+        
+        if quiz_data.get('quiz_needed', False):
+            questions = quiz_data.get('questions', [])
+            section_id = section['section_id']
+            question_states = self.question_states.get(section_id, [True] * len(questions))
+            
+            for i in range(min(5, len(questions))):
+                checkbox_states[i] = question_states[i] if i < len(question_states) else True
+                question = questions[i]
+                q_text = f"**Q{i+1}:** {question['question']}\n\n"
+                a_text = f"**A:** {question['answer']}\n\n"
+                if 'learning_objective' in question:
+                    obj_text = f"*Learning Objective:* {question['learning_objective']}\n\n"
+                else:
+                    obj_text = ""
+                question_texts[i] = f"{q_text}{a_text}{obj_text}"
+        else:
+            # No quiz needed for this section
+            question_texts[0] = "**No quiz needed for this section**\n\n*This section was determined to not require a quiz based on its content.*"
+        
+        return [title, nav_text, section_text] + checkbox_states + question_texts
+    
+    def load_quiz_file_with_checkboxes(self, file_path=None):
+        """Load a quiz JSON file and return data for checkboxes"""
+        # Use provided file path or initial file path
+        path_to_load = file_path or self.initial_file_path
+        
+        if not path_to_load:
+            return ["No file path provided", "No file loaded", "No content loaded"] + [False] * 5 + [""] * 5
+            
+        try:
+            # Check if file exists
+            if not os.path.exists(path_to_load):
+                return [f"File not found: {path_to_load}", "File not found", "No content loaded"] + [False] * 5 + [""] * 5
+            
+            with open(path_to_load, 'r', encoding='utf-8') as f:
+                self.quiz_data = json.load(f)
+            
+            # Validate JSON structure
+            if not isinstance(self.quiz_data, dict):
+                return [f"Invalid JSON structure in {path_to_load}", "Invalid file format", "No content loaded"] + [False] * 5 + [""] * 5
+            
+            self.sections = self.quiz_data.get('sections', [])
+            if not self.sections:
+                return [f"No sections found in {path_to_load}", "No sections found", "No content loaded"] + [False] * 5 + [""] * 5
+            
+            # Try to load the original .qmd file
+            self.load_original_qmd_file(path_to_load)
+            
+            # Initialize question states for all sections
+            self.initialize_question_states()
+            
+            self.current_section_index = 0
+            
+            # Load first section
+            section = self.sections[0]
+            title = f"{section['section_title']} ({section['section_id']})"
+            section_text = self.get_full_section_content(section)
+            nav_text = f"Section 1 of {len(self.sections)}"
+            
+            # Prepare checkbox states and question texts
+            quiz_data = section.get('quiz_data', {})
+            checkbox_states = [False] * 5
+            question_texts = [""] * 5
+            
+            if quiz_data.get('quiz_needed', False):
+                questions = quiz_data.get('questions', [])
+                section_id = section['section_id']
+                question_states = self.question_states.get(section_id, [True] * len(questions))
+                
+                for i in range(min(5, len(questions))):
+                    checkbox_states[i] = question_states[i] if i < len(question_states) else True
+                    question = questions[i]
+                    q_text = f"**Q{i+1}:** {question['question']}\n\n"
+                    a_text = f"**A:** {question['answer']}\n\n"
+                    if 'learning_objective' in question:
+                        obj_text = f"*Learning Objective:* {question['learning_objective']}\n\n"
+                    else:
+                        obj_text = ""
+                    question_texts[i] = f"{q_text}{a_text}{obj_text}"
+            else:
+                # No quiz needed for this section
+                question_texts[0] = "**No quiz needed for this section**\n\n*This section was determined to not require a quiz based on its content.*"
+            
+            return [title, nav_text, section_text] + checkbox_states + question_texts
+            
+        except json.JSONDecodeError as e:
+            return [f"Invalid JSON in {path_to_load}: {str(e)}", "JSON Error", "No content loaded"] + [False] * 5 + [""] * 5
+        except Exception as e:
+            return [f"Error loading {path_to_load}: {str(e)}", "Error loading file", "No content loaded"] + [False] * 5 + [""] * 5
+    
+    def save_changes_with_checkboxes(self, checkbox_states):
+        """Save the current quiz data with removed questions based on checkbox states"""
+        if not self.quiz_data or not self.sections:
+            return "No data to save"
+        
+        # Update question states for current section
+        current_section = self.sections[self.current_section_index]
+        section_id = current_section['section_id']
+        self.question_states[section_id] = checkbox_states[:5]  # Take first 5 values
+        
+        # Create a copy of the data to modify
+        modified_data = json.loads(json.dumps(self.quiz_data))
+        
+        # Remove unchecked questions from each section
+        for section in modified_data['sections']:
+            section_id = section['section_id']
+            quiz_data = section.get('quiz_data', {})
+            
+            if quiz_data.get('quiz_needed', False):
+                questions = quiz_data.get('questions', [])
+                question_states = self.question_states.get(section_id, [True] * len(questions))
+                
+                # Keep only checked questions
+                kept_questions = []
+                for i, question in enumerate(questions):
+                    if i < len(question_states) and question_states[i]:
+                        kept_questions.append(question)
+                
+                # Update the questions list
+                quiz_data['questions'] = kept_questions
+                
+                # Update rationale if no questions remain
+                if not kept_questions:
+                    quiz_data['quiz_needed'] = False
+                    quiz_data['rationale'] = "All questions were removed by user"
+        
+        # Save to the original file
+        try:
+            with open(self.initial_file_path, 'w', encoding='utf-8') as f:
+                json.dump(modified_data, f, indent=2, ensure_ascii=False)
+            return f"Saved changes to {os.path.basename(self.initial_file_path)}"
+        except Exception as e:
+            return f"Error saving file: {str(e)}"
 
 def create_gradio_interface(initial_file_path=None):
     """Create the Gradio interface"""
     editor = QuizEditorGradio(initial_file_path)
+    
+    # Load the quiz file immediately
+    if initial_file_path:
+        load_result = editor.load_quiz_file(initial_file_path)
+        if isinstance(load_result, tuple):
+            section_title, nav_info, section_text, questions_text, _ = load_result
+        else:
+            section_title, nav_info, section_text, questions_text = "Error", "Error", "Error loading file", ""
+    else:
+        section_title, nav_info, section_text, questions_text = "No file loaded", "No sections", "No content loaded", ""
     
     with gr.Blocks(title="Quiz Editor", theme=gr.themes.Soft()) as interface:
         gr.Markdown("# Quiz Editor")
@@ -430,52 +667,138 @@ def create_gradio_interface(initial_file_path=None):
         with gr.Row():
             with gr.Column(scale=1):
                 gr.Markdown("### Section Title")
-                section_title = gr.Textbox(label="", interactive=False, value="No file loaded")
+                section_title_box = gr.Textbox(label="", interactive=False, value=section_title)
             
             with gr.Column(scale=1):
                 gr.Markdown("### Navigation")
-                nav_info = gr.Textbox(label="", interactive=False, value="No sections")
+                nav_info_box = gr.Textbox(label="", interactive=False, value=nav_info)
         
         # Section content
         gr.Markdown("### Section Content (from .qmd file)")
-        section_text = gr.Textbox(label="", lines=15, interactive=False, max_lines=20, value="No content loaded")
+        section_text_box = gr.Textbox(label="", lines=15, interactive=False, max_lines=20, value=section_text)
         
-        # Questions
         gr.Markdown("### Generated Questions")
-        questions_display = gr.Markdown("No questions loaded")
         
-        # Bottom row with navigation buttons
+        # Dynamically create question rows based on the number of questions
+        question_checkboxes = []
+        question_markdowns = []
+        answer_markdowns = []
+        learning_obj_markdowns = []
+        
+        def create_question_rows(num_questions, questions):
+            for i in range(num_questions):
+                with gr.Row(visible=True) as row_group:
+                    with gr.Column(scale=1):  # Checkboxake the checkbox sCheckbox without text
+                        checkbox = gr.Checkbox(label="Select", value=True, visible=True)
+                        question_checkboxes.append(checkbox)
+                    with gr.Column(scale=3):
+                        # Display the question text
+                        question_text = f"Q: {questions[i]['question']}"
+                        print(f"Debug: Question Text - {question_text}")  # Debugging statement
+                        question_md = gr.Markdown(question_text, visible=True)
+                        question_markdowns.append(question_md)  # ✅ correct list
+                    with gr.Column(scale=3):
+                        # Display the answer in the middle column
+                        answer_text = f"**Answer:** {questions[i]['answer']}"
+                        print(f"Debug: Answer Text - {answer_text}")  # Debugging statement
+                        answer_md = gr.Markdown(answer_text, visible=True)
+                        answer_markdowns.append(answer_md)
+                    with gr.Column(scale=2):
+                        # Display the learning objective in the last column
+                        learning_text = f"**Learning Objective:** {questions[i].get('learning_objective', 'N/A')}"
+                        print(f"Debug: Learning Objective Text - {learning_text}")  # Debugging statement
+                        learning_md = gr.Markdown(learning_text, visible=True)
+                        learning_obj_markdowns.append(learning_md)
+        
+        # Create initial question rows based on the first section
+        if editor.sections:
+            first_section = editor.sections[0]
+            quiz_data = first_section.get('quiz_data', {})
+            questions = quiz_data.get('questions', []) if quiz_data.get('quiz_needed', False) else []
+            create_question_rows(len(questions), questions)
+        
+        # Bottom row with navigation and save buttons
         with gr.Row():
             with gr.Column(scale=1):
                 prev_btn = gr.Button("← Previous", size="lg")
             with gr.Column(scale=1):
+                save_btn = gr.Button("💾 Save & Exit", size="lg", variant="primary")
+            with gr.Column(scale=1):
                 next_btn = gr.Button("Next →", size="lg")
         
-        # Status bar
-        status_bar = gr.Textbox(label="Status", interactive=False, value="Ready")
+        def update_question_rows(section_title, nav_info, section_text, *question_data):
+            # question_data: [checkbox_states, question_markdowns, answer_markdowns, learning_obj_markdowns]
+            outputs = [section_title, nav_info, section_text]
+            num_questions = len(question_data) // 4  # Calculate number of questions
+            for i in range(num_questions):
+                outputs.append(question_data[i])  # checkbox state
+            for i in range(num_questions):
+                outputs.append(question_data[num_questions+i])  # question markdown
+            for i in range(num_questions):
+                outputs.append(question_data[2*num_questions+i])  # answer markdown
+            for i in range(num_questions):
+                outputs.append(question_data[3*num_questions+i])  # learning obj markdown
+            return outputs
         
-        # Event handlers
-        prev_btn.click(
-            fn=lambda: editor.navigate_section("prev"),
-            outputs=[section_title, nav_info, section_text, questions_display, status_bar]
-        )
+        def get_section_data(section_idx):
+            # Returns: section_title, nav_info, section_text, [checkbox_states], [question_markdowns], [answer_md], [learning_md]
+            if not editor.sections:
+                return ["No file loaded", "No sections", "No content loaded"] + [False]*5 + [""]*5 + [""]*5 + [""]*5
+            section = editor.sections[section_idx]
+            title = f"{section['section_title']} ({section['section_id']})"
+            section_text_val = editor.get_full_section_content(section)
+            nav_text = f"Section {section_idx+1} of {len(editor.sections)}"
+            quiz_data = section.get('quiz_data', {})
+            questions = quiz_data.get('questions', []) if quiz_data.get('quiz_needed', False) else []
+            num_questions = len(questions)
+            checkbox_states = [True]*num_questions
+            question_markdowns = [f"Q: {q['question']}" for q in questions]
+            answer_md = [f"**Answer:** {q['answer']}" for q in questions]
+            learning_md = [f"**Learning Objective:** {q.get('learning_objective', 'N/A')}" for q in questions]
+            return [title, nav_text, section_text_val] + checkbox_states + question_markdowns + answer_md + learning_md
         
-        next_btn.click(
-            fn=lambda: editor.navigate_section("next"),
-            outputs=[section_title, nav_info, section_text, questions_display, status_bar]
-        )
+        # Navigation handlers
+        def nav_prev():
+            if editor.current_section_index > 0:
+                editor.current_section_index -= 1
+            return update_question_rows(*get_section_data(editor.current_section_index))
+        def nav_next():
+            if editor.current_section_index < len(editor.sections)-1:
+                editor.current_section_index += 1
+            return update_question_rows(*get_section_data(editor.current_section_index))
         
-        # Auto-load if initial file path is provided
-        if initial_file_path:
-            # Use a separate function to handle the initial load
-            def initial_load():
-                try:
-                    return editor.load_quiz_file(initial_file_path)
-                except Exception as e:
-                    return "Error loading file", "No sections", "Error occurred", "No questions available", f"Error: {str(e)}"
-            
-            interface.load(initial_load, outputs=[section_title, nav_info, section_text, questions_display, status_bar])
-    
+        # Checkbox change handler
+        def checkbox_change(*checkbox_values):
+            if editor.sections and editor.current_section_index < len(editor.sections):
+                current_section = editor.sections[editor.current_section_index]
+                section_id = current_section['section_id']
+                editor.question_states[section_id] = list(checkbox_values)
+            return  # No output needed
+        
+        # Save handler
+        def save_changes(*checkbox_values):
+            if editor.sections and editor.current_section_index < len(editor.sections):
+                current_section = editor.sections[editor.current_section_index]
+                section_id = current_section['section_id']
+                editor.question_states[section_id] = list(checkbox_values)
+            return editor.save_changes_with_checkboxes(list(checkbox_values))
+        
+        # Initial load
+        def initial_load():
+            # Get the initial section data
+            section_data = get_section_data(editor.current_section_index)
+            # Calculate the number of questions
+            num_questions = (len(section_data) - 3) // 4  # Subtract the fixed outputs (title, nav_info, section_text) and divide by 4 for checkboxes, question_markdowns, answer_markdowns, learning_obj_markdowns
+            # Ensure the number of outputs matches the components
+            return section_data[:3] + section_data[3:3+num_questions] + section_data[3+num_questions:3+2*num_questions] + section_data[3+2*num_questions:3+3*num_questions] + section_data[3+3*num_questions:3+4*num_questions]
+        
+        # Wire up components
+        prev_btn.click(nav_prev, outputs=[section_title_box, nav_info_box, section_text_box] + question_checkboxes + question_markdowns + answer_markdowns + learning_obj_markdowns)
+        next_btn.click(nav_next, outputs=[section_title_box, nav_info_box, section_text_box] + question_checkboxes + question_markdowns + answer_markdowns + learning_obj_markdowns)
+        for cb in question_checkboxes:
+            cb.change(checkbox_change, inputs=question_checkboxes, outputs=[])
+        save_btn.click(save_changes, inputs=question_checkboxes, outputs=[])
+        interface.load(initial_load, outputs=[section_title_box, nav_info_box, section_text_box] + question_checkboxes + question_markdowns + answer_markdowns + learning_obj_markdowns)
     return interface
 
 def run_gui(quiz_file_path=None):
@@ -557,3 +880,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
