@@ -710,12 +710,10 @@ def create_gradio_interface(initial_file_path=None):
                         learning_md = gr.Markdown(learning_text, visible=True)
                         learning_obj_markdowns.append(learning_md)
         
-        # Create initial question rows based on the first section
-        if editor.sections:
-            first_section = editor.sections[0]
-            quiz_data = first_section.get('quiz_data', {})
-            questions = quiz_data.get('questions', []) if quiz_data.get('quiz_needed', False) else []
-            create_question_rows(len(questions), questions)
+        # Create maximum possible question rows (5 as per schema)
+        max_questions = 5
+        dummy_questions = [{"question": "", "answer": "", "learning_objective": ""}] * max_questions
+        create_question_rows(max_questions, dummy_questions)
         
         # Bottom row with navigation and save buttons
         with gr.Row():
@@ -726,14 +724,17 @@ def create_gradio_interface(initial_file_path=None):
             with gr.Column(scale=1):
                 next_btn = gr.Button("Next →", size="lg")
         
+        # Status display for save operations
+        status_display = gr.Textbox(label="Status", interactive=False, visible=True)
+        
 
         def get_section_data(section_idx):
             # Returns: section_title, nav_info, section_text, [checkbox_states], [question_markdowns], [answer_md], [learning_md]
-            # Always returns fixed number of outputs to match interface components
-            num_components = len(question_checkboxes)  # Use the number of components created initially
+            # Always returns fixed number of outputs to match interface components (max 5 questions)
+            max_components = 5
             
             if not editor.sections:
-                return ["No file loaded", "No sections", "No content loaded"] + [False]*num_components + [""]*num_components + [""]*num_components + [""]*num_components
+                return ["No file loaded", "No sections", "No content loaded"] + [False]*max_components + [""]*max_components + [""]*max_components + [""]*max_components
             
             section = editor.sections[section_idx]
             title = f"{section['section_title']} ({section['section_id']})"
@@ -744,17 +745,28 @@ def create_gradio_interface(initial_file_path=None):
             num_questions = len(questions)
             
             # Initialize with False/empty for all component slots
-            checkbox_states = [False] * num_components
-            question_markdowns = [""] * num_components
-            answer_md = [""] * num_components
-            learning_md = [""] * num_components
+            checkbox_states = [False] * max_components
+            question_markdowns = [""] * max_components
+            answer_md = [""] * max_components
+            learning_md = [""] * max_components
             
-            # Fill in data for actual questions (up to the number of components)
-            for i in range(min(num_questions, num_components)):
-                checkbox_states[i] = True
-                question_markdowns[i] = f"Q: {questions[i]['question']}"
-                answer_md[i] = f"**Answer:** {questions[i]['answer']}"
-                learning_md[i] = f"**Learning Objective:** {questions[i].get('learning_objective', 'N/A')}"
+            if num_questions == 0:
+                # No quiz needed for this section
+                question_markdowns[0] = "**No quiz needed for this section**"
+                answer_md[0] = "*This section was determined to not require a quiz based on its content.*"
+                learning_md[0] = ""
+            else:
+                # Get saved checkbox states for this section
+                section_id = section['section_id']
+                saved_states = editor.question_states.get(section_id, [True] * num_questions)
+                
+                # Fill in data for actual questions (up to max_components)
+                for i in range(min(num_questions, max_components)):
+                    # Use saved checkbox state if available, otherwise default to True
+                    checkbox_states[i] = saved_states[i] if i < len(saved_states) else True
+                    question_markdowns[i] = f"**Q{i+1}:** {questions[i]['question']}"
+                    answer_md[i] = f"**Answer:** {questions[i]['answer']}"
+                    learning_md[i] = f"**Learning Objective:** {questions[i].get('learning_objective', 'N/A')}"
             
             return [title, nav_text, section_text_val] + checkbox_states + question_markdowns + answer_md + learning_md
         
@@ -773,7 +785,11 @@ def create_gradio_interface(initial_file_path=None):
             if editor.sections and editor.current_section_index < len(editor.sections):
                 current_section = editor.sections[editor.current_section_index]
                 section_id = current_section['section_id']
-                editor.question_states[section_id] = list(checkbox_values)
+                # Only save the checkbox states for questions that actually exist
+                quiz_data = current_section.get('quiz_data', {})
+                questions = quiz_data.get('questions', []) if quiz_data.get('quiz_needed', False) else []
+                num_questions = len(questions)
+                editor.question_states[section_id] = list(checkbox_values[:num_questions])
             return  # No output needed
         
         # Save handler
@@ -781,7 +797,11 @@ def create_gradio_interface(initial_file_path=None):
             if editor.sections and editor.current_section_index < len(editor.sections):
                 current_section = editor.sections[editor.current_section_index]
                 section_id = current_section['section_id']
-                editor.question_states[section_id] = list(checkbox_values)
+                # Only save the checkbox states for questions that actually exist
+                quiz_data = current_section.get('quiz_data', {})
+                questions = quiz_data.get('questions', []) if quiz_data.get('quiz_needed', False) else []
+                num_questions = len(questions)
+                editor.question_states[section_id] = list(checkbox_values[:num_questions])
             return editor.save_changes_with_checkboxes(list(checkbox_values))
         
         # Initial load
@@ -793,7 +813,7 @@ def create_gradio_interface(initial_file_path=None):
         next_btn.click(nav_next, outputs=[section_title_box, nav_info_box, section_text_box] + question_checkboxes + question_markdowns + answer_markdowns + learning_obj_markdowns)
         for cb in question_checkboxes:
             cb.change(checkbox_change, inputs=question_checkboxes, outputs=[])
-        save_btn.click(save_changes, inputs=question_checkboxes, outputs=[])
+        save_btn.click(save_changes, inputs=question_checkboxes, outputs=[status_display])
         interface.load(initial_load, outputs=[section_title_box, nav_info_box, section_text_box] + question_checkboxes + question_markdowns + answer_markdowns + learning_obj_markdowns)
     return interface
 
