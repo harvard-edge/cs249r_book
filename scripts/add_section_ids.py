@@ -152,8 +152,8 @@ def process_markdown_file(filepath, auto_yes=False, dry_run=False):
         original_lines = file.readlines()
 
     modified_lines = []
-    # Updated pattern to match both level-1 and level-2+ headers
-    header_pattern = re.compile(r'^(#{1,6}) (.+?)(\s*\{#([^\}]+)\})?$')
+    # Updated pattern to match headers with optional .unnumbered class and ID
+    header_pattern = re.compile(r'^(#{1,6}) (.+?)(\s*\{\.unnumbered\})?(\s*\{#([^\}]+)\})?$')
     div_start_pattern = re.compile(r'^:::\s*\{\.([^\}]+)')
     div_end_pattern = re.compile(r'^:::\s*$')
 
@@ -198,13 +198,17 @@ def process_markdown_file(filepath, auto_yes=False, dry_run=False):
         # Process headers only if not inside a skip div
         match = header_pattern.match(line)
         if match and not inside_skip_div:
-            hashes, title, full_id, id_only = match.groups()
+            hashes, title, unnumbered_class, full_id, id_only = match.groups()
             header_count += 1
             logging.debug(f"Line {line_num}: Found header: {title} (Level: {len(hashes)})")
             
             # Only process level 2+ headers (skip chapter title)
             if len(hashes) > 1:
                 proposed_id = generate_section_id(title, filepath, existing_ids, chapter_title)
+                
+                # If header has .unnumbered class, append it to the ID
+                if unnumbered_class:
+                    proposed_id = f"{proposed_id}-unnumbered"
                 
                 if id_only:
                     if id_only == proposed_id:
@@ -214,7 +218,11 @@ def process_markdown_file(filepath, auto_yes=False, dry_run=False):
                     elif not id_only.startswith('sec-'):
                         # ID exists but doesn't have sec- prefix
                         if ask_to_update_format(id_only, proposed_id, auto_yes):
-                            line = f"{hashes} {title} {{#{proposed_id}}}\n"
+                            # Combine .unnumbered class with ID if present
+                            if unnumbered_class:
+                                line = f"{hashes} {title} {{.unnumbered #{proposed_id}}}\n"
+                            else:
+                                line = f"{hashes} {title} {{#{proposed_id}}}\n"
                             existing_ids.add(proposed_id)
                             changed = True
                             logging.info(f"Line {line_num}: Updated non-standard ID from {id_only} to {proposed_id}")
@@ -224,7 +232,11 @@ def process_markdown_file(filepath, auto_yes=False, dry_run=False):
                     else:
                         # ID exists with sec- prefix but is different
                         if ask_to_replace_existing(id_only, proposed_id, auto_yes):
-                            line = f"{hashes} {title} {{#{proposed_id}}}\n"
+                            # Combine .unnumbered class with ID if present
+                            if unnumbered_class:
+                                line = f"{hashes} {title} {{.unnumbered #{proposed_id}}}\n"
+                            else:
+                                line = f"{hashes} {title} {{#{proposed_id}}}\n"
                             existing_ids.add(proposed_id)
                             changed = True
                             logging.info(f"Line {line_num}: Replaced existing section ID from {id_only} to {proposed_id}")
@@ -233,7 +245,11 @@ def process_markdown_file(filepath, auto_yes=False, dry_run=False):
                             logging.info(f"Line {line_num}: Kept existing section ID: {id_only}")
                 else:
                     # No ID exists, add new one
-                    line = f"{hashes} {title} {{#{proposed_id}}}\n"
+                    # Combine .unnumbered class with ID if present
+                    if unnumbered_class:
+                        line = f"{hashes} {title} {{.unnumbered #{proposed_id}}}\n"
+                    else:
+                        line = f"{hashes} {title} {{#{proposed_id}}}\n"
                     existing_ids.add(proposed_id)
                     logging.info(f"Line {line_num}: Added new ID: {proposed_id}")
                     changed = True
