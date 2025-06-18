@@ -269,6 +269,9 @@ def process_markdown_file(file_path, auto_yes=False, dry_run=False, force=False)
                     attrs_end = line.rfind("}")
                     if attrs_end > attrs_start:
                         existing_attrs = line[attrs_start:attrs_end+1]
+                # Skip headers with {.unnumbered}
+                if ".unnumbered" in existing_attrs:
+                    continue  # Skip this header
 
                 existing_id_matches = re.findall(r'\{#(sec-[^}]+)\}', line)
                 if existing_id_matches:
