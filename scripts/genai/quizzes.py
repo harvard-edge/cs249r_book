@@ -726,24 +726,15 @@ def create_gradio_interface(initial_file_path=None):
             with gr.Column(scale=1):
                 next_btn = gr.Button("Next →", size="lg")
         
-        def update_question_rows(section_title, nav_info, section_text, *question_data):
-            # question_data: [checkbox_states, question_markdowns, answer_markdowns, learning_obj_markdowns]
-            outputs = [section_title, nav_info, section_text]
-            num_questions = len(question_data) // 4  # Calculate number of questions
-            for i in range(num_questions):
-                outputs.append(question_data[i])  # checkbox state
-            for i in range(num_questions):
-                outputs.append(question_data[num_questions+i])  # question markdown
-            for i in range(num_questions):
-                outputs.append(question_data[2*num_questions+i])  # answer markdown
-            for i in range(num_questions):
-                outputs.append(question_data[3*num_questions+i])  # learning obj markdown
-            return outputs
-        
+
         def get_section_data(section_idx):
             # Returns: section_title, nav_info, section_text, [checkbox_states], [question_markdowns], [answer_md], [learning_md]
+            # Always returns fixed number of outputs to match interface components
+            num_components = len(question_checkboxes)  # Use the number of components created initially
+            
             if not editor.sections:
-                return ["No file loaded", "No sections", "No content loaded"] + [False]*5 + [""]*5 + [""]*5 + [""]*5
+                return ["No file loaded", "No sections", "No content loaded"] + [False]*num_components + [""]*num_components + [""]*num_components + [""]*num_components
+            
             section = editor.sections[section_idx]
             title = f"{section['section_title']} ({section['section_id']})"
             section_text_val = editor.get_full_section_content(section)
@@ -751,21 +742,31 @@ def create_gradio_interface(initial_file_path=None):
             quiz_data = section.get('quiz_data', {})
             questions = quiz_data.get('questions', []) if quiz_data.get('quiz_needed', False) else []
             num_questions = len(questions)
-            checkbox_states = [True]*num_questions
-            question_markdowns = [f"Q: {q['question']}" for q in questions]
-            answer_md = [f"**Answer:** {q['answer']}" for q in questions]
-            learning_md = [f"**Learning Objective:** {q.get('learning_objective', 'N/A')}" for q in questions]
+            
+            # Initialize with False/empty for all component slots
+            checkbox_states = [False] * num_components
+            question_markdowns = [""] * num_components
+            answer_md = [""] * num_components
+            learning_md = [""] * num_components
+            
+            # Fill in data for actual questions (up to the number of components)
+            for i in range(min(num_questions, num_components)):
+                checkbox_states[i] = True
+                question_markdowns[i] = f"Q: {questions[i]['question']}"
+                answer_md[i] = f"**Answer:** {questions[i]['answer']}"
+                learning_md[i] = f"**Learning Objective:** {questions[i].get('learning_objective', 'N/A')}"
+            
             return [title, nav_text, section_text_val] + checkbox_states + question_markdowns + answer_md + learning_md
         
         # Navigation handlers
         def nav_prev():
             if editor.current_section_index > 0:
                 editor.current_section_index -= 1
-            return update_question_rows(*get_section_data(editor.current_section_index))
+            return get_section_data(editor.current_section_index)
         def nav_next():
             if editor.current_section_index < len(editor.sections)-1:
                 editor.current_section_index += 1
-            return update_question_rows(*get_section_data(editor.current_section_index))
+            return get_section_data(editor.current_section_index)
         
         # Checkbox change handler
         def checkbox_change(*checkbox_values):
@@ -785,12 +786,7 @@ def create_gradio_interface(initial_file_path=None):
         
         # Initial load
         def initial_load():
-            # Get the initial section data
-            section_data = get_section_data(editor.current_section_index)
-            # Calculate the number of questions
-            num_questions = (len(section_data) - 3) // 4  # Subtract the fixed outputs (title, nav_info, section_text) and divide by 4 for checkboxes, question_markdowns, answer_markdowns, learning_obj_markdowns
-            # Ensure the number of outputs matches the components
-            return section_data[:3] + section_data[3:3+num_questions] + section_data[3+num_questions:3+2*num_questions] + section_data[3+2*num_questions:3+3*num_questions] + section_data[3+3*num_questions:3+4*num_questions]
+            return get_section_data(editor.current_section_index)
         
         # Wire up components
         prev_btn.click(nav_prev, outputs=[section_title_box, nav_info_box, section_text_box] + question_checkboxes + question_markdowns + answer_markdowns + learning_obj_markdowns)
