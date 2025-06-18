@@ -55,6 +55,9 @@ logging.basicConfig(
     ]
 )
 
+# Global variable to track ID replacements
+id_replacements = {}
+
 def simple_slugify(text):
     """Convert header text to a slug format, removing stopwords."""
     # Get English stopwords
@@ -149,7 +152,7 @@ def is_properly_formatted_id(section_id, title, file_path):
     
     return True, normalized
 
-def generate_section_id(title, file_path, existing_ids, chapter_title, section_counter):
+def generate_section_id(title, file_path, chapter_title, section_counter):
     """Generate a unique section ID based on the chapter title and section counter."""
     if not chapter_title:
         raise ValueError(f"No chapter title found for section: {title}")
@@ -206,76 +209,39 @@ def show_diff(original, modified, filename):
 
 def process_markdown_file(file_path, auto_yes=False, dry_run=False, force=False):
     """Process a single Markdown file."""
-    logging.info(f"Processing file: {file_path}")
-    
-    with open(file_path, "r", encoding="utf-8") as file:
-        lines = file.readlines()
+    global id_replacements
+    logging.info(f"\n📄 Processing: {file_path}")
+    path = Path(file_path)
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
 
-    # Pattern to match headers with optional attributes in curly braces
     header_pattern = re.compile(r'^(#{1,6})\s+(.+?)(?:\s*\{[^}]*\})?$')
-    div_start_pattern = re.compile(r'^:::\s*\{\.([^\}]+)')
+    div_start_pattern = re.compile(r'^:::\s*\{\.([^"]+)')
     div_end_pattern = re.compile(r'^:::\s*$')
-
-    # Div types that should skip header processing
-    skip_div_types = {
-        'callout-tip',
-        'callout-note',
-        'callout-warning',
-        'callout-important',
-        'callout-caution',
-        'callout'
-    }
 
     inside_skip_div = False
     modified = False
     changes = []
-    existing_ids = set()  # Initialize the set of existing IDs
-    section_counter = 0  # Track section number
-
-    # First pass: find chapter title and collect existing IDs
+    section_counter = 0
     chapter_title = None
+
     for line in lines:
         match = header_pattern.match(line)
-        if match and len(match.group(1)) == 1:  # Level 1 header
+        if match and len(match.group(1)) == 1:
             chapter_title = match.group(2).strip()
             break
-        # Also collect any existing section IDs
-        if "#sec-" in line:
-            id_matches = re.findall(r'\{#(sec-[^}]+)\}', line)
-            for id_match in id_matches:
-                existing_ids.add(id_match)
 
     if not chapter_title:
         raise ValueError(f"No chapter title found in {file_path}")
 
-    logging.debug(f"Found chapter title: {chapter_title}")
-    logging.debug(f"Found {len(existing_ids)} existing section IDs")
-
-    # If force mode, show warning and ask for confirmation
-    if force and existing_ids and not dry_run and not auto_yes:
-        print(f"\n⚠️  Force mode will remove {len(existing_ids)} existing section IDs in {file_path}")
-        print("This will affect all cross-references to these sections.")
-        if input("Continue? (y/n): ").lower() != 'y':
-            logging.info("Operation cancelled")
-            return
-
     for i, line in enumerate(lines):
-        stripped = line.strip()
-        
-        # Check for div start/end
-        div_start_match = div_start_pattern.match(stripped)
-        if div_start_match:
-            div_type = div_start_match.group(1)
-            inside_skip_div = div_type in skip_div_types
-        elif div_end_pattern.match(stripped):
+        if div_start_pattern.match(line.strip()):
+            inside_skip_div = True
+        elif div_end_pattern.match(line.strip()):
             inside_skip_div = False
-        
-        # Process headers only if not inside a skip div
+
         match = header_pattern.match(line)
         if match and not inside_skip_div:
             hashes, title = match.groups()
-            
-            # Only process level 2+ headers (skip chapter title)
             if len(hashes) > 1:
                 # Extract existing attributes if any
                 existing_attrs = ""
@@ -285,73 +251,47 @@ def process_markdown_file(file_path, auto_yes=False, dry_run=False, force=False)
                     if attrs_end > attrs_start:
                         existing_attrs = line[attrs_start:attrs_end+1]
 
-                # Check for existing section IDs
                 existing_id_matches = re.findall(r'\{#(sec-[^}]+)\}', line)
                 if existing_id_matches:
-                    if len(existing_id_matches) > 1:
-                        # Multiple section IDs found
-                        if force or auto_yes or input(f"\nFound multiple section IDs in '{title}': {', '.join(existing_id_matches)}\nRegenerate with a single ID? (y/n): ").lower() == 'y':
-                            # Remove all existing section IDs
-                            existing_attrs = re.sub(r'\{#sec-[^}]+\}', '', existing_attrs)
-                            existing_attrs = existing_attrs.strip()
-                            if existing_attrs == "{}":
-                                existing_attrs = ""
-                        else:
-                            logging.info(f"Skipping {title} - keeping existing IDs")
-                            continue
-                    else:
-                        # Single section ID found
-                        existing_id = existing_id_matches[0]
-                        is_proper, expected_id = is_properly_formatted_id(existing_id, title, file_path)
-                        if not is_proper:
-                            if force or auto_yes or input(f"\nFound improperly formatted ID in '{title}':\n  Current: {existing_id}\n  Should be: {expected_id}\nRegenerate with proper format? (y/n): ").lower() == 'y':
-                                # Remove existing ID
-                                existing_attrs = re.sub(r'\{#sec-[^}]+\}', '', existing_attrs)
-                                existing_attrs = existing_attrs.strip()
-                                if existing_attrs == "{}":
-                                    existing_attrs = ""
-                            else:
-                                logging.info(f"Skipping {title} - keeping existing ID: {existing_id}")
-                                continue
-                        else:
-                            logging.info(f"Skipping {title} - has properly formatted ID: {existing_id}")
-                            continue
-
-                # Generate ID from clean title
-                proposed_id = generate_section_id(title, file_path, existing_ids, chapter_title, section_counter)
-                if proposed_id:
-                    section_counter += 1  # Increment counter after successful generation
-                
-                # Construct new line with ID
-                if existing_attrs:
-                    # If there are existing attributes, add ID to them
-                    if ".unnumbered" in existing_attrs:
-                        new_line = f"{hashes} {title} {{.unnumbered #{proposed_id}}}\n"
-                    else:
-                        new_line = f"{hashes} {title} {existing_attrs} {{#{proposed_id}}}\n"
+                    existing_id = existing_id_matches[0]
+                    is_proper, expected_id = is_properly_formatted_id(existing_id, title, file_path)
+                    if not is_proper:
+                        if auto_yes or input(f"\n🔄 Update ID for '{title}':\n  From: {existing_id}\n  To:   {expected_id}\n  Proceed? [Y/n]: ").lower() != 'n':
+                            # Store the replacement
+                            id_replacements[existing_id] = expected_id
+                            # Replace only the sec- part while preserving other attributes
+                            new_attrs = re.sub(r'#sec-[^}]+', f'#{expected_id}', existing_attrs)
+                            new_line = f"{hashes} {title} {new_attrs}\n"
+                            lines[i] = new_line
+                            modified = True
+                            logging.info(f"  ✓ Updated: {title}")
+                            logging.info(f"    {line.strip()}")
+                            logging.info(f"    → {new_line.strip()}")
                 else:
-                    new_line = f"{hashes} {title} {{#{proposed_id}}}\n"
-                
-                if new_line != line:
-                    changes.append((i, line, new_line))
+                    new_id = generate_section_id(title, file_path, chapter_title, section_counter)
+                    section_counter += 1
+                    # Add ID while preserving other attributes
+                    if existing_attrs:
+                        # Remove any existing ID if present
+                        attrs_without_id = re.sub(r'#sec-[^}]+', '', existing_attrs)
+                        attrs_without_id = attrs_without_id.strip()
+                        if attrs_without_id == "{}":
+                            new_line = f"{hashes} {title} {{#{new_id}}}\n"
+                        else:
+                            new_line = f"{hashes} {title} {attrs_without_id} {{#{new_id}}}\n"
+                    else:
+                        new_line = f"{hashes} {title} {{#{new_id}}}\n"
                     lines[i] = new_line
                     modified = True
+                    logging.info(f"  + Added: {title}")
+                    logging.info(f"    {line.strip()}")
+                    logging.info(f"    → {new_line.strip()}")
 
     if modified and not dry_run:
-        with open(file_path, "w", encoding="utf-8") as file:
-            file.writelines(lines)
-        if force:
-            logging.info(f"✅ Force updated {len(changes)} headers in {file_path}")
-        else:
-            logging.info(f"✅ Updated {len(changes)} headers in {file_path}")
-    elif dry_run and changes:
-        logging.info(f"\nWould make {len(changes)} changes to {file_path}:")
-        for i, old, new in changes:
-            logging.info(f"  Line {i+1}:")
-            logging.info(f"    - {old.strip()}")
-            logging.info(f"    + {new.strip()}")
-    elif not changes:
-        logging.info(f"✅ No changes needed for {file_path}")
+        path.write_text(''.join(lines), encoding="utf-8")
+        logging.info(f"✅ Saved changes to {file_path}")
+    elif not modified:
+        logging.info(f"✓ No changes needed for {file_path}")
 
 def process_directory(directory, auto_yes=False, dry_run=False):
     """
@@ -371,72 +311,73 @@ def process_directory(directory, auto_yes=False, dry_run=False):
         process_markdown_file(file_path, auto_yes=auto_yes, dry_run=dry_run)
 
 def verify_section_ids(filepath):
-    """Verify that all section IDs in a file are properly formatted."""
+    """Verify that all headers have proper section IDs."""
     missing_ids = []
     with open(filepath, 'r', encoding='utf-8') as file:
         lines = file.readlines()
-        
-    # Pattern to match headers with optional attributes in curly braces
+    
     header_pattern = re.compile(r'^(#{1,6})\s+(.+?)(?:\s*\{[^}]*\})?$')
-    div_start_pattern = re.compile(r'^:::\s*\{\.([^\}]+)')
+    div_start_pattern = re.compile(r'^:::\s*\{\.([^"]+)')
     div_end_pattern = re.compile(r'^:::\s*$')
-
-    # Div types that should skip header processing
-    skip_div_types = {
-        'callout-tip',
-        'callout-note',
-        'callout-warning',
-        'callout-important',
-        'callout-caution',
-        'callout'
-    }
-
+    
     inside_skip_div = False
-    chapter_title = None
-    
-    # First pass: find chapter title
-    for line in lines:
-        match = header_pattern.match(line)
-        if match and len(match.group(1)) == 1:  # Level 1 header
-            chapter_title = match.group(2).strip()
-            break
-    
-    if not chapter_title:
-        raise ValueError(f"No chapter title found in {filepath}")
-
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        
-        # Check for div start/end
-        div_start_match = div_start_pattern.match(stripped)
-        if div_start_match:
-            div_type = div_start_match.group(1)
-            inside_skip_div = div_type in skip_div_types
-        elif div_end_pattern.match(stripped):
+    for i, line in enumerate(lines, 1):
+        if div_start_pattern.match(line.strip()):
+            inside_skip_div = True
+        elif div_end_pattern.match(line.strip()):
             inside_skip_div = False
-        
-        # Process headers only if not inside a skip div
+            
         match = header_pattern.match(line)
         if match and not inside_skip_div:
             hashes, title = match.groups()
-            
-            # Only process level 2+ headers (skip chapter title)
-            if len(hashes) > 1:
-                # Check for existing section IDs
-                existing_id_matches = re.findall(r'\{#(sec-[^}]+)\}', line)
-                if not existing_id_matches:
-                    missing_ids.append((i+1, title))
-                else:
-                    # Verify format of existing IDs
-                    for existing_id in existing_id_matches:
-                        is_proper, expected_id = is_properly_formatted_id(existing_id, title, filepath)
-                        if not is_proper:
-                            missing_ids.append((i+1, title, existing_id, expected_id))
+            if len(hashes) > 1:  # Skip chapter title
+                if not re.search(r'\{#sec-[^}]+\}', line):
+                    missing_ids.append({
+                        'line': i,
+                        'title': title.strip()
+                    })
     
     return missing_ids
 
+def update_cross_references(file_path, id_map):
+    """Update cross-references in a file using the ID mapping."""
+    global id_replacements
+    
+    logging.info(f"\n🔍 Checking references in: {file_path}")
+    path = Path(file_path)
+    content = path.read_text(encoding="utf-8")
+    
+    # Track changes
+    changes = []
+    modified = False
+    
+    # Update each reference
+    for old_id, new_id in id_map.items():
+        # Update both @ and # references with word boundary
+        pattern = rf'([@#]){re.escape(old_id)}\b'
+        new_content = re.sub(pattern, rf'\1{new_id}', content)
+        if new_content != content:
+            content = new_content
+            changes.append((old_id, new_id))
+            modified = True
+    
+    if modified:
+        path.write_text(content, encoding="utf-8")
+        logging.info(f"✅ Updated {len(changes)} references:")
+        for old, new in changes:
+            logging.info(f"  - {old} → {new}")
+        return True
+    else:
+        logging.info(f"  ✓ No references found to update")
+    
+    return False
+
 def main():
     """Main function to process files."""
+    global id_replacements
+    # Reset id_replacements at the start of each run
+    id_replacements = {}
+    
     parser = argparse.ArgumentParser(description="Add unique section IDs to Markdown headers")
     parser.add_argument("-f", "--file", help="Process a single file")
     parser.add_argument("-d", "--directory", help="Process all .qmd files in directory")
@@ -458,38 +399,66 @@ def main():
         if args.file:
             missing_ids = verify_section_ids(args.file)
             if missing_ids:
-                print(f"\nFound {len(missing_ids)} headers missing section IDs in {args.file}:")
+                logging.warning(f"❌ {args.file}")
                 for header in missing_ids:
-                    print(f"  Line {header['line']}: {header['title']} (missing ID)")
+                    logging.warning(f"  Line {header['line']}: {header['title']} (missing ID)")
                 sys.exit(1)
             else:
-                print(f"✅ All headers in {args.file} have proper section IDs")
+                logging.info(f"✅ {args.file}")
                 sys.exit(0)
         elif args.directory:
             all_missing = []
             for filepath in glob.glob(os.path.join(args.directory, "**/*.qmd"), recursive=True):
                 missing_ids = verify_section_ids(filepath)
                 if missing_ids:
+                    logging.warning(f"❌ {filepath}")
                     all_missing.append((filepath, missing_ids))
-            
+                else:
+                    logging.info(f"✅ {filepath}")
             if all_missing:
-                print("\nFound headers missing section IDs:")
+                # After all files, print details for each file with missing IDs
                 for filepath, missing_ids in all_missing:
-                    print(f"\n{filepath}:")
                     for header in missing_ids:
-                        print(f"  Line {header['line']}: {header['title']} (missing ID)")
+                        logging.warning(f"  {filepath}: Line {header['line']}: {header['title']} (missing ID)")
                 sys.exit(1)
             else:
-                print("✅ All headers have proper section IDs")
                 sys.exit(0)
         else:
             parser.error("--verify requires either --file or --directory")
     else:
+        # First phase: Update all section IDs and build mapping
         if args.file:
             process_markdown_file(args.file, args.yes, args.dry_run, args.force)
+            # Update cross-references in the same directory
+            if not args.dry_run and id_replacements:
+                logging.info("\n📝 Found the following ID replacements:")
+                for old_id, new_id in id_replacements.items():
+                    logging.info(f"  {old_id} → {new_id}")
+                
+                if args.yes or input("\n🔄 Would you like to update cross-references with these new IDs? [Y/n]: ").lower() != 'n':
+                    logging.info("\n🔍 Searching for cross-references...")
+                    file_dir = Path(args.file).parent
+                    update_cross_references(args.file, id_replacements)
+                    # Also check other files in the same directory
+                    for other_file in file_dir.glob("*.qmd"):
+                        if other_file != Path(args.file):
+                            update_cross_references(str(other_file), id_replacements)
         elif args.directory:
+            # Process all files first
             for filepath in glob.glob(os.path.join(args.directory, "**/*.qmd"), recursive=True):
                 process_markdown_file(filepath, args.yes, args.dry_run, args.force)
+            
+            # Then update cross-references if we have replacements
+            if not args.dry_run and id_replacements:
+                logging.info("\n📝 Found the following ID replacements:")
+                for old_id, new_id in id_replacements.items():
+                    logging.info(f"  {old_id} → {new_id}")
+                
+                if args.yes or input("\n🔄 Would you like to update cross-references with these new IDs? [Y/n]: ").lower() != 'n':
+                    logging.info("\n🔍 Searching for cross-references...")
+                    # Update all files in the directory
+                    for filepath in glob.glob(os.path.join(args.directory, "**/*.qmd"), recursive=True):
+                        update_cross_references(filepath, id_replacements)
         else:
             parser.error("Either --file or --directory is required")
 
