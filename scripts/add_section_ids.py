@@ -153,25 +153,12 @@ def is_properly_formatted_id(section_id, title, file_path):
     return True, normalized
 
 def generate_section_id(title, file_path, chapter_title, section_counter):
-    """Generate a unique section ID based on the chapter title and section counter."""
-    if not chapter_title:
-        raise ValueError(f"No chapter title found for section: {title}")
-        
-    # Clean the title and chapter name
+    """Generate a unique section ID based on the section title, with a hash that includes file path, chapter title, section title, and section counter."""
     clean_title = clean_text_for_id(title)
-    chapter_name = clean_text_for_id(chapter_title)
-    
-    # Generate hash using title, chapter, and counter for determinism
-    hash_input = f"{title}{chapter_title}{section_counter}"
-    hash_suffix = hashlib.sha1(hash_input.encode()).hexdigest()[:4]
-    
-    # Create the base ID with format: sec-<chapter>-<sectiontitle>-<hashid>
-    base_id = f"sec-{chapter_name}-{clean_title}-{hash_suffix}"
-    
-    # Normalize the generated ID
-    normalized_id = normalize_section_id(base_id)
-    
-    return normalized_id
+    # Hash includes file path, chapter title, section title, and section counter
+    hash_input = f"{file_path}|{chapter_title}|{title}|{section_counter}".encode('utf-8')
+    hash_suffix = hashlib.sha1(hash_input).hexdigest()[:4]
+    return f"sec-{clean_title}-{hash_suffix}"
 
 def ask_to_replace(old_id, new_id, auto_yes=False):
     """Ask user if they want to replace an existing ID."""
