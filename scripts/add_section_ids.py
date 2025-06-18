@@ -49,7 +49,10 @@ except LookupError:
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
-    format="%(levelname)s: %(message)s"
+    format='%(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
 )
 
 def simple_slugify(text):
@@ -78,49 +81,41 @@ def generate_hash_suffix(title, filepath):
     return hashlib.sha1(hash_input).hexdigest()[:4]
 
 def clean_text_for_id(text):
-    """Clean text to be used in an ID."""
+    """Clean text for use in section IDs."""
     # Convert to lowercase
     text = text.lower()
-    # Replace spaces and underscores with hyphens
-    text = re.sub(r'[\s_]+', '-', text)
-    # Remove any non-alphanumeric characters except hyphens
-    text = re.sub(r'[^a-z0-9-]', '', text)
-    # Replace multiple hyphens with single hyphen
-    text = re.sub(r'-+', '-', text)
+    
+    # Replace spaces and special characters with hyphens
+    text = re.sub(r'[^a-z0-9]+', '-', text)
+    
     # Remove leading/trailing hyphens
     text = text.strip('-')
+    
+    # Replace multiple hyphens with single hyphen
+    text = re.sub(r'-+', '-', text)
+    
     return text
 
 def normalize_section_id(section_id):
-    """Normalize a section ID to the standard format: sec-<chapter>-<section>-<hash>[_suffix]."""
+    """Normalize a section ID to ensure consistent format."""
+    if not section_id:
+        return None
+        
+    # Ensure the ID starts with sec-
     if not section_id.startswith('sec-'):
         return None
-    
-    # Split into main parts and potential suffix
-    parts = section_id.split('_', 1)
-    main_id = parts[0]
-    suffix = f"_{parts[1]}" if len(parts) > 1 else ""
-    
-    # Split the main ID into components
-    components = main_id.split('-')
-    if len(components) < 4:  # sec, chapter, section, hash
+        
+    # Split into parts
+    parts = section_id.split('-')
+    if len(parts) < 3:  # Need at least: sec, chapter, section
         return None
+        
+    # Clean each part
+    cleaned_parts = [clean_text_for_id(part) for part in parts]
     
-    # Clean each component
-    cleaned_components = []
-    for comp in components:
-        # Convert to lowercase and replace underscores with hyphens
-        comp = comp.lower().replace('_', '-')
-        # Remove any non-alphanumeric characters except hyphens
-        comp = re.sub(r'[^a-z0-9-]', '', comp)
-        # Replace multiple hyphens with single hyphen
-        comp = re.sub(r'-+', '-', comp)
-        # Remove leading/trailing hyphens
-        comp = comp.strip('-')
-        cleaned_components.append(comp)
+    # Rejoin with hyphens
+    normalized = '-'.join(cleaned_parts)
     
-    # Reconstruct the normalized ID
-    normalized = '-'.join(cleaned_components) + suffix
     return normalized
 
 def is_properly_formatted_id(section_id, title, file_path):
@@ -157,8 +152,7 @@ def is_properly_formatted_id(section_id, title, file_path):
 def generate_section_id(title, file_path, existing_ids, chapter_title, section_counter):
     """Generate a unique section ID based on the chapter title and section counter."""
     if not chapter_title:
-        logging.warning(f"No chapter title found for section: {title}")
-        return None
+        raise ValueError(f"No chapter title found for section: {title}")
         
     # Clean the title and chapter name
     clean_title = clean_text_for_id(title)
@@ -252,8 +246,7 @@ def process_markdown_file(file_path, auto_yes=False, dry_run=False, force=False)
                 existing_ids.add(id_match)
 
     if not chapter_title:
-        logging.error(f"No chapter title found in {file_path}")
-        return
+        raise ValueError(f"No chapter title found in {file_path}")
 
     logging.debug(f"Found chapter title: {chapter_title}")
     logging.debug(f"Found {len(existing_ids)} existing section IDs")
@@ -378,14 +371,11 @@ def process_directory(directory, auto_yes=False, dry_run=False):
         process_markdown_file(file_path, auto_yes=auto_yes, dry_run=dry_run)
 
 def verify_section_ids(filepath):
-    """
-    Verify that all section headers have proper section IDs.
-    Returns a list of headers missing IDs.
-    """
+    """Verify that all section IDs in a file are properly formatted."""
     missing_ids = []
-    with open(filepath, "r", encoding="utf-8") as file:
+    with open(filepath, 'r', encoding='utf-8') as file:
         lines = file.readlines()
-
+        
     # Pattern to match headers with optional attributes in curly braces
     header_pattern = re.compile(r'^(#{1,6})\s+(.+?)(?:\s*\{[^}]*\})?$')
     div_start_pattern = re.compile(r'^:::\s*\{\.([^\}]+)')
@@ -402,8 +392,19 @@ def verify_section_ids(filepath):
     }
 
     inside_skip_div = False
+    chapter_title = None
+    
+    # First pass: find chapter title
+    for line in lines:
+        match = header_pattern.match(line)
+        if match and len(match.group(1)) == 1:  # Level 1 header
+            chapter_title = match.group(2).strip()
+            break
+    
+    if not chapter_title:
+        raise ValueError(f"No chapter title found in {filepath}")
 
-    for line_num, line in enumerate(lines, 1):
+    for i, line in enumerate(lines):
         stripped = line.strip()
         
         # Check for div start/end
@@ -419,18 +420,19 @@ def verify_section_ids(filepath):
         if match and not inside_skip_div:
             hashes, title = match.groups()
             
-            # Only check level 2+ headers (skip chapter title)
+            # Only process level 2+ headers (skip chapter title)
             if len(hashes) > 1:
-                # Check if line has a section ID
-                has_id = "#sec-" in line
-                if not has_id:
-                    missing_ids.append({
-                        'line': line_num,
-                        'title': title,
-                        'level': len(hashes),
-                        'has_id': has_id
-                    })
-
+                # Check for existing section IDs
+                existing_id_matches = re.findall(r'\{#(sec-[^}]+)\}', line)
+                if not existing_id_matches:
+                    missing_ids.append((i+1, title))
+                else:
+                    # Verify format of existing IDs
+                    for existing_id in existing_id_matches:
+                        is_proper, expected_id = is_properly_formatted_id(existing_id, title, filepath)
+                        if not is_proper:
+                            missing_ids.append((i+1, title, existing_id, expected_id))
+    
     return missing_ids
 
 def main():
