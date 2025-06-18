@@ -38,6 +38,7 @@ import os
 import glob
 import random
 import string
+import time
 
 # Download NLTK stopwords if not already downloaded
 try:
@@ -90,29 +91,90 @@ def clean_text_for_id(text):
     text = text.strip('-')
     return text
 
-def is_properly_formatted_id(section_id, title, file_path):
-    """Check if a section ID follows the correct format by comparing with a freshly generated one."""
-    # Generate what the ID should be
-    expected_id = generate_section_id(title, file_path, set(), None)
-    return section_id == expected_id
-
-def generate_section_id(title, file_path, existing_ids, chapter_title=None):
-    """Generate a unique section ID based on the title and file path."""
-    # Clean the title - stop at any curly braces
-    if "{" in title:
-        title = title[:title.find("{")].strip()
+def normalize_section_id(section_id):
+    """Normalize a section ID to the standard format: sec-<chapter>-<section>-<hash>[_suffix]."""
+    if not section_id.startswith('sec-'):
+        return None
     
+    # Split into main parts and potential suffix
+    parts = section_id.split('_', 1)
+    main_id = parts[0]
+    suffix = f"_{parts[1]}" if len(parts) > 1 else ""
+    
+    # Split the main ID into components
+    components = main_id.split('-')
+    if len(components) < 4:  # sec, chapter, section, hash
+        return None
+    
+    # Clean each component
+    cleaned_components = []
+    for comp in components:
+        # Convert to lowercase and replace underscores with hyphens
+        comp = comp.lower().replace('_', '-')
+        # Remove any non-alphanumeric characters except hyphens
+        comp = re.sub(r'[^a-z0-9-]', '', comp)
+        # Replace multiple hyphens with single hyphen
+        comp = re.sub(r'-+', '-', comp)
+        # Remove leading/trailing hyphens
+        comp = comp.strip('-')
+        cleaned_components.append(comp)
+    
+    # Reconstruct the normalized ID
+    normalized = '-'.join(cleaned_components) + suffix
+    return normalized
+
+def is_properly_formatted_id(section_id, title, file_path):
+    """Check if a section ID follows the correct format by comparing with a normalized version."""
     # Clean the title and file name
     clean_title = clean_text_for_id(title)
     file_name = clean_text_for_id(os.path.splitext(os.path.basename(file_path))[0])
     
-    # Generate a unique hash using the existing function
-    hash_suffix = generate_hash_suffix(title, file_path)
+    # Generate what the ID should be using the same hash generation logic
+    base_id = f"sec-{file_name}-{clean_title}"
+    hash_input = f"{title}{file_name}0"  # Using counter 0 for consistency
+    hash_suffix = hashlib.sha1(hash_input.encode()).hexdigest()[:4]
+    expected_id = f"{base_id}-{hash_suffix}"
+    
+    # Check if the ID has the required parts
+    if not section_id.startswith('sec-'):
+        return False, expected_id
+    
+    # Split into parts
+    parts = section_id.split('-')
+    if len(parts) < 3:  # Need at least: sec, chapter, section
+        return False, expected_id
+    
+    # Check if it has a hash part (4 hex chars)
+    if not re.search(r'-[a-f0-9]{4}$', section_id):
+        return False, expected_id
+    
+    normalized = normalize_section_id(section_id)
+    if not normalized:
+        return False, expected_id
+    
+    return True, normalized
+
+def generate_section_id(title, file_path, existing_ids, chapter_title, section_counter):
+    """Generate a unique section ID based on the chapter title and section counter."""
+    if not chapter_title:
+        logging.warning(f"No chapter title found for section: {title}")
+        return None
+        
+    # Clean the title and chapter name
+    clean_title = clean_text_for_id(title)
+    chapter_name = clean_text_for_id(chapter_title)
+    
+    # Generate hash using title, chapter, and counter for determinism
+    hash_input = f"{title}{chapter_title}{section_counter}"
+    hash_suffix = hashlib.sha1(hash_input.encode()).hexdigest()[:4]
     
     # Create the base ID with format: sec-<chapter>-<sectiontitle>-<hashid>
-    base_id = f"sec-{file_name}-{clean_title}-{hash_suffix}"
+    base_id = f"sec-{chapter_name}-{clean_title}-{hash_suffix}"
     
-    return base_id
+    # Normalize the generated ID
+    normalized_id = normalize_section_id(base_id)
+    
+    return normalized_id
 
 def ask_to_replace(old_id, new_id, auto_yes=False):
     """Ask user if they want to replace an existing ID."""
@@ -174,6 +236,7 @@ def process_markdown_file(file_path, auto_yes=False, dry_run=False, force=False)
     modified = False
     changes = []
     existing_ids = set()  # Initialize the set of existing IDs
+    section_counter = 0  # Track section number
 
     # First pass: find chapter title and collect existing IDs
     chapter_title = None
@@ -187,6 +250,10 @@ def process_markdown_file(file_path, auto_yes=False, dry_run=False, force=False)
             id_matches = re.findall(r'\{#(sec-[^}]+)\}', line)
             for id_match in id_matches:
                 existing_ids.add(id_match)
+
+    if not chapter_title:
+        logging.error(f"No chapter title found in {file_path}")
+        return
 
     logging.debug(f"Found chapter title: {chapter_title}")
     logging.debug(f"Found {len(existing_ids)} existing section IDs")
@@ -242,8 +309,9 @@ def process_markdown_file(file_path, auto_yes=False, dry_run=False, force=False)
                     else:
                         # Single section ID found
                         existing_id = existing_id_matches[0]
-                        if not is_properly_formatted_id(existing_id, title, file_path):
-                            if force or auto_yes or input(f"\nFound improperly formatted ID in '{title}': {existing_id}\nRegenerate with proper format? (y/n): ").lower() == 'y':
+                        is_proper, expected_id = is_properly_formatted_id(existing_id, title, file_path)
+                        if not is_proper:
+                            if force or auto_yes or input(f"\nFound improperly formatted ID in '{title}':\n  Current: {existing_id}\n  Should be: {expected_id}\nRegenerate with proper format? (y/n): ").lower() == 'y':
                                 # Remove existing ID
                                 existing_attrs = re.sub(r'\{#sec-[^}]+\}', '', existing_attrs)
                                 existing_attrs = existing_attrs.strip()
@@ -257,15 +325,9 @@ def process_markdown_file(file_path, auto_yes=False, dry_run=False, force=False)
                             continue
 
                 # Generate ID from clean title
-                proposed_id = generate_section_id(title, file_path, existing_ids, chapter_title)
-                
-                # Check if this ID already exists
-                if proposed_id in existing_ids:
-                    # Add a unique suffix
-                    suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
-                    proposed_id = f"{proposed_id}_{suffix}"
-                
-                existing_ids.add(proposed_id)
+                proposed_id = generate_section_id(title, file_path, existing_ids, chapter_title, section_counter)
+                if proposed_id:
+                    section_counter += 1  # Increment counter after successful generation
                 
                 # Construct new line with ID
                 if existing_attrs:
