@@ -15,6 +15,12 @@ defaultOptions={
 blockStart = function (tt, fmt)
   local Open =""
   local BoxStyle =" fbx-default closebutton"
+  if tt.type == "callout-quiz-answer" then
+    BoxStyle = " fbx-answer closebutton"
+  elseif tt.type == "callout-quiz-question" then
+    BoxStyle = " fbx-default closebutton"
+  end
+
   local texEnv = "fbx"
   if #tt.title > 0 then tt.typlabelTag = tt.typlabelTag..": " end
   if fmt =="html" then
