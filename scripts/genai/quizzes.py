@@ -27,7 +27,7 @@ ANSWER_ID_PREFIX = "quiz-answer-"
 STOPWORDS = {"in", "of", "the", "and", "to", "for", "on", "a", "an", "with", "by"}
 
 SYSTEM_PROMPT = """
-You are a helpful assistant for a university-level textbook on machine learning systems.
+You are an educational content specialist with expertise in machine learning systems, tasked with creating pedagogically sound quiz questions for a university-level textbook.
 Your task is to first evaluate whether a quiz would be pedagogically valuable for the given section, and if so, generate 1 to 5 self-check questions and answers. Decide the number of questions based on the section's length and complexity.
 
 ## ML Systems Focus
@@ -95,12 +95,19 @@ If you determine a quiz IS needed, return this JSON:
 - Connect to practical ML systems scenarios
 
 **Question Types (use variety based on content):**
-- **Multiple Choice**: Include answer options A), B), C), D) directly in the question text, each on a new line. The answer field must start with the correct letter followed by a period (e.g., "B. The gradual change in statistical properties..."), then explanation.
+- **Multiple Choice**: Include answer options A), B), C), D) directly in the question text, each on a new line. The answer field must start with a sentence followed by the correct letter followed by a period (e.g., "The correct answer is B. The gradual change in statistical properties..."), then explanation. Every multiple-choice question must begin with a clear question stem, followed by the answer options. Do not generate questions that consist only of options.
 - **Short Answer**: Require explanation of concepts, not just definitions
 - **Scenario-Based**: Present realistic ML systems situations requiring application
 - **Comparison**: Test understanding of tradeoffs between approaches
 - **Fill-in-the-Blank**: Use ____ (four underscores) for missing key terms. Answer should contain only the missing word/phrase followed by a period, plus brief explanation.
 - **True/False**: Always require justification in the answer
+
+**Question Variety Instructions:**
+- Vary the order and types of questions based on the content
+- Don't follow the same pattern every time
+- Choose question types that best fit the specific concepts being tested
+- Mix difficulty levels throughout, not just in progression
+- Consider starting with different question types depending on the section's focus
 
 **Quality Standards:**
 - Use clear, academically appropriate language
@@ -342,58 +349,89 @@ def call_openai(client, system_prompt, user_prompt, model="gpt-4o"):
             "rationale": f"Unexpected error: {str(e)}"
         }
 
+def format_mcq_question(question_text):
+    # Detect MCQ options (A), B), etc.) and reformat to a), b), ...
+    option_pattern = re.compile(r"([A-D])\) ?(.*?)(?=(?:[A-D]\)|$))", re.DOTALL)
+    # Find the question and options
+    lines = question_text.split("\n")
+    q = []
+    opts = []
+    for line in lines:
+        if option_pattern.search(line):
+            opts.extend(option_pattern.findall(line))
+        else:
+            q.append(line)
+    qtext = " ".join(q).strip()
+    if opts:
+        opt_lines = [f"   {chr(96+ord(opt[0].upper())-64)}) {opt[1].strip()}" for opt in opts]  # a), b), ...
+        return f"{qtext}\n" + "\n".join(opt_lines)
+    else:
+        return question_text
+
+def is_only_options(qtext):
+    # Returns True if qtext is only a list of options (a), b), etc.) and no question stem
+    lines = [l.strip() for l in qtext.split('\n') if l.strip()]
+    return all(re.match(r'^[a-dA-D]\)', l) for l in lines)
+
 def format_quiz_block(qa_pairs, answer_ref):
     """Formats the questions into a Quarto callout block."""
-    # Check if quiz is needed
     if isinstance(qa_pairs, dict) and not qa_pairs.get("quiz_needed", True):
-        return ""  # Return empty string if no quiz is needed
-    
-    # Extract questions from the nested structure
+        return ""
     questions = qa_pairs.get("questions", qa_pairs) if isinstance(qa_pairs, dict) else qa_pairs
-    
-    # If there are no questions or questions is empty, return empty string
     if not questions or (isinstance(questions, list) and len(questions) == 0):
         return ""
-    
-    # Extract slug from answer_ref (e.g., 'quiz-answer-my-slug' -> 'my-slug')
     slug = answer_ref.replace(ANSWER_ID_PREFIX, "")
     quiz_id = f"{QUESTION_ID_PREFIX}{slug}"
-
-    # Always number questions, even if there is only one
-    if isinstance(questions, list):
-        formatted_questions = [f"{i+1}. {qa['question']}" if isinstance(qa, dict) else f"{i+1}. {qa}" for i, qa in enumerate(questions)]
-    else:
-        formatted_questions = [f"1. {questions}"]
-    
-    return f"""
-
+    formatted_questions = []
+    for i, qa in enumerate(questions):
+        qtext = qa['question'] if isinstance(qa, dict) else qa
+        # Skip questions that are only options
+        if is_only_options(qtext):
+            continue
+        formatted = format_mcq_question(qtext)
+        formatted_questions.append(f"{i+1}. {formatted}")
+    if not formatted_questions:
+        return ""
+    return (
+        f"""
 ::: {{{QUIZ_CALLOUT_CLASS} #{quiz_id}}}
 
-{"\n\n".join(formatted_questions)}
+"""
+        + "\n\n".join(formatted_questions)
+        + f"""
 
 {REFERENCE_TEXT} \\ref{{{answer_ref}}}.
 :::
-
 """
+    )
+
+def indent_answer_explanation(answer):
+    return '\n'.join([f"   {line}" if line.strip() else "" for line in answer.strip().split("\n")])
+
+def format_mcq_answer(question, answer):
+    q_lines = format_mcq_question(question).split("\n")
+    answer_lines = indent_answer_explanation(answer)
+    return "\n".join(q_lines) + "\n\n" + answer_lines
 
 def format_answer_block(slug, qa_pairs):
     """Formats the answers into a Quarto callout block."""
-    # Check if quiz is needed
     if isinstance(qa_pairs, dict) and not qa_pairs.get("quiz_needed", True):
-        return ""  # Return empty string if no quiz is needed
-    
-    # Extract questions from the nested structure
+        return ""
     questions = qa_pairs.get("questions", qa_pairs) if isinstance(qa_pairs, dict) else qa_pairs
-    
-    # If there are no questions or questions is empty, return empty string
     if not questions or (isinstance(questions, list) and len(questions) == 0):
         return ""
-    
-    # Format Q&A pairs with consistent numbering
-    lines = [f"**{i+1}. {qa['question']}**\n\n{qa['answer']}" for i, qa in enumerate(questions)]
-    
-    # Ensure consistent callout formatting
-    return f"""::: {{{ANSWER_CALLOUT_CLASS} #{ANSWER_ID_PREFIX}{slug}}} {"\n\n".join(lines)} ::: """
+    lines = []
+    for i, qa in enumerate(questions):
+        qtext = qa['question'] if isinstance(qa, dict) else qa
+        ans = qa['answer'] if isinstance(qa, dict) else ''
+        formatted_q = format_mcq_question(qtext)
+        formatted_a = indent_answer_explanation(ans)
+        lines.append(f"{i+1}. {formatted_q}\n\n{formatted_a}")
+    return (
+        f":::{{{ANSWER_CALLOUT_CLASS} #{ANSWER_ID_PREFIX}{slug}}}\n"
+        + "\n\n".join(lines)
+        + "\n:::\n"
+    )
 
 # --- GUI Mode ---
 
@@ -591,25 +629,7 @@ def launch_gui_mode(client, sections, qa_by_section, filepath, model, pre_select
             new_index = index + 1
             title, text = sections[new_index]
             
-            # Generate questions for the new section if they don't exist
-            if title not in qa_by_section:
-                logging.info(f"Generating questions for section: '{title}'")
-                # Get previous sections for context
-                previous_sections = sections[:new_index] if new_index > 0 else None
-                user_prompt = build_user_prompt(title, text, chapter_title, previous_sections)
-                qa_pairs = call_openai(client, SYSTEM_PROMPT, user_prompt, model=model)
-                if qa_pairs:
-                    # Check if quiz is needed
-                    if isinstance(qa_pairs, dict) and not qa_pairs.get("quiz_needed", True):
-                        logging.info(f"No quiz needed for section: '{title}'")
-                        qa_by_section[title] = qa_pairs
-                    else:
-                        questions = qa_pairs.get("questions", qa_pairs) if isinstance(qa_pairs, dict) else qa_pairs
-                        logging.info(f"Successfully generated {len(questions)} Q&A pairs for section: '{title}'")
-                        qa_by_section[title] = qa_pairs
-                else:
-                    logging.warning(f"No Q&A pairs were generated for section: '{title}'")
-            
+            # Don't automatically generate questions - only show existing ones
             return new_index, *get_section_data(new_index)
 
         def go_back(index):
@@ -833,6 +853,229 @@ def insert_quiz_at_end(match, quiz_block):
         return section_text.rstrip() + '\n\n' + quiz_block.strip() + '\n\n'
     return section_text  # Return original section text with its newlines intact
 
+def extract_existing_quizzes(markdown_text):
+    """Extract existing quiz questions and answers from markdown text.
+    Returns:
+        dict: Dictionary mapping section titles to their quiz content
+    """
+    quizzes_by_section = {}
+    
+    # First, find all question blocks by their ID
+    question_blocks = {}
+    question_pattern = re.compile(
+        rf"::: \{{{QUIZ_CALLOUT_CLASS}[^}}]*#{QUESTION_ID_PREFIX}([^}}]+)[^}}]*\}}([\s\S]*?){REFERENCE_TEXT} \\ref\{{{ANSWER_ID_PREFIX}([^}}]+)\}}[\s\S]*?:::",
+        re.DOTALL
+    )
+    
+    print("\n=== Finding Question Blocks ===")
+    print("Looking for question blocks with pattern:", question_pattern.pattern)
+    for match in question_pattern.finditer(markdown_text):
+        question_slug = match.group(1)
+        answer_slug = match.group(3)
+        question_text = match.group(2).strip()
+        
+        print(f"\nFound question block:")
+        print(f"Question ID: {QUESTION_ID_PREFIX}{question_slug}")
+        print(f"Answer ID: {ANSWER_ID_PREFIX}{answer_slug}")
+        print(f"Question text: {question_text[:100]}...")  # Show first 100 chars
+        
+        # Find the section this quiz belongs to
+        section_start = markdown_text.rfind("## ", 0, match.start())
+        if section_start == -1:
+            print(f"❌ Could not find section for quiz with question_slug: {question_slug}")
+            continue
+            
+        section_end = markdown_text.find("\n## ", section_start + 1)
+        if section_end == -1:
+            section_end = len(markdown_text)
+            
+        section_text = markdown_text[section_start:section_end]
+        section_title = re.search(r"^##\s+(.*?)$", section_text, re.MULTILINE)
+        if not section_title:
+            print(f"❌ Could not find section title for quiz with question_slug: {question_slug}")
+            continue
+            
+        section_title = section_title.group(1).strip()
+        print(f"✅ Found in section: {section_title}")
+        
+        # Store the question block info
+        if section_title not in question_blocks:
+            question_blocks[section_title] = []
+        question_blocks[section_title].append({
+            'question_slug': question_slug,
+            'answer_slug': answer_slug,
+            'question_text': question_text
+        })
+    
+    print(f"\nFound {len(question_blocks)} sections with questions")
+    
+    # Now find all answer blocks
+    answer_blocks = {}
+    answer_pattern = re.compile(
+        rf"::: \{{{ANSWER_CALLOUT_CLASS}[^}}]*#{ANSWER_ID_PREFIX}([^}}]+)[^}}]*\}}([\s\S]*?):::",
+        re.DOTALL
+    )
+    
+    print("\n=== Finding Answer Blocks ===")
+    print("Looking for answer blocks with pattern:", answer_pattern.pattern)
+    for match in answer_pattern.finditer(markdown_text):
+        answer_slug = match.group(1)
+        answer_text = match.group(2).strip()
+        
+        print(f"\nFound answer block:")
+        print(f"Answer ID: {ANSWER_ID_PREFIX}{answer_slug}")
+        print(f"Answer text: {answer_text[:100]}...")  # Show first 100 chars
+        
+        # Split answers by numbered questions
+        answer_items = []
+        # This pattern matches:
+        # 1. Question text
+        #    a) option
+        #    b) option
+        #    c) option
+        #    d) option
+        #
+        #    The answer text
+        qa_pattern = re.compile(
+            r"^(\d+)\.\s+([^\n]+(?:\n\s+[a-d]\)[^\n]+)*)\n\n\s+([^\n]+(?:\n\s+[^\n]+)*)(?=^\d+\.|\Z)",
+            re.MULTILINE | re.DOTALL
+        )
+        
+        for qa_match in qa_pattern.finditer(answer_text):
+            qnum = qa_match.group(1)
+            question_part = qa_match.group(2).strip()
+            answer_part = qa_match.group(3).strip()
+            
+            print(f"\nProcessing question {qnum}:")
+            print(f"Question: {question_part[:100]}...")
+            print(f"Answer: {answer_part[:100]}...")
+            
+            # Handle different question types
+            if 'a)' in question_part or 'b)' in question_part or 'c)' in question_part or 'd)' in question_part:
+                print("Type: Multiple choice")
+                answer_items.append((qnum, answer_part))
+            elif 'True or False' in question_part:
+                print("Type: True/False")
+                answer_items.append((qnum, answer_part))
+            elif 'Fill in the blank' in question_part:
+                print("Type: Fill in the blank")
+                answer_items.append((qnum, answer_part))
+            else:
+                print("Type: Regular question")
+                answer_items.append((qnum, answer_part))
+            
+        if answer_items:
+            print(f"✅ Successfully parsed {len(answer_items)} answers for {answer_slug}")
+            answer_blocks[answer_slug] = answer_items
+        else:
+            print(f"❌ No answers parsed for {answer_slug}")
+            print("Raw answer text:", answer_text)
+    
+    print(f"\nFound {len(answer_blocks)} answer blocks")
+    
+    # Now process each section's questions and match with answers
+    print("\n=== Matching Questions with Answers ===")
+    for section_title, questions in question_blocks.items():
+        print(f"\nProcessing section: {section_title}")
+        qa_pairs = []
+        
+        for q_info in questions:
+            question_text = q_info['question_text']
+            answer_slug = q_info['answer_slug']
+            
+            print(f"\nProcessing question block with answer_slug: {answer_slug}")
+            print(f"Looking for answer block with ID: {ANSWER_ID_PREFIX}{answer_slug}")
+            
+            # Split questions by numbered lines
+            question_items = []
+            question_pattern = re.compile(r"^(\d+)\. ([\s\S]*?)(?=^\d+\. |\Z)", re.MULTILINE)
+            for qm in question_pattern.finditer(question_text):
+                qnum = qm.group(1)
+                qtext = qm.group(2).strip()
+                question_items.append((qnum, qtext))
+                print(f"Found question {qnum}: {qtext[:100]}...")
+            
+            # Match questions with answers
+            answer_items = answer_blocks.get(answer_slug, [])
+            print(f"Found {len(answer_items)} answers for this block")
+            print("Available answer numbers:", [anum for anum, _ in answer_items])
+            
+            for qnum, qtext in question_items:
+                print(f"\nTrying to match question {qnum}")
+                # Find matching answer
+                atext = ''
+                for anum, a in answer_items:
+                    print(f"Checking answer {anum} against question {qnum}")
+                    if anum == qnum:
+                        atext = a
+                        print(f"✅ Matched question {qnum} with answer {anum}")
+                        break
+                else:
+                    print(f"❌ No answer found for question {qnum}")
+                    print("Available answers:", answer_items)
+                
+                qa_pairs.append({
+                    "question": qtext,
+                    "answer": atext,
+                    "learning_objective": "Extracted from existing quiz"
+                })
+        
+        if qa_pairs:
+            print(f"✅ Successfully processed {len(qa_pairs)} Q&A pairs for section: {section_title}")
+            quizzes_by_section[section_title] = {
+                "questions": qa_pairs,
+                "quiz_needed": True
+            }
+        else:
+            print(f"❌ No Q&A pairs extracted for section: {section_title}")
+    
+    print(f"\n=== Final Results ===")
+    print(f"Found {len(quizzes_by_section)} sections with quizzes")
+    for section, quiz in quizzes_by_section.items():
+        print(f"Section '{section}': {len(quiz['questions'])} questions")
+    
+    return quizzes_by_section
+
+def process_file_offline(filepath):
+    """Process a file in offline review mode - extract and review existing quizzes."""
+    logging.info(f"--- Starting offline review for: {filepath} ---")
+    tmp_path = None
+    try:
+        # Read original file
+        with open(filepath, "r", encoding="utf-8") as f:
+            content = f.read()
+        logging.info(f"Successfully read file with {len(content)} characters.")
+
+        # Extract chapter title and sections
+        chapter_title, sections = extract_sections(content)
+        if not sections:
+            logging.warning(f"No level-2 sections (## Section Title) found. Nothing to process.")
+            return
+
+        # Extract existing quizzes
+        qa_by_section = extract_existing_quizzes(content)
+        
+        # Create a temporary file
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.tmp', encoding='utf-8') as tmp:
+            tmp_path = tmp.name
+            tmp.write(content)
+        logging.info(f"Created temporary file at: {tmp_path}")
+
+        # Launch GUI in review mode with existing quizzes
+        launch_gui_mode(None, sections, qa_by_section, filepath, None, pre_select_all=True, tmp_path=tmp_path, chapter_title=chapter_title)
+
+    except FileNotFoundError:
+        logging.error(f"File not found: {filepath}")
+        return
+    except Exception as e:
+        logging.error(f"An error occurred while processing {filepath}: {str(e)}")
+        return
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            logging.info(f"Cleaning up temporary file: {tmp_path}")
+            os.unlink(tmp_path)
+            logging.info("Temporary file removed successfully.")
+
 def process_file(client, filepath, mode="batch", model="gpt-4o"):
     """Orchestrates the processing of a single markdown file."""
     logging.info(f"--- Starting processing for: {filepath} ---")
@@ -991,11 +1234,12 @@ def main():
     )
     parser.add_argument("-f", "--file", help="Path to a single markdown (.qmd/.md) file.")
     parser.add_argument("-d", "--dir", help="Path to a directory containing markdown files to process.")
-    parser.add_argument("--mode", required=True, choices=["batch", "review", "interactive"],
+    parser.add_argument("--mode", required=True, choices=["batch", "review", "interactive", "offline-review"],
         help="""Mode of operation:
         batch: Process all sections and write to file without review
         review: Batch process all sections first, then review them
-        interactive: Generate and review questions one section at a time""")
+        interactive: Generate and review questions one section at a time
+        offline-review: Review existing quizzes from a file without generating new ones""")
     parser.add_argument("--model", default="gpt-4o", help="The OpenAI model to use (e.g., 'gpt-4o', 'gpt-4o-mini').")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose (DEBUG) logging.")
     
@@ -1021,7 +1265,11 @@ def main():
         return
 
     if args.file:
-        process_file(client, Path(args.file), mode=args.mode, model=args.model)
+        if args.mode == "offline-review":
+            # For offline review, we don't need the OpenAI client
+            process_file_offline(Path(args.file))
+        else:
+            process_file(client, Path(args.file), mode=args.mode, model=args.model)
     elif args.dir:
         directory = Path(args.dir)
         if not directory.is_dir():
@@ -1033,7 +1281,10 @@ def main():
             for name in files:
                 if name.endswith((".qmd", ".md")):
                     filepath = Path(root) / name
-                    process_file(client, filepath, mode=args.mode, model=args.model)
+                    if args.mode == "offline-review":
+                        process_file_offline(filepath)
+                    else:
+                        process_file(client, filepath, mode=args.mode, model=args.model)
                 else:
                     logging.debug(f"Skipping non-markdown file: {name}")
     else:
