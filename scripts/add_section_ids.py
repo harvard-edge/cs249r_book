@@ -1,12 +1,44 @@
 # section_id_tool.py
 
 """
-Section ID Tool for Markdown and Quarto Files
+Section ID Management Script for Quarto/Markdown Book Projects
+-------------------------------------------------------------
 
-This utility adds or updates unique section IDs to level-2+ headers (## and deeper)
-in Markdown (.md or .qmd) files. It ensures that each section ID is both human-readable
-and globally unique by appending a deterministic 4-character hash suffix derived from
-the header content and file path.
+This script ensures that all section headers in your Markdown/Quarto book project have unique, clean, and consistent section IDs.
+
+Workflow Philosophy:
+--------------------
+- **Write Freely:**
+  - As you write, you can leave out section IDs or make up quick/guess IDs (e.g., {#sec-my-section}) for new sections.
+  - Focus on content, not on perfecting section IDs.
+
+- **Automated Cleanup:**
+  - Before committing or publishing, run this script (manually, via pre-commit, or in CI).
+  - The script will:
+    - Add missing section IDs.
+    - Normalize and fix any IDs that don't match the scheme.
+    - Ensure all IDs are globally unique and clean.
+    - Optionally update cross-references if IDs change.
+
+- **Referencing Sections:**
+  - While writing, use your best guess for section IDs in cross-references.
+  - After running the script, you can look up the actual IDs (e.g., with grep or a helper script).
+
+- **Verification:**
+  - Run the script in --verify mode to check for missing or malformed IDs before a commit or build.
+
+ID Scheme:
+----------
+- IDs are of the form: sec-[short-title]-[short-hash]
+- The hash is generated from: file path + chapter title + section title + section counter
+- This ensures global uniqueness, even for repeated section titles in different files.
+- The visible part of the ID remains short and human-readable.
+
+Best Practices:
+---------------
+- Use a pre-commit hook or CI job to enforce ID consistency.
+- Use the script's --verify mode to check for issues without making changes.
+- Optionally, add a script to list all section IDs and their locations for easy lookup.
 
 Key Features:
 - Adds {#slug-hash} style section IDs to headers
