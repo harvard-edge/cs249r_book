@@ -12,6 +12,10 @@ import gradio as gr
 # JSON Schema validation
 from jsonschema import validate, ValidationError
 
+# Callout class names for quiz insertion
+QUIZ_QUESTION_CALLOUT_CLASS = "callout-quiz-question"
+QUIZ_ANSWER_CALLOUT_CLASS = "callout-quiz-answer"
+
 # Schema for individual quiz responses (used by AI generation)
 JSON_SCHEMA = {
     "type": "object",
@@ -1362,11 +1366,22 @@ def run_insert_mode(args):
             print(f"❌ Error reading quiz file: {str(e)}")
             return
     
-    # Validate the quiz file
+    # Quick verification using existing code (brief mode)
+    print("🔍 Verifying files...")
+    
+    # Verify quiz file
     is_valid, message = validate_quiz_file(quiz_file_path)
     if not is_valid:
-        print(f"Error: {message}")
+        print(f"❌ Quiz file validation failed: {message}")
         return
+    print("✅ Quiz file is valid")
+    
+    # Verify markdown file
+    qmd_sections = analyze_qmd_file(qmd_file_path)
+    if not qmd_sections:
+        print("❌ Markdown file validation failed")
+        return
+    print("✅ Markdown file is valid")
     
     # Now insert the quizzes
     insert_quizzes_into_markdown(qmd_file_path, quiz_file_path)
@@ -1396,17 +1411,28 @@ def insert_quizzes_into_markdown(qmd_file_path, quiz_file_path):
         # Process each section and insert quizzes
         modified_content = qmd_content
         sections_modified = 0
+        quiz_answers = []  # Collect answers for the end
         
         for qmd_section in qmd_sections:
             section_id = qmd_section['section_id']
             quiz_section = quiz_sections.get(section_id)
             
             if quiz_section and quiz_section.get('quiz_data', {}).get('quiz_needed', False):
-                # Insert quiz at the end of this section
-                quiz_markdown = format_quiz_for_insertion(quiz_section)
+                # Create quiz callout
+                quiz_markdown = format_quiz_callout(quiz_section, section_id)
                 modified_content = insert_quiz_into_section(modified_content, section_id, quiz_markdown)
+                
+                # Collect answer for the end
+                answer_markdown = format_answer_callout(quiz_section, section_id)
+                quiz_answers.append(answer_markdown)
+                
                 sections_modified += 1
                 print(f"  ✓ Added quiz to section: {qmd_section['section_title']}")
+        
+        # Add quiz answers section at the end
+        if quiz_answers:
+            answers_section = "\n\n## Quiz Answers\n\n" + "\n\n".join(quiz_answers)
+            modified_content += answers_section
         
         # Write the modified content back to the file
         with open(qmd_file_path, 'w', encoding='utf-8') as f:
@@ -1419,58 +1445,47 @@ def insert_quizzes_into_markdown(qmd_file_path, quiz_file_path):
     except Exception as e:
         print(f"❌ Error inserting quizzes: {str(e)}")
 
-def format_quiz_for_insertion(quiz_section):
-    """Format quiz data as markdown for insertion"""
+def format_quiz_callout(quiz_section, section_id):
+    """Format quiz data as callout for insertion"""
     quiz_data = quiz_section.get('quiz_data', {})
     questions = quiz_data.get('questions', [])
     
     if not questions:
         return ""
     
-    # Format the quiz as markdown
-    quiz_markdown = "\n\n## Quiz\n\n"
+    # Extract section key (remove # prefix only, keep hyphens and underscores)
+    section_key = section_id.replace('#', '')
+    
+    # Format the quiz as callout
+    quiz_markdown = f"\n\n::: {{.{QUIZ_QUESTION_CALLOUT_CLASS} #quiz-question-{section_key}}}\n\n"
     
     for i, question in enumerate(questions, 1):
-        quiz_markdown += f"### Question {i}\n\n"
-        quiz_markdown += f"{question['question']}\n\n"
-        quiz_markdown += f"**Answer:** {question['answer']}\n\n"
-        if 'learning_objective' in question:
-            quiz_markdown += f"*Learning Objective:* {question['learning_objective']}\n\n"
-        quiz_markdown += "---\n\n"
+        quiz_markdown += f"{i}. {question['question']}\n\n"
+    
+    quiz_markdown += f"See Answer \\ref{{quiz-answer-{section_key}}}.\n\n:::\n\n"
     
     return quiz_markdown
 
-def insert_quiz_into_section(content, section_id, quiz_markdown):
-    """Insert quiz markdown at the end of a specific section"""
-    # Remove the # prefix if present
-    if section_id.startswith('#'):
-        section_id = section_id[1:]
+def format_answer_callout(quiz_section, section_id):
+    """Format answer data as callout for the answers section"""
+    quiz_data = quiz_section.get('quiz_data', {})
+    questions = quiz_data.get('questions', [])
     
-    # Find the section in the content
-    section_pattern = re.compile(rf'^##\s+.*?\{{\#{re.escape(section_id)}\}}.*?$', re.MULTILINE)
-    match = section_pattern.search(content)
+    if not questions:
+        return ""
     
-    if not match:
-        print(f"⚠️  Warning: Could not find section {section_id} in content")
-        return content
+    # Extract section key (remove # prefix only, keep hyphens and underscores)
+    section_key = section_id.replace('#', '')
     
-    # Find the start and end of this section
-    start_pos = match.start()
+    # Format the answer as callout
+    answer_markdown = f"::: {{.{QUIZ_ANSWER_CALLOUT_CLASS} #quiz-answer-{section_key}}}\n\n"
     
-    # Find the next section or end of file
-    next_section_pattern = re.compile(r'^##\s+', re.MULTILINE)
-    next_match = next_section_pattern.search(content, start_pos + 1)
+    for i, question in enumerate(questions, 1):
+        answer_markdown += f"{i}. {question['question']}\n   {question['answer']}\n\n"
     
-    if next_match:
-        end_pos = next_match.start()
-    else:
-        end_pos = len(content)
+    answer_markdown += ":::\n\n"
     
-    # Insert the quiz before the next section
-    before_section = content[:end_pos]
-    after_section = content[end_pos:]
-    
-    return before_section + quiz_markdown + after_section
+    return answer_markdown
 
 def run_verify_mode(args):
     """Verify quiz files and validate their structure"""
@@ -2050,6 +2065,38 @@ def find_quiz_file_from_qmd(qmd_file_path):
         return quiz_path
     
     return None
+
+def insert_quiz_into_section(content, section_id, quiz_markdown):
+    """Insert quiz markdown at the end of a specific section"""
+    # Remove the # prefix if present
+    if section_id.startswith('#'):
+        section_id = section_id[1:]
+    
+    # Find the section in the content
+    section_pattern = re.compile(rf'^##\s+.*?\{{\#{re.escape(section_id)}\}}.*?$', re.MULTILINE)
+    match = section_pattern.search(content)
+    
+    if not match:
+        print(f"⚠️  Warning: Could not find section {section_id} in content")
+        return content
+    
+    # Find the start and end of this section
+    start_pos = match.start()
+    
+    # Find the next section or end of file
+    next_section_pattern = re.compile(r'^##\s+', re.MULTILINE)
+    next_match = next_section_pattern.search(content, start_pos + 1)
+    
+    if next_match:
+        end_pos = next_match.start()
+    else:
+        end_pos = len(content)
+    
+    # Insert the quiz before the next section
+    before_section = content[:end_pos]
+    after_section = content[end_pos:]
+    
+    return before_section + quiz_markdown + after_section
 
 if __name__ == "__main__":
     main()
