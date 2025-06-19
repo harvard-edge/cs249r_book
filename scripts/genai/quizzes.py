@@ -986,7 +986,7 @@ def run_gui(quiz_file_path=None):
     """Run the Gradio application for quiz review"""
     if not quiz_file_path:
         print("Error: Quiz file path is required for GUI mode")
-        print("Usage: python quizzes.py --mode review --quiz-file <path>")
+        print("Usage: python quizzes.py --mode review <file_path>")
         return
     
     print(f"Launching quiz review GUI for: {quiz_file_path}")
@@ -1004,10 +1004,6 @@ def show_usage_examples():
     print("\n2. Review existing quizzes with GUI:")
     print("   python quizzes.py --mode review quizzes.json  # Positional argument")
     print("   python quizzes.py --mode review chapter1.qmd  # Positional argument (finds quiz file)")
-    print("   python quizzes.py --mode review -q quizzes.json")
-    print("   python quizzes.py --mode review --gui quizzes.json")
-    print("   python quizzes.py --mode review --gui chapter1.qmd")
-    print("   python quizzes.py --mode review --file chapter1.qmd")
     
     print("\n3. Verify quiz file structure and correspondence:")
     print("   python quizzes.py --mode verify -q quizzes.json")
@@ -1016,7 +1012,8 @@ def show_usage_examples():
     print("   python quizzes.py --mode verify --directory ./quiz_files/")
     
     print("\n4. Insert quizzes into markdown (future feature):")
-    print("   python quizzes.py --mode insert --file chapter1.qmd -q quizzes.json")
+    print("   python quizzes.py --mode insert chapter1.qmd  # Finds quiz file automatically")
+    print("   python quizzes.py --mode insert quizzes.json  # Finds markdown file automatically")
     
     print("\n5. Default mode (generate):")
     print("   python quizzes.py --file chapter1.qmd")
@@ -1034,13 +1031,12 @@ Examples:
   %(prog)s --mode generate --directory ./some_dir/
   %(prog)s --mode review quizzes.json  # Positional argument
   %(prog)s --mode review chapter1.qmd  # Positional argument (finds quiz file)
-  %(prog)s --mode review -q quizzes.json
-  %(prog)s --mode review --gui chapter1.qmd
+  %(prog)s --mode insert chapter1.qmd  # Finds quiz file automatically
+  %(prog)s --mode insert quizzes.json  # Finds markdown file automatically
   %(prog)s --mode verify -q quizzes.json
   %(prog)s --mode verify -q chapter1.qmd  # Will find corresponding quiz file
   %(prog)s --mode verify --directory ./quiz_files/
   %(prog)s --mode verify --file chapter1.qmd
-  %(prog)s --mode insert --file chapter1.qmd -q quizzes.json
 
 Note: In generate mode, you MUST use -f/--file for a single .qmd file or -d/--directory for a directory of .qmd files. 
 Do NOT pass the file as a positional argument.
@@ -1048,13 +1044,12 @@ Do NOT pass the file as a positional argument.
     )
     parser.add_argument("--mode", choices=["generate", "review", "insert", "verify"], default="generate",
                        help="Mode of operation: generate (create new quizzes), review (edit existing quizzes), insert (add quizzes to markdown), verify (validate quiz files)")
-    parser.add_argument("file_path", nargs="?", help="File path for review mode (quiz JSON or markdown .qmd file). Can be used instead of -f or -q in review mode.")
+    parser.add_argument("file_path", nargs="?", help="File path for review/insert modes (quiz JSON or markdown .qmd file).")
     parser.add_argument("-f", "--file", help="Path to a markdown (.qmd/.md) file. REQUIRED for generate mode unless --directory is used.")
-    parser.add_argument("-q", "--quiz-file", help="Path to quiz JSON file (for review/insert/verify modes). For verify mode, can also accept .qmd files to find corresponding quiz files.")
+    parser.add_argument("-q", "--quiz-file", help="Path to quiz JSON file (for verify mode only). For verify mode, can also accept .qmd files to find corresponding quiz files.")
     parser.add_argument("-d", "--directory", help="Path to directory containing .qmd files (for generate mode) or quiz JSON files (for verify mode). REQUIRED for generate mode unless --file is used.")
     parser.add_argument("--model", default="gpt-4o", help="OpenAI model to use (generate mode only).")
     parser.add_argument("-o", "--output", default="quizzes.json", help="Path to output JSON file (generate mode only).")
-    parser.add_argument("--gui", nargs="?", const="", metavar="QUIZ_FILE", help="Launch GUI mode for review. Optionally provide quiz JSON file path.")
     parser.add_argument("--examples", action="store_true", help="Show usage examples")
     args = parser.parse_args()
 
@@ -1295,59 +1290,28 @@ def run_review_mode(args):
     """Review and edit existing quizzes using GUI"""
     print("=== Quiz Review Mode ===")
     
-    # Determine quiz file path
-    quiz_file_path = None
+    # Get file path from positional argument
+    if not args.file_path:
+        print("Error: File path is required for review mode")
+        print("Usage:")
+        print("  python quizzes.py --mode review <file_path>  # Quiz JSON or markdown file")
+        return
     
-    # Check for positional argument first (most convenient)
-    if args.file_path:
-        file_path = args.file_path
-        if file_path.lower().endswith(('.qmd', '.md', '.markdown')):
-            # It's a markdown file, try to find the quiz file from metadata
-            print(f"🔍 Looking for quiz file referenced in: {file_path}")
-            quiz_file_path = find_quiz_file_from_qmd(file_path)
-            if not quiz_file_path:
-                print(f"❌ No quiz file found for markdown file: {file_path}")
-                print("   Make sure the markdown file has 'quiz: filename.json' in its frontmatter")
-                return
-            print(f"✅ Found quiz file: {quiz_file_path}")
-        else:
-            # Assume it's a quiz file path
-            quiz_file_path = file_path
-    elif args.quiz_file:
-        # Direct quiz file specified
-        quiz_file_path = args.quiz_file
-    elif args.gui:
-        # GUI option with potential markdown file
-        if args.gui.endswith(('.qmd', '.md')):
-            # It's a markdown file, try to find the quiz file from metadata
-            print(f"🔍 Looking for quiz file referenced in: {args.gui}")
-            quiz_file_path = find_quiz_file_from_qmd(args.gui)
-            if not quiz_file_path:
-                print(f"❌ No quiz file found for markdown file: {args.gui}")
-                print("   Make sure the markdown file has 'quiz: filename.json' in its frontmatter")
-                return
-            print(f"✅ Found quiz file: {quiz_file_path}")
-        else:
-            # Assume it's a quiz file path
-            quiz_file_path = args.gui
-    elif args.file:
-        # File option specified, try to find quiz file from metadata
-        print(f"🔍 Looking for quiz file referenced in: {args.file}")
-        quiz_file_path = find_quiz_file_from_qmd(args.file)
+    file_path = args.file_path
+    
+    # Determine if it's a markdown file or quiz file
+    if file_path.lower().endswith(('.qmd', '.md', '.markdown')):
+        # It's a markdown file, try to find the quiz file from metadata
+        print(f"🔍 Looking for quiz file referenced in: {file_path}")
+        quiz_file_path = find_quiz_file_from_qmd(file_path)
         if not quiz_file_path:
-            print(f"❌ No quiz file found for markdown file: {args.file}")
+            print(f"❌ No quiz file found for markdown file: {file_path}")
             print("   Make sure the markdown file has 'quiz: filename.json' in its frontmatter")
             return
         print(f"✅ Found quiz file: {quiz_file_path}")
     else:
-        print("Error: No quiz file or markdown file specified for review mode")
-        print("Usage:")
-        print("  python quizzes.py --mode review <file_path>  # Quiz JSON or markdown file")
-        print("  python quizzes.py --mode review --quiz-file <quiz_file>")
-        print("  python quizzes.py --mode review --gui <quiz_file>")
-        print("  python quizzes.py --mode review --gui <markdown_file>")
-        print("  python quizzes.py --mode review --file <markdown_file>")
-        return
+        # Assume it's a quiz file path
+        quiz_file_path = file_path
     
     # Validate the quiz file
     is_valid, message = validate_quiz_file(quiz_file_path)
@@ -1358,21 +1322,155 @@ def run_review_mode(args):
     run_gui(quiz_file_path)
 
 def run_insert_mode(args):
-    """Insert quizzes into markdown files (placeholder for future implementation)"""
+    """Insert quizzes into markdown files"""
     print("=== Quiz Insert Mode ===")
-    print("This mode is not yet implemented.")
-    print("It will insert generated quizzes into the original markdown files.")
     
-    if not args.file:
-        print("Error: --file is required for insert mode")
+    # Get file path from positional argument
+    if not args.file_path:
+        print("Error: File path is required for insert mode")
+        print("Usage:")
+        print("  python quizzes.py --mode insert <file_path>  # Quiz JSON or markdown file")
         return
     
-    if not args.quiz_file:
-        print("Error: --quiz-file is required for insert mode")
+    file_path = args.file_path
+    
+    # Determine if it's a markdown file or quiz file
+    if file_path.lower().endswith(('.qmd', '.md', '.markdown')):
+        # It's a markdown file, try to find the quiz file from metadata
+        print(f"🔍 Looking for quiz file referenced in: {file_path}")
+        quiz_file_path = find_quiz_file_from_qmd(file_path)
+        if not quiz_file_path:
+            print(f"❌ No quiz file found for markdown file: {file_path}")
+            print("   Make sure the markdown file has 'quiz: filename.json' in its frontmatter")
+            return
+        print(f"✅ Found quiz file: {quiz_file_path}")
+        qmd_file_path = file_path
+    else:
+        # Assume it's a quiz file path, try to find the markdown file
+        print(f"🔍 Looking for markdown file referenced in: {file_path}")
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                quiz_data = json.load(f)
+            qmd_file_path = find_qmd_file_from_quiz(file_path, quiz_data)
+            if not qmd_file_path:
+                print(f"❌ No markdown file found for quiz file: {file_path}")
+                print("   The quiz file should have a 'source_file' in its metadata")
+                return
+            print(f"✅ Found markdown file: {qmd_file_path}")
+            quiz_file_path = file_path
+        except Exception as e:
+            print(f"❌ Error reading quiz file: {str(e)}")
+            return
+    
+    # Validate the quiz file
+    is_valid, message = validate_quiz_file(quiz_file_path)
+    if not is_valid:
+        print(f"Error: {message}")
         return
     
-    print(f"Would insert quizzes from {args.quiz_file} into {args.file}")
-    print("Implementation coming soon...")
+    # Now insert the quizzes
+    insert_quizzes_into_markdown(qmd_file_path, quiz_file_path)
+
+def insert_quizzes_into_markdown(qmd_file_path, quiz_file_path):
+    """Insert quizzes from JSON file into markdown file"""
+    print(f"📝 Inserting quizzes from {quiz_file_path} into {qmd_file_path}")
+    
+    try:
+        # Load the quiz data
+        with open(quiz_file_path, 'r', encoding='utf-8') as f:
+            quiz_data = json.load(f)
+        
+        # Load the markdown file
+        with open(qmd_file_path, 'r', encoding='utf-8') as f:
+            qmd_content = f.read()
+        
+        # Extract sections from markdown
+        qmd_sections = extract_sections_with_ids(qmd_content)
+        if not qmd_sections:
+            print("❌ No sections found in markdown file")
+            return
+        
+        # Create a mapping of section IDs to quiz data
+        quiz_sections = {section['section_id']: section for section in quiz_data.get('sections', [])}
+        
+        # Process each section and insert quizzes
+        modified_content = qmd_content
+        sections_modified = 0
+        
+        for qmd_section in qmd_sections:
+            section_id = qmd_section['section_id']
+            quiz_section = quiz_sections.get(section_id)
+            
+            if quiz_section and quiz_section.get('quiz_data', {}).get('quiz_needed', False):
+                # Insert quiz at the end of this section
+                quiz_markdown = format_quiz_for_insertion(quiz_section)
+                modified_content = insert_quiz_into_section(modified_content, section_id, quiz_markdown)
+                sections_modified += 1
+                print(f"  ✓ Added quiz to section: {qmd_section['section_title']}")
+        
+        # Write the modified content back to the file
+        with open(qmd_file_path, 'w', encoding='utf-8') as f:
+            f.write(modified_content)
+        
+        print(f"\n✅ Successfully inserted quizzes into {qmd_file_path}")
+        print(f"   - Sections modified: {sections_modified}")
+        print(f"   - Total sections in file: {len(qmd_sections)}")
+        
+    except Exception as e:
+        print(f"❌ Error inserting quizzes: {str(e)}")
+
+def format_quiz_for_insertion(quiz_section):
+    """Format quiz data as markdown for insertion"""
+    quiz_data = quiz_section.get('quiz_data', {})
+    questions = quiz_data.get('questions', [])
+    
+    if not questions:
+        return ""
+    
+    # Format the quiz as markdown
+    quiz_markdown = "\n\n## Quiz\n\n"
+    
+    for i, question in enumerate(questions, 1):
+        quiz_markdown += f"### Question {i}\n\n"
+        quiz_markdown += f"{question['question']}\n\n"
+        quiz_markdown += f"**Answer:** {question['answer']}\n\n"
+        if 'learning_objective' in question:
+            quiz_markdown += f"*Learning Objective:* {question['learning_objective']}\n\n"
+        quiz_markdown += "---\n\n"
+    
+    return quiz_markdown
+
+def insert_quiz_into_section(content, section_id, quiz_markdown):
+    """Insert quiz markdown at the end of a specific section"""
+    # Remove the # prefix if present
+    if section_id.startswith('#'):
+        section_id = section_id[1:]
+    
+    # Find the section in the content
+    section_pattern = re.compile(rf'^##\s+.*?\{{\#{re.escape(section_id)}\}}.*?$', re.MULTILINE)
+    match = section_pattern.search(content)
+    
+    if not match:
+        print(f"⚠️  Warning: Could not find section {section_id} in content")
+        return content
+    
+    # Find the start and end of this section
+    start_pos = match.start()
+    
+    # Find the next section or end of file
+    next_section_pattern = re.compile(r'^##\s+', re.MULTILINE)
+    next_match = next_section_pattern.search(content, start_pos + 1)
+    
+    if next_match:
+        end_pos = next_match.start()
+    else:
+        end_pos = len(content)
+    
+    # Insert the quiz before the next section
+    before_section = content[:end_pos]
+    after_section = content[end_pos:]
+    
+    return before_section + quiz_markdown + after_section
 
 def run_verify_mode(args):
     """Verify quiz files and validate their structure"""
