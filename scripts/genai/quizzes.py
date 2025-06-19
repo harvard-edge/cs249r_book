@@ -2513,7 +2513,12 @@ def regenerate_section_quiz(client, section_title, section_text, current_quiz_da
     regeneration_prompt = f"""
 You are being asked to REGENERATE the quiz questions for this section.
 
-{user_prompt}
+IMPORTANT: The user's regeneration request takes PRIORITY over the original quiz evaluation criteria. 
+If the user wants a quiz generated, you should generate one regardless of whether the original analysis 
+determined a quiz was needed or not. Focus on fulfilling the user's specific request while keeping 
+the educational quality standards in mind.
+
+User's regeneration request: {user_prompt}
 
 {SYSTEM_PROMPT}
 
