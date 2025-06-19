@@ -28,7 +28,7 @@ QUESTION_TYPE_CONFIG = [
     },
     {
         "type": "SHORT",
-        "description": "Encourages deeper reflection. Works well for “Why is X necessary?” or “What would happen if...?” questions."
+        "description": "Encourages deeper reflection. Works well for \"Why is X necessary?\" or \"What would happen if...?\" questions."
     },
     {
         "type": "FILL",
@@ -364,11 +364,14 @@ def extract_sections_with_ids(markdown_text):
     If any section is missing a reference, prints an error and returns None.
     """
     section_pattern = re.compile(r"^##\s+(.+?)(\s*\{#([\w\-]+)\})?\s*$", re.MULTILINE)
-    matches = list(section_pattern.finditer(markdown_text))
+    all_matches = list(section_pattern.finditer(markdown_text))
     
-    # First, validate all sections have IDs
+    # Filter out "Quiz Answers" sections
+    content_matches = [m for m in all_matches if m.group(1).strip().lower() != 'quiz answers']
+    
+    # First, validate all content sections have IDs
     missing_refs = []
-    for match in matches:
+    for match in content_matches:
         title = match.group(1).strip()
         ref = match.group(3)
         if not ref:
@@ -383,11 +386,15 @@ def extract_sections_with_ids(markdown_text):
     
     # If all sections have IDs, proceed with extraction
     sections = []
-    for i, match in enumerate(matches):
+    for i, match in enumerate(content_matches):
         title = match.group(1).strip()
         ref = match.group(3)
         start = match.end()
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(markdown_text)
+        
+        # Find the correct end position from the original list of all matches
+        original_index = all_matches.index(match)
+        end = all_matches[original_index + 1].start() if original_index + 1 < len(all_matches) else len(markdown_text)
+        
         content = markdown_text[start:end].strip()
         # Store the full section reference including the # symbol
         full_ref = f"#{ref}"
@@ -657,7 +664,7 @@ class QuizEditorGradio:
             checked = question_states[i] if i < len(question_states) else True
             status = "✅ WILL KEEP" if checked else "❌ WILL REMOVE"
             
-            q_text = f"**Q{i+1}:** {question['question']}\n\n"
+            q_text = format_question_for_display(question, i+1) + "\n"
             a_text = f"**A:** {question['answer']}\n\n"
             
             if 'learning_objective' in question:
@@ -754,7 +761,7 @@ class QuizEditorGradio:
             for i in range(min(5, len(questions))):
                 checkbox_states[i] = question_states[i] if i < len(question_states) else True
                 question = questions[i]
-                q_text = f"**Q{i+1}:** {question['question']}\n\n"
+                q_text = format_question_for_display(question, i+1) + "\n"
                 a_text = f"**A:** {question['answer']}\n\n"
                 if 'learning_objective' in question:
                     obj_text = f"*Learning Objective:* {question['learning_objective']}\n\n"
@@ -818,7 +825,7 @@ class QuizEditorGradio:
                 for i in range(min(5, len(questions))):
                     checkbox_states[i] = question_states[i] if i < len(question_states) else True
                     question = questions[i]
-                    q_text = f"**Q{i+1}:** {question['question']}\n\n"
+                    q_text = format_question_for_display(question, i+1) + "\n"
                     a_text = f"**A:** {question['answer']}\n\n"
                     if 'learning_objective' in question:
                         obj_text = f"*Learning Objective:* {question['learning_objective']}\n\n"
@@ -934,6 +941,25 @@ def format_quiz_information(section, quiz_data):
             info += f"{i}. {obj}\n"
     
     return info
+
+def format_question_for_display(question, question_number):
+    """Format a question for display in the Gradio interface based on its type"""
+    question_type = question.get('question_type', 'SHORT')
+    question_text = question.get('question', '')
+    
+    if question_type == "MCQ":
+        # Format MCQ with bold stem and indented choices
+        formatted = f"**Q{question_number}:** {question_text}\n\n"
+        
+        choices = question.get('choices', [])
+        for j, choice in enumerate(choices):
+            letter = chr(ord('A') + j)
+            formatted += f"   {letter}) {choice}\n"
+        
+        return formatted
+    else:
+        # Standard formatting for other types
+        return f"**Q{question_number}:** {question_text}"
 
 def create_gradio_interface(initial_file_path=None):
     """Create the Gradio interface"""
@@ -1100,7 +1126,7 @@ def create_gradio_interface(initial_file_path=None):
                 for i in range(min(num_questions, max_components)):
                     # Use saved checkbox state if available, otherwise default to True
                     checkbox_states[i] = saved_states[i] if i < len(saved_states) else True
-                    question_markdowns[i] = f"**Q{i+1}:** {questions[i]['question']}"
+                    question_markdowns[i] = format_question_for_display(questions[i], i+1)
                     answer_md[i] = f"**Answer:** {questions[i]['answer']}"
                     learning_md[i] = f"**Learning Objective:** {questions[i].get('learning_objective', 'N/A')}"
                 
@@ -1769,7 +1795,10 @@ def insert_quizzes_into_markdown(qmd_file_path, quiz_file_path):
         
         # Add quiz answers section at the end
         if quiz_answers:
-            answers_section = "\n\n## Quiz Answers\n\n" + "\n\n".join(quiz_answers)
+            # Strip trailing whitespace from each answer block before joining
+            # to prevent extra newlines between callouts.
+            stripped_answers = [qa.strip() for qa in quiz_answers]
+            answers_section = "\n\n## Quiz Answers\n\n" + "\n\n".join(stripped_answers)
             modified_content += answers_section
         
         # Write the modified content back to the file
@@ -1830,12 +1859,26 @@ def format_answer_callout(quiz_section, section_id):
                 letter = chr(ord('A') + j)
                 answer_markdown += f"   {letter}) {choice}\n"
             
-            answer_markdown += f"\n   {question['answer']}\n\n"
+            answer_text = question['answer']
+            
+            # Check if answer already indicates the choice
+            if not re.search(r"^[Tt]he correct answer is [A-Z]\.", answer_text):
+                correct_choice_letter = None
+                for j, choice in enumerate(choices):
+                    # Check if the answer text starts with the choice text, ignoring case and leading/trailing whitespace
+                    if answer_text.strip().lower().startswith(choice.strip().lower()):
+                        correct_choice_letter = chr(ord('A') + j)
+                        break
+                
+                if correct_choice_letter:
+                    answer_text = f"The correct answer is {correct_choice_letter}. {answer_text}"
+            
+            answer_markdown += f"\n   {answer_text}\n\n"
         else:
             # Standard formatting for other types
-            answer_markdown += f"{i}. {question['question']}\n\n   {question['answer']}\n\n"
+            answer_markdown += f"{i}. **{question['question']}**\n\n   {question['answer']}\n\n"
     
-    answer_markdown += ":::\n\n"
+    answer_markdown += ":::"
     
     return answer_markdown
 
