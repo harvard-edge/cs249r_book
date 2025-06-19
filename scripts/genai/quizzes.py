@@ -1019,7 +1019,13 @@ def show_usage_examples():
     print("   python quizzes.py --mode insert chapter1.qmd  # Finds quiz file automatically")
     print("   python quizzes.py --mode insert quizzes.json  # Finds markdown file automatically")
     
-    print("\n5. Default mode (generate):")
+    print("\n5. Clean quizzes from markdown files:")
+    print("   python quizzes.py --mode clean --file chapter1.qmd")
+    print("   python quizzes.py --mode clean --directory ./chapters/")
+    print("   python quizzes.py --mode clean --backup --file chapter1.qmd")
+    print("   python quizzes.py --mode clean --dry-run --directory ./chapters/")
+    
+    print("\n6. Default mode (generate):")
     print("   python quizzes.py --file chapter1.qmd")
     
     print("\n⚠️  IMPORTANT: In generate mode, you MUST use -f/--file or -d/--directory options.")
@@ -1037,6 +1043,10 @@ Examples:
   %(prog)s --mode review chapter1.qmd  # Positional argument (finds quiz file)
   %(prog)s --mode insert chapter1.qmd  # Finds quiz file automatically
   %(prog)s --mode insert quizzes.json  # Finds markdown file automatically
+  %(prog)s --mode clean --file chapter1.qmd
+  %(prog)s --mode clean --directory ./chapters/
+  %(prog)s --mode clean --backup --file chapter1.qmd
+  %(prog)s --mode clean --dry-run --directory ./chapters/
   %(prog)s --mode verify -q quizzes.json
   %(prog)s --mode verify -q chapter1.qmd  # Will find corresponding quiz file
   %(prog)s --mode verify --directory ./quiz_files/
@@ -1046,14 +1056,16 @@ Note: In generate mode, you MUST use -f/--file for a single .qmd file or -d/--di
 Do NOT pass the file as a positional argument.
         """
     )
-    parser.add_argument("--mode", choices=["generate", "review", "insert", "verify"], default="generate",
-                       help="Mode of operation: generate (create new quizzes), review (edit existing quizzes), insert (add quizzes to markdown), verify (validate quiz files)")
+    parser.add_argument("--mode", choices=["generate", "review", "insert", "verify", "clean"], default="generate",
+                       help="Mode of operation: generate (create new quizzes), review (edit existing quizzes), insert (add quizzes to markdown), verify (validate quiz files), clean (remove all quizzes)")
     parser.add_argument("file_path", nargs="?", help="File path for review/insert modes (quiz JSON or markdown .qmd file).")
     parser.add_argument("-f", "--file", help="Path to a markdown (.qmd/.md) file. REQUIRED for generate mode unless --directory is used.")
     parser.add_argument("-q", "--quiz-file", help="Path to quiz JSON file (for verify mode only). For verify mode, can also accept .qmd files to find corresponding quiz files.")
-    parser.add_argument("-d", "--directory", help="Path to directory containing .qmd files (for generate mode) or quiz JSON files (for verify mode). REQUIRED for generate mode unless --file is used.")
+    parser.add_argument("-d", "--directory", help="Path to directory containing .qmd files (for generate/clean modes) or quiz JSON files (for verify mode). REQUIRED for generate/clean modes unless --file is used.")
     parser.add_argument("--model", default="gpt-4o", help="OpenAI model to use (generate mode only).")
     parser.add_argument("-o", "--output", default="quizzes.json", help="Path to output JSON file (generate mode only).")
+    parser.add_argument("--backup", action="store_true", help="Create backup files before cleaning (clean mode only).")
+    parser.add_argument("--dry-run", action="store_true", help="Show what would be cleaned without making changes (clean mode only).")
     parser.add_argument("--examples", action="store_true", help="Show usage examples")
     args = parser.parse_args()
 
@@ -1069,6 +1081,8 @@ Do NOT pass the file as a positional argument.
         run_insert_mode(args)
     elif args.mode == "verify":
         run_verify_mode(args)
+    elif args.mode == "clean":
+        run_clean_mode(args)
     else:
         print(f"Unknown mode: {args.mode}")
         parser.print_help()
@@ -2097,6 +2111,156 @@ def insert_quiz_into_section(content, section_id, quiz_markdown):
     after_section = content[end_pos:]
     
     return before_section + quiz_markdown + after_section
+
+def run_clean_mode(args):
+    """Clean all quizzes from markdown files"""
+    print("=== Quiz Clean Mode ===")
+    
+    if not args.file and not args.directory:
+        print("Error: In clean mode, you must specify either:")
+        print("  -f/--file <path>     for a single .qmd file")
+        print("  -d/--directory <path> for a directory containing .qmd files")
+        print("\nExamples:")
+        print("  python quizzes.py --mode clean --file chapter1.qmd")
+        print("  python quizzes.py --mode clean --directory ./chapters/")
+        return
+    
+    if args.file:
+        # Enforce .qmd extension
+        if not args.file.lower().endswith('.qmd'):
+            print("Error: The input file must have a .qmd extension for clean mode.")
+            print("Please provide a file with .qmd extension.")
+            return
+        print("=== Quiz Clean Mode (Single File) ===")
+        clean_single_file(args.file, args)
+    elif args.directory:
+        print("=== Quiz Clean Mode (Directory) ===")
+        clean_directory(args.directory, args)
+
+def clean_single_file(qmd_file, args):
+    """Clean quizzes from a single QMD file"""
+    print(f"🧹 Cleaning quizzes from: {qmd_file}")
+    
+    try:
+        # Read the file
+        with open(qmd_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Create backup if requested
+        if args.backup:
+            backup_file = f"{qmd_file}.backup"
+            with open(backup_file, 'w', encoding='utf-8') as f:
+                f.write(content)
+            print(f"📦 Created backup: {backup_file}")
+        
+        # Clean the content
+        cleaned_content, removed_count = clean_quiz_content(content)
+        
+        if args.dry_run:
+            print(f"🔍 Dry run - would remove {removed_count} quiz elements from {qmd_file}")
+            return
+        
+        # Write the cleaned content back
+        with open(qmd_file, 'w', encoding='utf-8') as f:
+            f.write(cleaned_content)
+        
+        print(f"✅ Cleaned {qmd_file}")
+        print(f"   - Removed {removed_count} quiz elements")
+        
+    except Exception as e:
+        print(f"❌ Error cleaning {qmd_file}: {str(e)}")
+
+def clean_directory(directory, args):
+    """Clean quizzes from all QMD files in a directory"""
+    if not os.path.exists(directory):
+        print(f"❌ Directory not found: {directory}")
+        return
+    
+    if not os.path.isdir(directory):
+        print(f"❌ Path is not a directory: {directory}")
+        return
+    
+    print(f"🔍 Scanning directory: {directory}")
+    
+    # Find all .qmd files
+    qmd_files = []
+    for file in os.listdir(directory):
+        if file.lower().endswith('.qmd'):
+            qmd_files.append(os.path.join(directory, file))
+    
+    if not qmd_files:
+        print("❌ No .qmd files found in directory")
+        return
+    
+    print(f"📁 Found {len(qmd_files)} .qmd files")
+    
+    # Clean each file
+    total_removed = 0
+    for qmd_file in qmd_files:
+        print(f"\n--- Cleaning: {os.path.basename(qmd_file)} ---")
+        try:
+            # Read the file
+            with open(qmd_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Create backup if requested
+            if args.backup:
+                backup_file = f"{qmd_file}.backup"
+                with open(backup_file, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                print(f"📦 Created backup: {os.path.basename(backup_file)}")
+            
+            # Clean the content
+            cleaned_content, removed_count = clean_quiz_content(content)
+            total_removed += removed_count
+            
+            if args.dry_run:
+                print(f"🔍 Dry run - would remove {removed_count} quiz elements")
+                continue
+            
+            # Write the cleaned content back
+            with open(qmd_file, 'w', encoding='utf-8') as f:
+                f.write(cleaned_content)
+            
+            print(f"✅ Cleaned {os.path.basename(qmd_file)} ({removed_count} elements removed)")
+            
+        except Exception as e:
+            print(f"❌ Error cleaning {os.path.basename(qmd_file)}: {str(e)}")
+    
+    if args.dry_run:
+        print(f"\n🔍 Dry run complete - would remove {total_removed} quiz elements total")
+    else:
+        print(f"\n✅ Clean complete - removed {total_removed} quiz elements total")
+
+def clean_quiz_content(content):
+    """Remove all quiz callouts and Quiz Answers section from content"""
+    removed_count = 0
+    
+    # Remove quiz question callouts
+    question_pattern = re.compile(
+        r'\n\n::: \{\.' + re.escape(QUIZ_QUESTION_CALLOUT_CLASS) + r' #[^}]*\}\n\n.*?\n\nSee Answer \\ref\{[^}]+\}\.\n\n:::\n\n',
+        re.DOTALL
+    )
+    content, question_count = question_pattern.subn('', content)
+    removed_count += question_count
+    
+    # Remove quiz answer callouts
+    answer_pattern = re.compile(
+        r'\n\n::: \{\.' + re.escape(QUIZ_ANSWER_CALLOUT_CLASS) + r' #[^}]*\}\n\n.*?\n\n:::\n\n',
+        re.DOTALL
+    )
+    content, answer_count = answer_pattern.subn('', content)
+    removed_count += answer_count
+    
+    # Remove the Quiz Answers section entirely
+    answers_section_pattern = re.compile(
+        r'\n\n## Quiz Answers\n\n.*',
+        re.DOTALL
+    )
+    content, section_count = answers_section_pattern.subn('', content)
+    removed_count += section_count
+    
+    return content, removed_count
 
 if __name__ == "__main__":
     main()
