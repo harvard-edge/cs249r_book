@@ -797,6 +797,61 @@ class QuizEditorGradio:
         except Exception as e:
             return f"Error saving file: {str(e)}"
 
+def format_quiz_information(section, quiz_data):
+    """Format quiz information for display including rationale and metadata"""
+    if not quiz_data.get('quiz_needed', False):
+        return "**No quiz needed for this section**\n\n" + quiz_data.get('rationale', 'No rationale provided')
+    
+    rationale = quiz_data.get('rationale', {})
+    questions = quiz_data.get('questions', [])
+    
+    # Format the information
+    info = f"**Quiz Information for: {section['section_title']}**\n\n"
+    
+    if isinstance(rationale, dict):
+        # Detailed rationale with focus areas
+        focus_areas = rationale.get('focus_areas', [])
+        if focus_areas:
+            info += "**Focus Areas:**\n"
+            for i, area in enumerate(focus_areas, 1):
+                info += f"{i}. {area}\n"
+            info += "\n"
+        
+        question_strategy = rationale.get('question_strategy', '')
+        if question_strategy:
+            info += f"**Question Strategy:** {question_strategy}\n\n"
+        
+        difficulty_progression = rationale.get('difficulty_progression', '')
+        if difficulty_progression:
+            info += f"**Difficulty Progression:** {difficulty_progression}\n\n"
+        
+        integration = rationale.get('integration', '')
+        if integration:
+            info += f"**Integration:** {integration}\n\n"
+        
+        ranking_explanation = rationale.get('ranking_explanation', '')
+        if ranking_explanation:
+            info += f"**Question Order:** {ranking_explanation}\n\n"
+    else:
+        # Simple rationale string
+        info += f"**Rationale:** {rationale}\n\n"
+    
+    # Add question count
+    info += f"**Questions:** {len(questions)} question{'s' if len(questions) != 1 else ''}\n\n"
+    
+    # Add learning objectives summary
+    learning_objectives = []
+    for question in questions:
+        if 'learning_objective' in question:
+            learning_objectives.append(question['learning_objective'])
+    
+    if learning_objectives:
+        info += "**Learning Objectives:**\n"
+        for i, obj in enumerate(learning_objectives, 1):
+            info += f"{i}. {obj}\n"
+    
+    return info
+
 def create_gradio_interface(initial_file_path=None):
     """Create the Gradio interface"""
     editor = QuizEditorGradio(initial_file_path)
@@ -810,6 +865,13 @@ def create_gradio_interface(initial_file_path=None):
             section_title, nav_info, section_text, questions_text = "Error", "Error", "Error loading file", ""
     else:
         section_title, nav_info, section_text, questions_text = "No file loaded", "No sections", "No content loaded", ""
+    
+    # Get initial quiz info
+    if editor.sections:
+        initial_section = editor.sections[0]
+        quiz_info = format_quiz_information(initial_section, initial_section.get('quiz_data', {}))
+    else:
+        quiz_info = "No quiz information available"
     
     with gr.Blocks(title="Quiz Editor", theme=gr.themes.Soft()) as interface:
         gr.Markdown("# Quiz Editor")
@@ -872,18 +934,38 @@ def create_gradio_interface(initial_file_path=None):
             with gr.Column(scale=1):
                 next_btn = gr.Button("Next →", size="lg")
         
-        # Status display for save operations
-        status_display = gr.Textbox(label="Status", interactive=False, visible=True)
+        # Regeneration section
+        gr.Markdown("### Regenerate Questions")
+        with gr.Row():
+            with gr.Column(scale=3):
+                prompt_input = gr.Textbox(
+                    label="Regeneration Instructions", 
+                    placeholder="Enter instructions for regenerating questions (e.g., 'Make questions more challenging', 'Focus on practical applications', 'Add more multiple choice questions')",
+                    lines=3,
+                    max_lines=5
+                )
+            with gr.Column(scale=1):
+                regenerate_btn = gr.Button("🔄 Regenerate", size="lg", variant="secondary")
+        
+        # Status display for operations (moved here, below regeneration)
+        status_display = gr.Textbox(label="Status", interactive=False, visible=True, lines=3)
+        
+        # Quiz Information section (moved to bottom)
+        gr.Markdown("### Quiz Information")
+        quiz_info_display = gr.Markdown(quiz_info, visible=True)
+        
+        # Status display for operations (smaller, at bottom)
+        status_display = gr.Textbox(label="Status", interactive=False, visible=True, lines=2)
         
 
         def get_section_data(section_idx):
-            # Returns: section_title, nav_info, section_text, [checkbox_states], [question_markdowns], [answer_md], [learning_md]
+            # Returns: section_title, nav_info, section_text, quiz_info, [checkbox_states], [question_markdowns], [answer_md], [learning_md]
             # Always returns fixed number of outputs to match interface components (max 5 questions)
             max_components = 5
             
             if not editor.sections:
                 return [
-                    "No file loaded", "No sections", "No content loaded",
+                    "No file loaded", "No sections", "No content loaded", "No quiz information available",
                     *(gr.update(value=False, visible=False) for i in range(max_components)),
                     *(gr.update(value="", visible=False) for i in range(max_components)),
                     *(gr.update(value="", visible=False) for i in range(max_components)),
@@ -894,9 +976,18 @@ def create_gradio_interface(initial_file_path=None):
             title = f"{section['section_title']} ({section['section_id']})"
             section_text_val = editor.get_full_section_content(section)
             nav_text = f"Section {section_idx+1} of {len(editor.sections)}"
+            
+            # Add question count to navigation
             quiz_data = section.get('quiz_data', {})
             questions = quiz_data.get('questions', []) if quiz_data.get('quiz_needed', False) else []
             num_questions = len(questions)
+            if num_questions > 0:
+                nav_text += f" ({num_questions} question{'s' if num_questions != 1 else ''})"
+            else:
+                nav_text += " (no quiz)"
+            
+            # Format quiz information
+            quiz_info = format_quiz_information(section, quiz_data)
             
             # Initialize with False/empty for all component slots
             checkbox_states = [False] * max_components
@@ -911,7 +1002,7 @@ def create_gradio_interface(initial_file_path=None):
                 learning_md[0] = ""
                 # Only show the first row, hide the rest
                 return [
-                    title, nav_text, section_text_val,
+                    title, nav_text, section_text_val, quiz_info,
                     *(gr.update(value=checkbox_states[i], visible=(i == 0)) for i in range(max_components)),
                     *(gr.update(value=question_markdowns[i], visible=(i == 0)) for i in range(max_components)),
                     *(gr.update(value=answer_md[i], visible=(i == 0)) for i in range(max_components)),
@@ -932,7 +1023,7 @@ def create_gradio_interface(initial_file_path=None):
                 
                 # Return gr.update() objects with proper visibility control
                 return [
-                    title, nav_text, section_text_val,
+                    title, nav_text, section_text_val, quiz_info,
                     *(gr.update(value=checkbox_states[i], visible=(i < num_questions)) for i in range(max_components)),
                     *(gr.update(value=question_markdowns[i], visible=(i < num_questions)) for i in range(max_components)),
                     *(gr.update(value=answer_md[i], visible=(i < num_questions)) for i in range(max_components)),
@@ -961,7 +1052,7 @@ def create_gradio_interface(initial_file_path=None):
                 editor.question_states[section_id] = list(checkbox_values[:num_questions])
             return  # No output needed
         
-        # Save handler
+        # Save handler - directly save changes
         def save_changes(*checkbox_values):
             if editor.sections and editor.current_section_index < len(editor.sections):
                 current_section = editor.sections[editor.current_section_index]
@@ -971,19 +1062,122 @@ def create_gradio_interface(initial_file_path=None):
                 questions = quiz_data.get('questions', []) if quiz_data.get('quiz_needed', False) else []
                 num_questions = len(questions)
                 editor.question_states[section_id] = list(checkbox_values[:num_questions])
+            
+            # Count total changes across all sections
+            total_questions_removed = 0
+            for section in editor.sections:
+                section_id = section['section_id']
+                quiz_data = section.get('quiz_data', {})
+                questions = quiz_data.get('questions', []) if quiz_data.get('quiz_needed', False) else []
+                question_states = editor.question_states.get(section_id, [True] * len(questions))
+                removed_count = sum(1 for state in question_states if not state)
+                total_questions_removed += removed_count
+            
+            # Save the changes
+            result = editor.save_changes_with_checkboxes(list(checkbox_values))
+            
+            if total_questions_removed > 0:
+                return f"{result}\n\nRemoved {total_questions_removed} question(s) total."
+            else:
+                return f"{result}\n\nAll questions kept."
+        
+        # Confirmed save handler
+        def confirmed_save(confirm_save, *checkbox_values):
+            if not confirm_save:
+                return "❌ Save cancelled"
+            
+            if editor.sections and editor.current_section_index < len(editor.sections):
+                current_section = editor.sections[editor.current_section_index]
+                section_id = current_section['section_id']
+                # Only save the checkbox states for questions that actually exist
+                quiz_data = current_section.get('quiz_data', {})
+                questions = quiz_data.get('questions', []) if quiz_data.get('quiz_needed', False) else []
+                num_questions = len(questions)
+                editor.question_states[section_id] = list(checkbox_values[:num_questions])
+            
             return editor.save_changes_with_checkboxes(list(checkbox_values))
+        
+        # Regeneration handler
+        def regenerate_questions(user_prompt):
+            if not user_prompt.strip():
+                return "Please enter regeneration instructions"
+            
+            if not editor.sections or editor.current_section_index >= len(editor.sections):
+                return "No section loaded"
+            
+            current_section = editor.sections[editor.current_section_index]
+            section_title = current_section['section_title']
+            section_id = current_section['section_id']
+            current_quiz_data = current_section.get('quiz_data', {})
+            
+            # Get section text
+            section_text = editor.get_full_section_content(current_section)
+            
+            try:
+                # Initialize OpenAI client
+                client = OpenAI()
+                
+                # Call regeneration function
+                new_quiz_data = regenerate_section_quiz(
+                    client, section_title, section_text, current_quiz_data, user_prompt
+                )
+                
+                # Get the regeneration comment
+                comment = new_quiz_data.pop('_regeneration_comment', '')  # Remove from data so it doesn't get saved
+                
+                # Update the current section with new quiz data
+                current_section['quiz_data'] = new_quiz_data
+                
+                
+                # Reset question states for this section
+                if new_quiz_data.get('quiz_needed', False):
+                    questions = new_quiz_data.get('questions', [])
+                    editor.question_states[section_id] = [True] * len(questions)
+                else:
+                    editor.question_states[section_id] = []
+                
+                # Create status message with the model's comment
+                if comment:
+                    status_msg = f"✅ **Regenerated questions for '{section_title}'**\n\n{comment}"
+                else:
+                    status_msg = f"✅ **Regenerated questions for '{section_title}'**"
+                
+                return status_msg
+                
+            except Exception as e:
+                return f"❌ Error regenerating questions: {str(e)}"
         
         # Initial load
         def initial_load():
             return get_section_data(editor.current_section_index)
         
         # Wire up components
-        prev_btn.click(nav_prev, outputs=[section_title_box, nav_info_box, section_text_box] + question_checkboxes + question_markdowns + answer_markdowns + learning_obj_markdowns)
-        next_btn.click(nav_next, outputs=[section_title_box, nav_info_box, section_text_box] + question_checkboxes + question_markdowns + answer_markdowns + learning_obj_markdowns)
+        prev_btn.click(nav_prev, outputs=[section_title_box, nav_info_box, section_text_box, quiz_info_display] + question_checkboxes + question_markdowns + answer_markdowns + learning_obj_markdowns)
+        next_btn.click(nav_next, outputs=[section_title_box, nav_info_box, section_text_box, quiz_info_display] + question_checkboxes + question_markdowns + answer_markdowns + learning_obj_markdowns)
         for cb in question_checkboxes:
             cb.change(checkbox_change, inputs=question_checkboxes, outputs=[])
+        
+        # Save button - directly save changes
         save_btn.click(save_changes, inputs=question_checkboxes, outputs=[status_display])
-        interface.load(initial_load, outputs=[section_title_box, nav_info_box, section_text_box] + question_checkboxes + question_markdowns + answer_markdowns + learning_obj_markdowns)
+        
+        # Regenerate button - updates status and refreshes the current section
+        def regenerate_and_refresh(user_prompt):
+            status = regenerate_questions(user_prompt)
+            if status.startswith("✅"):
+                # If successful, refresh the current section display and clear the prompt
+                section_data = get_section_data(editor.current_section_index)
+                return [status, ""] + section_data  # Clear prompt_input
+            else:
+                # If error, just return status and keep prompt
+                return [status, user_prompt] + [""] * (1 + 2 + 1 + 1 + 5 + 5 + 5 + 5)  # status + prompt + title + nav + text + quiz_info + checkboxes + questions + answers + learning
+        
+        regenerate_btn.click(
+            regenerate_and_refresh, 
+            inputs=[prompt_input], 
+            outputs=[status_display, prompt_input, section_title_box, nav_info_box, section_text_box, quiz_info_display] + question_checkboxes + question_markdowns + answer_markdowns + learning_obj_markdowns
+        )
+        
+        interface.load(initial_load, outputs=[section_title_box, nav_info_box, section_text_box, quiz_info_display] + question_checkboxes + question_markdowns + answer_markdowns + learning_obj_markdowns)
     return interface
 
 def run_gui(quiz_file_path=None):
@@ -1008,6 +1202,7 @@ def show_usage_examples():
     print("\n2. Review existing quizzes with GUI:")
     print("   python quizzes.py --mode review quizzes.json  # Positional argument")
     print("   python quizzes.py --mode review chapter1.qmd  # Positional argument (finds quiz file)")
+    print("   # In the GUI, you can regenerate questions with custom instructions")
     
     print("\n3. Verify quiz file structure and correspondence:")
     print("   python quizzes.py --mode verify -q quizzes.json")
@@ -2307,6 +2502,81 @@ def clean_quiz_content(content):
     removed_count += section_count
     
     return content, removed_count
+
+def regenerate_section_quiz(client, section_title, section_text, current_quiz_data, user_prompt, model="gpt-4o"):
+    """Regenerate quiz for a specific section based on user prompt"""
+    
+    # Format the current quiz data as JSON for context
+    current_quiz_json = json.dumps(current_quiz_data, indent=2, ensure_ascii=False)
+    
+    # Build the regeneration prompt
+    regeneration_prompt = f"""
+You are being asked to REGENERATE the quiz questions for this section.
+
+{user_prompt}
+
+{SYSTEM_PROMPT}
+
+Current section: "{section_title}"
+
+Current quiz data (in JSON format):
+{current_quiz_json}
+
+Please regenerate the quiz questions for this section. Return your response in exactly the same JSON format as shown above, but with new questions based on the regeneration instructions provided.
+
+IMPORTANT: After the JSON response, add a brief comment (2-3 sentences) explaining what changes you made based on the regeneration request. Format it like this:
+
+<!-- REGENERATION_COMMENT -->
+Brief explanation of what was changed based on the user's request.
+<!-- END_REGENERATION_COMMENT -->
+""".strip()
+    
+    # Call OpenAI with the same parameters as original generation
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You are an educational content specialist with expertise in machine learning systems."},
+                {"role": "user", "content": regeneration_prompt}
+            ],
+            temperature=0.4
+        )
+        content = response.choices[0].message.content
+        
+        # Extract the comment if present
+        comment = ""
+        comment_match = re.search(r'<!-- REGENERATION_COMMENT -->(.*?)<!-- END_REGENERATION_COMMENT -->', content, re.DOTALL)
+        if comment_match:
+            comment = comment_match.group(1).strip()
+            # Remove the comment from content to get clean JSON
+            content = re.sub(r'<!-- REGENERATION_COMMENT -->.*?<!-- END_REGENERATION_COMMENT -->', '', content, flags=re.DOTALL).strip()
+        
+        # Parse the JSON response
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError:
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            if json_match:
+                data = json.loads(json_match.group(0))
+            else:
+                return {"quiz_needed": False, "rationale": "No JSON found in regeneration response"}
+        
+        # Validate the response against JSON_SCHEMA
+        try:
+            validate(instance=data, schema=JSON_SCHEMA)
+        except ValidationError as e:
+            print(f"⚠️  Warning: Regeneration response doesn't match schema: {e.message}")
+            return {"quiz_needed": False, "rationale": f"Schema validation failed: {e.message}"}
+        
+        # Add the comment to the data for display purposes (won't be saved to JSON)
+        data['_regeneration_comment'] = comment
+        
+        return data
+        
+    except APIError as e:
+        return {"quiz_needed": False, "rationale": f"API error: {str(e)}"}
+    except Exception as e:
+        return {"quiz_needed": False, "rationale": f"Unexpected error: {str(e)}"}
 
 if __name__ == "__main__":
     main()
