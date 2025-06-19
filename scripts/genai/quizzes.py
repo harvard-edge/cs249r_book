@@ -1400,9 +1400,55 @@ def run_insert_mode(args):
     # Now insert the quizzes
     insert_quizzes_into_markdown(qmd_file_path, quiz_file_path)
 
+def check_existing_quizzes(qmd_file_path):
+    """Check if there are existing quiz questions in the markdown file"""
+    try:
+        with open(qmd_file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Check for quiz question callouts
+        question_pattern = re.compile(
+            r'::: \{\.' + re.escape(QUIZ_QUESTION_CALLOUT_CLASS) + r' #[^}]*\}',
+            re.DOTALL
+        )
+        existing_questions = question_pattern.findall(content)
+        
+        return len(existing_questions) > 0, len(existing_questions)
+        
+    except Exception as e:
+        print(f"⚠️  Warning: Could not check for existing quizzes: {str(e)}")
+        return False, 0
+
 def insert_quizzes_into_markdown(qmd_file_path, quiz_file_path):
     """Insert quizzes from JSON file into markdown file"""
     print(f"📝 Inserting quizzes from {quiz_file_path} into {qmd_file_path}")
+    
+    # Check for existing quizzes
+    has_existing, count = check_existing_quizzes(qmd_file_path)
+    if has_existing:
+        print(f"⚠️  Found {count} existing quiz question(s) in the file")
+        print("   This may cause duplicate quizzes or conflicts.")
+        
+        while True:
+            response = input("   Do you want to clean existing quizzes first? (y/n): ").lower().strip()
+            if response in ['y', 'yes']:
+                print("🧹 Cleaning existing quizzes...")
+                try:
+                    with open(qmd_file_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    cleaned_content, removed_count = clean_quiz_content(content)
+                    with open(qmd_file_path, 'w', encoding='utf-8') as f:
+                        f.write(cleaned_content)
+                    print(f"✅ Removed {removed_count} existing quiz elements")
+                    break
+                except Exception as e:
+                    print(f"❌ Error cleaning existing quizzes: {str(e)}")
+                    return
+            elif response in ['n', 'no']:
+                print("   Proceeding with insertion (may create duplicates)...")
+                break
+            else:
+                print("   Please enter 'y' or 'n'")
     
     try:
         # Load the quiz data
