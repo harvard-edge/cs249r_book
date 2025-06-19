@@ -16,6 +16,42 @@ from jsonschema import validate, ValidationError
 QUIZ_QUESTION_CALLOUT_CLASS = "callout-quiz-question"
 QUIZ_ANSWER_CALLOUT_CLASS = "callout-quiz-answer"
 
+# Configuration for question types, making it easy to modify or extend.
+QUESTION_TYPE_CONFIG = [
+    {
+        "type": "MCQ",
+        "description": "Best for checking definitions, comparisons, and system behaviors. Provide 3–5 options with plausible distractors. The `answer` field must explain why the correct choice is correct."
+    },
+    {
+        "type": "TF",
+        "description": "Good for testing basic understanding or challenging misconceptions. The `answer` must include a justification."
+    },
+    {
+        "type": "SHORT",
+        "description": "Encourages deeper reflection. Works well for “Why is X necessary?” or “What would happen if...?” questions."
+    },
+    {
+        "type": "FILL",
+        "description": "Useful for terminology. Use `____` (four underscores) for the blank. The `answer` should contain the missing word(s) and a brief explanation."
+    },
+    {
+        "type": "ORDER",
+        "description": "Excellent for reinforcing processes or workflows. The `question` should list the items to be ordered, and the `answer` should present them in the correct sequence with explanations if necessary."
+    },
+    {
+        "type": "CALC",
+        "description": "For questions requiring mathematical calculation (e.g., performance estimates, metric calculations). The `answer` should show the steps of the calculation."
+    }
+]
+
+# Dynamically generate the list of non-MCQ question types for the schema enum
+NON_MCQ_TYPES = [q["type"] for q in QUESTION_TYPE_CONFIG if q["type"] != "MCQ"]
+
+# Dynamically generate question guidelines for the system prompt
+QUESTION_GUIDELINES = "\n".join(
+    f"-   **{q['type']}**: {q['description']}" for q in QUESTION_TYPE_CONFIG
+)
+
 # Schema for individual quiz responses (used by AI generation)
 JSON_SCHEMA = {
     "type": "object",
@@ -53,14 +89,39 @@ JSON_SCHEMA = {
                 "questions": {
                     "type": "array",
                     "items": {
-                        "type": "object",
-                        "properties": {
-                            "question": {"type": "string"},
-                            "answer": {"type": "string"},
-                            "learning_objective": {"type": "string"}
-                        },
-                        "required": ["question", "answer", "learning_objective"],
-                        "additionalProperties": False
+                        "oneOf": [
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "question_type": {"type": "string", "const": "MCQ"},
+                                    "question": {"type": "string"},
+                                    "choices": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                        "minItems": 3,
+                                        "maxItems": 5
+                                    },
+                                    "answer": {"type": "string"},
+                                    "learning_objective": {"type": "string"}
+                                },
+                                "required": ["question_type", "question", "choices", "answer", "learning_objective"],
+                                "additionalProperties": False
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "question_type": {
+                                        "type": "string",
+                                        "enum": NON_MCQ_TYPES
+                                    },
+                                    "question": {"type": "string"},
+                                    "answer": {"type": "string"},
+                                    "learning_objective": {"type": "string"}
+                                },
+                                "required": ["question_type", "question", "answer", "learning_objective"],
+                                "additionalProperties": False
+                            }
+                        ]
                     },
                     "minItems": 1,
                     "maxItems": 5
@@ -129,14 +190,39 @@ QUIZ_FILE_SCHEMA = {
                                     "questions": {
                                         "type": "array",
                                         "items": {
-                                            "type": "object",
-                                            "properties": {
-                                                "question": {"type": "string"},
-                                                "answer": {"type": "string"},
-                                                "learning_objective": {"type": "string"}
-                                            },
-                                            "required": ["question", "answer", "learning_objective"],
-                                            "additionalProperties": False
+                                            "oneOf": [
+                                                {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "question_type": {"type": "string", "const": "MCQ"},
+                                                        "question": {"type": "string"},
+                                                        "choices": {
+                                                            "type": "array",
+                                                            "items": {"type": "string"},
+                                                            "minItems": 3,
+                                                            "maxItems": 5
+                                                        },
+                                                        "answer": {"type": "string"},
+                                                        "learning_objective": {"type": "string"}
+                                                    },
+                                                    "required": ["question_type", "question", "choices", "answer", "learning_objective"],
+                                                    "additionalProperties": False
+                                                },
+                                                {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "question_type": {
+                                                            "type": "string",
+                                                            "enum": NON_MCQ_TYPES
+                                                        },
+                                                        "question": {"type": "string"},
+                                                        "answer": {"type": "string"},
+                                                        "learning_objective": {"type": "string"}
+                                                    },
+                                                    "required": ["question_type", "question", "answer", "learning_objective"],
+                                                    "additionalProperties": False
+                                                }
+                                            ]
                                         },
                                         "minItems": 1,
                                         "maxItems": 5
@@ -196,30 +282,38 @@ You MUST return a valid JSON object that strictly follows this schema:
 
 ## Output Format
 
-If you determine a quiz is NOT needed, return this JSON:
-```json
-{{
-    "quiz_needed": false,
-    "rationale": "Explanation of why this section doesn't need a quiz (e.g., context-setting, descriptive only, no actionable concepts)."
-}}
-```
+If you determine a quiz is NOT needed, return the standard `quiz_needed: false` object.
 
-If you determine a quiz IS needed, return this JSON:
+If a quiz IS needed, follow the structure below. For "MCQ" questions, provide the question stem in the `question` field and the options in the `choices` array. For all other types, the `choices` field should be omitted.
+
 ```json
 {{
     "quiz_needed": true,
     "rationale": {{
-        "focus_areas": ["List of 2–3 key areas this section focuses on"],
-        "question_strategy": "Brief explanation of why these question types were chosen and how they build understanding",
-        "difficulty_progression": "How the questions progress in complexity and support deeper learning",
-        "integration": "How these questions connect with concepts introduced earlier in the chapter or textbook (if applicable)",
-        "ranking_explanation": "Explanation of why questions are ordered this way and how they support learning"
+        "focus_areas": ["..."],
+        "question_strategy": "...",
+        "difficulty_progression": "...",
+        "integration": "...",
+        "ranking_explanation": "..."
     }},
     "questions": [
         {{
-            "question": "The question text",
-            "answer": "The answer text",
-            "learning_objective": "What specific understanding or skill this question tests"
+            "question_type": "MCQ",
+            "question": "This is the question stem for the multiple choice question.",
+            "choices": [
+                "Option A",
+                "Option B",
+                "Option C",
+                "Option D"
+            ],
+            "answer": "The correct answer is B. This is the explanation for why B is correct.",
+            "learning_objective": "..."
+        }},
+        {{
+            "question_type": "Short",
+            "question": "This is a short answer question.",
+            "answer": "This is the answer to the short answer question.",
+            "learning_objective": "..."
         }}
     ]
 }}
@@ -234,20 +328,9 @@ If you determine a quiz IS needed, return this JSON:
 - Avoid surface-level recall or trivia
 - Connect to practical ML systems scenarios
 
-**Question Types (use variety based on content):**
-- **Multiple Choice**: Include answer options A), B), C), D) directly in the question text, each on a new line. The answer field must start with a sentence followed by the correct letter followed by a period (e.g., "The correct answer is B. The gradual change in statistical properties..."), then explanation. Every multiple-choice question must begin with a clear question stem, followed by the answer options. Do not generate questions that consist only of options.
-- **Short Answer**: Require explanation of concepts, not just definitions
-- **Scenario-Based**: Present realistic ML systems situations requiring application
-- **Comparison**: Test understanding of tradeoffs between approaches
-- **Fill-in-the-Blank**: Use ____ (four underscores) for missing key terms. Answer should contain only the missing word/phrase followed by a period, plus brief explanation.
-- **True/False**: Always require justification in the answer
-
-**Question Variety Instructions:**
-- Vary the order and types of questions based on the content
-- Don't follow the same pattern every time
-- Choose question types that best fit the specific concepts being tested
-- Mix difficulty levels throughout, not just in progression
-- Consider starting with different question types depending on the section's focus
+**Question Types (use a variety based on content):**
+{QUESTION_GUIDELINES}
+-   **Do not** embed options (e.g., A, B, C) in the `question` string for MCQ questions; use the `choices` array instead.
 
 **Quality Standards:**
 - Use clear, academically appropriate language
@@ -1736,7 +1819,21 @@ def format_answer_callout(quiz_section, section_id):
     answer_markdown = f"::: {{.{QUIZ_ANSWER_CALLOUT_CLASS} #quiz-answer-{section_key}}}\n\n"
     
     for i, question in enumerate(questions, 1):
-        answer_markdown += f"{i}. {question['question']}\n   {question['answer']}\n\n"
+        q_type = question.get('question_type', 'SHORT') # Default to short answer for safety
+        
+        if q_type == "MCQ":
+            # Format MCQ with bold stem and indented choices
+            answer_markdown += f"{i}. **{question['question']}**\n\n"
+            
+            choices = question.get('choices', [])
+            for j, choice in enumerate(choices):
+                letter = chr(ord('A') + j)
+                answer_markdown += f"   {letter}) {choice}\n"
+            
+            answer_markdown += f"\n   {question['answer']}\n\n"
+        else:
+            # Standard formatting for other types
+            answer_markdown += f"{i}. {question['question']}\n\n   {question['answer']}\n\n"
     
     answer_markdown += ":::\n\n"
     
