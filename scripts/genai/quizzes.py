@@ -836,25 +836,22 @@ def create_gradio_interface(initial_file_path=None):
             for i in range(num_questions):
                 with gr.Row(visible=True) as row_group:
                     with gr.Column(scale=1):  # Checkboxake the checkbox sCheckbox without text
-                        checkbox = gr.Checkbox(label="Select", value=True, visible=True)
+                        checkbox = gr.Checkbox(label="Select", value=True, visible=False)
                         question_checkboxes.append(checkbox)
                     with gr.Column(scale=3):
                         # Display the question text
                         question_text = f"Q: {questions[i]['question']}"
-                        print(f"Debug: Question Text - {question_text}")  # Debugging statement
-                        question_md = gr.Markdown(question_text, visible=True)
+                        question_md = gr.Markdown(question_text, visible=False)
                         question_markdowns.append(question_md)  # ✅ correct list
                     with gr.Column(scale=3):
                         # Display the answer in the middle column
                         answer_text = f"**Answer:** {questions[i]['answer']}"
-                        print(f"Debug: Answer Text - {answer_text}")  # Debugging statement
-                        answer_md = gr.Markdown(answer_text, visible=True)
+                        answer_md = gr.Markdown(answer_text, visible=False)
                         answer_markdowns.append(answer_md)
                     with gr.Column(scale=2):
                         # Display the learning objective in the last column
                         learning_text = f"**Learning Objective:** {questions[i].get('learning_objective', 'N/A')}"
-                        print(f"Debug: Learning Objective Text - {learning_text}")  # Debugging statement
-                        learning_md = gr.Markdown(learning_text, visible=True)
+                        learning_md = gr.Markdown(learning_text, visible=False)
                         learning_obj_markdowns.append(learning_md)
         
         # Create maximum possible question rows (5 as per schema)
@@ -881,7 +878,13 @@ def create_gradio_interface(initial_file_path=None):
             max_components = 5
             
             if not editor.sections:
-                return ["No file loaded", "No sections", "No content loaded"] + [False]*max_components + [""]*max_components + [""]*max_components + [""]*max_components
+                return [
+                    "No file loaded", "No sections", "No content loaded",
+                    *(gr.update(value=False, visible=False) for i in range(max_components)),
+                    *(gr.update(value="", visible=False) for i in range(max_components)),
+                    *(gr.update(value="", visible=False) for i in range(max_components)),
+                    *(gr.update(value="", visible=False) for i in range(max_components))
+                ]
             
             section = editor.sections[section_idx]
             title = f"{section['section_title']} ({section['section_id']})"
@@ -898,10 +901,18 @@ def create_gradio_interface(initial_file_path=None):
             learning_md = [""] * max_components
             
             if num_questions == 0:
-                # No quiz needed for this section
+                # No quiz needed for this section - show only first row with message
                 question_markdowns[0] = "**No quiz needed for this section**"
                 answer_md[0] = "*This section was determined to not require a quiz based on its content.*"
                 learning_md[0] = ""
+                # Only show the first row, hide the rest
+                return [
+                    title, nav_text, section_text_val,
+                    *(gr.update(value=checkbox_states[i], visible=(i == 0)) for i in range(max_components)),
+                    *(gr.update(value=question_markdowns[i], visible=(i == 0)) for i in range(max_components)),
+                    *(gr.update(value=answer_md[i], visible=(i == 0)) for i in range(max_components)),
+                    *(gr.update(value=learning_md[i], visible=(i == 0)) for i in range(max_components))
+                ]
             else:
                 # Get saved checkbox states for this section
                 section_id = section['section_id']
@@ -914,8 +925,15 @@ def create_gradio_interface(initial_file_path=None):
                     question_markdowns[i] = f"**Q{i+1}:** {questions[i]['question']}"
                     answer_md[i] = f"**Answer:** {questions[i]['answer']}"
                     learning_md[i] = f"**Learning Objective:** {questions[i].get('learning_objective', 'N/A')}"
-            
-            return [title, nav_text, section_text_val] + checkbox_states + question_markdowns + answer_md + learning_md
+                
+                # Return gr.update() objects with proper visibility control
+                return [
+                    title, nav_text, section_text_val,
+                    *(gr.update(value=checkbox_states[i], visible=(i < num_questions)) for i in range(max_components)),
+                    *(gr.update(value=question_markdowns[i], visible=(i < num_questions)) for i in range(max_components)),
+                    *(gr.update(value=answer_md[i], visible=(i < num_questions)) for i in range(max_components)),
+                    *(gr.update(value=learning_md[i], visible=(i < num_questions)) for i in range(max_components))
+                ]
         
         # Navigation handlers
         def nav_prev():
