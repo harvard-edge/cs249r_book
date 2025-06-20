@@ -333,6 +333,7 @@ If a quiz IS needed, follow the structure below. For "MCQ" questions, provide th
 -   **Do not** embed options (e.g., A, B, C) in the `question` string for MCQ questions; use the `choices` array instead.
 
 **Quality Standards:**
+- For `MCQ` questions, the `answer` string MUST start with `The correct answer is [LETTER].` followed by the text of the correct choice and then an explanation.
 - Use clear, academically appropriate language
 - Avoid repeating exact phrasing from source text
 - Keep answers concise and informative (~75-150 words total per Q&A pair)
@@ -1857,7 +1858,7 @@ def format_answer_callout(quiz_section, section_id):
             choices = question.get('choices', [])
             for j, choice in enumerate(choices):
                 letter = chr(ord('A') + j)
-                answer_markdown += f"   {letter}) {choice}\n"
+                answer_markdown += f"    {letter}) {choice}\n"
             
             answer_text = question['answer']
             
@@ -1871,9 +1872,9 @@ def format_answer_callout(quiz_section, section_id):
                         break
                 
                 if correct_choice_letter:
-                    answer_text = f"These steps should be in the following order: {correct_choice_letter}. {answer_text}"
+                    answer_text = f"The correct answer is {correct_choice_letter}. {answer_text}"
             
-            answer_markdown += f"\n   {answer_text}\n\n"
+            answer_markdown += f"\n    {answer_text}\n\n"
         else:
             # Standard formatting for other types
             answer_text = question['answer']
