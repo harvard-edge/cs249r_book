@@ -32,7 +32,7 @@ QUESTION_TYPE_CONFIG = [
     },
     {
         "type": "FILL",
-        "description": "Useful for terminology. Use `____` (four underscores) for the blank. The `answer` should contain the missing word(s) and a brief explanation."
+        "description": "Useful for terminology. Use `____` (four underscores) for the blank. The `answer` MUST provide the missing word(s) first, followed by a period and then a brief explanation. For example: `performance gap. This gap occurs...`"
     },
     {
         "type": "ORDER",
