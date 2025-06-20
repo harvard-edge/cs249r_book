@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from openai import OpenAI, APIError
 from datetime import datetime
+import yaml
 
 # Gradio imports
 import gradio as gr
@@ -357,6 +358,54 @@ Before finalizing, ensure:
 - Answer explanations help reinforce learning, not just state correctness
 - The response strictly follows the JSON schema provided above
 """
+
+def update_qmd_frontmatter(qmd_file_path, quiz_file_name):
+    """Adds or updates the 'quiz' key in the QMD file's YAML frontmatter using a YAML parser."""
+    print(f"  Updating frontmatter in: {os.path.basename(qmd_file_path)}")
+    try:
+        # We use a proper YAML parser to safely handle the frontmatter.
+        with open(qmd_file_path, 'r+', encoding='utf-8') as f:
+            content = f.read()
+            
+            frontmatter_pattern = re.compile(r'^(---\s*\n.*?\n---\s*\n)', re.DOTALL)
+            match = frontmatter_pattern.match(content)
+            
+            if match:
+                # Frontmatter exists
+                frontmatter_str = match.group(1)
+                yaml_content_str = frontmatter_str.strip().strip('---').strip()
+                
+                try:
+                    frontmatter_data = yaml.safe_load(yaml_content_str)
+                    if not isinstance(frontmatter_data, dict):
+                        frontmatter_data = {}
+                except yaml.YAMLError:
+                    frontmatter_data = {} # On error, start fresh to avoid corruption
+
+                # Update the quiz key
+                frontmatter_data['quiz'] = quiz_file_name
+                
+                # Dump back to YAML string, keeping order and format
+                new_yaml_content = yaml.dump(frontmatter_data, default_flow_style=False, sort_keys=False, indent=2)
+                
+                new_frontmatter = f"---\n{new_yaml_content.strip()}\n---\n"
+                
+                # Replace old frontmatter block
+                new_content = content.replace(frontmatter_str, new_frontmatter, 1)
+            else:
+                # No frontmatter, create it
+                frontmatter_data = {'quiz': quiz_file_name}
+                new_yaml_content = yaml.dump(frontmatter_data, default_flow_style=False, sort_keys=False)
+                new_frontmatter = f"---\n{new_yaml_content}---\n\n"
+                new_content = new_frontmatter + content
+            
+            f.seek(0)
+            f.write(new_content)
+            f.truncate()
+        
+        print(f"  ✓ Updated frontmatter in {os.path.basename(qmd_file_path)} with 'quiz: {quiz_file_name}'")
+    except Exception as e:
+        print(f"  ❌ Error updating frontmatter in {qmd_file_path}: {e}")
 
 def extract_sections_with_ids(markdown_text):
     """
@@ -1484,6 +1533,9 @@ def generate_for_file(qmd_file, args):
     print(f"  - Total sections processed: {len(sections)}")
     print(f"  - Sections with quizzes: {output_data['metadata']['sections_with_quizzes']}")
     print(f"  - Sections without quizzes: {output_data['metadata']['sections_without_quizzes']}")
+
+    # Update the frontmatter of the qmd file
+    update_qmd_frontmatter(qmd_file, os.path.basename(out_path))
 
 def generate_for_directory(directory, args):
     # Find all .qmd files in the directory (non-recursive)
