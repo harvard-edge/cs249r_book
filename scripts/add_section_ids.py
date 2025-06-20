@@ -242,6 +242,7 @@ def process_markdown_file(file_path, auto_yes=False, dry_run=False, force=False)
     changes = []
     section_counter = 0
     chapter_title = None
+    existing_sections = []
 
     for line in lines:
         match = header_pattern.match(line)
@@ -276,6 +277,7 @@ def process_markdown_file(file_path, auto_yes=False, dry_run=False, force=False)
                 existing_id_matches = re.findall(r'\{#(sec-[^}]+)\}', line)
                 if existing_id_matches:
                     existing_id = existing_id_matches[0]
+                    existing_sections.append((title.strip(), existing_id))
                     is_proper, expected_id = is_properly_formatted_id(existing_id, title, file_path)
                     if not is_proper:
                         if auto_yes or input(f"\n🔄 Update ID for '{title}':\n  From: {existing_id}\n  To:   {expected_id}\n  Proceed? [Y/n]: ").lower() != 'n':
@@ -308,6 +310,12 @@ def process_markdown_file(file_path, auto_yes=False, dry_run=False, force=False)
                     logging.info(f"  + Added: {title}")
                     logging.info(f"    {line.strip()}")
                     logging.info(f"    → {new_line.strip()}")
+
+    # Show existing sections even if no changes were made
+    if existing_sections:
+        logging.info(f"  📋 Existing sections:")
+        for title, section_id in existing_sections:
+            logging.info(f"    • {title} → #{section_id}")
 
     if modified and not dry_run:
         path.write_text(''.join(lines), encoding="utf-8")
