@@ -39,10 +39,25 @@ ID Scheme:
 - IDs are of the form: sec-{chapter-title}-{section-title}-{hash}
 - Chapter and section titles have stopwords removed for cleaner IDs
 - The hash is generated from: file path + chapter title + section title + parent section hierarchy
-- This ensures global uniqueness and reflects the actual document structure
+- This ensures GLOBAL UNIQUENESS across the entire book project
+- Different files with identical section names and hierarchies will have different IDs
 - Parent sections are included in the hash to handle duplicate section names naturally
 - The visible part of the ID remains short and human-readable
 - IDs are stable and won't change if sections are reordered (as long as hierarchy doesn't change)
+
+Global Uniqueness Guarantee:
+----------------------------
+The hash generation includes the file path to ensure that sections with identical names
+and hierarchies in different files will have different IDs. This prevents conflicts when:
+
+- Multiple chapters have sections with the same name (e.g., "Introduction" in different files)
+- Different files have identical section hierarchies (e.g., "Techniques > Advanced > Optimization")
+- The same section name appears in multiple contexts across the book
+
+Example hash inputs:
+  - File A: "contents/chapter1.qmd|Getting Started|Introduction|"
+  - File B: "contents/chapter2.qmd|Getting Started|Introduction|"
+  - Result: Different 4-character hashes ensure unique IDs
 
 Available Modes:
 ----------------
@@ -73,6 +88,7 @@ Key Features:
 - Comprehensive section ID management (add, repair, remove, verify, list)
 - Hierarchy-based ID generation that reflects document structure
 - Natural handling of duplicate section names through parent section context
+- Global uniqueness guaranteed through file path inclusion in hash
 - Stable IDs that don't change when sections are reordered
 - Smart attribute preservation (e.g., {.class #sec-id .other-class})
 - Cross-reference updating when IDs change
@@ -215,7 +231,32 @@ def is_properly_formatted_id(section_id, title, file_path, chapter_title, sectio
     return True, section_id
 
 def generate_section_id(title, file_path, chapter_title, section_counter, parent_sections=None):
-    """Generate a unique section ID based on the section title, with a hash that includes file path, chapter title, section title, and parent section hierarchy to handle duplicates."""
+    """
+    Generate a unique section ID based on the section title.
+    
+    The hash includes file path, chapter title, section title, and parent section hierarchy
+    to ensure GLOBAL UNIQUENESS across the entire book project. This prevents conflicts when:
+    
+    - Multiple files have sections with identical names and hierarchies
+    - The same section name appears in different chapters
+    - Different files have identical section structures
+    
+    Args:
+        title: The section title
+        file_path: The file path (included in hash for global uniqueness)
+        chapter_title: The chapter title
+        section_counter: Counter for this section (not used in hash)
+        parent_sections: List of parent section titles (included in hash)
+    
+    Returns:
+        A unique section ID in the format: sec-{chapter-slug}-{section-slug}-{4-char-hash}
+        
+    Example:
+        Same section name in different files:
+        - File A: "contents/chapter1.qmd|Getting Started|Introduction|" → hash: d212
+        - File B: "contents/chapter2.qmd|Getting Started|Introduction|" → hash: 8435
+        Result: Different IDs ensure global uniqueness
+    """
     clean_title = simple_slugify(title)
     clean_chapter_title = simple_slugify(chapter_title)
     
@@ -229,6 +270,7 @@ def generate_section_id(title, file_path, chapter_title, section_counter, parent
         hierarchy = "|".join(hierarchy_parts)
     
     # Hash includes file path, chapter title, section title, and parent hierarchy
+    # This ensures global uniqueness across the entire book project
     hash_input = f"{file_path}|{chapter_title}|{title}|{hierarchy}".encode('utf-8')
     hash_suffix = hashlib.sha1(hash_input).hexdigest()[:4]
     return f"sec-{clean_chapter_title}-{clean_title}-{hash_suffix}"

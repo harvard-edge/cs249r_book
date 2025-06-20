@@ -1354,36 +1354,32 @@ def show_usage_examples():
     """Show usage examples for different modes"""
     print("\n=== Usage Examples ===")
     print("\n1. Generate quizzes from a markdown file:")
-    print("   python quizzes.py --mode generate --file chapter1.qmd")
-    print("   python quizzes.py --mode generate --file chapter1.qmd --output my_quizzes.json")
-    print("   python quizzes.py --mode generate --directory ./chapters/")
+    print("   python quizzes.py --mode generate -f chapter1.qmd")
+    print("   python quizzes.py --mode generate -f chapter1.qmd -o my_quizzes.json")
+    print("   python quizzes.py --mode generate -d ./chapters/")
     
     print("\n2. Review existing quizzes with GUI:")
-    print("   python quizzes.py --mode review quizzes.json  # Positional argument")
-    print("   python quizzes.py --mode review chapter1.qmd  # Positional argument (finds quiz file)")
+    print("   python quizzes.py --mode review -f quizzes.json")
+    print("   python quizzes.py --mode review -f chapter1.qmd")
     print("   # In the GUI, you can regenerate questions with custom instructions")
     
     print("\n3. Verify quiz file structure and correspondence:")
-    print("   python quizzes.py --mode verify -q quizzes.json")
-    print("   python quizzes.py --mode verify -q chapter1.qmd  # Will find corresponding quiz file")
-    print("   python quizzes.py --mode verify --file chapter1.qmd")
-    print("   python quizzes.py --mode verify --directory ./quiz_files/")
+    print("   python quizzes.py --mode verify -f quizzes.json")
+    print("   python quizzes.py --mode verify -f chapter1.qmd")
+    print("   python quizzes.py --mode verify -d ./quiz_files/")
     
-    print("\n4. Insert quizzes into markdown (future feature):")
-    print("   python quizzes.py --mode insert chapter1.qmd  # Finds quiz file automatically")
-    print("   python quizzes.py --mode insert quizzes.json  # Finds markdown file automatically")
+    print("\n4. Insert quizzes into markdown:")
+    print("   python quizzes.py --mode insert -f chapter1.qmd")
+    print("   python quizzes.py --mode insert -f quizzes.json")
     
     print("\n5. Clean quizzes from markdown files:")
-    print("   python quizzes.py --mode clean --file chapter1.qmd")
-    print("   python quizzes.py --mode clean --directory ./chapters/")
-    print("   python quizzes.py --mode clean --backup --file chapter1.qmd")
-    print("   python quizzes.py --mode clean --dry-run --directory ./chapters/")
+    print("   python quizzes.py --mode clean -f chapter1.qmd")
+    print("   python quizzes.py --mode clean -d ./chapters/")
+    print("   python quizzes.py --mode clean --backup -f chapter1.qmd")
+    print("   python quizzes.py --mode clean --dry-run -d ./chapters/")
     
-    print("\n6. Default mode (generate):")
-    print("   python quizzes.py --file chapter1.qmd")
-    
-    print("\n⚠️  IMPORTANT: In generate mode, you MUST use -f/--file or -d/--directory options.")
-    print("   Do NOT pass files as positional arguments.")
+    print("\n⚠️  IMPORTANT: You must specify either -f (file) or -d (directory) for all modes.")
+    print("   The tool automatically detects file types (JSON vs QMD) and performs the appropriate action.")
 
 def main():
     parser = argparse.ArgumentParser(
@@ -1391,35 +1387,30 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  %(prog)s --mode generate --file chapter1.qmd
-  %(prog)s --mode generate --directory ./some_dir/
-  %(prog)s --mode review quizzes.json  # Positional argument
-  %(prog)s --mode review chapter1.qmd  # Positional argument (finds quiz file)
-  %(prog)s --mode insert chapter1.qmd  # Finds quiz file automatically
-  %(prog)s --mode insert quizzes.json  # Finds markdown file automatically
-  %(prog)s --mode clean --file chapter1.qmd
-  %(prog)s --mode clean --directory ./chapters/
-  %(prog)s --mode clean --backup --file chapter1.qmd
-  %(prog)s --mode clean --dry-run --directory ./chapters/
-  %(prog)s --mode verify -q quizzes.json
-  %(prog)s --mode verify -q chapter1.qmd  # Will find corresponding quiz file
-  %(prog)s --mode verify --directory ./quiz_files/
-  %(prog)s --mode verify --file chapter1.qmd
+  %(prog)s --mode generate -f chapter1.qmd
+  %(prog)s --mode generate -d ./some_dir/
+  %(prog)s --mode review -f chapter1.qmd
+  %(prog)s --mode review -f quizzes.json
+  %(prog)s --mode insert -f chapter1.qmd
+  %(prog)s --mode insert -f quizzes.json
+  %(prog)s --mode clean -f chapter1.qmd
+  %(prog)s --mode clean -d ./chapters/
+  %(prog)s --mode verify -f chapter1.qmd
+  %(prog)s --mode verify -f quizzes.json
+  %(prog)s --mode verify -d ./quiz_files/
 
-Note: In generate mode, you MUST use -f/--file for a single .qmd file or -d/--directory for a directory of .qmd files. 
-Do NOT pass the file as a positional argument.
+Note: You must specify either -f (file) or -d (directory) for all modes.
+The tool will automatically detect file types (JSON vs QMD) and perform the appropriate action.
         """
     )
-    parser.add_argument("--mode", choices=["generate", "review", "insert", "verify", "clean"], default="generate",
-                       help="Mode of operation: generate (create new quizzes), review (edit existing quizzes), insert (add quizzes to markdown), verify (validate quiz files), clean (remove all quizzes)")
-    parser.add_argument("file_path", nargs="?", help="File path for review/insert modes (quiz JSON or markdown .qmd file).")
-    parser.add_argument("-f", "--file", help="Path to a markdown (.qmd/.md) file. REQUIRED for generate mode unless --directory is used.")
-    parser.add_argument("-q", "--quiz-file", help="Path to quiz JSON file (for verify mode only). For verify mode, can also accept .qmd files to find corresponding quiz files.")
-    parser.add_argument("-d", "--directory", help="Path to directory containing .qmd files (for generate/clean modes) or quiz JSON files (for verify mode). REQUIRED for generate/clean modes unless --file is used.")
-    parser.add_argument("--model", default="gpt-4o", help="OpenAI model to use (generate mode only).")
-    parser.add_argument("-o", "--output", default="quizzes.json", help="Path to output JSON file (generate mode only).")
-    parser.add_argument("--backup", action="store_true", help="Create backup files before cleaning (clean mode only).")
-    parser.add_argument("--dry-run", action="store_true", help="Show what would be cleaned without making changes (clean mode only).")
+    parser.add_argument("--mode", choices=["generate", "review", "insert", "verify", "clean"], 
+                       required=True, help="Mode of operation")
+    parser.add_argument("-f", "--file", help="Path to a file (.qmd, .md, or .json)")
+    parser.add_argument("-d", "--directory", help="Path to directory")
+    parser.add_argument("--model", default="gpt-4o", help="OpenAI model to use (generate mode only)")
+    parser.add_argument("-o", "--output", default="quizzes.json", help="Path to output JSON file (generate mode only)")
+    parser.add_argument("--backup", action="store_true", help="Create backup files before cleaning")
+    parser.add_argument("--dry-run", action="store_true", help="Show what would be done without making changes")
     parser.add_argument("--examples", action="store_true", help="Show usage examples")
     args = parser.parse_args()
 
@@ -1427,1369 +1418,116 @@ Do NOT pass the file as a positional argument.
         show_usage_examples()
         return
 
-    if args.mode == "generate":
-        run_generate_mode(args)
-    elif args.mode == "review":
-        run_review_mode(args)
-    elif args.mode == "insert":
-        run_insert_mode(args)
-    elif args.mode == "verify":
-        run_verify_mode(args)
-    elif args.mode == "clean":
-        run_clean_mode(args)
-    else:
-        print(f"Unknown mode: {args.mode}")
-        parser.print_help()
-
-def run_generate_mode(args):
-    """Generate new quizzes from a markdown file or directory of .qmd files"""
+    # Validate that either -f or -d is provided
     if not args.file and not args.directory:
-        print("Error: In generate mode, you must specify either:")
-        print("  -f/--file <path>     for a single .qmd file")
-        print("  -d/--directory <path> for a directory containing .qmd files")
-        print("\nExamples:")
-        print("  python quizzes.py --mode generate --file chapter1.qmd")
-        print("  python quizzes.py --mode generate --directory ./chapters/")
-        print("  python quizzes.py --file chapter1.qmd  # generate mode is default")
+        print("Error: You must specify either -f (file) or -d (directory)")
+        parser.print_help()
         return
-    
+
+    # Determine file type and route to appropriate function
     if args.file:
-        # Enforce .qmd extension
-        if not args.file.lower().endswith('.qmd'):
-            print("Error: The input file must have a .qmd extension for generate mode.")
-            print("Please provide a file with .qmd extension.")
-            return
-        print("=== Quiz Generation Mode (Single File) ===")
-        generate_for_file(args.file, args)
-    elif args.directory:
-        print("=== Quiz Generation Mode (Directory) ===")
-        generate_for_directory(args.directory, args)
-
-def generate_for_file(qmd_file, args):
-    with open(qmd_file, "r", encoding="utf-8") as f:
-        content = f.read()
-
-    sections = extract_sections_with_ids(content)
-    if sections is None:
-        exit(1)
-
-    print(f"Found {len(sections)} sections to process:")
-    for section in sections:
-        print(f"  - {section['section_title']} ({section['section_id']})")
-
-    client = OpenAI()
-    results = []
-    
-    for i, section in enumerate(sections, 1):
-        print(f"\nProcessing section {i}/{len(sections)}: {section['section_title']} ({section['section_id']})")
-        
-        prompt = build_user_prompt(section["section_title"], section["section_text"])
-        quiz_response = call_openai(client, SYSTEM_PROMPT, prompt, model=args.model)
-        
-        # Create a structured result for this section
-        section_result = {
-            "section_id": section["section_id"],
-            "section_title": section["section_title"],
-            "quiz_data": quiz_response
-        }
-        
-        # Add status information
-        if quiz_response.get("quiz_needed", False):
-            num_questions = len(quiz_response.get("questions", []))
-            print(f"  ✓ Quiz generated with {num_questions} questions")
+        file_ext = os.path.splitext(args.file)[1].lower()
+        if file_ext in ['.json']:
+            # JSON file - treat as quiz file
+            if args.mode == "generate":
+                print("Error: Generate mode requires a .qmd file, not a .json file")
+                return
+            elif args.mode == "review":
+                run_review_mode_simple(args.file)
+            elif args.mode == "insert":
+                run_insert_mode_simple(args.file)
+            elif args.mode == "verify":
+                run_verify_mode_simple(args.file)
+            elif args.mode == "clean":
+                print("Error: Clean mode requires a .qmd file, not a .json file")
+                return
+        elif file_ext in ['.qmd', '.md']:
+            # QMD/MD file - treat as markdown file
+            if args.mode == "generate":
+                run_generate_mode_simple(args.file, args)
+            elif args.mode == "review":
+                run_review_mode_simple(args.file)
+            elif args.mode == "insert":
+                run_insert_mode_simple(args.file)
+            elif args.mode == "verify":
+                run_verify_mode_simple(args.file)
+            elif args.mode == "clean":
+                run_clean_mode_simple(args.file, args)
         else:
-            print(f"  - No quiz needed: {quiz_response.get('rationale', 'No rationale provided')}")
-        
-        results.append(section_result)
+            print(f"Error: Unsupported file extension: {file_ext}")
+            print("Supported extensions: .qmd, .md, .json")
+            return
+    elif args.directory:
+        # Directory mode
+        if args.mode == "generate":
+            run_generate_mode_directory(args.directory, args)
+        elif args.mode == "review":
+            print("Error: Review mode requires a specific file, not a directory")
+            return
+        elif args.mode == "insert":
+            print("Error: Insert mode requires a specific file, not a directory")
+            return
+        elif args.mode == "verify":
+            run_verify_mode_directory(args.directory)
+        elif args.mode == "clean":
+            run_clean_mode_directory(args.directory, args)
 
-    # Create the final output structure
-    output_data = {
-        "metadata": {
-            "source_file": qmd_file,
-            "total_sections": len(sections),
-            "sections_with_quizzes": sum(1 for r in results if r["quiz_data"].get("quiz_needed", False)),
-            "sections_without_quizzes": sum(1 for r in results if not r["quiz_data"].get("quiz_needed", False))
-        },
-        "sections": results
-    }
+def run_generate_mode_simple(qmd_file, args):
+    """Generate new quizzes from a markdown file"""
+    print(f"=== Quiz Generation Mode (Single File) ===")
+    generate_for_file(qmd_file, args)
 
-    # Validate the final output structure
-    try:
-        validate(instance=output_data, schema=QUIZ_FILE_SCHEMA)
-        print("✅ Generated quiz file structure is valid")
-    except ValidationError as e:
-        print(f"❌ Generated quiz file structure is invalid:")
-        print(f"   - Path: {' -> '.join(str(p) for p in e.path)}")
-        print(f"   - Error: {e.message}")
-        print("   Attempting to fix structure...")
-        output_data = fix_quiz_file_structure(output_data)
+def run_generate_mode_directory(directory, args):
+    """Generate new quizzes from a directory of .qmd files"""
+    print(f"=== Quiz Generation Mode (Directory) ===")
+    generate_for_directory(directory, args)
 
-    # Use the specified output path or default to quizzes.json in the same directory as input
-    out_path = args.output if os.path.isabs(args.output) else os.path.join(os.path.dirname(qmd_file), args.output)
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(output_data, f, indent=2, ensure_ascii=False)
-    
-    print(f"\n✓ Wrote quizzes to {out_path}")
-    print(f"  - Total sections processed: {len(sections)}")
-    print(f"  - Sections with quizzes: {output_data['metadata']['sections_with_quizzes']}")
-    print(f"  - Sections without quizzes: {output_data['metadata']['sections_without_quizzes']}")
-
-    # Update the frontmatter of the qmd file
-    update_qmd_frontmatter(qmd_file, os.path.basename(out_path))
-
-def generate_for_directory(directory, args):
-    # Find all .qmd files in the directory (non-recursive)
-    qmd_files = [os.path.join(directory, f) for f in os.listdir(directory) if f.lower().endswith('.qmd')]
-    if not qmd_files:
-        print(f"No .qmd files found in directory: {directory}")
-        return
-    print(f"Found {len(qmd_files)} .qmd files in directory: {directory}")
-    for qmd_file in qmd_files:
-        print(f"\n--- Generating for: {qmd_file} ---")
-        generate_for_file(qmd_file, args)
-
-def validate_final_quiz_structure(data):
-    """Validate the final quiz file structure manually"""
-    if not isinstance(data, dict):
-        return False
-    
-    if 'metadata' not in data or 'sections' not in data:
-        return False
-    
-    metadata = data['metadata']
-    required_metadata = ['source_file', 'total_sections', 'sections_with_quizzes', 'sections_without_quizzes']
-    if not all(field in metadata for field in required_metadata):
-        return False
-    
-    if not isinstance(data['sections'], list):
-        return False
-    
-    for section in data['sections']:
-        if not isinstance(section, dict):
-            return False
-        
-        required_section_fields = ['section_id', 'section_title', 'quiz_data']
-        if not all(field in section for field in required_section_fields):
-            return False
-        
-        quiz_data = section['quiz_data']
-        if not isinstance(quiz_data, dict):
-            return False
-        
-        if 'quiz_needed' not in quiz_data:
-            return False
-    
-    return True
-
-def fix_quiz_file_structure(data):
-    """Attempt to fix common issues in quiz file structure"""
-    print("🔧 Attempting to fix quiz file structure...")
-    
-    # Ensure metadata exists and has required fields
-    if 'metadata' not in data:
-        data['metadata'] = {}
-    
-    metadata = data['metadata']
-    if 'source_file' not in metadata:
-        metadata['source_file'] = 'unknown'
-    if 'total_sections' not in metadata:
-        metadata['total_sections'] = len(data.get('sections', []))
-    if 'sections_with_quizzes' not in metadata:
-        sections_with_quizzes = sum(1 for s in data.get('sections', []) if s.get('quiz_data', {}).get('quiz_needed', False))
-        metadata['sections_with_quizzes'] = sections_with_quizzes
-    if 'sections_without_quizzes' not in metadata:
-        sections_without_quizzes = sum(1 for s in data.get('sections', []) if not s.get('quiz_data', {}).get('quiz_needed', False))
-        metadata['sections_without_quizzes'] = sections_without_quizzes
-    
-    # Ensure sections exist
-    if 'sections' not in data:
-        data['sections'] = []
-    
-    # Fix individual sections
-    for i, section in enumerate(data['sections']):
-        if not isinstance(section, dict):
-            data['sections'][i] = {
-                'section_id': f'#sec-fixed-{i}',
-                'section_title': f'Fixed Section {i}',
-                'quiz_data': {'quiz_needed': False, 'rationale': 'Section was corrupted and fixed'}
-            }
-            continue
-        
-        # Ensure required section fields
-        if 'section_id' not in section:
-            section['section_id'] = f'#sec-missing-id-{i}'
-        if 'section_title' not in section:
-            section['section_title'] = f'Section {i}'
-        if 'quiz_data' not in section:
-            section['quiz_data'] = {'quiz_needed': False, 'rationale': 'Missing quiz data'}
-        
-        # Fix quiz_data structure
-        quiz_data = section['quiz_data']
-        if not isinstance(quiz_data, dict):
-            section['quiz_data'] = {'quiz_needed': False, 'rationale': 'Invalid quiz data structure'}
-            continue
-        
-        if 'quiz_needed' not in quiz_data:
-            quiz_data['quiz_needed'] = False
-            quiz_data['rationale'] = 'Missing quiz_needed field'
-    
-    print("✅ Quiz file structure has been fixed")
-    return data
-
-def validate_quiz_file(quiz_file_path):
-    """Validate that a quiz file exists and has the correct structure"""
-    if not os.path.exists(quiz_file_path):
-        return False, f"Quiz file not found: {quiz_file_path}"
-    
-    try:
-        with open(quiz_file_path, 'r', encoding='utf-8') as f:
-            quiz_data = json.load(f)
-        
-        if not isinstance(quiz_data, dict):
-            return False, "Invalid JSON structure: root must be an object"
-        
-        if 'sections' not in quiz_data:
-            return False, "Missing 'sections' key in quiz data"
-        
-        if not isinstance(quiz_data['sections'], list):
-            return False, "Sections must be a list"
-        
-        return True, "Valid quiz file"
-        
-    except json.JSONDecodeError as e:
-        return False, f"Invalid JSON in quiz file: {str(e)}"
-    except Exception as e:
-        return False, f"Error reading quiz file: {str(e)}"
-
-def run_review_mode(args):
-    """Review and edit existing quizzes using GUI"""
+def run_review_mode_simple(file_path):
+    """Review and edit existing quizzes from a file (JSON or QMD)"""
     print("=== Quiz Review Mode ===")
     
-    # Get file path from positional argument
-    if not args.file_path:
-        print("Error: File path is required for review mode")
-        print("Usage:")
-        print("  python quizzes.py --mode review <file_path>  # Quiz JSON or markdown file")
-        return
+    # Determine file type
+    file_ext = os.path.splitext(file_path)[1].lower()
     
-    file_path = args.file_path
-    
-    # Determine if it's a markdown file or quiz file
-    if file_path.lower().endswith(('.qmd', '.md', '.markdown')):
-        # It's a markdown file, try to find the quiz file from metadata
-        print(f"🔍 Looking for quiz file referenced in: {file_path}")
+    if file_ext in ['.json']:
+        # JSON file - run GUI directly
+        run_gui(file_path)
+    elif file_ext in ['.qmd', '.md']:
+        # QMD file - find corresponding quiz file first
         quiz_file_path = find_quiz_file_from_qmd(file_path)
-        if not quiz_file_path:
-            print(f"❌ No quiz file found for markdown file: {file_path}")
+        if quiz_file_path:
+            run_gui(quiz_file_path)
+        else:
+            print(f"❌ No corresponding quiz file found for {file_path}")
             print("   Make sure the markdown file has 'quiz: filename.json' in its frontmatter")
-            return
-        print(f"✅ Found quiz file: {quiz_file_path}")
     else:
-        # Assume it's a quiz file path
-        quiz_file_path = file_path
-    
-    # Validate the quiz file
-    is_valid, message = validate_quiz_file(quiz_file_path)
-    if not is_valid:
-        print(f"Error: {message}")
-        return
-    
-    run_gui(quiz_file_path)
+        print(f"❌ Unsupported file type: {file_ext}")
+        print("   Supported types: .json, .qmd, .md")
 
-def run_insert_mode(args):
+def run_insert_mode_simple(file_path):
     """Insert quizzes into markdown files"""
     print("=== Quiz Insert Mode ===")
-    
-    # Get file path from positional argument
-    if not args.file_path:
-        print("Error: File path is required for insert mode")
-        print("Usage:")
-        print("  python quizzes.py --mode insert <file_path>  # Quiz JSON or markdown file")
-        return
-    
-    file_path = args.file_path
-    
-    # Determine if it's a markdown file or quiz file
-    if file_path.lower().endswith(('.qmd', '.md', '.markdown')):
-        # It's a markdown file, try to find the quiz file from metadata
-        print(f"🔍 Looking for quiz file referenced in: {file_path}")
-        quiz_file_path = find_quiz_file_from_qmd(file_path)
-        if not quiz_file_path:
-            print(f"❌ No quiz file found for markdown file: {file_path}")
-            print("   Make sure the markdown file has 'quiz: filename.json' in its frontmatter")
-            return
-        print(f"✅ Found quiz file: {quiz_file_path}")
-        qmd_file_path = file_path
-    else:
-        # Assume it's a quiz file path, try to find the markdown file
-        print(f"🔍 Looking for markdown file referenced in: {file_path}")
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                quiz_data = json.load(f)
-            qmd_file_path = find_qmd_file_from_quiz(file_path, quiz_data)
-            if not qmd_file_path:
-                print(f"❌ No markdown file found for quiz file: {file_path}")
-                print("   The quiz file should have a 'source_file' in its metadata")
-                return
-            print(f"✅ Found markdown file: {qmd_file_path}")
-            quiz_file_path = file_path
-        except Exception as e:
-            print(f"❌ Error reading quiz file: {str(e)}")
-            return
-    
-    # Quick verification using existing code (brief mode)
-    print("🔍 Verifying files...")
-    
-    # Verify quiz file
-    is_valid, message = validate_quiz_file(quiz_file_path)
-    if not is_valid:
-        print(f"❌ Quiz file validation failed: {message}")
-        return
-    print("✅ Quiz file is valid")
-    
-    # Verify markdown file
-    qmd_sections = analyze_qmd_file(qmd_file_path)
-    if not qmd_sections:
-        print("❌ Markdown file validation failed")
-        return
-    print("✅ Markdown file is valid")
-    
-    # Now insert the quizzes
-    insert_quizzes_into_markdown(qmd_file_path, quiz_file_path)
+    run_insert_mode(file_path)
 
-def check_existing_quizzes(qmd_file_path):
-    """Check if there are existing quiz questions in the markdown file"""
-    try:
-        with open(qmd_file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        # Check for quiz question callouts
-        question_pattern = re.compile(
-            r'::: \{\.' + re.escape(QUIZ_QUESTION_CALLOUT_CLASS) + r' #[^}]*\}',
-            re.DOTALL
-        )
-        existing_questions = question_pattern.findall(content)
-        
-        return len(existing_questions) > 0, len(existing_questions)
-        
-    except Exception as e:
-        print(f"⚠️  Warning: Could not check for existing quizzes: {str(e)}")
-        return False, 0
-
-def insert_quizzes_into_markdown(qmd_file_path, quiz_file_path):
-    """Insert quizzes from JSON file into markdown file"""
-    print(f"📝 Inserting quizzes from {quiz_file_path} into {qmd_file_path}")
-    
-    # Check for existing quizzes
-    has_existing, count = check_existing_quizzes(qmd_file_path)
-    if has_existing:
-        print(f"⚠️  Found {count} existing quiz question(s) in the file")
-        print("   This may cause duplicate quizzes or conflicts.")
-        
-        while True:
-            response = input("   Do you want to clean existing quizzes first? (y/n): ").lower().strip()
-            if response in ['y', 'yes']:
-                print("🧹 Cleaning existing quizzes...")
-                try:
-                    with open(qmd_file_path, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                    cleaned_content, removed_count = clean_quiz_content(content)
-                    with open(qmd_file_path, 'w', encoding='utf-8') as f:
-                        f.write(cleaned_content)
-                    print(f"✅ Removed {removed_count} existing quiz elements")
-                    break
-                except Exception as e:
-                    print(f"❌ Error cleaning existing quizzes: {str(e)}")
-                    return
-            elif response in ['n', 'no']:
-                print("   Proceeding with insertion (may create duplicates)...")
-                break
-            else:
-                print("   Please enter 'y' or 'n'")
-    
-    try:
-        # Load the quiz data
-        with open(quiz_file_path, 'r', encoding='utf-8') as f:
-            quiz_data = json.load(f)
-        
-        # Load the markdown file
-        with open(qmd_file_path, 'r', encoding='utf-8') as f:
-            qmd_content = f.read()
-        
-        # Extract sections from markdown
-        qmd_sections = extract_sections_with_ids(qmd_content)
-        if not qmd_sections:
-            print("❌ No sections found in markdown file")
-            return
-        
-        # Create a mapping of section IDs to quiz data
-        quiz_sections = {section['section_id']: section for section in quiz_data.get('sections', [])}
-        
-        # Process each section and insert quizzes
-        modified_content = qmd_content
-        sections_modified = 0
-        quiz_answers = []  # Collect answers for the end
-        
-        for qmd_section in qmd_sections:
-            section_id = qmd_section['section_id']
-            quiz_section = quiz_sections.get(section_id)
-            
-            if quiz_section and quiz_section.get('quiz_data', {}).get('quiz_needed', False):
-                # Create quiz callout
-                quiz_markdown = format_quiz_callout(quiz_section, section_id)
-                modified_content = insert_quiz_into_section(modified_content, section_id, quiz_markdown)
-                
-                # Collect answer for the end
-                answer_markdown = format_answer_callout(quiz_section, section_id)
-                quiz_answers.append(answer_markdown)
-                
-                sections_modified += 1
-                print(f"  ✓ Added quiz to section: {qmd_section['section_title']}")
-        
-        # Add quiz answers section at the end
-        if quiz_answers:
-            # Strip trailing whitespace from each answer block before joining
-            # to prevent extra newlines between callouts.
-            stripped_answers = [qa.strip() for qa in quiz_answers]
-            answers_section = "\n\n## Quiz Answers\n\n" + "\n\n".join(stripped_answers)
-            modified_content += answers_section
-        
-        # Write the modified content back to the file
-        with open(qmd_file_path, 'w', encoding='utf-8') as f:
-            f.write(modified_content)
-        
-        print(f"\n✅ Successfully inserted quizzes into {qmd_file_path}")
-        print(f"   - Sections modified: {sections_modified}")
-        print(f"   - Total sections in file: {len(qmd_sections)}")
-        
-    except Exception as e:
-        print(f"❌ Error inserting quizzes: {str(e)}")
-
-def format_quiz_callout(quiz_section, section_id):
-    """Format quiz data as callout for insertion"""
-    quiz_data = quiz_section.get('quiz_data', {})
-    questions = quiz_data.get('questions', [])
-    
-    if not questions:
-        return ""
-    
-    # Extract section key (remove # prefix only, keep hyphens and underscores)
-    section_key = section_id.replace('#', '')
-    
-    # Format the quiz as callout
-    quiz_markdown = f"\n::: {{.{QUIZ_QUESTION_CALLOUT_CLASS} #quiz-question-{section_key}}}\n\n"
-    
-    for i, question in enumerate(questions, 1):
-        quiz_markdown += f"{i}. {question['question']}\n\n"
-    
-    quiz_markdown += f"See Answer \\ref{{quiz-answer-{section_key}}}.\n\n:::\n\n"
-    
-    return quiz_markdown
-
-def format_answer_callout(quiz_section, section_id):
-    """Format answer data as callout for the answers section"""
-    quiz_data = quiz_section.get('quiz_data', {})
-    questions = quiz_data.get('questions', [])
-    
-    if not questions:
-        return ""
-    
-    # Extract section key (remove # prefix only, keep hyphens and underscores)
-    section_key = section_id.replace('#', '')
-    
-    # Format the answer as callout
-    answer_markdown = f"::: {{.{QUIZ_ANSWER_CALLOUT_CLASS} #quiz-answer-{section_key}}}\n\n"
-    
-    for i, question in enumerate(questions, 1):
-        q_type = question.get('question_type', 'SHORT') # Default to short answer for safety
-        
-        if q_type == "MCQ":
-            # Format MCQ with bold stem and indented choices
-            answer_markdown += f"{i}. **{question['question']}**\n\n"
-            
-            choices = question.get('choices', [])
-            for j, choice in enumerate(choices):
-                letter = chr(ord('A') + j)
-                answer_markdown += f"    {letter}) {choice}\n"
-            
-            answer_text = question['answer']
-            
-            # Check if answer already indicates the choice
-            if not re.search(r"^[Tt]he correct answer is [A-Z]\.", answer_text):
-                correct_choice_letter = None
-                for j, choice in enumerate(choices):
-                    # Check if the answer text starts with the choice text, ignoring case and leading/trailing whitespace
-                    if answer_text.strip().lower().startswith(choice.strip().lower()):
-                        correct_choice_letter = chr(ord('A') + j)
-                        break
-                
-                if correct_choice_letter:
-                    answer_text = f"The correct answer is {correct_choice_letter}. {answer_text}"
-            
-            answer_markdown += f"\n    {answer_text}\n\n"
-        else:
-            # Standard formatting for other types
-            answer_text = question['answer']
-            if q_type == "FILL":
-                # The answer is expected to be the filled word/phrase, optionally followed by a period and an explanation.
-                parts = answer_text.split('.', 1)
-                if len(parts) > 1:
-                    filled_word = parts[0]
-                    explanation = parts[1]
-                    # Quote the filled word and reconstruct the answer.
-                    answer_text = f'"{filled_word.strip()}".{explanation}'
-                else:
-                    # If no period, quote the entire answer.
-                    answer_text = f'"{answer_text.strip()}"'
-            elif q_type == "ORDER":
-                answer_text = f"The correct order is: {answer_text}"
-            
-            answer_markdown += f"{i}. **{question['question']}**\n\n   {answer_text}\n\n"
-    
-    answer_markdown += ":::"
-    
-    return answer_markdown
-
-def run_verify_mode(args):
+def run_verify_mode_simple(file_path):
     """Verify quiz files and validate their structure"""
     print("=== Quiz Verify Mode ===")
-    
-    if args.directory:
-        run_verify_directory(args.directory)
-    elif args.quiz_file:
-        # Check if the quiz file is actually a markdown file
-        if args.quiz_file.lower().endswith(('.qmd', '.md', '.markdown')):
-            print(f"🔍 Detected markdown file provided with -q/--quiz-file: {args.quiz_file}")
-            print("   Treating as markdown file and finding corresponding quiz file...")
-            run_verify_qmd_to_quiz(args.quiz_file)
-        else:
-            # Quiz file provided - find corresponding markdown file and verify
-            run_verify_quiz_to_qmd(args.quiz_file)
-    elif args.file:
-        # Markdown file provided - find corresponding quiz file and verify
-        run_verify_qmd_to_quiz(args.file)
-    else:
-        print("Error: One of --quiz-file, --directory, or --file is required for verify mode")
-        print("Usage:")
-        print("  python quizzes.py --mode verify --quiz-file <quiz_file>")
-        print("  python quizzes.py --mode verify --quiz-file <qmd_file>  # Will detect markdown file")
-        print("  python quizzes.py --mode verify --directory <path>")
-        print("  python quizzes.py --mode verify --file <qmd_file>")
-        return
+    run_verify_mode(file_path)
 
-def run_verify_quiz_to_qmd(quiz_file_path):
-    """Verify quiz file and find corresponding markdown file for validation"""
-    print(f"🔍 Verifying quiz file and finding corresponding markdown: {quiz_file_path}")
-    
-    # Stage 1: Validate quiz file schema
-    print("\n=== Stage 1: Quiz File Schema Validation ===")
-    quiz_data = validate_quiz_schema(quiz_file_path)
-    if not quiz_data:
-        return
-    
-    # Stage 2: Find corresponding markdown file
-    print("\n=== Stage 2: Finding Corresponding Markdown File ===")
-    qmd_file_path = find_qmd_file_from_quiz(quiz_file_path, quiz_data)
-    if not qmd_file_path:
-        print("❌ No corresponding markdown file found")
-        print("   The quiz file should have a 'source_file' in its metadata")
-        return
-    
-    # Stage 3: Analyze markdown file
-    print("\n=== Stage 3: Markdown File Analysis ===")
-    qmd_sections = analyze_qmd_file(qmd_file_path)
-    if not qmd_sections:
-        return
-    
-    # Stage 4: Correspondence validation
-    print("\n=== Stage 4: Correspondence Validation ===")
-    validate_correspondence(qmd_sections, quiz_data, qmd_file_path, quiz_file_path)
+def run_clean_mode_simple(qmd_file, args):
+    """Clean all quizzes from a markdown file"""
+    print("=== Quiz Clean Mode (Single File) ===")
+    clean_single_file(qmd_file, args)
 
-def run_verify_qmd_to_quiz(qmd_file_path):
-    """Verify markdown file and find corresponding quiz file for validation"""
-    print(f"🔍 Verifying markdown file and finding corresponding quiz: {qmd_file_path}")
-    
-    # Stage 1: Analyze markdown file
-    print("\n=== Stage 1: Markdown File Analysis ===")
-    qmd_sections = analyze_qmd_file(qmd_file_path)
-    if not qmd_sections:
-        return
-    
-    # Stage 2: Find corresponding quiz file
-    print("\n=== Stage 2: Finding Corresponding Quiz File ===")
-    quiz_file_path = find_quiz_file_from_qmd(qmd_file_path)
-    if not quiz_file_path:
-        print("❌ No corresponding quiz file found")
-        print("   Make sure the markdown file has 'quiz: filename.json' in its frontmatter")
-        return
-    
-    # Stage 3: Validate quiz file schema
-    print("\n=== Stage 3: Quiz File Schema Validation ===")
-    quiz_data = validate_quiz_schema(quiz_file_path)
-    if not quiz_data:
-        return
-    
-    # Stage 4: Correspondence validation
-    print("\n=== Stage 4: Correspondence Validation ===")
-    validate_correspondence(qmd_sections, quiz_data, qmd_file_path, quiz_file_path)
+def run_clean_mode_directory(directory, args):
+    """Clean all quizzes from all QMD files in a directory"""
+    print("=== Quiz Clean Mode (Directory) ===")
+    clean_directory(directory, args)
 
-def find_qmd_file_from_quiz(quiz_file_path, quiz_data):
-    """Find the corresponding markdown file for a quiz file"""
-    # Get source file from quiz metadata
-    metadata = quiz_data.get('metadata', {})
-    source_file = metadata.get('source_file')
-    
-    if not source_file:
-        print("❌ Quiz file missing 'source_file' in metadata")
-        return None
-    
-    # Try to find the source file
-    if os.path.exists(source_file):
-        # Absolute path or relative to current directory
-        return source_file
-    
-    # Try relative to quiz file directory
-    quiz_dir = os.path.dirname(quiz_file_path)
-    relative_path = os.path.join(quiz_dir, source_file)
-    if os.path.exists(relative_path):
-        return relative_path
-    
-    # Try with different extensions
-    for ext in ['.qmd', '.md', '.markdown']:
-        if not source_file.endswith(ext):
-            test_path = os.path.join(quiz_dir, source_file + ext)
-            if os.path.exists(test_path):
-                return test_path
-    
-    print(f"❌ Source file not found: {source_file}")
-    print(f"   Tried:")
-    print(f"   - {source_file}")
-    print(f"   - {relative_path}")
-    return None
-
-def validate_quiz_schema(quiz_file_path):
-    """Validate quiz file against schema and return parsed data"""
-    print(f"🔍 Validating quiz schema: {quiz_file_path}")
-    
-    # Basic file validation
-    is_valid, message = validate_quiz_file(quiz_file_path)
-    if not is_valid:
-        print(f"❌ Quiz file validation failed: {message}")
-        return None
-    
-    try:
-        with open(quiz_file_path, 'r', encoding='utf-8') as f:
-            quiz_data = json.load(f)
-        
-        # Use JSON Schema validation
-        try:
-            validate(instance=quiz_data, schema=QUIZ_FILE_SCHEMA)
-            print("✅ JSON Schema validation passed")
-        except ValidationError as e:
-            print(f"❌ JSON Schema validation failed:")
-            print(f"   - Path: {' -> '.join(str(p) for p in e.path)}")
-            print(f"   - Error: {e.message}")
-            return None
-        
-        # Count statistics for reporting
-        sections = quiz_data.get('sections', [])
-        valid_sections = len(sections)
-        total_questions = 0
-        valid_questions = 0
-        
-        for section in sections:
-            quiz_data_section = section.get('quiz_data', {})
-            if quiz_data_section.get('quiz_needed', False):
-                questions = quiz_data_section.get('questions', [])
-                total_questions += len(questions)
-                valid_questions += len(questions)  # All questions should be valid if schema passed
-        
-        print(f"✅ Schema validation passed:")
-        print(f"   - Valid sections: {valid_sections}")
-        print(f"   - Total questions: {total_questions}")
-        print(f"   - Valid questions: {valid_questions}")
-        
-        return quiz_data
-        
-    except Exception as e:
-        print(f"❌ Error validating quiz schema: {str(e)}")
-        return None
-
-def manual_schema_validation(quiz_data):
-    """Manual validation fallback when jsonschema is not available"""
-    # Validate schema structure
-    if not isinstance(quiz_data, dict):
-        print("❌ Quiz data must be an object")
-        return False
-    
-    if 'sections' not in quiz_data:
-        print("❌ Quiz data missing 'sections' key")
-        return False
-    
-    if not isinstance(quiz_data['sections'], list):
-        print("❌ Quiz 'sections' must be an array")
-        return False
-    
-    # Validate each section's quiz data
-    for i, section in enumerate(quiz_data['sections']):
-        if not isinstance(section, dict):
-            print(f"❌ Section {i+1}: Must be an object")
-            return False
-        
-        required_fields = ['section_id', 'section_title', 'quiz_data']
-        missing_fields = [field for field in required_fields if field not in section]
-        if missing_fields:
-            print(f"❌ Section {i+1}: Missing fields: {missing_fields}")
-            return False
-        
-        quiz_data_section = section['quiz_data']
-        if not isinstance(quiz_data_section, dict):
-            print(f"❌ Section {i+1}: quiz_data must be an object")
-            return False
-        
-        if 'quiz_needed' not in quiz_data_section:
-            print(f"❌ Section {i+1}: Missing quiz_needed field")
-            return False
-        
-        if quiz_data_section['quiz_needed']:
-            if 'questions' not in quiz_data_section:
-                print(f"❌ Section {i+1}: Missing questions array")
-                return False
-            
-            questions = quiz_data_section['questions']
-            if not isinstance(questions, list):
-                print(f"❌ Section {i+1}: questions must be an array")
-                return False
-            
-            # Validate each question
-            for j, question in enumerate(questions):
-                if not isinstance(question, dict):
-                    print(f"❌ Section {i+1}, Question {j+1}: Must be an object")
-                    return False
-                
-                required_question_fields = ['question', 'answer', 'learning_objective']
-                missing_question_fields = [field for field in required_question_fields if field not in question]
-                if missing_question_fields:
-                    print(f"❌ Section {i+1}, Question {j+1}: Missing fields: {missing_question_fields}")
-                    return False
-    
-    return True
-
-def validate_correspondence(qmd_data, quiz_data, qmd_file_path, quiz_file_path):
-    """Validate correspondence between QMD sections and quiz sections"""
-    print(f"🔍 Validating correspondence between QMD and quiz files")
-    
-    qmd_sections = qmd_data['sections']
-    quiz_sections = quiz_data['sections']
-    
-    # Create lookup dictionaries
-    qmd_section_ids = {section['section_id']: section for section in qmd_sections}
-    quiz_section_ids = {section['section_id']: section for section in quiz_sections}
-    
-    print(f"\n📊 Section Analysis:")
-    print(f"   - QMD sections: {len(qmd_sections)}")
-    print(f"   - Quiz sections: {len(quiz_sections)}")
-    
-    # Check for quiz sections that don't exist in QMD (this is the critical check)
-    missing_in_qmd = []
-    for quiz_section in quiz_sections:
-        if quiz_section['section_id'] not in qmd_section_ids:
-            missing_in_qmd.append({
-                'section_id': quiz_section['section_id'],
-                'title': quiz_section['section_title']
-            })
-    
-    # Check for mismatched titles (when section exists in both but titles differ)
-    mismatched_titles = []
-    for quiz_section in quiz_sections:
-        qmd_section = qmd_section_ids.get(quiz_section['section_id'])
-        if qmd_section and qmd_section['section_title'] != quiz_section['section_title']:
-            mismatched_titles.append({
-                'section_id': quiz_section['section_id'],
-                'qmd_title': qmd_section['section_title'],
-                'quiz_title': quiz_section['section_title']
-            })
-    
-    # Optional: Show which QMD sections don't have quizzes (for information only)
-    qmd_sections_without_quizzes = []
-    for qmd_section in qmd_sections:
-        if qmd_section['section_id'] not in quiz_section_ids:
-            qmd_sections_without_quizzes.append(qmd_section['section_title'])
-    
-    # Report results
-    print(f"\n📋 Correspondence Results:")
-    
-    if missing_in_qmd:
-        print(f"❌ Quiz sections that don't exist in QMD file:")
-        for missing in missing_in_qmd:
-            print(f"   - {missing['title']} ({missing['section_id']})")
-    else:
-        print(f"✅ All quiz sections exist in QMD file")
-    
-    if mismatched_titles:
-        print(f"❌ Mismatched section titles:")
-        for mismatch in mismatched_titles:
-            print(f"   - {mismatch['section_id']}:")
-            print(f"     QMD:  {mismatch['qmd_title']}")
-            print(f"     Quiz: {mismatch['quiz_title']}")
-    else:
-        print(f"✅ All section titles match")
-    
-    # Informational: Show QMD sections without quizzes
-    if qmd_sections_without_quizzes:
-        print(f"\nℹ️  QMD sections without quizzes (this is normal):")
-        for title in qmd_sections_without_quizzes:
-            print(f"   - {title}")
-    else:
-        print(f"\nℹ️  All QMD sections have corresponding quiz entries")
-    
-    # Summary - only count critical issues
-    critical_issues = len(missing_in_qmd) + len(mismatched_titles)
-    
-    print(f"\n{'='*60}")
-    if critical_issues == 0:
-        print(f"🎉 Perfect correspondence! All quiz sections exist in QMD file.")
-    else:
-        print(f"⚠️  Found {critical_issues} critical correspondence issue(s)")
-        if missing_in_qmd:
-            print(f"   - {len(missing_in_qmd)} quiz sections missing from QMD")
-        if mismatched_titles:
-            print(f"   - {len(mismatched_titles)} mismatched section titles")
-    print(f"{'='*60}")
-
-def run_verify_directory(directory_path):
+def run_verify_mode_directory(directory_path):
     """Verify all quiz files in a directory"""
-    if not os.path.exists(directory_path):
-        print(f"❌ Directory not found: {directory_path}")
-        return
-    
-    if not os.path.isdir(directory_path):
-        print(f"❌ Path is not a directory: {directory_path}")
-        return
-    
-    print(f"🔍 Scanning directory: {directory_path}")
-    
-    # Find all JSON files
-    json_files = []
-    for file in os.listdir(directory_path):
-        if file.endswith('.json'):
-            json_files.append(os.path.join(directory_path, file))
-    
-    if not json_files:
-        print("❌ No JSON files found in directory")
-        return
-    
-    print(f"📁 Found {len(json_files)} JSON files")
-    
-    # Verify each file
-    results = []
-    for json_file in json_files:
-        print(f"\n{'='*60}")
-        print(f"Verifying: {os.path.basename(json_file)}")
-        print(f"{'='*60}")
-        
-        result = verify_single_file_detailed(json_file)
-        results.append(result)
-    
-    # Print summary
-    print_summary(results)
-
-def run_verify_single_file(quiz_file_path):
-    """Verify a single quiz file"""
-    print(f"🔍 Verifying single file: {quiz_file_path}")
-    result = verify_single_file_detailed(quiz_file_path)
-    
-    # For single file, show detailed output
-    if result['valid']:
-        print(f"\n🎉 Quiz file is valid!")
-    else:
-        print(f"\n❌ Quiz file has issues!")
-
-def verify_single_file_detailed(quiz_file_path):
-    """Verify a single quiz file and return detailed results"""
-    result = {
-        'file': quiz_file_path,
-        'valid': False,
-        'error': None,
-        'metadata': {},
-        'sections': {
-            'total': 0,
-            'valid': 0,
-            'with_quizzes': 0,
-            'without_quizzes': 0
-        },
-        'questions': {
-            'total': 0,
-            'valid': 0
-        }
-    }
-    
-    # Basic file validation
-    is_valid, message = validate_quiz_file(quiz_file_path)
-    if not is_valid:
-        result['error'] = message
-        return result
-    
-    # Load and perform detailed validation
-    try:
-        with open(quiz_file_path, 'r', encoding='utf-8') as f:
-            quiz_data = json.load(f)
-        
-        # Check metadata
-        metadata = quiz_data.get('metadata', {})
-        result['metadata'] = {
-            'source_file': metadata.get('source_file', 'Not specified'),
-            'total_sections': metadata.get('total_sections', 'Not specified'),
-            'sections_with_quizzes': metadata.get('sections_with_quizzes', 'Not specified'),
-            'sections_without_quizzes': metadata.get('sections_without_quizzes', 'Not specified')
-        }
-        
-        # Validate sections
-        sections = quiz_data.get('sections', [])
-        result['sections']['total'] = len(sections)
-        
-        for section in sections:
-            section_id = section.get('section_id', '')
-            section_title = section.get('section_title', '')
-            quiz_data_section = section.get('quiz_data', {})
-            
-            # Check required fields
-            if not section_id or not section_title:
-                continue
-            
-            # Check quiz data structure
-            if not isinstance(quiz_data_section, dict):
-                continue
-            
-            quiz_needed = quiz_data_section.get('quiz_needed', None)
-            if quiz_needed is None:
-                continue
-            
-            result['sections']['valid'] += 1
-            
-            if quiz_needed:
-                result['sections']['with_quizzes'] += 1
-                questions = quiz_data_section.get('questions', [])
-                result['questions']['total'] += len(questions)
-                
-                # Validate questions
-                for question in questions:
-                    if isinstance(question, dict):
-                        required_fields = ['question', 'answer', 'learning_objective']
-                        if all(field in question for field in required_fields):
-                            result['questions']['valid'] += 1
-            else:
-                result['sections']['without_quizzes'] += 1
-        
-        result['valid'] = True
-        
-    except Exception as e:
-        result['error'] = str(e)
-    
-    return result
-
-def print_summary(results):
-    """Print a summary of verification results for multiple files"""
-    print(f"\n{'='*80}")
-    print(f"📊 VERIFICATION SUMMARY")
-    print(f"{'='*80}")
-    
-    total_files = len(results)
-    valid_files = sum(1 for r in results if r['valid'])
-    invalid_files = total_files - valid_files
-    
-    print(f"📁 Total files processed: {total_files}")
-    print(f"✅ Valid files: {valid_files}")
-    print(f"❌ Invalid files: {invalid_files}")
-    
-    if invalid_files > 0:
-        print(f"\n❌ Invalid files:")
-        for result in results:
-            if not result['valid']:
-                print(f"   - {os.path.basename(result['file'])}: {result['error']}")
-    
-    # Summary statistics
-    total_sections = sum(r['sections']['total'] for r in results if r['valid'])
-    valid_sections = sum(r['sections']['valid'] for r in results if r['valid'])
-    sections_with_quizzes = sum(r['sections']['with_quizzes'] for r in results if r['valid'])
-    sections_without_quizzes = sum(r['sections']['without_quizzes'] for r in results if r['valid'])
-    total_questions = sum(r['questions']['total'] for r in results if r['valid'])
-    valid_questions = sum(r['questions']['valid'] for r in results if r['valid'])
-    
-    print(f"\n📝 Section Statistics:")
-    print(f"   - Total sections: {total_sections}")
-    print(f"   - Valid sections: {valid_sections}")
-    print(f"   - Sections with quizzes: {sections_with_quizzes}")
-    print(f"   - Sections without quizzes: {sections_without_quizzes}")
-    
-    print(f"\n❓ Question Statistics:")
-    print(f"   - Total questions: {total_questions}")
-    print(f"   - Valid questions: {valid_questions}")
-    
-    if total_questions > 0:
-        question_validity = (valid_questions / total_questions) * 100
-        print(f"   - Question validity rate: {question_validity:.1f}%")
-    
-    # File-by-file breakdown
-    print(f"\n📋 File-by-file breakdown:")
-    for result in results:
-        filename = os.path.basename(result['file'])
-        status = "✅" if result['valid'] else "❌"
-        sections_info = f"{result['sections']['valid']}/{result['sections']['total']} sections"
-        questions_info = f"{result['questions']['valid']}/{result['questions']['total']} questions"
-        
-        print(f"   {status} {filename}: {sections_info}, {questions_info}")
-    
-    print(f"\n{'='*80}")
-    if invalid_files == 0:
-        print(f"🎉 All files are valid!")
-    else:
-        print(f"⚠️  {invalid_files} file(s) have issues that need attention.")
-
-def analyze_qmd_file(qmd_file_path):
-    """Analyze QMD file and extract sections with metadata"""
-    if not os.path.exists(qmd_file_path):
-        print(f"❌ QMD file not found: {qmd_file_path}")
-        return None
-    
-    try:
-        with open(qmd_file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        # Extract quiz metadata
-        quiz_metadata = extract_quiz_metadata(content)
-        if quiz_metadata:
-            print(f"📋 Found quiz metadata: {quiz_metadata}")
-        
-        # Extract sections
-        sections = extract_sections_with_ids(content)
-        if not sections:
-            print("❌ No sections found in QMD file")
-            return None
-        
-        print(f"📝 Found {len(sections)} sections in QMD file:")
-        for section in sections:
-            print(f"   - {section['section_title']} ({section['section_id']})")
-        
-        return {
-            'file_path': qmd_file_path,
-            'quiz_metadata': quiz_metadata,
-            'sections': sections
-        }
-        
-    except Exception as e:
-        print(f"❌ Error reading QMD file: {str(e)}")
-        return None
-
-def extract_quiz_metadata(content):
-    """Extract quiz metadata from QMD file frontmatter"""
-    # Look for YAML frontmatter
-    frontmatter_match = re.search(r'^---\s*\n(.*?)\n---\s*\n', content, re.DOTALL)
-    if not frontmatter_match:
-        return None
-    
-    frontmatter = frontmatter_match.group(1)
-    
-    # Look for quiz: field
-    quiz_match = re.search(r'^quiz:\s*(.+)$', frontmatter, re.MULTILINE)
-    if quiz_match:
-        return quiz_match.group(1).strip()
-    
-    return None
-
-def find_quiz_file_from_qmd(qmd_file_path):
-    """Find the corresponding quiz file for a QMD file"""
-    # First, try to get quiz path from QMD metadata
-    try:
-        with open(qmd_file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        quiz_metadata = extract_quiz_metadata(content)
-        if quiz_metadata:
-            # Try relative to QMD file directory
-            qmd_dir = os.path.dirname(qmd_file_path)
-            quiz_path = os.path.join(qmd_dir, quiz_metadata)
-            if os.path.exists(quiz_path):
-                return quiz_path
-            
-            # Try absolute path
-            if os.path.exists(quiz_metadata):
-                return quiz_metadata
-    
-    except Exception:
-        pass
-    
-    # Fallback: look for quiz file with same name
-    qmd_dir = os.path.dirname(qmd_file_path)
-    qmd_name = os.path.splitext(os.path.basename(qmd_file_path))[0]
-    quiz_path = os.path.join(qmd_dir, f"{qmd_name}_quizzes.json")
-    
-    if os.path.exists(quiz_path):
-        return quiz_path
-    
-    return None
-
-def insert_quiz_into_section(content, section_id, quiz_markdown):
-    """Insert quiz markdown at the end of a specific section"""
-    # Remove the # prefix if present
-    if section_id.startswith('#'):
-        section_id = section_id[1:]
-    
-    # Find the section in the content
-    section_pattern = re.compile(rf'^##\s+.*?\{{\#{re.escape(section_id)}\}}.*?$', re.MULTILINE)
-    match = section_pattern.search(content)
-    
-    if not match:
-        print(f"⚠️  Warning: Could not find section {section_id} in content")
-        return content
-    
-    # Find the start and end of this section
-    start_pos = match.start()
-    
-    # Find the next section or end of file
-    next_section_pattern = re.compile(r'^##\s+', re.MULTILINE)
-    next_match = next_section_pattern.search(content, start_pos + 1)
-    
-    if next_match:
-        end_pos = next_match.start()
-    else:
-        end_pos = len(content)
-    
-    # Insert the quiz before the next section
-    before_section = content[:end_pos]
-    after_section = content[end_pos:]
-    
-    return before_section + quiz_markdown + after_section
-
-def run_clean_mode(args):
-    """Clean all quizzes from markdown files"""
-    print("=== Quiz Clean Mode ===")
-    
-    if not args.file and not args.directory:
-        print("Error: In clean mode, you must specify either:")
-        print("  -f/--file <path>     for a single .qmd file")
-        print("  -d/--directory <path> for a directory containing .qmd files")
-        print("\nExamples:")
-        print("  python quizzes.py --mode clean --file chapter1.qmd")
-        print("  python quizzes.py --mode clean --directory ./chapters/")
-        return
-    
-    if args.file:
-        # Enforce .qmd extension
-        if not args.file.lower().endswith('.qmd'):
-            print("Error: The input file must have a .qmd extension for clean mode.")
-            print("Please provide a file with .qmd extension.")
-            return
-        print("=== Quiz Clean Mode (Single File) ===")
-        clean_single_file(args.file, args)
-    elif args.directory:
-        print("=== Quiz Clean Mode (Directory) ===")
-        clean_directory(args.directory, args)
-
-def clean_single_file(qmd_file, args):
-    """Clean quizzes from a single QMD file"""
-    print(f"🧹 Cleaning quizzes from: {qmd_file}")
-    
-    try:
-        # Read the file
-        with open(qmd_file, 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        # Create backup if requested
-        if args.backup:
-            backup_file = f"{qmd_file}.backup"
-            with open(backup_file, 'w', encoding='utf-8') as f:
-                f.write(content)
-            print(f"📦 Created backup: {backup_file}")
-        
-        # Clean the content
-        cleaned_content, removed_count = clean_quiz_content(content)
-        
-        if args.dry_run:
-            print(f"🔍 Dry run - would remove {removed_count} quiz elements from {qmd_file}")
-            return
-        
-        # Write the cleaned content back
-        with open(qmd_file, 'w', encoding='utf-8') as f:
-            f.write(cleaned_content)
-        
-        print(f"✅ Cleaned {qmd_file}")
-        print(f"   - Removed {removed_count} quiz elements")
-        
-    except Exception as e:
-        print(f"❌ Error cleaning {qmd_file}: {str(e)}")
-
-def clean_directory(directory, args):
-    """Clean quizzes from all QMD files in a directory"""
-    if not os.path.exists(directory):
-        print(f"❌ Directory not found: {directory}")
-        return
-    
-    if not os.path.isdir(directory):
-        print(f"❌ Path is not a directory: {directory}")
-        return
-    
-    print(f"🔍 Scanning directory: {directory}")
-    
-    # Find all .qmd files
-    qmd_files = []
-    for file in os.listdir(directory):
-        if file.lower().endswith('.qmd'):
-            qmd_files.append(os.path.join(directory, file))
-    
-    if not qmd_files:
-        print("❌ No .qmd files found in directory")
-        return
-    
-    print(f"📁 Found {len(qmd_files)} .qmd files")
-    
-    # Clean each file
-    total_removed = 0
-    for qmd_file in qmd_files:
-        print(f"\n--- Cleaning: {os.path.basename(qmd_file)} ---")
-        try:
-            # Read the file
-            with open(qmd_file, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            # Create backup if requested
-            if args.backup:
-                backup_file = f"{qmd_file}.backup"
-                with open(backup_file, 'w', encoding='utf-8') as f:
-                    f.write(content)
-                print(f"📦 Created backup: {os.path.basename(backup_file)}")
-            
-            # Clean the content
-            cleaned_content, removed_count = clean_quiz_content(content)
-            total_removed += removed_count
-            
-            if args.dry_run:
-                print(f"🔍 Dry run - would remove {removed_count} quiz elements")
-                continue
-            
-            # Write the cleaned content back
-            with open(qmd_file, 'w', encoding='utf-8') as f:
-                f.write(cleaned_content)
-            
-            print(f"✅ Cleaned {os.path.basename(qmd_file)} ({removed_count} elements removed)")
-            
-        except Exception as e:
-            print(f"❌ Error cleaning {os.path.basename(qmd_file)}: {str(e)}")
-    
-    if args.dry_run:
-        print(f"\n🔍 Dry run complete - would remove {total_removed} quiz elements total")
-    else:
-        print(f"\n✅ Clean complete - removed {total_removed} quiz elements total")
-
-def clean_quiz_content(content):
-    """Remove all quiz callouts and Quiz Answers section from content, preserving all line breaks and spaces around section headers and blocks."""
-    removed_count = 0
-
-    # Remove quiz question callouts (match any number of colons, preserve whitespace)
-    question_pattern = re.compile(
-        r'\n+:{3,}\s*\{\.' + re.escape(QUIZ_QUESTION_CALLOUT_CLASS) + r' #[^}]*\}\s*\n.*?\n:{3,}\s*\n',
-        re.DOTALL
-    )
-    content, question_count = question_pattern.subn('\n', content)
-    removed_count += question_count
-
-    # Remove quiz answer callouts (match any number of colons, preserve whitespace)
-    answer_pattern = re.compile(
-        r'\n+:{3,}\s*\{\.' + re.escape(QUIZ_ANSWER_CALLOUT_CLASS) + r' #[^}]*\}\s*\n.*?\n:{3,}\s*\n',
-        re.DOTALL
-    )
-    content, answer_count = answer_pattern.subn('\n', content)
-    removed_count += answer_count
-
-    # Remove the Quiz Answers section entirely, but preserve line breaks before/after
-    answers_section_pattern = re.compile(
-        r'(\n+## Quiz Answers[^\n]*\n(?:.|\n)*?)(?=\n## |\Z)',
-        re.DOTALL
-    )
-    content, section_count = answers_section_pattern.subn('\n', content)
-    removed_count += section_count
-
-    return content, removed_count
-
-def regenerate_section_quiz(client, section_title, section_text, current_quiz_data, user_prompt, model="gpt-4o"):
-    """Regenerate quiz for a specific section based on user prompt"""
-    
-    # Format the current quiz data as JSON for context
-    current_quiz_json = json.dumps(current_quiz_data, indent=2, ensure_ascii=False)
-    
-    # Build the regeneration prompt
-    regeneration_prompt = f"""
-You are being asked to REGENERATE the quiz questions for this section.
-
-IMPORTANT: The user's regeneration request takes PRIORITY over the original quiz evaluation criteria. 
-If the user wants a quiz generated, you should generate one regardless of whether the original analysis 
-determined a quiz was needed or not. Focus on fulfilling the user's specific request while keeping 
-the educational quality standards in mind.
-
-User's regeneration request: {user_prompt}
-
-{SYSTEM_PROMPT}
-
-Current section: "{section_title}"
-
-Current quiz data (in JSON format):
-{current_quiz_json}
-
-Please regenerate the quiz questions for this section. Return your response in exactly the same JSON format as shown above, but with new questions based on the regeneration instructions provided.
-
-IMPORTANT: After the JSON response, add a brief comment (2-3 sentences) explaining what changes you made based on the regeneration request. Format it like this:
-
-<!-- REGENERATION_COMMENT -->
-Brief explanation of what was changed based on the user's request.
-<!-- END_REGENERATION_COMMENT -->
-""".strip()
-    
-    # Call OpenAI with the same parameters as original generation
-    try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": "You are an educational content specialist with expertise in machine learning systems."},
-                {"role": "user", "content": regeneration_prompt}
-            ],
-            temperature=0.4
-        )
-        content = response.choices[0].message.content
-        
-        # Extract the comment if present
-        comment = ""
-        comment_match = re.search(r'<!-- REGENERATION_COMMENT -->(.*?)<!-- END_REGENERATION_COMMENT -->', content, re.DOTALL)
-        if comment_match:
-            comment = comment_match.group(1).strip()
-            # Remove the comment from content to get clean JSON
-            content = re.sub(r'<!-- REGENERATION_COMMENT -->.*?<!-- END_REGENERATION_COMMENT -->', '', content, flags=re.DOTALL).strip()
-        
-        # Parse the JSON response
-        try:
-            data = json.loads(content)
-        except json.JSONDecodeError:
-            json_match = re.search(r'\{.*\}', content, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group(0))
-            else:
-                return {"quiz_needed": False, "rationale": "No JSON found in regeneration response"}
-        
-        # Validate the response against JSON_SCHEMA
-        try:
-            validate(instance=data, schema=JSON_SCHEMA)
-        except ValidationError as e:
-            print(f"⚠️  Warning: Regeneration response doesn't match schema: {e.message}")
-            return {"quiz_needed": False, "rationale": f"Schema validation failed: {e.message}"}
-        
-        # Add the comment to the data for display purposes (won't be saved to JSON)
-        data['_regeneration_comment'] = comment
-        
-        return data
-        
-    except APIError as e:
-        return {"quiz_needed": False, "rationale": f"API error: {str(e)}"}
-    except Exception as e:
-        return {"quiz_needed": False, "rationale": f"Unexpected error: {str(e)}"}
+    print("=== Quiz Verify Mode (Directory) ===")
+    run_verify_directory(directory_path)
 
 if __name__ == "__main__":
     main()

@@ -2,7 +2,7 @@
 
 ## Overview
 
-The section ID management system provides automated tools for managing unique, consistent section IDs in Quarto/Markdown book projects. The system uses a **hierarchy-based approach** to generate stable, meaningful section IDs that reflect the actual document structure.
+The section ID management system provides automated tools for managing unique, consistent section IDs in Quarto/Markdown book projects. The system uses a **hierarchy-based approach** to generate stable, meaningful section IDs that reflect the actual document structure and ensures **global uniqueness** across the entire book project.
 
 ## Key Features
 
@@ -11,6 +11,7 @@ The section ID management system provides automated tools for managing unique, c
 - **Meaningful Structure**: IDs reflect the actual document organization and parent-child relationships
 - **Natural Duplicate Handling**: Sections with the same name but different parents automatically get different IDs
 - **No Counter Dependency**: No need to worry about section reordering affecting IDs
+- **Global Uniqueness**: File path inclusion ensures unique IDs across the entire book project
 
 ### ID Format
 ```sec-{chapter-title}-{section-title}-{hash}
@@ -22,7 +23,39 @@ The hash is generated from:
 {file_path}|{chapter_title}|{section_title}|{parent_hierarchy}
 ```
 
-Where `parent_hierarchy` is a pipe-separated list of all parent sections (e.g., `parent1|parent2|parent3`).
+Where:
+- `file_path`: The file path (ensures global uniqueness across different files)
+- `chapter_title`: The chapter title
+- `section_title`: The section title
+- `parent_hierarchy`: A pipe-separated list of all parent sections (e.g., `parent1|parent2|parent3`)
+
+## Global Uniqueness Guarantee
+
+The inclusion of the file path in the hash generation ensures that sections with identical names and hierarchies in different files will have different IDs. This prevents conflicts when:
+
+- Multiple chapters have sections with the same name (e.g., "Introduction" in different files)
+- Different files have identical section hierarchies (e.g., "Techniques > Advanced > Optimization")
+- The same section name appears in multiple contexts across the book
+
+### Example: Same Section Name in Different Files
+
+```markdown
+# File: contents/chapter1.qmd
+# Getting Started
+
+## Introduction {#sec-getting-started-introduction-d212}
+
+# File: contents/chapter2.qmd  
+# Getting Started
+
+## Introduction {#sec-getting-started-introduction-8435}
+```
+
+Hash inputs:
+- File 1: `"contents/chapter1.qmd|Getting Started|Introduction|"` → hash: `d212`
+- File 2: `"contents/chapter2.qmd|Getting Started|Introduction|"` → hash: `8435`
+
+Result: Different 4-character hashes ensure unique IDs across the entire book.
 
 ## How It Works
 
@@ -51,7 +84,7 @@ if parent_sections:
         hierarchy_parts.append(simple_slugify(parent))
     hierarchy = "|".join(hierarchy_parts)
 
-# Generate hash
+# Generate hash with file path for global uniqueness
 hash_input = f"{file_path}|{chapter_title}|{title}|{hierarchy}".encode('utf-8')
 hash_suffix = hashlib.sha1(hash_input).hexdigest()[:4]
 ```
@@ -92,6 +125,7 @@ The three "Data Considerations" sections will get different IDs:
 | **Meaning** | Arbitrary position-based | Reflects document structure |
 | **Duplicates** | Requires manual counter management | Handled naturally by context |
 | **Maintenance** | Fragile to document changes | Robust and self-maintaining |
+| **Global Uniqueness** | May conflict across files | Guaranteed by file path inclusion |
 
 ## Usage
 
@@ -141,6 +175,13 @@ If you have existing counter-based IDs, the system will automatically migrate th
 def generate_section_id(title, file_path, chapter_title, section_counter, parent_sections=None):
 ```
 
+### Parameters
+- `title`: The section title
+- `file_path`: The file path (included in hash for global uniqueness)
+- `chapter_title`: The chapter title
+- `section_counter`: Counter for this section (not used in hash)
+- `parent_sections`: List of parent section titles (included in hash)
+
 ### Parent Sections Format
 - `parent_sections` is a list of strings representing the full hierarchy
 - Each parent is processed through `simple_slugify()` to remove stopwords
@@ -150,12 +191,13 @@ def generate_section_id(title, file_path, chapter_title, section_counter, parent
 - Uses SHA-1 for hash generation
 - Takes first 4 hex characters for the suffix
 - Ensures uniqueness while keeping IDs readable
+- Includes file path to guarantee global uniqueness across the book project
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Duplicate IDs**: Should not occur with hierarchy-based system
+1. **Duplicate IDs**: Should not occur with hierarchy-based system and file path inclusion
 2. **Changing IDs**: IDs may change when document structure changes (this is expected)
 3. **Cross-reference breaks**: Use `--repair` to update all references
 
