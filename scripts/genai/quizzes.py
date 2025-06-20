@@ -1825,7 +1825,7 @@ def format_quiz_callout(quiz_section, section_id):
     section_key = section_id.replace('#', '')
     
     # Format the quiz as callout
-    quiz_markdown = f"\n\n::: {{.{QUIZ_QUESTION_CALLOUT_CLASS} #quiz-question-{section_key}}}\n\n"
+    quiz_markdown = f"\n::: {{.{QUIZ_QUESTION_CALLOUT_CLASS} #quiz-question-{section_key}}}\n\n"
     
     for i, question in enumerate(questions, 1):
         quiz_markdown += f"{i}. {question['question']}\n\n"
