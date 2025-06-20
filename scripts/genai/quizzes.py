@@ -2629,33 +2629,33 @@ def clean_directory(directory, args):
         print(f"\n✅ Clean complete - removed {total_removed} quiz elements total")
 
 def clean_quiz_content(content):
-    """Remove all quiz callouts and Quiz Answers section from content"""
+    """Remove all quiz callouts and Quiz Answers section from content, preserving all line breaks and spaces around section headers and blocks."""
     removed_count = 0
-    
-    # Remove quiz question callouts
+
+    # Remove quiz question callouts (match any number of colons, preserve whitespace)
     question_pattern = re.compile(
-        r'\n\n::: \{\.' + re.escape(QUIZ_QUESTION_CALLOUT_CLASS) + r' #[^}]*\}\n\n.*?\n\nSee Answer \\ref\{[^}]+\}\.\n\n:::\n\n',
+        r'\n+:{3,}\s*\{\.' + re.escape(QUIZ_QUESTION_CALLOUT_CLASS) + r' #[^}]*\}\s*\n.*?\n:{3,}\s*\n',
         re.DOTALL
     )
-    content, question_count = question_pattern.subn('', content)
+    content, question_count = question_pattern.subn('\n', content)
     removed_count += question_count
-    
-    # Remove quiz answer callouts
+
+    # Remove quiz answer callouts (match any number of colons, preserve whitespace)
     answer_pattern = re.compile(
-        r'\n\n::: \{\.' + re.escape(QUIZ_ANSWER_CALLOUT_CLASS) + r' #[^}]*\}\n\n.*?\n\n:::\n\n',
+        r'\n+:{3,}\s*\{\.' + re.escape(QUIZ_ANSWER_CALLOUT_CLASS) + r' #[^}]*\}\s*\n.*?\n:{3,}\s*\n',
         re.DOTALL
     )
-    content, answer_count = answer_pattern.subn('', content)
+    content, answer_count = answer_pattern.subn('\n', content)
     removed_count += answer_count
-    
-    # Remove the Quiz Answers section entirely
+
+    # Remove the Quiz Answers section entirely, but preserve line breaks before/after
     answers_section_pattern = re.compile(
-        r'\n\n## Quiz Answers\n\n.*',
+        r'(\n+## Quiz Answers[^\n]*\n(?:.|\n)*?)(?=\n## |\Z)',
         re.DOTALL
     )
-    content, section_count = answers_section_pattern.subn('', content)
+    content, section_count = answers_section_pattern.subn('\n', content)
     removed_count += section_count
-    
+
     return content, removed_count
 
 def regenerate_section_quiz(client, section_title, section_text, current_quiz_data, user_prompt, model="gpt-4o"):
