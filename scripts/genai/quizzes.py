@@ -1871,12 +1871,27 @@ def format_answer_callout(quiz_section, section_id):
                         break
                 
                 if correct_choice_letter:
-                    answer_text = f"The correct answer is {correct_choice_letter}. {answer_text}"
+                    answer_text = f"These steps should be in the following order: {correct_choice_letter}. {answer_text}"
             
             answer_markdown += f"\n   {answer_text}\n\n"
         else:
             # Standard formatting for other types
-            answer_markdown += f"{i}. **{question['question']}**\n\n   {question['answer']}\n\n"
+            answer_text = question['answer']
+            if q_type == "FILL":
+                # The answer is expected to be the filled word/phrase, optionally followed by a period and an explanation.
+                parts = answer_text.split('.', 1)
+                if len(parts) > 1:
+                    filled_word = parts[0]
+                    explanation = parts[1]
+                    # Quote the filled word and reconstruct the answer.
+                    answer_text = f'"{filled_word.strip()}".{explanation}'
+                else:
+                    # If no period, quote the entire answer.
+                    answer_text = f'"{answer_text.strip()}"'
+            elif q_type == "ORDER":
+                answer_text = f"The correct order is: {answer_text}"
+            
+            answer_markdown += f"{i}. **{question['question']}**\n\n   {answer_text}\n\n"
     
     answer_markdown += ":::"
     
