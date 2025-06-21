@@ -1,32 +1,251 @@
 import argparse
 import os
 import re
-import logging
 import json
 from pathlib import Path
 from openai import OpenAI, APIError
-from slugify import slugify
+from datetime import datetime
+import yaml
+
+# Gradio imports
 import gradio as gr
-import sys
-import tempfile
-import shutil
-import time
 
-# Client is initialized in main() after logging is set up
+# JSON Schema validation
+from jsonschema import validate, ValidationError
 
-# --- Global Callout Type Definitions ---
-QUIZ_CALLOUT_CLASS = ".callout-quiz-question"
-ANSWER_CALLOUT_CLASS = ".callout-quiz-answer"
+# Callout class names for quiz insertion
+QUIZ_QUESTION_CALLOUT_CLASS = "callout-quiz-question"
+QUIZ_ANSWER_CALLOUT_CLASS = "callout-quiz-answer"
 
-# --- Global Reference and ID Prefixes ---
-REFERENCE_TEXT = "See Answer"
-QUESTION_ID_PREFIX = "quiz-question-"
-ANSWER_ID_PREFIX = "quiz-answer-"
+# Configuration for question types, making it easy to modify or extend.
+QUESTION_TYPE_CONFIG = [
+    {
+        "type": "MCQ",
+        "description": "Best for checking definitions, comparisons, and system behaviors. Provide 3–5 options with plausible distractors. The `answer` field must explain why the correct choice is correct."
+    },
+    {
+        "type": "TF",
+        "description": "Good for testing basic understanding or challenging misconceptions. The `answer` must include a justification."
+    },
+    {
+        "type": "SHORT",
+        "description": "Encourages deeper reflection. Works well for \"Why is X necessary?\" or \"What would happen if...?\" questions."
+    },
+    {
+        "type": "FILL",
+        "description": "Useful for terminology. Use `____` (four underscores) for the blank. The `answer` MUST provide the missing word(s) first, followed by a period and then a brief explanation. For example: `performance gap. This gap occurs...`"
+    },
+    {
+        "type": "ORDER",
+        "description": "Excellent for reinforcing processes or workflows. The `question` should list the items to be ordered, and the `answer` should present them in the correct sequence with explanations if necessary."
+    },
+    {
+        "type": "CALC",
+        "description": "For questions requiring mathematical calculation (e.g., performance estimates, metric calculations). The `answer` should show the steps of the calculation."
+    }
+]
 
-# --- Constants ---
-STOPWORDS = {"in", "of", "the", "and", "to", "for", "on", "a", "an", "with", "by"}
+# Dynamically generate the list of non-MCQ question types for the schema enum
+NON_MCQ_TYPES = [q["type"] for q in QUESTION_TYPE_CONFIG if q["type"] != "MCQ"]
 
-SYSTEM_PROMPT = """
+# Dynamically generate question guidelines for the system prompt
+QUESTION_GUIDELINES = "\n".join(
+    f"-   **{q['type']}**: {q['description']}" for q in QUESTION_TYPE_CONFIG
+)
+
+# Schema for individual quiz responses (used by AI generation)
+JSON_SCHEMA = {
+    "type": "object",
+    "oneOf": [
+        {
+            "type": "object",
+            "properties": {
+                "quiz_needed": {"type": "boolean", "const": False},
+                "rationale": {"type": "string"}
+            },
+            "required": ["quiz_needed", "rationale"],
+            "additionalProperties": False
+        },
+        {
+            "type": "object",
+            "properties": {
+                "quiz_needed": {"type": "boolean", "const": True},
+                "rationale": {
+                    "type": "object",
+                    "properties": {
+                        "focus_areas": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "minItems": 2,
+                            "maxItems": 3
+                        },
+                        "question_strategy": {"type": "string"},
+                        "difficulty_progression": {"type": "string"},
+                        "integration": {"type": "string"},
+                        "ranking_explanation": {"type": "string"}
+                    },
+                    "required": ["focus_areas", "question_strategy", "difficulty_progression", "integration", "ranking_explanation"],
+                    "additionalProperties": False
+                },
+                "questions": {
+                    "type": "array",
+                    "items": {
+                        "oneOf": [
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "question_type": {"type": "string", "const": "MCQ"},
+                                    "question": {"type": "string"},
+                                    "choices": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                        "minItems": 3,
+                                        "maxItems": 5
+                                    },
+                                    "answer": {"type": "string"},
+                                    "learning_objective": {"type": "string"}
+                                },
+                                "required": ["question_type", "question", "choices", "answer", "learning_objective"],
+                                "additionalProperties": False
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "question_type": {
+                                        "type": "string",
+                                        "enum": NON_MCQ_TYPES
+                                    },
+                                    "question": {"type": "string"},
+                                    "answer": {"type": "string"},
+                                    "learning_objective": {"type": "string"}
+                                },
+                                "required": ["question_type", "question", "answer", "learning_objective"],
+                                "additionalProperties": False
+                            }
+                        ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 5
+                }
+            },
+            "required": ["quiz_needed", "rationale", "questions"],
+            "additionalProperties": False
+        }
+    ]
+}
+
+# Schema for complete quiz files
+QUIZ_FILE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "metadata": {
+            "type": "object",
+            "properties": {
+                "source_file": {"type": "string"},
+                "total_sections": {"type": "integer"},
+                "sections_with_quizzes": {"type": "integer"},
+                "sections_without_quizzes": {"type": "integer"}
+            },
+            "required": ["source_file", "total_sections", "sections_with_quizzes", "sections_without_quizzes"],
+            "additionalProperties": False
+        },
+        "sections": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "section_id": {"type": "string"},
+                    "section_title": {"type": "string"},
+                    "quiz_data": {
+                        "oneOf": [
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "quiz_needed": {"type": "boolean", "const": False},
+                                    "rationale": {"type": "string"}
+                                },
+                                "required": ["quiz_needed", "rationale"],
+                                "additionalProperties": False
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "quiz_needed": {"type": "boolean", "const": True},
+                                    "rationale": {
+                                        "type": "object",
+                                        "properties": {
+                                            "focus_areas": {
+                                                "type": "array",
+                                                "items": {"type": "string"},
+                                                "minItems": 2,
+                                                "maxItems": 3
+                                            },
+                                            "question_strategy": {"type": "string"},
+                                            "difficulty_progression": {"type": "string"},
+                                            "integration": {"type": "string"},
+                                            "ranking_explanation": {"type": "string"}
+                                        },
+                                        "required": ["focus_areas", "question_strategy", "difficulty_progression", "integration", "ranking_explanation"],
+                                        "additionalProperties": False
+                                    },
+                                    "questions": {
+                                        "type": "array",
+                                        "items": {
+                                            "oneOf": [
+                                                {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "question_type": {"type": "string", "const": "MCQ"},
+                                                        "question": {"type": "string"},
+                                                        "choices": {
+                                                            "type": "array",
+                                                            "items": {"type": "string"},
+                                                            "minItems": 3,
+                                                            "maxItems": 5
+                                                        },
+                                                        "answer": {"type": "string"},
+                                                        "learning_objective": {"type": "string"}
+                                                    },
+                                                    "required": ["question_type", "question", "choices", "answer", "learning_objective"],
+                                                    "additionalProperties": False
+                                                },
+                                                {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "question_type": {
+                                                            "type": "string",
+                                                            "enum": NON_MCQ_TYPES
+                                                        },
+                                                        "question": {"type": "string"},
+                                                        "answer": {"type": "string"},
+                                                        "learning_objective": {"type": "string"}
+                                                    },
+                                                    "required": ["question_type", "question", "answer", "learning_objective"],
+                                                    "additionalProperties": False
+                                                }
+                                            ]
+                                        },
+                                        "minItems": 1,
+                                        "maxItems": 5
+                                    }
+                                },
+                                "required": ["quiz_needed", "rationale", "questions"],
+                                "additionalProperties": False
+                            }
+                        ]
+                    }
+                },
+                "required": ["section_id", "section_title", "quiz_data"],
+                "additionalProperties": False
+            },
+            "minItems": 1
+        }
+    },
+    "required": ["metadata", "sections"],
+    "additionalProperties": False
+}
+
+SYSTEM_PROMPT = f"""
 You are an educational content specialist with expertise in machine learning systems, tasked with creating pedagogically sound quiz questions for a university-level textbook.
 Your task is to first evaluate whether a quiz would be pedagogically valuable for the given section, and if so, generate 1 to 5 self-check questions and answers. Decide the number of questions based on the section's length and complexity.
 
@@ -54,35 +273,51 @@ First, evaluate if this section warrants a quiz by considering:
 - Sections requiring application of concepts to real scenarios
 - Sections building on previous knowledge in critical ways
 
-## Output Format
+## Required JSON Schema
 
-If you determine a quiz is NOT needed, return this JSON:
+You MUST return a valid JSON object that strictly follows this schema:
+
 ```json
-{
-    "quiz_needed": false,
-    "rationale": "Explanation of why this section doesn't need a quiz (e.g., context-setting, descriptive only, no actionable concepts)."
-}
+{json.dumps(JSON_SCHEMA, indent=2)}
 ```
 
-If you determine a quiz IS needed, return this JSON:
+## Output Format
+
+If you determine a quiz is NOT needed, return the standard `quiz_needed: false` object.
+
+If a quiz IS needed, follow the structure below. For "MCQ" questions, provide the question stem in the `question` field and the options in the `choices` array. For all other types, the `choices` field should be omitted.
+
 ```json
-{
+{{
     "quiz_needed": true,
-    "rationale": {
-        "focus_areas": ["List of 2–3 key areas this section focuses on"],
-        "question_strategy": "Brief explanation of why these question types were chosen and how they build understanding",
-        "difficulty_progression": "How the questions progress in complexity and support deeper learning",
-        "integration": "How these questions connect with concepts introduced earlier in the chapter or textbook (if applicable)",
-        "ranking_explanation": "Explanation of why questions are ordered this way and how they support learning"
-    },
+    "rationale": {{
+        "focus_areas": ["..."],
+        "question_strategy": "...",
+        "difficulty_progression": "...",
+        "integration": "...",
+        "ranking_explanation": "..."
+    }},
     "questions": [
-        {
-            "question": "The question text",
-            "answer": "The answer text",
-            "learning_objective": "What specific understanding or skill this question tests"
-        }
+        {{
+            "question_type": "MCQ",
+            "question": "This is the question stem for the multiple choice question.",
+            "choices": [
+                "Option A",
+                "Option B",
+                "Option C",
+                "Option D"
+            ],
+            "answer": "The correct answer is B. This is the explanation for why B is correct.",
+            "learning_objective": "..."
+        }},
+        {{
+            "question_type": "Short",
+            "question": "This is a short answer question.",
+            "answer": "This is the answer to the short answer question.",
+            "learning_objective": "..."
+        }}
     ]
-}
+}}
 ```
 
 ## Question Guidelines
@@ -94,22 +329,12 @@ If you determine a quiz IS needed, return this JSON:
 - Avoid surface-level recall or trivia
 - Connect to practical ML systems scenarios
 
-**Question Types (use variety based on content):**
-- **Multiple Choice**: Include answer options A), B), C), D) directly in the question text, each on a new line. The answer field must start with a sentence followed by the correct letter followed by a period (e.g., "The correct answer is B. The gradual change in statistical properties..."), then explanation. Every multiple-choice question must begin with a clear question stem, followed by the answer options. Do not generate questions that consist only of options.
-- **Short Answer**: Require explanation of concepts, not just definitions
-- **Scenario-Based**: Present realistic ML systems situations requiring application
-- **Comparison**: Test understanding of tradeoffs between approaches
-- **Fill-in-the-Blank**: Use ____ (four underscores) for missing key terms. Answer should contain only the missing word/phrase followed by a period, plus brief explanation.
-- **True/False**: Always require justification in the answer
-
-**Question Variety Instructions:**
-- Vary the order and types of questions based on the content
-- Don't follow the same pattern every time
-- Choose question types that best fit the specific concepts being tested
-- Mix difficulty levels throughout, not just in progression
-- Consider starting with different question types depending on the section's focus
+**Question Types (use a variety based on content):**
+{QUESTION_GUIDELINES}
+-   **Do not** embed options (e.g., A, B, C) in the `question` string for MCQ questions; use the `choices` array instead.
 
 **Quality Standards:**
+- For `MCQ` questions, the `answer` string MUST start with `The correct answer is [LETTER].` followed by the text of the correct choice and then an explanation.
 - Use clear, academically appropriate language
 - Avoid repeating exact phrasing from source text
 - Keep answers concise and informative (~75-150 words total per Q&A pair)
@@ -131,146 +356,107 @@ Before finalizing, ensure:
 - At least one question addresses system-level implications
 - Questions are appropriate for the textbook's target audience
 - Answer explanations help reinforce learning, not just state correctness
+- The response strictly follows the JSON schema provided above
 """
 
-# --- Core Functions ---
+def update_qmd_frontmatter(qmd_file_path, quiz_file_name):
+    """Adds or updates the 'quiz' key in the QMD file's YAML frontmatter using a YAML parser."""
+    print(f"  Updating frontmatter in: {os.path.basename(qmd_file_path)}")
+    try:
+        # We use a proper YAML parser to safely handle the frontmatter.
+        with open(qmd_file_path, 'r+', encoding='utf-8') as f:
+            content = f.read()
+            
+            frontmatter_pattern = re.compile(r'^(---\s*\n.*?\n---\s*\n)', re.DOTALL)
+            match = frontmatter_pattern.match(content)
+            
+            if match:
+                # Frontmatter exists
+                frontmatter_str = match.group(1)
+                yaml_content_str = frontmatter_str.strip().strip('---').strip()
+                
+                try:
+                    frontmatter_data = yaml.safe_load(yaml_content_str)
+                    if not isinstance(frontmatter_data, dict):
+                        frontmatter_data = {}
+                except yaml.YAMLError:
+                    frontmatter_data = {} # On error, start fresh to avoid corruption
 
-def clean_slug(title):
-    """Creates a URL-friendly slug from a title."""
-    words = title.lower().split()
-    keywords = [w for w in words if w not in STOPWORDS]
-    slug = slugify(" ".join(keywords))
-    logging.debug(f"Cleaned title '{title}' to slug '{slug}'")
-    return slug
-
-def determine_question_count(text):
-    """Determines the number of questions to generate based on section length.
-    
-    Guidelines:
-    - Short (<200 words): 0-1 questions
-    - Medium (200-500 words): 2-3 questions
-    - Long (>500 words or dense math): 3-5 questions
-    
-    Args:
-        text (str): The section text to analyze
+                # Update the quiz key
+                frontmatter_data['quiz'] = quiz_file_name
+                
+                # Dump back to YAML string, keeping order and format
+                new_yaml_content = yaml.dump(frontmatter_data, default_flow_style=False, sort_keys=False, indent=2)
+                
+                new_frontmatter = f"---\n{new_yaml_content.strip()}\n---\n"
+                
+                # Replace old frontmatter block
+                new_content = content.replace(frontmatter_str, new_frontmatter, 1)
+            else:
+                # No frontmatter, create it
+                frontmatter_data = {'quiz': quiz_file_name}
+                new_yaml_content = yaml.dump(frontmatter_data, default_flow_style=False, sort_keys=False)
+                new_frontmatter = f"---\n{new_yaml_content}---\n\n"
+                new_content = new_frontmatter + content
+            
+            f.seek(0)
+            f.write(new_content)
+            f.truncate()
         
-    Returns:
-        tuple: (min_questions, max_questions)
+        print(f"  ✓ Updated frontmatter in {os.path.basename(qmd_file_path)} with 'quiz: {quiz_file_name}'")
+    except Exception as e:
+        print(f"  ❌ Error updating frontmatter in {qmd_file_path}: {e}")
+
+def extract_sections_with_ids(markdown_text):
     """
-    # Count words (simple whitespace-based count)
-    word_count = len(text.split())
+    Extracts all level-2 sections (##) with their content and section reference (e.g., {#sec-...}).
+    Returns a list of dicts: {section_id, section_title, section_text}
+    If any section is missing a reference, prints an error and returns None.
+    """
+    section_pattern = re.compile(r"^##\s+(.+?)(\s*\{#([\w\-]+)\})?\s*$", re.MULTILINE)
+    all_matches = list(section_pattern.finditer(markdown_text))
     
-    # Check for dense math content (presence of math delimiters)
-    has_math = bool(re.search(r'\$.*?\$|\$\$.*?\$\$|\\\(.*?\\\)|\\\[.*?\\\]', text))
+    # Filter out "Quiz Answers" sections
+    content_matches = [m for m in all_matches if m.group(1).strip().lower() != 'quiz answers']
     
-    if word_count < 200:
-        return (0, 1)
-    elif word_count < 500 and not has_math:
-        return (2, 3)
-    else:
-        return (3, 5)
-
-def strip_quiz_callouts(text):
-    """Remove any existing Self-Check Quiz callout blocks from the text."""
-    return re.sub(rf"::: \{{{QUIZ_CALLOUT_CLASS}[\s\S]*?:::\n?", "", text)
-
-def build_user_prompt(section_title, section_text, chapter_title=None, previous_sections=None):
-    """Constructs the user prompt for the language model."""
-    # Strip quiz callouts from section_text
-    section_text = strip_quiz_callouts(section_text)
-    prefix = f'This section is titled "{section_title}".'
-    if chapter_title:
-        prefix += f' It appears in the chapter "{chapter_title}".'
-    
-    # Determine question count based on section length
-    min_questions, max_questions = determine_question_count(section_text)
-    
-    previous_context = ""
-    if previous_sections:
-        previous_context = "\n\nPrevious sections in this chapter:\n"
-        for prev_title, prev_content in previous_sections:
-            # Strip quiz callouts from previous content
-            prev_content_clean = strip_quiz_callouts(prev_content)
-            # Extract any existing quizzes from previous content (for reference, but now always empty)
-            quiz_pattern = re.compile(r":::.*?title=\"Self-Check Quiz\".*?:::", re.DOTALL)
-            quiz_match = quiz_pattern.search(prev_content)
-            quiz_text = quiz_match.group(0) if quiz_match else "No quiz in this section"
-            previous_context += f"\nSection: {prev_title}\n"
-            previous_context += f"Content Summary: {prev_content_clean[:200]}...\n"
-            previous_context += f"Quiz: {quiz_text}\n"
-    
-    prompt = f"""
-{prefix}
-
-Section content:
-{section_text}{previous_context}
-
-Generate a self-check quiz with {min_questions} to {max_questions} well-structured questions and answers based on this section.
-Include a rationale explaining your question generation strategy and focus areas.
-
-Return your response in this exact JSON format:
-{{
-    "rationale": {{
-        "focus_areas": ["List 2-3 key areas this section focuses on"],
-        "question_strategy": "Explain why you chose these question types",
-        "difficulty_progression": "How the questions progress in complexity",
-        "integration": "How these questions connect with previous sections"
-    }},
-    "questions": [
-        {{
-            "question": "The question text",
-            "answer": "The answer text"
-        }}
-    ]
-}}
-""".strip()
-    logging.debug(f"Built user prompt for section '{section_title}'")
-    return prompt
-
-def extract_sections(markdown_text):
-    """Extracts chapter title and level-2 markdown sections into (title, content) tuples."""
-    logging.debug("Starting section extraction...")
-    
-    # Extract chapter title (first level-1 header)
-    chapter_pattern = re.compile(r"^#\s+(.*)", re.MULTILINE)
-    chapter_match = chapter_pattern.search(markdown_text)
-    chapter_title = chapter_match.group(1).strip() if chapter_match else None
-    logging.debug(f"Extracted chapter title: {chapter_title}")
-    
-    # Normalize newlines
-    markdown_text = markdown_text.replace('\r\n', '\n').replace('\r', '\n')
-    
-    # Find all ## sections
-    sections = []
-    section_pattern = re.compile(r'^##\s+(.*?)$', re.MULTILINE)
-    matches = list(section_pattern.finditer(markdown_text))
-    
-    # Process each section
-    for i, match in enumerate(matches):
+    # First, validate all content sections have IDs
+    missing_refs = []
+    for match in content_matches:
         title = match.group(1).strip()
-        start = match.start()
-        # End is either the start of next section or end of file
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(markdown_text)
-        # Don't strip the content to preserve newlines
-        content = markdown_text[start:end]
-        sections.append((title, content))
-        logging.info(f"Found section {i+1}: {title}")
+        ref = match.group(3)
+        if not ref:
+            missing_refs.append(title)
     
-    logging.info(f"Extraction complete. Found {len(sections)} level-2 sections.")
-    # Print all sections found
-    print("\nSections found:")
-    print("=" * 50)
-    for i, (title, _) in enumerate(sections, 1):
-        print(f"{i}. {title}")
-    print("=" * 50)
+    if missing_refs:
+        print("ERROR: The following sections are missing section reference labels (e.g., {#sec-...}):")
+        for title in missing_refs:
+            print(f"  - {title}")
+        print("\nPlease add section references to all sections and re-run the script.")
+        return None
     
-    return chapter_title, sections
+    # If all sections have IDs, proceed with extraction
+    sections = []
+    for i, match in enumerate(content_matches):
+        title = match.group(1).strip()
+        ref = match.group(3)
+        start = match.end()
+        
+        # Find the correct end position from the original list of all matches
+        original_index = all_matches.index(match)
+        end = all_matches[original_index + 1].start() if original_index + 1 < len(all_matches) else len(markdown_text)
+        
+        content = markdown_text[start:end].strip()
+        # Store the full section reference including the # symbol
+        full_ref = f"#{ref}"
+        sections.append({
+            "section_id": full_ref,
+            "section_title": title,
+            "section_text": content
+        })
+    return sections
 
 def call_openai(client, system_prompt, user_prompt, model="gpt-4o"):
-    """Calls the OpenAI API and handles potential errors."""
-    logging.info(f"Calling OpenAI API with model '{model}'...")
     try:
-        # Remove response_format for models that don't support it
         response = client.chat.completions.create(
             model=model,
             messages=[
@@ -280,1017 +466,1185 @@ def call_openai(client, system_prompt, user_prompt, model="gpt-4o"):
             temperature=0.4
         )
         content = response.choices[0].message.content
-        logging.debug(f"Raw response content from OpenAI: {content}")
-        
         try:
             data = json.loads(content)
         except json.JSONDecodeError:
-            # If the response isn't valid JSON, try to extract JSON from the text
             json_match = re.search(r'\{.*\}', content, re.DOTALL)
             if json_match:
-                try:
-                    data = json.loads(json_match.group(0))
-                except json.JSONDecodeError:
-                    logging.error("Failed to parse JSON from response")
-                    return {
-                        "quiz_needed": False,
-                        "rationale": "Failed to parse response as JSON"
-                    }
+                data = json.loads(json_match.group(0))
             else:
-                logging.error("No JSON found in response")
-                return {
-                    "quiz_needed": False,
-                    "rationale": "No JSON found in response"
-                }
+                return {"quiz_needed": False, "rationale": "No JSON found in response"}
         
-        # Ensure we always return a dictionary with the expected structure
-        if isinstance(data, list):
-            # Convert list to expected dictionary format
-            return {
-                "quiz_needed": True,
-                "rationale": {
-                    "focus_areas": ["Key concepts from the section"],
-                    "question_strategy": "Questions designed to test understanding of core concepts",
-                    "difficulty_progression": "Questions progress from basic to advanced concepts",
-                    "integration": "Questions build on fundamental concepts"
-                },
-                "questions": data
-            }
-        elif isinstance(data, dict):
-            # If it's already a dict but missing quiz_needed, add it
-            if "quiz_needed" not in data:
-                data["quiz_needed"] = True
-            # If it's missing rationale but has questions, add default rationale
-            if "rationale" not in data and "questions" in data:
-                data["rationale"] = {
-                    "focus_areas": ["Key concepts from the section"],
-                    "question_strategy": "Questions designed to test understanding of core concepts",
-                    "difficulty_progression": "Questions progress from basic to advanced concepts",
-                    "integration": "Questions build on fundamental concepts"
-                }
-            return data
-        else:
-            logging.warning(f"Unexpected JSON structure from OpenAI: {type(data)}")
-            return {
-                "quiz_needed": False,
-                "rationale": "Unexpected response structure"
-            }
-
+        # Validate the response against JSON_SCHEMA
+        try:
+            validate(instance=data, schema=JSON_SCHEMA)
+        except ValidationError as e:
+            print(f"⚠️  Warning: AI response doesn't match schema: {e.message}")
+            # Return a fallback response
+            return {"quiz_needed": False, "rationale": f"Schema validation failed: {e.message}"}
+        
+        return data
     except APIError as e:
-        logging.error(f"OpenAI API error: {e}")
-        return {
-            "quiz_needed": False,
-            "rationale": f"API error: {str(e)}"
-        }
+        return {"quiz_needed": False, "rationale": f"API error: {str(e)}"}
     except Exception as e:
-        logging.error(f"An unexpected error occurred in call_openai: {e}")
-        return {
-            "quiz_needed": False,
-            "rationale": f"Unexpected error: {str(e)}"
-        }
+        return {"quiz_needed": False, "rationale": f"Unexpected error: {str(e)}"}
 
-def format_mcq_question(question_text):
-    # Detect MCQ options (A), B), etc.) and reformat to a), b), ...
-    option_pattern = re.compile(r"([A-D])\) ?(.*?)(?=(?:[A-D]\)|$))", re.DOTALL)
-    # Find the question and options
-    lines = question_text.split("\n")
-    q = []
-    opts = []
-    for line in lines:
-        if option_pattern.search(line):
-            opts.extend(option_pattern.findall(line))
-        else:
-            q.append(line)
-    qtext = " ".join(q).strip()
-    if opts:
-        opt_lines = [f"   {chr(96+ord(opt[0].upper())-64)}) {opt[1].strip()}" for opt in opts]  # a), b), ...
-        return f"{qtext}\n" + "\n".join(opt_lines)
-    else:
-        return question_text
-
-def is_only_options(qtext):
-    # Returns True if qtext is only a list of options (a), b), etc.) and no question stem
-    lines = [l.strip() for l in qtext.split('\n') if l.strip()]
-    return all(re.match(r'^[a-dA-D]\)', l) for l in lines)
-
-def format_quiz_block(qa_pairs, answer_ref):
-    """Formats the questions into a Quarto callout block."""
-    if isinstance(qa_pairs, dict) and not qa_pairs.get("quiz_needed", True):
-        return ""
-    questions = qa_pairs.get("questions", qa_pairs) if isinstance(qa_pairs, dict) else qa_pairs
-    if not questions or (isinstance(questions, list) and len(questions) == 0):
-        return ""
-    slug = answer_ref.replace(ANSWER_ID_PREFIX, "")
-    quiz_id = f"{QUESTION_ID_PREFIX}{slug}"
-    formatted_questions = []
-    for i, qa in enumerate(questions):
-        qtext = qa['question'] if isinstance(qa, dict) else qa
-        # Skip questions that are only options
-        if is_only_options(qtext):
-            continue
-        formatted = format_mcq_question(qtext)
-        formatted_questions.append(f"{i+1}. {formatted}")
-    if not formatted_questions:
-        return ""
-    return (
-        f"""
-::: {{{QUIZ_CALLOUT_CLASS} #{quiz_id}}}
-
-"""
-        + "\n\n".join(formatted_questions)
-        + f"""
-
-{REFERENCE_TEXT} \\ref{{{answer_ref}}}.
-:::
-"""
-    )
-
-def indent_answer_explanation(answer):
-    return '\n'.join([f"   {line}" if line.strip() else "" for line in answer.strip().split("\n")])
-
-def format_mcq_answer(question, answer):
-    q_lines = format_mcq_question(question).split("\n")
-    answer_lines = indent_answer_explanation(answer)
-    return "\n".join(q_lines) + "\n\n" + answer_lines
-
-def format_answer_block(slug, qa_pairs):
-    """Formats the answers into a Quarto callout block."""
-    if isinstance(qa_pairs, dict) and not qa_pairs.get("quiz_needed", True):
-        return ""
-    questions = qa_pairs.get("questions", qa_pairs) if isinstance(qa_pairs, dict) else qa_pairs
-    if not questions or (isinstance(questions, list) and len(questions) == 0):
-        return ""
-    lines = []
-    for i, qa in enumerate(questions):
-        qtext = qa['question'] if isinstance(qa, dict) else qa
-        ans = qa['answer'] if isinstance(qa, dict) else ''
-        formatted_q = format_mcq_question(qtext)
-        formatted_a = indent_answer_explanation(ans)
-        lines.append(f"{i+1}. {formatted_q}\n\n{formatted_a}")
-    return (
-        f":::{{{ANSWER_CALLOUT_CLASS} #{ANSWER_ID_PREFIX}{slug}}}\n"
-        + "\n\n".join(lines)
-        + "\n:::\n"
-    )
-
-# --- GUI Mode ---
-
-def launch_gui_mode(client, sections, qa_by_section, filepath, model, pre_select_all=False, tmp_path=None, chapter_title=None):
-    """Launches an interactive Gradio GUI to review and select Q&A pairs."""
-    logging.info("Preparing to launch GUI mode...")
-    final_answers = []
-    total_sections = len(sections)
-    selected_indices_by_section = {}  # NEW: Track selections per section
+def validate_individual_quiz_response(data):
+    """Validate individual quiz response manually"""
+    if not isinstance(data, dict):
+        return False
     
-    with gr.Blocks(title="Quiz Generator Review", theme=gr.themes.Soft()) as demo:
-        progress_bar = gr.Markdown(f"### Section 1 of {total_sections}")
+    if 'quiz_needed' not in data:
+        return False
+    
+    if not isinstance(data['quiz_needed'], bool):
+        return False
+    
+    if 'rationale' not in data:
+        return False
+    
+    if data['quiz_needed']:
+        # Check for required fields when quiz is needed
+        if 'questions' not in data:
+            return False
         
-        with gr.Row():
-            gr.Markdown("# Review Generated Quizzes")
-        gr.Markdown(f"Reviewing sections from `{filepath}`. Use the navigation buttons to move between sections. Click 'Save Current Section' to store your selections.")
+        if not isinstance(data['questions'], list):
+            return False
         
-        current_index = gr.State(0)
+        if len(data['questions']) < 1 or len(data['questions']) > 5:
+            return False
         
-        section_title_box = gr.Textbox(label="Section Title", interactive=False)
-        section_text_box = gr.Textbox(label="Section Content", lines=10, interactive=False)
-        
-        # Add rationale textbox
-        rationale_box = gr.Textbox(
-            label="Generation Rationale",
-            interactive=False,
-            lines=4,
-            show_copy_button=True
-        )
-        
-        qa_checkboxes = gr.CheckboxGroup(label="Select Q&A pairs to include", interactive=True)
-        
-        with gr.Row():
-            back_btn = gr.Button("← Previous Section", variant="secondary")
-            save_btn = gr.Button("💾 Save Current Section", variant="secondary")
-            next_btn = gr.Button("Next Section →", variant="primary")
-        
-        with gr.Row():
-            custom_guidance = gr.Textbox(
-                label="Custom Regeneration Guidance (optional)",
-                placeholder="E.g., 'Focus more on system design tradeoffs' or 'Include a question about scalability'",
-                lines=2
-            )
-        
-        with gr.Row():
-            regenerate_btn = gr.Button("🔄 Regenerate Questions", variant="secondary")
-            write_exit_btn = gr.Button("📝 Write to File and Exit", variant="stop")
-        
-        def get_section_data(index):
-            if index >= total_sections:
-                logging.info("All sections have been reviewed by the user.")
-                progress_text = "### Review Complete! This is the last section."
-                return progress_text, "All sections reviewed.", "", "", gr.update(choices=[], value=[]), gr.update(visible=False), gr.update(visible=False), gr.update(visible=False)
+        # Validate each question
+        for question in data['questions']:
+            if not isinstance(question, dict):
+                return False
             
-            progress_text = f"### Section {index + 1} of {total_sections}"
-            title, text = sections[index]
-            logging.info(f"Displaying section {index+1}/{total_sections} in GUI: {title}")
-            
-            qa_pairs = qa_by_section.get(title, [])
-            
-            # Extract rationale and questions
-            rationale_text = ""
-            choices = []
-            
-            if qa_pairs:
-                # If quiz_needed is explicitly False, show only rationale, no Q&A pairs
-                if isinstance(qa_pairs, dict) and qa_pairs.get("quiz_needed", True) is False:
-                    rationale = qa_pairs.get("rationale", "No quiz needed for this section.")
-                    rationale_text = str(rationale)
-                    choices = []
-                else:
-                    if isinstance(qa_pairs, dict):
-                        if "rationale" in qa_pairs:
-                            rationale = qa_pairs["rationale"]
-                            if isinstance(rationale, dict):
-                                rationale_text = (
-                                    f"Focus Areas: {', '.join(rationale['focus_areas'])}\n"
-                                    f"Strategy: {rationale['question_strategy']}\n"
-                                    f"Progression: {rationale['difficulty_progression']}\n"
-                                    f"Integration: {rationale['integration']}\n"
-                                    f"Ranking: {rationale.get('ranking_explanation', 'Questions ordered by learning effectiveness')}"
-                                )
-                            else:
-                                rationale_text = str(rationale)
-                        
-                        # Add questions
-                        questions = qa_pairs.get("questions", qa_pairs)
-                        if isinstance(questions, list):
-                            for i, qa in enumerate(questions):
-                                if isinstance(qa, dict):
-                                    formatted_content = f"{i+1}. {qa['question']}\n\n{qa['answer']}"
-                                    if 'learning_objective' in qa:
-                                        formatted_content += f"\n\nLearning Objective: {qa['learning_objective']}"
-                                    choices.append((formatted_content, i))
-                                else:
-                                    # Handle case where qa is a string
-                                    choices.append((f"{i+1}. {qa}", i))
-                        else:
-                            # Handle case where questions is a string
-                            choices.append((f"1. {questions}", 0))
-                    else:
-                        # Handle case where qa_pairs is a list
-                        for i, qa in enumerate(qa_pairs):
-                            if isinstance(qa, dict):
-                                formatted_content = f"{i+1}. {qa['question']}\n\n{qa['answer']}"
-                                if 'learning_objective' in qa:
-                                    formatted_content += f"\n\nLearning Objective: {qa['learning_objective']}"
-                                choices.append((formatted_content, i))
-                            else:
-                                # Handle case where qa is a string
-                                choices.append((f"{i+1}. {qa}", i))
-            
-            # Restore previous selection if available
-            if title in selected_indices_by_section:
-                initial_value = selected_indices_by_section[title]
-            else:
-                initial_value = list(range(len(choices))) if pre_select_all else []
-            
-            return progress_text, title, text, rationale_text, gr.update(choices=choices, value=initial_value), gr.update(visible=True), gr.update(visible=True), gr.update(visible=True)
+            required_fields = ['question', 'answer', 'learning_objective']
+            if not all(field in question for field in required_fields):
+                return False
+        
+        # Validate rationale structure
+        rationale = data['rationale']
+        if not isinstance(rationale, dict):
+            return False
+        
+        required_rationale_fields = ['focus_areas', 'question_strategy', 'difficulty_progression', 'integration', 'ranking_explanation']
+        if not all(field in rationale for field in required_rationale_fields):
+            return False
+        
+        if not isinstance(rationale['focus_areas'], list) or len(rationale['focus_areas']) < 2 or len(rationale['focus_areas']) > 3:
+            return False
+    
+    return True
 
-        def regenerate_questions(index, custom_guidance_text):
-            if index >= total_sections:
-                return gr.update(choices=[], value=[]), gr.update(value=""), gr.update(value="⚠️ No more sections to process!")
+def build_user_prompt(section_title, section_text):
+    return f"""
+This section is titled \"{section_title}\".
+
+Section content:
+{section_text}
+
+Generate a self-check quiz with 1 to 5 well-structured questions and answers based on this section. Include a rationale explaining your question generation strategy and focus areas. Return your response in the specified JSON format.
+""".strip()
+
+# Gradio Application
+class QuizEditorGradio:
+    def __init__(self, initial_file_path=None):
+        self.quiz_data = None
+        self.sections = []
+        self.current_section_index = 0
+        self.initial_file_path = initial_file_path
+        self.original_qmd_content = None
+        self.qmd_file_path = None
+        self.question_states = {}  # Track checked/unchecked state for each question
+        
+    def load_quiz_file(self, file_path=None):
+        """Load a quiz JSON file"""
+        # Use provided file path or initial file path
+        path_to_load = file_path or self.initial_file_path
+        
+        if not path_to_load:
+            return "No file path provided", "No file loaded", "No sections", "", ""
             
-            title, text = sections[index]
-            logging.info(f"Regenerating questions for section: '{title}'")
+        try:
+            # Check if file exists
+            if not os.path.exists(path_to_load):
+                return f"File not found: {path_to_load}", "File not found", "No sections", "", ""
             
-            # Get previous sections for context
-            previous_sections = sections[:index] if index > 0 else None
+            with open(path_to_load, 'r', encoding='utf-8') as f:
+                self.quiz_data = json.load(f)
             
-            # Add custom guidance to the prompt if provided
-            guidance_context = ""
-            if custom_guidance_text and custom_guidance_text.strip():
-                guidance_context = f"\n\nAdditional guidance for question generation:\n{custom_guidance_text.strip()}"
+            # Validate JSON structure
+            if not isinstance(self.quiz_data, dict):
+                return f"Invalid JSON structure in {path_to_load}", "Invalid file format", "No sections", "", ""
             
-            user_prompt = build_user_prompt(title, text, chapter_title, previous_sections) + guidance_context
+            self.sections = self.quiz_data.get('sections', [])
+            if not self.sections:
+                return f"No sections found in {path_to_load}", "No sections found", "No sections", "", ""
             
-            # Show loading state
-            yield gr.update(choices=[("Generating new questions...", 0)], value=[]), gr.update(value="Generating..."), gr.update(value="🔄 Generating...")
+            # Try to load the original .qmd file
+            self.load_original_qmd_file(path_to_load)
+            
+            # Initialize question states for all sections
+            self.initialize_question_states()
+            
+            self.current_section_index = 0
+            
+            # Load first section
+            section = self.sections[0]
+            title = f"{section['section_title']} ({section['section_id']})"
+            section_text = self.get_full_section_content(section)
+            questions_text = self.format_questions_with_buttons(section)
+            nav_text = f"Section 1 of {len(self.sections)}"
+            
+            return title, nav_text, section_text, questions_text, ""
+            
+        except json.JSONDecodeError as e:
+            return f"Invalid JSON in {path_to_load}: {str(e)}", "JSON Error", "No sections", "", ""
+        except Exception as e:
+            return f"Error loading {path_to_load}: {str(e)}", "Error loading file", "No sections", "", ""
+    
+    def initialize_question_states(self):
+        """Initialize checked state for all questions (all checked by default)"""
+        self.question_states = {}
+        for i, section in enumerate(self.sections):
+            section_id = section['section_id']
+            quiz_data = section.get('quiz_data', {})
+            if quiz_data.get('quiz_needed', False):
+                questions = quiz_data.get('questions', [])
+                self.question_states[section_id] = [True] * len(questions)  # All checked by default
+    
+    def update_question_state(self, section_id, question_index, checked):
+        """Update the checked state of a question"""
+        if section_id not in self.question_states:
+            self.question_states[section_id] = []
+        
+        # Ensure the list is long enough
+        while len(self.question_states[section_id]) <= question_index:
+            self.question_states[section_id].append(True)
+        
+        self.question_states[section_id][question_index] = checked
+    
+    def load_original_qmd_file(self, quiz_file_path):
+        """Try to load the original .qmd file based on the quiz file path"""
+        try:
+            # Get metadata from quiz file
+            metadata = self.quiz_data.get('metadata', {})
+            source_file = metadata.get('source_file')
+            
+            if source_file and os.path.exists(source_file):
+                self.qmd_file_path = source_file
+                with open(source_file, 'r', encoding='utf-8') as f:
+                    self.original_qmd_content = f.read()
+            else:
+                # Try to find .qmd file in the same directory
+                quiz_dir = os.path.dirname(quiz_file_path)
+                quiz_name = os.path.splitext(os.path.basename(quiz_file_path))[0]
+                
+                # Look for .qmd files in the directory
+                for file in os.listdir(quiz_dir):
+                    if file.endswith('.qmd') and not file.startswith('.'):
+                        self.qmd_file_path = os.path.join(quiz_dir, file)
+                        with open(self.qmd_file_path, 'r', encoding='utf-8') as f:
+                            self.original_qmd_content = f.read()
+                        break
+                        
+        except Exception as e:
+            print(f"Warning: Could not load original .qmd file: {str(e)}")
+            self.original_qmd_content = None
+            self.qmd_file_path = None
+    
+    def get_full_section_content(self, section):
+        """Get the full section content from the original .qmd file"""
+        if not self.original_qmd_content:
+            return section.get('section_text', 'No section text available')
+        
+        section_id = section['section_id']
+        # Remove the # prefix if present
+        if section_id.startswith('#'):
+            section_id = section_id[1:]
+        
+        # Find the section in the original content
+        section_pattern = re.compile(rf'^##\s+.*?\{{\#{re.escape(section_id)}\}}.*?$', re.MULTILINE)
+        match = section_pattern.search(self.original_qmd_content)
+        
+        if match:
+            # Find the start and end of this section
+            start_pos = match.start()
+            
+            # Find the next section or end of file
+            next_section_pattern = re.compile(r'^##\s+', re.MULTILINE)
+            next_match = next_section_pattern.search(self.original_qmd_content, start_pos + 1)
+            
+            if next_match:
+                end_pos = next_match.start()
+            else:
+                end_pos = len(self.original_qmd_content)
+            
+            # Extract the full section content
+            section_content = self.original_qmd_content[start_pos:end_pos].strip()
+            return section_content
+        else:
+            # Fallback to the stored section text
+            return section.get('section_text', 'No section text available')
+    
+    def load_from_path(self, file_path):
+        """Load quiz from a file path string"""
+        return self.load_quiz_file(file_path)
+    
+    def format_questions_with_buttons(self, section):
+        """Format questions for display with status indicators"""
+        quiz_data = section.get('quiz_data', {})
+        
+        if not quiz_data.get('quiz_needed', False):
+            return "No quiz needed for this section"
+        
+        questions = quiz_data.get('questions', [])
+        if not questions:
+            return "No questions available"
+        
+        section_id = section['section_id']
+        question_states = self.question_states.get(section_id, [True] * len(questions))
+        
+        formatted = []
+        formatted.append("**Question Status (all questions will be kept by default):**\n\n")
+        formatted.append("*Note: Currently showing question status. Use Save & Exit to keep all questions, or edit the JSON file manually to remove unwanted questions.*\n\n")
+        
+        for i, question in enumerate(questions):
+            checked = question_states[i] if i < len(question_states) else True
+            status = "✅ WILL KEEP" if checked else "❌ WILL REMOVE"
+            
+            q_text = format_question_for_display(question, i+1) + "\n"
+            a_text = f"**A:** {question['answer']}\n\n"
+            
+            if 'learning_objective' in question:
+                obj_text = f"**Learning Objective:** {question['learning_objective']}\n\n"
+            else:
+                obj_text = ""
+            
+            formatted.append(f"{q_text}{a_text}{obj_text}**Status:** {status}\n\n---\n\n")
+        
+        return "".join(formatted)
+    
+    def save_changes(self):
+        """Save the current quiz data with removed questions"""
+        if not self.quiz_data:
+            return "No data to save"
+        
+        # Create a copy of the data to modify
+        modified_data = json.loads(json.dumps(self.quiz_data))
+        
+        # Remove unchecked questions from each section
+        for section in modified_data['sections']:
+            section_id = section['section_id']
+            quiz_data = section.get('quiz_data', {})
+            
+            if quiz_data.get('quiz_needed', False):
+                questions = quiz_data.get('questions', [])
+                question_states = self.question_states.get(section_id, [True] * len(questions))
+                
+                # Keep only checked questions
+                kept_questions = []
+                for i, question in enumerate(questions):
+                    if i < len(question_states) and question_states[i]:
+                        kept_questions.append(question)
+                
+                # Update the questions list
+                quiz_data['questions'] = kept_questions
+                
+                # Update rationale if no questions remain
+                if not kept_questions:
+                    quiz_data['quiz_needed'] = False
+                    quiz_data['rationale'] = "All questions were removed by user"
+        
+        # Save to the original file
+        try:
+            with open(self.initial_file_path, 'w', encoding='utf-8') as f:
+                json.dump(modified_data, f, indent=2, ensure_ascii=False)
+            return f"Saved changes to {os.path.basename(self.initial_file_path)}"
+        except Exception as e:
+            return f"Error saving file: {str(e)}"
+    
+    def toggle_question(self, section_id, question_index):
+        """Toggle the checked state of a question"""
+        if section_id not in self.question_states:
+            self.question_states[section_id] = []
+        
+        # Ensure the list is long enough
+        while len(self.question_states[section_id]) <= question_index:
+            self.question_states[section_id].append(True)
+        
+        # Toggle the state
+        self.question_states[section_id][question_index] = not self.question_states[section_id][question_index]
+        
+        # Return updated questions display
+        section = next((s for s in self.sections if s['section_id'] == section_id), None)
+        if section:
+            return self.format_questions_with_buttons(section)
+        return "Error updating question"
+    
+    def navigate_section(self, direction):
+        """Navigate to previous or next section"""
+        if not self.sections:
+            return ["No file loaded", "No sections", "No content loaded"] + [False] * 5 + [""] * 5
+        
+        if direction == "prev" and self.current_section_index > 0:
+            self.current_section_index -= 1
+        elif direction == "next" and self.current_section_index < len(self.sections) - 1:
+            self.current_section_index += 1
+        
+        section = self.sections[self.current_section_index]
+        title = f"{section['section_title']} ({section['section_id']})"
+        section_text = self.get_full_section_content(section)
+        nav_text = f"Section {self.current_section_index + 1} of {len(self.sections)}"
+        
+        # Prepare checkbox states and question texts
+        quiz_data = section.get('quiz_data', {})
+        checkbox_states = [False] * 5
+        question_texts = [""] * 5
+        
+        if quiz_data.get('quiz_needed', False):
+            questions = quiz_data.get('questions', [])
+            section_id = section['section_id']
+            question_states = self.question_states.get(section_id, [True] * len(questions))
+            
+            for i in range(min(5, len(questions))):
+                checkbox_states[i] = question_states[i] if i < len(question_states) else True
+                question = questions[i]
+                q_text = format_question_for_display(question, i+1) + "\n"
+                a_text = f"**A:** {question['answer']}\n\n"
+                if 'learning_objective' in question:
+                    obj_text = f"*Learning Objective:* {question['learning_objective']}\n\n"
+                else:
+                    obj_text = ""
+                question_texts[i] = f"{q_text}{a_text}{obj_text}"
+        else:
+            # No quiz needed for this section
+            question_texts[0] = "**No quiz needed for this section**\n\n*This section was determined to not require a quiz based on its content.*"
+        
+        return [title, nav_text, section_text] + checkbox_states + question_texts
+    
+    def load_quiz_file_with_checkboxes(self, file_path=None):
+        """Load a quiz JSON file and return data for checkboxes"""
+        # Use provided file path or initial file path
+        path_to_load = file_path or self.initial_file_path
+        
+        if not path_to_load:
+            return ["No file path provided", "No file loaded", "No content loaded"] + [False] * 5 + [""] * 5
+            
+        try:
+            # Check if file exists
+            if not os.path.exists(path_to_load):
+                return [f"File not found: {path_to_load}", "File not found", "No content loaded"] + [False] * 5 + [""] * 5
+            
+            with open(path_to_load, 'r', encoding='utf-8') as f:
+                self.quiz_data = json.load(f)
+            
+            # Validate JSON structure
+            if not isinstance(self.quiz_data, dict):
+                return [f"Invalid JSON structure in {path_to_load}", "Invalid file format", "No content loaded"] + [False] * 5 + [""] * 5
+            
+            self.sections = self.quiz_data.get('sections', [])
+            if not self.sections:
+                return [f"No sections found in {path_to_load}", "No sections found", "No content loaded"] + [False] * 5 + [""] * 5
+            
+            # Try to load the original .qmd file
+            self.load_original_qmd_file(path_to_load)
+            
+            # Initialize question states for all sections
+            self.initialize_question_states()
+            
+            self.current_section_index = 0
+            
+            # Load first section
+            section = self.sections[0]
+            title = f"{section['section_title']} ({section['section_id']})"
+            section_text = self.get_full_section_content(section)
+            nav_text = f"Section 1 of {len(self.sections)}"
+            
+            # Prepare checkbox states and question texts
+            quiz_data = section.get('quiz_data', {})
+            checkbox_states = [False] * 5
+            question_texts = [""] * 5
+            
+            if quiz_data.get('quiz_needed', False):
+                questions = quiz_data.get('questions', [])
+                section_id = section['section_id']
+                question_states = self.question_states.get(section_id, [True] * len(questions))
+                
+                for i in range(min(5, len(questions))):
+                    checkbox_states[i] = question_states[i] if i < len(question_states) else True
+                    question = questions[i]
+                    q_text = format_question_for_display(question, i+1) + "\n"
+                    a_text = f"**A:** {question['answer']}\n\n"
+                    if 'learning_objective' in question:
+                        obj_text = f"*Learning Objective:* {question['learning_objective']}\n\n"
+                    else:
+                        obj_text = ""
+                    question_texts[i] = f"{q_text}{a_text}{obj_text}"
+            else:
+                # No quiz needed for this section
+                question_texts[0] = "**No quiz needed for this section**\n\n*This section was determined to not require a quiz based on its content.*"
+            
+            return [title, nav_text, section_text] + checkbox_states + question_texts
+            
+        except json.JSONDecodeError as e:
+            return [f"Invalid JSON in {path_to_load}: {str(e)}", "JSON Error", "No content loaded"] + [False] * 5 + [""] * 5
+        except Exception as e:
+            return [f"Error loading {path_to_load}: {str(e)}", "Error loading file", "No content loaded"] + [False] * 5 + [""] * 5
+    
+    def save_changes_with_checkboxes(self, checkbox_states):
+        """Save the current quiz data with removed questions based on checkbox states"""
+        if not self.quiz_data or not self.sections:
+            return "No data to save"
+        
+        # Update question states for current section
+        current_section = self.sections[self.current_section_index]
+        section_id = current_section['section_id']
+        self.question_states[section_id] = checkbox_states[:5]  # Take first 5 values
+        
+        # Create a copy of the data to modify
+        modified_data = json.loads(json.dumps(self.quiz_data))
+        
+        # Remove unchecked questions from each section
+        for section in modified_data['sections']:
+            section_id = section['section_id']
+            quiz_data = section.get('quiz_data', {})
+            
+            if quiz_data.get('quiz_needed', False):
+                questions = quiz_data.get('questions', [])
+                question_states = self.question_states.get(section_id, [True] * len(questions))
+                
+                # Keep only checked questions
+                kept_questions = []
+                for i, question in enumerate(questions):
+                    if i < len(question_states) and question_states[i]:
+                        kept_questions.append(question)
+                
+                # Update the questions list
+                quiz_data['questions'] = kept_questions
+                
+                # Update rationale if no questions remain
+                if not kept_questions:
+                    quiz_data['quiz_needed'] = False
+                    quiz_data['rationale'] = "All questions were removed by user"
+        
+        # Save to the original file
+        try:
+            with open(self.initial_file_path, 'w', encoding='utf-8') as f:
+                json.dump(modified_data, f, indent=2, ensure_ascii=False)
+            return f"Saved changes to {os.path.basename(self.initial_file_path)}"
+        except Exception as e:
+            return f"Error saving file: {str(e)}"
+
+def format_quiz_information(section, quiz_data):
+    """Format quiz information for display including rationale and metadata"""
+    if not quiz_data.get('quiz_needed', False):
+        return "**No quiz needed for this section**\n\n" + quiz_data.get('rationale', 'No rationale provided')
+    
+    rationale = quiz_data.get('rationale', {})
+    questions = quiz_data.get('questions', [])
+    
+    # Format the information
+    info = f"**Quiz Information for: {section['section_title']}**\n\n"
+    
+    if isinstance(rationale, dict):
+        # Detailed rationale with focus areas
+        focus_areas = rationale.get('focus_areas', [])
+        if focus_areas:
+            info += "**Focus Areas:**\n"
+            for i, area in enumerate(focus_areas, 1):
+                info += f"{i}. {area}\n"
+            info += "\n"
+        
+        question_strategy = rationale.get('question_strategy', '')
+        if question_strategy:
+            info += f"**Question Strategy:** {question_strategy}\n\n"
+        
+        difficulty_progression = rationale.get('difficulty_progression', '')
+        if difficulty_progression:
+            info += f"**Difficulty Progression:** {difficulty_progression}\n\n"
+        
+        integration = rationale.get('integration', '')
+        if integration:
+            info += f"**Integration:** {integration}\n\n"
+        
+        ranking_explanation = rationale.get('ranking_explanation', '')
+        if ranking_explanation:
+            info += f"**Question Order:** {ranking_explanation}\n\n"
+    else:
+        # Simple rationale string
+        info += f"**Rationale:** {rationale}\n\n"
+    
+    # Add question count
+    info += f"**Questions:** {len(questions)} question{'s' if len(questions) != 1 else ''}\n\n"
+    
+    # Add learning objectives summary
+    learning_objectives = []
+    for question in questions:
+        if 'learning_objective' in question:
+            learning_objectives.append(question['learning_objective'])
+    
+    if learning_objectives:
+        info += "**Learning Objectives:**\n"
+        for i, obj in enumerate(learning_objectives, 1):
+            info += f"{i}. {obj}\n"
+    
+    return info
+
+def format_question_for_display(question, question_number):
+    """Format a question for display in the Gradio interface based on its type"""
+    question_type = question.get('question_type', 'SHORT')
+    question_text = question.get('question', '')
+    
+    if question_type == "MCQ":
+        # Format MCQ with bold stem and indented choices
+        formatted = f"**Q{question_number}:** {question_text}\n\n"
+        
+        choices = question.get('choices', [])
+        for j, choice in enumerate(choices):
+            letter = chr(ord('A') + j)
+            formatted += f"   {letter}) {choice}\n"
+        
+        return formatted
+    else:
+        # Standard formatting for other types
+        return f"**Q{question_number}:** {question_text}"
+
+def create_gradio_interface(initial_file_path=None):
+    """Create the Gradio interface"""
+    editor = QuizEditorGradio(initial_file_path)
+    
+    # Load the quiz file immediately
+    if initial_file_path:
+        load_result = editor.load_quiz_file(initial_file_path)
+        if isinstance(load_result, tuple):
+            section_title, nav_info, section_text, questions_text, _ = load_result
+        else:
+            section_title, nav_info, section_text, questions_text = "Error", "Error", "Error loading file", ""
+    else:
+        section_title, nav_info, section_text, questions_text = "No file loaded", "No sections", "No content loaded", ""
+    
+    # Get initial quiz info
+    if editor.sections:
+        initial_section = editor.sections[0]
+        quiz_info = format_quiz_information(initial_section, initial_section.get('quiz_data', {}))
+    else:
+        quiz_info = "No quiz information available"
+    
+    with gr.Blocks(title="Quiz Editor", theme=gr.themes.Soft()) as interface:
+        gr.Markdown("# Quiz Editor")
+        
+        # Top row with section title and navigation (50-50)
+        with gr.Row():
+            with gr.Column(scale=1):
+                gr.Markdown("### Section Title")
+                section_title_box = gr.Textbox(label="", interactive=False, value=section_title)
+            
+            with gr.Column(scale=1):
+                gr.Markdown("### Navigation")
+                nav_info_box = gr.Textbox(label="", interactive=False, value=nav_info)
+        
+        # Section content
+        gr.Markdown("### Section Content (from .qmd file)")
+        section_text_box = gr.Textbox(label="", lines=15, interactive=False, max_lines=20, value=section_text)
+        
+        gr.Markdown("### Generated Questions")
+        
+        # Dynamically create question rows based on the number of questions
+        question_checkboxes = []
+        question_markdowns = []
+        answer_markdowns = []
+        learning_obj_markdowns = []
+        
+        def create_question_rows(num_questions, questions):
+            for i in range(num_questions):
+                with gr.Row(visible=True) as row_group:
+                    with gr.Column(scale=1):  # Checkboxake the checkbox sCheckbox without text
+                        checkbox = gr.Checkbox(label="Select", value=True, visible=False)
+                        question_checkboxes.append(checkbox)
+                    with gr.Column(scale=3):
+                        # Display the question text
+                        question_text = f"Q: {questions[i]['question']}"
+                        question_md = gr.Markdown(question_text, visible=False)
+                        question_markdowns.append(question_md)  # ✅ correct list
+                    with gr.Column(scale=3):
+                        # Display the answer in the middle column
+                        answer_text = f"**Answer:** {questions[i]['answer']}"
+                        answer_md = gr.Markdown(answer_text, visible=False)
+                        answer_markdowns.append(answer_md)
+                    with gr.Column(scale=2):
+                        # Display the learning objective in the last column
+                        learning_text = f"**Learning Objective:** {questions[i].get('learning_objective', 'N/A')}"
+                        learning_md = gr.Markdown(learning_text, visible=False)
+                        learning_obj_markdowns.append(learning_md)
+        
+        # Create maximum possible question rows (5 as per schema)
+        max_questions = 5
+        dummy_questions = [{"question": "", "answer": "", "learning_objective": ""}] * max_questions
+        create_question_rows(max_questions, dummy_questions)
+        
+        # Bottom row with navigation and save buttons
+        with gr.Row():
+            with gr.Column(scale=1):
+                prev_btn = gr.Button("← Previous", size="lg")
+            with gr.Column(scale=1):
+                save_btn = gr.Button("💾 Save & Exit", size="lg", variant="primary")
+            with gr.Column(scale=1):
+                next_btn = gr.Button("Next →", size="lg")
+        
+        # Regeneration section
+        gr.Markdown("### Regenerate Questions")
+        with gr.Row():
+            with gr.Column(scale=3):
+                prompt_input = gr.Textbox(
+                    label="Regeneration Instructions", 
+                    placeholder="Enter instructions for regenerating questions (e.g., 'Make questions more challenging', 'Focus on practical applications', 'Add more multiple choice questions')",
+                    lines=3,
+                    max_lines=5
+                )
+            with gr.Column(scale=1):
+                regenerate_btn = gr.Button("🔄 Regenerate", size="lg", variant="secondary")
+        
+        # Status display for operations (moved here, below regeneration)
+        status_display = gr.Textbox(label="Status", interactive=False, visible=True, lines=3)
+        
+        # Quiz Information section (moved to bottom)
+        gr.Markdown("### Quiz Information")
+        quiz_info_display = gr.Markdown(quiz_info, visible=True)
+        
+        # Status display for operations (smaller, at bottom)
+        status_display = gr.Textbox(label="Status", interactive=False, visible=True, lines=2)
+        
+
+        def get_section_data(section_idx):
+            # Returns: section_title, nav_info, section_text, quiz_info, [checkbox_states], [question_markdowns], [answer_md], [learning_md]
+            # Always returns fixed number of outputs to match interface components (max 5 questions)
+            max_components = 5
+            
+            if not editor.sections:
+                return [
+                    "No file loaded", "No sections", "No content loaded", "No quiz information available",
+                    *(gr.update(value=False, visible=False) for i in range(max_components)),
+                    *(gr.update(value="", visible=False) for i in range(max_components)),
+                    *(gr.update(value="", visible=False) for i in range(max_components)),
+                    *(gr.update(value="", visible=False) for i in range(max_components))
+                ]
+            
+            section = editor.sections[section_idx]
+            title = f"{section['section_title']} ({section['section_id']})"
+            section_text_val = editor.get_full_section_content(section)
+            nav_text = f"Section {section_idx+1} of {len(editor.sections)}"
+            
+            # Add question count to navigation
+            quiz_data = section.get('quiz_data', {})
+            questions = quiz_data.get('questions', []) if quiz_data.get('quiz_needed', False) else []
+            num_questions = len(questions)
+            if num_questions > 0:
+                nav_text += f" ({num_questions} question{'s' if num_questions != 1 else ''})"
+            else:
+                nav_text += " (no quiz)"
+            
+            # Format quiz information
+            quiz_info = format_quiz_information(section, quiz_data)
+            
+            # Initialize with False/empty for all component slots
+            checkbox_states = [False] * max_components
+            question_markdowns = [""] * max_components
+            answer_md = [""] * max_components
+            learning_md = [""] * max_components
+            
+            if num_questions == 0:
+                # No quiz needed for this section - show only first row with message
+                question_markdowns[0] = "**No quiz needed for this section**"
+                answer_md[0] = "*This section was determined to not require a quiz based on its content.*"
+                learning_md[0] = ""
+                # Only show the first row, hide the rest
+                return [
+                    title, nav_text, section_text_val, quiz_info,
+                    *(gr.update(value=checkbox_states[i], visible=(i == 0)) for i in range(max_components)),
+                    *(gr.update(value=question_markdowns[i], visible=(i == 0)) for i in range(max_components)),
+                    *(gr.update(value=answer_md[i], visible=(i == 0)) for i in range(max_components)),
+                    *(gr.update(value=learning_md[i], visible=(i == 0)) for i in range(max_components))
+                ]
+            else:
+                # Get saved checkbox states for this section
+                section_id = section['section_id']
+                saved_states = editor.question_states.get(section_id, [True] * num_questions)
+                
+                # Fill in data for actual questions (up to max_components)
+                for i in range(min(num_questions, max_components)):
+                    # Use saved checkbox state if available, otherwise default to True
+                    checkbox_states[i] = saved_states[i] if i < len(saved_states) else True
+                    question_markdowns[i] = format_question_for_display(questions[i], i+1)
+                    answer_md[i] = f"**Answer:** {questions[i]['answer']}"
+                    learning_md[i] = f"**Learning Objective:** {questions[i].get('learning_objective', 'N/A')}"
+                
+                # Return gr.update() objects with proper visibility control
+                return [
+                    title, nav_text, section_text_val, quiz_info,
+                    *(gr.update(value=checkbox_states[i], visible=(i < num_questions)) for i in range(max_components)),
+                    *(gr.update(value=question_markdowns[i], visible=(i < num_questions)) for i in range(max_components)),
+                    *(gr.update(value=answer_md[i], visible=(i < num_questions)) for i in range(max_components)),
+                    *(gr.update(value=learning_md[i], visible=(i < num_questions)) for i in range(max_components))
+                ]
+        
+        # Navigation handlers
+        def nav_prev():
+            if editor.current_section_index > 0:
+                editor.current_section_index -= 1
+            return get_section_data(editor.current_section_index)
+        def nav_next():
+            if editor.current_section_index < len(editor.sections)-1:
+                editor.current_section_index += 1
+            return get_section_data(editor.current_section_index)
+        
+        # Checkbox change handler
+        def checkbox_change(*checkbox_values):
+            if editor.sections and editor.current_section_index < len(editor.sections):
+                current_section = editor.sections[editor.current_section_index]
+                section_id = current_section['section_id']
+                # Only save the checkbox states for questions that actually exist
+                quiz_data = current_section.get('quiz_data', {})
+                questions = quiz_data.get('questions', []) if quiz_data.get('quiz_needed', False) else []
+                num_questions = len(questions)
+                editor.question_states[section_id] = list(checkbox_values[:num_questions])
+            return  # No output needed
+        
+        # Save handler - directly save changes
+        def save_changes(*checkbox_values):
+            if editor.sections and editor.current_section_index < len(editor.sections):
+                current_section = editor.sections[editor.current_section_index]
+                section_id = current_section['section_id']
+                # Only save the checkbox states for questions that actually exist
+                quiz_data = current_section.get('quiz_data', {})
+                questions = quiz_data.get('questions', []) if quiz_data.get('quiz_needed', False) else []
+                num_questions = len(questions)
+                editor.question_states[section_id] = list(checkbox_values[:num_questions])
+            
+            # Count total changes across all sections
+            total_questions_removed = 0
+            for section in editor.sections:
+                section_id = section['section_id']
+                quiz_data = section.get('quiz_data', {})
+                questions = quiz_data.get('questions', []) if quiz_data.get('quiz_needed', False) else []
+                question_states = editor.question_states.get(section_id, [True] * len(questions))
+                removed_count = sum(1 for state in question_states if not state)
+                total_questions_removed += removed_count
+            
+            # Save the changes
+            result = editor.save_changes_with_checkboxes(list(checkbox_values))
+            
+            if total_questions_removed > 0:
+                return f"{result}\n\nRemoved {total_questions_removed} question(s) total."
+            else:
+                return f"{result}\n\nAll questions kept."
+        
+        # Confirmed save handler
+        def confirmed_save(confirm_save, *checkbox_values):
+            if not confirm_save:
+                return "❌ Save cancelled"
+            
+            if editor.sections and editor.current_section_index < len(editor.sections):
+                current_section = editor.sections[editor.current_section_index]
+                section_id = current_section['section_id']
+                # Only save the checkbox states for questions that actually exist
+                quiz_data = current_section.get('quiz_data', {})
+                questions = quiz_data.get('questions', []) if quiz_data.get('quiz_needed', False) else []
+                num_questions = len(questions)
+                editor.question_states[section_id] = list(checkbox_values[:num_questions])
+            
+            return editor.save_changes_with_checkboxes(list(checkbox_values))
+        
+        # Regeneration handler
+        def regenerate_questions(user_prompt):
+            if not user_prompt.strip():
+                return "Please enter regeneration instructions"
+            
+            if not editor.sections or editor.current_section_index >= len(editor.sections):
+                return "No section loaded"
+            
+            current_section = editor.sections[editor.current_section_index]
+            section_title = current_section['section_title']
+            section_id = current_section['section_id']
+            current_quiz_data = current_section.get('quiz_data', {})
+            
+            # Get section text
+            section_text = editor.get_full_section_content(current_section)
             
             try:
-                qa_pairs = call_openai(client, SYSTEM_PROMPT, user_prompt, model=model)
+                # Initialize OpenAI client
+                client = OpenAI()
                 
-                if qa_pairs:
-                    # Check if quiz is needed
-                    if isinstance(qa_pairs, dict) and not qa_pairs.get("quiz_needed", True):
-                        qa_by_section[title] = qa_pairs
-                        yield gr.update(choices=[], value=[]), gr.update(value=str(qa_pairs.get("rationale", "No quiz needed for this section."))), gr.update(value="✅ Section marked as not needing a quiz")
-                    else:
-                        qa_by_section[title] = qa_pairs
-                        questions = qa_pairs.get("questions", qa_pairs) if isinstance(qa_pairs, dict) else qa_pairs
-                        logging.info(f"Successfully regenerated {len(questions)} Q&A pairs for section: '{title}'")
-                        
-                        # Extract rationale and questions
-                        rationale_text = ""
-                        choices = []
-                        
-                        if isinstance(qa_pairs, dict) and "rationale" in qa_pairs:
-                            rationale = qa_pairs["rationale"]
-                            if isinstance(rationale, dict):
-                                rationale_text = (
-                                    f"Focus Areas: {', '.join(rationale['focus_areas'])}\n"
-                                    f"Strategy: {rationale['question_strategy']}\n"
-                                    f"Progression: {rationale['difficulty_progression']}\n"
-                                    f"Integration: {rationale['integration']}\n"
-                                    f"Ranking: {rationale.get('ranking_explanation', 'Questions ordered by learning effectiveness')}"
-                                )
-                            else:
-                                rationale_text = str(rationale)
-                        
-                        # Add questions
-                        for i, qa in enumerate(questions):
-                            formatted_content = f"{i+1}. {qa['question']}\n\n{qa['answer']}"
-                            if 'learning_objective' in qa:
-                                formatted_content += f"\n\nLearning Objective: {qa['learning_objective']}"
-                            choices.append((formatted_content, i))
-                        
-                        # Start with no questions selected
-                        yield gr.update(choices=choices, value=[]), gr.update(value=rationale_text), gr.update(value="✅ Questions regenerated!")
+                # Call regeneration function
+                new_quiz_data = regenerate_section_quiz(
+                    client, section_title, section_text, current_quiz_data, user_prompt
+                )
+                
+                # Get the regeneration comment
+                comment = new_quiz_data.pop('_regeneration_comment', '')  # Remove from data so it doesn't get saved
+                
+                # Update the current section with new quiz data
+                current_section['quiz_data'] = new_quiz_data
+                
+                
+                # Reset question states for this section
+                if new_quiz_data.get('quiz_needed', False):
+                    questions = new_quiz_data.get('questions', [])
+                    editor.question_states[section_id] = [True] * len(questions)
                 else:
-                    yield gr.update(choices=[], value=[]), gr.update(value="Failed to generate questions"), gr.update(value="⚠️ Failed to generate questions")
+                    editor.question_states[section_id] = []
+                
+                # Create status message with the model's comment
+                if comment:
+                    status_msg = f"✅ **Regenerated questions for '{section_title}'**\n\n{comment}"
+                else:
+                    status_msg = f"✅ **Regenerated questions for '{section_title}'**"
+                
+                return status_msg
+                
             except Exception as e:
-                logging.error(f"Error regenerating questions: {e}")
-                yield gr.update(choices=[], value=[]), gr.update(value="Error generating questions"), gr.update(value="⚠️ Error generating questions")
-
-        def go_next(index, selected_indices):
-            # Save current section before moving
-            save_current_section(index, selected_indices)
-            
-            if index >= total_sections - 1:
-                # We're at the end, show end message
-                progress_text = "### You've reached the end! There are no more sections to review."
-                return index, progress_text, "End of Document", "No more sections to review.", "", gr.update(choices=[], value=[]), gr.update(visible=False), gr.update(visible=True), gr.update(visible=False)
-            
-            new_index = index + 1
-            title, text = sections[new_index]
-            
-            # Don't automatically generate questions - only show existing ones
-            return new_index, *get_section_data(new_index)
-
-        def go_back(index):
-            if index > 0:
-                new_index = index - 1
-                return new_index, *get_section_data(new_index)
-            return index, *get_section_data(index)
-
-        def save_current_section(index, selected_indices):
-            if index < total_sections:
-                title, _ = sections[index]
-                qa_pairs = qa_by_section.get(title, [])
-                
-                # Save the user's selection for this section
-                selected_indices_by_section[title] = list(selected_indices)
-                
-                # Check if quiz is needed
-                if isinstance(qa_pairs, dict) and not qa_pairs.get("quiz_needed", True):
-                    # For sections that don't need a quiz, save an empty list
-                    for i, (existing_title, _) in enumerate(final_answers):
-                        if existing_title == title:
-                            final_answers[i] = (title, [])
-                            break
-                    else:
-                        final_answers.append((title, []))
-                    logging.info(f"Section '{title}' marked as not needing a quiz")
-                    return gr.update(value="✅ Section marked as not needing a quiz")
-                
-                # Get the questions list from the nested structure
-                questions = qa_pairs.get("questions", qa_pairs) if isinstance(qa_pairs, dict) else qa_pairs
-                
-                # Filter out any invalid indices
-                valid_indices = [i for i in selected_indices if i < len(questions)]
-                selected_qa = [questions[i] for i in valid_indices]
-                
-                if selected_qa:
-                    # Update or add to final_answers
-                    for i, (existing_title, _) in enumerate(final_answers):
-                        if existing_title == title:
-                            final_answers[i] = (title, selected_qa)
-                            break
-                    else:
-                        final_answers.append((title, selected_qa))
-                    
-                    logging.info(f"Saved {len(selected_qa)} Q&A pairs for section: {title}")
-                    return gr.update(value="✅ Saved!")
-                else:
-                    return gr.update(value="⚠️ No selections to save")
-            return gr.update()
-
-        def write_and_exit():
-            # print("--- ENTERING WRITE_AND_EXIT FUNCTION ---") # DEBUG: Check if function is called
-            if not final_answers:
-                return gr.update(value="⚠️ No sections saved!")
-            
-            logging.info(f"Proceeding to write {len(final_answers)} updated sections to file.")
-
-            # Start with the cleaned content that was written to tmp_path initially
-            # We need to read it back because 'content' is not directly accessible here
-            with open(tmp_path, "r", encoding="utf-8") as f:
-                modified_content = f.read()
-
-            answer_blocks = []
-            for title, qa_pairs in final_answers:
-                logging.debug(f"Formatting and inserting quiz for section: '{title}'")
-                slug = clean_slug(title)
-                quiz_block = format_quiz_block(qa_pairs, f"{ANSWER_ID_PREFIX}{slug}")
-                answer_block = format_answer_block(slug, qa_pairs)
-                
-                # Insert quiz only at the end of the ## section, after all its content (including any ### or deeper)
-                section_pattern = re.compile(rf"(^##\s+{re.escape(title)}\s*\n)(.*?)(?=^##\s|\Z)", re.DOTALL | re.MULTILINE)
-                modified_content = section_pattern.sub(lambda m: insert_quiz_at_end(m, quiz_block), modified_content, count=1)
-                answer_blocks.append(answer_block)
-
-            # Only add non-empty answer blocks
-            nonempty_answer_blocks = [b for b in answer_blocks if b.strip() and not b.strip().isspace() and ANSWER_ID_PREFIX in b]
-            logging.info(f"Found {len(nonempty_answer_blocks)} non-empty answer blocks to append")
-            
-            if nonempty_answer_blocks:
-                logging.info("Appending final 'Quiz Answers' block.")
-                if not re.search(r"^##\s+Quiz Answers", modified_content, re.MULTILINE):
-                    logging.info("Adding 'Quiz Answers' section header")
-                    modified_content += "\n\n## Quiz Answers\n"
-                else:
-                    logging.info("'Quiz Answers' section header already exists")
-                
-                logging.info(f"Appending {len(nonempty_answer_blocks)} answer blocks")
-                modified_content += "\n" + "\n\n".join(nonempty_answer_blocks)
+                return f"❌ Error regenerating questions: {str(e)}"
+        
+        # Initial load
+        def initial_load():
+            return get_section_data(editor.current_section_index)
+        
+        # Wire up components
+        prev_btn.click(nav_prev, outputs=[section_title_box, nav_info_box, section_text_box, quiz_info_display] + question_checkboxes + question_markdowns + answer_markdowns + learning_obj_markdowns)
+        next_btn.click(nav_next, outputs=[section_title_box, nav_info_box, section_text_box, quiz_info_display] + question_checkboxes + question_markdowns + answer_markdowns + learning_obj_markdowns)
+        for cb in question_checkboxes:
+            cb.change(checkbox_change, inputs=question_checkboxes, outputs=[])
+        
+        # Save button - directly save changes
+        save_btn.click(save_changes, inputs=question_checkboxes, outputs=[status_display])
+        
+        # Regenerate button - updates status and refreshes the current section
+        def regenerate_and_refresh(user_prompt):
+            status = regenerate_questions(user_prompt)
+            if status.startswith("✅"):
+                # If successful, refresh the current section display and clear the prompt
+                section_data = get_section_data(editor.current_section_index)
+                return [status, ""] + section_data  # Clear prompt_input
             else:
-                logging.info("No answer blocks to append")
-
-            # Write the final content back to the temporary file
-            logging.info(f"Writing modified content to temporary file: {tmp_path}")
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                f.write(modified_content)
-            logging.info(f"Successfully wrote updated content to temporary file. Size: {os.path.getsize(tmp_path)} bytes")
-
-            # --- Final Overwrite and Cleanup ---
-            logging.info(f"Overwriting original file: {filepath}")
-            shutil.copy2(tmp_path, filepath)
-            logging.info(f"Successfully updated original file. New size: {os.path.getsize(filepath)} bytes")
-            
-            # Clean up the temporary file
-            if os.path.exists(tmp_path):
-                logging.info(f"Cleaning up temporary file: {tmp_path}")
-                os.unlink(tmp_path)
-                logging.info("Temporary file removed successfully.")
-
-            logging.info(f"GUI mode: Successfully updated file: {filepath}")
-            
-            # --- Exit the app and process ---
-            try:
-                demo.close()
-            except Exception:
-                pass
-            sys.exit(0)
-            return gr.update(value="✅ File written successfully!")
-
-        # Initial Load for the first section
-        progress, title, text, rationale_text, checkboxes_update, next_visible, back_visible, regen_visible = get_section_data(0)
-        progress_bar.value = progress
-        section_title_box.value = title
-        section_text_box.value = text
-        rationale_box.value = rationale_text
-        qa_checkboxes.choices = checkboxes_update['choices']
-        qa_checkboxes.value = checkboxes_update['value']
-        
-        # Connect buttons
-        back_btn.click(
-            fn=go_back,
-            inputs=[current_index],
-            outputs=[current_index, progress_bar, section_title_box, section_text_box, rationale_box, qa_checkboxes, next_btn, back_btn, regenerate_btn]
-        )
-        
-        save_btn.click(
-            fn=save_current_section,
-            inputs=[current_index, qa_checkboxes],
-            outputs=[save_btn]
-        )
-        
-        next_btn.click(
-            fn=go_next,
-            inputs=[current_index, qa_checkboxes],
-            outputs=[current_index, progress_bar, section_title_box, section_text_box, rationale_box, qa_checkboxes, next_btn, back_btn, regenerate_btn]
-        )
+                # If error, just return status and keep prompt
+                return [status, user_prompt] + [""] * (1 + 2 + 1 + 1 + 5 + 5 + 5 + 5)  # status + prompt + title + nav + text + quiz_info + checkboxes + questions + answers + learning
         
         regenerate_btn.click(
-            fn=regenerate_questions,
-            inputs=[current_index, custom_guidance],
-            outputs=[qa_checkboxes, rationale_box, regenerate_btn]
+            regenerate_and_refresh, 
+            inputs=[prompt_input], 
+            outputs=[status_display, prompt_input, section_title_box, nav_info_box, section_text_box, quiz_info_display] + question_checkboxes + question_markdowns + answer_markdowns + learning_obj_markdowns
         )
         
-        write_exit_btn.click(
-            fn=write_and_exit,
-            outputs=[write_exit_btn]
-        )
+        interface.load(initial_load, outputs=[section_title_box, nav_info_box, section_text_box, quiz_info_display] + question_checkboxes + question_markdowns + answer_markdowns + learning_obj_markdowns)
+    return interface
 
-    # --- Interactive Prompt Before Launch ---
-    print("\n" + "="*70)
-    print("🚀 Interactive Review Session is Ready to Launch")
-    print("="*70)
-    print("The script will now start a local web server for you to review the questions.")
-    print("\nWhat will happen next:")
-    print("  1. I will start the server and attempt to open a new tab in your web browser.")
-    print("  2. If a tab doesn't open, a URL (like http://127.0.0.1:7860) will appear below.")
-    print("     You must copy and paste this URL into your browser.")
-    print("  3. After you finish your review, click 'Write to File and Exit' and then close the web page.")
-    print("     The script will then automatically process your selections and save the file.")
-    
-    input("\n➡️  Press Enter to launch the review session...")
-    
-    logging.info("Launching Gradio interface. Look for the local URL in the output below.")
-    demo.launch(inbrowser=True)
-
-# --- Main File Processing Logic ---
-
-def clean_existing_quiz_blocks(markdown_text):
-    """
-    Remove all quiz and answer callouts, and the entire '## Quiz Answers' section with its content.
-    Returns:
-        cleaned_text (str): the cleaned markdown
-        changed (bool): whether anything was removed
-        quiz_removed_count (int): number of quiz blocks removed
-        answer_removed_count (int): number of answer blocks removed
-    """
-    original_len = len(markdown_text)
-    quiz_removed_count = 0
-    answer_removed_count = 0
-
-    # --- Remove quiz callouts ---
-    quiz_callout_pattern = re.compile(
-        r":::\s*\{[^}]*?" + re.escape(QUIZ_CALLOUT_CLASS) + r"[^}]*?\}[\s\S]*?:::\s*\n?",
-        re.DOTALL | re.IGNORECASE
-    )
-    cleaned, quiz_removed_count = quiz_callout_pattern.subn("", markdown_text)
-
-    # --- Remove all answer callouts ---
-    answer_callout_pattern = re.compile(
-        r":::\s*\{[^}]*?" + re.escape(ANSWER_CALLOUT_CLASS) + r"[^}]*?\}[\s\S]*?:::\s*\n?",
-        re.DOTALL | re.IGNORECASE
-    )
-    cleaned, answer_removed_count = answer_callout_pattern.subn("", cleaned)
-
-    # --- Remove the entire '## Quiz Answers' section (header + all content) ---
-    quiz_answers_section_pattern = re.compile(
-        r"(^##\s+" + re.escape("Quiz Answers") + r"[\s\S]*?)(?=^##\s|\Z)", re.MULTILINE
-    )
-    cleaned, section_removed_count = quiz_answers_section_pattern.subn("", cleaned)
-
-    logging.debug(f"Cleaned section removed count: {section_removed_count}")
-    changed = len(cleaned) != original_len
-    return cleaned, changed, quiz_removed_count, answer_removed_count
-
-def insert_quiz_at_end(match, quiz_block):
-    """Helper function to insert quiz block at the end of a section."""
-    section_text = match.group(0)  # Keep original newlines
-    # Remove any existing quiz callout in this section
-    section_text = re.sub(rf"::: \{{{QUIZ_CALLOUT_CLASS}[\s\S]*?:::\n?", "", section_text)
-    # Only insert if quiz_block is not empty and not already present
-    if quiz_block.strip() and quiz_block.strip() not in section_text:
-        return section_text.rstrip() + '\n\n' + quiz_block.strip() + '\n\n'
-    return section_text  # Return original section text with its newlines intact
-
-def extract_existing_quizzes(markdown_text):
-    """Extract existing quiz questions and answers from markdown text.
-    Returns:
-        dict: Dictionary mapping section titles to their quiz content
-    """
-    quizzes_by_section = {}
-    
-    # First, find all question blocks by their ID
-    question_blocks = {}
-    question_pattern = re.compile(
-        rf"::: \{{{QUIZ_CALLOUT_CLASS}[^}}]*#{QUESTION_ID_PREFIX}([^}}]+)[^}}]*\}}([\s\S]*?){REFERENCE_TEXT} \\ref\{{{ANSWER_ID_PREFIX}([^}}]+)\}}[\s\S]*?:::",
-        re.DOTALL
-    )
-    
-    print("\n=== Finding Question Blocks ===")
-    print("Looking for question blocks with pattern:", question_pattern.pattern)
-    for match in question_pattern.finditer(markdown_text):
-        question_slug = match.group(1)
-        answer_slug = match.group(3)
-        question_text = match.group(2).strip()
-        
-        print(f"\nFound question block:")
-        print(f"Question ID: {QUESTION_ID_PREFIX}{question_slug}")
-        print(f"Answer ID: {ANSWER_ID_PREFIX}{answer_slug}")
-        print(f"Question text: {question_text[:100]}...")  # Show first 100 chars
-        
-        # Find the section this quiz belongs to
-        section_start = markdown_text.rfind("## ", 0, match.start())
-        if section_start == -1:
-            print(f"❌ Could not find section for quiz with question_slug: {question_slug}")
-            continue
-            
-        section_end = markdown_text.find("\n## ", section_start + 1)
-        if section_end == -1:
-            section_end = len(markdown_text)
-            
-        section_text = markdown_text[section_start:section_end]
-        section_title = re.search(r"^##\s+(.*?)$", section_text, re.MULTILINE)
-        if not section_title:
-            print(f"❌ Could not find section title for quiz with question_slug: {question_slug}")
-            continue
-            
-        section_title = section_title.group(1).strip()
-        print(f"✅ Found in section: {section_title}")
-        
-        # Store the question block info
-        if section_title not in question_blocks:
-            question_blocks[section_title] = []
-        question_blocks[section_title].append({
-            'question_slug': question_slug,
-            'answer_slug': answer_slug,
-            'question_text': question_text
-        })
-    
-    print(f"\nFound {len(question_blocks)} sections with questions")
-    
-    # Now find all answer blocks
-    answer_blocks = {}
-    answer_pattern = re.compile(
-        rf"::: \{{{ANSWER_CALLOUT_CLASS}[^}}]*#{ANSWER_ID_PREFIX}([^}}]+)[^}}]*\}}([\s\S]*?):::",
-        re.DOTALL
-    )
-    
-    print("\n=== Finding Answer Blocks ===")
-    print("Looking for answer blocks with pattern:", answer_pattern.pattern)
-    for match in answer_pattern.finditer(markdown_text):
-        answer_slug = match.group(1)
-        answer_text = match.group(2).strip()
-        
-        print(f"\nFound answer block:")
-        print(f"Answer ID: {ANSWER_ID_PREFIX}{answer_slug}")
-        print(f"Answer text: {answer_text[:100]}...")  # Show first 100 chars
-        
-        # Split answers by numbered questions
-        answer_items = []
-        # This pattern matches:
-        # 1. Question text
-        #    a) option
-        #    b) option
-        #    c) option
-        #    d) option
-        #
-        #    The answer text
-        qa_pattern = re.compile(
-            r"^(\d+)\.\s+([^\n]+(?:\n\s+[a-d]\)[^\n]+)*)\n\n\s+([^\n]+(?:\n\s+[^\n]+)*)(?=^\d+\.|\Z)",
-            re.MULTILINE | re.DOTALL
-        )
-        
-        for qa_match in qa_pattern.finditer(answer_text):
-            qnum = qa_match.group(1)
-            question_part = qa_match.group(2).strip()
-            answer_part = qa_match.group(3).strip()
-            
-            print(f"\nProcessing question {qnum}:")
-            print(f"Question: {question_part[:100]}...")
-            print(f"Answer: {answer_part[:100]}...")
-            
-            # Handle different question types
-            if 'a)' in question_part or 'b)' in question_part or 'c)' in question_part or 'd)' in question_part:
-                print("Type: Multiple choice")
-                answer_items.append((qnum, answer_part))
-            elif 'True or False' in question_part:
-                print("Type: True/False")
-                answer_items.append((qnum, answer_part))
-            elif 'Fill in the blank' in question_part:
-                print("Type: Fill in the blank")
-                answer_items.append((qnum, answer_part))
-            else:
-                print("Type: Regular question")
-                answer_items.append((qnum, answer_part))
-            
-        if answer_items:
-            print(f"✅ Successfully parsed {len(answer_items)} answers for {answer_slug}")
-            answer_blocks[answer_slug] = answer_items
-        else:
-            print(f"❌ No answers parsed for {answer_slug}")
-            print("Raw answer text:", answer_text)
-    
-    print(f"\nFound {len(answer_blocks)} answer blocks")
-    
-    # Now process each section's questions and match with answers
-    print("\n=== Matching Questions with Answers ===")
-    for section_title, questions in question_blocks.items():
-        print(f"\nProcessing section: {section_title}")
-        qa_pairs = []
-        
-        for q_info in questions:
-            question_text = q_info['question_text']
-            answer_slug = q_info['answer_slug']
-            
-            print(f"\nProcessing question block with answer_slug: {answer_slug}")
-            print(f"Looking for answer block with ID: {ANSWER_ID_PREFIX}{answer_slug}")
-            
-            # Split questions by numbered lines
-            question_items = []
-            question_pattern = re.compile(r"^(\d+)\. ([\s\S]*?)(?=^\d+\. |\Z)", re.MULTILINE)
-            for qm in question_pattern.finditer(question_text):
-                qnum = qm.group(1)
-                qtext = qm.group(2).strip()
-                question_items.append((qnum, qtext))
-                print(f"Found question {qnum}: {qtext[:100]}...")
-            
-            # Match questions with answers
-            answer_items = answer_blocks.get(answer_slug, [])
-            print(f"Found {len(answer_items)} answers for this block")
-            print("Available answer numbers:", [anum for anum, _ in answer_items])
-            
-            for qnum, qtext in question_items:
-                print(f"\nTrying to match question {qnum}")
-                # Find matching answer
-                atext = ''
-                for anum, a in answer_items:
-                    print(f"Checking answer {anum} against question {qnum}")
-                    if anum == qnum:
-                        atext = a
-                        print(f"✅ Matched question {qnum} with answer {anum}")
-                        break
-                else:
-                    print(f"❌ No answer found for question {qnum}")
-                    print("Available answers:", answer_items)
-                
-                qa_pairs.append({
-                    "question": qtext,
-                    "answer": atext,
-                    "learning_objective": "Extracted from existing quiz"
-                })
-        
-        if qa_pairs:
-            print(f"✅ Successfully processed {len(qa_pairs)} Q&A pairs for section: {section_title}")
-            quizzes_by_section[section_title] = {
-                "questions": qa_pairs,
-                "quiz_needed": True
-            }
-        else:
-            print(f"❌ No Q&A pairs extracted for section: {section_title}")
-    
-    print(f"\n=== Final Results ===")
-    print(f"Found {len(quizzes_by_section)} sections with quizzes")
-    for section, quiz in quizzes_by_section.items():
-        print(f"Section '{section}': {len(quiz['questions'])} questions")
-    
-    return quizzes_by_section
-
-def process_file_offline(filepath):
-    """Process a file in offline review mode - extract and review existing quizzes."""
-    logging.info(f"--- Starting offline review for: {filepath} ---")
-    tmp_path = None
-    try:
-        # Read original file
-        with open(filepath, "r", encoding="utf-8") as f:
-            content = f.read()
-        logging.info(f"Successfully read file with {len(content)} characters.")
-
-        # Extract chapter title and sections
-        chapter_title, sections = extract_sections(content)
-        if not sections:
-            logging.warning(f"No level-2 sections (## Section Title) found. Nothing to process.")
-            return
-
-        # Extract existing quizzes
-        qa_by_section = extract_existing_quizzes(content)
-        
-        # Create a temporary file
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.tmp', encoding='utf-8') as tmp:
-            tmp_path = tmp.name
-            tmp.write(content)
-        logging.info(f"Created temporary file at: {tmp_path}")
-
-        # Launch GUI in review mode with existing quizzes
-        launch_gui_mode(None, sections, qa_by_section, filepath, None, pre_select_all=True, tmp_path=tmp_path, chapter_title=chapter_title)
-
-    except FileNotFoundError:
-        logging.error(f"File not found: {filepath}")
+def run_gui(quiz_file_path=None):
+    """Run the Gradio application for quiz review"""
+    if not quiz_file_path:
+        print("Error: Quiz file path is required for GUI mode")
+        print("Usage: python quizzes.py --mode review <file_path>")
         return
-    except Exception as e:
-        logging.error(f"An error occurred while processing {filepath}: {str(e)}")
-        return
-    finally:
-        if tmp_path and os.path.exists(tmp_path):
-            logging.info(f"Cleaning up temporary file: {tmp_path}")
-            os.unlink(tmp_path)
-            logging.info("Temporary file removed successfully.")
+    
+    print(f"Launching quiz review GUI for: {quiz_file_path}")
+    interface = create_gradio_interface(quiz_file_path)
+    interface.launch(share=False, server_name="0.0.0.0", server_port=7860)
 
-def process_file(client, filepath, mode="batch", model="gpt-4o"):
-    """Orchestrates the processing of a single markdown file."""
-    logging.info(f"--- Starting processing for: {filepath} ---")
-    tmp_path = None  # Initialize tmp_path
-    try:
-        # Read original file
-        with open(filepath, "r", encoding="utf-8") as f:
-            content = f.read()
-        logging.info(f"Successfully read file with {len(content)} characters.")
-
-        # Clean up any existing quiz/answer callouts
-        content, cleaned_something, quiz_count, answer_count = clean_existing_quiz_blocks(content)
-        if cleaned_something:
-            logging.info(f"Cleaned up existing content: Removed {quiz_count} quiz callout(s) and {answer_count} answer callout(s).")
-        
-        # Create a temporary file
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.tmp', encoding='utf-8') as tmp:
-            tmp_path = tmp.name
-            tmp.write(content)
-        logging.info(f"Created temporary file at: {tmp_path}")
-        logging.info(f"Temporary file size: {os.path.getsize(tmp_path)} bytes")
-
-        # Now process the cleaned content
-        chapter_title, sections = extract_sections(content)
-        if not sections:
-            logging.warning(f"No level-2 sections (## Section Title) found. Nothing to process.")
-            logging.info(f"--- Finished processing for: {filepath} ---")
-            return
-            
-        qa_by_section = {}
-                
-        if mode == "review":
-            # For review mode, generate questions for all sections first
-            logging.info("Generating questions for all sections...")
-            for title, section_text in sections:
-                logging.info(f"Processing section: '{title}'")
-                user_prompt = build_user_prompt(title, section_text, chapter_title)
-                qa_pairs = call_openai(client, SYSTEM_PROMPT, user_prompt, model=model)
-                if qa_pairs:
-                    questions = qa_pairs.get("questions", qa_pairs) if isinstance(qa_pairs, dict) else qa_pairs
-                    logging.info(f"Successfully generated {len(questions)} Q&A pairs for section: '{title}'")
-                    qa_by_section[title] = qa_pairs
-                else:
-                    logging.warning(f"No Q&A pairs were generated for section: '{title}'")
-            
-            # Launch GUI with all questions pre-selected
-            launch_gui_mode(client, sections, qa_by_section, filepath, model, pre_select_all=True, tmp_path=tmp_path, chapter_title=chapter_title)
-        
-        elif mode == "interactive":
-            # For interactive mode, only generate questions for the first section initially
-            if sections:
-                title, text = sections[0]
-                logging.info(f"Generating initial questions for first section: '{title}'")
-                user_prompt = build_user_prompt(title, text, chapter_title)
-                qa_pairs = call_openai(client, SYSTEM_PROMPT, user_prompt, model=model)
-                if qa_pairs:
-                    qa_by_section[title] = qa_pairs
-                    questions = qa_pairs.get("questions", qa_pairs) if isinstance(qa_pairs, dict) else qa_pairs
-                    logging.info(f"Successfully generated {len(questions)} Q&A pairs for first section")
-                else:
-                    logging.warning(f"No Q&A pairs were generated for first section")
-            
-            # Launch GUI with only first section's questions
-            launch_gui_mode(client, sections, qa_by_section, filepath, model, tmp_path=tmp_path, chapter_title=chapter_title)
-        
-        else:  # batch mode
-            # For batch mode, process all sections and write to file
-            logging.info("Running in batch mode. Writing all generated quizzes to file...")
-            for title, section_text in sections:
-                logging.info(f"Processing section: '{title}'")
-                user_prompt = build_user_prompt(title, section_text, chapter_title)
-                qa_pairs = call_openai(client, SYSTEM_PROMPT, user_prompt, model=model)
-                if qa_pairs:
-                    questions = qa_pairs.get("questions", qa_pairs) if isinstance(qa_pairs, dict) else qa_pairs
-                    logging.info(f"Successfully generated {len(questions)} Q&A pairs for section: '{title}'")
-                    qa_by_section[title] = qa_pairs
-                else:
-                    logging.warning(f"No Q&A pairs were generated for section: '{title}'")
-
-            if not qa_by_section:
-                logging.warning("No questions were generated for any section. No changes will be made.")
-                logging.info(f"--- Finished processing for: {filepath} ---")
-                return
-
-            modified_content = content
-            answer_blocks = []
-
-            logging.info(f"Starting to insert {len(qa_by_section)} quiz sections into the document...")
-            for title, qa_pairs in qa_by_section.items():
-                logging.info(f"Processing quiz insertion for section: '{title}'")
-                slug = clean_slug(title)
-                quiz_block = format_quiz_block(qa_pairs, f"{ANSWER_ID_PREFIX}{slug}")
-                answer_block = format_answer_block(slug, qa_pairs)
-                
-                if quiz_block.strip():
-                    logging.info(f"Generated quiz block for section '{title}' ({len(quiz_block)} chars)")
-                else:
-                    logging.info(f"No quiz block generated for section '{title}' (quiz not needed)")
-                
-                if answer_block.strip():
-                    logging.info(f"Generated answer block for section '{title}' ({len(answer_block)} chars)")
-                    answer_blocks.append(answer_block)
-                else:
-                    logging.info(f"No answer block generated for section '{title}' (quiz not needed)")
-                
-                # Insert quiz only at the end of the ## section, after all its content (including any ### or deeper)
-                section_pattern = re.compile(rf"(^##\s+{re.escape(title)}\s*\n)(.*?)(?=^##\s|\Z)", re.DOTALL | re.MULTILINE)
-                modified_content = section_pattern.sub(lambda m: insert_quiz_at_end(m, quiz_block), modified_content, count=1)
-
-            # Only add non-empty answer blocks
-            nonempty_answer_blocks = [b for b in answer_blocks if b.strip() and not b.strip().isspace() and ANSWER_ID_PREFIX in b]
-            logging.info(f"Found {len(nonempty_answer_blocks)} non-empty answer blocks to append")
-            
-            if nonempty_answer_blocks:
-                logging.info("Appending final 'Quiz Answers' block.")
-                if not re.search(r"^##\s+Quiz Answers", modified_content, re.MULTILINE):
-                    logging.info("Adding 'Quiz Answers' section header")
-                    modified_content += "\n\n## Quiz Answers\n"
-                else:
-                    logging.info("'Quiz Answers' section header already exists")
-                
-                logging.info(f"Appending {len(nonempty_answer_blocks)} answer blocks")
-                modified_content += "\n" + "\n\n".join(nonempty_answer_blocks)
-            else:
-                logging.info("No answer blocks to append")
-
-            # Write the final content to the temporary file
-            logging.info(f"Writing modified content to temporary file: {tmp_path}")
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                f.write(modified_content)
-            logging.info(f"Successfully wrote updated content to temporary file. Size: {os.path.getsize(tmp_path)} bytes")
-
-            # Overwrite the original file with the temporary file's contents
-            logging.info(f"Overwriting original file: {filepath}")
-            shutil.copy2(tmp_path, filepath)
-            logging.info(f"Successfully updated original file. New size: {os.path.getsize(filepath)} bytes")
-
-    except FileNotFoundError:
-        logging.error(f"File not found: {filepath}")
-        return
-    except Exception as e:
-        logging.error(f"An error occurred while processing {filepath}: {str(e)}")
-        return
-    finally:
-        # Clean up the temporary file if it still exists
-        if tmp_path and os.path.exists(tmp_path):
-            logging.info(f"Cleaning up leftover temporary file: {tmp_path}")
-            os.unlink(tmp_path)
-            logging.info("Leftover temporary file removed successfully.")
+def show_usage_examples():
+    """Show usage examples for different modes"""
+    print("\n=== Usage Examples ===")
+    print("\n1. Generate quizzes from a markdown file:")
+    print("   python quizzes.py --mode generate -f chapter1.qmd")
+    print("   python quizzes.py --mode generate -f chapter1.qmd -o my_quizzes.json")
+    print("   python quizzes.py --mode generate -d ./chapters/")
+    
+    print("\n2. Review existing quizzes with GUI:")
+    print("   python quizzes.py --mode review -f quizzes.json")
+    print("   python quizzes.py --mode review -f chapter1.qmd")
+    print("   # In the GUI, you can regenerate questions with custom instructions")
+    
+    print("\n3. Verify quiz file structure and correspondence:")
+    print("   python quizzes.py --mode verify -f quizzes.json")
+    print("   python quizzes.py --mode verify -f chapter1.qmd")
+    print("   python quizzes.py --mode verify -d ./quiz_files/")
+    
+    print("\n4. Insert quizzes into markdown:")
+    print("   python quizzes.py --mode insert -f chapter1.qmd")
+    print("   python quizzes.py --mode insert -f quizzes.json")
+    
+    print("\n5. Clean quizzes from markdown files:")
+    print("   python quizzes.py --mode clean -f chapter1.qmd")
+    print("   python quizzes.py --mode clean -d ./chapters/")
+    print("   python quizzes.py --mode clean --backup -f chapter1.qmd")
+    print("   python quizzes.py --mode clean --dry-run -d ./chapters/")
+    
+    print("\n⚠️  IMPORTANT: You must specify either -f (file) or -d (directory) for all modes.")
+    print("   The tool automatically detects file types (JSON vs QMD) and performs the appropriate action.")
 
 def main():
-    """Parses command-line arguments and starts the processing."""
     parser = argparse.ArgumentParser(
-        description="Generate self-check quizzes from Quarto markdown files using OpenAI.",
-        formatter_class=argparse.RawTextHelpFormatter
+        description="Quiz generation and management tool for markdown files.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s --mode generate -f chapter1.qmd
+  %(prog)s --mode generate -d ./some_dir/
+  %(prog)s --mode review -f chapter1.qmd
+  %(prog)s --mode review -f quizzes.json
+  %(prog)s --mode insert -f chapter1.qmd
+  %(prog)s --mode insert -f quizzes.json
+  %(prog)s --mode clean -f chapter1.qmd
+  %(prog)s --mode clean -d ./chapters/
+  %(prog)s --mode verify -f chapter1.qmd
+  %(prog)s --mode verify -f quizzes.json
+  %(prog)s --mode verify -d ./quiz_files/
+
+Note: You must specify either -f (file) or -d (directory) for all modes.
+The tool will automatically detect file types (JSON vs QMD) and perform the appropriate action.
+        """
     )
-    parser.add_argument("-f", "--file", help="Path to a single markdown (.qmd/.md) file.")
-    parser.add_argument("-d", "--dir", help="Path to a directory containing markdown files to process.")
-    parser.add_argument("--mode", required=True, choices=["batch", "review", "interactive", "offline-review"],
-        help="""Mode of operation:
-        batch: Process all sections and write to file without review
-        review: Batch process all sections first, then review them
-        interactive: Generate and review questions one section at a time
-        offline-review: Review existing quizzes from a file without generating new ones""")
-    parser.add_argument("--model", default="gpt-4o", help="The OpenAI model to use (e.g., 'gpt-4o', 'gpt-4o-mini').")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose (DEBUG) logging.")
-    
+    parser.add_argument("--mode", choices=["generate", "review", "insert", "verify", "clean"], 
+                       required=True, help="Mode of operation")
+    parser.add_argument("-f", "--file", help="Path to a file (.qmd, .md, or .json)")
+    parser.add_argument("-d", "--directory", help="Path to directory")
+    parser.add_argument("--model", default="gpt-4o", help="OpenAI model to use (generate mode only)")
+    parser.add_argument("-o", "--output", default="quizzes.json", help="Path to output JSON file (generate mode only)")
+    parser.add_argument("--backup", action="store_true", help="Create backup files before cleaning")
+    parser.add_argument("--dry-run", action="store_true", help="Show what would be done without making changes")
+    parser.add_argument("--examples", action="store_true", help="Show usage examples")
     args = parser.parse_args()
 
-    # --- Setup Logging ---
-    log_level = logging.DEBUG if args.verbose else logging.INFO
-    logging.basicConfig(
-        level=log_level,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S"
-    )
-
-    logging.info("Script starting...")
-    logging.info(f"Running with settings: {args}")
-
-    # --- Initialize OpenAI Client ---
-    try:
-        client = OpenAI()
-        logging.debug("OpenAI client initialized successfully.")
-    except Exception as e:
-        logging.error(f"Failed to initialize OpenAI client. Ensure OPENAI_API_KEY is set. Error: {e}")
+    if args.examples:
+        show_usage_examples()
         return
 
-    if args.file:
-        if args.mode == "offline-review":
-            # For offline review, we don't need the OpenAI client
-            process_file_offline(Path(args.file))
-        else:
-            process_file(client, Path(args.file), mode=args.mode, model=args.model)
-    elif args.dir:
-        directory = Path(args.dir)
-        if not directory.is_dir():
-            logging.error(f"Error: Provided path is not a directory: {args.dir}")
-            return
-            
-        logging.info(f"Scanning directory: {directory}")
-        for root, _, files in os.walk(directory):
-            for name in files:
-                if name.endswith((".qmd", ".md")):
-                    filepath = Path(root) / name
-                    if args.mode == "offline-review":
-                        process_file_offline(filepath)
-                    else:
-                        process_file(client, filepath, mode=args.mode, model=args.model)
-                else:
-                    logging.debug(f"Skipping non-markdown file: {name}")
-    else:
+    # Validate that either -f or -d is provided
+    if not args.file and not args.directory:
+        print("Error: You must specify either -f (file) or -d (directory)")
         parser.print_help()
+        return
+
+    # Determine file type and route to appropriate function
+    if args.file:
+        file_ext = os.path.splitext(args.file)[1].lower()
+        if file_ext in ['.json']:
+            # JSON file - treat as quiz file
+            if args.mode == "generate":
+                print("Error: Generate mode requires a .qmd file, not a .json file")
+                return
+            elif args.mode == "review":
+                run_review_mode_simple(args.file)
+            elif args.mode == "insert":
+                run_insert_mode_simple(args.file)
+            elif args.mode == "verify":
+                run_verify_mode_simple(args.file)
+            elif args.mode == "clean":
+                print("Error: Clean mode requires a .qmd file, not a .json file")
+                return
+        elif file_ext in ['.qmd', '.md']:
+            # QMD/MD file - treat as markdown file
+            if args.mode == "generate":
+                run_generate_mode_simple(args.file, args)
+            elif args.mode == "review":
+                run_review_mode_simple(args.file)
+            elif args.mode == "insert":
+                run_insert_mode_simple(args.file)
+            elif args.mode == "verify":
+                run_verify_mode_simple(args.file)
+            elif args.mode == "clean":
+                run_clean_mode_simple(args.file, args)
+        else:
+            print(f"Error: Unsupported file extension: {file_ext}")
+            print("Supported extensions: .qmd, .md, .json")
+            return
+    elif args.directory:
+        # Directory mode
+        if args.mode == "generate":
+            run_generate_mode_directory(args.directory, args)
+        elif args.mode == "review":
+            print("Error: Review mode requires a specific file, not a directory")
+            return
+        elif args.mode == "insert":
+            print("Error: Insert mode requires a specific file, not a directory")
+            return
+        elif args.mode == "verify":
+            run_verify_mode_directory(args.directory)
+        elif args.mode == "clean":
+            run_clean_mode_directory(args.directory, args)
+
+def run_generate_mode_simple(qmd_file, args):
+    """Generate new quizzes from a markdown file"""
+    print(f"=== Quiz Generation Mode (Single File) ===")
+    generate_for_file(qmd_file, args)
+
+def run_generate_mode_directory(directory, args):
+    """Generate new quizzes from a directory of .qmd files"""
+    print(f"=== Quiz Generation Mode (Directory) ===")
+    generate_for_directory(directory, args)
+
+def run_review_mode_simple(file_path):
+    """Review and edit existing quizzes from a file (JSON or QMD)"""
+    print("=== Quiz Review Mode ===")
     
-    logging.info("Script finished.")
+    # Determine file type
+    file_ext = os.path.splitext(file_path)[1].lower()
+    
+    if file_ext in ['.json']:
+        # JSON file - run GUI directly
+        run_gui(file_path)
+    elif file_ext in ['.qmd', '.md']:
+        # QMD file - find corresponding quiz file first
+        quiz_file_path = find_quiz_file_from_qmd(file_path)
+        if quiz_file_path:
+            run_gui(quiz_file_path)
+        else:
+            print(f"❌ No corresponding quiz file found for {file_path}")
+            print("   Make sure the markdown file has 'quiz: filename.json' in its frontmatter")
+    else:
+        print(f"❌ Unsupported file type: {file_ext}")
+        print("   Supported types: .json, .qmd, .md")
+
+def run_insert_mode_simple(file_path):
+    """Insert quizzes into markdown files"""
+    print("=== Quiz Insert Mode ===")
+    
+    # Determine file type
+    file_ext = os.path.splitext(file_path)[1].lower()
+    
+    if file_ext in ['.json']:
+        # JSON file - find corresponding QMD file
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                quiz_data = json.load(f)
+            qmd_file_path = find_qmd_file_from_quiz(file_path, quiz_data)
+            if qmd_file_path:
+                insert_quizzes_into_markdown(qmd_file_path, file_path)
+            else:
+                print(f"❌ No corresponding QMD file found for {file_path}")
+                print("   Make sure the quiz file has 'source_file' in its metadata")
+        except Exception as e:
+            print(f"❌ Error reading quiz file: {str(e)}")
+    elif file_ext in ['.qmd', '.md']:
+        # QMD file - find corresponding quiz file
+        quiz_file_path = find_quiz_file_from_qmd(file_path)
+        if quiz_file_path:
+            insert_quizzes_into_markdown(file_path, quiz_file_path)
+        else:
+            print(f"❌ No corresponding quiz file found for {file_path}")
+            print("   Make sure the markdown file has 'quiz: filename.json' in its frontmatter")
+    else:
+        print(f"❌ Unsupported file type: {file_ext}")
+        print("   Supported types: .json, .qmd, .md")
+
+def run_verify_mode_simple(file_path):
+    """Verify quiz files and validate their structure"""
+    print("=== Quiz Verify Mode ===")
+    
+    # Determine file type
+    file_ext = os.path.splitext(file_path)[1].lower()
+    
+    if file_ext in ['.json']:
+        # JSON file - verify quiz file and find corresponding QMD
+        print(f"🔍 Verifying quiz file: {file_path}")
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                quiz_data = json.load(f)
+            
+            # Basic validation
+            if not isinstance(quiz_data, dict):
+                print("❌ Quiz file must be a JSON object")
+                return
+            
+            if 'sections' not in quiz_data:
+                print("❌ Quiz file missing 'sections' key")
+                return
+            
+            sections = quiz_data.get('sections', [])
+            print(f"✅ Quiz file is valid JSON")
+            print(f"   - Found {len(sections)} sections")
+            
+            # Count questions
+            total_questions = 0
+            sections_with_quizzes = 0
+            for section in sections:
+                quiz_data_section = section.get('quiz_data', {})
+                if quiz_data_section.get('quiz_needed', False):
+                    sections_with_quizzes += 1
+                    questions = quiz_data_section.get('questions', [])
+                    total_questions += len(questions)
+            
+            print(f"   - Sections with quizzes: {sections_with_quizzes}")
+            print(f"   - Total questions: {total_questions}")
+            
+            # Try to find corresponding QMD file
+            metadata = quiz_data.get('metadata', {})
+            source_file = metadata.get('source_file')
+            if source_file:
+                if os.path.exists(source_file):
+                    print(f"✅ Found corresponding QMD file: {source_file}")
+                else:
+                    print(f"⚠️  QMD file not found: {source_file}")
+            else:
+                print("⚠️  No source file specified in metadata")
+            
+        except json.JSONDecodeError as e:
+            print(f"❌ Invalid JSON: {str(e)}")
+        except Exception as e:
+            print(f"❌ Error reading file: {str(e)}")
+            
+    elif file_ext in ['.qmd', '.md']:
+        # QMD file - verify QMD file and find corresponding quiz
+        print(f"🔍 Verifying QMD file: {file_path}")
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Extract sections
+            sections = extract_sections_with_ids(content)
+            if sections:
+                print(f"✅ QMD file is valid")
+                print(f"   - Found {len(sections)} sections")
+                
+                # Show section titles
+                for section in sections:
+                    print(f"     - {section['section_title']} ({section['section_id']})")
+                
+                # Try to find corresponding quiz file
+                quiz_metadata = extract_quiz_metadata(content)
+                if quiz_metadata:
+                    quiz_path = os.path.join(os.path.dirname(file_path), quiz_metadata)
+                    if os.path.exists(quiz_path):
+                        print(f"✅ Found corresponding quiz file: {quiz_path}")
+                    else:
+                        print(f"⚠️  Quiz file not found: {quiz_path}")
+                else:
+                    print("⚠️  No quiz file specified in frontmatter")
+            else:
+                print("❌ No sections found in QMD file")
+                
+        except Exception as e:
+            print(f"❌ Error reading file: {str(e)}")
+        
+    else:
+        print(f"❌ Unsupported file type: {file_ext}")
+        print("   Supported types: .json, .qmd, .md")
+
+def run_clean_mode_simple(qmd_file, args):
+    """Clean all quizzes from a markdown file"""
+    print("=== Quiz Clean Mode (Single File) ===")
+    clean_single_file(qmd_file, args)
+
+def run_clean_mode_directory(directory, args):
+    """Clean all quizzes from all QMD files in a directory"""
+    print("=== Quiz Clean Mode (Directory) ===")
+    clean_directory(directory, args)
+
+def run_verify_mode_directory(directory_path):
+    """Verify all quiz files in a directory"""
+    print("=== Quiz Verify Mode (Directory) ===")
+    run_verify_directory(directory_path)
 
 if __name__ == "__main__":
     main()
+
