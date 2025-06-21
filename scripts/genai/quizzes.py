@@ -1507,12 +1507,128 @@ def run_review_mode_simple(file_path):
 def run_insert_mode_simple(file_path):
     """Insert quizzes into markdown files"""
     print("=== Quiz Insert Mode ===")
-    run_insert_mode(file_path)
+    
+    # Determine file type
+    file_ext = os.path.splitext(file_path)[1].lower()
+    
+    if file_ext in ['.json']:
+        # JSON file - find corresponding QMD file
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                quiz_data = json.load(f)
+            qmd_file_path = find_qmd_file_from_quiz(file_path, quiz_data)
+            if qmd_file_path:
+                insert_quizzes_into_markdown(qmd_file_path, file_path)
+            else:
+                print(f"❌ No corresponding QMD file found for {file_path}")
+                print("   Make sure the quiz file has 'source_file' in its metadata")
+        except Exception as e:
+            print(f"❌ Error reading quiz file: {str(e)}")
+    elif file_ext in ['.qmd', '.md']:
+        # QMD file - find corresponding quiz file
+        quiz_file_path = find_quiz_file_from_qmd(file_path)
+        if quiz_file_path:
+            insert_quizzes_into_markdown(file_path, quiz_file_path)
+        else:
+            print(f"❌ No corresponding quiz file found for {file_path}")
+            print("   Make sure the markdown file has 'quiz: filename.json' in its frontmatter")
+    else:
+        print(f"❌ Unsupported file type: {file_ext}")
+        print("   Supported types: .json, .qmd, .md")
 
 def run_verify_mode_simple(file_path):
     """Verify quiz files and validate their structure"""
     print("=== Quiz Verify Mode ===")
-    run_verify_mode(file_path)
+    
+    # Determine file type
+    file_ext = os.path.splitext(file_path)[1].lower()
+    
+    if file_ext in ['.json']:
+        # JSON file - verify quiz file and find corresponding QMD
+        print(f"🔍 Verifying quiz file: {file_path}")
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                quiz_data = json.load(f)
+            
+            # Basic validation
+            if not isinstance(quiz_data, dict):
+                print("❌ Quiz file must be a JSON object")
+                return
+            
+            if 'sections' not in quiz_data:
+                print("❌ Quiz file missing 'sections' key")
+                return
+            
+            sections = quiz_data.get('sections', [])
+            print(f"✅ Quiz file is valid JSON")
+            print(f"   - Found {len(sections)} sections")
+            
+            # Count questions
+            total_questions = 0
+            sections_with_quizzes = 0
+            for section in sections:
+                quiz_data_section = section.get('quiz_data', {})
+                if quiz_data_section.get('quiz_needed', False):
+                    sections_with_quizzes += 1
+                    questions = quiz_data_section.get('questions', [])
+                    total_questions += len(questions)
+            
+            print(f"   - Sections with quizzes: {sections_with_quizzes}")
+            print(f"   - Total questions: {total_questions}")
+            
+            # Try to find corresponding QMD file
+            metadata = quiz_data.get('metadata', {})
+            source_file = metadata.get('source_file')
+            if source_file:
+                if os.path.exists(source_file):
+                    print(f"✅ Found corresponding QMD file: {source_file}")
+                else:
+                    print(f"⚠️  QMD file not found: {source_file}")
+            else:
+                print("⚠️  No source file specified in metadata")
+            
+        except json.JSONDecodeError as e:
+            print(f"❌ Invalid JSON: {str(e)}")
+        except Exception as e:
+            print(f"❌ Error reading file: {str(e)}")
+            
+    elif file_ext in ['.qmd', '.md']:
+        # QMD file - verify QMD file and find corresponding quiz
+        print(f"🔍 Verifying QMD file: {file_path}")
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Extract sections
+            sections = extract_sections_with_ids(content)
+            if sections:
+                print(f"✅ QMD file is valid")
+                print(f"   - Found {len(sections)} sections")
+                
+                # Show section titles
+                for section in sections:
+                    print(f"     - {section['section_title']} ({section['section_id']})")
+                
+                # Try to find corresponding quiz file
+                quiz_metadata = extract_quiz_metadata(content)
+                if quiz_metadata:
+                    quiz_path = os.path.join(os.path.dirname(file_path), quiz_metadata)
+                    if os.path.exists(quiz_path):
+                        print(f"✅ Found corresponding quiz file: {quiz_path}")
+                    else:
+                        print(f"⚠️  Quiz file not found: {quiz_path}")
+                else:
+                    print("⚠️  No quiz file specified in frontmatter")
+            else:
+                print("❌ No sections found in QMD file")
+                
+        except Exception as e:
+            print(f"❌ Error reading file: {str(e)}")
+        
+    else:
+        print(f"❌ Unsupported file type: {file_ext}")
+        print("   Supported types: .json, .qmd, .md")
 
 def run_clean_mode_simple(qmd_file, args):
     """Clean all quizzes from a markdown file"""
