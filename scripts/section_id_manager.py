@@ -8,6 +8,12 @@ This script provides a complete toolkit for managing section IDs in your Markdow
 It ensures that all section headers have unique, clean, and consistent section IDs while preserving
 cross-references and other attributes.
 
+Special Handling for Unnumbered Headers:
+---------------------------------------
+- Any header with the {.unnumbered} class is always skipped for section ID management.
+- Unnumbered headers will never have a section ID added, updated, or required (including in verify mode).
+- Only numbered headers (without {.unnumbered}) require section IDs.
+
 Workflow Philosophy:
 --------------------
 - **Write Freely:**
@@ -17,10 +23,10 @@ Workflow Philosophy:
 - **Automated Management:**
   - Before committing or publishing, run this script (manually, via pre-commit, or in CI).
   - The script can:
-    - Add missing section IDs
+    - Add missing section IDs (except for unnumbered headers)
     - Repair existing IDs to match the new format
     - Remove all IDs for a fresh start
-    - Verify all IDs are present and properly formatted
+    - Verify all IDs are present and properly formatted (skipping unnumbered headers)
     - List all IDs for reference
     - Create backups before making changes
     - Update cross-references when IDs change
@@ -32,7 +38,7 @@ Workflow Philosophy:
 - **Safety First:**
   - Use --backup to create timestamped backups before making changes
   - Use --dry-run to preview changes without modifying files
-  - Use --verify to check for issues before committing
+  - Use --verify to check for issues before committing (unnumbered headers are always ignored)
 
 ID Scheme:
 ----------
@@ -61,10 +67,10 @@ Example hash inputs:
 
 Available Modes:
 ----------------
-- **Add Mode (default):** Add missing section IDs to headers
+- **Add Mode (default):** Add missing section IDs to headers (skips unnumbered headers)
 - **Repair Mode (--repair):** Fix existing section IDs to match the new format
 - **Remove Mode (--remove):** Remove all section IDs (use with --backup)
-- **Verify Mode (--verify):** Check that all section IDs are present and properly formatted
+- **Verify Mode (--verify):** Check that all section IDs are present and properly formatted (skips unnumbered headers)
 - **List Mode (--list):** Display all section IDs found in files
 
 Safety Features:
@@ -79,7 +85,7 @@ Safety Features:
 Best Practices:
 ---------------
 - Use --backup when making bulk changes
-- Use --verify before commits to ensure ID integrity
+- Use --verify before commits to ensure ID integrity (unnumbered headers are always ignored)
 - Use --list to audit existing section IDs
 - Use --dry-run to preview changes before applying them
 - Consider using this in pre-commit hooks or CI pipelines
@@ -96,6 +102,7 @@ Key Features:
 - Detailed summaries and progress reporting
 - Support for both single files (-f) and directories (-d)
 - Stopword removal for cleaner, more readable IDs
+- **Unnumbered headers are always skipped for section IDs in all modes**
 
 Typical Usage:
     # Add missing IDs
@@ -108,7 +115,7 @@ Typical Usage:
     # Force repair without prompts
     python section_id_manager.py -d contents/ --repair --force
     
-    # Verify all IDs
+    # Verify all IDs (unnumbered headers are always ignored)
     python section_id_manager.py -d contents/ --verify
     
     # List all IDs
@@ -732,13 +739,13 @@ def print_summary(all_summaries):
     logging.info(f"\n{'='*60}")
 
 def verify_section_ids(filepath):
-    """Verify that all headers have proper section IDs."""
+    """Verify that all headers have proper section IDs, skipping unnumbered headers."""
     missing_ids = []
     with open(filepath, 'r', encoding='utf-8') as file:
         lines = file.readlines()
     
     header_pattern = re.compile(r'^(#{1,6})\s+(.+?)(?:\s*\{[^}]*\})?$')
-    div_start_pattern = re.compile(r'^:::\s*\{\.([^"]+)')
+    div_start_pattern = re.compile(r'^:::\s*\{\.([^\"]+)')
     div_end_pattern = re.compile(r'^:::\s*$')
     
     inside_skip_div = False
@@ -752,6 +759,16 @@ def verify_section_ids(filepath):
         if match and not inside_skip_div:
             hashes, title = match.groups()
             if len(hashes) > 1:  # Skip chapter title
+                # Extract existing attributes if any
+                existing_attrs = ""
+                if "{" in line:
+                    attrs_start = line.find("{")
+                    attrs_end = line.rfind("}")
+                    if attrs_end > attrs_start:
+                        existing_attrs = line[attrs_start:attrs_end+1]
+                # Skip headers with {.unnumbered}
+                if ".unnumbered" in existing_attrs:
+                    continue  # Skip this header
                 if not re.search(r'\{#sec-[^}]+\}', line):
                     missing_ids.append({
                         'line': i,
