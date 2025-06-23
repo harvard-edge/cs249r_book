@@ -190,6 +190,49 @@ def clean_text_for_id(text):
     
     return text
 
+def normalize_content_for_hash(content):
+    """
+    Normalize content for hashing to reduce noise from minor formatting changes.
+    
+    This function removes or normalizes formatting that doesn't change the semantic meaning
+    of the content, so that minor formatting changes don't cause section IDs to change.
+    
+    Args:
+        content: Raw content string from the section
+    
+    Returns:
+        Normalized content string suitable for hashing
+    """
+    if not content:
+        return ""
+    
+    # Remove extra whitespace and normalize
+    normalized = re.sub(r'\s+', ' ', content.strip())
+    
+    # Remove basic markdown formatting that doesn't change meaning
+    normalized = re.sub(r'[*_`]', '', normalized)  # Remove emphasis markers
+    normalized = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', normalized)  # Convert links to text
+    normalized = re.sub(r'!\[([^\]]*)\]\([^)]+\)', r'\1', normalized)  # Convert images to alt text
+    
+    # Remove HTML tags (basic)
+    normalized = re.sub(r'<[^>]+>', '', normalized)
+    
+    # Remove code block markers (multiline)
+    normalized = re.sub(r'```[^`]*```', '', normalized, flags=re.DOTALL)
+    normalized = re.sub(r'`[^`]+`', '', normalized)
+    
+    # Remove blockquote markers (multiline)
+    normalized = re.sub(r'^>\s*', '', normalized, flags=re.MULTILINE)
+    
+    # Remove list markers (multiline)
+    normalized = re.sub(r'^[\s]*[-*+]\s+', '', normalized, flags=re.MULTILINE)
+    normalized = re.sub(r'^[\s]*\d+\.\s+', '', normalized, flags=re.MULTILINE)
+    
+    # Clean up any remaining extra whitespace
+    normalized = re.sub(r'\s+', ' ', normalized).strip()
+    
+    return normalized
+
 def normalize_section_id(section_id):
     """Normalize a section ID to ensure consistent format."""
     if not section_id:
@@ -230,32 +273,31 @@ def is_properly_formatted_id(section_id, title, file_path, chapter_title, sectio
     # If it passes all format checks, it's properly formatted
     return True, section_id
 
-def generate_section_id(title, file_path, chapter_title, section_counter, parent_sections=None):
+def generate_section_id(title, file_path, chapter_title, section_counter, parent_sections=None, section_content=None):
     """
-    Generate a unique section ID based on the section title.
+    Generate a unique section ID based on the section title and content.
     
-    The hash includes file path, chapter title, section title, and parent section hierarchy
-    to ensure GLOBAL UNIQUENESS across the entire book project. This prevents conflicts when:
-    
-    - Multiple files have sections with identical names and hierarchies
-    - The same section name appears in different chapters
-    - Different files have identical section structures
+    The hash includes file path, chapter title, section title, parent section hierarchy,
+    and section content to ensure the ID changes when either location or content changes.
+    This is perfect for quiz synchronization - when the ID changes, you know the content
+    or context has changed and quizzes may need updating.
     
     Args:
         title: The section title
-        file_path: The file path (included in hash for global uniqueness)
+        file_path: The file path (included in hash for location tracking)
         chapter_title: The chapter title
         section_counter: Counter for this section (not used in hash)
         parent_sections: List of parent section titles (included in hash)
+        section_content: The content of the section (included in hash for content tracking)
     
     Returns:
         A unique section ID in the format: sec-{chapter-slug}-{section-slug}-{4-char-hash}
         
     Example:
         Same section name in different files:
-        - File A: "contents/chapter1.qmd|Getting Started|Introduction|" → hash: d212
-        - File B: "contents/chapter2.qmd|Getting Started|Introduction|" → hash: 8435
-        Result: Different IDs ensure global uniqueness
+        - File A: "contents/chapter1.qmd|Getting Started|Introduction|content1" → hash: d212
+        - File B: "contents/chapter2.qmd|Getting Started|Introduction|content1" → hash: 8435
+        Result: Different IDs ensure uniqueness and track both location and content changes
     """
     clean_title = simple_slugify(title)
     clean_chapter_title = simple_slugify(chapter_title)
@@ -269,10 +311,15 @@ def generate_section_id(title, file_path, chapter_title, section_counter, parent
             hierarchy_parts.append(simple_slugify(parent))
         hierarchy = "|".join(hierarchy_parts)
     
-    # Hash includes file path, chapter title, section title, and parent hierarchy
-    # This ensures global uniqueness across the entire book project
-    hash_input = f"{file_path}|{chapter_title}|{title}|{hierarchy}".encode('utf-8')
-    hash_suffix = hashlib.sha1(hash_input).hexdigest()[:4]
+    # Normalize content for hashing (remove extra whitespace, basic formatting)
+    normalized_content = ""
+    if section_content:
+        normalized_content = normalize_content_for_hash(section_content)
+    
+    # Hash includes file path, chapter title, section title, parent hierarchy, and content
+    # This ensures the ID changes when either location or content changes
+    hash_input = f"{file_path}|{chapter_title}|{title}|{hierarchy}|{normalized_content}".encode('utf-8')
+    hash_suffix = hashlib.sha1(hash_input).hexdigest()[:4]  # Keep 4 chars
     return f"sec-{clean_chapter_title}-{clean_title}-{hash_suffix}"
 
 def list_section_ids(filepath):
@@ -365,6 +412,42 @@ def list_all_section_ids(directory):
     logging.info(f"  Total sections: {total_sections}")
     logging.info(f"  Sections with IDs: {total_with_ids}")
     logging.info(f"  Sections missing IDs: {total_sections - total_with_ids}")
+
+def extract_section_content(lines, section_start_index, header_level):
+    """
+    Extract the content of a section from the markdown file.
+    
+    Args:
+        lines: List of lines in the file
+        section_start_index: Index of the section header line
+        header_level: Level of the section header (2-6)
+    
+    Returns:
+        String containing the section content (normalized)
+    """
+    content_lines = []
+    i = section_start_index + 1
+    
+    while i < len(lines):
+        line = lines[i].strip()
+        
+        # Stop if we hit another header of same or higher level
+        if line.startswith('#'):
+            next_header_level = len(line) - len(line.lstrip('#'))
+            if next_header_level <= header_level:
+                break
+        
+        # Stop if we hit a div boundary
+        if line.startswith(':::'):
+            break
+            
+        # Add non-empty lines to content
+        if line:
+            content_lines.append(line)
+        
+        i += 1
+    
+    return ' '.join(content_lines)
 
 def create_backup(file_path):
     """Create a backup of the file before making changes."""
@@ -476,8 +559,11 @@ def process_markdown_file(file_path, auto_yes=False, force=False, dry_run=False,
                             logging.info(f"    {line.strip()}")
                             logging.info(f"    → {new_line.strip()}")
                     else:
-                        # Generate the new ID in the standard format with parent hierarchy
-                        new_id = generate_section_id(title, file_path, chapter_title, section_counter, parent_sections)
+                        # Extract section content for content-aware ID generation
+                        section_content = extract_section_content(lines, i, header_level)
+                        
+                        # Generate the new ID in the standard format with parent hierarchy and content
+                        new_id = generate_section_id(title, file_path, chapter_title, section_counter, parent_sections, section_content)
                         section_counter += 1
                         
                         # Check if the existing ID needs to be repaired/updated
@@ -506,7 +592,11 @@ def process_markdown_file(file_path, auto_yes=False, force=False, dry_run=False,
                                 logging.info(f"    → {new_line.strip()}")
                 else:
                     if not remove_mode:  # Only add IDs if not in remove mode
-                        new_id = generate_section_id(title, file_path, chapter_title, section_counter, parent_sections)
+                        # Extract section content for content-aware ID generation
+                        section_content = extract_section_content(lines, i, header_level)
+                        
+                        # Generate the new ID in the standard format with parent hierarchy and content
+                        new_id = generate_section_id(title, file_path, chapter_title, section_counter, parent_sections, section_content)
                         section_counter += 1
                         # Add ID while preserving other attributes
                         if existing_attrs:
