@@ -532,6 +532,28 @@ def process_markdown_file(file_path, auto_yes=False, force=False, dry_run=False,
                         existing_attrs = line[attrs_start:attrs_end+1]
                 # Skip headers with {.unnumbered}
                 if ".unnumbered" in existing_attrs:
+                    # Remove any existing section ID from unnumbered headers
+                    existing_id_matches = re.findall(r'\{#(sec-[^}]+)\}', line)
+                    if existing_id_matches:
+                        existing_id = existing_id_matches[0]
+                        # Remove the section ID while preserving other attributes
+                        new_attrs = re.sub(r'#sec-[^}\s]+', '', existing_attrs)
+                        # Remove duplicate .unnumbered
+                        new_attrs = re.sub(r'(\.unnumbered)(?=.*\.unnumbered)', '', new_attrs)
+                        # Remove extra whitespace
+                        new_attrs = re.sub(r'\s+', ' ', new_attrs).strip()
+                        # Remove empty braces or braces with only whitespace
+                        if new_attrs in ["{}", "{ }", ""]:
+                            new_line = f"{hashes} {title}\n"
+                        else:
+                            new_line = f"{hashes} {title} {new_attrs}\n"
+                        lines[i] = new_line
+                        modified = True
+                        file_summary['modified'] = True
+                        file_summary['removed_ids'].append((title.strip(), existing_id))
+                        logging.info(f"  🗑️  Removed ID from unnumbered header: {title}")
+                        logging.info(f"    {line.strip()}")
+                        logging.info(f"    → {new_line.strip()}")
                     continue  # Skip this header
 
                 existing_id_matches = re.findall(r'\{#(sec-[^}]+)\}', line)
