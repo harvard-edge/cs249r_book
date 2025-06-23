@@ -138,7 +138,7 @@ FRONTMATTER_PATTERN = r'^(---\s*\n.*?\n---\s*\n)'
 YAML_FRONTMATTER_PATTERN = r'^(---\s*\n.*?\n---\s*\n)'
 
 # Section patterns
-SECTION_PATTERN = r"^##\s+(.+?)(\s*\{#([\w\-]+)\})?\s*$"
+SECTION_PATTERN = r"^##\s+(.+?)(\s*\{[^}]*\})?\s*$"
 
 # Configuration for question types, making it easy to modify or extend.
 QUESTION_TYPE_CONFIG = [
@@ -396,6 +396,16 @@ First, evaluate if this section warrants a quiz by considering:
 - Sections requiring application of concepts to real scenarios
 - Sections building on previous knowledge in critical ways
 
+## Chapter-Level Variety and Coherence
+
+When previous quiz context is provided for the chapter:
+- **Analyze the existing questions** to understand what concepts and question types have been covered
+- **Ensure conceptual variety** - avoid repeating the same learning objectives or approaches
+- **Complement rather than duplicate** - if similar concepts appear, approach them from different angles
+- **Maintain chapter coherence** - questions should build on each other while covering distinct aspects
+- **Balance question types** - if previous sections used mostly MCQs, consider SHORT, FILL, or other types
+- **Focus on different system aspects** - if previous questions focused on tradeoffs, focus on implementation, operational concerns, or real-world applications
+
 ## Required JSON Schema
 
 You MUST return a valid JSON object that strictly follows this schema:
@@ -446,32 +456,71 @@ If a quiz IS needed, follow the structure below. For "MCQ" questions, provide th
 ## Question Guidelines
 
 **Content Focus:**
-- Emphasize conceptual understanding and system-level reasoning
+- Prioritize system-level reasoning: e.g., tradeoffs in deployment environments, impact of data pipeline design on model accuracy, scaling infrastructure for inference workloads, etc.
 - Include at least one question about design tradeoffs or operational implications
 - Address common misconceptions when applicable
 - Avoid surface-level recall or trivia
 - Connect to practical ML systems scenarios
+- Check whether similar concepts or questions have been addressed in earlier sections. Avoid repeating the same idea unless it is being extended or applied in a novel way.
 
 **Question Types (use a variety based on content):**
 {QUESTION_GUIDELINES}
 -   **Do not** embed options (e.g., A, B, C) in the `question` string for MCQ questions; use the `choices` array instead.
+
+**Question Type Specifics:**
+- **MCQ**: Provide 3-5 plausible distractors. The correct answer should not be obvious from the question stem alone.
+- **SHORT**: Should encourage synthesis or justification (e.g., "Explain why X matters in Y context").
+- **FILL**: Should test key terms, but avoid placing the answer immediately before or after the blank. Use only when the term is central and non-obvious.
+- **TF**: Must include justification that addresses common misconceptions.
+- **ORDER**: Focus on processes where sequence matters for system outcomes.
+- **CALC**: Include real-world context and explain the practical significance of the result.
 
 **Quality Standards:**
 - For `MCQ` questions, the `answer` string MUST start with `The correct answer is [LETTER].` followed by an explanation of why this choice is correct. Do NOT repeat the answer text in the explanation.
 - Use clear, academically appropriate language
 - Avoid repeating exact phrasing from source text
 - Keep answers concise and informative (~75-150 words total per Q&A pair)
-- Ensure questions collectively cover the section's main learning objectives
+- Use the first question to address the most foundational or essential system insight from the section
+- If multiple questions are included, ensure they span distinct ideas (e.g., tradeoffs, lifecycle stages, deployment implications)
 - Progress from basic understanding to application/analysis when multiple questions are used
 - Note: Questions will appear at the end of each major section, with answers provided separately at the chapter's end. Design questions that serve as immediate comprehension checks for the section just read.
 
 **CRITICAL ANTI-PATTERNS TO AVOID:**
-- **Questions where the answer is obvious from the question itself** (e.g., fill-in-the-blank where the answer appears in the same sentence)
-- **Questions that test surface-level recall without deeper understanding**
-- **Questions where multiple reasonable answers could be correct**
-- **Questions that simply repeat information from the text without requiring analysis**
-- **Questions that test trivial facts rather than conceptual understanding**
-- **Questions where the explanation just restates what's already obvious from the question**
+- Avoid "fill-in-the-blank" questions where the answer is given in the same sentence or is trivially inferable
+- Avoid MCQs where distractors are implausible or where the answer is telegraphed
+- All question types should require thought, not just recall
+- Questions where the answer is obvious from the question itself
+- Questions that test surface-level recall without deeper understanding
+- Questions where multiple reasonable answers could be correct
+- Questions that simply repeat information from the text without requiring analysis
+- Questions that test trivial facts rather than conceptual understanding
+- Questions where the explanation just restates what's already obvious from the question
+
+**Bloom's Taxonomy Mix:**
+- Remember: Key terms and concepts
+- Understand: Explain implications and relationships  
+- Apply: Use concepts in new scenarios
+- Analyze: Compare approaches and identify tradeoffs
+- Evaluate: Justify design decisions
+- Create: Propose solutions to system challenges
+
+**Integration Guidelines:**
+- When appropriate, build on concepts introduced in earlier sections to show how foundational ideas evolve into more complex system-level considerations
+- Ensure questions collectively cover the section's main learning objectives
+- Questions should reinforce different facets of system-level thinking
+
+**Quality Check**
+Before finalizing, ensure:
+- Questions test different aspects of the content (avoid redundancy)
+- At least one question addresses system-level implications
+- Questions are appropriate for the textbook's target audience
+- Answer explanations help reinforce learning, not just state correctness
+- The response strictly follows the JSON schema provided above
+- **No questions fall into the anti-patterns listed above**
+- Re-read all questions and confirm: Are they distinct? Do they avoid overlap? Do they reinforce different facets of system-level thinking?
+- If previous quiz context was provided: Do these questions complement rather than duplicate previous questions? Do they use different question types and focus areas?
+
+## Appendix: Common Pitfalls Explained
 
 **EXAMPLE OF A POOR FILL QUESTION:**
 ❌ "In ML systems, the choice between cloud and edge architectures can be influenced by ________ requirements, such as data sovereignty and privacy."
@@ -493,27 +542,26 @@ Answer: "Data residency and processing location. Healthcare data must often be p
 - The answer should be a specific term or concept, not a general word that could be inferred
 - Avoid questions where the answer appears in the same sentence or immediately before/after the blank
 - Test understanding of relationships, not just vocabulary recall
-
-**Bloom's Taxonomy Mix:**
-- Remember: Key terms and concepts
-- Understand: Explain implications and relationships  
-- Apply: Use concepts in new scenarios
-- Analyze: Compare approaches and identify tradeoffs
-- Evaluate: Justify design decisions
-- Create: Propose solutions to system challenges
-
-**Quality Check**
-Before finalizing, ensure:
-- Questions test different aspects of the content (avoid redundancy)
-- At least one question addresses system-level implications
-- Questions are appropriate for the textbook's target audience
-- Answer explanations help reinforce learning, not just state correctness
-- The response strictly follows the JSON schema provided above
-- **No questions fall into the anti-patterns listed above**
 """
 
 def update_qmd_frontmatter(qmd_file_path, quiz_file_name):
-    """Adds or updates the 'quiz' key in the QMD file's YAML frontmatter using a YAML parser."""
+    """
+    Add or update the 'quiz' key in a QMD file's YAML frontmatter.
+    
+    This function safely modifies the YAML frontmatter of a Quarto markdown file
+    to include a reference to the corresponding quiz file. It handles cases where
+    frontmatter doesn't exist and preserves the existing structure.
+    
+    Args:
+        qmd_file_path (str): Path to the QMD file to modify
+        quiz_file_name (str): Name of the quiz file to reference
+        
+    Returns:
+        None
+        
+    Raises:
+        Exception: If there's an error reading or writing the file
+    """
     print(f"  Updating frontmatter in: {os.path.basename(qmd_file_path)}")
     try:
         # We use a proper YAML parser to safely handle the frontmatter.
@@ -562,22 +610,64 @@ def update_qmd_frontmatter(qmd_file_path, quiz_file_name):
 
 def extract_sections_with_ids(markdown_text):
     """
-    Extracts all level-2 sections (##) with their content and section reference (e.g., {#sec-...}).
-    Returns a list of dicts: {section_id, section_title, section_text}
-    If any section is missing a reference, prints an error and returns None.
+    Extract all level-2 sections (##) with their content and section references.
+    
+    This function parses markdown content to find all level-2 headers that have
+    section reference labels (e.g., {#sec-...}). It validates that all sections
+    have proper IDs and returns structured data for each section.
+    
+    Args:
+        markdown_text (str): The markdown content to parse
+        
+    Returns:
+        list: List of dictionaries containing section data, or None if validation fails.
+              Each dict has keys: 'section_id', 'section_title', 'section_text'
+              
+    Note:
+        - Filters out "Quiz Answers" sections automatically
+        - Requires regular sections to have reference labels for consistency
+        - Excludes unnumbered sections and special sections that don't need IDs
+        - Returns None if any regular section is missing a reference label
+        
+    Excluded sections (don't need IDs):
+        - Sections with {.unnumbered} attribute
+        - Sections with {.appendix} attribute  
+        - Sections with {.backmatter} attribute
+        - "Quiz Answers" sections
     """
-    section_pattern = re.compile(SECTION_PATTERN, re.MULTILINE)
+    # Updated pattern to handle various section formats
+    section_pattern = re.compile(r'^##\s+(.+?)(\s*\{[^}]*\})?\s*$', re.MULTILINE)
     all_matches = list(section_pattern.finditer(markdown_text))
     
-    # Filter out "Quiz Answers" sections
-    content_matches = [m for m in all_matches if m.group(1).strip().lower() != 'quiz answers']
+    # Filter out "Quiz Answers" sections and special sections
+    content_matches = []
+    for match in all_matches:
+        title = match.group(1).strip()
+        attributes = match.group(2) if match.group(2) else ""
+        
+        # Skip Quiz Answers sections
+        if title.lower() == 'quiz answers':
+            continue
+            
+        # Skip unnumbered sections and other special sections
+        if '.unnumbered' in attributes or '.unnumbered' in title:
+            continue
+            
+        # Skip sections with other special attributes that don't need IDs
+        if any(special in attributes for special in ['.unnumbered', '.appendix', '.backmatter']):
+            continue
+            
+        content_matches.append(match)
     
-    # First, validate all content sections have IDs
+    # Check which sections need IDs (regular sections without special attributes)
     missing_refs = []
     for match in content_matches:
         title = match.group(1).strip()
-        ref = match.group(3)
-        if not ref:
+        attributes = match.group(2) if match.group(2) else ""
+        
+        # Check if this section has a proper ID (starts with #)
+        has_id = re.search(r'\{#([\w\-]+)\}', attributes)
+        if not has_id:
             missing_refs.append(title)
     
     if missing_refs:
@@ -585,13 +675,14 @@ def extract_sections_with_ids(markdown_text):
         for title in missing_refs:
             print(f"  - {title}")
         print("\nPlease add section references to all sections and re-run the script.")
+        print("Note: Unnumbered sections (with {.unnumbered}) are automatically excluded.")
         return None
     
     # If all sections have IDs, proceed with extraction
     sections = []
     for i, match in enumerate(content_matches):
         title = match.group(1).strip()
-        ref = match.group(3)
+        attributes = match.group(2) if match.group(2) else ""
         start = match.end()
         
         # Find the correct end position from the original list of all matches
@@ -599,16 +690,44 @@ def extract_sections_with_ids(markdown_text):
         end = all_matches[original_index + 1].start() if original_index + 1 < len(all_matches) else len(markdown_text)
         
         content = markdown_text[start:end].strip()
-        # Store the full section reference including the # symbol
-        full_ref = f"#{ref}"
-        sections.append({
-            "section_id": full_ref,
-            "section_title": title,
-            "section_text": content
-        })
+        
+        # Extract the section ID
+        id_match = re.search(r'\{#([\w\-]+)\}', attributes)
+        ref = id_match.group(1) if id_match else None
+        
+        if ref:
+            # Store the full section reference including the # symbol
+            full_ref = f"#{ref}"
+            sections.append({
+                "section_id": full_ref,
+                "section_title": title,
+                "section_text": content
+            })
+    
     return sections
 
 def call_openai(client, system_prompt, user_prompt, model="gpt-4o"):
+    """
+    Make an API call to OpenAI for quiz generation.
+    
+    This function handles the communication with OpenAI's API, including error
+    handling, JSON parsing, and schema validation. It ensures the response
+    follows the expected structure for quiz data.
+    
+    Args:
+        client (OpenAI): Initialized OpenAI client instance
+        system_prompt (str): The system prompt defining the AI's role and constraints
+        user_prompt (str): The user prompt containing the section content
+        model (str): OpenAI model to use (default: "gpt-4o")
+        
+    Returns:
+        dict: Validated quiz response data, or fallback response on error
+        
+    Note:
+        - Includes fallback JSON extraction if the response isn't pure JSON
+        - Validates response against JSON_SCHEMA
+        - Returns structured error responses for debugging
+    """
     try:
         response = client.chat.completions.create(
             model=model,
@@ -643,7 +762,23 @@ def call_openai(client, system_prompt, user_prompt, model="gpt-4o"):
         return {"quiz_needed": False, "rationale": f"Unexpected error: {str(e)}"}
 
 def validate_individual_quiz_response(data):
-    """Validate individual quiz response manually"""
+    """
+    Manually validate individual quiz response structure.
+    
+    This function performs a thorough validation of quiz response data to ensure
+    it meets all requirements before processing. It checks data types, required
+    fields, and structural integrity.
+    
+    Args:
+        data: The quiz response data to validate
+        
+    Returns:
+        bool: True if the data is valid, False otherwise
+        
+    Note:
+        This is a backup validation method in addition to JSON schema validation.
+        It provides more detailed error checking for debugging purposes.
+    """
     if not isinstance(data, dict):
         return False
     
@@ -690,15 +825,30 @@ def validate_individual_quiz_response(data):
     
     return True
 
-def build_user_prompt(section_title, section_text, chapter_number=None, chapter_title=None):
+def build_user_prompt(section_title, section_text, chapter_number=None, chapter_title=None, previous_quizzes=None):
     """
-    Build user prompt with chapter context for appropriate difficulty progression.
+    Build a user prompt with chapter context and previous quiz data for variety.
+    
+    This function constructs the user prompt sent to the AI, incorporating
+    chapter-specific context, difficulty guidelines, and previous quiz data
+    to ensure variety and avoid overlap within the chapter.
     
     Args:
-        section_title: Title of the section
-        section_text: Content of the section
-        chapter_number: Chapter number (1-20)
-        chapter_title: Chapter title
+        section_title (str): Title of the section being processed
+        section_text (str): Content of the section
+        chapter_number (int, optional): Chapter number (1-20)
+        chapter_title (str, optional): Chapter title
+        previous_quizzes (list, optional): List of previous quiz data from earlier sections in this chapter
+        
+    Returns:
+        str: Formatted user prompt with chapter context, difficulty guidelines, and previous quiz context
+        
+    Note:
+        - Chapters 1-5: Foundational concepts and basic understanding
+        - Chapters 6-10: Intermediate complexity with practical applications
+        - Chapters 11-15: Advanced topics requiring system-level reasoning
+        - Chapters 16-20: Specialized topics requiring integration across concepts
+        - Previous quiz data helps avoid redundancy and ensures variety
     """
     # Define chapter progression context
     chapter_context = ""
@@ -745,11 +895,38 @@ The book progresses from foundational concepts to advanced topics and operationa
 - Emphasize critical thinking about ML systems in broader contexts
 """
     
+    # Build previous quiz context if available
+    previous_quiz_context = ""
+    if previous_quizzes and len(previous_quizzes) > 0:
+        previous_quiz_context = f"""
+**Previous Quiz Context (Avoid Overlap):**
+The following sections in this chapter already have quizzes. Ensure your questions are distinct and avoid conceptual overlap:
+
+"""
+        for i, quiz_data in enumerate(previous_quizzes, 1):
+            if quiz_data.get('quiz_needed', False):
+                questions = quiz_data.get('questions', [])
+                previous_quiz_context += f"\nSection {i} Questions:\n"
+                for j, question in enumerate(questions, 1):
+                    q_type = question.get('question_type', 'Unknown')
+                    q_text = question.get('question', '')[:100] + "..." if len(question.get('question', '')) > 100 else question.get('question', '')
+                    previous_quiz_context += f"  Q{j} ({q_type}): {q_text}\n"
+                previous_quiz_context += "\n"
+        
+        previous_quiz_context += """
+**Variety Guidelines:**
+- Use different question types than those already used in this chapter
+- Focus on different aspects of the content (e.g., if previous questions focused on tradeoffs, focus on implementation or operational concerns)
+- Ensure your questions complement rather than repeat the learning objectives covered in previous sections
+- If similar concepts appear, approach them from a different angle or application context
+"""
+    
     return f"""
 This section is titled "{section_title}".
 
 {chapter_context}
 {difficulty_guidelines}
+{previous_quiz_context}
 
 Section content:
 {section_text}
@@ -757,18 +934,33 @@ Section content:
 Generate a self-check quiz with 1 to 5 well-structured questions and answers based on this section. Include a rationale explaining your question generation strategy and focus areas. Return your response in the specified JSON format.
 """.strip()
 
-def regenerate_section_quiz(client, section_title, section_text, current_quiz_data, user_prompt, chapter_number=None, chapter_title=None):
+def regenerate_section_quiz(client, section_title, section_text, current_quiz_data, user_prompt, chapter_number=None, chapter_title=None, previous_quizzes=None):
     """
     Regenerate quiz questions for a section with custom instructions.
     
+    This function allows users to regenerate quiz questions with specific
+    instructions while maintaining all quality standards and anti-patterns.
+    It's used by the GUI for interactive quiz editing and can incorporate
+    previous quiz context for better variety.
+    
     Args:
-        client: OpenAI client
-        section_title: Title of the section
-        section_text: Content of the section
-        current_quiz_data: Current quiz data for the section
-        user_prompt: User's regeneration instructions
-        chapter_number: Chapter number (1-20)
-        chapter_title: Chapter title
+        client (OpenAI): Initialized OpenAI client instance
+        section_title (str): Title of the section
+        section_text (str): Content of the section
+        current_quiz_data (dict): Current quiz data for the section
+        user_prompt (str): User's regeneration instructions
+        chapter_number (int, optional): Chapter number (1-20)
+        chapter_title (str, optional): Chapter title
+        previous_quizzes (list, optional): List of previous quiz data from earlier sections in this chapter
+        
+    Returns:
+        dict: New quiz data following the user's instructions
+        
+    Note:
+        - Maintains all quality standards from the original prompt
+        - Adds user instructions to the system prompt
+        - Includes a regeneration comment for tracking changes
+        - Can incorporate previous quiz context for variety if provided
     """
     # Create a custom system prompt that includes the user's instructions
     custom_system_prompt = f"""
@@ -785,11 +977,12 @@ Please regenerate the quiz questions following these specific instructions while
 - Maintain the same high quality standards as the original prompt
 - Pay special attention to avoiding the anti-patterns listed above
 - If the user requests changes to question types, ensure the new types are appropriate for the content
+- If previous quiz context is provided, ensure the new questions complement rather than duplicate previous questions
 - Provide a brief comment explaining how you addressed the user's instructions
 """
     
-    # Build the user prompt with chapter context
-    user_prompt_text = build_user_prompt(section_title, section_text, chapter_number, chapter_title)
+    # Build the user prompt with chapter context and previous quiz data
+    user_prompt_text = build_user_prompt(section_title, section_text, chapter_number, chapter_title, previous_quizzes)
     user_prompt_text += f"\n\nPlease regenerate the quiz questions following the user's specific instructions: {user_prompt}"
     
     # Call the AI
@@ -805,7 +998,37 @@ Please regenerate the quiz questions following these specific instructions while
 
 # Gradio Application
 class QuizEditorGradio:
+    """
+    Gradio-based GUI for reviewing and editing quiz questions.
+    
+    This class provides an interactive web interface for reviewing generated quiz
+    questions, regenerating questions with custom instructions, and managing
+    question selection. It integrates with the quiz file format and provides
+    a user-friendly way to interact with quiz data.
+    
+    Attributes:
+        quiz_data (dict): The loaded quiz data structure
+        sections (list): List of sections from the quiz file
+        current_section_index (int): Index of the currently displayed section
+        initial_file_path (str): Path to the initial quiz file
+        original_qmd_content (str): Content of the original QMD file
+        qmd_file_path (str): Path to the original QMD file
+        question_states (dict): Track checked/unchecked state for each question
+        
+    Methods:
+        load_quiz_file: Load and parse a quiz JSON file
+        navigate_section: Move between sections
+        save_changes: Save modifications to the quiz file
+        regenerate_questions: Regenerate questions with custom instructions
+    """
+    
     def __init__(self, initial_file_path=None):
+        """
+        Initialize the QuizEditorGradio instance.
+        
+        Args:
+            initial_file_path (str, optional): Path to the initial quiz file to load
+        """
         self.quiz_data = None
         self.sections = []
         self.current_section_index = 0
@@ -815,7 +1038,20 @@ class QuizEditorGradio:
         self.question_states = {}  # Track checked/unchecked state for each question
         
     def load_quiz_file(self, file_path=None):
-        """Load a quiz JSON file"""
+        """
+        Load a quiz JSON file and initialize the editor state.
+        
+        This method loads a quiz file, validates its structure, and prepares
+        the editor for interaction. It also attempts to load the corresponding
+        QMD file for context.
+        
+        Args:
+            file_path (str, optional): Path to the quiz file. If None, uses initial_file_path
+            
+        Returns:
+            tuple: (section_title, nav_info, section_text, questions_text, status)
+                   Status information for the loaded file
+        """
         # Use provided file path or initial file path
         path_to_load = file_path or self.initial_file_path
         
@@ -861,7 +1097,13 @@ class QuizEditorGradio:
             return f"Error loading {path_to_load}: {str(e)}", "Error loading file", "No sections", "", ""
     
     def initialize_question_states(self):
-        """Initialize checked state for all questions (all checked by default)"""
+        """
+        Initialize checked state for all questions (all checked by default).
+        
+        This method sets up the question selection state for all sections,
+        ensuring that all questions are initially marked as selected for
+        inclusion in the final quiz.
+        """
         self.question_states = {}
         for i, section in enumerate(self.sections):
             section_id = section['section_id']
@@ -871,7 +1113,14 @@ class QuizEditorGradio:
                 self.question_states[section_id] = [True] * len(questions)  # All checked by default
     
     def update_question_state(self, section_id, question_index, checked):
-        """Update the checked state of a question"""
+        """
+        Update the checked state of a specific question.
+        
+        Args:
+            section_id (str): The section identifier
+            question_index (int): Index of the question within the section
+            checked (bool): Whether the question should be included
+        """
         if section_id not in self.question_states:
             self.question_states[section_id] = []
         
@@ -882,7 +1131,16 @@ class QuizEditorGradio:
         self.question_states[section_id][question_index] = checked
     
     def load_original_qmd_file(self, quiz_file_path):
-        """Try to load the original .qmd file based on the quiz file path"""
+        """
+        Try to load the original .qmd file based on the quiz file path.
+        
+        This method attempts to find and load the original QMD file that
+        corresponds to the quiz file. It first checks the metadata in the
+        quiz file, then falls back to searching the directory.
+        
+        Args:
+            quiz_file_path (str): Path to the quiz file
+        """
         try:
             # Get metadata from quiz file
             metadata = self.quiz_data.get('metadata', {})
@@ -911,7 +1169,18 @@ class QuizEditorGradio:
             self.qmd_file_path = None
     
     def get_full_section_content(self, section):
-        """Get the full section content from the original .qmd file"""
+        """
+        Get the full section content from the original .qmd file.
+        
+        This method retrieves the complete section content from the original
+        QMD file, including the header, for better context in the editor.
+        
+        Args:
+            section (dict): Section data containing section_id and section_title
+            
+        Returns:
+            str: Full section content including header, or fallback text
+        """
         if not self.original_qmd_content:
             return section.get('section_text', 'No section text available')
         
@@ -1194,7 +1463,20 @@ class QuizEditorGradio:
             return f"Error saving file: {str(e)}"
 
 def format_quiz_information(section, quiz_data):
-    """Format quiz information for display including rationale and metadata"""
+    """
+    Format quiz information for display including rationale and metadata.
+    
+    This function creates a formatted display of quiz information for
+    the GUI, including focus areas, question strategy, and learning
+    objectives.
+    
+    Args:
+        section (dict): Section data containing title and ID
+        quiz_data (dict): Quiz data for the section
+        
+    Returns:
+        str: Formatted quiz information text
+    """
     if not quiz_data.get('quiz_needed', False):
         return "**No quiz needed for this section**\n\n" + quiz_data.get('rationale', 'No rationale provided')
     
@@ -1249,7 +1531,20 @@ def format_quiz_information(section, quiz_data):
     return info
 
 def format_question_for_display(question, question_number):
-    """Format a question for display in the Gradio interface based on its type"""
+    """
+    Format a question for display in the Gradio interface based on its type.
+    
+    This function takes a question object and formats it appropriately
+    for display in the GUI, handling different question types (MCQ,
+    TF, SHORT, etc.) with proper formatting.
+    
+    Args:
+        question (dict): Question data containing type, text, and options
+        question_number (int): The question number for display
+        
+    Returns:
+        str: Formatted question text ready for display
+    """
     question_type = question.get('question_type', 'SHORT')
     question_text = question.get('question', '')
     
@@ -1596,7 +1891,23 @@ def create_gradio_interface(initial_file_path=None):
     return interface
 
 def run_gui(quiz_file_path=None):
-    """Run the Gradio application for quiz review"""
+    """
+    Launch the Gradio GUI for quiz review and editing.
+    
+    This function creates and launches the interactive web interface
+    for reviewing and editing quiz questions. It provides a user-friendly
+    way to navigate through sections, view questions, and regenerate
+    questions with custom instructions.
+    
+    Args:
+        quiz_file_path (str, optional): Path to the quiz file to load initially
+        
+    Note:
+        - Launches on localhost:7860 by default
+        - Provides full quiz editing capabilities
+        - Supports question regeneration with custom prompts
+        - Allows saving changes back to the quiz file
+    """
     if not quiz_file_path:
         print("Error: Quiz file path is required for GUI mode")
         print("Usage: python quizzes.py --mode review <file_path>")
@@ -1607,7 +1918,13 @@ def run_gui(quiz_file_path=None):
     interface.launch(share=False, server_name="0.0.0.0", server_port=7860)
 
 def show_usage_examples():
-    """Show usage examples for different modes"""
+    """
+    Display comprehensive usage examples for all modes of operation.
+    
+    This function provides detailed examples of how to use the quiz tool
+    in different scenarios, helping users understand the various modes
+    and their applications.
+    """
     print("\n=== Usage Examples ===")
     print("\n1. Generate quizzes from a markdown file:")
     print("   python quizzes.py --mode generate -f chapter1.qmd")
@@ -1638,6 +1955,28 @@ def show_usage_examples():
     print("   The tool automatically detects file types (JSON vs QMD) and performs the appropriate action.")
 
 def main():
+    """
+    Main entry point for the quiz generation and management tool.
+    
+    This function parses command line arguments and routes to the appropriate
+    mode of operation. It validates input parameters and provides helpful
+    error messages for incorrect usage.
+    
+    Modes:
+        - generate: Create new quiz files from QMD files
+        - review: Open GUI to review/edit existing quizzes
+        - insert: Insert quiz callouts into markdown files
+        - verify: Validate quiz file structure and correspondence
+        - clean: Remove quiz content from markdown files
+        
+    Usage:
+        python quizzes.py --mode <mode> -f <file> | -d <directory> [options]
+        
+    Note:
+        - Requires either -f (file) or -d (directory) for all modes
+        - Automatically detects file types (JSON vs QMD) and routes appropriately
+        - Provides comprehensive help and usage examples
+    """
     parser = argparse.ArgumentParser(
         description="Quiz generation and management tool for markdown files.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1729,17 +2068,38 @@ The tool will automatically detect file types (JSON vs QMD) and perform the appr
             run_clean_mode_directory(args.directory, args)
 
 def run_generate_mode_simple(qmd_file, args):
-    """Generate new quizzes from a markdown file"""
+    """
+    Generate new quizzes from a single markdown file.
+    
+    Args:
+        qmd_file (str): Path to the QMD file to process
+        args (argparse.Namespace): Command line arguments
+    """
     print(f"=== Quiz Generation Mode (Single File) ===")
     generate_for_file(qmd_file, args)
 
 def run_generate_mode_directory(directory, args):
-    """Generate new quizzes from a directory of .qmd files"""
+    """
+    Generate new quizzes from all QMD files in a directory.
+    
+    Args:
+        directory (str): Path to the directory containing QMD files
+        args (argparse.Namespace): Command line arguments
+    """
     print(f"=== Quiz Generation Mode (Directory) ===")
     generate_for_directory(directory, args)
 
 def run_review_mode_simple(file_path):
-    """Review and edit existing quizzes from a file (JSON or QMD)"""
+    """
+    Review and edit existing quizzes from a file (JSON or QMD).
+    
+    This function launches the interactive GUI for reviewing quiz questions.
+    It can handle both JSON quiz files and QMD files (by finding the
+    corresponding quiz file).
+    
+    Args:
+        file_path (str): Path to the file to review (JSON or QMD)
+    """
     print("=== Quiz Review Mode ===")
     
     # Determine file type
@@ -1761,7 +2121,19 @@ def run_review_mode_simple(file_path):
         print("   Supported types: .json, .qmd, .md")
 
 def run_insert_mode_simple(file_path):
-    """Insert quizzes into markdown files"""
+    """
+    Insert quizzes into markdown files.
+    
+    This function handles the insertion of quiz callouts into QMD files.
+    It can work with either JSON quiz files or QMD files (by finding
+    the corresponding quiz file).
+    
+    Args:
+        file_path (str): Path to the file (JSON or QMD)
+        
+    Note:
+        This is a placeholder function - insert functionality is not yet implemented.
+    """
     print("=== Quiz Insert Mode ===")
     
     # Determine file type
@@ -1793,7 +2165,16 @@ def run_insert_mode_simple(file_path):
         print("   Supported types: .json, .qmd, .md")
 
 def run_verify_mode_simple(file_path):
-    """Verify quiz files and validate their structure"""
+    """
+    Verify quiz files and validate their structure.
+    
+    This function performs comprehensive validation of quiz files and
+    their correspondence with QMD files. It checks file structure,
+    metadata, and cross-references.
+    
+    Args:
+        file_path (str): Path to the file to verify (JSON or QMD)
+    """
     print("=== Quiz Verify Mode ===")
     
     # Determine file type
@@ -1887,17 +2268,43 @@ def run_verify_mode_simple(file_path):
         print("   Supported types: .json, .qmd, .md")
 
 def run_clean_mode_simple(qmd_file, args):
-    """Clean all quizzes from a markdown file"""
+    """
+    Clean all quizzes from a single markdown file.
+    
+    Args:
+        qmd_file (str): Path to the QMD file to clean
+        args (argparse.Namespace): Command line arguments
+    """
     print("=== Quiz Clean Mode (Single File) ===")
     clean_single_file(qmd_file, args)
 
 def run_clean_mode_directory(directory, args):
-    """Clean all quizzes from all QMD files in a directory"""
+    """
+    Clean all quizzes from all QMD files in a directory.
+    
+    Args:
+        directory (str): Path to the directory containing QMD files
+        args (argparse.Namespace): Command line arguments
+    """
     print("=== Quiz Clean Mode (Directory) ===")
     clean_directory(directory, args)
 
 def run_verify_mode_directory(directory_path):
-    """Verify all quiz files in a directory"""
+    """
+    Verify all quiz files in a directory.
+    
+    This function would perform verification on all quiz files in a
+    directory. Currently a placeholder for future implementation.
+    
+    Args:
+        directory_path (str): Path to the directory to verify
+        
+    Note:
+        This functionality is not yet implemented. It would involve:
+        - Finding all JSON and QMD files in the directory
+        - Running verification on each file
+        - Providing a summary report
+    """
     print("=== Quiz Verify Mode (Directory) ===")
     run_verify_directory(directory_path)
 
@@ -1936,7 +2343,23 @@ def find_qmd_file_from_quiz(quiz_file_path, quiz_data):
     return None
 
 def extract_chapter_info(file_path):
-    """Extract chapter number and title from file path"""
+    """
+    Extract chapter number and title from file path.
+    
+    This function maps file paths to chapter numbers based on the book's
+    directory structure. It uses a predefined mapping to identify which
+    chapter a file belongs to for difficulty progression.
+    
+    Args:
+        file_path (str): Path to the QMD file
+        
+    Returns:
+        tuple: (chapter_number, chapter_title) or (None, None) if not found
+        
+    Note:
+        The chapter mapping is based on the ML Systems textbook structure.
+        Update this mapping if the book structure changes.
+    """
     # Map file paths to chapter numbers based on the book outline
     chapter_mapping = {
         'introduction': (1, 'Introduction'),
@@ -1971,7 +2394,24 @@ def extract_chapter_info(file_path):
     return None, None
 
 def generate_for_file(qmd_file, args):
-    """Generate quizzes for a single QMD file"""
+    """
+    Generate quizzes for a single QMD file.
+    
+    This function processes a single QMD file to generate quiz questions
+    for each section. It extracts sections, determines chapter context,
+    and calls the AI to generate appropriate questions. It also passes
+    previous quiz data to ensure variety and avoid overlap within the chapter.
+    
+    Args:
+        qmd_file (str): Path to the QMD file to process
+        args (argparse.Namespace): Command line arguments including model and output
+        
+    Note:
+        - Automatically detects chapter number and title for difficulty progression
+        - Updates QMD frontmatter with quiz file reference
+        - Creates structured JSON output with metadata
+        - Passes previous quiz data to each section for variety and coherence
+    """
     print(f"Generating quizzes for: {qmd_file}")
     
     try:
@@ -1995,20 +2435,22 @@ def generate_for_file(qmd_file, args):
         # Initialize OpenAI client
         client = OpenAI()
         
-        # Generate quizzes for each section
+        # Generate quizzes for each section, passing previous quiz data
         quiz_sections = []
         sections_with_quizzes = 0
         sections_without_quizzes = 0
+        previous_quizzes = []  # Track previous quiz data for variety
         
         for i, section in enumerate(sections):
             print(f"\nProcessing section {i+1}/{len(sections)}: {section['section_title']}")
             
-            # Build user prompt with chapter context
+            # Build user prompt with chapter context and previous quiz data
             user_prompt = build_user_prompt(
                 section['section_title'], 
                 section['section_text'],
                 chapter_number,
-                chapter_title
+                chapter_title,
+                previous_quizzes  # Pass previous quiz data for variety
             )
             
             # Call OpenAI
@@ -2017,9 +2459,13 @@ def generate_for_file(qmd_file, args):
             if response.get('quiz_needed', False):
                 sections_with_quizzes += 1
                 print(f"  ✅ Generated quiz with {len(response.get('questions', []))} questions")
+                # Add to previous quizzes for next section
+                previous_quizzes.append(response)
             else:
                 sections_without_quizzes += 1
                 print(f"  ⏭️  No quiz needed: {response.get('rationale', 'No rationale provided')}")
+                # Still add to previous quizzes to maintain section count
+                previous_quizzes.append(response)
             
             quiz_sections.append({
                 'section_id': section['section_id'],
@@ -2055,7 +2501,22 @@ def generate_for_file(qmd_file, args):
         print(f"❌ Error generating quizzes: {str(e)}")
 
 def generate_for_directory(directory, args):
-    """Generate quizzes for all QMD files in a directory"""
+    """
+    Generate quizzes for all QMD files in a directory.
+    
+    This function recursively finds all QMD files in a directory and
+    generates quizzes for each one. It creates separate quiz files
+    for each chapter.
+    
+    Args:
+        directory (str): Path to the directory containing QMD files
+        args (argparse.Namespace): Command line arguments
+        
+    Note:
+        - Creates separate quiz files for each QMD file
+        - Uses the QMD filename as the base for the quiz filename
+        - Processes files recursively through subdirectories
+    """
     print(f"Generating quizzes for directory: {directory}")
     
     qmd_files = []
@@ -2078,13 +2539,44 @@ def generate_for_directory(directory, args):
         generate_for_file(qmd_file, args)
 
 def insert_quizzes_into_markdown(qmd_file_path, quiz_file_path):
-    """Insert quizzes into a markdown file"""
+    """
+    Insert quizzes into a markdown file.
+    
+    This function would insert quiz callouts into QMD files based on
+    the quiz data. Currently a placeholder for future implementation.
+    
+    Args:
+        qmd_file_path (str): Path to the QMD file to modify
+        quiz_file_path (str): Path to the quiz JSON file
+        
+    Note:
+        This functionality is not yet implemented. It would involve:
+        - Reading quiz data from JSON file
+        - Inserting quiz callouts at appropriate locations in QMD
+        - Adding quiz answers section at the end
+    """
     print(f"Inserting quizzes from {quiz_file_path} into {qmd_file_path}")
     # Implementation would go here - this is a placeholder
     print("❌ Insert functionality not yet implemented")
 
 def clean_single_file(qmd_file, args):
-    """Clean quizzes from a single QMD file"""
+    """
+    Clean all quiz content from a single QMD file.
+    
+    This function removes all quiz-related content from a QMD file,
+    including quiz callouts, the quiz answers section, and quiz
+    frontmatter entries. It can create backups and perform dry runs.
+    
+    Args:
+        qmd_file (str): Path to the QMD file to clean
+        args (argparse.Namespace): Command line arguments including backup and dry_run flags
+        
+    Note:
+        - Removes quiz question and answer callouts using global patterns
+        - Removes the entire "Quiz Answers" section
+        - Removes quiz entry from YAML frontmatter
+        - Supports backup creation and dry-run mode
+    """
     print(f"Cleaning quizzes from: {qmd_file}")
     
     try:
@@ -2165,7 +2657,23 @@ def clean_single_file(qmd_file, args):
         print(f"❌ Error cleaning file: {str(e)}")
 
 def clean_directory(directory, args):
-    """Clean quizzes from all QMD files in a directory"""
+    """
+    Clean all quiz content from all QMD files in a directory.
+    
+    This function recursively finds all QMD files in a directory and
+    cleans quiz content from each one. It supports backup creation
+    and dry-run mode for safe operation.
+    
+    Args:
+        directory (str): Path to the directory containing QMD files
+        args (argparse.Namespace): Command line arguments including backup and dry_run flags
+        
+    Note:
+        - Processes files recursively through subdirectories
+        - Creates backups for each file if requested
+        - Supports dry-run mode to preview changes
+        - Provides progress tracking for large directories
+    """
     print(f"Cleaning quizzes from directory: {directory}")
     
     qmd_files = []
@@ -2200,7 +2708,21 @@ def clean_directory(directory, args):
     print(f"\n✅ Clean operation complete for {len(qmd_files)} files")
 
 def run_verify_directory(directory_path):
-    """Verify all quiz files in a directory"""
+    """
+    Verify all quiz files in a directory.
+    
+    This function would perform verification on all quiz files in a
+    directory. Currently a placeholder for future implementation.
+    
+    Args:
+        directory_path (str): Path to the directory to verify
+        
+    Note:
+        This functionality is not yet implemented. It would involve:
+        - Finding all JSON and QMD files in the directory
+        - Running verification on each file
+        - Providing a summary report
+    """
     print(f"Verifying quiz files in directory: {directory_path}")
     # Implementation would go here - this is a placeholder
     print("❌ Verify directory functionality not yet implemented")
