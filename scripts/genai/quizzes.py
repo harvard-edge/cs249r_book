@@ -17,6 +17,19 @@ from jsonschema import validate, ValidationError
 QUIZ_QUESTION_CALLOUT_CLASS = "callout-quiz-question"
 QUIZ_ANSWER_CALLOUT_CLASS = "callout-quiz-answer"
 
+# Quiz section headers and patterns for easy maintenance
+QUIZ_ANSWERS_SECTION_HEADER = "## Quiz Answers"
+QUIZ_ANSWERS_SECTION_PATTERN = rf"^{re.escape(QUIZ_ANSWERS_SECTION_HEADER)}\s*{{#[^}}]*}}\s*\n.*?(?=\n##\s+|$)"
+QUIZ_QUESTION_CALLOUT_PATTERN = rf"::: \{{\.{re.escape(QUIZ_QUESTION_CALLOUT_CLASS)}[^}}]*\}}\n.*?\n:::\n"
+QUIZ_ANSWER_CALLOUT_PATTERN = rf"::: \{{\.{re.escape(QUIZ_ANSWER_CALLOUT_CLASS)}[^}}]*\}}\n.*?\n:::\n"
+
+# Frontmatter patterns
+FRONTMATTER_PATTERN = r'^(---\s*\n.*?\n---\s*\n)'
+YAML_FRONTMATTER_PATTERN = r'^(---\s*\n.*?\n---\s*\n)'
+
+# Section patterns
+SECTION_PATTERN = r"^##\s+(.+?)(\s*\{#([\w\-]+)\})?\s*$"
+
 # Configuration for question types, making it easy to modify or extend.
 QUESTION_TYPE_CONFIG = [
     {
@@ -33,7 +46,7 @@ QUESTION_TYPE_CONFIG = [
     },
     {
         "type": "FILL",
-        "description": "Useful for terminology. Use `____` (four underscores) for the blank. The `answer` MUST provide the missing word(s) first, followed by a period and then a brief explanation. For example: `performance gap. This gap occurs...`"
+        "description": "Useful for testing specific terminology or concepts that require precise recall. Use `____` (four underscores) for the blank. The `answer` MUST provide the missing word(s) first, followed by a period and then a brief explanation. For example: `performance gap. This gap occurs...` AVOID: Questions where the answer is obvious from context, where the blank can be filled with multiple reasonable answers, or where the answer appears in the same sentence as the blank."
     },
     {
         "type": "ORDER",
@@ -334,13 +347,42 @@ If a quiz IS needed, follow the structure below. For "MCQ" questions, provide th
 -   **Do not** embed options (e.g., A, B, C) in the `question` string for MCQ questions; use the `choices` array instead.
 
 **Quality Standards:**
-- For `MCQ` questions, the `answer` string MUST start with `The correct answer is [LETTER].` followed by the text of the correct choice and then an explanation.
+- For `MCQ` questions, the `answer` string MUST start with `The correct answer is [LETTER].` followed by an explanation of why this choice is correct. Do NOT repeat the answer text in the explanation.
 - Use clear, academically appropriate language
 - Avoid repeating exact phrasing from source text
 - Keep answers concise and informative (~75-150 words total per Q&A pair)
 - Ensure questions collectively cover the section's main learning objectives
 - Progress from basic understanding to application/analysis when multiple questions are used
 - Note: Questions will appear at the end of each major section, with answers provided separately at the chapter's end. Design questions that serve as immediate comprehension checks for the section just read.
+
+**CRITICAL ANTI-PATTERNS TO AVOID:**
+- **Questions where the answer is obvious from the question itself** (e.g., fill-in-the-blank where the answer appears in the same sentence)
+- **Questions that test surface-level recall without deeper understanding**
+- **Questions where multiple reasonable answers could be correct**
+- **Questions that simply repeat information from the text without requiring analysis**
+- **Questions that test trivial facts rather than conceptual understanding**
+- **Questions where the explanation just restates what's already obvious from the question**
+
+**EXAMPLE OF A POOR FILL QUESTION:**
+❌ "In ML systems, the choice between cloud and edge architectures can be influenced by ________ requirements, such as data sovereignty and privacy."
+Answer: "privacy. Privacy requirements can dictate the need for data to be processed closer to its source, influencing the choice of architecture towards edge solutions to comply with regulations."
+
+**WHY THIS IS POOR:**
+- The answer "privacy" is obvious from the context (mentioned right after the blank)
+- The explanation just repeats what's already stated in the question
+- Tests surface-level recall, not understanding
+- No deeper analysis or application required
+
+**BETTER ALTERNATIVE:**
+✅ "When designing an ML system for a healthcare application, what specific architectural consideration becomes critical due to regulatory requirements?"
+Answer: "Data residency and processing location. Healthcare data must often be processed within specific geographic boundaries due to regulations like HIPAA, requiring careful consideration of whether to use cloud providers with local data centers or edge processing to keep data within jurisdictional boundaries."
+
+**For FILL questions specifically:**
+- Only use for testing specific terminology or concepts that require precise recall
+- Ensure the blank tests a concept that isn't immediately obvious from the surrounding context
+- The answer should be a specific term or concept, not a general word that could be inferred
+- Avoid questions where the answer appears in the same sentence or immediately before/after the blank
+- Test understanding of relationships, not just vocabulary recall
 
 **Bloom's Taxonomy Mix:**
 - Remember: Key terms and concepts
@@ -350,13 +392,14 @@ If a quiz IS needed, follow the structure below. For "MCQ" questions, provide th
 - Evaluate: Justify design decisions
 - Create: Propose solutions to system challenges
 
-## Quality Check
+**Quality Check**
 Before finalizing, ensure:
 - Questions test different aspects of the content (avoid redundancy)
 - At least one question addresses system-level implications
 - Questions are appropriate for the textbook's target audience
 - Answer explanations help reinforce learning, not just state correctness
 - The response strictly follows the JSON schema provided above
+- **No questions fall into the anti-patterns listed above**
 """
 
 def update_qmd_frontmatter(qmd_file_path, quiz_file_name):
@@ -367,7 +410,7 @@ def update_qmd_frontmatter(qmd_file_path, quiz_file_name):
         with open(qmd_file_path, 'r+', encoding='utf-8') as f:
             content = f.read()
             
-            frontmatter_pattern = re.compile(r'^(---\s*\n.*?\n---\s*\n)', re.DOTALL)
+            frontmatter_pattern = re.compile(FRONTMATTER_PATTERN, re.DOTALL)
             match = frontmatter_pattern.match(content)
             
             if match:
@@ -413,7 +456,7 @@ def extract_sections_with_ids(markdown_text):
     Returns a list of dicts: {section_id, section_title, section_text}
     If any section is missing a reference, prints an error and returns None.
     """
-    section_pattern = re.compile(r"^##\s+(.+?)(\s*\{#([\w\-]+)\})?\s*$", re.MULTILINE)
+    section_pattern = re.compile(SECTION_PATTERN, re.MULTILINE)
     all_matches = list(section_pattern.finditer(markdown_text))
     
     # Filter out "Quiz Answers" sections
@@ -537,15 +580,118 @@ def validate_individual_quiz_response(data):
     
     return True
 
-def build_user_prompt(section_title, section_text):
+def build_user_prompt(section_title, section_text, chapter_number=None, chapter_title=None):
+    """
+    Build user prompt with chapter context for appropriate difficulty progression.
+    
+    Args:
+        section_title: Title of the section
+        section_text: Content of the section
+        chapter_number: Chapter number (1-20)
+        chapter_title: Chapter title
+    """
+    # Define chapter progression context
+    chapter_context = ""
+    difficulty_guidelines = ""
+    
+    if chapter_number is not None:
+        chapter_context = f"""
+**Chapter Context:**
+This is Chapter {chapter_number}: {chapter_title or 'Unknown'} in a 20-chapter textbook on Machine Learning Systems.
+The book progresses from foundational concepts to advanced topics and operational concerns.
+"""
+        
+        # Progressive difficulty guidelines based on chapter position
+        if chapter_number <= 5:
+            difficulty_guidelines = """
+**Chapter Difficulty Guidelines (Chapters 1-5):**
+- Focus on foundational concepts and basic understanding
+- Emphasize core definitions and fundamental principles
+- Questions should test comprehension of basic ML systems concepts
+- Avoid overly complex scenarios or advanced technical details
+"""
+        elif chapter_number <= 10:
+            difficulty_guidelines = """
+**Chapter Difficulty Guidelines (Chapters 6-10):**
+- Intermediate complexity with practical applications
+- Questions should test understanding of technical implementation
+- Include questions about tradeoffs and design decisions
+- Connect concepts to real-world ML system scenarios
+"""
+        elif chapter_number <= 15:
+            difficulty_guidelines = """
+**Chapter Difficulty Guidelines (Chapters 11-15):**
+- Advanced topics requiring system-level reasoning
+- Questions should test deep understanding of optimization and operational concerns
+- Focus on integration of multiple concepts
+- Emphasize practical implications and real-world challenges
+"""
+        else:
+            difficulty_guidelines = """
+**Chapter Difficulty Guidelines (Chapters 16-20):**
+- Specialized topics requiring integration across multiple concepts
+- Questions should test synthesis of knowledge from throughout the book
+- Focus on ethical, societal, and advanced operational considerations
+- Emphasize critical thinking about ML systems in broader contexts
+"""
+    
     return f"""
-This section is titled \"{section_title}\".
+This section is titled "{section_title}".
+
+{chapter_context}
+{difficulty_guidelines}
 
 Section content:
 {section_text}
 
 Generate a self-check quiz with 1 to 5 well-structured questions and answers based on this section. Include a rationale explaining your question generation strategy and focus areas. Return your response in the specified JSON format.
 """.strip()
+
+def regenerate_section_quiz(client, section_title, section_text, current_quiz_data, user_prompt, chapter_number=None, chapter_title=None):
+    """
+    Regenerate quiz questions for a section with custom instructions.
+    
+    Args:
+        client: OpenAI client
+        section_title: Title of the section
+        section_text: Content of the section
+        current_quiz_data: Current quiz data for the section
+        user_prompt: User's regeneration instructions
+        chapter_number: Chapter number (1-20)
+        chapter_title: Chapter title
+    """
+    # Create a custom system prompt that includes the user's instructions
+    custom_system_prompt = f"""
+{SYSTEM_PROMPT}
+
+## REGENERATION INSTRUCTIONS
+The user has requested the following changes to the quiz questions:
+{user_prompt}
+
+Please regenerate the quiz questions following these specific instructions while maintaining all the quality standards and anti-patterns listed above.
+
+## ADDITIONAL REGENERATION GUIDELINES
+- Ensure the new questions address the user's specific requirements
+- Maintain the same high quality standards as the original prompt
+- Pay special attention to avoiding the anti-patterns listed above
+- If the user requests changes to question types, ensure the new types are appropriate for the content
+- Provide a brief comment explaining how you addressed the user's instructions
+"""
+    
+    # Build the user prompt with chapter context
+    user_prompt_text = build_user_prompt(section_title, section_text, chapter_number, chapter_title)
+    user_prompt_text += f"\n\nPlease regenerate the quiz questions following the user's specific instructions: {user_prompt}"
+    
+    # Call the AI
+    response = call_openai(client, custom_system_prompt, user_prompt_text)
+    
+    # Add a regeneration comment if the response includes one
+    if isinstance(response, dict) and 'quiz_needed' in response:
+        # Extract any comment from the response (this would be in the AI's response text)
+        # For now, we'll add a simple comment
+        response['_regeneration_comment'] = f"Regenerated based on user instructions: {user_prompt}"
+    
+    return response
 
 # Gradio Application
 class QuizEditorGradio:
@@ -1644,6 +1790,310 @@ def run_verify_mode_directory(directory_path):
     """Verify all quiz files in a directory"""
     print("=== Quiz Verify Mode (Directory) ===")
     run_verify_directory(directory_path)
+
+def extract_quiz_metadata(content):
+    """Extract quiz file name from YAML frontmatter"""
+    frontmatter_pattern = re.compile(FRONTMATTER_PATTERN, re.DOTALL)
+    match = frontmatter_pattern.match(content)
+    if match:
+        frontmatter = match.group(1)
+        # Look for quiz: filename.json
+        quiz_match = re.search(r'^quiz:\s*(.+)$', frontmatter, re.MULTILINE)
+        if quiz_match:
+            return quiz_match.group(1).strip()
+    return None
+
+def find_quiz_file_from_qmd(qmd_file_path):
+    """Find the corresponding quiz file for a QMD file"""
+    try:
+        with open(qmd_file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        quiz_file = extract_quiz_metadata(content)
+        if quiz_file:
+            quiz_path = os.path.join(os.path.dirname(qmd_file_path), quiz_file)
+            if os.path.exists(quiz_path):
+                return quiz_path
+    except Exception:
+        pass
+    return None
+
+def find_qmd_file_from_quiz(quiz_file_path, quiz_data):
+    """Find the corresponding QMD file for a quiz file"""
+    metadata = quiz_data.get('metadata', {})
+    source_file = metadata.get('source_file')
+    if source_file and os.path.exists(source_file):
+        return source_file
+    return None
+
+def extract_chapter_info(file_path):
+    """Extract chapter number and title from file path"""
+    # Map file paths to chapter numbers based on the book outline
+    chapter_mapping = {
+        'introduction': (1, 'Introduction'),
+        'ml_systems': (2, 'ML Systems'),
+        'dl_primer': (3, 'DL Primer'),
+        'dnn_architectures': (4, 'DNN Architectures'),
+        'workflow': (5, 'AI Workflow'),
+        'data_engineering': (6, 'Data Engineering'),
+        'frameworks': (7, 'AI Frameworks'),
+        'training': (8, 'AI Training'),
+        'efficient_ai': (9, 'Efficient AI'),
+        'optimizations': (10, 'Model Optimizations'),
+        'hw_acceleration': (11, 'AI Acceleration'),
+        'benchmarking': (12, 'Benchmarking AI'),
+        'ops': (13, 'ML Operations'),
+        'ondevice_learning': (14, 'On-Device Learning'),
+        'privacy_security': (15, 'Security & Privacy'),
+        'responsible_ai': (16, 'Responsible AI'),
+        'sustainable_ai': (17, 'Sustainable AI'),
+        'robust_ai': (18, 'Robust AI'),
+        'ai_for_good': (19, 'AI for Good'),
+        'conclusion': (20, 'Conclusion')
+    }
+    
+    # Extract chapter name from file path
+    file_name = os.path.basename(file_path).replace('.qmd', '').replace('.md', '')
+    
+    for key, (number, title) in chapter_mapping.items():
+        if key in file_name:
+            return number, title
+    
+    return None, None
+
+def generate_for_file(qmd_file, args):
+    """Generate quizzes for a single QMD file"""
+    print(f"Generating quizzes for: {qmd_file}")
+    
+    try:
+        # Read the QMD file
+        with open(qmd_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Extract sections
+        sections = extract_sections_with_ids(content)
+        if not sections:
+            print("❌ No sections found or sections missing IDs")
+            return
+        
+        # Extract chapter info
+        chapter_number, chapter_title = extract_chapter_info(qmd_file)
+        
+        print(f"Found {len(sections)} sections")
+        if chapter_number:
+            print(f"Chapter {chapter_number}: {chapter_title}")
+        
+        # Initialize OpenAI client
+        client = OpenAI()
+        
+        # Generate quizzes for each section
+        quiz_sections = []
+        sections_with_quizzes = 0
+        sections_without_quizzes = 0
+        
+        for i, section in enumerate(sections):
+            print(f"\nProcessing section {i+1}/{len(sections)}: {section['section_title']}")
+            
+            # Build user prompt with chapter context
+            user_prompt = build_user_prompt(
+                section['section_title'], 
+                section['section_text'],
+                chapter_number,
+                chapter_title
+            )
+            
+            # Call OpenAI
+            response = call_openai(client, SYSTEM_PROMPT, user_prompt, args.model)
+            
+            if response.get('quiz_needed', False):
+                sections_with_quizzes += 1
+                print(f"  ✅ Generated quiz with {len(response.get('questions', []))} questions")
+            else:
+                sections_without_quizzes += 1
+                print(f"  ⏭️  No quiz needed: {response.get('rationale', 'No rationale provided')}")
+            
+            quiz_sections.append({
+                'section_id': section['section_id'],
+                'section_title': section['section_title'],
+                'quiz_data': response
+            })
+        
+        # Create quiz file structure
+        quiz_data = {
+            'metadata': {
+                'source_file': os.path.abspath(qmd_file),
+                'total_sections': len(sections),
+                'sections_with_quizzes': sections_with_quizzes,
+                'sections_without_quizzes': sections_without_quizzes
+            },
+            'sections': quiz_sections
+        }
+        
+        # Save to output file
+        output_file = args.output
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(quiz_data, f, indent=2, ensure_ascii=False)
+        
+        print(f"\n✅ Quiz generation complete!")
+        print(f"   - Output file: {output_file}")
+        print(f"   - Sections with quizzes: {sections_with_quizzes}")
+        print(f"   - Sections without quizzes: {sections_without_quizzes}")
+        
+        # Update QMD frontmatter
+        update_qmd_frontmatter(qmd_file, os.path.basename(output_file))
+        
+    except Exception as e:
+        print(f"❌ Error generating quizzes: {str(e)}")
+
+def generate_for_directory(directory, args):
+    """Generate quizzes for all QMD files in a directory"""
+    print(f"Generating quizzes for directory: {directory}")
+    
+    qmd_files = []
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if file.endswith('.qmd') or file.endswith('.md'):
+                qmd_files.append(os.path.join(root, file))
+    
+    if not qmd_files:
+        print("❌ No QMD files found in directory")
+        return
+    
+    print(f"Found {len(qmd_files)} QMD files")
+    
+    for qmd_file in qmd_files:
+        print(f"\n{'='*60}")
+        # Create output file name based on input file
+        base_name = os.path.splitext(os.path.basename(qmd_file))[0]
+        args.output = f"{base_name}_quizzes.json"
+        generate_for_file(qmd_file, args)
+
+def insert_quizzes_into_markdown(qmd_file_path, quiz_file_path):
+    """Insert quizzes into a markdown file"""
+    print(f"Inserting quizzes from {quiz_file_path} into {qmd_file_path}")
+    # Implementation would go here - this is a placeholder
+    print("❌ Insert functionality not yet implemented")
+
+def clean_single_file(qmd_file, args):
+    """Clean quizzes from a single QMD file"""
+    print(f"Cleaning quizzes from: {qmd_file}")
+    
+    try:
+        # Read the QMD file
+        with open(qmd_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        original_content = content
+        
+        # Create backup if requested
+        if args.backup:
+            backup_file = f"{qmd_file}.backup"
+            with open(backup_file, 'w', encoding='utf-8') as f:
+                f.write(content)
+            print(f"  📋 Created backup: {backup_file}")
+        
+        # Remove quiz callouts using the defined constants
+        # Pattern to match quiz question callouts (more flexible for additional attributes)
+        quiz_question_pattern = re.compile(QUIZ_QUESTION_CALLOUT_PATTERN, re.DOTALL)
+        
+        # Pattern to match quiz answer callouts (more flexible for additional attributes)
+        quiz_answer_pattern = re.compile(QUIZ_ANSWER_CALLOUT_PATTERN, re.DOTALL)
+        
+        # Count how many callouts we find
+        question_matches = quiz_question_pattern.findall(content)
+        answer_matches = quiz_answer_pattern.findall(content)
+        
+        if args.dry_run:
+            print(f"  🔍 DRY RUN - Would remove:")
+            print(f"     - {len(question_matches)} quiz question callouts")
+            print(f"     - {len(answer_matches)} quiz answer callouts")
+            print(f"     - {len(quiz_answers_matches)} quiz answers section(s)")
+            return
+        
+        # Remove the callouts
+        content = quiz_question_pattern.sub('', content)
+        content = quiz_answer_pattern.sub('', content)
+        
+        # Remove the entire "Quiz Answers" section if it exists
+        quiz_answers_pattern = re.compile(QUIZ_ANSWERS_SECTION_PATTERN, re.DOTALL | re.MULTILINE)
+        quiz_answers_matches = quiz_answers_pattern.findall(content)
+        content = quiz_answers_pattern.sub('', content)
+        
+        # Remove quiz frontmatter entry using YAML processing
+        frontmatter_pattern = re.compile(YAML_FRONTMATTER_PATTERN, re.DOTALL)
+        match = frontmatter_pattern.match(content)
+        
+        if match:
+            frontmatter_str = match.group(1)
+            yaml_content_str = frontmatter_str.strip().strip('---').strip()
+            
+            try:
+                frontmatter_data = yaml.safe_load(yaml_content_str)
+                if isinstance(frontmatter_data, dict) and 'quiz' in frontmatter_data:
+                    # Remove the quiz key
+                    del frontmatter_data['quiz']
+                    
+                    # Reconstruct frontmatter
+                    new_yaml_content = yaml.dump(frontmatter_data, default_flow_style=False, sort_keys=False, indent=2)
+                    new_frontmatter = f"---\n{new_yaml_content.strip()}\n---\n"
+                    
+                    # Replace old frontmatter
+                    content = content.replace(frontmatter_str, new_frontmatter, 1)
+                    print(f"  ✅ Removed quiz frontmatter entry")
+            except yaml.YAMLError:
+                print(f"  ⚠️  Warning: Could not parse YAML frontmatter")
+        
+        # Write back to file
+        with open(qmd_file, 'w', encoding='utf-8') as f:
+            f.write(content)
+        
+        print(f"  ✅ Removed {len(question_matches)} quiz question callouts")
+        print(f"  ✅ Removed {len(answer_matches)} quiz answer callouts")
+        if len(quiz_answers_matches) > 0:
+            print(f"  ✅ Removed {len(quiz_answers_matches)} quiz answers section(s)")
+        
+    except Exception as e:
+        print(f"❌ Error cleaning file: {str(e)}")
+
+def clean_directory(directory, args):
+    """Clean quizzes from all QMD files in a directory"""
+    print(f"Cleaning quizzes from directory: {directory}")
+    
+    qmd_files = []
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if file.endswith('.qmd') or file.endswith('.md'):
+                qmd_files.append(os.path.join(root, file))
+    
+    if not qmd_files:
+        print("❌ No QMD files found in directory")
+        return
+    
+    print(f"Found {len(qmd_files)} QMD files")
+    
+    if args.dry_run:
+        print("🔍 DRY RUN - Would clean the following files:")
+        for qmd_file in qmd_files:
+            print(f"  - {qmd_file}")
+        return
+    
+    for i, qmd_file in enumerate(qmd_files, 1):
+        print(f"\n[{i}/{len(qmd_files)}] Cleaning: {qmd_file}")
+        try:
+            # Create a temporary args object for this file
+            file_args = argparse.Namespace()
+            file_args.backup = args.backup
+            file_args.dry_run = args.dry_run
+            clean_single_file(qmd_file, file_args)
+        except Exception as e:
+            print(f"❌ Error cleaning {qmd_file}: {str(e)}")
+    
+    print(f"\n✅ Clean operation complete for {len(qmd_files)} files")
+
+def run_verify_directory(directory_path):
+    """Verify all quiz files in a directory"""
+    print(f"Verifying quiz files in directory: {directory_path}")
+    # Implementation would go here - this is a placeholder
+    print("❌ Verify directory functionality not yet implemented")
 
 if __name__ == "__main__":
     main()
