@@ -1,3 +1,113 @@
+#!/usr/bin/env python3
+"""
+Quiz Generation and Management Tool for ML Systems Textbook
+
+This script provides a comprehensive tool for generating, managing, and maintaining
+quiz questions for a machine learning systems textbook. It supports multiple modes
+of operation and integrates with Quarto markdown files.
+
+OVERVIEW:
+---------
+The tool generates pedagogically sound quiz questions using AI, manages quiz files,
+and provides a GUI for reviewing and editing generated questions. It's designed to
+work with a 20-chapter textbook structure and provides progressive difficulty based
+on chapter position.
+
+FEATURES:
+---------
+- AI-powered quiz generation with chapter-aware difficulty progression
+- Interactive GUI for reviewing and editing questions
+- Quiz insertion and removal from markdown files
+- File validation and verification
+- Support for multiple question types (MCQ, TF, SHORT, FILL, ORDER, CALC)
+- Automatic frontmatter management
+- Backup and dry-run capabilities
+
+MODES OF OPERATION:
+-------------------
+1. generate: Create new quiz files from QMD files
+2. review: Open GUI to review/edit existing quizzes
+3. insert: Insert quiz callouts into markdown files
+4. verify: Validate quiz file structure and correspondence
+5. clean: Remove quiz content from markdown files
+
+USAGE EXAMPLES:
+---------------
+# Generate quizzes for a single chapter
+python quizzes.py --mode generate -f contents/core/introduction/introduction.qmd
+
+# Generate quizzes for all chapters in a directory
+python quizzes.py --mode generate -d contents/core/
+
+# Review quizzes with GUI
+python quizzes.py --mode review -f introduction_quizzes.json
+
+# Clean quiz content from files
+python quizzes.py --mode clean --backup -f introduction.qmd
+
+# Verify quiz file structure
+python quizzes.py --mode verify -f introduction_quizzes.json
+
+CHAPTER PROGRESSION:
+-------------------
+The tool automatically detects chapter position and adjusts question difficulty:
+- Chapters 1-5: Foundational concepts and basic understanding
+- Chapters 6-10: Intermediate complexity with practical applications
+- Chapters 11-15: Advanced topics requiring system-level reasoning
+- Chapters 16-20: Specialized topics requiring integration across concepts
+
+QUESTION TYPES:
+--------------
+- MCQ: Multiple choice questions with 3-5 options
+- TF: True/False questions with justification
+- SHORT: Short answer questions for deeper reflection
+- FILL: Fill-in-the-blank for specific terminology
+- ORDER: Sequencing questions for processes/workflows
+- CALC: Mathematical calculation questions
+
+FILE STRUCTURE:
+--------------
+Quiz files are stored as JSON with the following structure:
+{
+  "metadata": {
+    "source_file": "path/to/source.qmd",
+    "total_sections": 5,
+    "sections_with_quizzes": 3,
+    "sections_without_quizzes": 2
+  },
+  "sections": [
+    {
+      "section_id": "#sec-introduction",
+      "section_title": "Introduction",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {...},
+        "questions": [...]
+      }
+    }
+  ]
+}
+
+DEPENDENCIES:
+------------
+- openai: For AI-powered quiz generation
+- gradio: For the interactive GUI
+- jsonschema: For JSON validation
+- pyyaml: For YAML frontmatter processing
+- argparse: For command-line interface
+
+MAINTENANCE:
+-----------
+- Global variables at the top control patterns and constants
+- Question type configuration is easily modifiable
+- System prompts can be updated for different requirements
+- Chapter mapping can be adjusted for different book structures
+
+AUTHOR: [Your Name]
+VERSION: 1.0
+DATE: [Current Date]
+"""
+
 import argparse
 import os
 import re
