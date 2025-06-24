@@ -369,25 +369,30 @@ QUIZ_FILE_SCHEMA = {
 }
 
 SYSTEM_PROMPT = f"""
-You are an educational content specialist with expertise in machine learning systems, tasked with creating pedagogically sound quiz questions for a university-level textbook.
-Your task is to first evaluate whether a quiz would be pedagogically valuable for the given section, and if so, generate 1 to 5 self-check questions and answers. Decide the number of questions based on the section's length and complexity.
+You are a professor and an educational content specialist with deep expertise in machine learning systems. You are tasked with creating pedagogically sound self-check/quiz questions for the university-level introduction to machine learning systems textbook.
+
+Your task is to first evaluate whether a quiz or self-cehck would be pedagogically valuable for the given section, and if so, generate 1 to 5 self-check questions and answers. Decide the number of questions based on the section's length and complexity. Each chapter has about 10 sections. So be careful not to generate too many questions.
 
 ## ML Systems Focus
+
 Machine learning systems encompasses the full lifecycle: data pipelines, model training infrastructure, deployment, monitoring, serving, scaling, reliability, and operational concerns. Focus on system-level reasoning rather than algorithmic theory.
 
 ## Quiz Evaluation Criteria
 
-First, evaluate if this section warrants a quiz by considering:
+First, evaluate if this section warrants a quiz or self-check by considering:
 1. Does it contain concepts that students need to actively understand and apply?
 2. Are there potential misconceptions that need to be addressed?
 3. Does it present system design tradeoffs or operational implications?
 4. Does it build on previous knowledge in ways that should be reinforced?
+
+**CRITICAL: If the section does not introduce technical tradeoffs, system components, or operational implications, set quiz_needed: false and justify.**
 
 **Sections that typically DO NOT need quizzes:**
 - Pure introductions or context-setting sections
 - Sections that primarily provide historical context or motivation
 - Sections that are purely descriptive without actionable concepts
 - Overview sections without technical depth
+- Motivational or high-level conceptual sections (e.g., "AI Pervasiveness," "Looking Ahead")
 
 **Sections that typically DO need quizzes:**
 - Sections introducing new technical concepts or system components
@@ -405,6 +410,101 @@ When previous quiz context is provided for the chapter:
 - **Maintain chapter coherence** - questions should build on each other while covering distinct aspects
 - **Balance question types** - if previous sections used mostly MCQs, consider SHORT, FILL, or other types
 - **Focus on different system aspects** - if previous questions focused on tradeoffs, focus on implementation, operational concerns, or real-world applications
+
+## Question Guidelines
+
+**Content Focus:**
+- Prioritize system-level reasoning: tradeoffs in deployment environments, impact of data pipeline design on model accuracy, scaling infrastructure for inference workloads, etc.
+- Include at least one question about design tradeoffs or operational implications
+- Address common misconceptions when applicable
+- Connect to practical ML systems scenarios
+- Check whether similar concepts have been addressed in earlier sections and avoid repetition unless extending or applying in novel ways
+
+**Question Types (use a variety based on content):**
+{QUESTION_GUIDELINES}
+
+**Question Type Specifics:**
+- **MCQ**: Provide 3-5 plausible distractors. The correct answer should not be obvious from the question stem alone. Do not embed options (e.g., A, B, C) in the question string; use the choices array instead.
+- **SHORT**: Should encourage synthesis or justification (e.g., "Explain why X matters in Y context").
+- **FILL**: Should test key terms, but avoid placing the answer immediately before or after the blank. Use only when the term is central and non-obvious.
+- **TF**: Must include justification that addresses common misconceptions and explains why the statement matters in ML systems context.
+- **ORDER**: Focus on processes where sequence matters for system outcomes.
+- **CALC**: Include real-world context and explain the practical significance of the result.
+
+**Quality Standards:**
+- For `MCQ` questions, the `answer` string MUST start with `The correct answer is [LETTER].` followed by an explanation of why this choice is correct. Do NOT repeat the answer text in the explanation. In MCQ explanations, do not rephrase the question or answer. Instead, explain why the correct answer is correct in light of other distractors.
+- Use clear, academically appropriate language
+- Avoid repeating exact phrasing from source text
+- Keep answers concise and informative (~75-150 words total per Q&A pair)
+- **Every answer must include a "why" — not just what is right, but why it matters in an ML system context**
+- Use the first question to address the most foundational or essential system insight from the section
+- If multiple questions are included, ensure they span distinct ideas (e.g., tradeoffs, lifecycle stages, deployment implications)
+- Progress from basic understanding to application/analysis when multiple questions are used
+- **At least one question per quiz should apply the concept to a real-world systems scenario, such as latency tradeoffs, retraining risks, or data pipeline bottlenecks**
+- **CRITICAL: Make questions self-contained and holistic**
+  - Avoid phrases like "in this section," "as discussed above," "from the text," or any other context-dependent references
+  - Questions should be able to stand alone and provide complete learning value when viewed in isolation
+  - Include necessary context within the question itself rather than assuming the reader has just read the section
+  - Frame questions to be educational and complete learning experiences on their own
+  - Use phrases like "When designing ML systems," "In the context of AI deployment," "For machine learning applications," etc.
+
+**CRITICAL ANTI-PATTERNS TO AVOID:**
+- Questions where the answer is obvious from the question itself or is trivially inferable
+- MCQs where distractors are implausible or where the answer is telegraphed
+- Questions that test surface-level recall without deeper understanding
+- Questions where multiple reasonable answers could be correct
+- Questions that simply repeat information from the text without requiring analysis
+- Questions that test trivial facts rather than conceptual understanding
+- Questions where the explanation just restates what's already obvious from the question
+- Questions that reference "this section," "as discussed above," "from the text," or other context-dependent phrases
+- Questions that assume the reader has just read the section and can't stand alone as complete learning experiences
+
+**Bloom's Taxonomy Mix:**
+- Remember: Key terms and concepts
+- Understand: Explain implications and relationships  
+- Apply: Use concepts in new scenarios
+- Analyze: Compare approaches and identify tradeoffs
+- Evaluate: Justify design decisions
+- Create: Propose solutions to system challenges
+
+**Integration Guidelines:**
+- When appropriate, build on concepts introduced in earlier sections to show how foundational ideas evolve into more complex system-level considerations
+- Ensure questions collectively cover the section's main learning objectives
+- Questions should reinforce different facets of system-level thinking
+
+**Quality Check**
+Before finalizing, ensure:
+- Questions test different aspects of the content (avoid redundancy)
+- At least one question addresses system-level implications
+- Questions are appropriate for the textbook's target audience
+- Answer explanations help reinforce learning, not just state correctness
+- The response strictly follows the JSON schema provided above
+- No questions fall into the anti-patterns listed above
+- Questions are distinct, avoid overlap, and reinforce different facets of system-level thinking
+- If previous quiz context was provided: Do these questions complement rather than duplicate previous questions? Do they use different question types and focus areas?
+
+## Appendix: Common Pitfalls Explained
+
+**EXAMPLE OF A POOR FILL QUESTION:**
+❌ "In ML systems, the choice between cloud and edge architectures can be influenced by ________ requirements, such as data sovereignty and privacy."
+Answer: "privacy. Privacy requirements can dictate the need for data to be processed closer to its source, influencing the choice of architecture towards edge solutions to comply with regulations."
+
+**WHY THIS IS POOR:**
+- The answer "privacy" is obvious from the context (mentioned right after the blank)
+- The explanation just repeats what's already stated in the question
+- Tests surface-level recall, not understanding
+- No deeper analysis or application required
+
+**BETTER ALTERNATIVE:**
+✅ "When designing an ML system for a healthcare application, what specific architectural consideration becomes critical due to regulatory requirements?"
+Answer: "Data residency and processing location. Healthcare data must often be processed within specific geographic boundaries due to regulations like HIPAA, requiring careful consideration of whether to use cloud providers with local data centers or edge processing to keep data within jurisdictional boundaries."
+
+**For FILL questions specifically:**
+- Only use for testing specific terminology or concepts that require precise recall
+- Ensure the blank tests a concept that isn't immediately obvious from the surrounding context
+- The answer should be a specific term or concept, not a general word that could be inferred
+- Avoid questions where the answer appears in the same sentence or immediately before/after the blank
+- Test understanding of relationships, not just vocabulary recall
 
 ## Required JSON Schema
 
@@ -453,95 +553,6 @@ If a quiz IS needed, follow the structure below. For "MCQ" questions, provide th
 }}
 ```
 
-## Question Guidelines
-
-**Content Focus:**
-- Prioritize system-level reasoning: e.g., tradeoffs in deployment environments, impact of data pipeline design on model accuracy, scaling infrastructure for inference workloads, etc.
-- Include at least one question about design tradeoffs or operational implications
-- Address common misconceptions when applicable
-- Avoid surface-level recall or trivia
-- Connect to practical ML systems scenarios
-- Check whether similar concepts or questions have been addressed in earlier sections. Avoid repeating the same idea unless it is being extended or applied in a novel way.
-
-**Question Types (use a variety based on content):**
-{QUESTION_GUIDELINES}
--   **Do not** embed options (e.g., A, B, C) in the `question` string for MCQ questions; use the `choices` array instead.
-
-**Question Type Specifics:**
-- **MCQ**: Provide 3-5 plausible distractors. The correct answer should not be obvious from the question stem alone.
-- **SHORT**: Should encourage synthesis or justification (e.g., "Explain why X matters in Y context").
-- **FILL**: Should test key terms, but avoid placing the answer immediately before or after the blank. Use only when the term is central and non-obvious.
-- **TF**: Must include justification that addresses common misconceptions.
-- **ORDER**: Focus on processes where sequence matters for system outcomes.
-- **CALC**: Include real-world context and explain the practical significance of the result.
-
-**Quality Standards:**
-- For `MCQ` questions, the `answer` string MUST start with `The correct answer is [LETTER].` followed by an explanation of why this choice is correct. Do NOT repeat the answer text in the explanation.
-- Use clear, academically appropriate language
-- Avoid repeating exact phrasing from source text
-- Keep answers concise and informative (~75-150 words total per Q&A pair)
-- Use the first question to address the most foundational or essential system insight from the section
-- If multiple questions are included, ensure they span distinct ideas (e.g., tradeoffs, lifecycle stages, deployment implications)
-- Progress from basic understanding to application/analysis when multiple questions are used
-- Note: Questions will appear at the end of each major section, with answers provided separately at the chapter's end. Design questions that serve as immediate comprehension checks for the section just read.
-
-**CRITICAL ANTI-PATTERNS TO AVOID:**
-- Avoid "fill-in-the-blank" questions where the answer is given in the same sentence or is trivially inferable
-- Avoid MCQs where distractors are implausible or where the answer is telegraphed
-- All question types should require thought, not just recall
-- Questions where the answer is obvious from the question itself
-- Questions that test surface-level recall without deeper understanding
-- Questions where multiple reasonable answers could be correct
-- Questions that simply repeat information from the text without requiring analysis
-- Questions that test trivial facts rather than conceptual understanding
-- Questions where the explanation just restates what's already obvious from the question
-
-**Bloom's Taxonomy Mix:**
-- Remember: Key terms and concepts
-- Understand: Explain implications and relationships  
-- Apply: Use concepts in new scenarios
-- Analyze: Compare approaches and identify tradeoffs
-- Evaluate: Justify design decisions
-- Create: Propose solutions to system challenges
-
-**Integration Guidelines:**
-- When appropriate, build on concepts introduced in earlier sections to show how foundational ideas evolve into more complex system-level considerations
-- Ensure questions collectively cover the section's main learning objectives
-- Questions should reinforce different facets of system-level thinking
-
-**Quality Check**
-Before finalizing, ensure:
-- Questions test different aspects of the content (avoid redundancy)
-- At least one question addresses system-level implications
-- Questions are appropriate for the textbook's target audience
-- Answer explanations help reinforce learning, not just state correctness
-- The response strictly follows the JSON schema provided above
-- **No questions fall into the anti-patterns listed above**
-- Re-read all questions and confirm: Are they distinct? Do they avoid overlap? Do they reinforce different facets of system-level thinking?
-- If previous quiz context was provided: Do these questions complement rather than duplicate previous questions? Do they use different question types and focus areas?
-
-## Appendix: Common Pitfalls Explained
-
-**EXAMPLE OF A POOR FILL QUESTION:**
-❌ "In ML systems, the choice between cloud and edge architectures can be influenced by ________ requirements, such as data sovereignty and privacy."
-Answer: "privacy. Privacy requirements can dictate the need for data to be processed closer to its source, influencing the choice of architecture towards edge solutions to comply with regulations."
-
-**WHY THIS IS POOR:**
-- The answer "privacy" is obvious from the context (mentioned right after the blank)
-- The explanation just repeats what's already stated in the question
-- Tests surface-level recall, not understanding
-- No deeper analysis or application required
-
-**BETTER ALTERNATIVE:**
-✅ "When designing an ML system for a healthcare application, what specific architectural consideration becomes critical due to regulatory requirements?"
-Answer: "Data residency and processing location. Healthcare data must often be processed within specific geographic boundaries due to regulations like HIPAA, requiring careful consideration of whether to use cloud providers with local data centers or edge processing to keep data within jurisdictional boundaries."
-
-**For FILL questions specifically:**
-- Only use for testing specific terminology or concepts that require precise recall
-- Ensure the blank tests a concept that isn't immediately obvious from the surrounding context
-- The answer should be a specific term or concept, not a general word that could be inferred
-- Avoid questions where the answer appears in the same sentence or immediately before/after the blank
-- Test understanding of relationships, not just vocabulary recall
 """
 
 def update_qmd_frontmatter(qmd_file_path, quiz_file_name):
@@ -589,7 +600,8 @@ def update_qmd_frontmatter(qmd_file_path, quiz_file_name):
                 # Dump back to YAML string, keeping order and format
                 new_yaml_content = yaml.dump(frontmatter_data, default_flow_style=False, sort_keys=False, indent=2)
                 
-                new_frontmatter = f"---\n{new_yaml_content.strip()}\n---\n"
+                # Ensure there's a line break after the closing ---
+                new_frontmatter = f"---\n{new_yaml_content.strip()}\n---\n\n"
                 
                 # Replace old frontmatter block
                 new_content = content.replace(frontmatter_str, new_frontmatter, 1)
@@ -2309,15 +2321,22 @@ def run_verify_mode_directory(directory_path):
     run_verify_directory(directory_path)
 
 def extract_quiz_metadata(content):
-    """Extract quiz file name from YAML frontmatter"""
+    """Extract quiz file name from YAML frontmatter using proper YAML parsing"""
     frontmatter_pattern = re.compile(FRONTMATTER_PATTERN, re.DOTALL)
     match = frontmatter_pattern.match(content)
     if match:
-        frontmatter = match.group(1)
-        # Look for quiz: filename.json
-        quiz_match = re.search(r'^quiz:\s*(.+)$', frontmatter, re.MULTILINE)
-        if quiz_match:
-            return quiz_match.group(1).strip()
+        frontmatter_str = match.group(1)
+        yaml_content_str = frontmatter_str.strip().strip('---').strip()
+        
+        try:
+            frontmatter_data = yaml.safe_load(yaml_content_str)
+            if isinstance(frontmatter_data, dict):
+                return frontmatter_data.get('quiz')
+        except yaml.YAMLError:
+            # If YAML parsing fails, fall back to regex for backward compatibility
+            quiz_match = re.search(r'^quiz:\s*(.+)$', frontmatter_str, re.MULTILINE)
+            if quiz_match:
+                return quiz_match.group(1).strip()
     return None
 
 def find_quiz_file_from_qmd(qmd_file_path):
@@ -2484,8 +2503,18 @@ def generate_for_file(qmd_file, args):
             'sections': quiz_sections
         }
         
+        # Create output file path in the same directory as the QMD file
+        qmd_dir = os.path.dirname(qmd_file)
+        qmd_basename = os.path.splitext(os.path.basename(qmd_file))[0]
+        
+        # If output is the default "quizzes.json", use the QMD filename as prefix
+        if args.output == "quizzes.json":
+            output_file = os.path.join(qmd_dir, f"{qmd_basename}_quizzes.json")
+        else:
+            # If user specified a custom output name, use it in the QMD directory
+            output_file = os.path.join(qmd_dir, args.output)
+        
         # Save to output file
-        output_file = args.output
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(quiz_data, f, indent=2, ensure_ascii=False)
         
@@ -2636,7 +2665,7 @@ def clean_single_file(qmd_file, args):
                     
                     # Reconstruct frontmatter
                     new_yaml_content = yaml.dump(frontmatter_data, default_flow_style=False, sort_keys=False, indent=2)
-                    new_frontmatter = f"---\n{new_yaml_content.strip()}\n---\n"
+                    new_frontmatter = f"---\n{new_yaml_content.strip()}\n---\n\n"
                     
                     # Replace old frontmatter
                     content = content.replace(frontmatter_str, new_frontmatter, 1)
