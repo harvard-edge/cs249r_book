@@ -2088,7 +2088,7 @@ The tool will automatically detect file types (JSON vs QMD) and perform the appr
         """
     )
     parser.add_argument("--mode", choices=["generate", "review", "insert", "verify", "clean"], 
-                       required=True, help="Mode of operation")
+                       required=False, help="Mode of operation")
     parser.add_argument("-f", "--file", help="Path to a file (.qmd, .md, or .json)")
     parser.add_argument("-d", "--directory", help="Path to directory")
     parser.add_argument("--model", default="gpt-4o", help="OpenAI model to use (generate mode only)")
@@ -2100,6 +2100,11 @@ The tool will automatically detect file types (JSON vs QMD) and perform the appr
 
     if args.examples:
         show_usage_examples()
+        return
+
+    if not args.mode:
+        print("Error: --mode is required unless --examples is used.")
+        parser.print_help()
         return
 
     # Validate that either -f or -d is provided

@@ -142,6 +142,8 @@ import sys
 import os
 import glob
 import time
+import pypandoc
+import json
 
 # Download NLTK stopwords if not already downloaded
 try:
@@ -329,47 +331,68 @@ def generate_section_id(title, file_path, chapter_title, section_counter, parent
     hash_suffix = hashlib.sha1(hash_input).hexdigest()[:4]  # Keep 4 chars
     return f"sec-{clean_chapter_title}-{clean_title}-{hash_suffix}"
 
+def extract_section_headers_pandoc(file_path):
+    """Extract all real section headers from a QMD/MD file using Pandoc AST."""
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    ast_json = pypandoc.convert_text(content, 'json', format='markdown')
+    ast = json.loads(ast_json)
+    headers = []
+    def walk(blocks, in_div=False):
+        for block in blocks:
+            t = block.get('t')
+            c = block.get('c')
+            if t == 'Header' and not in_div:
+                level = c[0]
+                attr = c[1]
+                inlines = c[2]
+                section_id = attr[0] if attr[0] else None
+                classes = attr[1]
+                if level == 1 or 'unnumbered' in classes or 'appendix' in classes or 'backmatter' in classes:
+                    continue
+                # Extract plain text title
+                title = []
+                for x in inlines:
+                    if x['t'] == 'Str':
+                        title.append(x['c'])
+                    elif x['t'] == 'Space':
+                        title.append(' ')
+                title = ''.join(title).strip()
+                headers.append((level, title, section_id, classes))
+            elif t == 'Div':
+                walk(c[1], in_div=True)
+            elif t in ('BlockQuote', 'BulletList', 'OrderedList'):
+                if t == 'BlockQuote':
+                    walk(c, in_div=in_div)
+                elif t == 'BulletList':
+                    for item in c:
+                        walk(item, in_div=in_div)
+                elif t == 'OrderedList':
+                    for item in c[1]:
+                        walk(item, in_div=in_div)
+    walk(ast.get('blocks', []))
+    return headers
+
 def list_section_ids(filepath):
-    """List all section IDs found in a single file."""
+    """List all section IDs found in a single file using Pandoc AST."""
     logging.info(f"\n📋 Section IDs in: {filepath}")
     logging.info(f"{'='*60}")
-    
-    with open(filepath, 'r', encoding='utf-8') as file:
-        lines = file.readlines()
-    
-    header_pattern = re.compile(r'^(#{1,6})\s+(.+?)(?:\s*\{[^}]*\})?$')
-    div_start_pattern = re.compile(r'^:::\s*\{\.([^"]+)')
-    div_end_pattern = re.compile(r'^:::\s*$')
-    
-    inside_skip_div = False
+    headers = extract_section_headers_pandoc(filepath)
     section_count = 0
-    
-    for i, line in enumerate(lines, 1):
-        if div_start_pattern.match(line.strip()):
-            inside_skip_div = True
-        elif div_end_pattern.match(line.strip()):
-            inside_skip_div = False
-            
-        match = header_pattern.match(line)
-        if match and not inside_skip_div:
-            hashes, title = match.groups()
-            if len(hashes) > 1:  # Skip chapter title
-                section_count += 1
-                existing_id_matches = re.findall(r'\{#(sec-[^}]+)\}', line)
-                if existing_id_matches:
-                    section_id = existing_id_matches[0]
-                    logging.info(f"  {section_count:2d}. {title.strip()}")
-                    logging.info(f"      ID: #{section_id}")
-                else:
-                    logging.info(f"  {section_count:2d}. {title.strip()} (NO ID)")
-    
+    for level, title, section_id, classes in headers:
+        section_count += 1
+        if section_id:
+            logging.info(f"  {section_count:2d}. {title}")
+            logging.info(f"      ID: #{section_id}")
+        else:
+            logging.info(f"  {section_count:2d}. {title} (NO ID)")
     if section_count == 0:
         logging.info("  No sections found")
     else:
         logging.info(f"\n  Total sections: {section_count}")
 
 def list_all_section_ids(directory):
-    """List all section IDs found in all files in a directory."""
+    """List all section IDs found in all files in a directory using Pandoc AST."""
     path = Path(directory)
     if not path.exists():
         logging.error(f"Directory does not exist: {directory}")
@@ -384,35 +407,17 @@ def list_all_section_ids(directory):
     total_with_ids = 0
     
     for file_path in all_files:
-        with open(file_path, 'r', encoding='utf-8') as file:
-            lines = file.readlines()
-        
-        header_pattern = re.compile(r'^(#{1,6})\s+(.+?)(?:\s*\{[^}]*\})?$')
-        div_start_pattern = re.compile(r'^:::\s*\{\.([^"]+)')
-        div_end_pattern = re.compile(r'^:::\s*$')
-        
-        inside_skip_div = False
-        file_sections = 0
-        file_with_ids = 0
-        
-        for line in lines:
-            if div_start_pattern.match(line.strip()):
-                inside_skip_div = True
-            elif div_end_pattern.match(line.strip()):
-                inside_skip_div = False
-                
-            match = header_pattern.match(line)
-            if match and not inside_skip_div:
-                hashes, title = match.groups()
-                if len(hashes) > 1:  # Skip chapter title
-                    file_sections += 1
-                    if re.search(r'\{#sec-[^}]+\}', line):
-                        file_with_ids += 1
-        
-        if file_sections > 0:
-            logging.info(f"📄 {file_path}: {file_with_ids}/{file_sections} sections have IDs")
-            total_sections += file_sections
-            total_with_ids += file_with_ids
+        try:
+            headers = extract_section_headers_pandoc(file_path)
+            file_sections = len(headers)
+            file_with_ids = sum(1 for _, _, section_id, _ in headers if section_id)
+            
+            if file_sections > 0:
+                logging.info(f"📄 {file_path}: {file_with_ids}/{file_sections} sections have IDs")
+                total_sections += file_sections
+                total_with_ids += file_with_ids
+        except Exception as e:
+            logging.warning(f"Error processing {file_path}: {e}")
     
     logging.info(f"\n📊 SUMMARY:")
     logging.info(f"  Total files: {len(all_files)}")
@@ -739,42 +744,15 @@ def print_summary(all_summaries):
     logging.info(f"\n{'='*60}")
 
 def verify_section_ids(filepath):
-    """Verify that all headers have proper section IDs, skipping unnumbered headers."""
+    """Verify that all headers have proper section IDs, skipping unnumbered headers, using Pandoc AST."""
     missing_ids = []
-    with open(filepath, 'r', encoding='utf-8') as file:
-        lines = file.readlines()
-    
-    header_pattern = re.compile(r'^(#{1,6})\s+(.+?)(?:\s*\{[^}]*\})?$')
-    div_start_pattern = re.compile(r'^:::\s*\{\.([^\"]+)')
-    div_end_pattern = re.compile(r'^:::\s*$')
-    
-    inside_skip_div = False
-    for i, line in enumerate(lines, 1):
-        if div_start_pattern.match(line.strip()):
-            inside_skip_div = True
-        elif div_end_pattern.match(line.strip()):
-            inside_skip_div = False
-            
-        match = header_pattern.match(line)
-        if match and not inside_skip_div:
-            hashes, title = match.groups()
-            if len(hashes) > 1:  # Skip chapter title
-                # Extract existing attributes if any
-                existing_attrs = ""
-                if "{" in line:
-                    attrs_start = line.find("{")
-                    attrs_end = line.rfind("}")
-                    if attrs_end > attrs_start:
-                        existing_attrs = line[attrs_start:attrs_end+1]
-                # Skip headers with {.unnumbered}
-                if ".unnumbered" in existing_attrs:
-                    continue  # Skip this header
-                if not re.search(r'\{#sec-[^}]+\}', line):
-                    missing_ids.append({
-                        'line': i,
-                        'title': title.strip()
-                    })
-    
+    headers = extract_section_headers_pandoc(filepath)
+    for idx, (level, title, section_id, classes) in enumerate(headers, 1):
+        if not section_id:
+            missing_ids.append({
+                'line': idx,  # Not the real line, but section index
+                'title': title.strip()
+            })
     return missing_ids
 
 def update_cross_references(file_path, id_map):
