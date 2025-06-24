@@ -639,6 +639,7 @@ def extract_sections_with_ids(markdown_text):
         - Filters out "Quiz Answers" sections automatically
         - Requires regular sections to have reference labels for consistency
         - Excludes unnumbered sections and special sections that don't need IDs
+        - Ignores ## lines that appear inside any Quarto blocks
         - Returns None if any regular section is missing a reference label
         
     Excluded sections (don't need IDs):
@@ -646,14 +647,86 @@ def extract_sections_with_ids(markdown_text):
         - Sections with {.appendix} attribute  
         - Sections with {.backmatter} attribute
         - "Quiz Answers" sections
+        - ## lines inside any Quarto blocks:
+          - ::: blocks (callouts, content-visible, layout, figures, etc.)
+          - :::: blocks (4-colon divs)
+          - ``` code blocks
+          - --- YAML frontmatter blocks
     """
-    # Updated pattern to handle various section formats
-    section_pattern = re.compile(r'^##\s+(.+?)(\s*\{[^}]*\})?\s*$', re.MULTILINE)
-    all_matches = list(section_pattern.finditer(markdown_text))
+    lines = markdown_text.split('\n')
+    all_matches = []
+    
+    # Track context to ignore ## lines inside any Quarto blocks
+    in_div_block = False      # ::: blocks
+    in_div4_block = False     # :::: blocks  
+    in_code_block = False     # ``` blocks
+    in_yaml_block = False     # --- blocks
+    
+    div_depth = 0
+    div4_depth = 0
+    code_block_depth = 0
+    yaml_depth = 0
+    
+    for line_num, line in enumerate(lines):
+        stripped_line = line.strip()
+        
+        # Track ::: div block boundaries (callouts, content-visible, layout, etc.)
+        if stripped_line.startswith(':::'):
+            if not in_div_block:
+                in_div_block = True
+                div_depth = 1
+            else:
+                div_depth -= 1
+                if div_depth == 0:
+                    in_div_block = False
+        
+        # Track :::: div block boundaries (4-colon divs)
+        elif stripped_line.startswith('::::'):
+            if not in_div4_block:
+                in_div4_block = True
+                div4_depth = 1
+            else:
+                div4_depth -= 1
+                if div4_depth == 0:
+                    in_div4_block = False
+        
+        # Track code block boundaries
+        elif stripped_line.startswith('```'):
+            if not in_code_block:
+                in_code_block = True
+                code_block_depth = 1
+            else:
+                code_block_depth -= 1
+                if code_block_depth == 0:
+                    in_code_block = False
+        
+        # Track YAML frontmatter boundaries
+        elif stripped_line.startswith('---'):
+            if not in_yaml_block:
+                in_yaml_block = True
+                yaml_depth = 1
+            else:
+                yaml_depth -= 1
+                if yaml_depth == 0:
+                    in_yaml_block = False
+        
+        # Only process ## lines if we're not inside any block
+        if (stripped_line.startswith('##') and 
+            not in_div_block and 
+            not in_div4_block and
+            not in_code_block and
+            not in_yaml_block and
+            not stripped_line.startswith('###')):  # Ignore level 3+ headers
+            
+            # Use regex to extract section info
+            section_pattern = re.compile(r'^##\s+(.+?)(\s*\{[^}]*\})?\s*$')
+            match = section_pattern.match(stripped_line)
+            if match:
+                all_matches.append((line_num, match))
     
     # Filter out "Quiz Answers" sections and special sections
     content_matches = []
-    for match in all_matches:
+    for line_num, match in all_matches:
         title = match.group(1).strip()
         attributes = match.group(2) if match.group(2) else ""
         
@@ -669,11 +742,11 @@ def extract_sections_with_ids(markdown_text):
         if any(special in attributes for special in ['.unnumbered', '.appendix', '.backmatter']):
             continue
             
-        content_matches.append(match)
+        content_matches.append((line_num, match))
     
     # Check which sections need IDs (regular sections without special attributes)
     missing_refs = []
-    for match in content_matches:
+    for line_num, match in content_matches:
         title = match.group(1).strip()
         attributes = match.group(2) if match.group(2) else ""
         
@@ -692,16 +765,20 @@ def extract_sections_with_ids(markdown_text):
     
     # If all sections have IDs, proceed with extraction
     sections = []
-    for i, match in enumerate(content_matches):
+    for i, (line_num, match) in enumerate(content_matches):
         title = match.group(1).strip()
         attributes = match.group(2) if match.group(2) else ""
-        start = match.end()
         
-        # Find the correct end position from the original list of all matches
-        original_index = all_matches.index(match)
-        end = all_matches[original_index + 1].start() if original_index + 1 < len(all_matches) else len(markdown_text)
+        # Find the start and end of this section
+        start_line = line_num + 1  # Start after the header line
+        end_line = len(lines)
         
-        content = markdown_text[start:end].strip()
+        # Find the next section boundary
+        if i + 1 < len(content_matches):
+            end_line = content_matches[i + 1][0]  # Next section starts here
+        
+        # Extract content between this section and the next
+        section_content = '\n'.join(lines[start_line:end_line]).strip()
         
         # Extract the section ID
         id_match = re.search(r'\{#([\w\-]+)\}', attributes)
@@ -713,7 +790,7 @@ def extract_sections_with_ids(markdown_text):
             sections.append({
                 "section_id": full_ref,
                 "section_title": title,
-                "section_text": content
+                "section_text": section_content
             })
     
     return sections
