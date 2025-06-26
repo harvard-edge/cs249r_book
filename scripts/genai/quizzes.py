@@ -124,14 +124,22 @@ import gradio as gr
 from jsonschema import validate, ValidationError
 
 # Callout class names for quiz insertion
-QUIZ_QUESTION_CALLOUT_CLASS = "callout-quiz-question"
-QUIZ_ANSWER_CALLOUT_CLASS = "callout-quiz-answer"
+QUIZ_QUESTION_CALLOUT_CLASS = ".callout-quiz-question"
+QUIZ_ANSWER_CALLOUT_CLASS = ".callout-quiz-answer"
+
+# Additional constants for quiz insertion (adapted from existing code)
+QUIZ_CALLOUT_CLASS = QUIZ_QUESTION_CALLOUT_CLASS  # Alias for compatibility
+ANSWER_CALLOUT_CLASS = QUIZ_ANSWER_CALLOUT_CLASS  # Alias for compatibility
+QUESTION_ID_PREFIX = "quiz-question-"
+ANSWER_ID_PREFIX = "quiz-answer-"
+REFERENCE_TEXT = "See Answer"
 
 # Quiz section headers and patterns for easy maintenance
 QUIZ_ANSWERS_SECTION_HEADER = "## Quiz Answers"
 QUIZ_ANSWERS_SECTION_PATTERN = rf"^{re.escape(QUIZ_ANSWERS_SECTION_HEADER)}\s*{{#[^}}]*}}\s*\n.*?(?=\n##\s+|$)"
-QUIZ_QUESTION_CALLOUT_PATTERN = rf"::: \{{\.{re.escape(QUIZ_QUESTION_CALLOUT_CLASS)}[^}}]*\}}\n.*?\n:::\n"
-QUIZ_ANSWER_CALLOUT_PATTERN = rf"::: \{{\.{re.escape(QUIZ_ANSWER_CALLOUT_CLASS)}[^}}]*\}}\n.*?\n:::\n"
+# These will be constructed dynamically since they need re.escape
+QUIZ_QUESTION_CALLOUT_PATTERN = None  # Constructed dynamically
+QUIZ_ANSWER_CALLOUT_PATTERN = None    # Constructed dynamically
 
 # Frontmatter patterns
 FRONTMATTER_PATTERN = r'^(---\s*\n.*?\n---\s*\n)'
@@ -2649,26 +2657,358 @@ def generate_for_directory(directory, args):
         args.output = f"{base_name}_quizzes.json"
         generate_for_file(qmd_file, args)
 
+def clean_slug(title):
+    """Creates a URL-friendly slug from a title."""
+    import re
+    # Simple slug creation - convert to lowercase, replace spaces/special chars with hyphens
+    slug = re.sub(r'[^\w\s-]', '', title.lower())
+    slug = re.sub(r'[-\s]+', '-', slug)
+    return slug.strip('-')
+
+def format_mcq_question(question_text):
+    """Format MCQ question with proper choice formatting."""
+    # Detect MCQ options (A), B), etc.) and reformat to a), b), ...
+    option_pattern = re.compile(r"([A-D])\) ?(.*?)(?=(?:[A-D]\)|$))", re.DOTALL)
+    # Find the question and options
+    lines = question_text.split("\n")
+    q = []
+    opts = []
+    for line in lines:
+        if option_pattern.search(line):
+            opts.extend(option_pattern.findall(line))
+        else:
+            q.append(line)
+    qtext = " ".join(q).strip()
+    if opts:
+        opt_lines = [f"   {chr(96+ord(opt[0].upper())-64)}) {opt[1].strip()}" for opt in opts]  # a), b), ...
+        return f"{qtext}\n" + "\n".join(opt_lines)
+    else:
+        return question_text
+
+def is_only_options(qtext):
+    """Returns True if qtext is only a list of options (a), b), etc.) and no question stem."""
+    lines = [l.strip() for l in qtext.split('\n') if l.strip()]
+    return all(re.match(r'^[a-dA-D]\)', l) for l in lines)
+
+def format_quiz_block(qa_pairs, answer_ref, section_id):
+    """Formats the questions into a Quarto callout block."""
+    # Handle the case where quiz_needed is False
+    if isinstance(qa_pairs, dict) and qa_pairs.get("quiz_needed", True) is False:
+        return ""
+    
+    # Extract questions from the nested structure
+    questions = qa_pairs.get("questions", qa_pairs) if isinstance(qa_pairs, dict) else qa_pairs
+    if not questions or (isinstance(questions, list) and len(questions) == 0):
+        return ""
+    
+    quiz_id = f"{QUESTION_ID_PREFIX}{section_id}"
+    formatted_questions = []
+    
+    for i, qa in enumerate(questions):
+        qtext = qa['question'] if isinstance(qa, dict) else qa
+        # Skip questions that are only options
+        if is_only_options(qtext):
+            continue
+        
+        # Handle different question types
+        if isinstance(qa, dict) and qa.get('question_type') == 'MCQ':
+            # Format MCQ with choices
+            question_text = qtext
+            choices = qa.get('choices', [])
+            if choices:
+                formatted_q = f"{question_text}\n"
+                for j, choice in enumerate(choices):
+                    letter = chr(ord('a') + j)
+                    formatted_q += f"   {letter}) {choice}\n"
+                formatted_questions.append(f"{i+1}. {formatted_q.rstrip()}")
+            else:
+                formatted = format_mcq_question(qtext)
+                formatted_questions.append(f"{i+1}. {formatted}")
+        else:
+            # For other question types, use the original formatting
+            formatted = format_mcq_question(qtext)
+            formatted_questions.append(f"{i+1}. {formatted}")
+    
+    if not formatted_questions:
+        return ""
+    
+    return (
+        f"""
+::: {{{QUIZ_CALLOUT_CLASS} #{quiz_id}}}
+
+"""
+        + "\n\n".join(formatted_questions)
+        + f"""
+
+{REFERENCE_TEXT} \\ref{{{answer_ref}}}.
+:::
+"""
+    )
+
+def indent_answer_explanation(answer):
+    """Indent answer explanations properly."""
+    return '\n'.join([f"   {line}" if line.strip() else "" for line in answer.strip().split("\n")])
+
+def format_mcq_answer(question, answer):
+    """Format MCQ answer with question and indented explanation."""
+    q_lines = format_mcq_question(question).split("\n")
+    answer_lines = indent_answer_explanation(answer)
+    return "\n".join(q_lines) + "\n\n" + answer_lines
+
+def format_answer_block(section_id, qa_pairs):
+    """Formats the answers into a Quarto callout block."""
+    # Handle the case where quiz_needed is False
+    if isinstance(qa_pairs, dict) and qa_pairs.get("quiz_needed", True) is False:
+        return ""
+    
+    # Extract questions from the nested structure
+    questions = qa_pairs.get("questions", qa_pairs) if isinstance(qa_pairs, dict) else qa_pairs
+    if not questions or (isinstance(questions, list) and len(questions) == 0):
+        return ""
+    
+    lines = []
+    for i, qa in enumerate(questions):
+        qtext = qa['question'] if isinstance(qa, dict) else qa
+        ans = qa['answer'] if isinstance(qa, dict) else ''
+        
+        # Handle different question types for formatting
+        if isinstance(qa, dict) and qa.get('question_type') == 'MCQ':
+            # Format MCQ with choices
+            question_text = qtext
+            choices = qa.get('choices', [])
+            if choices:
+                formatted_q = f"{question_text}\n"
+                for j, choice in enumerate(choices):
+                    letter = chr(ord('a') + j)
+                    formatted_q += f"   {letter}) {choice}\n"
+                formatted_q = formatted_q.rstrip()
+            else:
+                formatted_q = format_mcq_question(qtext)
+        else:
+            # For other question types, use the original formatting
+            formatted_q = format_mcq_question(qtext)
+        
+        formatted_a = indent_answer_explanation(ans)
+        lines.append(f"{i+1}. {formatted_q}\n\n{formatted_a}")
+    
+    return (
+        f":::{{{ANSWER_CALLOUT_CLASS} #{ANSWER_ID_PREFIX}{section_id}}}\n"
+        + "\n\n".join(lines)
+        + "\n:::\n"
+    )
+
+def insert_quiz_at_end(match, quiz_block):
+    """Helper function to insert quiz block at the end of a section."""
+    section_text = match.group(0)  # Keep original newlines
+    # Remove any existing quiz callout in this section
+    section_text = re.sub(rf"::: \{{{QUIZ_CALLOUT_CLASS}[\s\S]*?:::\n?", "", section_text)
+    # Only insert if quiz_block is not empty and not already present
+    if quiz_block.strip() and quiz_block.strip() not in section_text:
+        return section_text.rstrip() + '\n\n' + quiz_block.strip() + '\n\n'
+    return section_text  # Return original section text with its newlines intact
+
+def clean_existing_quiz_blocks(markdown_text):
+    """
+    Remove all quiz and answer callouts, and the entire '## Quiz Answers' section with its content.
+    Returns:
+        cleaned_text (str): the cleaned markdown
+        changed (bool): whether anything was removed
+        quiz_removed_count (int): number of quiz blocks removed
+        answer_removed_count (int): number of answer blocks removed
+    """
+    original_len = len(markdown_text)
+    quiz_removed_count = 0
+    answer_removed_count = 0
+
+    # --- Remove quiz callouts ---
+    quiz_callout_pattern = re.compile(
+        r":::\s*\{[^}]*?" + re.escape(QUIZ_CALLOUT_CLASS.lstrip('.')) + r"[^}]*?\}[\s\S]*?:::\s*\n?",
+        re.DOTALL | re.IGNORECASE
+    )
+    cleaned, quiz_removed_count = quiz_callout_pattern.subn("", markdown_text)
+
+    # --- Remove all answer callouts ---
+    answer_callout_pattern = re.compile(
+        r":::\s*\{[^}]*?" + re.escape(ANSWER_CALLOUT_CLASS.lstrip('.')) + r"[^}]*?\}[\s\S]*?:::\s*\n?",
+        re.DOTALL | re.IGNORECASE
+    )
+    cleaned, answer_removed_count = answer_callout_pattern.subn("", cleaned)
+
+    # --- Remove the entire '## Quiz Answers' section (header + all content) ---
+    quiz_answers_section_pattern = re.compile(
+        r"(^##\s+" + re.escape("Quiz Answers") + r"[\s\S]*?)(?=^##\s|\Z)", re.MULTILINE
+    )
+    cleaned, section_removed_count = quiz_answers_section_pattern.subn("", cleaned)
+
+    changed = len(cleaned) != original_len
+    return cleaned, changed, quiz_removed_count, answer_removed_count
+
 def insert_quizzes_into_markdown(qmd_file_path, quiz_file_path):
     """
-    Insert quizzes into a markdown file.
+    Insert quizzes into a markdown file using robust existing insertion logic.
     
-    This function would insert quiz callouts into QMD files based on
-    the quiz data. Currently a placeholder for future implementation.
+    This function inserts quiz callouts into QMD files based on the quiz data.
+    It uses YAML processing to validate quiz integrity and includes a complete
+    Quiz Answers section at the end.
     
     Args:
         qmd_file_path (str): Path to the QMD file to modify
         quiz_file_path (str): Path to the quiz JSON file
         
     Note:
-        This functionality is not yet implemented. It would involve:
-        - Reading quiz data from JSON file
-        - Inserting quiz callouts at appropriate locations in QMD
-        - Adding quiz answers section at the end
+        - Uses YAML processing to extract quiz filename from frontmatter
+        - Validates quiz data integrity using existing validation functions
+        - Inserts quiz callouts at appropriate locations in QMD
+        - Adds complete Quiz Answers section at the end
+        - Handles different question types (MCQ, TF, SHORT, etc.)
     """
-    print(f"Inserting quizzes from {quiz_file_path} into {qmd_file_path}")
-    # Implementation would go here - this is a placeholder
-    print("❌ Insert functionality not yet implemented")
+    
+    try:
+        # Read the QMD file first
+        with open(qmd_file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # If quiz_file_path not provided, extract from QMD frontmatter using existing function
+        if quiz_file_path is None:
+            quiz_file_path = find_quiz_file_from_qmd(qmd_file_path)
+            if not quiz_file_path:
+                print("❌ No quiz file specified in QMD frontmatter")
+                print("   Make sure the QMD file has 'quiz: filename.json' in its frontmatter")
+                return
+        
+        print(f"Inserting quizzes from {os.path.basename(quiz_file_path)} into {os.path.basename(qmd_file_path)}")
+        
+        # Validate quiz file exists
+        if not os.path.exists(quiz_file_path):
+            print(f"❌ Quiz file not found: {quiz_file_path}")
+            return
+        
+        # Read and validate the quiz JSON file
+        try:
+            with open(quiz_file_path, 'r', encoding='utf-8') as f:
+                quiz_data = json.load(f)
+        except json.JSONDecodeError as e:
+            print(f"❌ Invalid JSON in quiz file: {str(e)}")
+            return
+        
+        # Validate quiz data structure using existing schema validation
+        try:
+            validate(instance=quiz_data, schema=QUIZ_FILE_SCHEMA)
+            print("  ✅ Quiz file structure is valid")
+        except ValidationError as e:
+            print(f"❌ Quiz file validation failed: {e.message}")
+            return
+        
+        # Extract and validate sections from the markdown file
+        sections = extract_sections_with_ids(content)
+        if not sections:
+            print("❌ No sections found in QMD file or sections missing IDs")
+            return
+        
+        print(f"  ✅ Found {len(sections)} sections in QMD file")
+        
+        # Clean up any existing quiz/answer callouts first
+        content, cleaned_something, quiz_count, answer_count = clean_existing_quiz_blocks(content)
+        if cleaned_something:
+            print(f"  🧹 Cleaned up existing content: Removed {quiz_count} quiz callout(s) and {answer_count} answer callout(s)")
+        
+        # Create mapping of section_id to quiz data and validate
+        qa_by_section = {}
+        valid_quiz_count = 0
+        
+        for section_data in quiz_data.get('sections', []):
+            section_id = section_data['section_id']
+            quiz_info = section_data.get('quiz_data', {})
+            
+            # Find matching section title
+            section_title = None
+            for section in sections:
+                if section['section_id'] == section_id:
+                    section_title = section['section_title']
+                    break
+            
+            if not section_title:
+                print(f"  ⚠️  Warning: Section {section_id} not found in QMD file, skipping")
+                continue
+            
+            if quiz_info.get('quiz_needed', False):
+                # Validate individual quiz response using existing function
+                if validate_individual_quiz_response(quiz_info):
+                    qa_by_section[section_title] = quiz_info
+                    valid_quiz_count += 1
+                else:
+                    print(f"  ⚠️  Warning: Invalid quiz data for section {section_id}, skipping")
+        
+        if not qa_by_section:
+            print("❌ No valid quiz data found in JSON file")
+            return
+        
+        print(f"  ✅ Found {valid_quiz_count} valid quiz section(s)")
+        
+        # Insert quizzes using the robust logic from existing code
+        modified_content = content
+        answer_blocks = []
+        inserted_count = 0
+        
+        print(f"  🔧 Starting to insert {len(qa_by_section)} quiz sections into the document...")
+        
+        for section_title, qa_pairs in qa_by_section.items():
+            # Find the full section ID for this title
+            section_id = None
+            for section in sections:
+                if section['section_title'] == section_title:
+                    section_id = section['section_id'].lstrip('#')  # Remove # prefix if present
+                    break
+            
+            if not section_id:
+                print(f"    ⚠️  Warning: Could not find section ID for '{section_title}', skipping")
+                continue
+                
+            quiz_block = format_quiz_block(qa_pairs, f"{ANSWER_ID_PREFIX}{section_id}", section_id)
+            answer_block = format_answer_block(section_id, qa_pairs)
+            
+            if quiz_block.strip():
+                # Insert quiz only at the end of the ## section, after all its content
+                # Handle section headers with attributes like {#sec-id}
+                section_pattern = re.compile(rf"(^##\s+{re.escape(section_title)}.*?\n)(.*?)(?=^##\s|\Z)", re.DOTALL | re.MULTILINE)
+                modified_content = section_pattern.sub(lambda m: insert_quiz_at_end(m, quiz_block), modified_content, count=1)
+                inserted_count += 1
+                print(f"    ✅ Inserted quiz for section: {section_title}")
+            else:
+                print(f"    ⏭️  No quiz block generated for section '{section_title}' (quiz not needed)")
+            
+            if answer_block.strip():
+                answer_blocks.append(answer_block)
+        
+        # Only add non-empty answer blocks
+        nonempty_answer_blocks = [b for b in answer_blocks if b.strip() and not b.strip().isspace() and ANSWER_ID_PREFIX in b]
+        print(f"  📝 Found {len(nonempty_answer_blocks)} non-empty answer blocks to append")
+        
+        if nonempty_answer_blocks:
+            print("  📚 Appending final 'Quiz Answers' section...")
+            if not re.search(r"^##\s+Quiz Answers", modified_content, re.MULTILINE):
+                print("    ➕ Adding 'Quiz Answers' section header")
+                modified_content += "\n\n## Quiz Answers\n"
+            else:
+                print("    ✅ 'Quiz Answers' section header already exists")
+            
+            print(f"    📄 Appending {len(nonempty_answer_blocks)} answer blocks")
+            modified_content += "\n" + "\n\n".join(nonempty_answer_blocks)
+        else:
+            print("  ⏭️  No answer blocks to append")
+        
+        # Write the modified content back to the file
+        with open(qmd_file_path, 'w', encoding='utf-8') as f:
+            f.write(modified_content)
+        
+        print(f"✅ Successfully inserted {inserted_count} quiz(es) into {os.path.basename(qmd_file_path)}")
+        if nonempty_answer_blocks:
+            print(f"✅ Added Quiz Answers section with {len(nonempty_answer_blocks)} answer block(s)")
+        
+    except Exception as e:
+        print(f"❌ Error inserting quizzes: {str(e)}")
+        import traceback
+        traceback.print_exc()
 
 def clean_single_file(qmd_file, args):
     """
@@ -2706,10 +3046,16 @@ def clean_single_file(qmd_file, args):
         
         # Remove quiz callouts using the defined constants
         # Pattern to match quiz question callouts (more flexible for additional attributes)
-        quiz_question_pattern = re.compile(QUIZ_QUESTION_CALLOUT_PATTERN, re.DOTALL)
+        quiz_question_pattern = re.compile(
+            r":::\s*\{[^}]*?" + re.escape(QUIZ_QUESTION_CALLOUT_CLASS.lstrip('.')) + r"[^}]*?\}[\s\S]*?:::\s*\n?",
+            re.DOTALL | re.IGNORECASE
+        )
         
         # Pattern to match quiz answer callouts (more flexible for additional attributes)
-        quiz_answer_pattern = re.compile(QUIZ_ANSWER_CALLOUT_PATTERN, re.DOTALL)
+        quiz_answer_pattern = re.compile(
+            r":::\s*\{[^}]*?" + re.escape(QUIZ_ANSWER_CALLOUT_CLASS.lstrip('.')) + r"[^}]*?\}[\s\S]*?:::\s*\n?",
+            re.DOTALL | re.IGNORECASE
+        )
         
         # Count how many callouts we find
         question_matches = quiz_question_pattern.findall(content)
