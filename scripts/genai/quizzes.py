@@ -2732,17 +2732,11 @@ def format_quiz_block(qa_pairs, answer_ref, section_id):
     if not formatted_questions:
         return ""
     
+    # Add a blank line before closing :::
     return (
-        f"""
-::: {{{QUIZ_CALLOUT_CLASS} #{quiz_id}}}
-
-"""
+        f"::: {{{QUIZ_CALLOUT_CLASS} #{quiz_id}}}\n\n"
         + "\n\n".join(formatted_questions)
-        + f"""
-
-{REFERENCE_TEXT} \\ref{{{answer_ref}}}.
-:::
-"""
+        + f"\n\n{REFERENCE_TEXT} \\ref{{{answer_ref}}}.\n\n:::\n"
     )
 
 def indent_answer_explanation(answer):
@@ -2791,8 +2785,9 @@ def format_answer_block(section_id, qa_pairs):
         formatted_a = indent_answer_explanation(ans)
         lines.append(f"{i+1}. {formatted_q}\n\n{formatted_a}")
     
+    # Add a blank line after opening ::: and only one before closing :::
     return (
-        f":::{{{ANSWER_CALLOUT_CLASS} #{ANSWER_ID_PREFIX}{section_id}}}\n"
+        f":::{{{ANSWER_CALLOUT_CLASS} #{ANSWER_ID_PREFIX}{section_id}}}\n\n"
         + "\n\n".join(lines)
         + "\n:::\n"
     )
@@ -2993,7 +2988,7 @@ def insert_quizzes_into_markdown(qmd_file_path, quiz_file_path):
                 print("    ✅ 'Quiz Answers' section header already exists")
             
             print(f"    📄 Appending {len(nonempty_answer_blocks)} answer blocks")
-            modified_content += "\n" + "\n\n".join(nonempty_answer_blocks)
+            modified_content += "\n" + "\n".join(nonempty_answer_blocks)
         else:
             print("  ⏭️  No answer blocks to append")
         
