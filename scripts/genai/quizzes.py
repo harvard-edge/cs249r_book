@@ -2212,12 +2212,21 @@ def run_review_mode_simple(file_path):
         run_gui(file_path)
     elif file_ext in ['.qmd', '.md']:
         # QMD file - find corresponding quiz file first
-        quiz_file_path = find_quiz_file_from_qmd(file_path)
-        if quiz_file_path:
-            run_gui(quiz_file_path)
-        else:
-            print(f"❌ No corresponding quiz file found for {file_path}")
-            print("   Make sure the markdown file has 'quiz: filename.json' in its frontmatter")
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            quiz_file = extract_quiz_metadata(content)
+            if not quiz_file:
+                print(f"❌ No 'quiz:' variable found in the frontmatter of {file_path}.")
+                print("   Please add 'quiz: <quizfile>.json' to the YAML frontmatter.")
+                return
+            quiz_path = os.path.join(os.path.dirname(file_path), quiz_file)
+            if not os.path.exists(quiz_path):
+                print(f"❌ The quiz file '{quiz_file}' referenced in the frontmatter of {file_path} does not exist.")
+                return
+            run_gui(quiz_path)
+        except Exception as e:
+            print(f"❌ Error reading file: {str(e)}")
     else:
         print(f"❌ Unsupported file type: {file_ext}")
         print("   Supported types: .json, .qmd, .md")
@@ -2256,12 +2265,21 @@ def run_insert_mode_simple(file_path):
             print(f"❌ Error reading quiz file: {str(e)}")
     elif file_ext in ['.qmd', '.md']:
         # QMD file - find corresponding quiz file
-        quiz_file_path = find_quiz_file_from_qmd(file_path)
-        if quiz_file_path:
-            insert_quizzes_into_markdown(file_path, quiz_file_path)
-        else:
-            print(f"❌ No corresponding quiz file found for {file_path}")
-            print("   Make sure the markdown file has 'quiz: filename.json' in its frontmatter")
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            quiz_file = extract_quiz_metadata(content)
+            if not quiz_file:
+                print(f"❌ No 'quiz:' variable found in the frontmatter of {file_path}.")
+                print("   Please add 'quiz: <quizfile>.json' to the YAML frontmatter.")
+                return
+            quiz_path = os.path.join(os.path.dirname(file_path), quiz_file)
+            if not os.path.exists(quiz_path):
+                print(f"❌ The quiz file '{quiz_file}' referenced in the frontmatter of {file_path} does not exist.")
+                return
+            insert_quizzes_into_markdown(file_path, quiz_path)
+        except Exception as e:
+            print(f"❌ Error reading file: {str(e)}")
     else:
         print(f"❌ Unsupported file type: {file_ext}")
         print("   Supported types: .json, .qmd, .md")
@@ -2350,15 +2368,16 @@ def run_verify_mode_simple(file_path):
                     print(f"     - {section['section_title']} ({section['section_id']})")
                 
                 # Try to find corresponding quiz file
-                quiz_metadata = extract_quiz_metadata(content)
-                if quiz_metadata:
-                    quiz_path = os.path.join(os.path.dirname(file_path), quiz_metadata)
-                    if os.path.exists(quiz_path):
-                        print(f"✅ Found corresponding quiz file: {quiz_path}")
-                    else:
-                        print(f"⚠️  Quiz file not found: {quiz_path}")
+                quiz_file = extract_quiz_metadata(content)
+                if not quiz_file:
+                    print(f"❌ No 'quiz:' variable found in the frontmatter of {file_path}.")
+                    print("   Please add 'quiz: <quizfile>.json' to the YAML frontmatter.")
+                    return
+                quiz_path = os.path.join(os.path.dirname(file_path), quiz_file)
+                if os.path.exists(quiz_path):
+                    print(f"✅ Found corresponding quiz file: {quiz_path}")
                 else:
-                    print("⚠️  No quiz file specified in frontmatter")
+                    print(f"⚠️  The quiz file '{quiz_file}' referenced in the frontmatter of {file_path} does not exist.")
             else:
                 print("❌ No sections found in QMD file")
                 
