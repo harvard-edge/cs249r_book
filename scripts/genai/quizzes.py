@@ -2804,6 +2804,7 @@ def format_answer_block(section_id, qa_pairs):
         qtext = qa['question'] if isinstance(qa, dict) else qa
         ans = qa['answer'] if isinstance(qa, dict) else ''
         learning_obj = qa.get('learning_objective', '') if isinstance(qa, dict) else ''
+        qtype = qa.get('question_type', '') if isinstance(qa, dict) else ''
         
         # Handle different question types for formatting
         if isinstance(qa, dict) and qa.get('question_type') == 'MCQ':
@@ -2826,7 +2827,22 @@ def format_answer_block(section_id, qa_pairs):
             # For other question types, format directly and make the main question line bold
             formatted_q = f"**{qtext}**"
         
-        formatted_a = indent_answer_explanation(ans)
+        # Special handling for FILL-type answers
+        if qtype == 'FILL' and ans:
+            # Extract the answer up to the first period (or the whole answer if no period)
+            first_period = ans.find('.')
+            if first_period != -1:
+                fill_word = ans[:first_period].strip()
+                rest = ans[first_period+1:].strip()
+            else:
+                fill_word = ans.strip()
+                rest = ''
+            formatted_a = f'The answer is "{fill_word}".'
+            if rest:
+                formatted_a += f' {rest}'
+            formatted_a = indent_answer_explanation(formatted_a)
+        else:
+            formatted_a = indent_answer_explanation(ans)
         
         # Format learning objective with proper indentation to match answer
         if learning_obj:
