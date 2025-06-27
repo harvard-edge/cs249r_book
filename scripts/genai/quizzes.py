@@ -2162,8 +2162,7 @@ The tool will automatically detect file types (JSON vs QMD) and perform the appr
             print("Error: Review mode requires a specific file, not a directory")
             return
         elif args.mode == "insert":
-            print("Error: Insert mode requires a specific file, not a directory")
-            return
+            run_insert_mode_directory(args.directory)
         elif args.mode == "verify":
             run_verify_mode_directory(args.directory)
         elif args.mode == "clean":
@@ -2856,7 +2855,7 @@ def format_answer_block(section_id, qa_pairs):
     return (
         f":::{{{ANSWER_CALLOUT_CLASS} #{ANSWER_ID_PREFIX}{section_id}}}\n\n"
         + "\n\n".join(lines)
-        + "\n:::\n"
+        + "\n\n:::\n"
     )
 
 def insert_quiz_at_end(match, quiz_block):
@@ -3048,14 +3047,12 @@ def insert_quizzes_into_markdown(qmd_file_path, quiz_file_path):
         
         if nonempty_answer_blocks:
             print("  📚 Appending final 'Quiz Answers' section...")
-            if not re.search(r"^##\s+Quiz Answers", modified_content, re.MULTILINE):
-                print("    ➕ Adding 'Quiz Answers' section header")
-                modified_content += "\n\n## Quiz Answers\n"
-            else:
-                print("    ✅ 'Quiz Answers' section header already exists")
-            
+            # Remove trailing whitespace/newlines at end of file
+            modified_content = modified_content.rstrip()
+            # Ensure exactly one blank line before Quiz Answers
+            modified_content += "\n\n## Quiz Answers\n"
             print(f"    📄 Appending {len(nonempty_answer_blocks)} answer blocks")
-            modified_content += "\n" + "\n".join(nonempty_answer_blocks)
+            modified_content += "\n" + "\n\n".join([block.strip() for block in nonempty_answer_blocks])
         else:
             print("  ⏭️  No answer blocks to append")
         
@@ -3365,6 +3362,25 @@ def run_verify_mode_directory(directory_path):
     print(f"\n✅ Verify operation complete for {len(ordered_qmds)} files")
 
 # If you have run_insert_mode_directory or similar, update it similarly.
+
+def run_insert_mode_directory(directory):
+    print(f"=== Quiz Insert Mode (Directory) ===")
+    print(f"Inserting quizzes for all quiz JSON files in: {directory}")
+    # Find all quiz JSON files in the directory (recursively)
+    quiz_files = []
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if file.endswith(QUIZ_JSON_SUFFIX):
+                quiz_files.append(os.path.join(root, file))
+    if not quiz_files:
+        print(f"❌ No quiz JSON files found in directory with suffix '{QUIZ_JSON_SUFFIX}'")
+        return
+    print(f"Found {len(quiz_files)} quiz JSON files.")
+    for i, quiz_file in enumerate(quiz_files, 1):
+        print(f"[{i}/{len(quiz_files)}] Inserting from: {quiz_file}")
+        run_insert_mode_simple(quiz_file)
+
+QUIZ_JSON_SUFFIX = '_quizzes.json'
 
 if __name__ == "__main__":
     main()
