@@ -2638,40 +2638,60 @@ def generate_for_file(qmd_file, args):
     except Exception as e:
         print(f"❌ Error generating quizzes: {str(e)}")
 
+# Global variable for _quarto.yml path
+QUARTO_YML_PATH = os.path.join(os.getcwd(), '_quarto.yml')
+
 def generate_for_directory(directory, args):
     """
-    Generate quizzes for all QMD files in a directory.
-    
-    This function recursively finds all QMD files in a directory and
-    generates quizzes for each one. It creates separate quiz files
-    for each chapter.
-    
-    Args:
-        directory (str): Path to the directory containing QMD files
-        args (argparse.Namespace): Command line arguments
-        
-    Note:
-        - Creates separate quiz files for each QMD file
-        - Uses the QMD filename as the base for the quiz filename
-        - Processes files recursively through subdirectories
+    Generate quizzes for all QMD files in a directory, in the order specified by _quarto.yml if present.
     """
     print(f"Generating quizzes for directory: {directory}")
     
+    # Use the global QUARTO_YML_PATH
+    yml_path = QUARTO_YML_PATH
+    if os.path.exists(yml_path):
+        print(f"Using _quarto.yml for chapter order: {yml_path}")
+    else:
+        print("No _quarto.yml found in project root. Using default file order.")
+    ordered_files = []
+    if os.path.exists(yml_path):
+        try:
+            ordered_files = get_qmd_order_from_quarto_yml(yml_path)
+            print(f"Found {len(ordered_files)} .qmd files in _quarto.yml chapters section.")
+        except Exception as e:
+            print(f"⚠️  Could not parse _quarto.yml for chapter order: {e}")
+    
+    # Find all .qmd files in the directory (recursively)
     qmd_files = []
     for root, _, files in os.walk(directory):
         for file in files:
             if file.endswith('.qmd') or file.endswith('.md'):
-                qmd_files.append(os.path.join(root, file))
+                qmd_files.append(os.path.relpath(os.path.join(root, file), os.getcwd()))
     
-    if not qmd_files:
+    # Order files: first those in ordered_files, then the rest
+    ordered_qmds = []
+    seen = set()
+    for f in ordered_files:
+        # Try both as-is and with/without leading './'
+        f_norm = f.lstrip('./')
+        for q in qmd_files:
+            if q == f or q == f_norm or q.endswith(f_norm):
+                ordered_qmds.append(q)
+                seen.add(q)
+                break
+    # Add remaining files not in chapters
+    for q in qmd_files:
+        if q not in seen:
+            ordered_qmds.append(q)
+    
+    if not ordered_qmds:
         print("❌ No QMD files found in directory")
         return
     
-    print(f"Found {len(qmd_files)} QMD files")
+    print(f"Found {len(ordered_qmds)} QMD files (ordered by _quarto.yml where possible)")
     
-    for qmd_file in qmd_files:
+    for qmd_file in ordered_qmds:
         print(f"\n{'='*60}")
-        # Create output file name based on input file
         base_name = os.path.splitext(os.path.basename(qmd_file))[0]
         args.output = f"{base_name}_quizzes.json"
         generate_for_file(qmd_file, args)
@@ -2783,26 +2803,38 @@ def format_answer_block(section_id, qa_pairs):
     for i, qa in enumerate(questions):
         qtext = qa['question'] if isinstance(qa, dict) else qa
         ans = qa['answer'] if isinstance(qa, dict) else ''
+        learning_obj = qa.get('learning_objective', '') if isinstance(qa, dict) else ''
         
         # Handle different question types for formatting
         if isinstance(qa, dict) and qa.get('question_type') == 'MCQ':
-            # Format MCQ with choices
+            # Format MCQ with choices - only bold the main question line
             question_text = qtext
             choices = qa.get('choices', [])
             if choices:
-                formatted_q = f"{question_text}\n"
+                formatted_q = f"**{question_text}**\n"
                 for j, choice in enumerate(choices):
                     letter = chr(ord('a') + j)
                     formatted_q += f"   {letter}) {choice}\n"
                 formatted_q = formatted_q.rstrip()
             else:
+                # MCQ without choices array - format the question text
                 formatted_q = format_mcq_question(qtext)
+                # Make only the main question line bold
+                formatted_q = formatted_q.replace(f"{i+1}. ", f"{i+1}. **")
+                formatted_q = formatted_q.replace("\n", "**\n", 1)
         else:
-            # For other question types, use the original formatting
-            formatted_q = format_mcq_question(qtext)
+            # For other question types, format directly and make the main question line bold
+            formatted_q = f"**{qtext}**"
         
         formatted_a = indent_answer_explanation(ans)
-        lines.append(f"{i+1}. {formatted_q}\n\n{formatted_a}")
+        
+        # Format learning objective with proper indentation to match answer
+        if learning_obj:
+            formatted_lo = f"\n\n   *Learning Objective*: {learning_obj}"
+        else:
+            formatted_lo = ""
+        
+        lines.append(f"{i+1}. {formatted_q}\n\n{formatted_a}{formatted_lo}")
     
     # Add a blank line after opening ::: and only one before closing :::
     return (
@@ -3197,6 +3229,126 @@ def run_verify_directory(directory_path):
     print(f"Verifying quiz files in directory: {directory_path}")
     # Implementation would go here - this is a placeholder
     print("❌ Verify directory functionality not yet implemented")
+
+def get_qmd_order_from_quarto_yml(yml_path):
+    """Extract the ordered list of .qmd files from the chapters section of _quarto.yml, including commented ones."""
+    with open(yml_path, 'r') as f:
+        content = f.read()
+    # Find the chapters section
+    chapters_match = re.search(r'chapters:\s*\n(.*?)(?=\n\w+:|$)', content, re.DOTALL)
+    if not chapters_match:
+        return []
+    chapters_content = chapters_match.group(1)
+    # Extract all .qmd files, including commented ones
+    qmd_files = []
+    lines = chapters_content.split('\n')
+    for line in lines:
+        line = line.strip()
+        if '.qmd' in line:
+            clean_line = re.sub(r'^\s*#\s*', '', line)
+            clean_line = re.sub(r'^\s*-\s*', '', clean_line)
+            file_match = re.search(r'contents/.*?\.qmd', clean_line)
+            if file_match:
+                qmd_files.append(file_match.group(0))
+    return qmd_files
+
+# Utility function to get ordered .qmd files for a directory based on _quarto.yml
+
+def get_ordered_qmd_files(directory):
+    """Return a list of .qmd files in the order specified by _quarto.yml, with unlisted files after."""
+    yml_path = QUARTO_YML_PATH
+    ordered_files = []
+    if os.path.exists(yml_path):
+        try:
+            ordered_files = get_qmd_order_from_quarto_yml(yml_path)
+        except Exception as e:
+            print(f"⚠️  Could not parse _quarto.yml for chapter order: {e}")
+    # Find all .qmd files in the directory (recursively)
+    qmd_files = []
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if file.endswith('.qmd') or file.endswith('.md'):
+                qmd_files.append(os.path.relpath(os.path.join(root, file), os.getcwd()))
+    # Order files: first those in ordered_files, then the rest
+    ordered_qmds = []
+    seen = set()
+    for f in ordered_files:
+        f_norm = f.lstrip('./')
+        for q in qmd_files:
+            if q == f or q == f_norm or q.endswith(f_norm):
+                ordered_qmds.append(q)
+                seen.add(q)
+                break
+    for q in qmd_files:
+        if q not in seen:
+            ordered_qmds.append(q)
+    return ordered_qmds
+
+# Update all directory-based commands to use get_ordered_qmd_files
+
+def generate_for_directory(directory, args):
+    print(f"Generating quizzes for directory: {directory}")
+    if os.path.exists(QUARTO_YML_PATH):
+        print(f"Using _quarto.yml for chapter order: {QUARTO_YML_PATH}")
+    else:
+        print("No _quarto.yml found in project root. Using default file order.")
+    ordered_qmds = get_ordered_qmd_files(directory)
+    if not ordered_qmds:
+        print("❌ No QMD files found in directory")
+        return
+    print(f"Found {len(ordered_qmds)} QMD files (ordered by _quarto.yml where possible)")
+    for qmd_file in ordered_qmds:
+        print(f"\n{'='*60}")
+        base_name = os.path.splitext(os.path.basename(qmd_file))[0]
+        args.output = f"{base_name}_quizzes.json"
+        generate_for_file(qmd_file, args)
+
+def run_clean_mode_directory(directory, args):
+    print(f"=== Quiz Clean Mode (Directory) ===")
+    print(f"Cleaning quizzes from directory: {directory}")
+    if os.path.exists(QUARTO_YML_PATH):
+        print(f"Using _quarto.yml for chapter order: {QUARTO_YML_PATH}")
+    else:
+        print("No _quarto.yml found in project root. Using default file order.")
+    ordered_qmds = get_ordered_qmd_files(directory)
+    if not ordered_qmds:
+        print("❌ No QMD files found in directory")
+        return
+    print(f"Found {len(ordered_qmds)} QMD files (ordered by _quarto.yml where possible)")
+    if args.dry_run:
+        print("🔍 DRY RUN - Would clean the following files:")
+        for qmd_file in ordered_qmds:
+            print(f"  - {qmd_file}")
+        return
+    for i, qmd_file in enumerate(ordered_qmds, 1):
+        print(f"\n[{i}/{len(ordered_qmds)}] Cleaning: {qmd_file}")
+        try:
+            file_args = argparse.Namespace()
+            file_args.backup = args.backup
+            file_args.dry_run = args.dry_run
+            clean_single_file(qmd_file, file_args)
+        except Exception as e:
+            print(f"❌ Error cleaning {qmd_file}: {str(e)}")
+    print(f"\n✅ Clean operation complete for {len(ordered_qmds)} files")
+
+def run_verify_mode_directory(directory_path):
+    print("=== Quiz Verify Mode (Directory) ===")
+    print(f"Verifying quiz files in directory: {directory_path}")
+    if os.path.exists(QUARTO_YML_PATH):
+        print(f"Using _quarto.yml for chapter order: {QUARTO_YML_PATH}")
+    else:
+        print("No _quarto.yml found in project root. Using default file order.")
+    ordered_qmds = get_ordered_qmd_files(directory_path)
+    if not ordered_qmds:
+        print("❌ No QMD files found in directory")
+        return
+    print(f"Found {len(ordered_qmds)} QMD files (ordered by _quarto.yml where possible)")
+    for i, qmd_file in enumerate(ordered_qmds, 1):
+        print(f"[{i}/{len(ordered_qmds)}] Verifying: {qmd_file}")
+        run_verify_mode_simple(qmd_file)
+    print(f"\n✅ Verify operation complete for {len(ordered_qmds)} files")
+
+# If you have run_insert_mode_directory or similar, update it similarly.
 
 if __name__ == "__main__":
     main()
