@@ -97,6 +97,23 @@ If you'd like to build the book locally, follow these steps:
 For a complete setup guide, including dependency installation, see [BUILD.md](BUILD.md).
 
 ---
+## 📖 Citation
+
+If you use or reference the book in your work, please cite:
+
+```bibtex
+@inproceedings{reddi2024mlsysbook,
+  title        = {MLSysBook.AI: Principles and Practices of Machine Learning Systems Engineering},
+  author       = {Reddi, Vijay Janapa},
+  booktitle    = {2024 International Conference on Hardware/Software Codesign and System Synthesis (CODES+ ISSS)},
+  pages        = {41--42},
+  year         = {2024},
+  organization = {IEEE},
+  url          = {https://mlsysbook.ai},
+  note         = {Available at: https://mlsysbook.ai}
+}
+```
+---
 
 ## 🛡️ License
 
