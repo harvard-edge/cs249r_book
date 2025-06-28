@@ -135,8 +135,13 @@ ANSWER_ID_PREFIX = "quiz-answer-"
 REFERENCE_TEXT = "See Answer"
 
 # Quiz section headers and patterns for easy maintenance
-QUIZ_ANSWERS_SECTION_HEADER = "## Quiz Answers"
-QUIZ_ANSWERS_SECTION_PATTERN = rf"^{re.escape(QUIZ_ANSWERS_SECTION_HEADER)}\s*{{#[^}}]*}}\s*\n.*?(?=\n##\s+|$)"
+SELF_CHECK_ANSWERS_HEADER = "Self-Check Answers"
+SELF_CHECK_ANSWERS_HEADER_LOWER = SELF_CHECK_ANSWERS_HEADER.lower()
+SELF_CHECK_ANSWERS_SECTION_HEADER = f"## {SELF_CHECK_ANSWERS_HEADER}"
+SELF_CHECK_ANSWERS_SECTION_PATTERN = rf"^##\s+{re.escape(SELF_CHECK_ANSWERS_HEADER)}[\s\S]*?(?=^##\s|\Z)"
+QUIZ_ANSWERS_SECTION_HEADER = SELF_CHECK_ANSWERS_SECTION_HEADER
+QUIZ_ANSWERS_SECTION_PATTERN = SELF_CHECK_ANSWERS_SECTION_PATTERN
+
 # These will be constructed dynamically since they need re.escape
 QUIZ_QUESTION_CALLOUT_PATTERN = None  # Constructed dynamically
 QUIZ_ANSWER_CALLOUT_PATTERN = None    # Constructed dynamically
@@ -2913,7 +2918,7 @@ def clean_existing_quiz_blocks(markdown_text):
 
     # --- Remove the entire '## Quiz Answers' section (header + all content) ---
     quiz_answers_section_pattern = re.compile(
-        r"(^##\s+" + re.escape("Quiz Answers") + r"[\s\S]*?)(?=^##\s|\Z)", re.MULTILINE
+        r"(^##\s+" + re.escape(SELF_CHECK_ANSWERS_HEADER) + r"[\s\S]*?)(?=^##\s|\Z)", re.MULTILINE
     )
     cleaned, section_removed_count = quiz_answers_section_pattern.subn("", cleaned)
 
