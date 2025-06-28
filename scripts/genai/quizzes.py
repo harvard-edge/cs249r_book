@@ -902,10 +902,11 @@ def validate_individual_quiz_response(data):
         if not isinstance(data['questions'], list):
             return False
         
-        if len(data['questions']) < 1 or len(data['questions']) > 5:
+        # Allow empty questions arrays (when user removes all questions)
+        if len(data['questions']) > 5:
             return False
         
-        # Validate each question
+        # Validate each question (only if there are questions)
         for question in data['questions']:
             if not isinstance(question, dict):
                 return False
@@ -1383,7 +1384,57 @@ class QuizEditorGradio:
                 # Update rationale if no questions remain
                 if not kept_questions:
                     quiz_data['quiz_needed'] = False
-                    quiz_data['rationale'] = "All questions were removed by user"
+        
+        # Remove any section where quiz_needed is true but questions is empty
+        modified_data['sections'] = [
+            s for s in modified_data['sections']
+            if not (s.get('quiz_data', {}).get('quiz_needed', False) and len(s.get('quiz_data', {}).get('questions', [])) == 0)
+        ]
+        
+        # Save to the original file
+        try:
+            with open(self.initial_file_path, 'w', encoding='utf-8') as f:
+                json.dump(modified_data, f, indent=2, ensure_ascii=False)
+            return f"Saved changes to {os.path.basename(self.initial_file_path)}"
+        except Exception as e:
+            return f"Error saving file: {str(e)}"
+    
+    def save_changes_with_checkboxes(self, checkbox_states):
+        """Save the current quiz data with removed questions based on checkbox states"""
+        if not self.quiz_data or not self.sections:
+            return "No data to save"
+        
+        # Update question states for current section
+        current_section = self.sections[self.current_section_index]
+        section_id = current_section['section_id']
+        self.question_states[section_id] = checkbox_states[:5]  # Take first 5 values
+        
+        # Create a copy of the data to modify
+        modified_data = json.loads(json.dumps(self.quiz_data))
+        
+        # Remove unchecked questions from each section
+        for section in modified_data['sections']:
+            section_id = section['section_id']
+            quiz_data = section.get('quiz_data', {})
+            
+            if quiz_data.get('quiz_needed', False):
+                questions = quiz_data.get('questions', [])
+                question_states = self.question_states.get(section_id, [True] * len(questions))
+                
+                # Keep only checked questions
+                kept_questions = []
+                for i, question in enumerate(questions):
+                    if i < len(question_states) and question_states[i]:
+                        kept_questions.append(question)
+                
+                # Update the questions list
+                quiz_data['questions'] = kept_questions
+        
+        # Remove any section where quiz_needed is true but questions is empty
+        modified_data['sections'] = [
+            s for s in modified_data['sections']
+            if not (s.get('quiz_data', {}).get('quiz_needed', False) and len(s.get('quiz_data', {}).get('questions', [])) == 0)
+        ]
         
         # Save to the original file
         try:
@@ -1520,50 +1571,6 @@ class QuizEditorGradio:
             return [f"Invalid JSON in {path_to_load}: {str(e)}", "JSON Error", "No content loaded"] + [False] * 5 + [""] * 5
         except Exception as e:
             return [f"Error loading {path_to_load}: {str(e)}", "Error loading file", "No content loaded"] + [False] * 5 + [""] * 5
-    
-    def save_changes_with_checkboxes(self, checkbox_states):
-        """Save the current quiz data with removed questions based on checkbox states"""
-        if not self.quiz_data or not self.sections:
-            return "No data to save"
-        
-        # Update question states for current section
-        current_section = self.sections[self.current_section_index]
-        section_id = current_section['section_id']
-        self.question_states[section_id] = checkbox_states[:5]  # Take first 5 values
-        
-        # Create a copy of the data to modify
-        modified_data = json.loads(json.dumps(self.quiz_data))
-        
-        # Remove unchecked questions from each section
-        for section in modified_data['sections']:
-            section_id = section['section_id']
-            quiz_data = section.get('quiz_data', {})
-            
-            if quiz_data.get('quiz_needed', False):
-                questions = quiz_data.get('questions', [])
-                question_states = self.question_states.get(section_id, [True] * len(questions))
-                
-                # Keep only checked questions
-                kept_questions = []
-                for i, question in enumerate(questions):
-                    if i < len(question_states) and question_states[i]:
-                        kept_questions.append(question)
-                
-                # Update the questions list
-                quiz_data['questions'] = kept_questions
-                
-                # Update rationale if no questions remain
-                if not kept_questions:
-                    quiz_data['quiz_needed'] = False
-                    quiz_data['rationale'] = "All questions were removed by user"
-        
-        # Save to the original file
-        try:
-            with open(self.initial_file_path, 'w', encoding='utf-8') as f:
-                json.dump(modified_data, f, indent=2, ensure_ascii=False)
-            return f"Saved changes to {os.path.basename(self.initial_file_path)}"
-        except Exception as e:
-            return f"Error saving file: {str(e)}"
 
 def format_quiz_information(section, quiz_data):
     """
@@ -1688,7 +1695,6 @@ def create_gradio_interface(initial_file_path=None):
     
     with gr.Blocks(title="Quiz Editor", theme=gr.themes.Soft()) as interface:
         gr.Markdown("# Quiz Editor")
-        gr.Markdown("**Keyboard Shortcuts:** `p` (previous), `n` (next), `s` (save), `r` (regenerate), `1-5` (toggle checkboxes)")
         
         # Top row with section title and navigation (50-50)
         with gr.Row():
@@ -1761,17 +1767,16 @@ def create_gradio_interface(initial_file_path=None):
             with gr.Column(scale=1):
                 regenerate_btn = gr.Button("🔄 Regenerate", size="lg", variant="secondary")
         
-        # Status display for operations (moved here, below regeneration)
-        status_display = gr.Textbox(label="Status", interactive=False, visible=True, lines=3)
+        # Status display for regeneration operations (after regeneration section)
+        regenerate_status_display = gr.Textbox(label="Regeneration Status", interactive=False, visible=True, lines=3)
         
         # Quiz Information section (moved to bottom)
         gr.Markdown("### Quiz Information")
         quiz_info_display = gr.Markdown(quiz_info, visible=True)
         
-        # Status display for operations (smaller, at bottom)
-        status_display = gr.Textbox(label="Status", interactive=False, visible=True, lines=2)
+        # Status display for overall/save operations (at bottom)
+        overall_status_display = gr.Textbox(label="Save Status", interactive=False, visible=True, lines=2)
         
-
         def get_section_data(section_idx):
             # Returns: section_title, nav_info, section_text, quiz_info, [checkbox_states], [question_markdowns], [answer_md], [learning_md]
             # Always returns fixed number of outputs to match interface components (max 5 questions)
@@ -1972,38 +1977,24 @@ def create_gradio_interface(initial_file_path=None):
             cb.change(checkbox_change, inputs=question_checkboxes, outputs=[])
         
         # Save button - directly save changes
-        save_btn.click(save_changes, inputs=question_checkboxes, outputs=[status_display])
+        save_btn.click(save_changes, inputs=question_checkboxes, outputs=[overall_status_display])
         
-        # Regenerate button - updates status and refreshes the current section
+        # Regenerate button - updates regeneration status and refreshes the current section
         def regenerate_and_refresh(user_prompt):
             status = regenerate_questions(user_prompt)
             if status.startswith("✅"):
-                # If successful, refresh the current section display and clear the prompt
                 section_data = get_section_data(editor.current_section_index)
-                return [status, ""] + section_data  # Clear prompt_input
+                return [status, ""] + section_data
             else:
-                # If error, just return status and keep prompt
-                return [status, user_prompt] + [""] * (1 + 2 + 1 + 1 + 5 + 5 + 5 + 5)  # status + prompt + title + nav + text + quiz_info + checkboxes + questions + answers + learning
+                return [status, user_prompt] + [""] * (1 + 2 + 1 + 1 + 5 + 5 + 5 + 5)
         
         regenerate_btn.click(
             regenerate_and_refresh, 
             inputs=[prompt_input], 
-            outputs=[status_display, prompt_input, section_title_box, nav_info_box, section_text_box, quiz_info_display] + question_checkboxes + question_markdowns + answer_markdowns + learning_obj_markdowns
+            outputs=[regenerate_status_display, prompt_input, section_title_box, nav_info_box, section_text_box, quiz_info_display] + question_checkboxes + question_markdowns + answer_markdowns + learning_obj_markdowns
         )
         
-        # Add keyboard shortcuts
         interface.load(initial_load, outputs=[section_title_box, nav_info_box, section_text_box, quiz_info_display] + question_checkboxes + question_markdowns + answer_markdowns + learning_obj_markdowns)
-        
-        # Keyboard shortcuts
-        interface.keyboard_shortcut("p", prev_btn)
-        interface.keyboard_shortcut("n", next_btn)
-        interface.keyboard_shortcut("s", save_btn)
-        interface.keyboard_shortcut("r", regenerate_btn)
-        
-        # Number shortcuts for checkboxes (1-5)
-        for i, checkbox in enumerate(question_checkboxes, 1):
-            if i <= 5:  # Only for first 5 checkboxes
-                interface.keyboard_shortcut(str(i), checkbox)
         
     return interface
 
@@ -2980,6 +2971,9 @@ def insert_quizzes_into_markdown(qmd_file_path, quiz_file_path):
             print(f"❌ Quiz file validation failed: {e.message}")
             return
         
+        # Check if this is a case where all questions were removed by user
+            return
+        
         # Extract and validate sections from the markdown file
         sections = extract_sections_with_ids(content)
         if not sections:
@@ -3013,6 +3007,13 @@ def insert_quizzes_into_markdown(qmd_file_path, quiz_file_path):
                 continue
             
             if quiz_info.get('quiz_needed', False):
+                # Check if this is a case where all questions were removed by user
+                questions = quiz_info.get('questions', [])
+                if len(questions) == 0:
+                    # This is a valid case - user removed all questions, so skip this section
+                    print(f"  ⏭️  Skipping section {section_id} - all questions were removed by user")
+                    continue
+                
                 # Validate individual quiz response using existing function
                 if validate_individual_quiz_response(quiz_info):
                     qa_by_section[section_title] = quiz_info
@@ -3021,7 +3022,13 @@ def insert_quizzes_into_markdown(qmd_file_path, quiz_file_path):
                     print(f"  ⚠️  Warning: Invalid quiz data for section {section_id}, skipping")
         
         if not qa_by_section:
-            print("❌ No valid quiz data found in JSON file")
+            print("⚠️  No quiz sections to insert (all questions may have been removed by user)")
+            print("  Proceeding to update frontmatter only...")
+            
+            # Update frontmatter to include quiz reference even if no quizzes to insert
+            quiz_filename = os.path.basename(quiz_file_path)
+            update_qmd_frontmatter(qmd_file_path, quiz_filename)
+            print(f"✅ Updated frontmatter with quiz: {quiz_filename}")
             return
         
         print(f"  ✅ Found {valid_quiz_count} valid quiz section(s)")
@@ -3080,9 +3087,14 @@ def insert_quizzes_into_markdown(qmd_file_path, quiz_file_path):
         with open(qmd_file_path, 'w', encoding='utf-8') as f:
             f.write(modified_content)
         
+        # Update frontmatter to include quiz reference
+        quiz_filename = os.path.basename(quiz_file_path)
+        update_qmd_frontmatter(qmd_file_path, quiz_filename)
+        
         print(f"✅ Successfully inserted {inserted_count} quiz(es) into {os.path.basename(qmd_file_path)}")
         if nonempty_answer_blocks:
             print(f"✅ Added Quiz Answers section with {len(nonempty_answer_blocks)} answer block(s)")
+        print(f"✅ Updated frontmatter with quiz: {quiz_filename}")
         
     except Exception as e:
         print(f"❌ Error inserting quizzes: {str(e)}")
