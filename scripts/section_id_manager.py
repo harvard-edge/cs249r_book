@@ -361,6 +361,9 @@ def extract_section_headers_pandoc(file_path):
                 headers.append((level, title, section_id, classes))
             elif t == 'Div':
                 walk(c[1], in_div=True)
+            elif t == 'CodeBlock':
+                # Skip code blocks entirely - they should not contain section headers
+                continue
             elif t in ('BlockQuote', 'BulletList', 'OrderedList'):
                 if t == 'BlockQuote':
                     walk(c, in_div=in_div)
