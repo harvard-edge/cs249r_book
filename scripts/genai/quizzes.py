@@ -2837,7 +2837,7 @@ def format_answer_block(section_id, qa_pairs):
             # For other question types, format directly and make the main question line bold
             formatted_q = f"**{qtext}**"
         
-        # Special handling for FILL-type answers
+        # Construct the answer string for all types
         if qtype == 'FILL' and ans:
             # Extract the answer up to the first period (or the whole answer if no period)
             first_period = ans.find('.')
@@ -2847,12 +2847,14 @@ def format_answer_block(section_id, qa_pairs):
             else:
                 fill_word = ans.strip()
                 rest = ''
-            formatted_a = f'The answer is "{fill_word}".'
+            answer_str = f'The answer is "{fill_word}".'
             if rest:
-                formatted_a += f' {rest}'
-            formatted_a = indent_answer_explanation(formatted_a)
+                answer_str += f' {rest}'
         else:
-            formatted_a = indent_answer_explanation(ans)
+            answer_str = ans
+        
+        # Format answer with consistent *Answer*: prefix for all types
+        formatted_a = indent_answer_explanation(f'*Answer*: {answer_str}')
         
         # Format learning objective with proper indentation to match answer
         if learning_obj:
