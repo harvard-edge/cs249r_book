@@ -3083,15 +3083,15 @@ def insert_quizzes_into_markdown(qmd_file_path, quiz_file_path):
         print(f"  📝 Found {len(nonempty_answer_blocks)} non-empty answer blocks to append")
         
         if nonempty_answer_blocks:
-            print("  📚 Appending final 'Quiz Answers' section...")
+            print(f"  📚 Appending final '{SELF_CHECK_ANSWERS_HEADER}' section...")
             # Remove trailing whitespace/newlines at end of file
             modified_content = modified_content.rstrip()
-            # Ensure exactly one blank line before Quiz Answers
-            modified_content += "\n\n## Quiz Answers\n"
-            print(f"    📄 Appending {len(nonempty_answer_blocks)} answer blocks")
+            # Ensure exactly one blank line before Self-Check Answers
+            modified_content += f"\n\n{SELF_CHECK_ANSWERS_SECTION_HEADER}\n"
             modified_content += "\n" + "\n\n".join([block.strip() for block in nonempty_answer_blocks])
+            print(f"✅ Added {SELF_CHECK_ANSWERS_HEADER} section with {len(nonempty_answer_blocks)} answer block(s)")
         else:
-            print("  ⏭️  No answer blocks to append")
+            print(f"  ⏭️  No answer blocks to append")
         
         # Write the modified content back to the file
         with open(qmd_file_path, 'w', encoding='utf-8') as f:
