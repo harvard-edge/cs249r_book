@@ -2928,28 +2928,16 @@ def clean_existing_quiz_blocks(markdown_text):
 def insert_quizzes_into_markdown(qmd_file_path, quiz_file_path):
     """
     Insert quizzes into a markdown file using robust existing insertion logic.
-    
     This function inserts quiz callouts into QMD files based on the quiz data.
     It uses YAML processing to validate quiz integrity and includes a complete
-    Quiz Answers section at the end.
-    
-    Args:
-        qmd_file_path (str): Path to the QMD file to modify
-        quiz_file_path (str): Path to the quiz JSON file
-        
-    Note:
-        - Uses YAML processing to extract quiz filename from frontmatter
-        - Validates quiz data integrity using existing validation functions
-        - Inserts quiz callouts at appropriate locations in QMD
-        - Adds complete Quiz Answers section at the end
-        - Handles different question types (MCQ, TF, SHORT, etc.)
+    Self-Check Answers section at the end.
     """
-    
     try:
-        # Read the QMD file first
+        # Read the QMD file as lines
         with open(qmd_file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        
+            lines = f.readlines()
+        content = ''.join(lines)
+
         # If quiz_file_path not provided, extract from QMD frontmatter using existing function
         if quiz_file_path is None:
             quiz_file_path = find_quiz_file_from_qmd(qmd_file_path)
@@ -2957,14 +2945,14 @@ def insert_quizzes_into_markdown(qmd_file_path, quiz_file_path):
                 print("❌ No quiz file specified in QMD frontmatter")
                 print("   Make sure the QMD file has 'quiz: filename.json' in its frontmatter")
                 return
-        
+
         print(f"Inserting quizzes from {os.path.basename(quiz_file_path)} into {os.path.basename(qmd_file_path)}")
-        
+
         # Validate quiz file exists
         if not os.path.exists(quiz_file_path):
             print(f"❌ Quiz file not found: {quiz_file_path}")
             return
-        
+
         # Read and validate the quiz JSON file
         try:
             with open(quiz_file_path, 'r', encoding='utf-8') as f:
@@ -2972,7 +2960,7 @@ def insert_quizzes_into_markdown(qmd_file_path, quiz_file_path):
         except json.JSONDecodeError as e:
             print(f"❌ Invalid JSON in quiz file: {str(e)}")
             return
-        
+
         # Validate quiz data structure using existing schema validation
         try:
             validate(instance=quiz_data, schema=QUIZ_FILE_SCHEMA)
@@ -2980,132 +2968,111 @@ def insert_quizzes_into_markdown(qmd_file_path, quiz_file_path):
         except ValidationError as e:
             print(f"❌ Quiz file validation failed: {e.message}")
             return
-        
-        # Check if this is a case where all questions were removed by user
-            return
-        
+
         # Extract and validate sections from the markdown file
         sections = extract_sections_with_ids(content)
         if not sections:
             print("❌ No sections found in QMD file or sections missing IDs")
             return
-        
+
         print(f"  ✅ Found {len(sections)} sections in QMD file")
-        
+
         # Clean up any existing quiz/answer callouts first
         content, cleaned_something, quiz_count, answer_count = clean_existing_quiz_blocks(content)
         if cleaned_something:
             print(f"  🧹 Cleaned up existing content: Removed {quiz_count} quiz callout(s) and {answer_count} answer callout(s)")
-        
+        lines = content.splitlines(keepends=True)
+
+        # Find safe insertion points
+        insertion_points = find_safe_insertion_points(lines)
+        # Map section title to insertion index
+        insertion_map = {(title, sid): idx for (title, sid, idx) in insertion_points}
+
         # Create mapping of section_id to quiz data and validate
         qa_by_section = {}
         valid_quiz_count = 0
-        
         for section_data in quiz_data.get('sections', []):
             section_id = section_data['section_id']
             quiz_info = section_data.get('quiz_data', {})
-            
-            # Find matching section title
             section_title = None
             for section in sections:
                 if section['section_id'] == section_id:
                     section_title = section['section_title']
                     break
-            
             if not section_title:
                 print(f"  ⚠️  Warning: Section {section_id} not found in QMD file, skipping")
                 continue
-            
             if quiz_info.get('quiz_needed', False):
-                # Check if this is a case where all questions were removed by user
                 questions = quiz_info.get('questions', [])
                 if len(questions) == 0:
-                    # This is a valid case - user removed all questions, so skip this section
                     print(f"  ⏭️  Skipping section {section_id} - all questions were removed by user")
                     continue
-                
-                # Validate individual quiz response using existing function
                 if validate_individual_quiz_response(quiz_info):
-                    qa_by_section[section_title] = quiz_info
+                    qa_by_section[(section_title, section_id.lstrip('#'))] = quiz_info
                     valid_quiz_count += 1
                 else:
                     print(f"  ⚠️  Warning: Invalid quiz data for section {section_id}, skipping")
-        
+
         if not qa_by_section:
             print("⚠️  No quiz sections to insert (all questions may have been removed by user)")
             print("  Proceeding to update frontmatter only...")
-            
-            # Update frontmatter to include quiz reference even if no quizzes to insert
             quiz_filename = os.path.basename(quiz_file_path)
             update_qmd_frontmatter(qmd_file_path, quiz_filename)
             print(f"✅ Updated frontmatter with quiz: {quiz_filename}")
             return
-        
+
         print(f"  ✅ Found {valid_quiz_count} valid quiz section(s)")
-        
-        # Insert quizzes using the robust logic from existing code
-        modified_content = content
-        answer_blocks = []
+
+        # Insert quizzes using the new line-based logic
         inserted_count = 0
-        
-        print(f"  🔧 Starting to insert {len(qa_by_section)} quiz sections into the document...")
-        
-        for section_title, qa_pairs in qa_by_section.items():
-            # Find the full section ID for this title
-            section_id = None
-            for section in sections:
-                if section['section_title'] == section_title:
-                    section_id = section['section_id'].lstrip('#')  # Remove # prefix if present
-                    break
-            
-            if not section_id:
-                print(f"    ⚠️  Warning: Could not find section ID for '{section_title}', skipping")
-                continue
-                
+        answer_blocks = []
+        for (section_title, section_id), qa_pairs in qa_by_section.items():
             quiz_block = format_quiz_block(qa_pairs, f"{ANSWER_ID_PREFIX}{section_id}", section_id)
             answer_block = format_answer_block(section_id, qa_pairs)
-            
             if quiz_block.strip():
-                # Insert quiz only at the end of the ## section, after all its content
-                # Handle section headers with attributes like {#sec-id}
-                section_pattern = re.compile(rf"(^##\s+{re.escape(section_title)}.*?\n)(.*?)(?=^##\s|\Z)", re.DOTALL | re.MULTILINE)
-                modified_content = section_pattern.sub(lambda m: insert_quiz_at_end(m, quiz_block), modified_content, count=1)
-                inserted_count += 1
-                print(f"    ✅ Inserted quiz for section: {section_title}")
+                # Find insertion index
+                idx = insertion_map.get((section_title, section_id))
+                if idx is not None:
+                    # Only insert if not already present
+                    already_present = any(quiz_block.strip() in l for l in lines[max(0, idx-5):idx+5])
+                    if not already_present:
+                        # Insert quiz block just before the next header (one empty line before quiz)
+                        lines.insert(idx, '\n' + quiz_block)
+                        inserted_count += 1
+                        print(f"    ✅ Inserted quiz for section: {section_title}")
+                else:
+                    print(f"    ⚠️  No valid insertion point found for section: {section_title}")
             else:
                 print(f"    ⏭️  No quiz block generated for section '{section_title}' (quiz not needed)")
-            
             if answer_block.strip():
                 answer_blocks.append(answer_block)
-        
+
         # Only add non-empty answer blocks
         nonempty_answer_blocks = [b for b in answer_blocks if b.strip() and not b.strip().isspace() and ANSWER_ID_PREFIX in b]
         print(f"  📝 Found {len(nonempty_answer_blocks)} non-empty answer blocks to append")
-        
         if nonempty_answer_blocks:
             print(f"  📚 Appending final '{SELF_CHECK_ANSWERS_HEADER}' section...")
             # Remove trailing whitespace/newlines at end of file
-            modified_content = modified_content.rstrip()
+            while lines and lines[-1].strip() == '':
+                lines.pop()
             # Ensure exactly one blank line before Self-Check Answers
-            modified_content += f"\n\n{SELF_CHECK_ANSWERS_SECTION_HEADER}\n"
-            modified_content += "\n" + "\n\n".join([block.strip() for block in nonempty_answer_blocks])
+            lines.append(f"\n{SELF_CHECK_ANSWERS_SECTION_HEADER}\n")
+            lines.append("\n" + "\n\n".join([block.strip() for block in nonempty_answer_blocks]) + "\n")
             print(f"✅ Added {SELF_CHECK_ANSWERS_HEADER} section with {len(nonempty_answer_blocks)} answer block(s)")
         else:
             print(f"  ⏭️  No answer blocks to append")
-        
+
         # Write the modified content back to the file
         with open(qmd_file_path, 'w', encoding='utf-8') as f:
-            f.write(modified_content)
-        
+            f.writelines(lines)
+
         # Update frontmatter to include quiz reference
         quiz_filename = os.path.basename(quiz_file_path)
         update_qmd_frontmatter(qmd_file_path, quiz_filename)
-        
         print(f"✅ Successfully inserted {inserted_count} quiz(es) into {os.path.basename(qmd_file_path)}")
         if nonempty_answer_blocks:
-            print(f"✅ Added Quiz Answers section with {len(nonempty_answer_blocks)} answer block(s)")
+            print(f"✅ Added {SELF_CHECK_ANSWERS_HEADER} section with {len(nonempty_answer_blocks)} answer block(s)")
         print(f"✅ Updated frontmatter with quiz: {quiz_filename}")
-        
     except Exception as e:
         print(f"❌ Error inserting quizzes: {str(e)}")
         import traceback
@@ -3423,6 +3390,62 @@ def run_insert_mode_directory(directory):
         run_insert_mode_simple(quiz_file)
 
 QUIZ_JSON_SUFFIX = '_quizzes.json'
+
+# Add a helper function to find safe insertion points for quiz callouts
+
+def find_safe_insertion_points(markdown_lines):
+    """
+    Returns a list of (section_title, section_id, insertion_index) tuples for valid quiz insertion points.
+    Only considers section headers outside of code and div blocks.
+    """
+    from re import match
+    state = {'inside_code_block': False, 'inside_div_block': False}
+    insertion_points = []
+    section_title = None
+    section_id = None
+    header_level = None
+    for i, line in enumerate(markdown_lines):
+        stripped = line.strip()
+        # Track code block state
+        if stripped.startswith('```'):
+            state['inside_code_block'] = not state['inside_code_block']
+        # Track div block state
+        elif stripped.startswith(':::'):
+            state['inside_div_block'] = not state['inside_div_block']
+        # Only consider headers outside of code/div blocks
+        if not state['inside_code_block'] and not state['inside_div_block']:
+            m = re.match(r'^##\s+(.+?)(\s*\{[^}]*\})?\s*$', stripped)
+            if m:
+                section_title = m.group(1).strip()
+                attrs = m.group(2) or ''
+                id_match = re.search(r'\{#([\w\-]+)\}', attrs)
+                section_id = id_match.group(1) if id_match else None
+                header_level = 2  # Only ## for now
+                # Find the end of this section (next header of same or higher level, outside blocks)
+                j = i + 1
+                block_state = state.copy()
+                while j < len(markdown_lines):
+                    line_j = markdown_lines[j].strip()
+                    # Update block state
+                    if line_j.startswith('```'):
+                        block_state['inside_code_block'] = not block_state['inside_code_block']
+                    elif line_j.startswith(':::'):
+                        block_state['inside_div_block'] = not block_state['inside_div_block']
+                                    if not block_state['inside_code_block'] and not block_state['inside_div_block']:
+                    if line_j.startswith('#'):
+                        next_level = len(line_j) - len(line_j.lstrip('#'))
+                        # Only break on headers of same or higher level (fewer #s)
+                        if next_level <= header_level:
+                            break
+                    j += 1
+                insertion_points.append((section_title, section_id, j))
+    return insertion_points
+
+# In insert_quizzes_into_markdown, replace the regex-based insertion with this logic:
+# 1. Read the file as lines
+# 2. Find safe insertion points
+# 3. For each quiz section, insert the callout at the correct index (if not already present)
+# 4. Write the modified lines back to the file
 
 if __name__ == "__main__":
     main()

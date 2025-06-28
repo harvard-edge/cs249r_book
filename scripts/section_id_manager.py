@@ -505,34 +505,34 @@ def extract_section_content(lines, section_start_index, header_level):
     """
     content_lines = []
     i = section_start_index + 1
-    
+    state = initialize_block_tracking()  # Track code/div blocks
+
     while i < len(lines):
-        line = lines[i].strip()
+        line = lines[i]
+        state = update_block_state(line, state)
+        line_stripped = line.strip()
         
-        # Stop if we hit another header of same or higher level
-        if line.startswith('#'):
-            next_header_level = len(line) - len(line.lstrip('#'))
-            if next_header_level <= header_level:
-                break
-            # If this is a header, strip attributes after '{'
-            if '{' in line:
-                line = line[:line.find('{')].strip()
+        # Only treat ## as section end if not inside a code or div block
+        if not state['inside_code_block'] and not state['inside_skip_div']:
+            if line_stripped.startswith('#'):
+                next_header_level = len(line_stripped) - len(line_stripped.lstrip('#'))
+                if next_header_level <= header_level:
+                    break
+                # If this is a header, strip attributes after '{'
+                if '{' in line_stripped:
+                    line_stripped = line_stripped[:line_stripped.find('{')].strip()
         
-        # Stop if we hit a div boundary
-        if line.startswith(':::'):
-            break
-            
-        # Stop if we hit a code block boundary
-        if line.startswith('```'):
-            break
-            
+        # Stop if we hit a div boundary (but only if not inside code/div block)
+        # (This is now handled by block tracking)
+        # Stop if we hit a code block boundary (also handled by block tracking)
+        
         # For all lines, if '{' is present, strip everything after it
-        if '{' in line:
-            line = line[:line.find('{')].strip()
+        if '{' in line_stripped:
+            line_stripped = line_stripped[:line_stripped.find('{')].strip()
         
         # Add non-empty lines to content
-        if line:
-            content_lines.append(line)
+        if line_stripped:
+            content_lines.append(line_stripped)
         
         i += 1
     
@@ -796,7 +796,7 @@ def print_summary(all_summaries):
     logging.info(f"📋 Existing sections found: {total_existing}")
 
     if total_added > 0 or total_updated > 0 or total_removed > 0:
-        logging.info(f"\n�� FILES WITH CHANGES:")
+        logging.info(f"\n FILES WITH CHANGES:")
         logging.info(f"{'-'*60}")
         
         for summary in all_summaries:
