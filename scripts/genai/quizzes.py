@@ -3431,12 +3431,12 @@ def find_safe_insertion_points(markdown_lines):
                         block_state['inside_code_block'] = not block_state['inside_code_block']
                     elif line_j.startswith(':::'):
                         block_state['inside_div_block'] = not block_state['inside_div_block']
-                                    if not block_state['inside_code_block'] and not block_state['inside_div_block']:
-                    if line_j.startswith('#'):
-                        next_level = len(line_j) - len(line_j.lstrip('#'))
-                        # Only break on headers of same or higher level (fewer #s)
-                        if next_level <= header_level:
-                            break
+                    if not block_state['inside_code_block'] and not block_state['inside_div_block']:
+                        if line_j.startswith('#'):
+                            next_level = len(line_j) - len(line_j.lstrip('#'))
+                            # Only break on headers of same or higher level (fewer #s)
+                            if next_level <= header_level:
+                                break
                     j += 1
                 insertion_points.append((section_title, section_id, j))
     return insertion_points
