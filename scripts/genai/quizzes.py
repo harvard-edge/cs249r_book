@@ -2853,8 +2853,11 @@ def format_answer_block(section_id, qa_pairs):
         else:
             answer_str = ans
         
-        # Format answer with consistent *Answer*: prefix for all types
-        formatted_a = indent_answer_explanation(f'*Answer*: {answer_str}')
+        # Special handling for ORDER-type answers
+        if qtype == 'ORDER':
+            formatted_a = indent_answer_explanation(f'*Answer*: The order is as follows: {answer_str}')
+        else:
+            formatted_a = indent_answer_explanation(f'*Answer*: {answer_str}')
         
         # Format learning objective with proper indentation to match answer
         if learning_obj:
