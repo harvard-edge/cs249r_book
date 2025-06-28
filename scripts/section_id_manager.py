@@ -14,6 +14,16 @@ Special Handling for Unnumbered Headers:
 - Unnumbered headers will never have a section ID added, updated, or required (including in verify mode).
 - Only numbered headers (without {.unnumbered}) require section IDs.
 
+Smart Block Detection:
+---------------------
+- **Code Blocks:** Headers inside code blocks (```...```) are automatically ignored
+- **Div Blocks:** Headers inside Quarto divs (::: {.class}...:::) are automatically ignored
+- **Callouts:** Headers inside callout divs are automatically ignored
+- **Comments:** R/Python comments like `## Section Name` inside code blocks are not treated as headers
+
+This prevents the script from incorrectly processing code comments or headers that are part of
+documentation examples rather than actual section headers.
+
 Workflow Philosophy:
 --------------------
 - **Write Freely:**
@@ -44,12 +54,19 @@ ID Scheme:
 ----------
 - IDs are of the form: sec-{chapter-title}-{section-title}-{hash}
 - Chapter and section titles have stopwords removed for cleaner IDs
-- The hash is generated from: file path + chapter title + section title + parent section hierarchy
+- The hash is generated from: file path + chapter title + section title + parent section hierarchy + section content
 - This ensures GLOBAL UNIQUENESS across the entire book project
 - Different files with identical section names and hierarchies will have different IDs
 - Parent sections are included in the hash to handle duplicate section names naturally
 - The visible part of the ID remains short and human-readable
 - IDs are stable and won't change if sections are reordered (as long as hierarchy doesn't change)
+
+Stable ID Generation:
+---------------------
+- Section IDs are content-aware and include normalized section content in the hash
+- Attributes and IDs are stripped from content before hashing to ensure stability
+- Running --repair multiple times will not change IDs unless content actually changes
+- This prevents ID churn and ensures cross-references remain valid
 
 Global Uniqueness Guarantee:
 ----------------------------
@@ -61,17 +78,17 @@ and hierarchies in different files will have different IDs. This prevents confli
 - The same section name appears in multiple contexts across the book
 
 Example hash inputs:
-  - File A: "contents/chapter1.qmd|Getting Started|Introduction|"
-  - File B: "contents/chapter2.qmd|Getting Started|Introduction|"
+  - File A: "contents/chapter1.qmd|Getting Started|Introduction|content1"
+  - File B: "contents/chapter2.qmd|Getting Started|Introduction|content1"
   - Result: Different 4-character hashes ensure unique IDs
 
 Available Modes:
 ----------------
-- **Add Mode (default):** Add missing section IDs to headers (skips unnumbered headers)
-- **Repair Mode (--repair):** Fix existing section IDs to match the new format
+- **Add Mode (default):** Add missing section IDs to headers (skips unnumbered headers and code blocks)
+- **Repair Mode (--repair):** Fix existing section IDs to match the new format (stable across multiple runs)
 - **Remove Mode (--remove):** Remove all section IDs (use with --backup)
-- **Verify Mode (--verify):** Check that all section IDs are present and properly formatted (skips unnumbered headers)
-- **List Mode (--list):** Display all section IDs found in files
+- **Verify Mode (--verify):** Check that all section IDs are present and properly formatted (skips unnumbered headers and code blocks)
+- **List Mode (--list):** Display all section IDs found in files (skips code blocks)
 
 Safety Features:
 ----------------
@@ -81,14 +98,16 @@ Safety Features:
 - **Force Mode:** --force automatically accepts all confirmations without prompting
 - **Attribute Preservation:** Maintains other attributes when modifying section IDs
 - **Cross-reference Updates:** Automatically updates references when IDs change
+- **Stable IDs:** IDs remain consistent across multiple repair runs
 
 Best Practices:
 ---------------
 - Use --backup when making bulk changes
-- Use --verify before commits to ensure ID integrity (unnumbered headers are always ignored)
+- Use --verify before commits to ensure ID integrity (unnumbered headers and code blocks are always ignored)
 - Use --list to audit existing section IDs
 - Use --dry-run to preview changes before applying them
 - Consider using this in pre-commit hooks or CI pipelines
+- Run --repair as many times as needed - IDs will remain stable
 
 Key Features:
 - Comprehensive section ID management (add, repair, remove, verify, list)
@@ -103,22 +122,29 @@ Key Features:
 - Support for both single files (-f) and directories (-d)
 - Stopword removal for cleaner, more readable IDs
 - **Unnumbered headers are always skipped for section IDs in all modes**
+- **Code blocks and divs are automatically detected and skipped**
+- **Stable ID generation prevents unnecessary changes**
+
+Code Quality:
+-------------
+- Shared functions eliminate code duplication
+- Consistent block detection logic across all modes
+- Modular design with clear separation of concerns
+- Comprehensive error handling and validation
 
 Typical Usage:
     # Add missing IDs
     python section_id_manager.py -d contents/
     python section_id_manager.py -f contents/chapter.qmd
     
-    # Repair existing IDs
+    # Repair existing IDs (stable across multiple runs)
     python section_id_manager.py -d contents/ --repair --backup
-    
-    # Force repair without prompts
     python section_id_manager.py -d contents/ --repair --force
     
-    # Verify all IDs (unnumbered headers are always ignored)
+    # Verify all IDs (skips unnumbered headers and code blocks)
     python section_id_manager.py -d contents/ --verify
     
-    # List all IDs
+    # List all IDs (skips code blocks)
     python section_id_manager.py -d contents/ --list
     
     # Remove all IDs (dangerous!)
@@ -142,8 +168,6 @@ import sys
 import os
 import glob
 import time
-import pypandoc
-import json
 
 # Download NLTK stopwords if not already downloaded
 try:
@@ -162,6 +186,61 @@ logging.basicConfig(
 
 # Global variable to track ID replacements
 id_replacements = {}
+
+# Shared regex patterns - defined once to avoid duplication
+HEADER_PATTERN = re.compile(r'^(#{1,6})\s+(.+?)(?:\s*\{[^}]*\})?$')
+DIV_START_PATTERN = re.compile(r'^:::\s*\{\.([^"]+)')
+DIV_END_PATTERN = re.compile(r'^:::\s*$')
+CODE_BLOCK_PATTERN = re.compile(r'^```[^`]*$')  # Matches code block start/end
+
+def initialize_block_tracking():
+    """Initialize block tracking state variables."""
+    return {
+        'inside_skip_div': False,
+        'inside_code_block': False
+    }
+
+def update_block_state(line, state):
+    """
+    Update block tracking state based on the current line.
+    
+    Args:
+        line: The current line being processed
+        state: Dictionary with 'inside_skip_div' and 'inside_code_block' keys
+    
+    Returns:
+        Updated state dictionary
+    """
+    line_stripped = line.strip()
+    
+    # Check for code block boundaries
+    if CODE_BLOCK_PATTERN.match(line_stripped):
+        state['inside_code_block'] = not state['inside_code_block']
+        return state
+        
+    # Check for div boundaries
+    if DIV_START_PATTERN.match(line_stripped):
+        state['inside_skip_div'] = True
+    elif DIV_END_PATTERN.match(line_stripped):
+        state['inside_skip_div'] = False
+    
+    return state
+
+def should_process_header(line, state):
+    """
+    Determine if a header should be processed based on current block state.
+    
+    Args:
+        line: The current line
+        state: Block tracking state dictionary
+    
+    Returns:
+        True if the header should be processed, False otherwise
+    """
+    match = HEADER_PATTERN.match(line)
+    if match and not state['inside_skip_div'] and not state['inside_code_block']:
+        return True, match
+    return False, None
 
 def simple_slugify(text):
     """Convert header text to a slug format, removing stopwords."""
@@ -331,68 +410,42 @@ def generate_section_id(title, file_path, chapter_title, section_counter, parent
     hash_suffix = hashlib.sha1(hash_input).hexdigest()[:4]  # Keep 4 chars
     return f"sec-{clean_chapter_title}-{clean_title}-{hash_suffix}"
 
-def extract_section_headers_pandoc(file_path):
-    """Extract all real section headers from a QMD/MD file using Pandoc AST."""
-    with open(file_path, 'r', encoding='utf-8') as f:
-        content = f.read()
-    ast_json = pypandoc.convert_text(content, 'json', format='markdown')
-    ast = json.loads(ast_json)
-    headers = []
-    def walk(blocks, in_div=False):
-        for block in blocks:
-            t = block.get('t')
-            c = block.get('c')
-            if t == 'Header' and not in_div:
-                level = c[0]
-                attr = c[1]
-                inlines = c[2]
-                section_id = attr[0] if attr[0] else None
-                classes = attr[1]
-                if level == 1 or 'unnumbered' in classes or 'appendix' in classes or 'backmatter' in classes:
-                    continue
-                # Extract plain text title
-                title = []
-                for x in inlines:
-                    if x['t'] == 'Str':
-                        title.append(x['c'])
-                    elif x['t'] == 'Space':
-                        title.append(' ')
-                title = ''.join(title).strip()
-                headers.append((level, title, section_id, classes))
-            elif t == 'Div':
-                walk(c[1], in_div=True)
-            elif t in ('BlockQuote', 'BulletList', 'OrderedList'):
-                if t == 'BlockQuote':
-                    walk(c, in_div=in_div)
-                elif t == 'BulletList':
-                    for item in c:
-                        walk(item, in_div=in_div)
-                elif t == 'OrderedList':
-                    for item in c[1]:
-                        walk(item, in_div=in_div)
-    walk(ast.get('blocks', []))
-    return headers
-
 def list_section_ids(filepath):
-    """List all section IDs found in a single file using Pandoc AST."""
+    """List all section IDs found in a single file."""
     logging.info(f"\n📋 Section IDs in: {filepath}")
     logging.info(f"{'='*60}")
-    headers = extract_section_headers_pandoc(filepath)
+    
+    with open(filepath, 'r', encoding='utf-8') as file:
+        lines = file.readlines()
+    
+    state = initialize_block_tracking()
     section_count = 0
-    for level, title, section_id, classes in headers:
-        section_count += 1
-        if section_id:
-            logging.info(f"  {section_count:2d}. {title}")
-            logging.info(f"      ID: #{section_id}")
-        else:
-            logging.info(f"  {section_count:2d}. {title} (NO ID)")
+    
+    for i, line in enumerate(lines, 1):
+        # Update block state
+        state = update_block_state(line, state)
+        
+        # Check if we should process this header
+        should_process, match = should_process_header(line, state)
+        if should_process:
+            hashes, title = match.groups()
+            if len(hashes) > 1:  # Skip chapter title
+                section_count += 1
+                existing_id_matches = re.findall(r'\{#(sec-[^}]+)\}', line)
+                if existing_id_matches:
+                    section_id = existing_id_matches[0]
+                    logging.info(f"  {section_count:2d}. {title.strip()}")
+                    logging.info(f"      ID: #{section_id}")
+                else:
+                    logging.info(f"  {section_count:2d}. {title.strip()} (NO ID)")
+    
     if section_count == 0:
         logging.info("  No sections found")
     else:
         logging.info(f"\n  Total sections: {section_count}")
 
 def list_all_section_ids(directory):
-    """List all section IDs found in all files in a directory using Pandoc AST."""
+    """List all section IDs found in all files in a directory."""
     path = Path(directory)
     if not path.exists():
         logging.error(f"Directory does not exist: {directory}")
@@ -407,17 +460,30 @@ def list_all_section_ids(directory):
     total_with_ids = 0
     
     for file_path in all_files:
-        try:
-            headers = extract_section_headers_pandoc(file_path)
-            file_sections = len(headers)
-            file_with_ids = sum(1 for _, _, section_id, _ in headers if section_id)
+        with open(file_path, 'r', encoding='utf-8') as file:
+            lines = file.readlines()
+        
+        state = initialize_block_tracking()
+        file_sections = 0
+        file_with_ids = 0
+        
+        for line in lines:
+            # Update block state
+            state = update_block_state(line, state)
             
-            if file_sections > 0:
-                logging.info(f"📄 {file_path}: {file_with_ids}/{file_sections} sections have IDs")
-                total_sections += file_sections
-                total_with_ids += file_with_ids
-        except Exception as e:
-            logging.warning(f"Error processing {file_path}: {e}")
+            # Check if we should process this header
+            should_process, match = should_process_header(line, state)
+            if should_process:
+                hashes, title = match.groups()
+                if len(hashes) > 1:  # Skip chapter title
+                    file_sections += 1
+                    if re.search(r'\{#sec-[^}]+\}', line):
+                        file_with_ids += 1
+        
+        if file_sections > 0:
+            logging.info(f"📄 {file_path}: {file_with_ids}/{file_sections} sections have IDs")
+            total_sections += file_sections
+            total_with_ids += file_with_ids
     
     logging.info(f"\n📊 SUMMARY:")
     logging.info(f"  Total files: {len(all_files)}")
@@ -448,11 +514,22 @@ def extract_section_content(lines, section_start_index, header_level):
             next_header_level = len(line) - len(line.lstrip('#'))
             if next_header_level <= header_level:
                 break
+            # If this is a header, strip attributes after '{'
+            if '{' in line:
+                line = line[:line.find('{')].strip()
         
         # Stop if we hit a div boundary
         if line.startswith(':::'):
             break
             
+        # Stop if we hit a code block boundary
+        if line.startswith('```'):
+            break
+            
+        # For all lines, if '{' is present, strip everything after it
+        if '{' in line:
+            line = line[:line.find('{')].strip()
+        
         # Add non-empty lines to content
         if line:
             content_lines.append(line)
@@ -481,11 +558,7 @@ def process_markdown_file(file_path, auto_yes=False, force=False, dry_run=False,
     path = Path(file_path)
     lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
 
-    header_pattern = re.compile(r'^(#{1,6})\s+(.+?)(?:\s*\{[^}]*\})?$')
-    div_start_pattern = re.compile(r'^:::\s*\{\.([^"]+)')
-    div_end_pattern = re.compile(r'^:::\s*$')
-
-    inside_skip_div = False
+    state = initialize_block_tracking()
     modified = False
     changes = []
     section_counter = 0
@@ -504,23 +577,26 @@ def process_markdown_file(file_path, auto_yes=False, force=False, dry_run=False,
         'modified': False
     }
 
+    # Find chapter title
     for line in lines:
-        match = header_pattern.match(line)
-        if match and len(match.group(1)) == 1:
+        should_process, match = should_process_header(line, state)
+        if should_process and len(match.group(1)) == 1:
             chapter_title = match.group(2).strip()
             break
 
     if not chapter_title:
         raise ValueError(f"No chapter title found in {file_path}")
 
-    for i, line in enumerate(lines):
-        if div_start_pattern.match(line.strip()):
-            inside_skip_div = True
-        elif div_end_pattern.match(line.strip()):
-            inside_skip_div = False
+    # Reset state for main processing
+    state = initialize_block_tracking()
 
-        match = header_pattern.match(line)
-        if match and not inside_skip_div:
+    for i, line in enumerate(lines):
+        # Update block state
+        state = update_block_state(line, state)
+        
+        # Check if we should process this header
+        should_process, match = should_process_header(line, state)
+        if should_process:
             hashes, title = match.groups()
             header_level = len(hashes)
             
@@ -720,7 +796,7 @@ def print_summary(all_summaries):
     logging.info(f"📋 Existing sections found: {total_existing}")
 
     if total_added > 0 or total_updated > 0 or total_removed > 0:
-        logging.info(f"\n📝 FILES WITH CHANGES:")
+        logging.info(f"\n�� FILES WITH CHANGES:")
         logging.info(f"{'-'*60}")
         
         for summary in all_summaries:
@@ -744,15 +820,37 @@ def print_summary(all_summaries):
     logging.info(f"\n{'='*60}")
 
 def verify_section_ids(filepath):
-    """Verify that all headers have proper section IDs, skipping unnumbered headers, using Pandoc AST."""
+    """Verify that all headers have proper section IDs, skipping unnumbered headers."""
     missing_ids = []
-    headers = extract_section_headers_pandoc(filepath)
-    for idx, (level, title, section_id, classes) in enumerate(headers, 1):
-        if not section_id:
-            missing_ids.append({
-                'line': idx,  # Not the real line, but section index
-                'title': title.strip()
-            })
+    with open(filepath, 'r', encoding='utf-8') as file:
+        lines = file.readlines()
+    
+    state = initialize_block_tracking()
+    for i, line in enumerate(lines, 1):
+        # Update block state
+        state = update_block_state(line, state)
+        
+        # Check if we should process this header
+        should_process, match = should_process_header(line, state)
+        if should_process:
+            hashes, title = match.groups()
+            if len(hashes) > 1:  # Skip chapter title
+                # Extract existing attributes if any
+                existing_attrs = ""
+                if "{" in line:
+                    attrs_start = line.find("{")
+                    attrs_end = line.rfind("}")
+                    if attrs_end > attrs_start:
+                        existing_attrs = line[attrs_start:attrs_end+1]
+                # Skip headers with {.unnumbered}
+                if ".unnumbered" in existing_attrs:
+                    continue  # Skip this header
+                if not re.search(r'\{#sec-[^}]+\}', line):
+                    missing_ids.append({
+                        'line': i,
+                        'title': title.strip()
+                    })
+    
     return missing_ids
 
 def update_cross_references(file_path, id_map):

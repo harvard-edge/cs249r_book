@@ -377,17 +377,17 @@ QUIZ_FILE_SCHEMA = {
 }
 
 SYSTEM_PROMPT = f"""
-You are a professor and an educational content specialist with deep expertise in machine learning systems. You are tasked with creating pedagogically sound self-check/quiz questions for the university-level introduction to machine learning systems textbook.
+You are a professor and an educational content specialist with deep expertise in machine learning systems. You are tasked with creating pedagogically sound self-check questions for the university-level introduction to machine learning systems textbook.
 
-Your task is to first evaluate whether a quiz or self-cehck would be pedagogically valuable for the given section, and if so, generate 1 to 5 self-check questions and answers. Decide the number of questions based on the section's length and complexity. Each chapter has about 10 sections. So be careful not to generate too many questions.
+Your task is to first evaluate whether a self-check would be pedagogically valuable for the given section, and if so, generate 1 to 5 self-check questions and answers. Decide the number of questions based on the section's length and complexity. Each chapter has about 10 sections. So be careful not to generate too many questions.
 
 ## ML Systems Focus
 
 Machine learning systems encompasses the full lifecycle: data pipelines, model training infrastructure, deployment, monitoring, serving, scaling, reliability, and operational concerns. Focus on system-level reasoning rather than algorithmic theory.
 
-## Quiz Evaluation Criteria
+## Self-Check Evaluation Criteria
 
-First, evaluate if this section warrants a quiz or self-check by considering:
+First, evaluate if this section warrants a self-check by considering:
 1. Does it contain concepts that students need to actively understand and apply?
 2. Are there potential misconceptions that need to be addressed?
 3. Does it present system design tradeoffs or operational implications?
@@ -395,14 +395,14 @@ First, evaluate if this section warrants a quiz or self-check by considering:
 
 **CRITICAL: If the section does not introduce technical tradeoffs, system components, or operational implications, set quiz_needed: false and justify.**
 
-**Sections that typically DO NOT need quizzes:**
+**Sections that typically DO NOT need self-checks:**
 - Pure introductions or context-setting sections
 - Sections that primarily provide historical context or motivation
 - Sections that are purely descriptive without actionable concepts
 - Overview sections without technical depth
 - Motivational or high-level conceptual sections (e.g., "AI Pervasiveness," "Looking Ahead")
 
-**Sections that typically DO need quizzes:**
+**Sections that typically DO need self-checks:**
 - Sections introducing new technical concepts or system components
 - Sections presenting design decisions, tradeoffs, or operational considerations
 - Sections addressing common pitfalls or misconceptions
@@ -411,7 +411,7 @@ First, evaluate if this section warrants a quiz or self-check by considering:
 
 ## Chapter-Level Variety and Coherence
 
-When previous quiz context is provided for the chapter:
+When previous self-check context is provided for the chapter:
 - **Analyze the existing questions** to understand what concepts and question types have been covered
 - **Ensure conceptual variety** - avoid repeating the same learning objectives or approaches
 - **Complement rather than duplicate** - if similar concepts appear, approach them from different angles
@@ -423,6 +423,7 @@ When previous quiz context is provided for the chapter:
 
 **Content Focus:**
 - Prioritize system-level reasoning: tradeoffs in deployment environments, impact of data pipeline design on model accuracy, scaling infrastructure for inference workloads, etc.
+- Include quantitative analysis when applicable: resource consumption calculations, performance trade-off analysis, scaling estimates, cost comparisons, latency budgets, throughput analysis
 - Include at least one question about design tradeoffs or operational implications
 - Address common misconceptions when applicable
 - Connect to practical ML systems scenarios
@@ -431,19 +432,42 @@ When previous quiz context is provided for the chapter:
 **Question Types (use a variety based on content):**
 {QUESTION_GUIDELINES}
 
+**When to use different question types:**
+- **CALC questions for:** Memory or storage requirements, latency calculations for multi-tier architectures, power consumption estimates, cost analysis for deployment options, throughput calculations for data pipelines, scaling factor analysis
+- **MCQ questions for:** Comparing system architectures, identifying appropriate design patterns, selecting deployment strategies
+- **SHORT questions for:** Explaining system tradeoffs, justifying design decisions, analyzing failure scenarios
+- **FILL questions for:** Specific technical terminology, protocol names, architectural components (only when precise recall is required)
+- **TF questions for:** Challenging common misconceptions, testing understanding of system constraints
+- **ORDER questions for:** System deployment workflows, data pipeline stages, model lifecycle phases
+
 **Question Type Specifics:**
-- **MCQ**: Provide 3-5 plausible distractors. The correct answer should not be obvious from the question stem alone. Do not embed options (e.g., A, B, C) in the question string; use the choices array instead.
+- **MCQ**: Provide 3-5 plausible distractors. The correct answer should not be obvious from the question stem alone. Do not embed options (e.g., A, B, C) in the question string; use the choices array instead. **CRITICAL: Distribute correct answers evenly across choices (A, B, C, D) to avoid guessing patterns. Do NOT favor any particular choice - ensure equal distribution. If you have 4 MCQ questions, aim for one correct answer for each letter (A, B, C, D). IMPORTANT: Randomize the position of correct answers. Use all four choices (A, B, C, D) across your MCQs. AVOID: Questions where the answer is obvious (e.g., "Which pillar focuses on training?" with "Training" as a choice).**
 - **SHORT**: Should encourage synthesis or justification (e.g., "Explain why X matters in Y context").
 - **FILL**: Should test key terms, but avoid placing the answer immediately before or after the blank. Use only when the term is central and non-obvious.
 - **TF**: Must include justification that addresses common misconceptions and explains why the statement matters in ML systems context.
 - **ORDER**: Focus on processes where sequence matters for system outcomes.
-- **CALC**: Include real-world context and explain the practical significance of the result.
+- **CALC**: Include real-world context and explain the practical significance of the result. Must include realistic parameters, show calculation steps clearly, and explain what the numerical result means for system design decisions.
+
+## Language and Writing Guidelines
+
+**Use precise technical language:**
+- Avoid generic academic terms like "crucial," "essential," "vital," "various," "numerous"
+- Replace vague phrases like "in the context of," "in terms of," "with regard to" with specific technical scenarios
+- Eliminate academic filler like "it is important to note," "furthermore," "moreover"
+- Use specific technical impacts instead of general importance statements
+- Frame questions with concrete technical situations rather than abstract contexts
+
+**Direct technical framing:**
+- Start with specific deployment scenarios, system constraints, or technical requirements
+- Use active voice and precise terminology
+- Focus on measurable impacts and specific system behaviors
+- Replace qualitative importance with quantitative or specific technical relationships
 
 **Quality Standards:**
 - For `MCQ` questions, the `answer` string MUST start with `The correct answer is [LETTER].` followed by an explanation of why this choice is correct. Do NOT repeat the answer text in the explanation. In MCQ explanations, do not rephrase the question or answer. Instead, explain why the correct answer is correct in light of other distractors.
-- Use clear, academically appropriate language
-- Avoid repeating exact phrasing from source text
-- Keep answers concise and informative (~75-150 words total per Q&A pair)
+- **Maintain a professional textbook tone** - Use clear, academically appropriate language suitable for university-level instruction
+- **Avoid basic definitional questions** - Focus on application, analysis, and system-level implications rather than simple recall
+- **Keep answers concise** - Aim for 50-100 words per answer explanation, not 75-150 words
 - **Every answer must include a "why" — not just what is right, but why it matters in an ML system context**
 - Use the first question to address the most foundational or essential system insight from the section
 - If multiple questions are included, ensure they span distinct ideas (e.g., tradeoffs, lifecycle stages, deployment implications)
@@ -454,11 +478,13 @@ When previous quiz context is provided for the chapter:
   - Questions should be able to stand alone and provide complete learning value when viewed in isolation
   - Include necessary context within the question itself rather than assuming the reader has just read the section
   - Frame questions to be educational and complete learning experiences on their own
-  - Use phrases like "When designing ML systems," "In the context of AI deployment," "For machine learning applications," etc.
+  - Use phrases like "When designing ML systems," "For machine learning applications," etc.
 
 **CRITICAL ANTI-PATTERNS TO AVOID:**
 - Questions where the answer is obvious from the question itself or is trivially inferable
+- **BAD EXAMPLE: "Which pillar focuses on AI training?" with choices A) Data B) Training C) Deployment D) Operations - the answer "Training" is obvious from the question**
 - MCQs where distractors are implausible or where the answer is telegraphed
+- **MCQ answer bias - DO NOT default to B or any particular choice. Ensure equal distribution across A, B, C, D**
 - Questions that test surface-level recall without deeper understanding
 - Questions where multiple reasonable answers could be correct
 - Questions that simply repeat information from the text without requiring analysis
@@ -466,6 +492,8 @@ When previous quiz context is provided for the chapter:
 - Questions where the explanation just restates what's already obvious from the question
 - Questions that reference "this section," "as discussed above," "from the text," or other context-dependent phrases
 - Questions that assume the reader has just read the section and can't stand alone as complete learning experiences
+- Generic academic filler language and vague contextual phrases
+- Imprecise qualifiers instead of specific technical terms
 
 **Bloom's Taxonomy Mix:**
 - Remember: Key terms and concepts
@@ -489,30 +517,8 @@ Before finalizing, ensure:
 - The response strictly follows the JSON schema provided above
 - No questions fall into the anti-patterns listed above
 - Questions are distinct, avoid overlap, and reinforce different facets of system-level thinking
-- If previous quiz context was provided: Do these questions complement rather than duplicate previous questions? Do they use different question types and focus areas?
-
-## Appendix: Common Pitfalls Explained
-
-**EXAMPLE OF A POOR FILL QUESTION:**
-❌ "In ML systems, the choice between cloud and edge architectures can be influenced by ________ requirements, such as data sovereignty and privacy."
-Answer: "privacy. Privacy requirements can dictate the need for data to be processed closer to its source, influencing the choice of architecture towards edge solutions to comply with regulations."
-
-**WHY THIS IS POOR:**
-- The answer "privacy" is obvious from the context (mentioned right after the blank)
-- The explanation just repeats what's already stated in the question
-- Tests surface-level recall, not understanding
-- No deeper analysis or application required
-
-**BETTER ALTERNATIVE:**
-✅ "When designing an ML system for a healthcare application, what specific architectural consideration becomes critical due to regulatory requirements?"
-Answer: "Data residency and processing location. Healthcare data must often be processed within specific geographic boundaries due to regulations like HIPAA, requiring careful consideration of whether to use cloud providers with local data centers or edge processing to keep data within jurisdictional boundaries."
-
-**For FILL questions specifically:**
-- Only use for testing specific terminology or concepts that require precise recall
-- Ensure the blank tests a concept that isn't immediately obvious from the surrounding context
-- The answer should be a specific term or concept, not a general word that could be inferred
-- Avoid questions where the answer appears in the same sentence or immediately before/after the blank
-- Test understanding of relationships, not just vocabulary recall
+- Language is precise and technical rather than generic or academic filler
+- If previous self-check context was provided: Do these questions complement rather than duplicate previous questions? Do they use different question types and focus areas?
 
 ## Required JSON Schema
 
@@ -524,9 +530,9 @@ You MUST return a valid JSON object that strictly follows this schema:
 
 ## Output Format
 
-If you determine a quiz is NOT needed, return the standard `quiz_needed: false` object.
+If you determine a self-check is NOT needed, return the standard `quiz_needed: false` object.
 
-If a quiz IS needed, follow the structure below. For "MCQ" questions, provide the question stem in the `question` field and the options in the `choices` array. For all other types, the `choices` field should be omitted.
+If a self-check IS needed, follow the structure below. For "MCQ" questions, provide the question stem in the `question` field and the options in the `choices` array. For all other types, the `choices` field should be omitted.
 
 ```json
 {{
@@ -548,7 +554,7 @@ If a quiz IS needed, follow the structure below. For "MCQ" questions, provide th
                 "Option C",
                 "Option D"
             ],
-            "answer": "The correct answer is B. This is the explanation for why B is correct.",
+            "answer": "The correct answer is [LETTER]. This is the explanation for why this choice is correct.",
             "learning_objective": "..."
         }},
         {{
@@ -896,10 +902,11 @@ def validate_individual_quiz_response(data):
         if not isinstance(data['questions'], list):
             return False
         
-        if len(data['questions']) < 1 or len(data['questions']) > 5:
+        # Allow empty questions arrays (when user removes all questions)
+        if len(data['questions']) > 5:
             return False
         
-        # Validate each question
+        # Validate each question (only if there are questions)
         for question in data['questions']:
             if not isinstance(question, dict):
                 return False
@@ -1006,7 +1013,7 @@ The following sections in this chapter already have quizzes. Ensure your questio
                 previous_quiz_context += f"\nSection {i} Questions:\n"
                 for j, question in enumerate(questions, 1):
                     q_type = question.get('question_type', 'Unknown')
-                    q_text = question.get('question', '')[:100] + "..." if len(question.get('question', '')) > 100 else question.get('question', '')
+                    q_text = question.get('question', '')
                     previous_quiz_context += f"  Q{j} ({q_type}): {q_text}\n"
                 previous_quiz_context += "\n"
         
@@ -1377,7 +1384,57 @@ class QuizEditorGradio:
                 # Update rationale if no questions remain
                 if not kept_questions:
                     quiz_data['quiz_needed'] = False
-                    quiz_data['rationale'] = "All questions were removed by user"
+        
+        # Remove any section where quiz_needed is true but questions is empty
+        modified_data['sections'] = [
+            s for s in modified_data['sections']
+            if not (s.get('quiz_data', {}).get('quiz_needed', False) and len(s.get('quiz_data', {}).get('questions', [])) == 0)
+        ]
+        
+        # Save to the original file
+        try:
+            with open(self.initial_file_path, 'w', encoding='utf-8') as f:
+                json.dump(modified_data, f, indent=2, ensure_ascii=False)
+            return f"Saved changes to {os.path.basename(self.initial_file_path)}"
+        except Exception as e:
+            return f"Error saving file: {str(e)}"
+    
+    def save_changes_with_checkboxes(self, checkbox_states):
+        """Save the current quiz data with removed questions based on checkbox states"""
+        if not self.quiz_data or not self.sections:
+            return "No data to save"
+        
+        # Update question states for current section
+        current_section = self.sections[self.current_section_index]
+        section_id = current_section['section_id']
+        self.question_states[section_id] = checkbox_states[:5]  # Take first 5 values
+        
+        # Create a copy of the data to modify
+        modified_data = json.loads(json.dumps(self.quiz_data))
+        
+        # Remove unchecked questions from each section
+        for section in modified_data['sections']:
+            section_id = section['section_id']
+            quiz_data = section.get('quiz_data', {})
+            
+            if quiz_data.get('quiz_needed', False):
+                questions = quiz_data.get('questions', [])
+                question_states = self.question_states.get(section_id, [True] * len(questions))
+                
+                # Keep only checked questions
+                kept_questions = []
+                for i, question in enumerate(questions):
+                    if i < len(question_states) and question_states[i]:
+                        kept_questions.append(question)
+                
+                # Update the questions list
+                quiz_data['questions'] = kept_questions
+        
+        # Remove any section where quiz_needed is true but questions is empty
+        modified_data['sections'] = [
+            s for s in modified_data['sections']
+            if not (s.get('quiz_data', {}).get('quiz_needed', False) and len(s.get('quiz_data', {}).get('questions', [])) == 0)
+        ]
         
         # Save to the original file
         try:
@@ -1514,50 +1571,6 @@ class QuizEditorGradio:
             return [f"Invalid JSON in {path_to_load}: {str(e)}", "JSON Error", "No content loaded"] + [False] * 5 + [""] * 5
         except Exception as e:
             return [f"Error loading {path_to_load}: {str(e)}", "Error loading file", "No content loaded"] + [False] * 5 + [""] * 5
-    
-    def save_changes_with_checkboxes(self, checkbox_states):
-        """Save the current quiz data with removed questions based on checkbox states"""
-        if not self.quiz_data or not self.sections:
-            return "No data to save"
-        
-        # Update question states for current section
-        current_section = self.sections[self.current_section_index]
-        section_id = current_section['section_id']
-        self.question_states[section_id] = checkbox_states[:5]  # Take first 5 values
-        
-        # Create a copy of the data to modify
-        modified_data = json.loads(json.dumps(self.quiz_data))
-        
-        # Remove unchecked questions from each section
-        for section in modified_data['sections']:
-            section_id = section['section_id']
-            quiz_data = section.get('quiz_data', {})
-            
-            if quiz_data.get('quiz_needed', False):
-                questions = quiz_data.get('questions', [])
-                question_states = self.question_states.get(section_id, [True] * len(questions))
-                
-                # Keep only checked questions
-                kept_questions = []
-                for i, question in enumerate(questions):
-                    if i < len(question_states) and question_states[i]:
-                        kept_questions.append(question)
-                
-                # Update the questions list
-                quiz_data['questions'] = kept_questions
-                
-                # Update rationale if no questions remain
-                if not kept_questions:
-                    quiz_data['quiz_needed'] = False
-                    quiz_data['rationale'] = "All questions were removed by user"
-        
-        # Save to the original file
-        try:
-            with open(self.initial_file_path, 'w', encoding='utf-8') as f:
-                json.dump(modified_data, f, indent=2, ensure_ascii=False)
-            return f"Saved changes to {os.path.basename(self.initial_file_path)}"
-        except Exception as e:
-            return f"Error saving file: {str(e)}"
 
 def format_quiz_information(section, quiz_data):
     """
@@ -1708,7 +1721,7 @@ def create_gradio_interface(initial_file_path=None):
         def create_question_rows(num_questions, questions):
             for i in range(num_questions):
                 with gr.Row(visible=True) as row_group:
-                    with gr.Column(scale=1):  # Checkboxake the checkbox sCheckbox without text
+                    with gr.Column(scale=1):  # Checkbox without text
                         checkbox = gr.Checkbox(label="Select", value=True, visible=False)
                         question_checkboxes.append(checkbox)
                     with gr.Column(scale=3):
@@ -1754,17 +1767,16 @@ def create_gradio_interface(initial_file_path=None):
             with gr.Column(scale=1):
                 regenerate_btn = gr.Button("🔄 Regenerate", size="lg", variant="secondary")
         
-        # Status display for operations (moved here, below regeneration)
-        status_display = gr.Textbox(label="Status", interactive=False, visible=True, lines=3)
+        # Status display for regeneration operations (after regeneration section)
+        regenerate_status_display = gr.Textbox(label="Regeneration Status", interactive=False, visible=True, lines=3)
         
         # Quiz Information section (moved to bottom)
         gr.Markdown("### Quiz Information")
         quiz_info_display = gr.Markdown(quiz_info, visible=True)
         
-        # Status display for operations (smaller, at bottom)
-        status_display = gr.Textbox(label="Status", interactive=False, visible=True, lines=2)
+        # Status display for overall/save operations (at bottom)
+        overall_status_display = gr.Textbox(label="Save Status", interactive=False, visible=True, lines=2)
         
-
         def get_section_data(section_idx):
             # Returns: section_title, nav_info, section_text, quiz_info, [checkbox_states], [question_markdowns], [answer_md], [learning_md]
             # Always returns fixed number of outputs to match interface components (max 5 questions)
@@ -1965,26 +1977,25 @@ def create_gradio_interface(initial_file_path=None):
             cb.change(checkbox_change, inputs=question_checkboxes, outputs=[])
         
         # Save button - directly save changes
-        save_btn.click(save_changes, inputs=question_checkboxes, outputs=[status_display])
+        save_btn.click(save_changes, inputs=question_checkboxes, outputs=[overall_status_display])
         
-        # Regenerate button - updates status and refreshes the current section
+        # Regenerate button - updates regeneration status and refreshes the current section
         def regenerate_and_refresh(user_prompt):
             status = regenerate_questions(user_prompt)
             if status.startswith("✅"):
-                # If successful, refresh the current section display and clear the prompt
                 section_data = get_section_data(editor.current_section_index)
-                return [status, ""] + section_data  # Clear prompt_input
+                return [status, ""] + section_data
             else:
-                # If error, just return status and keep prompt
-                return [status, user_prompt] + [""] * (1 + 2 + 1 + 1 + 5 + 5 + 5 + 5)  # status + prompt + title + nav + text + quiz_info + checkboxes + questions + answers + learning
+                return [status, user_prompt] + [""] * (1 + 2 + 1 + 1 + 5 + 5 + 5 + 5)
         
         regenerate_btn.click(
             regenerate_and_refresh, 
             inputs=[prompt_input], 
-            outputs=[status_display, prompt_input, section_title_box, nav_info_box, section_text_box, quiz_info_display] + question_checkboxes + question_markdowns + answer_markdowns + learning_obj_markdowns
+            outputs=[regenerate_status_display, prompt_input, section_title_box, nav_info_box, section_text_box, quiz_info_display] + question_checkboxes + question_markdowns + answer_markdowns + learning_obj_markdowns
         )
         
         interface.load(initial_load, outputs=[section_title_box, nav_info_box, section_text_box, quiz_info_display] + question_checkboxes + question_markdowns + answer_markdowns + learning_obj_markdowns)
+        
     return interface
 
 def run_gui(quiz_file_path=None):
@@ -2162,8 +2173,7 @@ The tool will automatically detect file types (JSON vs QMD) and perform the appr
             print("Error: Review mode requires a specific file, not a directory")
             return
         elif args.mode == "insert":
-            print("Error: Insert mode requires a specific file, not a directory")
-            return
+            run_insert_mode_directory(args.directory)
         elif args.mode == "verify":
             run_verify_mode_directory(args.directory)
         elif args.mode == "clean":
@@ -2638,40 +2648,60 @@ def generate_for_file(qmd_file, args):
     except Exception as e:
         print(f"❌ Error generating quizzes: {str(e)}")
 
+# Global variable for _quarto.yml path
+QUARTO_YML_PATH = os.path.join(os.getcwd(), '_quarto.yml')
+
 def generate_for_directory(directory, args):
     """
-    Generate quizzes for all QMD files in a directory.
-    
-    This function recursively finds all QMD files in a directory and
-    generates quizzes for each one. It creates separate quiz files
-    for each chapter.
-    
-    Args:
-        directory (str): Path to the directory containing QMD files
-        args (argparse.Namespace): Command line arguments
-        
-    Note:
-        - Creates separate quiz files for each QMD file
-        - Uses the QMD filename as the base for the quiz filename
-        - Processes files recursively through subdirectories
+    Generate quizzes for all QMD files in a directory, in the order specified by _quarto.yml if present.
     """
     print(f"Generating quizzes for directory: {directory}")
     
+    # Use the global QUARTO_YML_PATH
+    yml_path = QUARTO_YML_PATH
+    if os.path.exists(yml_path):
+        print(f"Using _quarto.yml for chapter order: {yml_path}")
+    else:
+        print("No _quarto.yml found in project root. Using default file order.")
+    ordered_files = []
+    if os.path.exists(yml_path):
+        try:
+            ordered_files = get_qmd_order_from_quarto_yml(yml_path)
+            print(f"Found {len(ordered_files)} .qmd files in _quarto.yml chapters section.")
+        except Exception as e:
+            print(f"⚠️  Could not parse _quarto.yml for chapter order: {e}")
+    
+    # Find all .qmd files in the directory (recursively)
     qmd_files = []
     for root, _, files in os.walk(directory):
         for file in files:
             if file.endswith('.qmd') or file.endswith('.md'):
-                qmd_files.append(os.path.join(root, file))
+                qmd_files.append(os.path.relpath(os.path.join(root, file), os.getcwd()))
     
-    if not qmd_files:
+    # Order files: first those in ordered_files, then the rest
+    ordered_qmds = []
+    seen = set()
+    for f in ordered_files:
+        # Try both as-is and with/without leading './'
+        f_norm = f.lstrip('./')
+        for q in qmd_files:
+            if q == f or q == f_norm or q.endswith(f_norm):
+                ordered_qmds.append(q)
+                seen.add(q)
+                break
+    # Add remaining files not in chapters
+    for q in qmd_files:
+        if q not in seen:
+            ordered_qmds.append(q)
+    
+    if not ordered_qmds:
         print("❌ No QMD files found in directory")
         return
     
-    print(f"Found {len(qmd_files)} QMD files")
+    print(f"Found {len(ordered_qmds)} QMD files (ordered by _quarto.yml where possible)")
     
-    for qmd_file in qmd_files:
+    for qmd_file in ordered_qmds:
         print(f"\n{'='*60}")
-        # Create output file name based on input file
         base_name = os.path.splitext(os.path.basename(qmd_file))[0]
         args.output = f"{base_name}_quizzes.json"
         generate_for_file(qmd_file, args)
@@ -2783,32 +2813,60 @@ def format_answer_block(section_id, qa_pairs):
     for i, qa in enumerate(questions):
         qtext = qa['question'] if isinstance(qa, dict) else qa
         ans = qa['answer'] if isinstance(qa, dict) else ''
+        learning_obj = qa.get('learning_objective', '') if isinstance(qa, dict) else ''
+        qtype = qa.get('question_type', '') if isinstance(qa, dict) else ''
         
         # Handle different question types for formatting
         if isinstance(qa, dict) and qa.get('question_type') == 'MCQ':
-            # Format MCQ with choices
+            # Format MCQ with choices - only bold the main question line
             question_text = qtext
             choices = qa.get('choices', [])
             if choices:
-                formatted_q = f"{question_text}\n"
+                formatted_q = f"**{question_text}**\n"
                 for j, choice in enumerate(choices):
                     letter = chr(ord('a') + j)
                     formatted_q += f"   {letter}) {choice}\n"
                 formatted_q = formatted_q.rstrip()
             else:
+                # MCQ without choices array - format the question text
                 formatted_q = format_mcq_question(qtext)
+                # Make only the main question line bold
+                formatted_q = formatted_q.replace(f"{i+1}. ", f"{i+1}. **")
+                formatted_q = formatted_q.replace("\n", "**\n", 1)
         else:
-            # For other question types, use the original formatting
-            formatted_q = format_mcq_question(qtext)
+            # For other question types, format directly and make the main question line bold
+            formatted_q = f"**{qtext}**"
         
-        formatted_a = indent_answer_explanation(ans)
-        lines.append(f"{i+1}. {formatted_q}\n\n{formatted_a}")
+        # Special handling for FILL-type answers
+        if qtype == 'FILL' and ans:
+            # Extract the answer up to the first period (or the whole answer if no period)
+            first_period = ans.find('.')
+            if first_period != -1:
+                fill_word = ans[:first_period].strip()
+                rest = ans[first_period+1:].strip()
+            else:
+                fill_word = ans.strip()
+                rest = ''
+            formatted_a = f'The answer is "{fill_word}".'
+            if rest:
+                formatted_a += f' {rest}'
+            formatted_a = indent_answer_explanation(formatted_a)
+        else:
+            formatted_a = indent_answer_explanation(ans)
+        
+        # Format learning objective with proper indentation to match answer
+        if learning_obj:
+            formatted_lo = f"\n\n   *Learning Objective*: {learning_obj}"
+        else:
+            formatted_lo = ""
+        
+        lines.append(f"{i+1}. {formatted_q}\n\n{formatted_a}{formatted_lo}")
     
     # Add a blank line after opening ::: and only one before closing :::
     return (
         f":::{{{ANSWER_CALLOUT_CLASS} #{ANSWER_ID_PREFIX}{section_id}}}\n\n"
         + "\n\n".join(lines)
-        + "\n:::\n"
+        + "\n\n:::\n"
     )
 
 def insert_quiz_at_end(match, quiz_block):
@@ -2913,6 +2971,9 @@ def insert_quizzes_into_markdown(qmd_file_path, quiz_file_path):
             print(f"❌ Quiz file validation failed: {e.message}")
             return
         
+        # Check if this is a case where all questions were removed by user
+            return
+        
         # Extract and validate sections from the markdown file
         sections = extract_sections_with_ids(content)
         if not sections:
@@ -2946,6 +3007,13 @@ def insert_quizzes_into_markdown(qmd_file_path, quiz_file_path):
                 continue
             
             if quiz_info.get('quiz_needed', False):
+                # Check if this is a case where all questions were removed by user
+                questions = quiz_info.get('questions', [])
+                if len(questions) == 0:
+                    # This is a valid case - user removed all questions, so skip this section
+                    print(f"  ⏭️  Skipping section {section_id} - all questions were removed by user")
+                    continue
+                
                 # Validate individual quiz response using existing function
                 if validate_individual_quiz_response(quiz_info):
                     qa_by_section[section_title] = quiz_info
@@ -2954,7 +3022,13 @@ def insert_quizzes_into_markdown(qmd_file_path, quiz_file_path):
                     print(f"  ⚠️  Warning: Invalid quiz data for section {section_id}, skipping")
         
         if not qa_by_section:
-            print("❌ No valid quiz data found in JSON file")
+            print("⚠️  No quiz sections to insert (all questions may have been removed by user)")
+            print("  Proceeding to update frontmatter only...")
+            
+            # Update frontmatter to include quiz reference even if no quizzes to insert
+            quiz_filename = os.path.basename(quiz_file_path)
+            update_qmd_frontmatter(qmd_file_path, quiz_filename)
+            print(f"✅ Updated frontmatter with quiz: {quiz_filename}")
             return
         
         print(f"  ✅ Found {valid_quiz_count} valid quiz section(s)")
@@ -3000,14 +3074,12 @@ def insert_quizzes_into_markdown(qmd_file_path, quiz_file_path):
         
         if nonempty_answer_blocks:
             print("  📚 Appending final 'Quiz Answers' section...")
-            if not re.search(r"^##\s+Quiz Answers", modified_content, re.MULTILINE):
-                print("    ➕ Adding 'Quiz Answers' section header")
-                modified_content += "\n\n## Quiz Answers\n"
-            else:
-                print("    ✅ 'Quiz Answers' section header already exists")
-            
+            # Remove trailing whitespace/newlines at end of file
+            modified_content = modified_content.rstrip()
+            # Ensure exactly one blank line before Quiz Answers
+            modified_content += "\n\n## Quiz Answers\n"
             print(f"    📄 Appending {len(nonempty_answer_blocks)} answer blocks")
-            modified_content += "\n" + "\n".join(nonempty_answer_blocks)
+            modified_content += "\n" + "\n\n".join([block.strip() for block in nonempty_answer_blocks])
         else:
             print("  ⏭️  No answer blocks to append")
         
@@ -3015,9 +3087,14 @@ def insert_quizzes_into_markdown(qmd_file_path, quiz_file_path):
         with open(qmd_file_path, 'w', encoding='utf-8') as f:
             f.write(modified_content)
         
+        # Update frontmatter to include quiz reference
+        quiz_filename = os.path.basename(quiz_file_path)
+        update_qmd_frontmatter(qmd_file_path, quiz_filename)
+        
         print(f"✅ Successfully inserted {inserted_count} quiz(es) into {os.path.basename(qmd_file_path)}")
         if nonempty_answer_blocks:
             print(f"✅ Added Quiz Answers section with {len(nonempty_answer_blocks)} answer block(s)")
+        print(f"✅ Updated frontmatter with quiz: {quiz_filename}")
         
     except Exception as e:
         print(f"❌ Error inserting quizzes: {str(e)}")
@@ -3197,6 +3274,145 @@ def run_verify_directory(directory_path):
     print(f"Verifying quiz files in directory: {directory_path}")
     # Implementation would go here - this is a placeholder
     print("❌ Verify directory functionality not yet implemented")
+
+def get_qmd_order_from_quarto_yml(yml_path):
+    """Extract the ordered list of .qmd files from the chapters section of _quarto.yml, including commented ones."""
+    with open(yml_path, 'r') as f:
+        content = f.read()
+    # Find the chapters section
+    chapters_match = re.search(r'chapters:\s*\n(.*?)(?=\n\w+:|$)', content, re.DOTALL)
+    if not chapters_match:
+        return []
+    chapters_content = chapters_match.group(1)
+    # Extract all .qmd files, including commented ones
+    qmd_files = []
+    lines = chapters_content.split('\n')
+    for line in lines:
+        line = line.strip()
+        if '.qmd' in line:
+            clean_line = re.sub(r'^\s*#\s*', '', line)
+            clean_line = re.sub(r'^\s*-\s*', '', clean_line)
+            file_match = re.search(r'contents/.*?\.qmd', clean_line)
+            if file_match:
+                qmd_files.append(file_match.group(0))
+    return qmd_files
+
+# Utility function to get ordered .qmd files for a directory based on _quarto.yml
+
+def get_ordered_qmd_files(directory):
+    """Return a list of .qmd files in the order specified by _quarto.yml, with unlisted files after."""
+    yml_path = QUARTO_YML_PATH
+    ordered_files = []
+    if os.path.exists(yml_path):
+        try:
+            ordered_files = get_qmd_order_from_quarto_yml(yml_path)
+        except Exception as e:
+            print(f"⚠️  Could not parse _quarto.yml for chapter order: {e}")
+    # Find all .qmd files in the directory (recursively)
+    qmd_files = []
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if file.endswith('.qmd') or file.endswith('.md'):
+                qmd_files.append(os.path.relpath(os.path.join(root, file), os.getcwd()))
+    # Order files: first those in ordered_files, then the rest
+    ordered_qmds = []
+    seen = set()
+    for f in ordered_files:
+        f_norm = f.lstrip('./')
+        for q in qmd_files:
+            if q == f or q == f_norm or q.endswith(f_norm):
+                ordered_qmds.append(q)
+                seen.add(q)
+                break
+    for q in qmd_files:
+        if q not in seen:
+            ordered_qmds.append(q)
+    return ordered_qmds
+
+# Update all directory-based commands to use get_ordered_qmd_files
+
+def generate_for_directory(directory, args):
+    print(f"Generating quizzes for directory: {directory}")
+    if os.path.exists(QUARTO_YML_PATH):
+        print(f"Using _quarto.yml for chapter order: {QUARTO_YML_PATH}")
+    else:
+        print("No _quarto.yml found in project root. Using default file order.")
+    ordered_qmds = get_ordered_qmd_files(directory)
+    if not ordered_qmds:
+        print("❌ No QMD files found in directory")
+        return
+    print(f"Found {len(ordered_qmds)} QMD files (ordered by _quarto.yml where possible)")
+    for qmd_file in ordered_qmds:
+        print(f"\n{'='*60}")
+        base_name = os.path.splitext(os.path.basename(qmd_file))[0]
+        args.output = f"{base_name}_quizzes.json"
+        generate_for_file(qmd_file, args)
+
+def run_clean_mode_directory(directory, args):
+    print(f"=== Quiz Clean Mode (Directory) ===")
+    print(f"Cleaning quizzes from directory: {directory}")
+    if os.path.exists(QUARTO_YML_PATH):
+        print(f"Using _quarto.yml for chapter order: {QUARTO_YML_PATH}")
+    else:
+        print("No _quarto.yml found in project root. Using default file order.")
+    ordered_qmds = get_ordered_qmd_files(directory)
+    if not ordered_qmds:
+        print("❌ No QMD files found in directory")
+        return
+    print(f"Found {len(ordered_qmds)} QMD files (ordered by _quarto.yml where possible)")
+    if args.dry_run:
+        print("🔍 DRY RUN - Would clean the following files:")
+        for qmd_file in ordered_qmds:
+            print(f"  - {qmd_file}")
+        return
+    for i, qmd_file in enumerate(ordered_qmds, 1):
+        print(f"\n[{i}/{len(ordered_qmds)}] Cleaning: {qmd_file}")
+        try:
+            file_args = argparse.Namespace()
+            file_args.backup = args.backup
+            file_args.dry_run = args.dry_run
+            clean_single_file(qmd_file, file_args)
+        except Exception as e:
+            print(f"❌ Error cleaning {qmd_file}: {str(e)}")
+    print(f"\n✅ Clean operation complete for {len(ordered_qmds)} files")
+
+def run_verify_mode_directory(directory_path):
+    print("=== Quiz Verify Mode (Directory) ===")
+    print(f"Verifying quiz files in directory: {directory_path}")
+    if os.path.exists(QUARTO_YML_PATH):
+        print(f"Using _quarto.yml for chapter order: {QUARTO_YML_PATH}")
+    else:
+        print("No _quarto.yml found in project root. Using default file order.")
+    ordered_qmds = get_ordered_qmd_files(directory_path)
+    if not ordered_qmds:
+        print("❌ No QMD files found in directory")
+        return
+    print(f"Found {len(ordered_qmds)} QMD files (ordered by _quarto.yml where possible)")
+    for i, qmd_file in enumerate(ordered_qmds, 1):
+        print(f"[{i}/{len(ordered_qmds)}] Verifying: {qmd_file}")
+        run_verify_mode_simple(qmd_file)
+    print(f"\n✅ Verify operation complete for {len(ordered_qmds)} files")
+
+# If you have run_insert_mode_directory or similar, update it similarly.
+
+def run_insert_mode_directory(directory):
+    print(f"=== Quiz Insert Mode (Directory) ===")
+    print(f"Inserting quizzes for all quiz JSON files in: {directory}")
+    # Find all quiz JSON files in the directory (recursively)
+    quiz_files = []
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if file.endswith(QUIZ_JSON_SUFFIX):
+                quiz_files.append(os.path.join(root, file))
+    if not quiz_files:
+        print(f"❌ No quiz JSON files found in directory with suffix '{QUIZ_JSON_SUFFIX}'")
+        return
+    print(f"Found {len(quiz_files)} quiz JSON files.")
+    for i, quiz_file in enumerate(quiz_files, 1):
+        print(f"[{i}/{len(quiz_files)}] Inserting from: {quiz_file}")
+        run_insert_mode_simple(quiz_file)
+
+QUIZ_JSON_SUFFIX = '_quizzes.json'
 
 if __name__ == "__main__":
     main()
