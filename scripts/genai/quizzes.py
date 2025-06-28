@@ -17,11 +17,12 @@ FEATURES:
 ---------
 - AI-powered quiz generation with chapter-aware difficulty progression
 - Interactive GUI for reviewing and editing questions
-- Quiz insertion and removal from markdown files
-- File validation and verification
+- Robust quiz insertion with reverse-order processing (prevents line number conflicts)
+- Quiz removal and cleanup from markdown files
+- File validation and verification with comprehensive error checking
 - Support for multiple question types (MCQ, TF, SHORT, FILL, ORDER, CALC)
 - Automatic frontmatter management
-- Backup and dry-run capabilities
+- Backup and dry-run capabilities for safe operation
 
 MODES OF OPERATION:
 -------------------
@@ -752,8 +753,8 @@ def extract_sections_with_ids(markdown_text):
         title = match.group(1).strip()
         attributes = match.group(2) if match.group(2) else ""
         
-        # Skip Quiz Answers sections
-        if title.lower() == 'quiz answers':
+        # Skip Quiz Answers sections and Self-Check Answers sections
+        if title.lower() in ['quiz answers', 'self-check answers']:
             continue
             
         # Skip unnumbered sections and other special sections
@@ -3314,30 +3315,57 @@ def insert_quizzes_into_markdown(qmd_file_path, quiz_file_path):
 
         print(f"  ✅ Found {valid_quiz_count} valid quiz section(s)")
 
-        # Insert quizzes using the new line-based logic
+        # Insert quizzes using line-based logic with reverse-order insertion
+        # CRITICAL: We must insert from bottom to top (highest line number to lowest)
+        # because each insertion shifts all subsequent line numbers down by the number
+        # of lines inserted. If we inserted top-to-bottom, all calculated insertion
+        # points for later sections would become incorrect.
+        #
+        # Example: If we have quizzes at lines 100, 200, 300 and we insert top-to-bottom:
+        # 1. Insert at line 100 (adds 5 lines) -> quiz at 200 is now at 205, quiz at 300 is now at 305
+        # 2. Insert at line 200 (but actual position is now 205) -> WRONG POSITION!
+        #
+        # By inserting bottom-to-top (300, 200, 100), each insertion doesn't affect
+        # the line numbers of the remaining insertions above it.
         inserted_count = 0
         answer_blocks = []
+        
+        # Collect all insertions with their indices for reverse-order processing
+        insertions_to_make = []
         for (section_title, section_id), qa_pairs in qa_by_section.items():
             quiz_block = format_quiz_block(qa_pairs, f"{ANSWER_ID_PREFIX}{section_id}", section_id)
             answer_block = format_answer_block(section_id, qa_pairs)
+            
             if quiz_block.strip():
-                # Find insertion index
+                # Find insertion index - section_id is already stripped of # in qa_by_section
                 idx = insertion_map.get((section_title, section_id))
                 if idx is not None:
                     # Only insert if not already present
                     already_present = any(quiz_block.strip() in l for l in lines[max(0, idx-5):idx+5])
                     if not already_present:
-                        # Insert quiz block with exactly one empty line before and after
-                        # quiz_block already ends with '\n' after ':::', so ensure one blank line after
-                        lines.insert(idx, '\n' + quiz_block.rstrip() + '\n\n')
-                        inserted_count += 1
-                        print(f"    ✅ Inserted quiz for section: {section_title}")
+                        insertions_to_make.append((idx, quiz_block, section_title))
                 else:
                     print(f"    ⚠️  No valid insertion point found for section: {section_title}")
             else:
                 print(f"    ⏭️  No quiz block generated for section '{section_title}' (quiz not needed)")
+                
             if answer_block.strip():
                 answer_blocks.append(answer_block)
+        
+        # Sort insertions by line number in descending order (bottom to top)
+        # This is the KEY to preventing line number shifting issues:
+        # - Higher line numbers are processed first
+        # - Each insertion only affects line numbers below it
+        # - Remaining insertion points above stay valid
+        insertions_to_make.sort(key=lambda x: x[0], reverse=True)
+        
+        # Execute insertions from bottom to top to maintain line number accuracy
+        for idx, quiz_block, section_title in insertions_to_make:
+            # Insert quiz block with exactly one empty line before and after
+            # quiz_block already ends with '\n' after ':::', so ensure one blank line after
+            lines.insert(idx, '\n' + quiz_block.rstrip() + '\n\n')
+            inserted_count += 1
+            print(f"    ✅ Inserted quiz for section: {section_title}")
 
         # Only add non-empty answer blocks
         nonempty_answer_blocks = [b for b in answer_blocks if b.strip() and not b.strip().isspace() and ANSWER_ID_PREFIX in b]
@@ -3687,8 +3715,35 @@ QUIZ_JSON_SUFFIX = '_quizzes.json'
 
 def find_safe_insertion_points(markdown_lines):
     """
-    Returns a list of (section_title, section_id, insertion_index) tuples for valid quiz insertion points.
-    Only considers section headers outside of code and div blocks.
+    Find safe insertion points for quiz callouts in markdown content.
+    
+    This function identifies where quiz callouts should be inserted by finding section
+    boundaries. It scans through the markdown content to locate section headers and
+    determines the optimal insertion point (right before the next section header).
+    
+    IMPORTANT: The returned insertion indices are used in reverse order (bottom-to-top)
+    to prevent line number shifting issues during the actual insertion process.
+    
+    Args:
+        markdown_lines (list): List of markdown lines to analyze
+        
+    Returns:
+        list: Tuples of (section_title, section_id, insertion_index) where:
+            - section_title: The title of the section (str)
+            - section_id: The section ID without # prefix (str or None)
+            - insertion_index: Line number where quiz should be inserted (int)
+    
+    Algorithm:
+        1. Track state to ignore headers inside code blocks (```) or div blocks (:::)
+        2. For each valid section header found:
+           - Extract title and ID from header
+           - Scan forward to find the next section header of same/higher level
+           - Record the line number of that next header as insertion point
+        3. Only consider headers outside of code/div blocks for both detection and scanning
+        
+    Note: 
+        Headers inside callouts, code blocks, or other div structures are properly
+        ignored to ensure insertion points are at actual section boundaries.
     """
     from re import match
     state = {'inside_code_block': False, 'inside_div_block': False}
@@ -3714,31 +3769,43 @@ def find_safe_insertion_points(markdown_lines):
                 attrs = m.group(3) or ''
                 id_match = re.search(r'\{#([\w\-]+)\}', attrs)
                 section_id = id_match.group(1) if id_match else None
-                # Find the end of this section (next header of same or higher level, outside blocks)
+                # Find section boundary: scan until we hit the next section header
+                # at the same or higher level (respecting block boundaries)
                 j = i + 1
-                block_state = state.copy()
+                block_state = state.copy()  # Track nested block state during scanning
                 while j < len(markdown_lines):
                     line_j = markdown_lines[j].strip()
-                    # Update block state
+                    
+                    # Maintain block state tracking during forward scan
                     if line_j.startswith('```'):
                         block_state['inside_code_block'] = not block_state['inside_code_block']
                     elif line_j.startswith(':::'):
                         block_state['inside_div_block'] = not block_state['inside_div_block']
+                    
+                    # Check for section boundary only when outside all blocks
                     if not block_state['inside_code_block'] and not block_state['inside_div_block']:
                         if line_j.startswith('#'):
                             next_level = len(line_j) - len(line_j.lstrip('#'))
-                            # Only break on headers of same or higher level (fewer #s)
+                            # Found boundary: next header at same/higher level (fewer #)
                             if next_level <= header_level:
                                 break
                     j += 1
+                
+                # j now points to the line where the quiz should be inserted
+                # (right before the next section header or at end of file)
                 insertion_points.append((section_title, section_id, j))
     return insertion_points
 
-# In insert_quizzes_into_markdown, replace the regex-based insertion with this logic:
-# 1. Read the file as lines
-# 2. Find safe insertion points
-# 3. For each quiz section, insert the callout at the correct index (if not already present)
-# 4. Write the modified lines back to the file
+# INTEGRATION NOTE: This function is used by insert_quizzes_into_markdown() 
+# which implements the complete insertion workflow:
+# 1. Read the markdown file as lines
+# 2. Find safe insertion points using this function
+# 3. Collect all insertions and sort in reverse order (CRITICAL for line number stability)
+# 4. Insert quiz callouts from bottom to top
+# 5. Write the modified content back to file
+#
+# The reverse-order insertion prevents line number shifting issues that would
+# occur with top-to-bottom insertion in a list structure.
 
 if __name__ == "__main__":
     main()
