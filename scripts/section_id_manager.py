@@ -502,7 +502,7 @@ def create_backup(file_path):
     return backup_path
 
 def process_markdown_file(file_path, auto_yes=False, force=False, dry_run=False, repair_mode=False, remove_mode=False, backup_mode=False):
-    """Process a single Markdown file using line-by-line processing with code block detection."""
+    """Process a single Markdown file using AST parsing for reliable section detection."""
     global id_replacements
     logging.info(f"\n📄 Processing: {file_path}")
     
@@ -511,20 +511,68 @@ def process_markdown_file(file_path, auto_yes=False, force=False, dry_run=False,
         create_backup(file_path)
     
     path = Path(file_path)
-    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
-
-    header_pattern = re.compile(r'^(#{1,6})\s+(.+?)(?:\s*\{[^}]*\})?$')
-    div_start_pattern = re.compile(r'^:::\s*\{\.([^"]+)')
-    div_end_pattern = re.compile(r'^:::\s*$')
-    codeblock_start_pattern = re.compile(r'^(```|~~~)')
-
-    inside_skip_div = False
-    inside_code_block = False
-    code_block_fence = None
+    
+    # Read the file content
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    
+    try:
+        # Parse with Pandoc AST
+        ast_json = pypandoc.convert_text(content, 'json', format='markdown')
+        ast = json.loads(ast_json)
+    except Exception as e:
+        logging.error(f"Failed to parse {file_path} with Pandoc: {e}")
+        return {
+            'file_path': file_path,
+            'added_ids': [],
+            'updated_ids': [],
+            'removed_ids': [],
+            'existing_sections': [],
+            'modified': False
+        }
+    
+    # Get code block ranges and section headers from AST
+    code_ranges = extract_code_block_ranges(ast)
+    headers = extract_section_headers_pandoc(file_path)
+    
+    # Find chapter title (first level 1 header) directly from AST
+    chapter_title = None
+    def find_chapter_title(blocks):
+        nonlocal chapter_title
+        for block in blocks:
+            t = block.get('t')
+            c = block.get('c')
+            
+            if t == 'Header':
+                level = c[0]
+                attr = c[1]
+                inlines = c[2]
+                
+                if level == 1 and not chapter_title:
+                    # Extract plain text title
+                    title = []
+                    for x in inlines:
+                        if x['t'] == 'Str':
+                            title.append(x['c'])
+                        elif x['t'] == 'Space':
+                            title.append(' ')
+                    chapter_title = ''.join(title).strip()
+                    return
+                elif level > 1:
+                    continue
+            elif t == 'Div':
+                find_chapter_title(c[1])
+    
+    find_chapter_title(ast.get('blocks', []))
+    
+    if not chapter_title:
+        raise ValueError(f"No chapter title found in {file_path}")
+    
+    # Process the file line by line, but use AST data for decisions
+    lines = content.splitlines(keepends=True)
+    new_lines = []
     modified = False
     section_counter = 0
-    chapter_title = None
-    existing_sections = []
     
     # Track section hierarchy
     section_hierarchy = []
@@ -537,19 +585,80 @@ def process_markdown_file(file_path, auto_yes=False, force=False, dry_run=False,
         'existing_sections': [],
         'modified': False
     }
-
-    # First pass: find chapter title and identify code blocks
-    for line in lines:
-        match = header_pattern.match(line)
-        if match and len(match.group(1)) == 1:
-            chapter_title = match.group(2).strip()
-            break
-
-    if not chapter_title:
-        raise ValueError(f"No chapter title found in {file_path}")
-
-    # Create a set of line numbers that are inside code blocks
-    code_block_lines = set()
+    
+    # Create a map of line numbers to header info from AST
+    header_map = {}
+    current_line = 1
+    
+    def walk_headers(blocks, in_div=False):
+        nonlocal current_line
+        for block in blocks:
+            t = block.get('t')
+            c = block.get('c')
+            
+            if t == 'Header' and not in_div:
+                level = c[0]
+                attr = c[1]
+                inlines = c[2]
+                section_id = attr[0] if attr[0] else None
+                classes = attr[1]
+                
+                # Skip level 1 headers and unnumbered headers
+                if level == 1 or 'unnumbered' in classes or 'appendix' in classes or 'backmatter' in classes:
+                    current_line += 1
+                    continue
+                
+                # Check if this header is inside a code block
+                in_code_block = any(start <= current_line <= end for start, end in code_ranges)
+                if in_code_block:
+                    current_line += 1
+                    continue
+                
+                # Extract plain text title
+                title = []
+                for x in inlines:
+                    if x['t'] == 'Str':
+                        title.append(x['c'])
+                    elif x['t'] == 'Space':
+                        title.append(' ')
+                title = ''.join(title).strip()
+                
+                header_map[current_line] = {
+                    'level': level,
+                    'title': title,
+                    'section_id': section_id,
+                    'classes': classes,
+                    'line_number': current_line
+                }
+                current_line += 1
+            elif t == 'CodeBlock':
+                # Skip code blocks entirely
+                code_text = c[1]
+                lines_in_block = code_text.count('\n') + 1
+                current_line += lines_in_block
+            elif t == 'Div':
+                walk_headers(c[1], in_div=True)
+            elif t in ('BlockQuote', 'BulletList', 'OrderedList'):
+                if t == 'BlockQuote':
+                    walk_headers(c, in_div=in_div)
+                elif t == 'BulletList':
+                    for item in c:
+                        walk_headers(item, in_div=in_div)
+                elif t == 'OrderedList':
+                    for item in c[1]:
+                        walk_headers(item, in_div=in_div)
+            else:
+                # For other blocks, count lines
+                if 'c' in block and isinstance(block['c'], str):
+                    lines_in_block = block['c'].count('\n') + 1
+                    current_line += lines_in_block
+                else:
+                    current_line += 1
+    
+    walk_headers(ast.get('blocks', []))
+    
+    # Process lines with AST guidance
+    current_line = 1
     inside_code_block = False
     code_block_fence = None
     
@@ -557,158 +666,158 @@ def process_markdown_file(file_path, auto_yes=False, force=False, dry_run=False,
         stripped = line.strip()
         
         # Track code block boundaries
-        if not inside_code_block and codeblock_start_pattern.match(stripped):
+        if not inside_code_block and (stripped.startswith('```') or stripped.startswith('~~~')):
             inside_code_block = True
             code_block_fence = stripped[:3]
-            code_block_lines.add(i)
         elif inside_code_block and stripped.startswith(code_block_fence):
             inside_code_block = False
             code_block_fence = None
-            code_block_lines.add(i)
-        
-        if inside_code_block:
-            code_block_lines.add(i)
-
-    # Second pass: process the content
-    new_lines = []
-    for i, line in enumerate(lines):
-        stripped = line.strip()
         
         # If this line is inside a code block, remove any section IDs and skip header processing
-        if i in code_block_lines:
+        if inside_code_block:
             # Remove any {#sec-...} from code comment lines (only section IDs, not other {#...} patterns)
             new_line = re.sub(r'\s*\{#sec-[-a-zA-Z0-9_:.]+\}', '', line)
             if new_line != line:
                 modified = True
             new_lines.append(new_line)
+            current_line += 1
             continue
         
-        # Handle div boundaries
-        if div_start_pattern.match(stripped):
-            inside_skip_div = True
-        elif div_end_pattern.match(stripped):
-            inside_skip_div = False
-
-        # Process headers (only outside code blocks and divs)
-        match = header_pattern.match(line)
-        if match and not inside_skip_div:
-            hashes, title = match.groups()
-            header_level = len(hashes)
+        # Check if this line contains a header (using AST data)
+        header_info = header_map.get(current_line)
+        
+        if header_info:
+            level = header_info['level']
+            title = header_info['title']
+            existing_section_id = header_info['section_id']
+            classes = header_info['classes']
             
-            if header_level > 1:  # Skip chapter title (level 1)
-                # Update section hierarchy
-                while len(section_hierarchy) >= header_level - 1:
-                    section_hierarchy.pop()
-                section_hierarchy.append(title.strip())
-                parent_sections = section_hierarchy[:-1] if len(section_hierarchy) > 1 else []
+            # Update section hierarchy
+            while len(section_hierarchy) >= level - 1:
+                section_hierarchy.pop()
+            section_hierarchy.append(title)
+            parent_sections = section_hierarchy[:-1] if len(section_hierarchy) > 1 else []
+            
+            # Skip headers with {.unnumbered}
+            if 'unnumbered' in classes:
+                # Remove any existing section ID from unnumbered headers
+                if existing_section_id:
+                    new_line = re.sub(r'\s*\{#sec-[^}]+\}', '', line)
+                    new_lines.append(new_line)
+                    modified = True
+                    file_summary['modified'] = True
+                    file_summary['removed_ids'].append((title, existing_section_id))
+                    logging.info(f"  🗑️  Removed ID from unnumbered header: {title}")
+                else:
+                    new_lines.append(line)
+                current_line += 1
+                continue
+            
+            # Process existing section IDs
+            if existing_section_id:
+                file_summary['existing_sections'].append((title, existing_section_id))
                 
-                # Extract existing attributes
-                existing_attrs = ""
-                if "{" in line:
-                    existing_attrs = line[line.index("{"):].strip()
-                
-                # Skip headers with {.unnumbered}
-                if ".unnumbered" in existing_attrs:
-                    # Remove any existing section ID from unnumbered headers
-                    existing_id_matches = re.findall(r'\{#(sec-[^}]+)\}', line)
-                    if existing_id_matches:
-                        existing_id = existing_id_matches[0]
-                        new_attrs = re.sub(r'#sec-[^}\s]+', '', existing_attrs)
-                        new_attrs = re.sub(r'(\.unnumbered)(?=.*\.unnumbered)', '', new_attrs)
-                        new_attrs = re.sub(r'\s+', ' ', new_attrs).strip()
-                        
-                        if new_attrs in ["{}", "{ }", ""]:
-                            new_line = f"{hashes} {title}\n"
-                        else:
-                            new_line = f"{hashes} {title} {new_attrs}\n"
-                        
+                if remove_mode:
+                    # Remove the section ID
+                    if auto_yes or force or input(f"\n🗑️  Remove ID for '{title}': {existing_section_id}? [Y/n]: ").lower() != 'n':
+                        new_line = re.sub(r'\s*\{#sec-[^}]+\}', '', line)
                         new_lines.append(new_line)
                         modified = True
                         file_summary['modified'] = True
-                        file_summary['removed_ids'].append((title.strip(), existing_id))
-                        logging.info(f"  🗑️  Removed ID from unnumbered header: {title}")
-                        logging.info(f"    {line.strip()}")
-                        logging.info(f"    → {new_line.strip()}")
-                    else:
-                        new_lines.append(line)
-                    continue
-                
-                # Process existing section IDs
-                existing_id_matches = re.findall(r'\{#(sec-[^}]+)\}', line)
-                if existing_id_matches:
-                    existing_id = existing_id_matches[0]
-                    file_summary['existing_sections'].append((title.strip(), existing_id))
+                        file_summary['removed_ids'].append((title, existing_section_id))
+                        logging.info(f"  🗑️  Removed: {title}")
+                else:
+                    # Generate new ID and check if update is needed
+                    section_content = extract_section_content(lines, i, level)
+                    new_id = generate_section_id(title, file_path, chapter_title, section_counter, parent_sections, section_content)
+                    section_counter += 1
                     
-                    if remove_mode:
-                        # Remove the section ID
-                        if auto_yes or force or input(f"\n🗑️  Remove ID for '{title}': {existing_id}? [Y/n]: ").lower() != 'n':
-                            new_attrs = re.sub(r'#sec-[^}\s]+', '', existing_attrs)
-                            new_attrs = re.sub(r'\s+', ' ', new_attrs).strip()
-                            
-                            if new_attrs == "{}":
-                                new_line = f"{hashes} {title}\n"
-                            else:
-                                new_line = f"{hashes} {title} {new_attrs}\n"
-                            
+                    is_proper, expected_id = is_properly_formatted_id(existing_section_id, title, file_path, chapter_title, section_counter, parent_sections, section_content)
+                    should_update = repair_mode or not is_proper
+                    
+                    if should_update and existing_section_id != new_id:
+                        if auto_yes or force or input(f"\n🔄 Update ID for '{title}':\n  From: {existing_section_id}\n  To:   {new_id}\n  Proceed? [Y/n]: ").lower() != 'n':
+                            id_replacements[existing_section_id] = new_id
+                            new_line = re.sub(r'\{#sec-[^}]+\}', f'{{#{new_id}}}', line)
                             new_lines.append(new_line)
                             modified = True
                             file_summary['modified'] = True
-                            file_summary['removed_ids'].append((title.strip(), existing_id))
-                            logging.info(f"  🗑️  Removed: {title}")
-                            logging.info(f"    {line.strip()}")
-                            logging.info(f"    → {new_line.strip()}")
-                    else:
-                        # Generate new ID and check if update is needed
-                        section_content = extract_section_content(lines, i, header_level)
-                        new_id = generate_section_id(title, file_path, chapter_title, section_counter, parent_sections, section_content)
-                        section_counter += 1
-                        
-                        is_proper, expected_id = is_properly_formatted_id(existing_id, title, file_path, chapter_title, section_counter, parent_sections, section_content)
-                        should_update = repair_mode or not is_proper
-                        
-                        if should_update and existing_id != new_id:
-                            if auto_yes or force or input(f"\n🔄 Update ID for '{title}':\n  From: {existing_id}\n  To:   {new_id}\n  Proceed? [Y/n]: ").lower() != 'n':
-                                id_replacements[existing_id] = new_id
-                                new_attrs = re.sub(r'#sec-[^}\s]+', f'#{new_id}', existing_attrs)
-                                new_line = f"{hashes} {title} {new_attrs}\n"
-                                new_lines.append(new_line)
-                                modified = True
-                                file_summary['modified'] = True
-                                file_summary['updated_ids'].append((title.strip(), existing_id, new_id))
-                                logging.info(f"  ✓ Updated: {title}")
-                                logging.info(f"    {line.strip()}")
-                                logging.info(f"    → {new_line.strip()}")
-                        else:
-                            new_lines.append(line)
-                else:
-                    if not remove_mode:  # Only add IDs if not in remove mode
-                        section_content = extract_section_content(lines, i, header_level)
-                        new_id = generate_section_id(title, file_path, chapter_title, section_counter, parent_sections, section_content)
-                        section_counter += 1
-                        
-                        if existing_attrs:
-                            attrs_without_id = re.sub(r'#sec-[^}]+', '', existing_attrs)
-                            attrs_without_id = attrs_without_id.strip()
-                            if attrs_without_id == "{}":
-                                new_line = f"{hashes} {title} {{#{new_id}}}\n"
-                            else:
-                                new_line = f"{hashes} {title} {attrs_without_id} {{#{new_id}}}\n"
-                        else:
-                            new_line = f"{hashes} {title} {{#{new_id}}}\n"
-                        
-                        new_lines.append(new_line)
-                        modified = True
-                        file_summary['modified'] = True
-                        file_summary['added_ids'].append((title.strip(), new_id))
-                        logging.info(f"  + Added: {title}")
-                        logging.info(f"    {line.strip()}")
-                        logging.info(f"    → {new_line.strip()}")
+                            file_summary['updated_ids'].append((title, existing_section_id, new_id))
+                            logging.info(f"  ✓ Updated: {title}")
                     else:
                         new_lines.append(line)
             else:
-                new_lines.append(line)
+                if not remove_mode:  # Only add IDs if not in remove mode
+                    section_content = extract_section_content(lines, i, level)
+                    new_id = generate_section_id(title, file_path, chapter_title, section_counter, parent_sections, section_content)
+                    section_counter += 1
+                    
+                    # Check if line already has attributes
+                    if '{' in line and '}' in line:
+                        # Insert section ID into existing attributes
+                        new_line = re.sub(r'(\{[^}]*\})', r'\1 {#' + new_id + '}', line)
+                    else:
+                        # Add new attributes with section ID
+                        new_line = line.rstrip() + f' {{#{new_id}}}\n'
+                    
+                    new_lines.append(new_line)
+                    modified = True
+                    file_summary['modified'] = True
+                    file_summary['added_ids'].append((title, new_id))
+                    logging.info(f"  + Added: {title}")
+                else:
+                    # In remove mode, also check if this line is a header with a section ID that wasn't detected by AST
+                    if remove_mode and line.strip().startswith('#'):
+                        # Check if this line contains a section ID
+                        if re.search(r'\{#sec-[^}]+\}', line):
+                            # Extract title from the line
+                            title_match = re.match(r'^(#{1,6})\s+(.+?)(?:\s+\{[^}]*\})?$', line.strip())
+                            if title_match:
+                                title = title_match.group(2).strip()
+                                # Remove the section ID
+                                if auto_yes or force or input(f"\n🗑️  Remove ID from header '{title}'? [Y/n]: ").lower() != 'n':
+                                    new_line = re.sub(r'\s*\{#sec-[^}]+\}', '', line)
+                                    new_lines.append(new_line)
+                                    modified = True
+                                    file_summary['modified'] = True
+                                    file_summary['removed_ids'].append((title, "unknown"))
+                                    logging.info(f"  🗑️  Removed ID from header: {title}")
+                                else:
+                                    new_lines.append(line)
+                            else:
+                                new_lines.append(line)
+                        else:
+                            new_lines.append(line)
+                    else:
+                        new_lines.append(line)
+            
+            current_line += 1
         else:
-            new_lines.append(line)
+            # In remove mode, also check if this line is a header with a section ID that wasn't detected by AST
+            if remove_mode and line.strip().startswith('#'):
+                # Check if this line contains a section ID
+                if re.search(r'\{#sec-[^}]+\}', line):
+                    # Extract title from the line
+                    title_match = re.match(r'^(#{1,6})\s+(.+?)(?:\s+\{[^}]*\})?$', line.strip())
+                    if title_match:
+                        title = title_match.group(2).strip()
+                        # Remove the section ID
+                        if auto_yes or force or input(f"\n🗑️  Remove ID from header '{title}'? [Y/n]: ").lower() != 'n':
+                            new_line = re.sub(r'\s*\{#sec-[^}]+\}', '', line)
+                            new_lines.append(new_line)
+                            modified = True
+                            file_summary['modified'] = True
+                            file_summary['removed_ids'].append((title, "unknown"))
+                            logging.info(f"  🗑️  Removed ID from header: {title}")
+                        else:
+                            new_lines.append(line)
+                    else:
+                        new_lines.append(line)
+                else:
+                    new_lines.append(line)
+            else:
+                new_lines.append(line)
+            current_line += 1
     
     # Show existing sections
     if file_summary['existing_sections']:
