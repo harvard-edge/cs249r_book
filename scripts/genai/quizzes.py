@@ -3036,8 +3036,8 @@ def insert_quizzes_into_markdown(qmd_file_path, quiz_file_path):
                     # Only insert if not already present
                     already_present = any(quiz_block.strip() in l for l in lines[max(0, idx-5):idx+5])
                     if not already_present:
-                        # Insert quiz block just before the next header (one empty line before quiz)
-                        lines.insert(idx, '\n' + quiz_block)
+                        # Insert quiz block with exactly one empty line before and after
+                        lines.insert(idx, '\n' + quiz_block.rstrip() + '\n')
                         inserted_count += 1
                         print(f"    ✅ Inserted quiz for section: {section_title}")
                 else:

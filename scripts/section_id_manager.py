@@ -54,7 +54,8 @@ ID Scheme:
 ----------
 - IDs are of the form: sec-{chapter-title}-{section-title}-{hash}
 - Chapter and section titles have stopwords removed for cleaner IDs
-- The hash is generated from: file path + chapter title + section title + parent section hierarchy + section content
+- The hash is generated from: file path + chapter title + section title + parent section hierarchy
+- Section content is NOT included in the hash to ensure IDs remain stable when content changes
 - This ensures GLOBAL UNIQUENESS across the entire book project
 - Different files with identical section names and hierarchies will have different IDs
 - Parent sections are included in the hash to handle duplicate section names naturally
@@ -63,10 +64,10 @@ ID Scheme:
 
 Stable ID Generation:
 ---------------------
-- Section IDs are content-aware and include normalized section content in the hash
-- Attributes and IDs are stripped from content before hashing to ensure stability
-- Running --repair multiple times will not change IDs unless content actually changes
-- This prevents ID churn and ensures cross-references remain valid
+- Section IDs are based on structural information (file path, chapter title, section title, hierarchy)
+- Section content is NOT included in the hash to ensure stability when content changes
+- Running --repair multiple times will not change IDs unless structure actually changes
+- This prevents ID churn and ensures cross-references remain valid when content is modified
 
 Global Uniqueness Guarantee:
 ----------------------------
@@ -78,8 +79,8 @@ and hierarchies in different files will have different IDs. This prevents confli
 - The same section name appears in multiple contexts across the book
 
 Example hash inputs:
-  - File A: "contents/chapter1.qmd|Getting Started|Introduction|content1"
-  - File B: "contents/chapter2.qmd|Getting Started|Introduction|content1"
+  - File A: "contents/chapter1.qmd|Getting Started|Introduction"
+  - File B: "contents/chapter2.qmd|Getting Started|Introduction"
   - Result: Different 4-character hashes ensure unique IDs
 
 Available Modes:
@@ -363,12 +364,11 @@ def is_properly_formatted_id(section_id, title, file_path, chapter_title, sectio
 
 def generate_section_id(title, file_path, chapter_title, section_counter, parent_sections=None, section_content=None):
     """
-    Generate a unique section ID based on the section title and content.
+    Generate a unique section ID based on the section title and hierarchy.
     
-    The hash includes file path, chapter title, section title, parent section hierarchy,
-    and section content to ensure the ID changes when either location or content changes.
-    This is perfect for quiz synchronization - when the ID changes, you know the content
-    or context has changed and quizzes may need updating.
+    The hash includes file path, chapter title, section title, and parent section hierarchy
+    to ensure uniqueness across the entire book project. Content is NOT included in the hash
+    to ensure IDs remain stable when content changes (e.g., when quizzes are added/removed).
     
     Args:
         title: The section title
@@ -376,16 +376,16 @@ def generate_section_id(title, file_path, chapter_title, section_counter, parent
         chapter_title: The chapter title
         section_counter: Counter for this section (not used in hash)
         parent_sections: List of parent section titles (included in hash)
-        section_content: The content of the section (included in hash for content tracking)
+        section_content: The content of the section (ignored - not used in hash)
     
     Returns:
         A unique section ID in the format: sec-{chapter-slug}-{section-slug}-{4-char-hash}
         
     Example:
         Same section name in different files:
-        - File A: "contents/chapter1.qmd|Getting Started|Introduction|content1" → hash: d212
-        - File B: "contents/chapter2.qmd|Getting Started|Introduction|content1" → hash: 8435
-        Result: Different IDs ensure uniqueness and track both location and content changes
+        - File A: "contents/chapter1.qmd|Getting Started|Introduction" → hash: d212
+        - File B: "contents/chapter2.qmd|Getting Started|Introduction" → hash: 8435
+        Result: Different IDs ensure uniqueness based on location and hierarchy only
     """
     clean_title = simple_slugify(title)
     clean_chapter_title = simple_slugify(chapter_title)
@@ -399,14 +399,9 @@ def generate_section_id(title, file_path, chapter_title, section_counter, parent
             hierarchy_parts.append(simple_slugify(parent))
         hierarchy = "|".join(hierarchy_parts)
     
-    # Normalize content for hashing (remove extra whitespace, basic formatting)
-    normalized_content = ""
-    if section_content:
-        normalized_content = normalize_content_for_hash(section_content)
-    
-    # Hash includes file path, chapter title, section title, parent hierarchy, and content
-    # This ensures the ID changes when either location or content changes
-    hash_input = f"{file_path}|{chapter_title}|{title}|{hierarchy}|{normalized_content}".encode('utf-8')
+    # Hash includes file path, chapter title, section title, and parent hierarchy only
+    # Content is excluded to ensure IDs remain stable when content changes
+    hash_input = f"{file_path}|{chapter_title}|{title}|{hierarchy}".encode('utf-8')
     hash_suffix = hashlib.sha1(hash_input).hexdigest()[:4]  # Keep 4 chars
     return f"sec-{clean_chapter_title}-{clean_title}-{hash_suffix}"
 
