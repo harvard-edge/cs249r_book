@@ -1688,6 +1688,7 @@ def create_gradio_interface(initial_file_path=None):
     
     with gr.Blocks(title="Quiz Editor", theme=gr.themes.Soft()) as interface:
         gr.Markdown("# Quiz Editor")
+        gr.Markdown("**Keyboard Shortcuts:** `p` (previous), `n` (next), `s` (save), `r` (regenerate), `1-5` (toggle checkboxes)")
         
         # Top row with section title and navigation (50-50)
         with gr.Row():
@@ -1714,7 +1715,7 @@ def create_gradio_interface(initial_file_path=None):
         def create_question_rows(num_questions, questions):
             for i in range(num_questions):
                 with gr.Row(visible=True) as row_group:
-                    with gr.Column(scale=1):  # Checkboxake the checkbox sCheckbox without text
+                    with gr.Column(scale=1):  # Checkbox without text
                         checkbox = gr.Checkbox(label="Select", value=True, visible=False)
                         question_checkboxes.append(checkbox)
                     with gr.Column(scale=3):
@@ -1990,7 +1991,20 @@ def create_gradio_interface(initial_file_path=None):
             outputs=[status_display, prompt_input, section_title_box, nav_info_box, section_text_box, quiz_info_display] + question_checkboxes + question_markdowns + answer_markdowns + learning_obj_markdowns
         )
         
+        # Add keyboard shortcuts
         interface.load(initial_load, outputs=[section_title_box, nav_info_box, section_text_box, quiz_info_display] + question_checkboxes + question_markdowns + answer_markdowns + learning_obj_markdowns)
+        
+        # Keyboard shortcuts
+        interface.keyboard_shortcut("p", prev_btn)
+        interface.keyboard_shortcut("n", next_btn)
+        interface.keyboard_shortcut("s", save_btn)
+        interface.keyboard_shortcut("r", regenerate_btn)
+        
+        # Number shortcuts for checkboxes (1-5)
+        for i, checkbox in enumerate(question_checkboxes, 1):
+            if i <= 5:  # Only for first 5 checkboxes
+                interface.keyboard_shortcut(str(i), checkbox)
+        
     return interface
 
 def run_gui(quiz_file_path=None):
