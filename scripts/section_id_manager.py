@@ -14,6 +14,16 @@ Special Handling for Unnumbered Headers:
 - Unnumbered headers will never have a section ID added, updated, or required (including in verify mode).
 - Only numbered headers (without {.unnumbered}) require section IDs.
 
+Smart Block Detection:
+---------------------
+- **Code Blocks:** Headers inside code blocks (```...```) are automatically ignored
+- **Div Blocks:** Headers inside Quarto divs (::: {.class}...:::) are automatically ignored
+- **Callouts:** Headers inside callout divs are automatically ignored
+- **Comments:** R/Python comments like `## Section Name` inside code blocks are not treated as headers
+
+This prevents the script from incorrectly processing code comments or headers that are part of
+documentation examples rather than actual section headers.
+
 Workflow Philosophy:
 --------------------
 - **Write Freely:**
@@ -44,12 +54,19 @@ ID Scheme:
 ----------
 - IDs are of the form: sec-{chapter-title}-{section-title}-{hash}
 - Chapter and section titles have stopwords removed for cleaner IDs
-- The hash is generated from: file path + chapter title + section title + parent section hierarchy
+- The hash is generated from: file path + chapter title + section title + parent section hierarchy + section content
 - This ensures GLOBAL UNIQUENESS across the entire book project
 - Different files with identical section names and hierarchies will have different IDs
 - Parent sections are included in the hash to handle duplicate section names naturally
 - The visible part of the ID remains short and human-readable
 - IDs are stable and won't change if sections are reordered (as long as hierarchy doesn't change)
+
+Stable ID Generation:
+---------------------
+- Section IDs are content-aware and include normalized section content in the hash
+- Attributes and IDs are stripped from content before hashing to ensure stability
+- Running --repair multiple times will not change IDs unless content actually changes
+- This prevents ID churn and ensures cross-references remain valid
 
 Global Uniqueness Guarantee:
 ----------------------------
@@ -61,17 +78,17 @@ and hierarchies in different files will have different IDs. This prevents confli
 - The same section name appears in multiple contexts across the book
 
 Example hash inputs:
-  - File A: "contents/chapter1.qmd|Getting Started|Introduction|"
-  - File B: "contents/chapter2.qmd|Getting Started|Introduction|"
+  - File A: "contents/chapter1.qmd|Getting Started|Introduction|content1"
+  - File B: "contents/chapter2.qmd|Getting Started|Introduction|content1"
   - Result: Different 4-character hashes ensure unique IDs
 
 Available Modes:
 ----------------
-- **Add Mode (default):** Add missing section IDs to headers (skips unnumbered headers)
-- **Repair Mode (--repair):** Fix existing section IDs to match the new format
+- **Add Mode (default):** Add missing section IDs to headers (skips unnumbered headers and code blocks)
+- **Repair Mode (--repair):** Fix existing section IDs to match the new format (stable across multiple runs)
 - **Remove Mode (--remove):** Remove all section IDs (use with --backup)
-- **Verify Mode (--verify):** Check that all section IDs are present and properly formatted (skips unnumbered headers)
-- **List Mode (--list):** Display all section IDs found in files
+- **Verify Mode (--verify):** Check that all section IDs are present and properly formatted (skips unnumbered headers and code blocks)
+- **List Mode (--list):** Display all section IDs found in files (skips code blocks)
 
 Safety Features:
 ----------------
@@ -81,14 +98,16 @@ Safety Features:
 - **Force Mode:** --force automatically accepts all confirmations without prompting
 - **Attribute Preservation:** Maintains other attributes when modifying section IDs
 - **Cross-reference Updates:** Automatically updates references when IDs change
+- **Stable IDs:** IDs remain consistent across multiple repair runs
 
 Best Practices:
 ---------------
 - Use --backup when making bulk changes
-- Use --verify before commits to ensure ID integrity (unnumbered headers are always ignored)
+- Use --verify before commits to ensure ID integrity (unnumbered headers and code blocks are always ignored)
 - Use --list to audit existing section IDs
 - Use --dry-run to preview changes before applying them
 - Consider using this in pre-commit hooks or CI pipelines
+- Run --repair as many times as needed - IDs will remain stable
 
 Key Features:
 - Comprehensive section ID management (add, repair, remove, verify, list)
@@ -103,22 +122,29 @@ Key Features:
 - Support for both single files (-f) and directories (-d)
 - Stopword removal for cleaner, more readable IDs
 - **Unnumbered headers are always skipped for section IDs in all modes**
+- **Code blocks and divs are automatically detected and skipped**
+- **Stable ID generation prevents unnecessary changes**
+
+Code Quality:
+-------------
+- Shared functions eliminate code duplication
+- Consistent block detection logic across all modes
+- Modular design with clear separation of concerns
+- Comprehensive error handling and validation
 
 Typical Usage:
     # Add missing IDs
     python section_id_manager.py -d contents/
     python section_id_manager.py -f contents/chapter.qmd
     
-    # Repair existing IDs
+    # Repair existing IDs (stable across multiple runs)
     python section_id_manager.py -d contents/ --repair --backup
-    
-    # Force repair without prompts
     python section_id_manager.py -d contents/ --repair --force
     
-    # Verify all IDs (unnumbered headers are always ignored)
+    # Verify all IDs (skips unnumbered headers and code blocks)
     python section_id_manager.py -d contents/ --verify
     
-    # List all IDs
+    # List all IDs (skips code blocks)
     python section_id_manager.py -d contents/ --list
     
     # Remove all IDs (dangerous!)
@@ -770,7 +796,7 @@ def print_summary(all_summaries):
     logging.info(f"📋 Existing sections found: {total_existing}")
 
     if total_added > 0 or total_updated > 0 or total_removed > 0:
-        logging.info(f"\n📝 FILES WITH CHANGES:")
+        logging.info(f"\n�� FILES WITH CHANGES:")
         logging.info(f"{'-'*60}")
         
         for summary in all_summaries:
