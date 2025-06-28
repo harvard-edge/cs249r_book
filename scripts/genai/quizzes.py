@@ -116,6 +116,9 @@ from pathlib import Path
 from openai import OpenAI, APIError
 from datetime import datetime
 import yaml
+import concurrent.futures
+import threading
+import time
 
 # Gradio imports
 import gradio as gr
@@ -2043,6 +2046,8 @@ def show_usage_examples():
     print("   python quizzes.py --mode generate -f chapter1.qmd")
     print("   python quizzes.py --mode generate -f chapter1.qmd -o my_quizzes.json")
     print("   python quizzes.py --mode generate -d ./chapters/")
+    print("   python quizzes.py --mode generate -d ./chapters/ --parallel")
+    print("   python quizzes.py --mode generate -d ./chapters/ --parallel --max-workers 2")
     
     print("\n2. Review existing quizzes with GUI:")
     print("   python quizzes.py --mode review -f quizzes.json")
@@ -2097,6 +2102,8 @@ def main():
 Examples:
   %(prog)s --mode generate -f chapter1.qmd
   %(prog)s --mode generate -d ./some_dir/
+  %(prog)s --mode generate -d ./some_dir/ --parallel
+  %(prog)s --mode generate -d ./some_dir/ --parallel --max-workers 2
   %(prog)s --mode review -f chapter1.qmd
   %(prog)s --mode review -f quizzes.json
   %(prog)s --mode insert -f chapter1.qmd
@@ -2109,6 +2116,7 @@ Examples:
 
 Note: You must specify either -f (file) or -d (directory) for all modes.
 The tool will automatically detect file types (JSON vs QMD) and perform the appropriate action.
+Use --parallel for faster directory processing (one thread per file).
         """
     )
     parser.add_argument("--mode", choices=["generate", "review", "insert", "verify", "clean"], 
@@ -2119,6 +2127,8 @@ The tool will automatically detect file types (JSON vs QMD) and perform the appr
     parser.add_argument("-o", "--output", default="quizzes.json", help="Path to output JSON file (generate mode only)")
     parser.add_argument("--backup", action="store_true", help="Create backup files before cleaning")
     parser.add_argument("--dry-run", action="store_true", help="Show what would be done without making changes")
+    parser.add_argument("--parallel", action="store_true", help="Process multiple files in parallel (directory mode only)")
+    parser.add_argument("--max-workers", type=int, default=None, help="Maximum number of parallel workers (default: number of files, max 4)")
     parser.add_argument("--examples", action="store_true", help="Show usage examples")
     args = parser.parse_args()
 
@@ -2136,6 +2146,14 @@ The tool will automatically detect file types (JSON vs QMD) and perform the appr
         print("Error: You must specify either -f (file) or -d (directory)")
         parser.print_help()
         return
+
+    # Validate parallel processing options
+    if args.parallel and args.file:
+        print("Error: --parallel can only be used with directory mode (-d), not with single files (-f)")
+        return
+    
+    if args.max_workers and not args.parallel:
+        print("Warning: --max-workers is only effective when used with --parallel")
 
     # Determine file type and route to appropriate function
     if args.file:
@@ -2203,8 +2221,12 @@ def run_generate_mode_directory(directory, args):
         directory (str): Path to the directory containing QMD files
         args (argparse.Namespace): Command line arguments
     """
-    print(f"=== Quiz Generation Mode (Directory) ===")
-    generate_for_directory(directory, args)
+    if getattr(args, 'parallel', False):
+        print(f"=== Quiz Generation Mode (Directory - Parallel) ===")
+        generate_for_directory_parallel(directory, args)
+    else:
+        print(f"=== Quiz Generation Mode (Directory - Sequential) ===")
+        generate_for_directory(directory, args)
 
 def run_review_mode_simple(file_path):
     """
@@ -2656,6 +2678,143 @@ def generate_for_file(qmd_file, args):
 # Global variable for _quarto.yml path
 QUARTO_YML_PATH = os.path.join(os.getcwd(), '_quarto.yml')
 
+# Thread-local storage for parallel processing
+thread_local = threading.local()
+
+def generate_for_file_parallel(qmd_file, args, progress_callback=None):
+    """
+    Thread-safe version of generate_for_file for parallel processing.
+    
+    Args:
+        qmd_file (str): Path to QMD file
+        args: Command line arguments
+        progress_callback (callable): Optional callback for progress updates
+    
+    Returns:
+        dict: Result summary with success/error info
+    """
+    thread_id = threading.get_ident()
+    start_time = time.time()
+    
+    try:
+        # Initialize thread-local OpenAI client to avoid sharing between threads
+        if not hasattr(thread_local, 'openai_client'):
+            thread_local.openai_client = OpenAI()
+        
+        # Call the existing generate_for_file logic but with isolated client
+        result = _generate_for_file_with_client(qmd_file, args, thread_local.openai_client)
+        
+        elapsed = time.time() - start_time
+        if progress_callback:
+            progress_callback(qmd_file, True, elapsed, result)
+        
+        return {
+            "file": qmd_file,
+            "success": True,
+            "elapsed": elapsed,
+            "thread_id": thread_id,
+            **result
+        }
+    except Exception as e:
+        elapsed = time.time() - start_time
+        if progress_callback:
+            progress_callback(qmd_file, False, elapsed, str(e))
+        
+        return {
+            "file": qmd_file,
+            "success": False,
+            "elapsed": elapsed,
+            "thread_id": thread_id,
+            "error": str(e)
+        }
+
+def _generate_for_file_with_client(qmd_file, args, client):
+    """
+    Core logic of generate_for_file that accepts a specific OpenAI client.
+    This allows for thread-safe parallel processing.
+    """
+    # Read the QMD file
+    with open(qmd_file, 'r', encoding='utf-8') as f:
+        content = f.read()
+    
+    # Extract sections
+    sections = extract_sections_with_ids(content)
+    if not sections:
+        raise ValueError("No sections found or sections missing IDs")
+    
+    # Extract chapter info
+    chapter_number, chapter_title = extract_chapter_info(qmd_file)
+    
+    # Generate quizzes for each section, passing previous quiz data
+    quiz_sections = []
+    sections_with_quizzes = 0
+    sections_without_quizzes = 0
+    previous_quizzes = []  # Track previous quiz data for variety
+    
+    for i, section in enumerate(sections):
+        # Build user prompt with chapter context and previous quiz data
+        user_prompt = build_user_prompt(
+            section['section_title'], 
+            section['section_text'],
+            chapter_number,
+            chapter_title,
+            previous_quizzes  # Pass previous quiz data for variety
+        )
+        
+        # Call OpenAI with provided client
+        response = call_openai(client, SYSTEM_PROMPT, user_prompt, args.model)
+        
+        if response.get('quiz_needed', False):
+            sections_with_quizzes += 1
+            # Add to previous quizzes for next section
+            previous_quizzes.append(response)
+        else:
+            sections_without_quizzes += 1
+            # Still add to previous quizzes to maintain section count
+            previous_quizzes.append(response)
+        
+        quiz_sections.append({
+            'section_id': section['section_id'],
+            'section_title': section['section_title'],
+            'quiz_data': response
+        })
+    
+    # Create quiz file structure
+    quiz_data = {
+        'metadata': {
+            'source_file': os.path.abspath(qmd_file),
+            'total_sections': len(sections),
+            'sections_with_quizzes': sections_with_quizzes,
+            'sections_without_quizzes': sections_without_quizzes
+        },
+        'sections': quiz_sections
+    }
+    
+    # Create output file path in the same directory as the QMD file
+    qmd_dir = os.path.dirname(qmd_file)
+    qmd_basename = os.path.splitext(os.path.basename(qmd_file))[0]
+    
+    # If output is the default "quizzes.json", use the QMD filename as prefix
+    if args.output == "quizzes.json":
+        output_file = os.path.join(qmd_dir, f"{qmd_basename}_quizzes.json")
+    else:
+        # If user specified a custom output name, use it in the QMD directory
+        output_file = os.path.join(qmd_dir, args.output)
+    
+    # Save to output file
+    with open(output_file, 'w', encoding='utf-8') as f:
+        json.dump(quiz_data, f, indent=2, ensure_ascii=False)
+    
+    # Update QMD frontmatter
+    update_qmd_frontmatter(qmd_file, os.path.basename(output_file))
+    
+    return {
+        "output_file": output_file,
+        "sections_with_quizzes": sections_with_quizzes,
+        "sections_without_quizzes": sections_without_quizzes,
+        "total_sections": len(sections)
+    }
+
 def generate_for_directory(directory, args):
     """
     Generate quizzes for all QMD files in a directory, in the order specified by _quarto.yml if present.
@@ -2710,6 +2869,138 @@ def generate_for_directory(directory, args):
         base_name = os.path.splitext(os.path.basename(qmd_file))[0]
         args.output = f"{base_name}_quizzes.json"
         generate_for_file(qmd_file, args)
+
+def generate_for_directory_parallel(directory, args):
+    """
+    Parallel version of generate_for_directory using ThreadPoolExecutor.
+    
+    Processes multiple QMD files simultaneously with one thread per file.
+    This provides significant speedup for directories with many files.
+    
+    Args:
+        directory (str): Directory containing QMD files
+        args: Command line arguments  
+    """
+    print(f"🚀 Generating quizzes for directory: {directory} (parallel mode)")
+    
+    # Use the global QUARTO_YML_PATH
+    yml_path = QUARTO_YML_PATH
+    if os.path.exists(yml_path):
+        print(f"Using _quarto.yml for chapter order: {yml_path}")
+    else:
+        print("No _quarto.yml found in project root. Using default file order.")
+    
+    # Get ordered files (same logic as existing sequential version)
+    ordered_files = []
+    if os.path.exists(yml_path):
+        try:
+            ordered_files = get_qmd_order_from_quarto_yml(yml_path)
+            print(f"Found {len(ordered_files)} .qmd files in _quarto.yml chapters section.")
+        except Exception as e:
+            print(f"⚠️  Could not parse _quarto.yml for chapter order: {e}")
+    
+    # Find all .qmd files in the directory (recursively)
+    qmd_files = []
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if file.endswith('.qmd') or file.endswith('.md'):
+                qmd_files.append(os.path.relpath(os.path.join(root, file), os.getcwd()))
+    
+    # Order files: first those in ordered_files, then the rest
+    ordered_qmds = []
+    seen = set()
+    for f in ordered_files:
+        # Try both as-is and with/without leading './'
+        f_norm = f.lstrip('./')
+        for q in qmd_files:
+            if q == f or q == f_norm or q.endswith(f_norm):
+                ordered_qmds.append(q)
+                seen.add(q)
+                break
+    # Add remaining files not in chapters
+    for q in qmd_files:
+        if q not in seen:
+            ordered_qmds.append(q)
+    
+    if not ordered_qmds:
+        print("❌ No QMD files found in directory")
+        return
+    
+    # Set reasonable defaults for threading
+    max_workers = args.max_workers
+    if max_workers is None:
+        # Default: one thread per file, but cap at 4 to avoid overwhelming OpenAI API
+        max_workers = min(len(ordered_qmds), 4)
+    
+    print(f"📚 Processing {len(ordered_qmds)} files with {max_workers} parallel threads")
+    
+    # Progress tracking with thread safety
+    progress_lock = threading.Lock()
+    completed_count = 0
+    results = []
+    
+    def progress_callback(file, success, elapsed, details):
+        nonlocal completed_count
+        with progress_lock:
+            completed_count += 1
+            status = "✅" if success else "❌"
+            file_name = Path(file).name
+            print(f"{status} [{completed_count:2d}/{len(ordered_qmds)}] {file_name:<30} ({elapsed:5.1f}s)")
+            if not success:
+                print(f"     Error: {details}")
+    
+    # Execute in parallel with controlled concurrency
+    start_time = time.time()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all tasks with individual args for each file
+        future_to_file = {}
+        for qmd_file in ordered_qmds:
+            # Create individual args for each file to avoid conflicts
+            file_args = argparse.Namespace(**vars(args))
+            base_name = os.path.splitext(os.path.basename(qmd_file))[0]
+            file_args.output = f"{base_name}_quizzes.json"
+            
+            future = executor.submit(generate_for_file_parallel, qmd_file, file_args, progress_callback)
+            future_to_file[future] = qmd_file
+        
+        # Collect results as they complete
+        for future in concurrent.futures.as_completed(future_to_file):
+            file = future_to_file[future]
+            try:
+                result = future.result()
+                results.append(result)
+            except Exception as e:
+                print(f"❌ Unexpected error processing {file}: {e}")
+                results.append({
+                    "file": file,
+                    "success": False,
+                    "error": str(e)
+                })
+    
+    # Summary report
+    total_elapsed = time.time() - start_time
+    successful = [r for r in results if r["success"]]
+    failed = [r for r in results if not r["success"]]
+    
+    total_cpu_time = sum(r.get("elapsed", 0) for r in results)
+    speedup = total_cpu_time / total_elapsed if total_elapsed > 0 else 1
+    
+    print(f"\n🏁 Parallel Generation Complete!")
+    print(f"   ✅ Successful: {len(successful)}")
+    print(f"   ❌ Failed: {len(failed)}")
+    print(f"   ⏱️  Total CPU time: {total_cpu_time:.1f}s")
+    print(f"   ⚡ Wall clock time: {total_elapsed:.1f}s")
+    print(f"   🚀 Speedup: {speedup:.1f}x")
+    
+    if successful:
+        total_sections = sum(r.get("total_sections", 0) for r in successful)
+        total_with_quiz = sum(r.get("sections_with_quizzes", 0) for r in successful)
+        print(f"   📊 Generated quizzes for {total_with_quiz}/{total_sections} sections across all files")
+    
+    if failed:
+        print(f"\n❌ Failed files:")
+        for r in failed:
+            print(f"   - {Path(r['file']).name}: {r.get('error', 'Unknown error')}")
 
 def clean_slug(title):
     """Creates a URL-friendly slug from a title."""
@@ -3037,7 +3328,8 @@ def insert_quizzes_into_markdown(qmd_file_path, quiz_file_path):
                     already_present = any(quiz_block.strip() in l for l in lines[max(0, idx-5):idx+5])
                     if not already_present:
                         # Insert quiz block with exactly one empty line before and after
-                        lines.insert(idx, '\n' + quiz_block.rstrip() + '\n')
+                        # quiz_block already ends with '\n' after ':::', so ensure one blank line after
+                        lines.insert(idx, '\n' + quiz_block.rstrip() + '\n\n')
                         inserted_count += 1
                         print(f"    ✅ Inserted quiz for section: {section_title}")
                 else:
@@ -3414,13 +3706,14 @@ def find_safe_insertion_points(markdown_lines):
             state['inside_div_block'] = not state['inside_div_block']
         # Only consider headers outside of code/div blocks
         if not state['inside_code_block'] and not state['inside_div_block']:
-            m = re.match(r'^##\s+(.+?)(\s*\{[^}]*\})?\s*$', stripped)
+            # Match headers at any level (##, ###, ####, etc.)
+            m = re.match(r'^(#{2,})\s+(.+?)(\s*\{[^}]*\})?\s*$', stripped)
             if m:
-                section_title = m.group(1).strip()
-                attrs = m.group(2) or ''
+                header_level = len(m.group(1))  # Count the number of # symbols
+                section_title = m.group(2).strip()
+                attrs = m.group(3) or ''
                 id_match = re.search(r'\{#([\w\-]+)\}', attrs)
                 section_id = id_match.group(1) if id_match else None
-                header_level = 2  # Only ## for now
                 # Find the end of this section (next header of same or higher level, outside blocks)
                 j = i + 1
                 block_state = state.copy()
