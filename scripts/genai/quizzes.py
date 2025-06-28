@@ -135,8 +135,13 @@ ANSWER_ID_PREFIX = "quiz-answer-"
 REFERENCE_TEXT = "See Answer"
 
 # Quiz section headers and patterns for easy maintenance
-QUIZ_ANSWERS_SECTION_HEADER = "## Quiz Answers"
-QUIZ_ANSWERS_SECTION_PATTERN = rf"^{re.escape(QUIZ_ANSWERS_SECTION_HEADER)}\s*{{#[^}}]*}}\s*\n.*?(?=\n##\s+|$)"
+SELF_CHECK_ANSWERS_HEADER = "Self-Check Answers"
+SELF_CHECK_ANSWERS_HEADER_LOWER = SELF_CHECK_ANSWERS_HEADER.lower()
+SELF_CHECK_ANSWERS_SECTION_HEADER = f"## {SELF_CHECK_ANSWERS_HEADER}"
+SELF_CHECK_ANSWERS_SECTION_PATTERN = rf"^##\s+{re.escape(SELF_CHECK_ANSWERS_HEADER)}[\s\S]*?(?=^##\s|\Z)"
+QUIZ_ANSWERS_SECTION_HEADER = SELF_CHECK_ANSWERS_SECTION_HEADER
+QUIZ_ANSWERS_SECTION_PATTERN = SELF_CHECK_ANSWERS_SECTION_PATTERN
+
 # These will be constructed dynamically since they need re.escape
 QUIZ_QUESTION_CALLOUT_PATTERN = None  # Constructed dynamically
 QUIZ_ANSWER_CALLOUT_PATTERN = None    # Constructed dynamically
@@ -2837,7 +2842,7 @@ def format_answer_block(section_id, qa_pairs):
             # For other question types, format directly and make the main question line bold
             formatted_q = f"**{qtext}**"
         
-        # Special handling for FILL-type answers
+        # Construct the answer string for all types
         if qtype == 'FILL' and ans:
             # Extract the answer up to the first period (or the whole answer if no period)
             first_period = ans.find('.')
@@ -2847,12 +2852,17 @@ def format_answer_block(section_id, qa_pairs):
             else:
                 fill_word = ans.strip()
                 rest = ''
-            formatted_a = f'The answer is "{fill_word}".'
+            answer_str = f'The answer is "{fill_word}".'
             if rest:
-                formatted_a += f' {rest}'
-            formatted_a = indent_answer_explanation(formatted_a)
+                answer_str += f' {rest}'
         else:
-            formatted_a = indent_answer_explanation(ans)
+            answer_str = ans
+        
+        # Special handling for ORDER-type answers
+        if qtype == 'ORDER':
+            formatted_a = indent_answer_explanation(f'*Answer*: The order is as follows: {answer_str}')
+        else:
+            formatted_a = indent_answer_explanation(f'*Answer*: {answer_str}')
         
         # Format learning objective with proper indentation to match answer
         if learning_obj:
@@ -2908,7 +2918,7 @@ def clean_existing_quiz_blocks(markdown_text):
 
     # --- Remove the entire '## Quiz Answers' section (header + all content) ---
     quiz_answers_section_pattern = re.compile(
-        r"(^##\s+" + re.escape("Quiz Answers") + r"[\s\S]*?)(?=^##\s|\Z)", re.MULTILINE
+        r"(^##\s+" + re.escape(SELF_CHECK_ANSWERS_HEADER) + r"[\s\S]*?)(?=^##\s|\Z)", re.MULTILINE
     )
     cleaned, section_removed_count = quiz_answers_section_pattern.subn("", cleaned)
 
