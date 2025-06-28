@@ -161,6 +161,61 @@ logging.basicConfig(
 # Global variable to track ID replacements
 id_replacements = {}
 
+# Shared regex patterns - defined once to avoid duplication
+HEADER_PATTERN = re.compile(r'^(#{1,6})\s+(.+?)(?:\s*\{[^}]*\})?$')
+DIV_START_PATTERN = re.compile(r'^:::\s*\{\.([^"]+)')
+DIV_END_PATTERN = re.compile(r'^:::\s*$')
+CODE_BLOCK_PATTERN = re.compile(r'^```[^`]*$')  # Matches code block start/end
+
+def initialize_block_tracking():
+    """Initialize block tracking state variables."""
+    return {
+        'inside_skip_div': False,
+        'inside_code_block': False
+    }
+
+def update_block_state(line, state):
+    """
+    Update block tracking state based on the current line.
+    
+    Args:
+        line: The current line being processed
+        state: Dictionary with 'inside_skip_div' and 'inside_code_block' keys
+    
+    Returns:
+        Updated state dictionary
+    """
+    line_stripped = line.strip()
+    
+    # Check for code block boundaries
+    if CODE_BLOCK_PATTERN.match(line_stripped):
+        state['inside_code_block'] = not state['inside_code_block']
+        return state
+        
+    # Check for div boundaries
+    if DIV_START_PATTERN.match(line_stripped):
+        state['inside_skip_div'] = True
+    elif DIV_END_PATTERN.match(line_stripped):
+        state['inside_skip_div'] = False
+    
+    return state
+
+def should_process_header(line, state):
+    """
+    Determine if a header should be processed based on current block state.
+    
+    Args:
+        line: The current line
+        state: Block tracking state dictionary
+    
+    Returns:
+        True if the header should be processed, False otherwise
+    """
+    match = HEADER_PATTERN.match(line)
+    if match and not state['inside_skip_div'] and not state['inside_code_block']:
+        return True, match
+    return False, None
+
 def simple_slugify(text):
     """Convert header text to a slug format, removing stopwords."""
     # Get English stopwords
@@ -337,29 +392,16 @@ def list_section_ids(filepath):
     with open(filepath, 'r', encoding='utf-8') as file:
         lines = file.readlines()
     
-    header_pattern = re.compile(r'^(#{1,6})\s+(.+?)(?:\s*\{[^}]*\})?$')
-    div_start_pattern = re.compile(r'^:::\s*\{\.([^"]+)')
-    div_end_pattern = re.compile(r'^:::\s*$')
-    code_block_pattern = re.compile(r'^```[^`]*$')  # Matches code block start/end
-    
-    inside_skip_div = False
-    inside_code_block = False
+    state = initialize_block_tracking()
     section_count = 0
     
     for i, line in enumerate(lines, 1):
-        # Check for code block boundaries
-        if code_block_pattern.match(line.strip()):
-            inside_code_block = not inside_code_block
-            continue
-            
-        # Check for div boundaries
-        if div_start_pattern.match(line.strip()):
-            inside_skip_div = True
-        elif div_end_pattern.match(line.strip()):
-            inside_skip_div = False
-            
-        match = header_pattern.match(line)
-        if match and not inside_skip_div and not inside_code_block:
+        # Update block state
+        state = update_block_state(line, state)
+        
+        # Check if we should process this header
+        should_process, match = should_process_header(line, state)
+        if should_process:
             hashes, title = match.groups()
             if len(hashes) > 1:  # Skip chapter title
                 section_count += 1
@@ -395,30 +437,17 @@ def list_all_section_ids(directory):
         with open(file_path, 'r', encoding='utf-8') as file:
             lines = file.readlines()
         
-        header_pattern = re.compile(r'^(#{1,6})\s+(.+?)(?:\s*\{[^}]*\})?$')
-        div_start_pattern = re.compile(r'^:::\s*\{\.([^"]+)')
-        div_end_pattern = re.compile(r'^:::\s*$')
-        code_block_pattern = re.compile(r'^```[^`]*$')  # Matches code block start/end
-        
-        inside_skip_div = False
-        inside_code_block = False
+        state = initialize_block_tracking()
         file_sections = 0
         file_with_ids = 0
         
         for line in lines:
-            # Check for code block boundaries
-            if code_block_pattern.match(line.strip()):
-                inside_code_block = not inside_code_block
-                continue
-                
-            # Check for div boundaries
-            if div_start_pattern.match(line.strip()):
-                inside_skip_div = True
-            elif div_end_pattern.match(line.strip()):
-                inside_skip_div = False
-                
-            match = header_pattern.match(line)
-            if match and not inside_skip_div and not inside_code_block:
+            # Update block state
+            state = update_block_state(line, state)
+            
+            # Check if we should process this header
+            should_process, match = should_process_header(line, state)
+            if should_process:
                 hashes, title = match.groups()
                 if len(hashes) > 1:  # Skip chapter title
                     file_sections += 1
@@ -503,13 +532,7 @@ def process_markdown_file(file_path, auto_yes=False, force=False, dry_run=False,
     path = Path(file_path)
     lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
 
-    header_pattern = re.compile(r'^(#{1,6})\s+(.+?)(?:\s*\{[^}]*\})?$')
-    div_start_pattern = re.compile(r'^:::\s*\{\.([^"]+)')
-    div_end_pattern = re.compile(r'^:::\s*$')
-    code_block_pattern = re.compile(r'^```[^`]*$')  # Matches code block start/end
-
-    inside_skip_div = False
-    inside_code_block = False
+    state = initialize_block_tracking()
     modified = False
     changes = []
     section_counter = 0
@@ -528,29 +551,26 @@ def process_markdown_file(file_path, auto_yes=False, force=False, dry_run=False,
         'modified': False
     }
 
+    # Find chapter title
     for line in lines:
-        match = header_pattern.match(line)
-        if match and len(match.group(1)) == 1:
+        should_process, match = should_process_header(line, state)
+        if should_process and len(match.group(1)) == 1:
             chapter_title = match.group(2).strip()
             break
 
     if not chapter_title:
         raise ValueError(f"No chapter title found in {file_path}")
 
-    for i, line in enumerate(lines):
-        # Check for code block boundaries
-        if code_block_pattern.match(line.strip()):
-            inside_code_block = not inside_code_block
-            continue
-            
-        # Check for div boundaries
-        if div_start_pattern.match(line.strip()):
-            inside_skip_div = True
-        elif div_end_pattern.match(line.strip()):
-            inside_skip_div = False
+    # Reset state for main processing
+    state = initialize_block_tracking()
 
-        match = header_pattern.match(line)
-        if match and not inside_skip_div and not inside_code_block:
+    for i, line in enumerate(lines):
+        # Update block state
+        state = update_block_state(line, state)
+        
+        # Check if we should process this header
+        should_process, match = should_process_header(line, state)
+        if should_process:
             hashes, title = match.groups()
             header_level = len(hashes)
             
@@ -779,27 +799,14 @@ def verify_section_ids(filepath):
     with open(filepath, 'r', encoding='utf-8') as file:
         lines = file.readlines()
     
-    header_pattern = re.compile(r'^(#{1,6})\s+(.+?)(?:\s*\{[^}]*\})?$')
-    div_start_pattern = re.compile(r'^:::\s*\{\.([^\"]+)')
-    div_end_pattern = re.compile(r'^:::\s*$')
-    code_block_pattern = re.compile(r'^```[^`]*$')  # Matches code block start/end
-    
-    inside_skip_div = False
-    inside_code_block = False
+    state = initialize_block_tracking()
     for i, line in enumerate(lines, 1):
-        # Check for code block boundaries
-        if code_block_pattern.match(line.strip()):
-            inside_code_block = not inside_code_block
-            continue
-            
-        # Check for div boundaries
-        if div_start_pattern.match(line.strip()):
-            inside_skip_div = True
-        elif div_end_pattern.match(line.strip()):
-            inside_skip_div = False
-            
-        match = header_pattern.match(line)
-        if match and not inside_skip_div and not inside_code_block:
+        # Update block state
+        state = update_block_state(line, state)
+        
+        # Check if we should process this header
+        should_process, match = should_process_header(line, state)
+        if should_process:
             hashes, title = match.groups()
             if len(hashes) > 1:  # Skip chapter title
                 # Extract existing attributes if any
