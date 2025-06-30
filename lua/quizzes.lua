@@ -71,7 +71,7 @@ end
 -- Format questions for inline quiz block
 local function format_quiz_block(questions, section_id)
   local answer_id = section_id:gsub("^#", "quiz-answer-sec-")
-  local question_id = section_id:gsub("^#", "quiz-question-sec-")
+  local question_id = section_id:gsub("^#sec%-", "quiz-question-sec-")
   local blocks = {}
   
   -- Create ordered list items for all questions
@@ -106,9 +106,8 @@ local function format_quiz_block(questions, section_id)
   -- Add blank line and "See Answer" reference
   table.insert(blocks, pandoc.Para{})
   table.insert(blocks, pandoc.Para{
-    pandoc.Str("See Answer "),
-    pandoc.RawInline("markdown", "\\ref{" .. answer_id .. "}"),
-    pandoc.Str(".")
+    pandoc.Str("\u{00A0}\u{00A0}\u{00A0}\u{00A0}"),
+    pandoc.Link({pandoc.Str("See Answers →")}, "#" .. answer_id)
   })
   
   return pandoc.Div(blocks, pandoc.Attr(question_id, {"callout-quiz-question"}))
@@ -117,6 +116,7 @@ end
 -- Format answer block for end-of-file insertion
 local function format_answer_block(section_id, questions)
   local id = section_id:gsub("^#", "quiz-answer-sec-")
+  local question_id = section_id:gsub("^#sec%-", "quiz-question-sec-")
   local blocks = {}
   
   -- Create ordered list items for all answer questions
@@ -181,6 +181,13 @@ local function format_answer_block(section_id, questions)
   -- Create the main ordered list for answers
   local answers_list = pandoc.OrderedList(answer_items, {1, "Decimal", "Period"})
   table.insert(blocks, answers_list)
+  
+  -- Add blank line and "Back to Question" link at the end of the callout
+  table.insert(blocks, pandoc.Para{})
+  table.insert(blocks, pandoc.Para{
+    pandoc.Str("\u{00A0}\u{00A0}\u{00A0}\u{00A0}"),
+    pandoc.Link({pandoc.Str("↩ Back to Self-Check Questions")}, "#" .. question_id)
+  })
   
   return pandoc.Div(blocks, pandoc.Attr(id, {"callout-quiz-answer"}))
 end
