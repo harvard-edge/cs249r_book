@@ -3476,16 +3476,9 @@ def clean_single_file(qmd_file, args):
             try:
                 frontmatter_data = yaml.safe_load(yaml_content_str)
                 if isinstance(frontmatter_data, dict) and 'quiz' in frontmatter_data:
-                    # Remove the quiz key
-                    del frontmatter_data['quiz']
-                    
-                    # Reconstruct frontmatter
-                    new_yaml_content = yaml.dump(frontmatter_data, default_flow_style=False, sort_keys=False, indent=2)
-                    new_frontmatter = f"---\n{new_yaml_content.strip()}\n---\n\n"
-                    
-                    # Replace old frontmatter
-                    content = content.replace(frontmatter_str, new_frontmatter, 1)
-                    print(f"  ✅ Removed quiz frontmatter entry")
+                    # Keep the quiz key but remove all quiz content from the body
+                    # This allows the Lua filter to work but removes inserted content
+                    print(f"  ✅ Preserved quiz frontmatter entry (quiz: {frontmatter_data['quiz']})")
             except yaml.YAMLError:
                 print(f"  ⚠️  Warning: Could not parse YAML frontmatter")
         
