@@ -3449,6 +3449,10 @@ def clean_single_file(qmd_file, args):
         question_matches = quiz_question_pattern.findall(content)
         answer_matches = quiz_answer_pattern.findall(content)
         
+        # Count quiz answers sections
+        quiz_answers_pattern = re.compile(QUIZ_ANSWERS_SECTION_PATTERN, re.DOTALL | re.MULTILINE)
+        quiz_answers_matches = quiz_answers_pattern.findall(content)
+        
         if args.dry_run:
             print(f"  🔍 DRY RUN - Would remove:")
             print(f"     - {len(question_matches)} quiz question callouts")
