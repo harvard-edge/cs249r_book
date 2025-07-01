@@ -69,7 +69,7 @@ local function load_quiz_data(meta)
 end
 
 -- Format questions for inline quiz block
-local function format_quiz_block(questions, section_id)
+local function format_quiz_block(questions, section_id, section_number)
   local answer_id = section_id:gsub("^#", "quiz-answer-sec-")
   local question_id = section_id:gsub("^#sec%-", "quiz-question-sec-")
   local blocks = {}
@@ -103,11 +103,11 @@ local function format_quiz_block(questions, section_id)
   local questions_list = pandoc.OrderedList(question_items, {1, "Decimal", "Period"})
   table.insert(blocks, questions_list)
   
-  -- Add blank line and "See Answer" reference
+  -- Add blank line and "See Answer" reference with section number
   table.insert(blocks, pandoc.Para{})
   table.insert(blocks, pandoc.Para{
     pandoc.Str("\u{00A0}\u{00A0}\u{00A0}\u{00A0}"),
-    pandoc.Link({pandoc.Str("See Answers →")}, "#" .. answer_id)
+    pandoc.Link({pandoc.Str("See Answer " .. section_number .. " →")}, "#" .. answer_id, "")
   })
   
   return pandoc.Div(blocks, pandoc.Attr(question_id, {"callout-quiz-question"}))
@@ -197,6 +197,7 @@ function Pandoc(doc)
   load_quiz_data(doc.meta)
   local new_blocks = {}
   local current_section_id = nil
+  local section_counter = 0
 
   for i = 1, #doc.blocks do
     local blk = doc.blocks[i]
@@ -212,8 +213,9 @@ function Pandoc(doc)
 
     local next_is_section = (i == #doc.blocks) or (doc.blocks[i+1].t == "Header" and doc.blocks[i+1].level == 2)
     if current_section_id and section_map[current_section_id] and next_is_section then
-      io.stderr:write("[QUIZ] Inserting quiz for section: " .. current_section_id .. "\n")
-      local quiz_block = format_quiz_block(section_map[current_section_id], current_section_id)
+      section_counter = section_counter + 1
+      io.stderr:write("[QUIZ] Inserting quiz for section: " .. current_section_id .. " (Answer " .. section_counter .. ")\n")
+      local quiz_block = format_quiz_block(section_map[current_section_id], current_section_id, section_counter)
       local answer_block = format_answer_block(current_section_id, section_map[current_section_id])
       table.insert(new_blocks, quiz_block)
       table.insert(answer_blocks, answer_block)
