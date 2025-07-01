@@ -8,6 +8,64 @@ local section_map = {}
 local answer_blocks = {}
 local loaded = false
 
+-- Helper: get chapter number from Pandoc's book metadata
+local function get_chapter_number_from_book(meta)
+  if not meta.book then
+    return nil
+  end
+  
+  local current_file = nil
+  if PANDOC_STATE.input_files and #PANDOC_STATE.input_files > 0 then
+    current_file = pandoc.path.split_extension(PANDOC_STATE.input_files[1])
+  elseif PANDOC_STATE.output_file then
+    current_file = pandoc.path.split_extension(PANDOC_STATE.output_file)
+  end
+  
+  if not current_file then
+    return nil
+  end
+  
+  -- Look through book.render for chapter information
+  if meta.book.render then
+    for _, v in pairs(meta.book.render) do
+      if pandoc.utils.stringify(v.type) == "chapter" then
+        local file_path = pandoc.utils.stringify(v.file)
+        local file_without_ext = pandoc.path.split_extension(file_path)
+        
+        if file_without_ext == current_file or 
+           file_path == current_file or
+           string.find(current_file, file_without_ext, 1, true) then
+          return v.number
+        end
+      end
+    end
+  end
+  
+  return nil
+end
+
+-- Helper: extract chapter number from file path (fallback method)
+local function get_chapter_number_from_path(file_path)
+  if not file_path then return nil end
+  
+  -- Simple pattern matching for chapter directories
+  local chapter_patterns = {
+    "introduction", "ml_systems", "dl_primer", "dnn_architectures", 
+    "workflow", "data_engineering", "frameworks", "training", 
+    "efficient_ai", "optimizations", "hw_acceleration", "benchmarking", 
+    "ops", "ondevice_learning", "privacy_security", "responsible_ai", 
+    "sustainable_ai", "robust_ai", "ai_for_good", "conclusion"
+  }
+  
+  for i, pattern in ipairs(chapter_patterns) do
+    if string.find(file_path:lower(), pattern) then
+      return i
+    end
+  end
+  
+  return nil
+end
+
 -- Helper: convert section title to ID (if not provided explicitly)
 local function slugify(text)
   return "#" .. text:gsub("[^%w]+", "-"):gsub("-$", ""):lower()
@@ -114,7 +172,7 @@ local function format_quiz_block(questions, section_id, section_number)
 end
 
 -- Format answer block for end-of-file insertion
-local function format_answer_block(section_id, questions)
+local function format_answer_block(section_id, questions, section_number)
   local id = section_id:gsub("^#", "quiz-answer-sec-")
   local question_id = section_id:gsub("^#sec%-", "quiz-question-sec-")
   local blocks = {}
@@ -182,11 +240,11 @@ local function format_answer_block(section_id, questions)
   local answers_list = pandoc.OrderedList(answer_items, {1, "Decimal", "Period"})
   table.insert(blocks, answers_list)
   
-  -- Add blank line and "Back to Question" link at the end of the callout
+  -- Add blank line and "Back to Question" link with section number at the end of the callout
   table.insert(blocks, pandoc.Para{})
   table.insert(blocks, pandoc.Para{
     pandoc.Str("\u{00A0}\u{00A0}\u{00A0}\u{00A0}"),
-    pandoc.Link({pandoc.Str("↩ Back to Self-Check Questions")}, "#" .. question_id)
+    pandoc.Link({pandoc.Str("↩ Back to Self-Check Question " .. section_number)}, "#" .. question_id)
   })
   
   return pandoc.Div(blocks, pandoc.Attr(id, {"callout-quiz-answer"}))
@@ -198,6 +256,40 @@ function Pandoc(doc)
   local new_blocks = {}
   local current_section_id = nil
   local section_counter = 0
+  
+  -- Try to determine chapter number from various sources
+  local chapter_number = nil
+  
+  -- First try: Use Pandoc's built-in book metadata (most reliable)
+  chapter_number = get_chapter_number_from_book(doc.meta)
+  if chapter_number then
+    io.stderr:write("[QUIZ] Got chapter number from book metadata: " .. chapter_number .. "\n")
+  end
+  
+  -- Fallback: try from input file paths
+  if not chapter_number and PANDOC_STATE.input_files and #PANDOC_STATE.input_files > 0 then
+    chapter_number = get_chapter_number_from_path(PANDOC_STATE.input_files[1])
+    if chapter_number then
+      io.stderr:write("[QUIZ] Got chapter number from input file path: " .. chapter_number .. "\n")
+    end
+  end
+  
+  -- Final fallback: try from current working directory
+  if not chapter_number then
+    local current_dir = pandoc.system.get_working_directory()
+    if current_dir then
+      chapter_number = get_chapter_number_from_path(current_dir)
+      if chapter_number then
+        io.stderr:write("[QUIZ] Got chapter number from working directory: " .. chapter_number .. "\n")
+      end
+    end
+  end
+  
+  -- Last resort: use 1 if we can't determine the chapter
+  if not chapter_number then
+    chapter_number = 1
+    io.stderr:write("[QUIZ] Warning: Could not determine chapter number, using default: 1\n")
+  end
 
   for i = 1, #doc.blocks do
     local blk = doc.blocks[i]
@@ -214,9 +306,10 @@ function Pandoc(doc)
     local next_is_section = (i == #doc.blocks) or (doc.blocks[i+1].t == "Header" and doc.blocks[i+1].level == 2)
     if current_section_id and section_map[current_section_id] and next_is_section then
       section_counter = section_counter + 1
-      io.stderr:write("[QUIZ] Inserting quiz for section: " .. current_section_id .. " (Answer " .. section_counter .. ")\n")
-      local quiz_block = format_quiz_block(section_map[current_section_id], current_section_id, section_counter)
-      local answer_block = format_answer_block(current_section_id, section_map[current_section_id])
+      local quiz_number = chapter_number .. "." .. section_counter
+      io.stderr:write("[QUIZ] Inserting quiz for section: " .. current_section_id .. " (Answer " .. quiz_number .. ")\n")
+      local quiz_block = format_quiz_block(section_map[current_section_id], current_section_id, quiz_number)
+      local answer_block = format_answer_block(current_section_id, section_map[current_section_id], quiz_number)
       table.insert(new_blocks, quiz_block)
       table.insert(answer_blocks, answer_block)
       section_map[current_section_id] = nil
