@@ -248,7 +248,14 @@ jobs:
           # Initialize tlmgr user mode
           tlmgr init-usertree
           
+          # Update tlmgr to latest version to handle cross-release updates
+          echo "🔄 Updating tlmgr to latest version..."
+          wget -O update-tlmgr-latest.sh https://mirror.ctan.org/systems/texlive/tlnet/update-tlmgr-latest.sh
+          chmod +x update-tlmgr-latest.sh
+          ./update-tlmgr-latest.sh -- --update
+          
           # Install packages in user mode
+          echo "🔄 Installing TeX Live packages..."
           tlmgr install \
             koma-script \
             standalone \
@@ -268,13 +275,44 @@ jobs:
         shell: pwsh
         run: |
           Write-Output "🔄 Installing MiKTeX on Windows..."
-          # Use winget if available, otherwise fallback to chocolatey
+          $miktexInstalled = $false
+          
+          # Try winget first
           try {
+            Write-Output "🔄 Attempting to install MiKTeX via winget..."
             winget install MiKTeX.MiKTeX --accept-source-agreements --accept-package-agreements
+            $miktexInstalled = $true
             Write-Output "✅ MiKTeX installed via winget"
           } catch {
-            Write-Output "🔄 winget not available, using chocolatey..."
-            choco install miktex -y
+            Write-Output "⚠️ winget installation failed, trying chocolatey..."
+          }
+          
+          # Try chocolatey if winget failed
+          if (-not $miktexInstalled) {
+            try {
+              Write-Output "🔄 Attempting to install MiKTeX via chocolatey..."
+              choco install miktex -y
+              $miktexInstalled = $true
+              Write-Output "✅ MiKTeX installed via chocolatey"
+            } catch {
+              Write-Output "⚠️ chocolatey installation failed, trying direct download..."
+            }
+          }
+          
+          # Try direct download if both package managers failed
+          if (-not $miktexInstalled) {
+            try {
+              Write-Output "🔄 Attempting direct MiKTeX download..."
+              $miktexUrl = "https://miktex.org/download/ctan/systems/win32/miktex/setup/windows-x64/miktexsetup-x64.exe"
+              $miktexInstaller = "$env:TEMP\miktexsetup-x64.exe"
+              Invoke-WebRequest -Uri $miktexUrl -OutFile $miktexInstaller
+              Start-Process -FilePath $miktexInstaller -ArgumentList "--unattended", "--package-set=basic" -Wait
+              $miktexInstalled = $true
+              Write-Output "✅ MiKTeX installed via direct download"
+            } catch {
+              Write-Error "❌ All MiKTeX installation methods failed. PDF generation may not work."
+              exit 1
+            }
           }
           
           # Add MiKTeX to PATH and refresh environment
@@ -285,17 +323,22 @@ jobs:
           # Refresh environment variables for this session
           refreshenv
           
-          # Install additional packages using MiKTeX Package Manager with full path
-          Write-Output "🔄 Installing additional TeX packages..."
-          & "$miktexPath\mpm.exe" --install koma-script
-          & "$miktexPath\mpm.exe" --install standalone
-          & "$miktexPath\mpm.exe" --install tikz-cd
-          & "$miktexPath\mpm.exe" --install marginfix
-          & "$miktexPath\mpm.exe" --install newpx
-          & "$miktexPath\mpm.exe" --install luatex85
-          & "$miktexPath\mpm.exe" --install listings
+          # Verify MiKTeX installation and install additional packages
+          if (Test-Path "$miktexPath\mpm.exe") {
+            Write-Output "🔄 Installing additional TeX packages..."
+            & "$miktexPath\mpm.exe" --install koma-script
+            & "$miktexPath\mpm.exe" --install standalone
+            & "$miktexPath\mpm.exe" --install tikz-cd
+            & "$miktexPath\mpm.exe" --install marginfix
+            & "$miktexPath\mpm.exe" --install newpx
+            & "$miktexPath\mpm.exe" --install luatex85
+            & "$miktexPath\mpm.exe" --install listings
+            Write-Output "✅ Additional TeX Live packages installed"
+          } else {
+            Write-Warning "⚠️ MiKTeX mpm.exe not found. Additional packages may not be available."
+          }
           
-          Write-Output "✅ TeX Live packages installed"
+          Write-Output "✅ TeX Live installation process completed"
           
       - name: 📊 Setup R
         uses: r-lib/actions/setup-r@v2
