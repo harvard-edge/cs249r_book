@@ -214,28 +214,65 @@ jobs:
           # Verify Inkscape installation
           inkscape --version
 
-      - name: 📦 Install & Update TeX Live 
+      # Cache TeX Live packages
+      - name: 💾 Cache TeX Live packages
         if: inputs.format == 'pdf' || inputs.format == 'epub' || inputs.format == 'all'
-        uses: teatimeguest/setup-texlive-action@v3
+        uses: actions/cache@v4
+        id: cache-texlive
         with:
-          version: 2025
-          packages: |
-            scheme-basic      
-            collection-latex  
-            collection-latexrecommended   
-            collection-fontsrecommended   
-            collection-latexextra
-            collection-pictures   
-            collection-luatex     
-            koma-script       
-            standalone       
-            tikz-cd         
-            marginfix      
-            newpx          
-            luatex85
-            listings       
-          update-all-packages: false # this slows builds down significantly
-          cache: true
+          path: |
+            ~/.texlive
+            ~/.TinyTeX
+            ~/AppData/Roaming/TinyTeX  # Windows path
+          key: texlive-${{ runner.os }}-${{ hashFiles('**/*.tex', '**/*.qmd') }}
+          restore-keys: |
+            texlive-${{ runner.os }}-
+
+      # Install TeX Live packages via apt-get (Linux)
+      - name: 📦 Install TeX Live packages (Linux)
+        if: runner.os == 'Linux' && (inputs.format == 'pdf' || inputs.format == 'epub' || inputs.format == 'all') && steps.cache-texlive.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          echo "🔄 Installing TeX Live packages via apt-get..."
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            texlive-latex-base \
+            texlive-latex-extra \
+            texlive-fonts-recommended \
+            texlive-fonts-extra \
+            texlive-xetex \
+            texlive-luatex \
+            texlive-pictures \
+            texlive-latex-recommended \
+            texlive-bibtex-extra \
+            texlive-lang-english \
+            lmodern \
+            koma-script \
+            standalone \
+            pgf \
+            tikz-cd \
+            pgfplots \
+            preview \
+            marginfix \
+            newpx \
+            luatex85 \
+            listings
+          echo "✅ TeX Live packages installed"
+
+      # Install TinyTeX (Windows)
+      - name: 📦 Install TinyTeX (Windows)
+        if: runner.os == 'Windows' && (inputs.format == 'pdf' || inputs.format == 'epub' || inputs.format == 'all') && steps.cache-texlive.outputs.cache-hit != 'true'
+        uses: r-lib/actions/setup-tinytex@v2
+
+      # Install TinyTeX (Linux) as backup
+      - name: 📦 Install TinyTeX (Linux)
+        if: runner.os == 'Linux' && (inputs.format == 'pdf' || inputs.format == 'epub' || inputs.format == 'all') && steps.cache-texlive.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          echo "🔄 Installing TinyTeX as backup..."
+          quarto install tinytex --no-prompt
+          echo "$HOME/.TinyTeX/bin/x86_64-linux" >> $GITHUB_PATH
+          echo "✅ TinyTeX installed"
           
       - name: 📊 Setup R
         uses: r-lib/actions/setup-r@v2
@@ -477,7 +514,11 @@ jobs:
         run: |
           # Create a variable for the TeX Live status
           $texLiveStatus = if ("${{ inputs.format }}" -eq "pdf" -or "${{ inputs.format }}" -eq "all") {
-            "Installed via teatimeguest/setup-texlive-action@v3"
+            if ("${{ runner.os }}" -eq "Linux") {
+              "Installed via apt-get + TinyTeX backup"
+            } else {
+              "Installed via r-lib/actions/setup-tinytex@v2"
+            }
           } else {
             "Skipped (not needed for HTML only)"
           }
@@ -493,6 +534,7 @@ jobs:
           🚀 Deploy: ${{ inputs.deploy }}
           🧩 Cache Status:
             - TeX Live: $texLiveStatus
+            - TeX Live Cache: ${{ steps.cache-texlive.outputs.cache-hit == 'true' && '✅ Hit' || '❌ Miss' }}
             - R Packages: ${{ steps.cache-r-packages.outputs.cache-hit == 'true' && '✅ Hit' || '❌ Miss' }}
             - Python Packages: ${{ steps.cache-python-packages.outputs.cache-hit == 'true' && '✅ Hit' || '❌ Miss' }}
           ⏰ Completed at: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
