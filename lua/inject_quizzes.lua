@@ -162,6 +162,7 @@ local function insert_quizzes(doc)
 
   local section_blocks = {}
   local current_section_id = nil
+  local current_section_level = nil
   local current_section_has_quiz = false
   local current_section_quizdiv = nil
   local current_section_answerdiv = nil
@@ -177,6 +178,7 @@ local function insert_quizzes(doc)
     end
     section_blocks = {}
     current_section_id = nil
+    current_section_level = nil
     current_section_has_quiz = false
     current_section_quizdiv = nil
     current_section_answerdiv = nil
@@ -185,18 +187,25 @@ local function insert_quizzes(doc)
   for i, block in ipairs(doc.blocks) do
     local is_section_header = block.t == "Header" and block.identifier
     local sid = is_section_header and ("#" .. block.identifier) or nil
+    local level = is_section_header and block.level or nil
 
     if is_section_header then
-      if #section_blocks > 0 then
+      if current_section_id and current_section_level and level and level <= current_section_level then
+        -- Only flush when we see a header of the same or higher level
         flush_section()
       end
       current_section_id = sid
+      current_section_level = level
       if quiz_sections[sid] then
         io.stderr:write("🎯 [QUIZ] Section matched for quiz: " .. sid .. "\n")
         local qdiv, adiv = process_quiz_questions(quiz_sections[sid], sid)
         current_section_has_quiz = true
         current_section_quizdiv = qdiv
         current_section_answerdiv = adiv
+      else
+        current_section_has_quiz = false
+        current_section_quizdiv = nil
+        current_section_answerdiv = nil
       end
     end
     table.insert(section_blocks, block)
