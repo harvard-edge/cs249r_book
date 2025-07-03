@@ -81,16 +81,20 @@ local function process_quiz_questions(questions, section_id)
   for i, q in ipairs(questions) do
     table.insert(ql, i..". "..q.question)
     if q.question_type == "MCQ" and q.choices then
+      local choices_line = {}
       for j, c in ipairs(q.choices) do
-        table.insert(ql, "   "..string.char(96+j)..") "..c)
+        table.insert(choices_line, "   "..string.char(96+j)..") "..c)
       end
+      table.insert(ql, table.concat(choices_line, "\n"))
     end
     -- build answers
     table.insert(al, i..". **"..q.question.."**")
     if q.question_type == "MCQ" and q.choices then
+      local choices_line = {}
       for j, c in ipairs(q.choices) do
-        table.insert(al, "   "..string.char(96+j)..") "..c)
+        table.insert(choices_line, "   "..string.char(96+j)..") "..c)
       end
+      table.insert(al, table.concat(choices_line, "\n"))
       table.insert(al, "")
     end
     table.insert(al, "   *Answer*: "..q.answer)
@@ -153,43 +157,60 @@ local function insert_quizzes(doc)
   local new_blocks      = {}
   local chapter_answers = {}
 
-  local function flush_answers()
-    if #chapter_answers > 0 then
-      table.insert(new_blocks,
-        pandoc.Header(2, "Self-Check Answers", { id="self-check-answers" })
-      )
-      for _, ans in ipairs(chapter_answers) do
-        table.insert(new_blocks, ans)
-      end
-      chapter_answers = {}
+  local section_blocks = {}
+  local current_section_id = nil
+  local current_section_has_quiz = false
+  local current_section_quizdiv = nil
+  local current_section_answerdiv = nil
+
+  local function flush_section()
+    for _, b in ipairs(section_blocks) do
+      table.insert(new_blocks, b)
     end
+    if current_section_has_quiz and current_section_quizdiv then
+      table.insert(new_blocks, current_section_quizdiv)
+      table.insert(chapter_answers, current_section_answerdiv)
+    end
+    section_blocks = {}
+    current_section_id = nil
+    current_section_has_quiz = false
+    current_section_quizdiv = nil
+    current_section_answerdiv = nil
   end
 
-  for _, block in ipairs(doc.blocks) do
-    local is_chapter_start = block.t == "Header" and block.level == 1
-    local is_references    = block.t == "Header"
-      and pandoc.utils.stringify(block.content)
-         :upper():find("REFERENCES")
+  for i, block in ipairs(doc.blocks) do
+    local is_section_header = block.t == "Header" and block.identifier
+    local sid = is_section_header and ("#" .. block.identifier) or nil
 
-    if is_chapter_start or is_references then
-      flush_answers()
-    end
-
-    table.insert(new_blocks, block)
-
-    if block.t == "Header" and block.identifier then
-      local sid = "#" .. block.identifier
+    if is_section_header then
+      if #section_blocks > 0 then
+        flush_section()
+      end
+      current_section_id = sid
       if quiz_sections[sid] then
         io.stderr:write("[QUIZ] MATCHED " .. sid .. "\n")
         local qdiv, adiv = process_quiz_questions(quiz_sections[sid], sid)
-        table.insert(new_blocks, qdiv)
-        table.insert(chapter_answers, adiv)
+        current_section_has_quiz = true
+        current_section_quizdiv = qdiv
+        current_section_answerdiv = adiv
       end
     end
+    table.insert(section_blocks, block)
+  end
+  -- flush last section
+  if #section_blocks > 0 then
+    flush_section()
   end
 
   -- answers for the last chapter
-  flush_answers()
+  if #chapter_answers > 0 then
+    table.insert(new_blocks,
+      pandoc.Header(2, "Self-Check Answers", { id="self-check-answers" })
+    )
+    for _, ans in ipairs(chapter_answers) do
+      table.insert(new_blocks, ans)
+    end
+  end
 
   doc.blocks = new_blocks
   return doc
@@ -200,3 +221,4 @@ return {
   { Meta   = handle_meta   },
   { Pandoc = insert_quizzes }
 }
+
