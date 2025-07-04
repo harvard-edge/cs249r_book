@@ -44,6 +44,21 @@ local stylename="foldbox"
 
 local stylez = require("style/"..stylename)
 
+current_chapter_number = nil
+
+function Header(el)
+  if el.level == 1 then
+    local title = pandoc.utils.stringify(el.content)
+    -- Find the first number from the title, e.g. From "Chapter 1: Introduction"
+    local chapno = string.match(title, "(%d+)")
+    if chapno then
+      current_chapter_number = chapno
+      io.stderr:write("=== CHAPNO DETECTED:    ", current_chapter_number, "\n")
+    end
+  end
+  return el
+end
+
 
 --- TODO: better encapsulation (luxury :-P)
 
@@ -108,8 +123,6 @@ local function updateTable (oldtbl, newtbl, ignorekeys)
   return(result)
 end
 
-
-
 ---- init step ---------------------------
 --- init = require ("fbx1")
 
@@ -128,21 +141,28 @@ end
 local function chapterinfo(book, fname)
   local first = "" 
   local last = "" 
-  local chapno = nil
+  local chapno = current_chapter_number or "?"
   local info = {}
-  --if book.render then
-    for _, v in pairs(book.render) do
-      if str(v.type) == "chapter" then
-        last = pandoc.path.split_extension(str(v.file))
-        if first == "" then first = last end
-        if last == fname then chapno = v.number end
+
+  for _, v in pairs(book.render) do
+    if str(v.type) == "chapter" then
+      -- Remove extension and directory from file, e.g. "core/introduction.qmd" → "introduction"
+      local fullpath = str(v.file)
+      local base = fullpath:match("([^/\\]+)%.%w+$") -- takes "Introduction" from "core/introduction.qmd"
+      last = base
+      if first == "" then first = base end
+
+      if base == fname then
+        chapno = v.number
       end
     end
-    info.islast = (fname == last)
-    info.isfirst = (fname == first)
-    info.lastchapter = last
-    info.chapno = chapno
-    return(info)
+  end
+
+  info.islast = (fname == last)
+  info.isfirst = (fname == first)
+  info.lastchapter = last
+  info.chapno = chapno
+  return(info)
 end
 
 local function Meta_findChapterNumber(meta)
