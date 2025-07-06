@@ -106,8 +106,8 @@ local function process_quiz_questions(questions, section_id)
     table.insert(al, "")
   end
 
-  table.insert(ql, "[See Answer →](#" .. aid .. ")")
-  table.insert(al, "[↩ Back to Question](#" .. qid .. ")")
+  table.insert(ql, "\n[See Answers →](#" .. aid .. ")")
+  table.insert(al, "\n[← Back to Questions](#" .. qid .. ")")
 
   return create_quiz_div(qid, "callout-quiz-question", table.concat(ql, "\n\n")),
          create_quiz_div(aid, "callout-quiz-answer",   table.concat(al, "\n\n"))
