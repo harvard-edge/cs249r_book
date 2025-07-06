@@ -20,9 +20,10 @@
   <a href="https://mlsysbook.ai/Machine-Learning-Systems.pdf">
     <img src="https://img.shields.io/badge/PDF-Download-blue" alt="Download PDF"/></a>
   <img src="https://img.shields.io/badge/Made%20with-Quarto-8A2BE2" alt="Made with Quarto"/>
-  <a href="https://creativecommons.org/licenses/by-nc-nd/4.0/">
-    <img src="https://img.shields.io/badge/License-CC%20BY--NC--ND%204.0-lightgrey.svg" alt="CC BY-NC-ND 4.0 License"/></a>
-</p>
+  <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">
+    <img src="https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg" alt="CC BY-NC-SA 4.0 License"/>
+  </a>
+
 
 <!-- 🌍 Community & Engagement -->
 <p align="center">
@@ -117,11 +118,10 @@ If you use or reference the book in your work, please cite:
 
 ## 🛡️ License
 
-This book is published under a [Creative Commons Attribution–NonCommercial–NoDerivatives 4.0 International (CC BY-NC-ND 4.0)](https://creativecommons.org/licenses/by-nc-nd/4.0/) license.
+This book is published under a [Creative Commons Attribution–NonCommercial–ShareAlike 4.0 International (CC BY-NC-SA 4.0)](https://creativecommons.org/licenses/by-nc-sa/4.0/) license.
 
-You are free to share the material for **non-commercial purposes** with proper attribution. No derivatives or commercial use are permitted without permission.
+You are free to share and adapt the material for **non-commercial purposes** with proper attribution, as long as any adaptations are distributed under the same license.
 
----
 
 ## 👥 Contributors
 
