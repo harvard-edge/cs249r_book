@@ -78,8 +78,8 @@ local function process_quiz_questions(questions, section_id)
   io.stderr:write("❓ [QUIZ] Section: " .. section_id .. "\n")
   local ql, al = {}, {}
   local clean = section_id:gsub("^#", "")
-  local qid   = "sec-" .. clean
-  local aid   = qid .. "-answer"
+  local qid   = "quiz-question-" .. clean
+  local aid   = "quiz-answer-" .. clean
 
   for i, q in ipairs(questions) do
     table.insert(ql, i..". "..q.question)
@@ -185,7 +185,7 @@ local function insert_quizzes(doc)
   end
 
   for i, block in ipairs(doc.blocks) do
-    local is_section_header = block.t == "Header" and block.identifier
+    local is_section_header = block.t == "Header" and block.identifier and block.level == 2
     local sid = is_section_header and ("#" .. block.identifier) or nil
     local level = is_section_header and block.level or nil
 
