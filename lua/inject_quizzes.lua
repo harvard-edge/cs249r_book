@@ -196,6 +196,9 @@ local function insert_quizzes(doc)
 
   -- Insert all answers at the end of the chapter
   if #chapter_answers > 0 then
+    -- Add a section header for Self-Check Answers
+    table.insert(new_blocks, pandoc.Header(2, "Self-Check Answers", { id="self-check-answers" }))
+    
     for _, adiv in ipairs(chapter_answers) do
       table.insert(new_blocks, adiv)
     end
