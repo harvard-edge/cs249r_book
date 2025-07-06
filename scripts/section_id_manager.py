@@ -6,7 +6,8 @@ Comprehensive Section ID Management Script for Quarto/Markdown Book Projects
 
 This script provides a complete toolkit for managing section IDs in your Markdown/Quarto book project.
 It ensures that all section headers have unique, clean, and consistent section IDs while preserving
-cross-references and other attributes.
+cross-references and other attributes. It also automatically updates corresponding quiz JSON files
+when section IDs change to maintain synchronization between content and assessments.
 
 Special Handling for Unnumbered Headers:
 ---------------------------------------
@@ -169,6 +170,7 @@ import sys
 import os
 import glob
 import time
+import json
 
 # Download NLTK stopwords if not already downloaded
 try:
@@ -854,6 +856,12 @@ def update_cross_references(file_path, id_map):
     
     logging.info(f"\n🔍 Checking references in: {file_path}")
     path = Path(file_path)
+    
+    # Handle JSON files differently
+    if path.suffix.lower() == '.json':
+        return update_quiz_json(file_path, id_map)
+    
+    # Handle text files (QMD, MD, etc.)
     content = path.read_text(encoding="utf-8")
     
     # Track changes
@@ -878,6 +886,64 @@ def update_cross_references(file_path, id_map):
         return True
     else:
         logging.info(f"  ✓ No references found to update")
+    
+    return False
+
+def update_quiz_json(file_path, id_map):
+    """Update section IDs in a quiz JSON file."""
+    global id_replacements
+    
+    logging.info(f"\n🔍 Checking quiz JSON in: {file_path}")
+    path = Path(file_path)
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            quiz_data = json.load(f)
+    except json.JSONDecodeError as e:
+        logging.error(f"Error decoding JSON from {file_path}: {e}")
+        return False
+    
+    # Track changes
+    changes = []
+    modified = False
+    
+    # First, update section_id fields in the structure
+    for section in quiz_data.get('sections', []):
+        old_section_id = section.get('section_id')
+        if old_section_id and old_section_id in id_map:
+            new_section_id = id_map[old_section_id]
+            section['section_id'] = new_section_id
+            changes.append((old_section_id, new_section_id))
+            modified = True
+    
+    # Then, search for any other occurrences of old IDs in the entire JSON content
+    # Convert to string, replace, then parse back
+    json_str = json.dumps(quiz_data, indent=2)
+    original_json_str = json_str
+    
+    for old_id, new_id in id_map.items():
+        if old_id in json_str:
+            json_str = json_str.replace(old_id, new_id)
+            if json_str != original_json_str:
+                modified = True
+                # Only add to changes if not already added from section_id field
+                if (old_id, new_id) not in changes:
+                    changes.append((old_id, new_id))
+    
+    if modified:
+        # Parse back to JSON to ensure it's valid
+        try:
+            updated_quiz_data = json.loads(json_str)
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(updated_quiz_data, f, indent=2)
+            logging.info(f"✅ Updated {len(changes)} section IDs in {file_path}")
+            for old, new in changes:
+                logging.info(f"  - {old} → {new}")
+            return True
+        except json.JSONDecodeError as e:
+            logging.error(f"Error after updating JSON in {file_path}: {e}")
+            return False
+    else:
+        logging.info(f"  ✓ No section IDs found to update in {file_path}")
     
     return False
 
@@ -1019,6 +1085,10 @@ MODE EXAMPLES:
                     for other_file in file_dir.glob("*.qmd"):
                         if other_file != Path(args.file):
                             update_cross_references(str(other_file), id_replacements)
+                    
+                    # Update all quiz JSON files in the same directory
+                    for quiz_file in file_dir.glob("*_quizzes.json"):
+                        update_cross_references(str(quiz_file), id_replacements)
         elif args.directory:
             # Process all files with summary
             process_directory(args.directory, args.yes, args.force, args.dry_run, args.repair, args.remove, args.backup)
@@ -1034,6 +1104,11 @@ MODE EXAMPLES:
                     # Update all files in the directory
                     for filepath in glob.glob(os.path.join(args.directory, "**/*.qmd"), recursive=True):
                         update_cross_references(filepath, id_replacements)
+                    
+                    # Update all quiz JSON files in the directory
+                    logging.info("\n📝 Updating quiz JSON files...")
+                    for quiz_file in glob.glob(os.path.join(args.directory, "**/*_quizzes.json"), recursive=True):
+                        update_cross_references(quiz_file, id_replacements)
         else:
             parser.error("Either --file or --directory is required")
 
