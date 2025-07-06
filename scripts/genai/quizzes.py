@@ -120,6 +120,7 @@ import yaml
 import concurrent.futures
 import threading
 import time
+import sys
 
 # Gradio imports
 import gradio as gr
@@ -388,11 +389,25 @@ QUIZ_FILE_SCHEMA = {
 SYSTEM_PROMPT = f"""
 You are a professor and an educational content specialist with deep expertise in machine learning systems. You are tasked with creating pedagogically sound self-check questions for the university-level introduction to machine learning systems textbook.
 
+**TARGET AUDIENCE:**
+This textbook is designed for:
+- Advanced undergraduate students (juniors/seniors) in Computer Science, Engineering, or related fields
+- Graduate students (Masters/PhD) in Computer Science, Data Science, or related disciplines
+- Students with varying backgrounds in machine learning - some may have taken ML theory courses, others may be learning ML concepts alongside systems concepts
+- Students with basic programming experience (Python preferred) and understanding of algorithms and data structures
+
+**ASSUMED PREREQUISITES:**
+- Basic programming experience (Python preferred)
+- Understanding of algorithms and data structures
+- Mathematical fundamentals (algebra, basic calculus concepts)
+- Basic computer architecture concepts
+- **Note: Students may have varying levels of ML theory background - some may be learning ML concepts for the first time in this course**
+
 Your task is to first evaluate whether a self-check would be pedagogically valuable for the given section, and if so, generate 1 to 5 self-check questions and answers. Decide the number of questions based on the section's length and complexity. Each chapter has about 10 sections. So be careful not to generate too many questions.
 
 ## ML Systems Focus
 
-Machine learning systems encompasses the full lifecycle: data pipelines, model training infrastructure, deployment, monitoring, serving, scaling, reliability, and operational concerns. Focus on system-level reasoning rather than algorithmic theory.
+Machine learning systems encompasses the full lifecycle: data pipelines, model training infrastructure, deployment, monitoring, serving, scaling, reliability, and operational concerns. Focus on system-level reasoning rather than algorithmic theory. When ML concepts are introduced, explain them clearly without assuming deep prior knowledge.
 
 ## Self-Check Evaluation Criteria
 
@@ -962,17 +977,60 @@ def build_user_prompt(section_title, section_text, chapter_number=None, chapter_
         - Chapters 11-15: Advanced topics requiring system-level reasoning
         - Chapters 16-20: Specialized topics requiring integration across concepts
         - Previous quiz data helps avoid redundancy and ensures variety
+        - Uses global BOOK_OUTLINE to connect concepts across chapters and build progression
     """
     # Define chapter progression context
     chapter_context = ""
     difficulty_guidelines = ""
+    book_progression_context = ""
     
     if chapter_number is not None:
-        chapter_context = f"""
+        # Ensure book outline is built
+        book_outline = build_book_outline_from_quarto_yml()
+        
+        if book_outline:
+            chapter_context = f"""
 **Chapter Context:**
-This is Chapter {chapter_number}: {chapter_title or 'Unknown'} in a 20-chapter textbook on Machine Learning Systems.
+This is Chapter {chapter_number}: {chapter_title or 'Unknown'} in a {len(book_outline)}-chapter textbook on Machine Learning Systems.
 The book progresses from foundational concepts to advanced topics and operational concerns.
 """
+            
+            # Add book outline context for better progression understanding using dynamic BOOK_OUTLINE
+            book_progression_context = f"""
+**Book Progression Context:**
+This chapter builds upon and connects to the broader textbook structure:
+
+"""
+            # Show previous chapters that this builds upon
+            if chapter_number > 1:
+                book_progression_context += "**Builds upon:**\n"
+                for i in range(1, chapter_number):
+                    if i <= len(book_outline):
+                        book_progression_context += f"- Chapter {i}: {book_outline[i-1]}\n"
+                book_progression_context += "\n"
+            
+            # Show upcoming chapters this connects to
+            if chapter_number < len(book_outline):
+                book_progression_context += "**Connects to:**\n"
+                for i in range(chapter_number + 1, min(chapter_number + 4, len(book_outline) + 1)):
+                    if i <= len(book_outline):
+                        book_progression_context += f"- Chapter {i}: {book_outline[i-1]}\n"
+                book_progression_context += "\n"
+            
+            book_progression_context += """
+**Progression Guidelines:**
+- Questions should acknowledge concepts from earlier chapters where relevant
+- Build upon foundational knowledge established in previous chapters
+- Prepare students for more advanced topics in upcoming chapters
+- Create connections that show how ML systems concepts evolve and integrate
+"""
+        else:
+            # No book outline available
+            chapter_context = f"""
+**Chapter Context:**
+This is Chapter {chapter_number}: {chapter_title or 'Unknown'} in a Machine Learning Systems textbook.
+"""
+            book_progression_context = ""
         
         # Progressive difficulty guidelines based on chapter position
         if chapter_number <= 5:
@@ -982,6 +1040,7 @@ The book progresses from foundational concepts to advanced topics and operationa
 - Emphasize core definitions and fundamental principles
 - Questions should test comprehension of basic ML systems concepts
 - Avoid overly complex scenarios or advanced technical details
+- Establish building blocks for later chapters
 """
         elif chapter_number <= 10:
             difficulty_guidelines = """
@@ -990,14 +1049,16 @@ The book progresses from foundational concepts to advanced topics and operationa
 - Questions should test understanding of technical implementation
 - Include questions about tradeoffs and design decisions
 - Connect concepts to real-world ML system scenarios
+- Build upon foundational concepts from Chapters 1-5
 """
         elif chapter_number <= 15:
             difficulty_guidelines = """
 **Chapter Difficulty Guidelines (Chapters 11-15):**
 - Advanced topics requiring system-level reasoning
 - Questions should test deep understanding of optimization and operational concerns
-- Focus on integration of multiple concepts
+- Focus on integration of multiple concepts from earlier chapters
 - Emphasize practical implications and real-world challenges
+- Prepare for specialized topics in final chapters
 """
         else:
             difficulty_guidelines = """
@@ -1006,6 +1067,7 @@ The book progresses from foundational concepts to advanced topics and operationa
 - Questions should test synthesis of knowledge from throughout the book
 - Focus on ethical, societal, and advanced operational considerations
 - Emphasize critical thinking about ML systems in broader contexts
+- Integrate concepts from all previous chapters
 """
     
     # Build previous quiz context if available
@@ -1032,12 +1094,14 @@ The following sections in this chapter already have quizzes. Ensure your questio
 - Focus on different aspects of the content (e.g., if previous questions focused on tradeoffs, focus on implementation or operational concerns)
 - Ensure your questions complement rather than repeat the learning objectives covered in previous sections
 - If similar concepts appear, approach them from a different angle or application context
+- Consider how this section's concepts connect to and build upon earlier chapters
 """
     
     return f"""
 This section is titled "{section_title}".
 
 {chapter_context}
+{book_progression_context}
 {difficulty_guidelines}
 {previous_quiz_context}
 
@@ -1046,7 +1110,6 @@ Section content:
 
 Generate a self-check quiz with 1 to 5 well-structured questions and answers based on this section. Include a rationale explaining your question generation strategy and focus areas. Return your response in the specified JSON format.
 """.strip()
-
 def regenerate_section_quiz(client, section_title, section_text, current_quiz_data, user_prompt, chapter_number=None, chapter_title=None, previous_quizzes=None):
     """
     Regenerate quiz questions for a section with custom instructions.
@@ -1074,6 +1137,7 @@ def regenerate_section_quiz(client, section_title, section_text, current_quiz_da
         - Adds user instructions to the system prompt
         - Includes a regeneration comment for tracking changes
         - Can incorporate previous quiz context for variety if provided
+        - Uses global BOOK_OUTLINE for chapter progression context
     """
     # Create a custom system prompt that includes the user's instructions
     custom_system_prompt = f"""
@@ -2513,8 +2577,8 @@ def extract_chapter_info(file_path):
     Extract chapter number and title from file path.
     
     This function maps file paths to chapter numbers based on the book's
-    directory structure. It uses a predefined mapping to identify which
-    chapter a file belongs to for difficulty progression.
+    structure as defined in _quarto.yml. It uses the global BOOK_OUTLINE 
+    to identify which chapter a file belongs to for difficulty progression.
     
     Args:
         file_path (str): Path to the QMD file
@@ -2523,39 +2587,31 @@ def extract_chapter_info(file_path):
         tuple: (chapter_number, chapter_title) or (None, None) if not found
         
     Note:
-        The chapter mapping is based on the ML Systems textbook structure.
-        Update this mapping if the book structure changes.
+        The chapter mapping is based on the order specified in _quarto.yml.
+        The function looks for the file in the book outline and returns its position.
     """
-    # Map file paths to chapter numbers based on the book outline
-    chapter_mapping = {
-        'introduction': (1, 'Introduction'),
-        'ml_systems': (2, 'ML Systems'),
-        'dl_primer': (3, 'DL Primer'),
-        'dnn_architectures': (4, 'DNN Architectures'),
-        'workflow': (5, 'AI Workflow'),
-        'data_engineering': (6, 'Data Engineering'),
-        'frameworks': (7, 'AI Frameworks'),
-        'training': (8, 'AI Training'),
-        'efficient_ai': (9, 'Efficient AI'),
-        'optimizations': (10, 'Model Optimizations'),
-        'hw_acceleration': (11, 'AI Acceleration'),
-        'benchmarking': (12, 'Benchmarking AI'),
-        'ops': (13, 'ML Operations'),
-        'ondevice_learning': (14, 'On-Device Learning'),
-        'privacy_security': (15, 'Security & Privacy'),
-        'responsible_ai': (16, 'Responsible AI'),
-        'sustainable_ai': (17, 'Sustainable AI'),
-        'robust_ai': (18, 'Robust AI'),
-        'ai_for_good': (19, 'AI for Good'),
-        'conclusion': (20, 'Conclusion')
-    }
+    # Get the dynamic book outline
+    book_outline = build_book_outline_from_quarto_yml()
     
-    # Extract chapter name from file path
-    file_name = os.path.basename(file_path).replace('.qmd', '').replace('.md', '')
+    # Extract the file path relative to the project root
+    try:
+        # Get absolute path and convert to relative path from project root
+        abs_path = os.path.abspath(file_path)
+        project_root = os.getcwd()
+        if abs_path.startswith(project_root):
+            relative_path = os.path.relpath(abs_path, project_root)
+        else:
+            relative_path = file_path
+    except:
+        relative_path = file_path
     
-    for key, (number, title) in chapter_mapping.items():
-        if key in file_name:
-            return number, title
+    # Look for this file in the book outline
+    for i, qmd_file in enumerate(get_qmd_order_from_quarto_yml(QUARTO_YML_PATH)):
+        if qmd_file == relative_path or qmd_file.endswith(os.path.basename(relative_path)):
+            # Found the file in the book outline, return its position (1-indexed)
+            chapter_number = i + 1
+            chapter_title = book_outline[i] if i < len(book_outline) else "Unknown"
+            return chapter_number, chapter_title
     
     return None, None
 
@@ -2679,17 +2735,266 @@ def generate_for_file(qmd_file, args):
 # Global variable for _quarto.yml path
 QUARTO_YML_PATH = os.path.join(os.getcwd(), '_quarto.yml')
 
+# Global book outline for Machine Learning Systems textbook
+# This will be populated automatically from _quarto.yml and QMD files
+BOOK_OUTLINE = None
+
 # Thread-local storage for parallel processing
 thread_local = threading.local()
 
-def generate_for_file_parallel(qmd_file, args, progress_callback=None):
+class ProgressTracker:
+    """
+    Real-time progress tracker for parallel quiz generation.
+    Shows progress bars for all files simultaneously.
+    """
+    
+    def __init__(self, total_files):
+        self.total_files = total_files
+        self.progress_lock = threading.Lock()
+        self.file_progress = {}  # file -> (current_section, total_sections, status)
+        self.completed_files = 0
+        self.start_time = time.time()
+        
+    def update_file_progress(self, file_name, current_section=None, total_sections=None, status="running"):
+        """Update progress for a specific file"""
+        with self.progress_lock:
+            if file_name not in self.file_progress:
+                self.file_progress[file_name] = (0, total_sections or 0, status)
+            else:
+                current, total, _ = self.file_progress[file_name]
+                if current_section is not None:
+                    current = current_section
+                if total_sections is not None:
+                    total = total_sections
+                self.file_progress[file_name] = (current, total, status)
+            self._redraw_progress()
+    
+    def complete_file(self, file_name, success=True):
+        """Mark a file as completed"""
+        with self.progress_lock:
+            self.completed_files += 1
+            status = "✅ completed" if success else "❌ failed"
+            self.file_progress[file_name] = (self.file_progress.get(file_name, (0, 0, ""))[1], 
+                                           self.file_progress.get(file_name, (0, 0, ""))[1], 
+                                           status)
+            self._redraw_progress()
+    
+    def _redraw_progress(self):
+        """Redraw all progress bars"""
+        # Clear screen (works on most terminals)
+        print("\033[2J\033[H", end="", flush=True)
+        
+        # Print header
+        elapsed = time.time() - self.start_time
+        print(f"🚀 Parallel Quiz Generation - {self.completed_files}/{self.total_files} completed ({elapsed:.1f}s elapsed)")
+        print("=" * 80)
+        print()  # Add spacing
+        
+        # Only show active files (running, recently completed, or failed)
+        active_files = []
+        for file_name, (current, total, status) in self.file_progress.items():
+            if status == "running" or "completed" in status or "failed" in status:
+                active_files.append((file_name, current, total, status))
+        
+        # Sort active files by chapter number from book outline
+        sorted_files = self._sort_active_files_by_chapter(active_files)
+        
+        for i, (file_name, current, total, status) in enumerate(sorted_files):
+            # Add spacing between files
+            if i > 0:
+                print()
+            
+            if total > 0:
+                # Show progress bar
+                progress = current / total
+                bar_length = 30
+                filled_length = int(bar_length * progress)
+                bar = "█" * filled_length + "░" * (bar_length - filled_length)
+                percentage = int(progress * 100)
+                
+                if status == "running":
+                    print(f"🔄 {file_name:<25} [{bar}] {percentage:3d}% ({current}/{total} sections)")
+                elif "completed" in status:
+                    print(f"✅ {file_name:<25} [{bar}] {percentage:3d}% {status}")
+                elif "failed" in status:
+                    print(f"❌ {file_name:<25} [{bar}] {percentage:3d}% {status}")
+            else:
+                # No sections found or not started
+                if status == "running":
+                    print(f"🔄 {file_name:<25} [{'░' * 30}] ---% (processing...)")
+                elif "completed" in status:
+                    print(f"✅ {file_name:<25} [{'█' * 30}] 100% {status}")
+                elif "failed" in status:
+                    print(f"❌ {file_name:<25} [{'░' * 30}] ---% {status}")
+        
+        print()  # Add spacing
+        print("=" * 80)
+        print(f"Total completed: {self.completed_files}/{self.total_files}")
+        if self.completed_files < self.total_files:
+            print("Press Ctrl+C to stop...")
+    
+    def _sort_active_files_by_chapter(self, active_files):
+        """Sort active files by their chapter number from the book outline"""
+        try:
+            # Get the book outline to determine chapter order
+            book_outline = build_book_outline_from_quarto_yml()
+            ordered_files = get_qmd_order_from_quarto_yml(QUARTO_YML_PATH)
+            
+            # Create a mapping of file names to their position in the book
+            file_order = {}
+            for i, qmd_file in enumerate(ordered_files):
+                file_name = Path(qmd_file).name
+                file_order[file_name] = i
+            
+            # Sort the active files by their position in the book outline
+            def sort_key(file_data):
+                file_name = file_data[0]
+                return file_order.get(file_name, 999)  # Put unknown files at the end
+            
+            return sorted(active_files, key=sort_key)
+            
+        except Exception:
+            # Fallback to alphabetical sorting if there's an error
+            return sorted(active_files, key=lambda x: x[0])
+    
+    def _sort_files_by_chapter(self):
+        """Sort files by their chapter number from the book outline"""
+        try:
+            # Get the book outline to determine chapter order
+            book_outline = build_book_outline_from_quarto_yml()
+            ordered_files = get_qmd_order_from_quarto_yml(QUARTO_YML_PATH)
+            
+            # Create a mapping of file names to their position in the book
+            file_order = {}
+            for i, qmd_file in enumerate(ordered_files):
+                file_name = Path(qmd_file).name
+                file_order[file_name] = i
+            
+            # Sort the files by their position in the book outline
+            def sort_key(file_name):
+                return file_order.get(file_name, 999)  # Put unknown files at the end
+            
+            return sorted(self.file_progress.keys(), key=sort_key)
+            
+        except Exception:
+            # Fallback to alphabetical sorting if there's an error
+            return sorted(self.file_progress.keys())
+
+def extract_chapter_title_from_qmd(qmd_file_path):
+    """
+    Extract the chapter title from the main # header in a QMD file.
+    
+    Args:
+        qmd_file_path (str): Path to the QMD file
+        
+    Returns:
+        str: Chapter title from the main header, or None if not found
+    """
+    try:
+        with open(qmd_file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Find the first # header (main chapter title)
+        lines = content.split('\n')
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith('# ') and not stripped.startswith('## '):
+                # Extract the title (remove the # and any attributes)
+                title = stripped[2:]  # Remove '# '
+                # Remove any attributes like {#sec-...}
+                title = re.sub(r'\s*\{[^}]*\}\s*$', '', title)
+                return title.strip()
+        
+        return None
+    except Exception as e:
+        print(f"Warning: Could not extract chapter title from {qmd_file_path}: {e}")
+        return None
+
+def build_book_outline_from_quarto_yml():
+    """
+    Automatically build the book outline from _quarto.yml and QMD files.
+    
+    This function reads the _quarto.yml file to get the chapter order,
+    then extracts chapter titles from the main # headers in each QMD file.
+    
+    Returns:
+        list: List of chapter titles in the order specified by _quarto.yml
+    """
+    global BOOK_OUTLINE
+    
+    # If already built, return it
+    if BOOK_OUTLINE is not None:
+        return BOOK_OUTLINE
+    
+    # Thread-safe building with a lock
+    if not hasattr(thread_local, 'building_outline'):
+        thread_local.building_outline = False
+    
+    # If another thread is already building, wait
+    if thread_local.building_outline:
+        # Wait for the outline to be built
+        while BOOK_OUTLINE is None:
+            time.sleep(0.1)
+        return BOOK_OUTLINE
+    
+    # Mark that we're building the outline
+    thread_local.building_outline = True
+    
+    yml_path = QUARTO_YML_PATH
+    if not os.path.exists(yml_path):
+        print("Warning: _quarto.yml not found, cannot build book outline")
+        BOOK_OUTLINE = []
+        thread_local.building_outline = False
+        return BOOK_OUTLINE
+    
+    try:
+        # Get ordered QMD files from _quarto.yml
+        ordered_qmd_files = get_qmd_order_from_quarto_yml(yml_path)
+        
+        if not ordered_qmd_files:
+            print("Warning: No QMD files found in _quarto.yml, cannot build book outline")
+            BOOK_OUTLINE = []
+            thread_local.building_outline = False
+            return BOOK_OUTLINE
+        
+        # Extract chapter titles from each QMD file in the order specified by _quarto.yml
+        chapter_titles = []
+        
+        for qmd_file in ordered_qmd_files:
+            # Convert relative path to absolute path
+            abs_path = os.path.join(os.getcwd(), qmd_file)
+            if os.path.exists(abs_path):
+                title = extract_chapter_title_from_qmd(abs_path)
+                if title:
+                    chapter_titles.append(title)
+                else:
+                    # If we can't extract the title, skip this file and log a warning
+                    print(f"Warning: Could not extract chapter title from {qmd_file}, skipping from book outline")
+                    continue
+            else:
+                print(f"Warning: QMD file not found: {abs_path}, skipping from book outline")
+                continue
+        
+        BOOK_OUTLINE = chapter_titles
+        print(f"✅ Built book outline from _quarto.yml with {len(chapter_titles)} chapters")
+        thread_local.building_outline = False
+        return BOOK_OUTLINE
+        
+    except Exception as e:
+        print(f"Warning: Error building book outline from _quarto.yml: {e}")
+        print("Cannot build book outline")
+        BOOK_OUTLINE = []
+        thread_local.building_outline = False
+        return BOOK_OUTLINE
+
+def generate_for_file_parallel(qmd_file, args, progress_tracker=None):
     """
     Thread-safe version of generate_for_file for parallel processing.
     
     Args:
         qmd_file (str): Path to QMD file
         args: Command line arguments
-        progress_callback (callable): Optional callback for progress updates
+        progress_tracker (ProgressTracker): Progress tracker for real-time updates
     
     Returns:
         dict: Result summary with success/error info
@@ -2697,17 +3002,21 @@ def generate_for_file_parallel(qmd_file, args, progress_callback=None):
     thread_id = threading.get_ident()
     start_time = time.time()
     
+    file_name = Path(qmd_file).name
+    
     try:
         # Initialize thread-local OpenAI client to avoid sharing between threads
         if not hasattr(thread_local, 'openai_client'):
             thread_local.openai_client = OpenAI()
         
-        # Call the existing generate_for_file logic but with isolated client
-        result = _generate_for_file_with_client(qmd_file, args, thread_local.openai_client)
+        # Call the existing generate_for_file logic but with isolated client and progress tracker
+        result = _generate_for_file_with_client(qmd_file, args, thread_local.openai_client, progress_tracker)
         
         elapsed = time.time() - start_time
-        if progress_callback:
-            progress_callback(qmd_file, True, elapsed, result)
+        
+        # Mark as completed
+        if progress_tracker:
+            progress_tracker.complete_file(file_name, True)
         
         return {
             "file": qmd_file,
@@ -2718,8 +3027,10 @@ def generate_for_file_parallel(qmd_file, args, progress_callback=None):
         }
     except Exception as e:
         elapsed = time.time() - start_time
-        if progress_callback:
-            progress_callback(qmd_file, False, elapsed, str(e))
+        
+        # Mark as failed
+        if progress_tracker:
+            progress_tracker.complete_file(file_name, False)
         
         return {
             "file": qmd_file,
@@ -2729,11 +3040,13 @@ def generate_for_file_parallel(qmd_file, args, progress_callback=None):
             "error": str(e)
         }
 
-def _generate_for_file_with_client(qmd_file, args, client):
+def _generate_for_file_with_client(qmd_file, args, client, progress_tracker=None):
     """
     Core logic of generate_for_file that accepts a specific OpenAI client.
     This allows for thread-safe parallel processing.
     """
+    file_name = Path(qmd_file).name
+    
     # Read the QMD file
     with open(qmd_file, 'r', encoding='utf-8') as f:
         content = f.read()
@@ -2742,6 +3055,10 @@ def _generate_for_file_with_client(qmd_file, args, client):
     sections = extract_sections_with_ids(content)
     if not sections:
         raise ValueError("No sections found or sections missing IDs")
+    
+    # Update progress with total sections found
+    if progress_tracker:
+        progress_tracker.update_file_progress(file_name, 0, len(sections))
     
     # Extract chapter info
     chapter_number, chapter_title = extract_chapter_info(qmd_file)
@@ -2753,6 +3070,10 @@ def _generate_for_file_with_client(qmd_file, args, client):
     previous_quizzes = []  # Track previous quiz data for variety
     
     for i, section in enumerate(sections):
+        # Update progress for current section
+        if progress_tracker:
+            progress_tracker.update_file_progress(file_name, i + 1, len(sections))
+        
         # Build user prompt with chapter context and previous quiz data
         user_prompt = build_user_prompt(
             section['section_title'], 
@@ -2935,20 +3256,9 @@ def generate_for_directory_parallel(directory, args):
     
     print(f"📚 Processing {len(ordered_qmds)} files with {max_workers} parallel threads")
     
-    # Progress tracking with thread safety
-    progress_lock = threading.Lock()
-    completed_count = 0
+    # Initialize progress tracker
+    progress_tracker = ProgressTracker(len(ordered_qmds))
     results = []
-    
-    def progress_callback(file, success, elapsed, details):
-        nonlocal completed_count
-        with progress_lock:
-            completed_count += 1
-            status = "✅" if success else "❌"
-            file_name = Path(file).name
-            print(f"{status} [{completed_count:2d}/{len(ordered_qmds)}] {file_name:<30} ({elapsed:5.1f}s)")
-            if not success:
-                print(f"     Error: {details}")
     
     # Execute in parallel with controlled concurrency
     start_time = time.time()
@@ -2961,17 +3271,27 @@ def generate_for_directory_parallel(directory, args):
             base_name = os.path.splitext(os.path.basename(qmd_file))[0]
             file_args.output = f"{base_name}_quizzes.json"
             
-            future = executor.submit(generate_for_file_parallel, qmd_file, file_args, progress_callback)
+            future = executor.submit(generate_for_file_parallel, qmd_file, file_args, progress_tracker)
             future_to_file[future] = qmd_file
         
         # Collect results as they complete
         for future in concurrent.futures.as_completed(future_to_file):
             file = future_to_file[future]
             try:
-                result = future.result()
+                # Add timeout to prevent hanging
+                result = future.result(timeout=300)  # 5 minute timeout per file
                 results.append(result)
+            except concurrent.futures.TimeoutError:
+                file_name = Path(file).name
+                progress_tracker.complete_file(file_name, False)
+                results.append({
+                    "file": file,
+                    "success": False,
+                    "error": "Timeout after 5 minutes"
+                })
             except Exception as e:
-                print(f"❌ Unexpected error processing {file}: {e}")
+                file_name = Path(file).name
+                progress_tracker.complete_file(file_name, False)
                 results.append({
                     "file": file,
                     "success": False,
@@ -2986,7 +3306,10 @@ def generate_for_directory_parallel(directory, args):
     total_cpu_time = sum(r.get("elapsed", 0) for r in results)
     speedup = total_cpu_time / total_elapsed if total_elapsed > 0 else 1
     
-    print(f"\n🏁 Parallel Generation Complete!")
+    # Clear the progress display and show final summary
+    print("\033[2J\033[H", end="", flush=True)
+    print(f"🏁 Parallel Generation Complete!")
+    print("=" * 80)
     print(f"   ✅ Successful: {len(successful)}")
     print(f"   ❌ Failed: {len(failed)}")
     print(f"   ⏱️  Total CPU time: {total_cpu_time:.1f}s")
@@ -3002,6 +3325,8 @@ def generate_for_directory_parallel(directory, args):
         print(f"\n❌ Failed files:")
         for r in failed:
             print(f"   - {Path(r['file']).name}: {r.get('error', 'Unknown error')}")
+    
+    print("=" * 80)
 
 def clean_slug(title):
     """Creates a URL-friendly slug from a title."""
