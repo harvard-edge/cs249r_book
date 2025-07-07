@@ -3,8 +3,10 @@
 local json  = require("pandoc.json")
 local utils = pandoc.utils
 
--- global state: all quiz sections are collected here
+-- global state: all quiz sections are collected here, organized by file source
 local quiz_sections = {}
+local quiz_sections_by_file = {} -- track which sections came from which file
+local current_document_file = "unknown" -- track which document is being processed
 
 -- helper: checks if output is PDF/LaTeX
 local function is_pdf()
@@ -16,6 +18,7 @@ end
 local function load_quiz_data(path)
   local f, err = io.open(path, "r")
   if not f then
+    io.stderr:write("❌ [QUIZ] Failed to open file: " .. path .. " - " .. (err or "unknown error") .. "\n")
     return nil
   end
   local content = f:read("*all")
@@ -23,30 +26,36 @@ local function load_quiz_data(path)
 
   local ok, data = pcall(json.decode, content)
   if not ok or type(data) ~= "table" then
+    io.stderr:write("❌ [QUIZ] Failed to parse JSON from file: " .. path .. "\n")
     return nil
   end
   return data
 end
 
 -- 2) Extract sections from JSON and map them to section_id
-local function register_sections(data)
+local function register_sections(data, file_path)
   local secs = {}
+  local sections_found = 0
+  
   if data.sections then
     for _, s in ipairs(data.sections) do
       if s.quiz_data
          and s.quiz_data.quiz_needed
          and s.quiz_data.questions then
         secs[s.section_id] = s.quiz_data.questions
+        sections_found = sections_found + 1
       end
     end
   else
     for sid, qs in pairs(data) do
       if sid ~= "metadata" then
         secs[sid] = qs
+        sections_found = sections_found + 1
       end
     end
   end
-  return secs
+  
+  return secs, sections_found
 end
 
 -- 3) Render content_md into a callout Div for all formats
@@ -108,6 +117,17 @@ local function handle_meta(meta)
     return meta
   end
 
+  -- Try to get the current document filename
+  if PANDOC_DOCUMENT and PANDOC_DOCUMENT.meta and PANDOC_DOCUMENT.meta.filename then
+    current_document_file = utils.stringify(PANDOC_DOCUMENT.meta.filename)
+  elseif PANDOC_STATE and PANDOC_STATE.input_files and PANDOC_STATE.input_files[1] then
+    current_document_file = PANDOC_STATE.input_files[1]
+  end
+
+  io.stderr:write("\n" .. string.rep("=", 80) .. "\n")
+  io.stderr:write("📄 [QUIZ] Processing Document: " .. current_document_file .. "\n")
+  io.stderr:write(string.rep("=", 80) .. "\n")
+
   -- collect all files into this list
   local files = {}
 
@@ -123,16 +143,41 @@ local function handle_meta(meta)
     table.insert(files, p)
   end
 
-  -- load each file individually
-  for _, path in ipairs(files) do
+  io.stderr:write("📁 Found " .. #files .. " quiz file(s) to process for this document\n\n")
+
+  -- load each file individually with detailed reporting
+  local total_sections_loaded = 0
+  local successful_files = 0
+  
+  for i, path in ipairs(files) do
+    io.stderr:write("📄 [" .. i .. "/" .. #files .. "] Loading quiz file: " .. path .. "\n")
+    
     local data = load_quiz_data(path)
     if data then
-      local secs = register_sections(data)
-      for k, v in pairs(secs) do
-        quiz_sections[k] = v
+      local secs, sections_found = register_sections(data, path)
+      if sections_found > 0 then
+        -- Track which sections came from this file
+        quiz_sections_by_file[path] = {}
+        for k, v in pairs(secs) do
+          quiz_sections[k] = v
+          quiz_sections_by_file[path][k] = v
+        end
+        total_sections_loaded = total_sections_loaded + sections_found
+        successful_files = successful_files + 1
+        io.stderr:write("   ✅ Loaded " .. sections_found .. " quiz section(s)\n")
+      else
+        io.stderr:write("   ⚠️  No quiz sections found in file\n")
       end
+    else
+      io.stderr:write("   ❌ Failed to load file\n")
     end
+    io.stderr:write("\n")
   end
+
+  io.stderr:write("📊 Quiz File Loading Summary for " .. current_document_file .. ":\n")
+  io.stderr:write("   • Files processed: " .. successful_files .. "/" .. #files .. " ✅\n")
+  io.stderr:write("   • Total quiz sections loaded: " .. total_sections_loaded .. " 📝\n")
+  io.stderr:write(string.rep("-", 80) .. "\n")
 
   return meta
 end
@@ -140,13 +185,16 @@ end
 -- 6) Pandoc phase: iterate over blocks and insert quizzes into chapters
 local function insert_quizzes(doc)
   if not next(quiz_sections) then
-    io.stderr:write("No quiz found for this file.\n")
+    io.stderr:write("ℹ️  [QUIZ] No quiz sections found for document: " .. current_document_file .. "\n")
     return doc
   end
-  io.stderr:write("\n========== [QUIZ] Inserting Quizzes ==========" .. "\n")
+
+  io.stderr:write("🔄 [QUIZ] Inserting quizzes into document: " .. current_document_file .. "\n")
 
   local new_blocks      = {}
   local chapter_answers = {}
+  local sections_processed = 0
+  local sections_by_file = {}
 
   local section_blocks = {}
   local current_section_id = nil
@@ -160,9 +208,23 @@ local function insert_quizzes(doc)
       table.insert(new_blocks, b)
     end
     if current_section_has_quiz and current_section_quizdiv then
-      io.stderr:write("✅ [QUIZ] Inserted quiz for section: " .. tostring(current_section_id) .. "\n")
+      -- Find which file this section came from
+      local source_file = "unknown"
+      for file_path, sections in pairs(quiz_sections_by_file) do
+        if sections[current_section_id] then
+          source_file = file_path
+          if not sections_by_file[source_file] then
+            sections_by_file[source_file] = {}
+          end
+          table.insert(sections_by_file[source_file], current_section_id)
+          break
+        end
+      end
+      
+      io.stderr:write("✅ Inserted quiz for section: " .. tostring(current_section_id) .. " (from: " .. source_file .. ")\n")
       table.insert(new_blocks, current_section_quizdiv)
       table.insert(chapter_answers, current_section_answerdiv)
+      sections_processed = sections_processed + 1
     end
     section_blocks = {}
     current_section_id = nil
@@ -202,7 +264,19 @@ local function insert_quizzes(doc)
     for _, adiv in ipairs(chapter_answers) do
       table.insert(new_blocks, adiv)
     end
-    io.stderr:write("\n========== [QUIZ] Done ==========" .. "\n")
+    
+    io.stderr:write("\n📊 Quiz Insertion Summary for " .. current_document_file .. ":\n")
+    io.stderr:write("   • Total sections processed: " .. sections_processed .. " ✅\n")
+    io.stderr:write("   • Total answers added: " .. #chapter_answers .. " 📝\n")
+    
+    -- Show breakdown by file
+    for file_path, sections in pairs(sections_by_file) do
+      io.stderr:write("   • From " .. file_path .. ": " .. #sections .. " section(s) 📄\n")
+    end
+    
+    io.stderr:write(string.rep("=", 80) .. "\n")
+    io.stderr:write("✅ [QUIZ] Document processing complete: " .. current_document_file .. "\n")
+    io.stderr:write(string.rep("=", 80) .. "\n\n")
   end
 
   return pandoc.Pandoc(new_blocks, doc.meta)
