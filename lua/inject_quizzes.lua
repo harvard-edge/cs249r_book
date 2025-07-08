@@ -131,14 +131,42 @@ local function handle_meta(meta)
     is_pdf_build = true
   end
 
+  -- Get quiz configuration from global metadata
+  local quiz_config = meta["quiz-config"] or {}
+  local file_pattern = quiz_config["file-pattern"] or "*_quizzes.json"
+  local scan_directory = quiz_config["scan-directory"] or "contents/core"
+  local auto_discover_pdf = quiz_config["auto-discover-pdf"] ~= false -- default to true
+  
+  -- Convert Meta objects to strings if needed
+  if type(file_pattern) == "table" and file_pattern.t == "MetaString" then
+    file_pattern = file_pattern.text
+  elseif type(file_pattern) == "table" then
+    file_pattern = utils.stringify(file_pattern)
+  end
+  
+  if type(scan_directory) == "table" and scan_directory.t == "MetaString" then
+    scan_directory = scan_directory.text
+  elseif type(scan_directory) == "table" then
+    scan_directory = utils.stringify(scan_directory)
+  end
+  
+  if type(auto_discover_pdf) == "table" and auto_discover_pdf.t == "MetaBool" then
+    auto_discover_pdf = auto_discover_pdf.bool
+  elseif type(auto_discover_pdf) == "table" then
+    auto_discover_pdf = utils.stringify(auto_discover_pdf) ~= "false"
+  end
+
   io.stderr:write("🔍 [DEBUG] Number of input files: " .. (PANDOC_STATE and PANDOC_STATE.input_files and #PANDOC_STATE.input_files or "unknown") .. "\n")
   io.stderr:write("🔍 [DEBUG] Is PDF build: " .. tostring(is_pdf_build) .. "\n")
   io.stderr:write("🔍 [DEBUG] Quiz metadata: " .. tostring(raw) .. "\n")
   io.stderr:write("🔍 [DEBUG] FORMAT: " .. tostring(FORMAT) .. "\n")
   io.stderr:write("🔍 [DEBUG] Current document file: " .. current_document_file .. "\n")
+  io.stderr:write("🔍 [DEBUG] Quiz config - file pattern: " .. file_pattern .. "\n")
+  io.stderr:write("🔍 [DEBUG] Quiz config - scan directory: " .. scan_directory .. "\n")
+  io.stderr:write("🔍 [DEBUG] Quiz config - auto discover PDF: " .. tostring(auto_discover_pdf) .. "\n")
 
   if not raw then
-    if is_pdf_build then
+    if is_pdf_build and auto_discover_pdf then
       -- For PDF builds, auto-discover quiz files from the input files
       io.stderr:write("\n" .. string.rep("=", 80) .. "\n")
       io.stderr:write("📄 [QUIZ] Processing PDF Book Document - Auto-discovering quiz files\n")
@@ -151,10 +179,12 @@ local function handle_meta(meta)
       -- Since Quarto combines files into a temporary document, we need to scan the directory directly
       local function scan_for_quiz_files()
         local quiz_files = {}
-        local core_dir = "contents/core"
         
-        -- Try to open the core directory
-        local dir = io.popen("find " .. core_dir .. " -name '*_quizzes.json' 2>/dev/null")
+        -- Use the configured directory and pattern
+        local find_command = string.format("find %s -name '%s' 2>/dev/null", scan_directory, file_pattern)
+        io.stderr:write("🔍 [DEBUG] Running command: " .. find_command .. "\n")
+        
+        local dir = io.popen(find_command)
         if dir then
           for file in dir:lines() do
             table.insert(quiz_files, file)
@@ -200,7 +230,7 @@ local function handle_meta(meta)
         io.stderr:write("   • Total quiz sections loaded: " .. total_sections_loaded .. " 📝\n")
         io.stderr:write(string.rep("-", 80) .. "\n")
       else
-        io.stderr:write("📁 No quiz files found in contents/core/ directory\n")
+        io.stderr:write("📁 No quiz files found in " .. scan_directory .. " directory\n")
         io.stderr:write(string.rep("-", 80) .. "\n")
       end
     else
