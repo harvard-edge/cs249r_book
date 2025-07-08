@@ -112,11 +112,7 @@ end
 -- 5) Meta phase: read one or more paths from meta.quiz
 local function handle_meta(meta)
   local raw = meta.quiz
-  if not raw then
-    -- Only log if we're in verbose mode or if this is a file that should have quizzes
-    return meta
-  end
-
+  
   -- Try to get the current document filename
   if PANDOC_DOCUMENT and PANDOC_DOCUMENT.meta and PANDOC_DOCUMENT.meta.filename then
     current_document_file = utils.stringify(PANDOC_DOCUMENT.meta.filename)
@@ -124,8 +120,102 @@ local function handle_meta(meta)
     current_document_file = PANDOC_STATE.input_files[1]
   end
 
+  -- Check if this is a PDF build (combined document) or HTML build (individual files)
+  local is_pdf_build = false
+  if PANDOC_STATE and PANDOC_STATE.input_files and #PANDOC_STATE.input_files > 1 then
+    is_pdf_build = true
+  end
+  
+  -- Alternative PDF detection: check if we're in a PDF format
+  if FORMAT and (FORMAT:lower():match("pdf") or FORMAT:lower():match("latex")) then
+    is_pdf_build = true
+  end
+
+  io.stderr:write("🔍 [DEBUG] Number of input files: " .. (PANDOC_STATE and PANDOC_STATE.input_files and #PANDOC_STATE.input_files or "unknown") .. "\n")
+  io.stderr:write("🔍 [DEBUG] Is PDF build: " .. tostring(is_pdf_build) .. "\n")
+  io.stderr:write("🔍 [DEBUG] Quiz metadata: " .. tostring(raw) .. "\n")
+  io.stderr:write("🔍 [DEBUG] FORMAT: " .. tostring(FORMAT) .. "\n")
+  io.stderr:write("🔍 [DEBUG] Current document file: " .. current_document_file .. "\n")
+
+  if not raw then
+    if is_pdf_build then
+      -- For PDF builds, auto-discover quiz files from the input files
+      io.stderr:write("\n" .. string.rep("=", 80) .. "\n")
+      io.stderr:write("📄 [QUIZ] Processing PDF Book Document - Auto-discovering quiz files\n")
+      io.stderr:write(string.rep("=", 80) .. "\n")
+      
+      local files = {}
+      local total_sections_loaded = 0
+      local successful_files = 0
+      
+      -- Since Quarto combines files into a temporary document, we need to scan the directory directly
+      local function scan_for_quiz_files()
+        local quiz_files = {}
+        local core_dir = "contents/core"
+        
+        -- Try to open the core directory
+        local dir = io.popen("find " .. core_dir .. " -name '*_quizzes.json' 2>/dev/null")
+        if dir then
+          for file in dir:lines() do
+            table.insert(quiz_files, file)
+          end
+          dir:close()
+        end
+        
+        return quiz_files
+      end
+      
+      files = scan_for_quiz_files()
+      
+      if #files > 0 then
+        io.stderr:write("📁 Found " .. #files .. " quiz file(s) to process for this document\n\n")
+        
+        for i, path in ipairs(files) do
+          io.stderr:write("📄 [" .. i .. "/" .. #files .. "] Loading quiz file: " .. path .. "\n")
+          
+          local data = load_quiz_data(path)
+          if data then
+            local secs, sections_found = register_sections(data, path)
+            if sections_found > 0 then
+              -- Track which sections came from this file
+              quiz_sections_by_file[path] = {}
+              for k, v in pairs(secs) do
+                quiz_sections[k] = v
+                quiz_sections_by_file[path][k] = v
+              end
+              total_sections_loaded = total_sections_loaded + sections_found
+              successful_files = successful_files + 1
+              io.stderr:write("   ✅ Loaded " .. sections_found .. " quiz section(s)\n")
+            else
+              io.stderr:write("   ⚠️  No quiz sections found in file\n")
+            end
+          else
+            io.stderr:write("   ❌ Failed to load file\n")
+          end
+          io.stderr:write("\n")
+        end
+        
+        io.stderr:write("📊 Quiz File Loading Summary for PDF Book:\n")
+        io.stderr:write("   • Files processed: " .. successful_files .. "/" .. #files .. " ✅\n")
+        io.stderr:write("   • Total quiz sections loaded: " .. total_sections_loaded .. " 📝\n")
+        io.stderr:write(string.rep("-", 80) .. "\n")
+      else
+        io.stderr:write("📁 No quiz files found in contents/core/ directory\n")
+        io.stderr:write(string.rep("-", 80) .. "\n")
+      end
+    else
+      -- For HTML builds, no quiz metadata means no quizzes needed
+      io.stderr:write("ℹ️  [QUIZ] No quiz metadata found for document: " .. current_document_file .. "\n")
+    end
+    return meta
+  end
+
   io.stderr:write("\n" .. string.rep("=", 80) .. "\n")
-  io.stderr:write("📄 [QUIZ] Processing Document: " .. current_document_file .. "\n")
+  if is_pdf_build then
+    io.stderr:write("📄 [QUIZ] Processing PDF Book Document\n")
+  else
+    io.stderr:write("📄 [QUIZ] Processing HTML Document: " .. current_document_file .. "\n")
+  end
   io.stderr:write(string.rep("=", 80) .. "\n")
 
   -- collect all files into this list
@@ -174,7 +264,11 @@ local function handle_meta(meta)
     io.stderr:write("\n")
   end
 
-  io.stderr:write("📊 Quiz File Loading Summary for " .. current_document_file .. ":\n")
+  if is_pdf_build then
+    io.stderr:write("📊 Quiz File Loading Summary for PDF Book:\n")
+  else
+    io.stderr:write("📊 Quiz File Loading Summary for " .. current_document_file .. ":\n")
+  end
   io.stderr:write("   • Files processed: " .. successful_files .. "/" .. #files .. " ✅\n")
   io.stderr:write("   • Total quiz sections loaded: " .. total_sections_loaded .. " 📝\n")
   io.stderr:write(string.rep("-", 80) .. "\n")
@@ -189,7 +283,36 @@ local function insert_quizzes(doc)
     return doc
   end
 
+  -- Try to extract chapter title
+  local chapter_title = "Unknown Chapter"
+  
+  -- Method 1: Try to get title from document metadata
+  if doc.meta and doc.meta.title then
+    chapter_title = utils.stringify(doc.meta.title)
+  end
+  
+  -- Method 2: If no metadata title, try to get from first heading
+  if chapter_title == "Unknown Chapter" and doc.blocks and #doc.blocks > 0 then
+    for _, block in ipairs(doc.blocks) do
+      if block.t == "Header" and block.level == 1 then
+        chapter_title = utils.stringify(block.content)
+        break
+      end
+    end
+  end
+  
+  -- Method 3: If still no title, try to get from first level 2 heading
+  if chapter_title == "Unknown Chapter" and doc.blocks and #doc.blocks > 0 then
+    for _, block in ipairs(doc.blocks) do
+      if block.t == "Header" and block.level == 2 then
+        chapter_title = utils.stringify(block.content)
+        break
+      end
+    end
+  end
+
   io.stderr:write("🔄 [QUIZ] Inserting quizzes into document: " .. current_document_file .. "\n")
+  io.stderr:write("📖 Chapter: " .. chapter_title .. "\n")
 
   local new_blocks      = {}
   local chapter_answers = {}
@@ -266,6 +389,7 @@ local function insert_quizzes(doc)
     end
     
     io.stderr:write("\n📊 Quiz Insertion Summary for " .. current_document_file .. ":\n")
+    io.stderr:write("📖 Chapter: " .. chapter_title .. "\n")
     io.stderr:write("   • Total sections processed: " .. sections_processed .. " ✅\n")
     io.stderr:write("   • Total answers added: " .. #chapter_answers .. " 📝\n")
     
@@ -276,6 +400,7 @@ local function insert_quizzes(doc)
     
     io.stderr:write(string.rep("=", 80) .. "\n")
     io.stderr:write("✅ [QUIZ] Document processing complete: " .. current_document_file .. "\n")
+    io.stderr:write("📖 Chapter: " .. chapter_title .. "\n")
     io.stderr:write(string.rep("=", 80) .. "\n\n")
   end
 
