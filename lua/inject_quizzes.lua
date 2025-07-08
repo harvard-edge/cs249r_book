@@ -313,41 +313,29 @@ local function insert_quizzes(doc)
     return doc
   end
 
-  -- Try to extract chapter title
-  local chapter_title = "Unknown Chapter"
-  
-  -- Method 1: Try to get title from document metadata
-  if doc.meta and doc.meta.title then
-    chapter_title = utils.stringify(doc.meta.title)
-  end
-  
-  -- Method 2: If no metadata title, try to get from first heading
-  if chapter_title == "Unknown Chapter" and doc.blocks and #doc.blocks > 0 then
-    for _, block in ipairs(doc.blocks) do
-      if block.t == "Header" and block.level == 1 then
-        chapter_title = utils.stringify(block.content)
-        break
-      end
-    end
-  end
-  
-  -- Method 3: If still no title, try to get from first level 2 heading
-  if chapter_title == "Unknown Chapter" and doc.blocks and #doc.blocks > 0 then
-    for _, block in ipairs(doc.blocks) do
-      if block.t == "Header" and block.level == 2 then
-        chapter_title = utils.stringify(block.content)
-        break
-      end
-    end
+  local is_pdf_build = false
+  if FORMAT and (FORMAT:lower():match("pdf") or FORMAT:lower():match("latex")) then
+    is_pdf_build = true
   end
 
-  io.stderr:write("🔄 [QUIZ] Inserting quizzes into document: " .. current_document_file .. "\n")
-  io.stderr:write("📖 Chapter: " .. chapter_title .. "\n")
+  local function flush_chapter(chapter_blocks, chapter_answers, chapter_title)
+    local out = {}
+    for _, b in ipairs(chapter_blocks) do table.insert(out, b) end
+    if #chapter_answers > 0 then
+      table.insert(out, pandoc.Header(2, "Self-Check Answers", { id="self-check-answers" }))
+      for _, adiv in ipairs(chapter_answers) do table.insert(out, adiv) end
+      io.stderr:write("\n📊 [QUIZ] Chapter: " .. (chapter_title or "(unknown)") .. "\n")
+      io.stderr:write("   • Self-Check Answers inserted: " .. #chapter_answers .. "\n")
+    end
+    return out
+  end
 
-  local new_blocks      = {}
+  local new_blocks = {}
+  local chapter_blocks = {}
   local chapter_answers = {}
-  local sections_processed = 0
+  local chapter_title = nil
   local sections_by_file = {}
+  local sections_processed = 0
 
   local section_blocks = {}
   local current_section_id = nil
@@ -357,28 +345,22 @@ local function insert_quizzes(doc)
   local current_section_answerdiv = nil
 
   local function flush_section()
-    for _, b in ipairs(section_blocks) do
-      table.insert(new_blocks, b)
-    end
     if current_section_has_quiz and current_section_quizdiv then
-      -- Find which file this section came from
       local source_file = "unknown"
       for file_path, sections in pairs(quiz_sections_by_file) do
         if sections[current_section_id] then
           source_file = file_path
-          if not sections_by_file[source_file] then
-            sections_by_file[source_file] = {}
-          end
+          if not sections_by_file[source_file] then sections_by_file[source_file] = {} end
           table.insert(sections_by_file[source_file], current_section_id)
           break
         end
       end
-      
-      io.stderr:write("✅ Inserted quiz for section: " .. tostring(current_section_id) .. " (from: " .. source_file .. ")\n")
-      table.insert(new_blocks, current_section_quizdiv)
+      io.stderr:write("   - Section: " .. tostring(current_section_id) .. " (from: " .. source_file .. ")\n")
+      table.insert(section_blocks, current_section_quizdiv)
       table.insert(chapter_answers, current_section_answerdiv)
       sections_processed = sections_processed + 1
     end
+    for _, b in ipairs(section_blocks) do table.insert(chapter_blocks, b) end
     section_blocks = {}
     current_section_id = nil
     current_section_level = nil
@@ -388,52 +370,70 @@ local function insert_quizzes(doc)
   end
 
   for i, block in ipairs(doc.blocks) do
+    local is_chapter_header = block.t == "Header" and block.level == 1
     local is_section_header = block.t == "Header" and block.identifier and block.level == 2
     local sid = is_section_header and ("#" .. block.identifier) or nil
     local level = is_section_header and block.level or nil
 
-    if is_section_header then
-      if current_section_id and current_section_level and level and level <= current_section_level then
-        flush_section()
+    if is_chapter_header then
+      -- New chapter: flush last section and chapter
+      if (#chapter_blocks > 0 or #chapter_answers > 0) or (i == 1) then
+        if i ~= 1 then
+          flush_section() -- flush last section of previous chapter
+          for _, b in ipairs(flush_chapter(chapter_blocks, chapter_answers, chapter_title)) do
+            table.insert(new_blocks, b)
+          end
+          chapter_blocks = {}
+          chapter_answers = {}
+        end
       end
+      chapter_title = pandoc.utils.stringify(block.content)
+      io.stderr:write("\n==============================\n[QUIZ] Starting Chapter: " .. chapter_title .. "\n==============================\n")
+      -- Start new section for the chapter header
+      section_blocks = { block }
+      current_section_id = nil
+      current_section_level = nil
+      current_section_has_quiz = false
+      current_section_quizdiv = nil
+      current_section_answerdiv = nil
+      goto continue
+    end
+
+    if is_section_header then
+      -- New section: flush previous section before starting new one
+      if current_section_id then
+        flush_section()
+      else
+        -- If this is the first section in the chapter, add any blocks before it
+        for _, b in ipairs(section_blocks) do table.insert(chapter_blocks, b) end
+        section_blocks = {}
+      end
+      section_blocks = { block }
       current_section_id = sid
       current_section_level = level
+      current_section_has_quiz = false
+      current_section_quizdiv = nil
+      current_section_answerdiv = nil
       if quiz_sections[sid] then
         current_section_has_quiz = true
         local qdiv, adiv = process_quiz_questions(quiz_sections[sid], sid)
         current_section_quizdiv = qdiv
         current_section_answerdiv = adiv
       end
+      goto continue
     end
+
+    -- All other blocks: add to current section
     table.insert(section_blocks, block)
+    ::continue::
   end
+  -- At end of doc, flush last section and chapter
   flush_section()
-
-  -- Insert all answers at the end of the chapter
-  if #chapter_answers > 0 then
-    -- Add a section header for Self-Check Answers
-    table.insert(new_blocks, pandoc.Header(2, "Self-Check Answers", { id="self-check-answers" }))
-    
-    for _, adiv in ipairs(chapter_answers) do
-      table.insert(new_blocks, adiv)
+  if #chapter_blocks > 0 or #chapter_answers > 0 then
+    for _, b in ipairs(flush_chapter(chapter_blocks, chapter_answers, chapter_title)) do
+      table.insert(new_blocks, b)
     end
-    
-    io.stderr:write("\n📊 Quiz Insertion Summary for " .. current_document_file .. ":\n")
-    io.stderr:write("📖 Chapter: " .. chapter_title .. "\n")
-    io.stderr:write("   • Total sections processed: " .. sections_processed .. " ✅\n")
-    io.stderr:write("   • Total answers added: " .. #chapter_answers .. " 📝\n")
-    
-    -- Show breakdown by file
-    for file_path, sections in pairs(sections_by_file) do
-      io.stderr:write("   • From " .. file_path .. ": " .. #sections .. " section(s) 📄\n")
-    end
-    
-    io.stderr:write(string.rep("=", 80) .. "\n")
-    io.stderr:write("✅ [QUIZ] Document processing complete: " .. current_document_file .. "\n")
-    io.stderr:write("📖 Chapter: " .. chapter_title .. "\n")
-    io.stderr:write(string.rep("=", 80) .. "\n\n")
   end
-
   return pandoc.Pandoc(new_blocks, doc.meta)
 end
 
