@@ -1,4 +1,7 @@
 -- inject_quizzes.lua
+---@diagnostic disable-next-line: undefined-global
+PANDOC_DOCUMENT = PANDOC_DOCUMENT
+
 
 local json  = require("pandoc.json")
 local utils = pandoc.utils
@@ -7,12 +10,6 @@ local utils = pandoc.utils
 local quiz_sections = {}
 local quiz_sections_by_file = {} -- track which sections came from which file
 local current_document_file = "unknown" -- track which document is being processed
-
--- helper: checks if output is PDF/LaTeX
-local function is_pdf()
-  return FORMAT
-    and (FORMAT:lower():match("pdf") or FORMAT:lower():match("latex"))
-end
 
 -- 1) Load a single JSON file
 local function load_quiz_data(path)
@@ -102,8 +99,13 @@ local function process_quiz_questions(questions, section_id)
     table.insert(al, "")
   end
 
-  table.insert(ql, "\n[See Answers →](#" .. aid .. ")")
-  table.insert(al, "\n[← Back to Questions](#" .. qid .. ")")
+    if FORMAT == "latex" then
+      table.insert(ql, string.format("\\noindent\\hspace*{1.25em}\\hyperref[%s]{\\textbf{See Answer~$\\rightarrow$}}", aid))
+      table.insert(al, string.format("\\noindent\\hspace*{1.25em}\\hyperref[%s]{\\textbf{$\\leftarrow$~Back to Question}}", qid))
+    else
+      table.insert(ql, '<a href="#' .. aid .. '" class="question-label">See Answers →</a>')
+      table.insert(al, '<a href="#' .. qid .. '" class="answer-label">← Back to Questions</a>')
+    end
 
   return create_quiz_div(qid, "callout-quiz-question", table.concat(ql, "\n\n")),
          create_quiz_div(aid, "callout-quiz-answer",   table.concat(al, "\n\n"))
@@ -177,24 +179,34 @@ local function handle_meta(meta)
       local successful_files = 0
       
       -- Since Quarto combines files into a temporary document, we need to scan the directory directly
-      local function scan_for_quiz_files()
-        local quiz_files = {}
-        
-        -- Use the configured directory and pattern
-        local find_command = string.format("find %s -name '%s' 2>/dev/null", scan_directory, file_pattern)
-        io.stderr:write("🔍 Running command: " .. find_command .. "\n")
-        
-        local dir = io.popen(find_command)
-        if dir then
-          for file in dir:lines() do
-            table.insert(quiz_files, file)
-          end
-          dir:close()
-        end
-        
-        return quiz_files
-      end
-      
+
+local function scan_for_quiz_files()
+  local quiz_files = {}
+
+  local command
+  if package.config:sub(1,1) == "\\" then
+    -- Windows
+    command = string.format('dir "%s\\%s" /b /s 2>nul', scan_directory, "*_quizzes.json")
+  else
+    -- Unix
+    command = string.format("find %s -name '%s' 2>/dev/null", scan_directory, "*_quizzes.json")
+  end
+
+  io.stderr:write("🔍 Scanning with command: " .. command .. "\n")
+
+  local pipe = io.popen(command)
+  if pipe then
+    for file in pipe:lines() do
+      table.insert(quiz_files, file)
+    end
+    pipe:close()
+  else
+    io.stderr:write("❌ Failed to open pipe for scanning quiz files\n")
+  end
+
+  return quiz_files
+end
+
       files = scan_for_quiz_files()
       
       if #files > 0 then
@@ -327,169 +339,150 @@ local function is_part_header(block)
   return false
 end
 
--- 6) Pandoc phase: iterate over blocks and insert quizzes into chapters
 local function insert_quizzes(doc)
-  if not next(quiz_sections) then
-    io.stderr:write("ℹ️  [QUIZ] No quiz sections found for document: " .. current_document_file .. "\n")
-    return doc
-  end
+  if not next(quiz_sections) then return doc end
 
-  local is_pdf_build = false
-  if FORMAT and (FORMAT:lower():match("pdf") or FORMAT:lower():match("latex")) then
-    is_pdf_build = true
-  end
-
-  local function is_part_header(block)
-    if block.t == "Header" and block.level == 1 then
-      if block.attr and block.attr.classes then
-        for _, cls in ipairs(block.attr.classes) do
-          if cls == "part" then return true end
-        end
-      end
-      if block.identifier and block.identifier:match("^part%-.+") then
-        return true
-      end
-      if block.content and #block.content > 0 then
-        local txt = pandoc.utils.stringify(block.content)
-        if txt:match("%(%s*PART%s*%)") then return true end
-      end
+  local function has_class(classes, cls)
+    for _, c in ipairs(classes) do
+      if c == cls then return true end
     end
     return false
   end
 
-  local function flush_chapter(chapter_blocks, chapter_answers, chapter_title)
+  -- priznajemo dva boundary-a: marker ili H1
+  local function is_marker(b)
+    return b.t == "Div"
+       and b.attr
+       and has_class(b.attr.classes, "quiz-end")
+  end
+
+  local function is_h1(b)
+    return b.t == "Header" and b.level == 1
+  end
+
+  -- akumulators
+  local new_blocks      = {}
+  local chapter_blocks  = {}
+  local chapter_answers = {}
+  local chapter_title   = nil
+
+  local section_blocks       = {}
+  local current_section_id   = nil
+  local current_quiz_block   = nil
+  local current_answer_block = nil
+
+  local function flush_section()
+    if current_quiz_block and current_answer_block then
+      table.insert(section_blocks, current_quiz_block)
+      table.insert(chapter_answers, current_answer_block)
+    end
+    for _, blk in ipairs(section_blocks) do
+      table.insert(chapter_blocks, blk)
+    end
+    section_blocks       = {}
+    current_section_id   = nil
+    current_quiz_block   = nil
+    current_answer_block = nil
+  end
+
+  local function flush_chapter()
     local out = {}
-    for _, b in ipairs(chapter_blocks) do table.insert(out, b) end
+    for _, blk in ipairs(chapter_blocks) do
+      table.insert(out, blk)
+    end
     if #chapter_answers > 0 then
-      table.insert(out, pandoc.Header(2, "Self-Check Answers", { id="self-check-answers" }))
-      for _, adiv in ipairs(chapter_answers) do table.insert(out, adiv) end
-      io.stderr:write("\n📊 [QUIZ] Chapter: " .. (chapter_title or "(unknown)") .. "\n")
-      io.stderr:write("   • Self-Check Answers inserted at end of chapter\n")
+      table.insert(out,
+        pandoc.Header(2,
+          { pandoc.Str("Self-Check Answers") },
+          pandoc.Attr("self-check-answers")
+        )
+      )
+      for _, ans in ipairs(chapter_answers) do
+        table.insert(out, ans)
+      end
     end
     return out
   end
 
-  local new_blocks = {}
-  local chapter_blocks = {}
-  local chapter_answers = {}
-  local chapter_title = nil
-  local sections_by_file = {}
-  local sections_processed = 0
-
-  local section_blocks = {}
-  local current_section_id = nil
-  local current_section_level = nil
-  local current_section_has_quiz = false
-  local current_section_quizdiv = nil
-  local current_section_answerdiv = nil
-
-  local function flush_section()
-    if current_section_has_quiz and current_section_quizdiv then
-      local source_file = "unknown"
-      for file_path, sections in pairs(quiz_sections_by_file) do
-        if sections[current_section_id] then
-          source_file = file_path
-          if not sections_by_file[source_file] then sections_by_file[source_file] = {} end
-          table.insert(sections_by_file[source_file], current_section_id)
-          break
-        end
-      end
-      io.stderr:write("   - Section: " .. tostring(current_section_id) .. " (from: " .. source_file .. ")\n")
-      table.insert(section_blocks, current_section_quizdiv)
-      table.insert(chapter_answers, current_section_answerdiv)
-      sections_processed = sections_processed + 1
-    end
-    for _, b in ipairs(section_blocks) do table.insert(chapter_blocks, b) end
-    section_blocks = {}
-    current_section_id = nil
-    current_section_level = nil
-    current_section_has_quiz = false
-    current_section_quizdiv = nil
-    current_section_answerdiv = nil
-  end
-
   local i = 1
   while i <= #doc.blocks do
-    local block = doc.blocks[i]
-    local is_chapter_header = block.t == "Header" and block.level == 1
-    local is_part = is_part_header(block)
-    local is_section_header = block.t == "Header" and block.identifier and block.level == 2
-    local sid = is_section_header and ("#" .. block.identifier) or nil
-    local level = is_section_header and block.level or nil
+    local b = doc.blocks[i]
 
-    if (is_part or is_chapter_header) and i == #doc.blocks then
+    -- 1) MARKER flush
+    if is_marker(b) then
       flush_section()
-      for _, b in ipairs(flush_chapter(chapter_blocks, chapter_answers, chapter_title)) do
-        table.insert(new_blocks, b)
-      end
-      chapter_blocks = {}
-      chapter_answers = {}
-      table.insert(new_blocks, block)
-      break
-    end
-
-    if is_chapter_header or is_part then
-      if (#chapter_blocks > 0 or #chapter_answers > 0) or (i == 1) then
-        if i ~= 1 then
-          flush_section()
-          for _, b in ipairs(flush_chapter(chapter_blocks, chapter_answers, chapter_title)) do
-            table.insert(new_blocks, b)
-          end
-          chapter_blocks = {}
-          chapter_answers = {}
+      if #chapter_blocks>0 or #chapter_answers>0 then
+        for _, x in ipairs(flush_chapter()) do
+          table.insert(new_blocks, x)
         end
+        chapter_blocks, chapter_answers = {}, {}
       end
-      chapter_title = pandoc.utils.stringify(block.content)
-      io.stderr:write("\n==============================\n[QUIZ] Starting Chapter: " .. chapter_title .. "\n==============================\n")
-      section_blocks = { block }
-      current_section_id = nil
-      current_section_level = nil
-      current_section_has_quiz = false
-      current_section_quizdiv = nil
-      current_section_answerdiv = nil
+      -- ne ubacuj marker u novi chapter (ili ga po želji prebaciš)
+      -- table.insert(new_blocks, b)
       i = i + 1
       goto continue
     end
 
-    if is_section_header then
+    -- 2) H1 boundary flush
+    if is_h1(b) then
+      flush_section()
+      if #chapter_blocks>0 or #chapter_answers>0 then
+        for _, x in ipairs(flush_chapter()) do
+          table.insert(new_blocks, x)
+        end
+        chapter_blocks, chapter_answers = {}, {}
+      end
+      -- sada umetni novi H1
+      table.insert(new_blocks, b)
+      chapter_title  = pandoc.utils.stringify(b.content or {})
+      section_blocks = {}
+      i = i + 1
+      goto continue
+    end
+
+    -- 3) H2 → sekcija sa kvizom
+    if b.t=="Header" and b.level==2 and b.identifier then
       if current_section_id then
         flush_section()
       else
-        for _, b in ipairs(section_blocks) do table.insert(chapter_blocks, b) end
+        for _, x in ipairs(section_blocks) do
+          table.insert(chapter_blocks, x)
+        end
         section_blocks = {}
       end
-      section_blocks = { block }
-      current_section_id = sid
-      current_section_level = level
-      current_section_has_quiz = false
-      current_section_quizdiv = nil
-      current_section_answerdiv = nil
-      if quiz_sections[sid] then
-        current_section_has_quiz = true
-        local qdiv, adiv = process_quiz_questions(quiz_sections[sid], sid)
-        current_section_quizdiv = qdiv
-        current_section_answerdiv = adiv
+      section_blocks      = { b }
+      current_section_id  = "#" .. b.identifier
+      local quiz = quiz_sections[current_section_id]
+      if quiz then
+        local q, a = process_quiz_questions(quiz, current_section_id)
+        current_quiz_block, current_answer_block = q, a
       end
       i = i + 1
       goto continue
     end
 
-    table.insert(section_blocks, block)
+    -- 4) ostali blokovi → u sekciju
+    table.insert(section_blocks, b)
     i = i + 1
+
     ::continue::
   end
+
+  -- završni flush na kraju dokumenta
   flush_section()
-  if #chapter_blocks > 0 or #chapter_answers > 0 then
-    for _, b in ipairs(flush_chapter(chapter_blocks, chapter_answers, chapter_title)) do
-      table.insert(new_blocks, b)
+  if #chapter_blocks>0 or #chapter_answers>0 then
+    for _, x in ipairs(flush_chapter()) do
+      table.insert(new_blocks, x)
     end
   end
+
   return pandoc.Pandoc(new_blocks, doc.meta)
 end
+
+
 
 -- 7) Register the filter
 return {
   { Meta   = handle_meta   },
   { Pandoc = insert_quizzes }
-}
-
+} 
