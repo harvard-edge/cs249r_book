@@ -1,17 +1,20 @@
 name: '📚 Quarto Build'
 
+# Set retention period to 7 days
+env:
+  GITHUB_ACTIONS_RETENTION_DAYS: 7
+
 # This workflow builds a Quarto project and deploys it to either a development site or GitHub Pages
 # It handles both Windows and Linux environments with extensive caching for better performance
 on:
   workflow_call:
-  workflow_dispatch:
     inputs:
       environment:
         required: true
         type: string
         description: 'Build environment (development/production/test)'
       os:
-        required: false
+        required: true
         type: string
         description: 'Operating system to run on (ubuntu-latest/windows-latest)'
       quarto-version:
@@ -55,7 +58,7 @@ jobs:
       name: ${{ inputs.environment }}
     env:
       R_LIBS_USER: ${{ github.workspace }}/.r-lib
-      QUARTO_LOG_LEVEL: DEBUG
+      QUARTO_LOG_LEVEL: INFO
 
     steps:
       - name: 🔍 Validate inputs
@@ -75,6 +78,7 @@ jobs:
           }
           
           Write-Output "✅ Input validation passed"
+
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
         with:
@@ -96,22 +100,30 @@ jobs:
           quarto --version
           echo "📍 Quarto installation location:"
           which quarto || where.exe quarto
+
       - name: 🐍 Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
 
-      - name: 📦 Install jupyterlab-quarto (Mac/Linux)
-        if: runner.os != 'Windows'
+      - name: 💾 Cache Python packages
+        uses: actions/cache@v4
+        id: cache-python-packages
+        with:
+          path: |
+            ~/.cache/pip
+            ~\AppData\Local\pip\Cache
+          key: python-pkgs-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            python-pkgs-${{ runner.os }}-
+
+      - name: 📦 Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install jupyterlab-quarto jupyter
-      - name: 📦 Install jupyterlab-quarto (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          py -m pip install --upgrade pip
-          py -m pip install jupyterlab-quarto jupyter
+          python -m pip install -r requirements.txt
+
+      # Note: NLTK data is downloaded automatically by section_id_manager.py when needed
+
       # Cache Linux system packages without hardcoded paths
       - name: 💾 Cache APT packages
         if: runner.os == 'Linux'
@@ -122,6 +134,7 @@ jobs:
           key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/*.yml') }}
           restore-keys: |
             apt-${{ runner.os }}-
+
       - name: 🛠️ Install Linux Dependencies
         if: runner.os == 'Linux' && steps.cache-apt.outputs.cache-hit != 'true'
         shell: bash
@@ -129,8 +142,10 @@ jobs:
           echo "🔄 Installing Linux dependencies..."
           echo "📦 Creating APT cache directory"
           mkdir -p ~/.apt-cache
+
           echo "📦 Updating package lists"
           sudo apt-get update
+
           echo "📦 Installing required system libraries"
           sudo apt-get -o dir::cache::archives="$HOME/.apt-cache" install -y \
             fonts-dejavu \
@@ -147,6 +162,7 @@ jobs:
             libjpeg-dev \
             libtiff5-dev \
             libpng-dev
+
           echo "✅ Linux dependencies installed"
                 
       - name: 🎨 Install Inkscape and font dependencies (Linux)
@@ -196,33 +212,31 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          choco install inkscape -y
+          # Use winget (Windows default package manager) if available, otherwise fallback to chocolatey
+          try {
+            winget install Inkscape.Inkscape --accept-source-agreements --accept-package-agreements
+            Write-Output "✅ Inkscape installed via winget"
+          } catch {
+            Write-Output "🔄 winget not available, using chocolatey..."
+            choco install inkscape -y
+          }
+          
+          # Add Inkscape to PATH (both installation methods use the same path)
           echo "C:\Program Files\Inkscape\bin" | Out-File -Append -Encoding ascii $env:GITHUB_PATH
           
           # Verify Inkscape installation
           inkscape --version
-      - name: 📦 Install & Update TeX Live 
-        if: inputs.format == 'pdf' || inputs.format == 'epub' || inputs.format == 'all'
-        uses: teatimeguest/setup-texlive-action@v3
+
+      # Install TeX Live packages (Cross-platform)
+      - name: 📦 Install TeX Live packages
+        if: (inputs.format == 'pdf' || inputs.format == 'epub' || inputs.format == 'all')
+        uses: zauguin/install-texlive@v4
         with:
-          version: 2025
-          packages: |
-            scheme-basic      
-            collection-latex  
-            collection-latexrecommended   
-            collection-fontsrecommended   
-            collection-latexextra
-            collection-pictures   
-            collection-luatex     
-            koma-script       
-            standalone       
-            tikz-cd         
-            marginfix      
-            newpx          
-            luatex85
-            listings       
-          update-all-packages: false # this slows builds down significantly
-          cache: true
+          package_file: tl_packages
+          texlive_version: 2025
+          cache_version: 1
+
+
           
       - name: 📊 Setup R
         uses: r-lib/actions/setup-r@v2
@@ -237,6 +251,7 @@ jobs:
           cat(paste("R version:", R.version$version.string, "\n"))
           cat(paste("R home:", R.home(), "\n"))
           cat(paste("R library paths:", paste(.libPaths(), collapse=", "), "\n"))
+
       # Cache R packages using standard paths
       - name: 💾 Cache R packages
         uses: actions/cache@v4
@@ -247,6 +262,7 @@ jobs:
           key: r-pkgs-${{ runner.os }}-${{ inputs.r-version }}-${{ hashFiles('**/install_packages.R', '**/*.qmd') }}
           restore-keys: |
             r-pkgs-${{ runner.os }}-${{ inputs.r-version }}-
+
       - name: 📦 Install R packages
         if: steps.cache-r-packages.outputs.cache-hit != 'true'
         shell: Rscript {0}
@@ -281,6 +297,7 @@ jobs:
           ip <- installed.packages()[, c("Package", "Version")]
           print(head(ip, 10))
           cat(paste("Total packages installed:", nrow(ip), "\n"))
+
       # Install before render cause we need it for rendering
       - name: 📦 Install Ghostscript (Linux)
         if: runner.os == 'Linux' && (inputs.format == 'pdf' || inputs.format == 'all')
@@ -290,11 +307,21 @@ jobs:
         if: runner.os == 'Windows' && (inputs.format == 'pdf' || inputs.format == 'all')
         shell: pwsh
         run: |
-          choco install ghostscript
+          # Use winget if available, otherwise fallback to chocolatey
+          try {
+            winget install ArtifexSoftware.GhostScript --accept-source-agreements --accept-package-agreements
+            Write-Output "✅ Ghostscript installed via winget"
+          } catch {
+            Write-Output "🔄 winget not available, using chocolatey..."
+            choco install ghostscript -y
+          }
+          
+          # Add Ghostscript to PATH (both installation methods use the same path)
           $gsPath = Get-ChildItem "C:\Program Files\gs" | Sort-Object Name -Descending | Select-Object -First 1
           $binPath = Join-Path $gsPath.FullName "bin"
           echo "Adding Ghostscript path: $binPath"
           echo "$binPath" | Out-File -Append -FilePath $env:GITHUB_PATH
+
       - name: 🔨 Render Quarto Project (HTML)
         if: inputs.format == 'html' || inputs.format == 'all'
         uses: quarto-dev/quarto-actions/render@v2
@@ -318,24 +345,40 @@ jobs:
         shell: bash
         run: |
           echo "🔄 Checking Quarto build output..."
-          
+
           if [ -d "_book" ]; then
             echo "✅ _book directory exists"
             echo "📊 Files in _book directory:"
             ls -la _book | head -n 20
             echo "📊 Total files in _book:"
             find _book -type f | wc -l
-            
-            if [ -f "_book/Machine-Learning-Systems.pdf" ] && [ "${{ inputs.format }}" != "html" ]; then
-              echo "✅ PDF file exists"
-              echo "📊 PDF file size:"
-              du -h "_book/Machine-Learning-Systems.pdf"
-            elif [ "${{ inputs.format }}" != "html" ]; then
-              echo "⚠️ PDF file not found!"
+
+            # PDF check
+            if [[ "${{ inputs.format }}" == "pdf" || "${{ inputs.format }}" == "all" ]]; then
+              if [ -f "_book/Machine-Learning-Systems.pdf" ]; then
+                echo "✅ PDF file exists"
+                echo "📊 PDF file size:"
+                du -h "_book/Machine-Learning-Systems.pdf"
+              else
+                echo "⚠️ PDF file not found!"
+              fi
             fi
+
+            # EPUB check
+            if [[ "${{ inputs.format }}" == "epub" || "${{ inputs.format }}" == "all" ]]; then
+              if [ -f "_book/Machine-Learning-Systems.epub" ]; then
+                echo "✅ EPUB file exists"
+                echo "📊 EPUB file size:"
+                du -h "_book/Machine-Learning-Systems.epub"
+              else
+                echo "⚠️ EPUB file not found!"
+              fi
+            fi
+
           else
             echo "❌ _book directory not found!"
           fi
+
       - name: 📉 Compress PDF with Ghostscript (Linux)
         if: runner.os == 'Linux' && (inputs.format == 'pdf' || inputs.format == 'all')
         run: |
@@ -349,25 +392,31 @@ jobs:
               -dBATCH \
               -sOutputFile="./_book/ebook.pdf" \
               "./_book/Machine-Learning-Systems.pdf"
+
             # Replace original with compressed
             mv ./_book/ebook.pdf ./_book/Machine-Learning-Systems.pdf
           else
             echo "⚠️ PDF file not found for compression"
           fi
+
       - name: 📉 Compress PDF with Ghostscript (Windows)
         if: runner.os == 'Windows' && (inputs.format == 'pdf' || inputs.format == 'all')
         shell: pwsh
         run: |
           $input = "./_book/Machine-Learning-Systems.pdf"
           $output = "./_book/ebook.pdf"
+
           if (!(Test-Path $input)) {
             Write-Warning "⚠️ Input PDF not found! Skipping compression..."
             exit 0  # Non-zero exit would fail the workflow
           }
+
           Write-Output "📉 Compressing PDF using Ghostscript..."
+
           # Unless you are a sucker for pain, don't try to line-break this command (it was a nightmare)
           # Note that compatability should be written as -dCompatibilityLevel:1.4, not -dCompatibilityLevel=1.4!!!
           & gswin64c -sDEVICE=pdfwrite -dCompatibilityLevel:1.4 -dPDFSETTINGS=/ebook -dNOPAUSE -dBATCH -sOutputFile="$output" "$input"
+
           if (Test-Path $output) {
             $afterSize = (Get-Item $output).Length / 1MB
             Write-Output ("📏 Compressed PDF size: {0:N2} MB" -f $afterSize)
@@ -393,24 +442,30 @@ jobs:
           echo "🔐 Starting ssh-agent..."
           eval "$(ssh-agent -s)"
           echo "$SSH_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
+
           git config --global user.email "khoshnevis.naeem@gmail.com"
           git config --global user.name "github-actions"
+
           echo "🔄 Cloning target repo..."
           git clone --depth=1 git@github.com:harvard-edge/cs249r_book_dev.git target-repo
           cd target-repo
           git checkout main
           git pull origin main
+
           echo "🧹 Cleaning existing docs/"
           rm -rf docs
           cp -r "${GITHUB_WORKSPACE}/_book" docs
           rm -f docs/CNAME  # remove if present
+
           echo "🔍 Validating deployment content..."
           test -f docs/index.html || (echo "❌ index.html missing" && exit 1)
           [ "$(ls -1 docs | wc -l)" -gt 3 ] || (echo "❌ docs/ too empty — something went wrong" && exit 1)
+
           echo "📦 Committing and pushing changes..."
           git add docs
           git commit -m "📚 Push dev branch build (manual version)" || echo "🟡 Nothing to commit"
           git push origin main
+
       - name: 📋 Dev Deployment Info
         if: inputs.target == 'dev' && runner.os == 'Linux' && inputs.deploy == true
         shell: bash
@@ -421,6 +476,7 @@ jobs:
           echo "📊 Target directory: docs"
           echo "📊 Source directory: _book"
           echo "✅ Deployment should be complete"
+
       # Deploy to GitHub Pages
       - name: 🚀 Deploy to GitHub Pages
         if: inputs.target == 'main' && runner.os == 'Linux' && inputs.deploy == true
@@ -440,12 +496,13 @@ jobs:
           echo "📊 Source directory: _book"
           echo "✅ Deployment should be complete"
           echo "🌐 Site should be available at: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+
       - name: 📋 Build Summary
         shell: pwsh
         run: |
           # Create a variable for the TeX Live status
           $texLiveStatus = if ("${{ inputs.format }}" -eq "pdf" -or "${{ inputs.format }}" -eq "all") {
-            "Installed via teatimeguest/setup-texlive-action@v3"
+            "Installed via zauguin/install-texlive@v4 (Cross-platform)"
           } else {
             "Skipped (not needed for HTML only)"
           }
@@ -462,5 +519,6 @@ jobs:
           🧩 Cache Status:
             - TeX Live: $texLiveStatus
             - R Packages: ${{ steps.cache-r-packages.outputs.cache-hit == 'true' && '✅ Hit' || '❌ Miss' }}
+            - Python Packages: ${{ steps.cache-python-packages.outputs.cache-hit == 'true' && '✅ Hit' || '❌ Miss' }}
           ⏰ Completed at: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
           "@ | Add-Content $env:GITHUB_STEP_SUMMARY 
