@@ -9,17 +9,18 @@ Usage:
   - Single file:    python check_images.py -f image.png
   - Directory scan: python check_images.py -d ./assets
   - CI hooks:       python check_images.py image1.png image2.jpg
+  - Auto-fix:       python check_images.py -d ./assets --fix
 
 Returns:
   - Exit code 1 if invalid image files are found.
   - Exit code 2 if files are unreadable.
-  - Exit code 0 if all images are valid.
+  - Exit code 0 if all images are valid or fixed.
 """
 
 import os
 import sys
 import argparse
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 from rich.console import Console
 from rich.table import Table
 
@@ -40,7 +41,18 @@ def is_valid_image(filepath, expected_format):
     except Exception as e:
         return f"Unreadable: {e}", None
 
-def check_file(filepath, strict=False, verbose=False):
+def fix_image(filepath, expected_format):
+    try:
+        with Image.open(filepath) as img:
+            img = img.convert('RGBA') if expected_format == 'PNG' else img.convert('RGB')
+            img.save(filepath, format=expected_format)
+            console.print(f"🔧 [blue]Fixed:[/blue] {filepath} → {expected_format}")
+            return True
+    except Exception as e:
+        console.print(f"❌ [red]Failed to fix:[/red] {filepath} ({e})")
+        return False
+
+def check_file(filepath, strict=False, verbose=False, fix=False):
     ext = os.path.splitext(filepath)[1].lower()
     expected_format = VALID_EXTENSIONS.get(ext)
 
@@ -63,50 +75,50 @@ def check_file(filepath, strict=False, verbose=False):
     elif isinstance(result, str):
         return [(filepath, result, None, expected_format)]
     else:
-        return [(filepath, "Format mismatch", actual_format, expected_format)]
+        if fix:
+            fixed = fix_image(filepath, expected_format)
+            return [] if fixed else [(filepath, "Fix failed", actual_format, expected_format)]
+        else:
+            return [(filepath, "Format mismatch", actual_format, expected_format)]
 
-def check_directory(root_dir, strict=False, verbose=False):
+def check_directory(root_dir, strict=False, verbose=False, fix=False):
     invalid_files = []
     for dirpath, _, filenames in os.walk(root_dir):
         for fname in filenames:
             fpath = os.path.join(dirpath, fname)
-            invalid_files.extend(check_file(fpath, strict=strict, verbose=verbose))
+            invalid_files.extend(check_file(fpath, strict=strict, verbose=verbose, fix=fix))
     return invalid_files
 
 def print_invalid_files(invalid):
     table = Table(title="❌ Invalid Image Files", show_lines=True)
-
     table.add_column("File", style="cyan", overflow="fold")
     table.add_column("Reason", style="red")
     table.add_column("Actual Format", style="yellow")
-    table.add_column("Expected Format", style="green")
-
+    table.add_column("Expected Format", style="red")
     for fpath, reason, actual, expected in invalid:
         table.add_row(fpath, reason, str(actual or "—"), str(expected or "—"))
-
     console.print(table)
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Validate image files by checking actual format using Pillow."
-    )
+    parser = argparse.ArgumentParser(description="Validate image files by checking actual format using Pillow.")
     group = parser.add_mutually_exclusive_group()
     group.add_argument('-f', '--file', type=str, help="Path to a single image file")
     group.add_argument('-d', '--dir', type=str, help="Directory to scan recursively")
     parser.add_argument('files', nargs='*', help="Files passed directly (e.g., via pre-commit)")
     parser.add_argument('--strict', action='store_true', help="Fail on unsupported file extensions")
     parser.add_argument('--verbose', '-v', action='store_true', help="Print each file being checked")
+    parser.add_argument('--fix', action='store_true', help="Attempt to fix format mismatches in place")
 
     args = parser.parse_args()
-
     invalid = []
+
     if args.file:
-        invalid = check_file(args.file, strict=args.strict, verbose=args.verbose)
+        invalid = check_file(args.file, strict=args.strict, verbose=args.verbose, fix=args.fix)
     elif args.dir:
-        invalid = check_directory(args.dir, strict=args.strict, verbose=args.verbose)
+        invalid = check_directory(args.dir, strict=args.strict, verbose=args.verbose, fix=args.fix)
     elif args.files:
         for fpath in args.files:
-            invalid.extend(check_file(fpath, strict=args.strict, verbose=args.verbose))
+            invalid.extend(check_file(fpath, strict=args.strict, verbose=args.verbose, fix=args.fix))
     else:
         parser.print_help()
         sys.exit(0)
