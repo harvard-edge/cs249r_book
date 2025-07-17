@@ -64,7 +64,7 @@ To build and preview the book using Quarto:
    ```bash
    git clone https://github.com/MLSysBook/mlsysbook.git
    cd mlsysbook
-````
+   ```
 
 3. Render the book:
 
