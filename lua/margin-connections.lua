@@ -29,10 +29,10 @@ function Div(el)
           )
         end
       end
-      local body = table.concat(parts, "\\\\\n")  -- '\\\\' = New row in LaTeX
+      local body = table.concat(parts, "\\\\[0.5ex]\n")  -- Add 0.5ex spacing between items
       -- Put together marginpar
       local m = string.format(
-        "\\marginpar{\\fontsize{8pt}{10}\\selectfont\\vspace*{1.8ex}\\par %s}",
+        "\\marginpar{\\footnotesize\\vspace*{1.8ex}\\par %s}",
         body
       )
       -- We return Rawblock and thus replace the entire Div
