@@ -8,7 +8,7 @@
 -- 
 -- Cross-references are formatted in academic style:
 -- See also:
--- • Target Section Title (\ref{sec-target-id}): AI-generated explanation
+-- • Target Section Title (§\ref{sec-target-id}) - AI-generated explanation
 -- 
 -- Expected JSON format:
 -- {
@@ -250,11 +250,11 @@ local function create_connection_box(refs)
     
          -- Create the academic-style bullet point
      if ref.explanation and ref.explanation ~= "" then
-       -- With explanation: • Title (\ref{sec-id}): explanation
-       bullet_content = "• " .. ref.target_section_title .. " (\\ref{" .. ref.target_section_id .. "}): " .. ref.explanation
+       -- With explanation: • Title (§\ref{sec-id}) - explanation
+       bullet_content = "• " .. ref.target_section_title .. " (§\\ref{" .. ref.target_section_id .. "}) - " .. ref.explanation
      else
-       -- Without explanation: • Title (\ref{sec-id})
-       bullet_content = "• " .. ref.target_section_title .. " (\\ref{" .. ref.target_section_id .. "})"
+       -- Without explanation: • Title (§\ref{sec-id})
+       bullet_content = "• " .. ref.target_section_title .. " (§\\ref{" .. ref.target_section_id .. "})"
      end
     
     log_info("DEBUG: Academic bullet: " .. bullet_content)
