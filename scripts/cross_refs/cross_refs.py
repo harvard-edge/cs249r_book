@@ -1070,7 +1070,7 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
                     if target_idx_map > source_idx:
                         connection_type = "Preview"
                     else:
-                        connection_type = "Foundation"
+                        connection_type = "Background"
 
                 file_section_refs[source_filename][source_section_id]['targets'].append({
                     'target_section_id': target_id,
