@@ -80,9 +80,11 @@ def load_section_filters() -> Dict:
         print(f"📄 No filters.yml found at {filter_file}, using default filters")
         # Default config if file doesn't exist
         return {
+            'exclude_files': {
+                'patterns': ['.*introduction.*', '.*quiz.*', '.*exercise.*']
+            },
             'exclude_sections': {
-                'exact': ['purpose', 'overview', 'learning objectives', 'prerequisites'],
-                'patterns': ['.*quiz.*', '.*exercise.*']
+                'patterns': ['^purpose$', '^overview$', '^learning objectives$', '^prerequisites$', '.*quiz.*', '.*exercise.*']
             },
             'content_filters': {
                 'min_length': 200,
@@ -104,7 +106,7 @@ def load_section_filters() -> Dict:
             raise ValueError("filters.yml must contain a valid YAML dictionary")
             
         # Validate required sections
-        required_sections = ['exclude_sections', 'content_filters', 'quality_filters']
+        required_sections = ['exclude_files', 'exclude_sections', 'content_filters', 'quality_filters']
         for section in required_sections:
             if section not in config:
                 print(f"⚠️  Warning: Missing '{section}' in filters.yml, using defaults")
@@ -123,6 +125,35 @@ def load_section_filters() -> Dict:
         return {}
 
 
+def should_exclude_file(file_path: str, config: Dict) -> tuple[bool, str]:
+    """
+    Determine if an entire file should be excluded from processing.
+    
+    Returns:
+        (should_exclude: bool, reason: str)
+    """
+    if not config:
+        return False, ""
+        
+    # Extract filename and relative path for pattern matching
+    filename = Path(file_path).name.lower()
+    try:
+        relative_path = str(Path(file_path).relative_to(Path.cwd())).lower()
+    except ValueError:
+        relative_path = str(Path(file_path)).lower()
+    
+    # Check file exclusion patterns
+    file_patterns = config.get('exclude_files', {}).get('patterns', [])
+    for pattern in file_patterns:
+        try:
+            if re.search(pattern.lower(), filename) or re.search(pattern.lower(), relative_path):
+                return True, f"file pattern match: '{pattern}'"
+        except re.error:
+            continue
+    
+    return False, ""
+
+
 def should_exclude_section(title: str, content: str, config: Dict) -> tuple[bool, str]:
     """
     Determine if section should be excluded from cross-referencing.
@@ -136,17 +167,12 @@ def should_exclude_section(title: str, content: str, config: Dict) -> tuple[bool
     title_lower = title.lower().strip()
     content_lower = content.lower()
     
-    # Exact title matches
-    exact_matches = config.get('exclude_sections', {}).get('exact', [])
-    if title_lower in [item.lower() for item in exact_matches]:
-        return True, f"exact title match: '{title}'"
-    
-    # Pattern matching
+    # Pattern matching (simplified - no more exact vs patterns)
     patterns = config.get('exclude_sections', {}).get('patterns', [])
     for pattern in patterns:
         try:
-            if re.match(pattern.lower(), title_lower):
-                return True, f"pattern match: '{pattern}'"
+            if re.search(pattern.lower(), title_lower):
+                return True, f"section pattern match: '{pattern}'"
         except re.error:
             continue
     
@@ -190,7 +216,7 @@ def should_exclude_section(title: str, content: str, config: Dict) -> tuple[bool
     return False, ""
 
 
-def get_quarto_file_order() -> List[str]:
+def get_quarto_file_order(quiet: bool = False) -> List[str]:
     """Extract file order from _quarto.yml chapters section, including commented lines."""
     quarto_yml_path = Path.cwd() / "_quarto.yml"
     
@@ -235,20 +261,21 @@ def get_quarto_file_order() -> List[str]:
                         'contents/core/' in file_part):
                         ordered_files.append(file_part)
         
-        print(f"📋 Found {len(ordered_files)} ordered files in _quarto.yml (including commented)")
-        if ordered_files:
-            print("🔍 _quarto.yml file order preview:")
-            for i, file_path in enumerate(ordered_files[:5], 1):
-                print(f"    {i}. {file_path}")
-            if len(ordered_files) > 5:
-                print(f"    ... and {len(ordered_files) - 5} more")
+        if not quiet:
+            print(f"📋 Found {len(ordered_files)} ordered files in _quarto.yml (including commented)")
+            if ordered_files:
+                print("🔍 _quarto.yml file order preview:")
+                for i, file_path in enumerate(ordered_files[:5], 1):
+                    print(f"    {i}. {file_path}")
+                if len(ordered_files) > 5:
+                    print(f"    ... and {len(ordered_files) - 5} more")
         return ordered_files
         
     except Exception as e:
         print(f"⚠️  Warning: Could not parse _quarto.yml: {e}")
         return []
 
-def find_qmd_files(directories: List[str]) -> List[str]:
+def find_qmd_files(directories: List[str], quiet: bool = False) -> List[str]:
     """Find all .qmd files in directories, ordered by _quarto.yml if available."""
     # Get all qmd files
     all_qmd_files = []
@@ -257,11 +284,12 @@ def find_qmd_files(directories: List[str]) -> List[str]:
             all_qmd_files.append(str(path))
     
     # Get order from _quarto.yml
-    quarto_order = get_quarto_file_order()
+    quarto_order = get_quarto_file_order(quiet=quiet)
     
     if not quarto_order:
         # Fallback to alphabetical sorting
-        print("📂 Using alphabetical file ordering (no _quarto.yml order found)")
+        if not quiet:
+            print("📂 Using alphabetical file ordering (no _quarto.yml order found)")
         return sorted(list(set(all_qmd_files)))
     
     # Create mapping for efficient lookup
@@ -300,18 +328,20 @@ def find_qmd_files(directories: List[str]) -> List[str]:
     remaining_files = sorted(list(all_files_set))
     ordered_files.extend(remaining_files)
     
-    print(f"📊 File ordering: {len(ordered_files)} total ({len(ordered_files) - len(remaining_files)} from _quarto.yml, {len(remaining_files)} alphabetical)")
+    if not quiet:
+        print(f"📊 File ordering: {len(ordered_files)} total ({len(ordered_files) - len(remaining_files)} from _quarto.yml, {len(remaining_files)} alphabetical)")
     
     return ordered_files
 
-def extract_sections(file_path: str, verbose: bool = False) -> List[Dict]:
+def extract_sections(file_path: str, verbose: bool = False, quiet: bool = False) -> List[Dict]:
     """
     Extract ## level sections from Quarto markdown files using pypandoc for clean content.
     
-    1. Uses pypandoc to convert markdown to clean text (removes all Quarto markup)
-    2. Extracts only ## level headers and their content until next ##
-    3. Applies section-level filtering to remove meta-content
-    4. Creates embeddings from this cleaned content
+    1. First extracts original section IDs and titles from raw markdown
+    2. Uses pypandoc to convert markdown to clean text (removes all Quarto markup)
+    3. Matches cleaned content with original section IDs
+    4. Applies section-level filtering to remove meta-content
+    5. Creates embeddings from this cleaned content
     """
     sections = []
     
@@ -320,40 +350,56 @@ def extract_sections(file_path: str, verbose: bool = False) -> List[Dict]:
     excluded_sections = []
     
     try:
-        # First, use pypandoc to clean the entire file
+        # Step 1: Extract original section headers with IDs from raw markdown
+        with open(file_path, 'r', encoding='utf-8') as f:
+            original_content = f.read()
+        
+        original_sections = _extract_original_headers(original_content)
+        
+        # Step 2: Use pypandoc to clean the entire file
         cleaned_markdown = _process_markdown_with_pypandoc(file_path)
         if not cleaned_markdown:
             print(f"⚠️  Failed to process {file_path} with pypandoc")
             return []
         
-        # Now extract ## level sections from the cleaned content
-        section_chunks = _extract_h2_sections_from_text(cleaned_markdown)
+        # Step 3: Extract content from cleaned markdown and match with original headers
+        cleaned_sections = _extract_h2_sections_from_text(cleaned_markdown)
         
-        for section_title, section_content in section_chunks:
-            if not section_title or not section_content:
+        # Step 4: Match cleaned content with original headers
+        for original_title, original_id in original_sections:
+            # Find matching cleaned content by title similarity
+            cleaned_content = None
+            for cleaned_title, content in cleaned_sections:
+                # Match by normalized title (remove extra spaces, case insensitive)
+                if _normalize_title(original_title) == _normalize_title(cleaned_title):
+                    cleaned_content = content
+                    break
+            
+            if not cleaned_content:
                 continue
                 
             # Apply section filtering
             should_exclude, exclude_reason = should_exclude_section(
-                section_title, section_content, filter_config
+                original_title, cleaned_content, filter_config
             )
             
             if should_exclude:
-                excluded_sections.append((section_title, exclude_reason))
-                if verbose:
-                    print(f"      🚫 Excluded '{section_title}': {exclude_reason}")
+                excluded_sections.append((original_title, exclude_reason))
+                if verbose and not quiet:
+                    print(f"      🚫 Excluded '{original_title}': {exclude_reason}")
                 continue
             
-            # Only include sections that pass all filters
-            content = section_content.strip()
-            sections.append({
-                'file_path': file_path,
-                'title': section_title,
-                'content': content[:2000]  # Limit for embeddings
-            })
+            # Only include sections with valid IDs and content
+            if original_id and cleaned_content.strip():
+                sections.append({
+                    'file_path': file_path,
+                    'title': original_title,  # Use exact original title
+                    'section_id': original_id,  # Use exact original ID
+                    'content': cleaned_content.strip()[:2000]  # Limit for embeddings
+                })
         
         # Show filtering summary
-        if excluded_sections:
+        if excluded_sections and verbose and not quiet:
             chapter_name = Path(file_path).parent.name
             print(f"      📋 [{chapter_name}] Excluded {len(excluded_sections)} sections:")
             for title, reason in excluded_sections[:3]:  # Show first 3
@@ -367,30 +413,75 @@ def extract_sections(file_path: str, verbose: bool = False) -> List[Dict]:
     return sections
 
 
+def _extract_original_headers(content: str) -> List[tuple[str, str]]:
+    """
+    Extract original section headers with their exact IDs from raw markdown.
+    
+    Returns list of (title, section_id) tuples.
+    """
+    headers = []
+    lines = content.split('\n')
+    
+    for line in lines:
+        if line.startswith('## ') and not line.startswith('### '):
+            # Extract title and ID from header line
+            header_match = re.match(r'^##\s+(.+?)(?:\s*\{([^}]+)\})?\s*$', line)
+            if header_match:
+                title = header_match.group(1).strip()
+                id_part = header_match.group(2)
+                
+                # Extract section ID from {#sec-something} or skip if no ID
+                section_id = None
+                if id_part and id_part.startswith('#'):
+                    section_id = id_part[1:]  # Remove the # prefix
+                
+                # Only include sections with valid IDs
+                if section_id and section_id.startswith('sec-'):
+                    headers.append((title, section_id))
+    
+    return headers
+
+
+def _normalize_title(title: str) -> str:
+    """Normalize title for matching (remove extra spaces, lowercase)."""
+    return re.sub(r'\s+', ' ', title.strip().lower())
+
+
 def _process_markdown_with_pypandoc(file_path: str) -> str:
     """
-    Use pypandoc to clean markdown file and remove all Quarto divs.
+    Use pypandoc to clean markdown file while preserving original headers.
     
-    This removes all ::: divs, callouts, figures, and Quarto-specific markup.
+    This removes Quarto divs, callouts, and markup but keeps the original ## headers intact.
     """
     try:
         import pypandoc
         
-        # Step 1: Convert to plain text to strip all formatting and divs
-        plain_text = pypandoc.convert_file(
+        # Read the original file to preserve headers
+        with open(file_path, 'r', encoding='utf-8') as f:
+            original_content = f.read()
+        
+        # Extract original ## headers before cleaning
+        original_headers = {}
+        lines = original_content.split('\n')
+        for i, line in enumerate(lines):
+            if line.startswith('## ') and not line.startswith('### '):
+                # Store the original header line
+                header_title = line.replace('##', '').strip()
+                original_headers[i] = line
+        
+        # Step 1: Use pypandoc to clean content but keep as markdown
+        cleaned_markdown = pypandoc.convert_file(
             file_path,
-            'plain',  # Output format: plain text
-            format='markdown',  # Input format
+            'markdown',  # Keep as markdown format
+            format='markdown',
             extra_args=[
-                '--strip-comments',  # Remove HTML comments
-                '--wrap=none',  # Don't wrap lines
+                '--strip-comments',
+                '--wrap=none',
+                '--markdown-headings=atx'  # Ensure ## style headers
             ]
         )
         
-        # Step 2: Process the plain text to reconstruct clean markdown with headers
-        cleaned_markdown = _reconstruct_markdown_from_plain_text(plain_text)
-        
-        # Step 3: Additional cleanup to remove any remaining Quarto artifacts
+        # Step 2: Additional cleanup for remaining Quarto artifacts
         cleaned_markdown = _additional_cleanup(cleaned_markdown)
         
         return cleaned_markdown
@@ -402,76 +493,6 @@ def _process_markdown_with_pypandoc(file_path: str) -> str:
     except Exception as e:
         print(f"⚠️  pypandoc processing failed for {file_path}: {e}")
         return ""
-
-
-def _reconstruct_markdown_from_plain_text(plain_text: str) -> str:
-    """
-    Reconstruct markdown with proper headers from plain text.
-    
-    Pandoc converts headers to plain text, so we need to detect and restore them.
-    """
-    lines = plain_text.split('\n')
-    markdown_lines = []
-    
-    # Common header patterns to look for
-    common_headers = {
-        'purpose', 'overview', 'introduction', 'summary', 'conclusion',
-        'background', 'methodology', 'results', 'discussion', 'challenges',
-        'design patterns', 'global challenges', 'key ai applications',
-        'engineering challenges', 'selection framework', 'ai pervasiveness',
-        'ai evolution', 'ml systems engineering', 'defining ml systems',
-        'lifecycle of ml systems', 'practical applications', 'looking ahead',
-        'book structure and learning path', 'cloud-based machine learning',
-        'edge machine learning', 'mobile machine learning', 'tiny machine learning',
-        'hybrid machine learning', 'shared principles', 'system comparison',
-        'deployment decision framework', 'global development perspective'
-    }
-    
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        
-        # Skip empty lines
-        if not stripped:
-            continue
-            
-        # Check if this looks like a header
-        is_header = False
-        
-        # Method 1: Known header patterns
-        if stripped.lower() in common_headers:
-            is_header = True
-            
-        # Method 2: Short lines that look like titles (3-50 chars, title case or caps)
-        elif (3 <= len(stripped) <= 50 and
-              not stripped.endswith('.') and  # Not sentences
-              not stripped.startswith('-') and  # Not list items
-              not stripped.startswith('*') and  # Not bullet points
-              not stripped.startswith('•') and  # Not bullet points
-              not '(' in stripped and  # Not parenthetical
-              not '"' in stripped and  # Not quotes
-              not stripped.lower().startswith('http') and  # Not URLs
-              (stripped[0].isupper() or stripped.isupper())):  # Starts with capital or all caps
-            
-            # Additional checks: should be standalone (surrounded by different content)
-            prev_line = lines[i-1].strip() if i > 0 else ""
-            next_line = lines[i+1].strip() if i < len(lines)-1 else ""
-            
-            # It's likely a header if:
-            # - Previous line is empty or very different
-            # - Next line starts content (longer, starts with lowercase/number)
-            if (not prev_line or len(prev_line) > 50 or prev_line.endswith('.')) and \
-               (not next_line or len(next_line) > 50 or next_line[0].islower() or next_line[0].isdigit()):
-                is_header = True
-        
-        if is_header:
-            # Convert to proper header format
-            header_text = stripped.title() if not stripped.isupper() else stripped.title()
-            markdown_lines.append(f"## {header_text}")
-        else:
-            # Regular content line
-            markdown_lines.append(line)
-    
-    return '\n'.join(markdown_lines)
 
 
 def _additional_cleanup(content: str) -> str:
@@ -627,8 +648,7 @@ def _extract_h2_sections_from_text(text: str) -> List[tuple]:
             
             # Start new section
             current_section_title = stripped_line.replace('##', '').strip()
-            # Remove any remaining Quarto markup from title
-            current_section_title = _clean_title(current_section_title)
+            # No need to clean title - we preserve original titles exactly
             current_section_lines = []
             
         elif current_section_title:
@@ -644,46 +664,43 @@ def _extract_h2_sections_from_text(text: str) -> List[tuple]:
     return sections
 
 
-def _clean_title(title: str) -> str:
-    """Clean section title of any remaining Quarto markup."""
-    import re
-    
-    # Remove section references like {#sec-something}
-    title = re.sub(r'\{#[^}]+\}', '', title)
-    # Remove class references like {.unnumbered}
-    title = re.sub(r'\{\.[\w-]+\}', '', title)
-    # Remove any remaining braces
-    title = re.sub(r'[{}]', '', title)
-    
-    return title.strip()
-
-
-
-
-def load_content(directories: List[str], exclude_chapters: Optional[List[str]] = None, verbose: bool = False) -> List[Dict]:
+def load_content(directories: List[str], exclude_chapters: Optional[List[str]] = None, verbose: bool = False, quiet: bool = False) -> List[Dict]:
     """Load and filter content from directories using pypandoc for clean extraction."""
     if exclude_chapters is None:
         exclude_chapters = []  # Default to including all chapters
     
-    print(f"📚 Loading content from: {', '.join(directories)}")
-    print(f"🔧 Using pypandoc-based content extraction with section filtering")
-    qmd_files = find_qmd_files(directories)
+    if not quiet:
+        print(f"📚 Loading content from: {', '.join(directories)}")
+        print(f"🔧 Using pypandoc-based content extraction with section filtering")
+    qmd_files = find_qmd_files(directories, quiet=quiet)
     
-    print(f"📋 Found {len(qmd_files)} .qmd files:")
-    for i, file_path in enumerate(qmd_files, 1):
-        try:
-            relative_path = str(Path(file_path).relative_to(Path.cwd()))
-        except ValueError:
-            relative_path = str(Path(file_path))
-        print(f"    {i:2d}. {relative_path}")
+    if not quiet:
+        print(f"📋 Found {len(qmd_files)} .qmd files:")
+        for i, file_path in enumerate(qmd_files, 1):
+            try:
+                relative_path = str(Path(file_path).relative_to(Path.cwd()))
+            except ValueError:
+                relative_path = str(Path(file_path))
+            print(f"    {i:2d}. {relative_path}")
     
     all_sections = []
     processed_files = []
     excluded_files = []
     total_excluded_sections = 0
     
+    # Load filtering configuration once
+    filter_config = load_section_filters()
+    
     for file_path in qmd_files:
-        sections = extract_sections(file_path, verbose=verbose)
+        # Apply file-level filtering
+        should_exclude_file_result = should_exclude_file(file_path, filter_config)
+        if should_exclude_file_result[0]:
+            excluded_files.append(file_path)
+            if verbose and not quiet:
+                print(f"      🚫 Excluding entire file '{file_path}': {should_exclude_file_result[1]}")
+            continue
+
+        sections = extract_sections(file_path, verbose=verbose and not quiet, quiet=quiet)
         if sections:
             # Apply filtering
             filtered_sections = []
@@ -697,33 +714,36 @@ def load_content(directories: List[str], exclude_chapters: Optional[List[str]] =
                 processed_files.append(file_path)
                 all_sections.extend(filtered_sections)
     
-    print(f"\n✅ PROCESSING SUMMARY:")
-    print(f"📖 Processing {len(processed_files)} files:")
-    for i, file_path in enumerate(processed_files, 1):
-        try:
-            relative_path = str(Path(file_path).relative_to(Path.cwd()))
-        except ValueError:
-            relative_path = str(Path(file_path))
-        chapter_name = Path(file_path).parent.name
-        sections_count = len([s for s in all_sections if s['file_path'] == file_path])
-        print(f"    {i:2d}. {relative_path} [{chapter_name}] ({sections_count} sections)")
-    
-    if excluded_files:
-        print(f"\n🚫 Excluded {len(excluded_files)} files ({', '.join(exclude_chapters)} chapters):")
-        for i, file_path in enumerate(excluded_files, 1):
+    if not quiet:
+        print(f"\n✅ PROCESSING SUMMARY:")
+        print(f"📖 Processing {len(processed_files)} files:")
+        for i, file_path in enumerate(processed_files, 1):
             try:
                 relative_path = str(Path(file_path).relative_to(Path.cwd()))
             except ValueError:
                 relative_path = str(Path(file_path))
             chapter_name = Path(file_path).parent.name
-            print(f"    {i:2d}. {relative_path} [{chapter_name}]")
-    
-    print(f"\n📊 FINAL COUNTS:")
-    print(f"    • Total files found: {len(qmd_files)}")
-    print(f"    • Files processed: {len(processed_files)}")
-    print(f"    • Files excluded: {len(excluded_files)}")
-    print(f"    • Sections extracted: {len(all_sections)}")
-    print(f"    • Quality filtering: Sections excluded for being meta-content, too short, or low-quality")
+            sections_count = len([s for s in all_sections if s['file_path'] == file_path])
+            print(f"    {i:2d}. {relative_path} [{chapter_name}] ({sections_count} sections)")
+        
+        if excluded_files:
+            print(f"\n🚫 Excluded {len(excluded_files)} files ({', '.join(exclude_chapters)} chapters):")
+            for i, file_path in enumerate(excluded_files, 1):
+                try:
+                    relative_path = str(Path(file_path).relative_to(Path.cwd()))
+                except ValueError:
+                    relative_path = str(Path(file_path))
+                chapter_name = Path(file_path).parent.name
+                print(f"    {i:2d}. {relative_path} [{chapter_name}]")
+        
+        print(f"\n📊 FINAL COUNTS:")
+        print(f"    • Total files found: {len(qmd_files)}")
+        print(f"    • Files processed: {len(processed_files)}")
+        print(f"    • Files excluded: {len(excluded_files)}")
+        print(f"    • Sections extracted: {len(all_sections)}")
+        print(f"    • Quality filtering: Sections excluded for being meta-content, too short, or low-quality")
+    else:
+        print(f"📊 Processed {len(processed_files)} files, extracted {len(all_sections)} sections")
     
     return all_sections
 
@@ -798,7 +818,7 @@ def create_training_examples(sections: List[Dict]) -> List:
     return train_examples
 
 def train_model(directories: List[str], output_path: str, base_model: str = "sentence-t5-base", 
-                epochs: int = 5, exclude_chapters: Optional[List[str]] = None, verbose: bool = False) -> bool:
+                epochs: int = 5, exclude_chapters: Optional[List[str]] = None, verbose: bool = False, quiet: bool = False) -> bool:
     """Train a domain-adapted model."""
     print("🔥 TRAINING MODE: Domain Adaptation")
     print("=" * 50)
@@ -812,7 +832,7 @@ def train_model(directories: List[str], output_path: str, base_model: str = "sen
         return False
     
     # Load content
-    all_sections = load_content(directories, exclude_chapters, verbose=verbose)
+    all_sections = load_content(directories, exclude_chapters, verbose=verbose, quiet=quiet)
     if len(all_sections) < 50:
         print(f"❌ Need at least 50 sections for training, got {len(all_sections)}")
         return False
@@ -874,71 +894,68 @@ def train_model(directories: List[str], output_path: str, base_model: str = "sen
         print(f"❌ Training failed: {e}")
         return False
 
-def extract_section_id(title: str) -> str:
-    """Extract section ID from title with pattern {sec-something}."""
-    import re
-    match = re.search(r'\{(sec-[^}]+)\}', title)
-    return match.group(1) if match else ""
-
-
-def generate_section_id(title: str, chapter_name: str) -> str:
-    """Generate a section ID from cleaned title and chapter name."""
-    import re
-    
-    # Clean the title: lowercase, remove special chars, replace spaces with hyphens
-    clean_title = re.sub(r'[^\w\s-]', '', title.lower())
-    clean_title = re.sub(r'\s+', '-', clean_title.strip())
-    clean_title = re.sub(r'-+', '-', clean_title)  # Remove multiple hyphens
-    clean_title = clean_title.strip('-')  # Remove leading/trailing hyphens
-    
-    # Create section ID with chapter prefix
-    section_id = f"sec-{chapter_name}-{clean_title}"
-    
-    return section_id
-
-def clean_title(title: str) -> str:
-    """Remove section ID from title for display."""
-    import re
-    return re.sub(r'\s*\{[^}]+\}', '', title).strip()
-
 def generate_cross_references(model_path: str, directories: List[str], output_file: str, 
                             exclude_chapters: Optional[List[str]] = None,
                             max_suggestions: int = 5,
                             similarity_threshold: float = 0.65,
-                            verbose: bool = False) -> Dict:
+                            verbose: bool = False, quiet: bool = False) -> Dict:
     """Generate cross-references using any sentence-transformer model."""
     
-    print("🚀 GENERATION MODE: Cross-Reference Generation")
-    print("=" * 50)
+    if not quiet:
+        print("🚀 GENERATION MODE: Cross-Reference Generation")
+        print("=" * 50)
     
     # Determine if model_path is a local path or HuggingFace model name
     is_local_model = Path(model_path).exists()
     model_type = "Domain-adapted" if is_local_model else "Base HuggingFace"
     
-    print(f"📂 Model: {model_path} ({model_type})")
+    if not quiet:
+        print(f"📂 Model: {model_path} ({model_type})")
     
     # Load model
     try:
         from sentence_transformers import SentenceTransformer
         model = SentenceTransformer(model_path)
-        print(f"✅ Model loaded: {model.get_sentence_embedding_dimension()} dimensions")
+        if not quiet:
+            print(f"✅ Model loaded: {model.get_sentence_embedding_dimension()} dimensions")
     except Exception as e:
         print(f"❌ Error loading model: {e}")
         return {}
     
-    # Load content
-    all_sections = load_content(directories, exclude_chapters, verbose=verbose)
-    if not all_sections:
-        print("❌ No content loaded")
-        return {}
+    # Suppress pypandoc warnings in quiet mode
+    if quiet:
+        import os
+        os.environ['PYPANDOC_PANDOC'] = os.environ.get('PYPANDOC_PANDOC', 'pandoc')
+        # Redirect stderr to suppress warnings
+        import subprocess
+        devnull = open(os.devnull, 'w')
+        old_stderr = sys.stderr
+        sys.stderr = devnull
     
-    # Generate embeddings
-    print("🧮 Generating embeddings...")
-    contents = [section['content'] for section in all_sections]
-    embeddings = model.encode(contents, show_progress_bar=True)
+    try:
+        # Load content
+        all_sections = load_content(directories, exclude_chapters, verbose=verbose, quiet=quiet)
+        if not all_sections:
+            if not quiet:
+                print("❌ No content loaded")
+            return {}
+        
+        # Generate embeddings
+        if not quiet:
+            print("🧮 Generating embeddings...")
+        embeddings = model.encode([section['content'] for section in all_sections], 
+                                show_progress_bar=not quiet)
+        
+        # Find similar sections
+        if not quiet:
+            print("🔍 Finding cross-references...")
+        
+    finally:
+        # Restore stderr if we suppressed it
+        if quiet:
+            sys.stderr = old_stderr
+            devnull.close()
     
-    # Find similar sections
-    print("🔍 Finding cross-references...")
     try:
         from sklearn.neighbors import NearestNeighbors
     except ImportError:
@@ -946,7 +963,7 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
         return {}
     
     # Get file order for determining connection type
-    file_order = find_qmd_files(directories)
+    file_order = find_qmd_files(directories, quiet=quiet)
     file_index_map = {file_path: i for i, file_path in enumerate(file_order)}
 
     nn_model = NearestNeighbors(n_neighbors=min(10, len(all_sections)), metric='cosine')
@@ -961,25 +978,22 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
         source_filename = Path(source_file).name
         source_chapter = Path(section['file_path']).parent.name
         
-        # Try to extract existing section ID, otherwise generate one
-        source_section_id = extract_section_id(section['title'])
+        # Use the exact section ID from extraction
+        source_section_id = section.get('section_id')
         if not source_section_id:
-            source_section_id = generate_section_id(section['title'], source_chapter)
-        
-        if not source_section_id:
-            continue
-            
+            continue  # Skip sections without valid IDs
+                
         if source_filename not in file_section_refs:
             file_section_refs[source_filename] = {}
-            
+                
         if source_section_id not in file_section_refs[source_filename]:
             file_section_refs[source_filename][source_section_id] = {
-                'section_title': clean_title(section['title']),
+                'section_title': section['title'],  # Use exact original title
                 'targets': []
             }
-        
+            
         suggestions_count = 0
-        
+            
         for j in range(1, min(10, len(indices[i]))):
             if suggestions_count >= max_suggestions:
                 break
@@ -993,30 +1007,29 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
             # Filter: different chapter, good similarity
             if (similarity > similarity_threshold and 
                 source_chapter != target_chapter):
-                
-                # Try to extract existing section ID, otherwise generate one
-                target_id = extract_section_id(target_section['title'])
+                    
+                # Use the exact section ID from extraction
+                target_id = target_section.get('section_id')
                 if not target_id:
-                    target_id = generate_section_id(target_section['title'], target_chapter)
+                    continue  # Skip targets without valid IDs
 
-                if target_id:
-                    # Determine connection type
-                    source_idx = file_index_map.get(source_file, -1)
-                    target_idx_map = file_index_map.get(target_section['file_path'], -1)
-                    connection_type = "related" # Default
-                    if source_idx != -1 and target_idx_map != -1:
-                        if target_idx_map > source_idx:
-                            connection_type = "Preview"
-                        else:
-                            connection_type = "Foundation"
+                # Determine connection type
+                source_idx = file_index_map.get(source_file, -1)
+                target_idx_map = file_index_map.get(target_section['file_path'], -1)
+                connection_type = "related" # Default
+                if source_idx != -1 and target_idx_map != -1:
+                    if target_idx_map > source_idx:
+                        connection_type = "Preview"
+                    else:
+                        connection_type = "Foundation"
 
-                    file_section_refs[source_filename][source_section_id]['targets'].append({
-                        'target_section_id': target_id,
-                        'target_section_title': clean_title(target_section['title']),
-                        'connection_type': connection_type,
-                        'similarity': float(similarity)
-                    })
-                    suggestions_count += 1
+                file_section_refs[source_filename][source_section_id]['targets'].append({
+                    'target_section_id': target_id,
+                    'target_section_title': target_section['title'],  # Use exact original title
+                    'connection_type': connection_type,
+                    'similarity': float(similarity)
+                })
+                suggestions_count += 1
     
     # Convert to final array structure
     cross_references = []
@@ -1056,11 +1069,14 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
     with open(output_file, 'w') as f:
         json.dump(result, f, indent=2)
     
-    print(f"\n✅ Generated {total_refs} cross-references across {len(cross_references)} files.")
-    all_sims = [target['similarity'] for file_entry in cross_references for section in file_entry['sections'] for target in section['targets']]
-    print(f"📊 Average similarity: {np.mean(all_sims):.3f}" if all_sims else "📊 No valid cross-references")
-    print(f"📄 Results saved to: {output_file}")
-    print(f"🎯 Model type: {model_type}")
+    if not quiet:
+        print(f"\n✅ Generated {total_refs} cross-references across {len(cross_references)} files.")
+        all_sims = [target['similarity'] for file_entry in cross_references for section in file_entry['sections'] for target in section['targets']]
+        print(f"📊 Average similarity: {np.mean(all_sims):.3f}" if all_sims else "📊 No valid cross-references")
+        print(f"📄 Results saved to: {output_file}")
+        print(f"🎯 Model type: {model_type}")
+    else:
+        print(f"✅ Generated {total_refs} cross-references → {output_file}")
     
     return result
 
@@ -1113,6 +1129,8 @@ Examples:
                         help='Max cross-references per section (default: 5)')
     parser.add_argument('--similarity-threshold', type=float, default=0.65,
                         help='Minimum similarity for cross-references (default: 0.65)')
+    parser.add_argument('--quiet', action='store_true',
+                        help='Reduce output verbosity (only show essential information)')
     
     args = parser.parse_args()
     
@@ -1136,7 +1154,8 @@ Examples:
                 base_model=args.base_model,
                 epochs=args.epochs,
                 exclude_chapters=args.exclude_chapters,
-                verbose=args.verbose
+                verbose=args.verbose,
+                quiet=args.quiet
             )
             return 0 if success else 1
             
@@ -1149,14 +1168,17 @@ Examples:
                 exclude_chapters=args.exclude_chapters,
                 max_suggestions=args.max_suggestions,
                 similarity_threshold=args.similarity_threshold,
-                verbose=args.verbose
+                verbose=args.verbose,
+                quiet=args.quiet
             )
             
             if result and 'cross_references' in result and result['cross_references']:
-                print(f"🎉 Success! Ready for Quarto injection. NOTE: lua/inject_xrefs.lua may need updates for the new JSON structure.")
+                if not args.quiet:
+                    print(f"🎉 Success! Ready for Quarto injection. NOTE: lua/inject_xrefs.lua may need updates for the new JSON structure.")
                 return 0
             else:
-                print("⚠️  No cross-references generated")
+                if not args.quiet:
+                    print("⚠️  No cross-references generated")
                 return 1
                 
     except KeyboardInterrupt:
