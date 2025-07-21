@@ -6,6 +6,10 @@
 -- It reads a JSON file with an array of files, each containing sections with targets,
 -- then injects a "Chapter Connection" callout box into the appropriate sections.
 -- 
+-- Cross-references are formatted in academic style:
+-- See also:
+-- • Target Section Title (\ref{sec-target-id}) — AI-generated explanation
+-- 
 -- Expected JSON format:
 -- {
 --   "cross_references": [
@@ -20,7 +24,8 @@
 --               "target_section_id": "sec-training-basics",
 --               "target_section_title": "Training Basics", 
 --               "connection_type": "Preview",
---               "similarity": 0.72
+--               "similarity": 0.72,
+--               "explanation": "provides essential background on neural network mathematics"
 --             }
 --           ]
 --         }
@@ -175,7 +180,8 @@ local function init_cross_references(meta)
             target_section_id = target.target_section_id,
             target_section_title = target.target_section_title,
             connection_type = target.connection_type,
-            similarity = target.similarity
+            similarity = target.similarity,
+            explanation = target.explanation or ""
           }
           
           if not refs_by_source_id[source_section_id] then
@@ -198,7 +204,8 @@ local function init_cross_references(meta)
           target_section_id = suggestion.target.section_id,
           target_section_title = suggestion.target.section_title,
           connection_type = suggestion.target.connection_type == "foundation" and "Foundation" or "Preview",
-          similarity = suggestion.similarity
+          similarity = suggestion.similarity,
+          explanation = suggestion.explanation or ""
         }
         
         if not refs_by_source_id[ref.source_section_id] then
@@ -220,71 +227,46 @@ local function init_cross_references(meta)
   stats.total_references = total_refs_processed
 end
 
--- Function to create the connection box as simple markdown-style content
+-- Function to create the connection box in academic style
 local function create_connection_box(refs)
-  local previews = {}
-  local foundations = {}
-  
-  -- Sort references by type
-  for _, ref in ipairs(refs) do
-    if ref.connection_type == "Preview" then
-      table.insert(previews, ref)
-    elseif ref.connection_type == "Foundation" then
-      table.insert(foundations, ref)
-    end
-  end
-    
   -- Don't create a box if there are no valid references
-  if #previews == 0 and #foundations == 0 then
+  if #refs == 0 then
     return nil
   end
 
-  -- Build content as simple paragraph blocks (compatible with margin-connections.lua)
+  -- Build content as academic-style "See also:" with bullet points
   local content_blocks = {}
   
-  -- Add preview references
-  for _, ref in ipairs(previews) do
-    -- Extract chapter name from target_section_id (e.g., sec-training-overview -> training)
-    local chapter_name = ""
-    if ref.target_section_id then
-      local extracted = ref.target_section_id:match("^sec%-([^%-]+)")
-      if extracted then
-        chapter_name = extracted:gsub("_", " "):gsub("(%a)([%w_']*)", function(first, rest) return first:upper() .. rest:lower() end)
-      end
-    end
-    
-    -- Preview: forward-looking reference
-    local content_md = "**Preview:** " .. chapter_name .. " → \\ref{" .. ref.target_section_id .. "} (" .. ref.target_section_title .. ")"
-    log_info("DEBUG: Preview content_md = " .. content_md)
-    local para_doc = pandoc.read(content_md, "markdown")
-    if para_doc.blocks[1] then
-      table.insert(content_blocks, para_doc.blocks[1])
-    end
+  -- Add "See also:" header
+  local header_md = "**See also:**"
+  local header_doc = pandoc.read(header_md, "markdown")
+  if header_doc.blocks[1] then
+    table.insert(content_blocks, header_doc.blocks[1])
   end
   
-  -- Add foundation references  
-  for _, ref in ipairs(foundations) do
-    -- Extract chapter name from target_section_id (e.g., sec-training-overview -> training)
-    local chapter_name = ""
-    if ref.target_section_id then
-      local extracted = ref.target_section_id:match("^sec%-([^%-]+)")
-      if extracted then
-        chapter_name = extracted:gsub("_", " "):gsub("(%a)([%w_']*)", function(first, rest) return first:upper() .. rest:lower() end)
-      end
+  -- Add each reference as a bullet point with explanation
+  for _, ref in ipairs(refs) do
+    local bullet_content = ""
+    
+    -- Create the academic-style bullet point
+    if ref.explanation and ref.explanation ~= "" then
+      -- With explanation: • Title (\ref{sec-id}) — explanation
+      bullet_content = "• " .. ref.target_section_title .. " (\\ref{" .. ref.target_section_id .. "}) — " .. ref.explanation
+    else
+      -- Without explanation: • Title (\ref{sec-id})
+      bullet_content = "• " .. ref.target_section_title .. " (\\ref{" .. ref.target_section_id .. "})"
     end
     
-    -- Foundation: backward-looking reference
-    local content_md = "**Foundation:** " .. chapter_name .. " ← \\ref{" .. ref.target_section_id .. "} (" .. ref.target_section_title .. ")"
-    log_info("DEBUG: Foundation content_md = " .. content_md)
-    local para_doc = pandoc.read(content_md, "markdown")
-    if para_doc.blocks[1] then
-      table.insert(content_blocks, para_doc.blocks[1])
+    log_info("DEBUG: Academic bullet: " .. bullet_content)
+    local bullet_doc = pandoc.read(bullet_content, "markdown")
+    if bullet_doc.blocks[1] then
+      table.insert(content_blocks, bullet_doc.blocks[1])
     end
   end
 
   -- Create a simple div with callout-chapter-connection class
   -- This structure is exactly what margin-connections.lua expects
-  log_info("DEBUG: Creating callout with " .. #content_blocks .. " content blocks")
+  log_info("DEBUG: Creating academic callout with " .. #content_blocks .. " content blocks")
   for i, block in ipairs(content_blocks) do
     log_info("DEBUG: Block " .. i .. " type: " .. block.t)
   end
