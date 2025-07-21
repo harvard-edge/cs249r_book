@@ -3,11 +3,55 @@
 -- This script is a Pandoc Lua filter that injects cross-references
 -- into a Quarto document based on a JSON file.
 
--- It reads a JSON file where cross-references are grouped by source file,
+-- It reads a JSON file with an array of files, each containing sections with targets,
 -- then injects a "Chapter Connection" callout box into the appropriate sections.
+-- 
+-- Expected JSON format:
+-- {
+--   "cross_references": [
+--     {
+--       "file": "introduction.qmd",
+--       "sections": [
+--         {
+--           "section_id": "sec-intro-overview",
+--           "section_title": "Overview",
+--           "targets": [
+--             {
+--               "target_section_id": "sec-training-basics",
+--               "target_section_title": "Training Basics", 
+--               "connection_type": "Preview",
+--               "similarity": 0.72
+--             }
+--           ]
+--         }
+--       ]
+--     }
+--   ]
+-- }
 
-local json = require("json")
-local anpan = require("anpan")
+-- Initialize logging counters
+local stats = {
+  files_processed = 0,
+  sections_found = 0,
+  injections_made = 0,
+  total_references = 0
+}
+
+-- Helper function for formatted logging
+local function log_info(message)
+  io.stderr:write("🔗 [Cross-Ref Filter] " .. message .. "\n")
+  io.stderr:flush()
+end
+
+local function log_success(message)
+  io.stderr:write("✅ [Cross-Ref Filter] " .. message .. "\n")
+  io.stderr:flush()
+end
+
+local function log_warning(message)
+  io.stderr:write("⚠️  [Cross-Ref Filter] " .. message .. "\n")
+  io.stderr:flush()
+end
 
 -- Helper function to read file content
 local function read_file(path)
@@ -19,44 +63,167 @@ local function read_file(path)
 end
 
 -- Load and parse the cross-references JSON file
-local function load_cross_references()
-  local json_path = "scripts/cross_referencing/cross_references.json"
-  local json_content = read_file(json_path)
-  if not json_content then
-    -- Don't raise a warning if the file simply doesn't exist
+local function load_cross_references(meta)
+  -- Check if cross-references are defined in _quarto.yml
+  if not meta or not meta["cross-references"] then
+    log_info("No cross-references configuration in _quarto.yml - filter disabled")
     return nil
   end
   
-  local ok, data = pcall(json.decode, json_content)
+  local xref_config = meta["cross-references"]
+  
+  -- Check if enabled
+  if xref_config.enabled then
+    local enabled_str = pandoc.utils.stringify(xref_config.enabled):lower()
+    if enabled_str ~= "true" then
+      log_info("Cross-references disabled in _quarto.yml")
+      return nil
+    end
+  end
+
+  -- Get file path from config
+  local config_file = ""
+  if xref_config.file then
+    config_file = pandoc.utils.stringify(xref_config.file)
+  end
+
+  -- Use the path from config as-is (Quarto has already resolved it correctly)
+  local json_path = config_file
+  log_info("📁 Using cross-references file path: '" .. json_path .. "'")
+
+  -- Try to read the file from the specified path only
+  local json_content = read_file(json_path)
+  
+  if not json_content then
+    local error_msg = "❌ FATAL ERROR: Cross-references file not found: " .. json_path .. "\n" ..
+                      "The file '" .. config_file .. "' is specified in _quarto.yml cross-references.file but does not exist.\n" ..
+                      "Please ensure the file exists at the specified path or update your _quarto.yml configuration.\n" ..
+                      "BUILD STOPPED."
+    
+    -- Write error to stderr and stop the build
+    io.stderr:write("\n" .. error_msg .. "\n\n")
+    io.stderr:flush()
+    os.exit(1)
+  end
+  
+  log_info("Loading cross-references from: " .. json_path)
+  
+  local ok, data = pcall(quarto.json.decode, json_content)
   if not ok then
-    -- Raise a warning if the file is invalid
-    quarto.log.warning("Could not parse " .. json_path)
+    log_warning("Could not parse " .. json_path .. " - invalid JSON format")
     return nil
   end
+  
+  -- Count total references (handle both formats)
+  local total_refs = 0
+  local total_files = 0
+  
+  if data and data.cross_references then
+    -- New format: array of file objects with sections and targets
+    for _, file_data in ipairs(data.cross_references) do
+      total_files = total_files + 1
+      for _, section in ipairs(file_data.sections) do
+        total_refs = total_refs + #section.targets
+      end
+    end
+  elseif data and data.suggestions then
+    -- Legacy format: flat array of suggestions
+    total_refs = #data.suggestions
+    total_files = 1 -- Single suggestions array
+  end
+  
+  log_success("Loaded " .. total_refs .. " cross-references from " .. total_files .. " source(s)")
+  stats.total_references = total_refs
+  
   return data
 end
 
--- Store the loaded cross-references
-local xrefs_data = load_cross_references()
-if not xrefs_data then
-  -- If there's no data, there's nothing to do
-  return {}
-end
-
--- Organize references by source section ID for quick lookup
+-- Global variable to store the lookup table
 local refs_by_source_id = {}
-if xrefs_data and xrefs_data.cross_references then
-  for source_file, refs in pairs(xrefs_data.cross_references) do
-    for _, ref in ipairs(refs) do
-      if not refs_by_source_id[ref.source_section_id] then
-        refs_by_source_id[ref.source_section_id] = {}
+
+-- Initialize cross-references from metadata
+local function init_cross_references(meta)
+  log_info("🚀 Initializing Cross-Reference Injection Filter")
+  log_info("================================================")
+
+  local xrefs_data = load_cross_references(meta)
+  if not xrefs_data then
+    log_info("No cross-references to inject - filter will pass through")
+    return
+  end
+
+  -- Organize references by source section ID for quick lookup
+  local total_refs_processed = 0
+  
+  if xrefs_data and xrefs_data.cross_references then
+    -- New format: array of file objects with sections and targets
+    for _, file_data in ipairs(xrefs_data.cross_references) do
+      local filename = file_data.file
+      log_info("Processing file: " .. filename .. " (" .. #file_data.sections .. " sections)")
+      
+      for _, section in ipairs(file_data.sections) do
+        local source_section_id = section.section_id
+        local source_section_title = section.section_title
+        
+        log_info("  Section: " .. source_section_id .. " (" .. #section.targets .. " targets)")
+        
+        for _, target in ipairs(section.targets) do
+          -- Convert to internal format
+          local ref = {
+            source_section_id = source_section_id,
+            source_section_title = source_section_title,
+            target_section_id = target.target_section_id,
+            target_section_title = target.target_section_title,
+            connection_type = target.connection_type,
+            similarity = target.similarity
+          }
+          
+          if not refs_by_source_id[source_section_id] then
+            refs_by_source_id[source_section_id] = {}
+          end
+          table.insert(refs_by_source_id[source_section_id], ref)
+          total_refs_processed = total_refs_processed + 1
+        end
       end
-      table.insert(refs_by_source_id[ref.source_section_id], ref)
+    end
+  elseif xrefs_data and xrefs_data.suggestions then
+    -- New format: flat array of suggestions
+    log_info("Processing " .. #xrefs_data.suggestions .. " suggestions from xref.json")
+    for _, suggestion in ipairs(xrefs_data.suggestions) do
+      if suggestion.enabled then
+        -- Convert new format to internal format
+        local ref = {
+          source_section_id = suggestion.source.section_id,
+          source_section_title = suggestion.source.section_title,
+          target_section_id = suggestion.target.section_id,
+          target_section_title = suggestion.target.section_title,
+          connection_type = suggestion.target.connection_type == "foundation" and "Foundation" or "Preview",
+          similarity = suggestion.similarity
+        }
+        
+        if not refs_by_source_id[ref.source_section_id] then
+          refs_by_source_id[ref.source_section_id] = {}
+        end
+        table.insert(refs_by_source_id[ref.source_section_id], ref)
+        total_refs_processed = total_refs_processed + 1
+      end
     end
   end
+
+  -- Count the sections properly (# doesn't work on tables with non-numeric keys)
+  local section_count = 0
+  for _ in pairs(refs_by_source_id) do
+    section_count = section_count + 1
+  end
+
+  log_info("Cross-reference lookup table built:")
+  log_info("  • " .. section_count .. " sections with references")
+  log_info("  • " .. total_refs_processed .. " total references processed")
+  
+  stats.total_references = total_refs_processed
 end
 
--- Function to create the markdown for the connection box
+-- Function to create the connection box as simple markdown-style content
 local function create_connection_box(refs)
   local previews = {}
   local foundations = {}
@@ -69,76 +236,145 @@ local function create_connection_box(refs)
       table.insert(foundations, ref)
     end
   end
-
+    
   -- Don't create a box if there are no valid references
   if #previews == 0 and #foundations == 0 then
     return nil
   end
 
-  local lines = {"::: {.callout-chapter-connection}", "##### Connections"}
+  -- Create the content paragraphs
+  local content_paras = {}
   
-  if #previews > 0 then
-    table.insert(lines, "")
-    table.insert(lines, "**Preview**")
-    for _, ref in ipairs(previews) do
-      -- Format: * **{Chapter}:** For more on *{Section}*, see @{id}.
-      local chapter_name = ref.target_chapter_name:gsub("_", " "):gsub("%b()", "")
-      chapter_name = chapter_name:gsub("^%s*%d*%.?%d*\\s*", "") -- remove leading numbers
-      chapter_name = string.upper(string.sub(chapter_name, 1, 1)) .. string.sub(chapter_name, 2)
+  -- Add preview references
+  for _, ref in ipairs(previews) do
+    -- Extract chapter name from target_section_id (e.g., sec-training-overview -> training)
+    local chapter_name = "Related"
+    if ref.target_section_id then
+      local extracted = ref.target_section_id:match("^sec%-([^%-]+)")
+      if extracted then
+        chapter_name = extracted:gsub("_", " ")
+        chapter_name = string.upper(string.sub(chapter_name, 1, 1)) .. string.sub(chapter_name, 2)
+      end
+    end
+    
+    local para_content = {
+      pandoc.Str("→ "),
+      pandoc.Strong({pandoc.Str(chapter_name .. ":")}),
+      pandoc.Space(),
+      pandoc.Str(ref.target_section_title)
+    }
+    table.insert(content_paras, pandoc.Para(para_content))
+  end
+  
+  -- Add foundation references  
+  for _, ref in ipairs(foundations) do
+    -- Extract chapter name from target_section_id (e.g., sec-training-overview -> training)
+    local chapter_name = "Related"
+    if ref.target_section_id then
+      local extracted = ref.target_section_id:match("^sec%-([^%-]+)")
+      if extracted then
+        chapter_name = extracted:gsub("_", " ")
+        chapter_name = string.upper(string.sub(chapter_name, 1, 1)) .. string.sub(chapter_name, 2)
+      end
+    end
+    
+    local para_content = {
+      pandoc.Str("↩ "),
+      pandoc.Strong({pandoc.Str(chapter_name .. ":")}),
+      pandoc.Space(),
+      pandoc.Str(ref.target_section_title)
+    }
+    table.insert(content_paras, pandoc.Para(para_content))
+  end
 
-      table.insert(lines, 
-        string.format("* **%s:** For more on *%s*, see `@%s`.", 
-          chapter_name, 
-          ref.target_section_title, 
-          ref.target_section_id))
-    end
-  end
+  -- Create the exact structure that Quarto's callout system produces
+  local details_content_div = pandoc.Div(content_paras)
   
-  if #foundations > 0 then
-    table.insert(lines, "")
-    table.insert(lines, "**Foundation**")
-    for _, ref in ipairs(foundations) do
-      -- Format: * **{Chapter}:** This builds on *{Section}* (`@{id}`).
-      local chapter_name = ref.target_chapter_name:gsub("_", " "):gsub("%b()", "")
-      chapter_name = chapter_name:gsub("^%s*%d*%.?%d*\\s*", "") -- remove leading numbers
-      chapter_name = string.upper(string.sub(chapter_name, 1, 1)) .. string.sub(chapter_name, 2)
-      
-      table.insert(lines, 
-        string.format("* **%s:** This builds on the principles of *%s* (`@%s`).", 
-          chapter_name,
-          ref.target_section_title, 
-          ref.target_section_id))
-    end
-  end
+  local summary = pandoc.RawInline("html", "<summary><strong>Chapter connection</strong></summary>")
+  local details = pandoc.RawBlock("html", 
+    "<details class=\"callout-chapter-connection fbx-simplebox fbx-default\">" ..
+    "<summary><strong>Chapter connection</strong></summary>" ..
+    "<div>")
   
-  table.insert(lines, ":::")
+  local details_end = pandoc.RawBlock("html", "</div></details>")
   
-  return table.concat(lines, "\n")
+  -- Generate unique ID for this callout
+  local unique_id = "callout-chapter-connection*-auto-" .. tostring(math.random(1000, 9999))
+  
+  local inner_div = pandoc.Div(
+    {details, table.unpack(content_paras), details_end},
+    {
+      id = unique_id,
+      class = "callout-chapter-connection margin-chapter-connection"
+    }
+  )
+  
+  local callout_div = pandoc.Div({inner_div}, {class = "margin-container"})
+  
+  return callout_div
 end
 
--- This is the main filter function called by Pandoc
-return {
-  ['Div'] = function(div)
-    -- We are looking for sections, which are Divs with an ID
-    if div.id and div.id ~= "" then
-      local section_id = div.id
+-- Process the entire document to inject cross-references
+local function inject_cross_references(doc)
+  local new_blocks = {}
+  
+  for i, block in ipairs(doc.blocks) do
+    table.insert(new_blocks, block)
+    
+    -- Look for headers with identifiers
+    if block.t == "Header" and block.identifier and block.identifier ~= "" then
+      local section_id = block.identifier
+      stats.sections_found = stats.sections_found + 1
+      
+      -- Debug: Show what sections we're finding
+      if section_id:match("^sec-introduction-") then
+        log_info("🔍 Found introduction section: " .. section_id)
+      end
       
       -- Check if we have references for this section
       if refs_by_source_id[section_id] then
-        local connection_box_md = create_connection_box(refs_by_source_id[section_id])
+        local num_refs = #refs_by_source_id[section_id]
+        log_info("📍 Processing section: " .. section_id .. " (" .. num_refs .. " references)")
         
-        if connection_box_md then
-          -- Parse the markdown into Pandoc AST
-          local new_content = anpan.parse(connection_box_md)
+        local connection_box = create_connection_box(refs_by_source_id[section_id])
+      
+        if connection_box then
+          -- Inject the connection box right after the header
+          table.insert(new_blocks, connection_box)
           
-          -- Inject the connection box at the beginning of the section's content
-          for i = #new_content.blocks, 1, -1 do
-            table.insert(div.content, 1, new_content.blocks[i])
-          end
-          
-          return div
+          stats.injections_made = stats.injections_made + 1
+          log_success("✨ Injected connection box after: " .. section_id)
+        end
+      else
+        if section_id:match("^sec-introduction-") then
+          log_info("❌ No references found for: " .. section_id)
         end
       end
     end
   end
+  
+  -- Final summary
+  if stats.sections_found > 0 then
+    log_info("================================================")
+    log_success("📊 INJECTION SUMMARY:")
+    log_success("   • Sections processed: " .. stats.sections_found)
+    log_success("   • Connection boxes injected: " .. stats.injections_made)
+    log_success("   • Total cross-references available: " .. stats.total_references)
+    log_success("   • Injection rate: " .. string.format("%.1f%%", (stats.injections_made / stats.sections_found) * 100))
+    log_info("================================================")
+  end
+  
+  return pandoc.Pandoc(new_blocks, doc.meta)
+end
+
+-- This is the main filter function called by Pandoc
+return {
+  -- Initialize cross-references when we first see metadata
+  { Meta = function(meta)
+    init_cross_references(meta)
+    return meta
+  end },
+  
+  -- Process the entire document to inject cross-references
+  { Pandoc = inject_cross_references }
 } 
