@@ -671,7 +671,7 @@ Source Section: "{source_title}"
 Target Section: "{target_title}"  
 {target_snippet}
 
-Write a natural 8-15 word explanation that completes: "See also: {target_title} - [your explanation]"
+Write a natural 4-7 word explanation that completes: "See also: {target_title} - [your explanation]"
 
 Use varied, engaging language. Examples of good explanations:
 - "provides essential background on neural network mathematics"
@@ -695,7 +695,7 @@ Write ONLY a natural explanation phrase (no labels, no "Explanation:" prefix):""
                 "options": {
                     "temperature": 0.3,
                     "top_p": 0.9,
-                    "max_tokens": 60
+                    "max_tokens": 50
                 }
             },
             timeout=30
