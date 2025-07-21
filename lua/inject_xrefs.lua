@@ -284,13 +284,29 @@ local function create_connection_box(refs)
     table.insert(content_paras, pandoc.Para(para_content))
   end
 
-  -- Create a proper Quarto callout structure that works for both HTML and PDF
-  local callout_div = pandoc.Div(
-    content_paras,
+  -- Create the exact structure that Quarto's callout system produces
+  local details_content_div = pandoc.Div(content_paras)
+  
+  local summary = pandoc.RawInline("html", "<summary><strong>Chapter connection</strong></summary>")
+  local details = pandoc.RawBlock("html", 
+    "<details class=\"callout-chapter-connection fbx-simplebox fbx-default\">" ..
+    "<summary><strong>Chapter connection</strong></summary>" ..
+    "<div>")
+  
+  local details_end = pandoc.RawBlock("html", "</div></details>")
+  
+  -- Generate unique ID for this callout
+  local unique_id = "callout-chapter-connection*-auto-" .. tostring(math.random(1000, 9999))
+  
+  local inner_div = pandoc.Div(
+    {details, table.unpack(content_paras), details_end},
     {
-      class = "callout-chapter-connection"
+      id = unique_id,
+      class = "callout-chapter-connection margin-chapter-connection"
     }
   )
+  
+  local callout_div = pandoc.Div({inner_div}, {class = "margin-container"})
   
   return callout_div
 end
