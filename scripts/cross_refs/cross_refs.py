@@ -7,8 +7,8 @@ Complete toolkit for domain adaptation and cross-reference generation using pypa
 
 MODES:
     Training Mode:
-        python3 cross_referencing.py -t -d ../../contents/core/ -o ./my_model
-        python3 cross_referencing.py --train --dirs ../../contents/core/ --output ./my_model --base-model sentence-t5-base --epochs 5
+        python3 cross_referencing.py --train -d ../../contents/core/ -o ./my_model
+python3 cross_referencing.py --train --dirs ../../contents/core/ --output ./my_model --base-model sentence-t5-base --epochs 5
     
     Generation Mode (Domain-adapted):
         python3 cross_referencing.py -g -m ./t5-mlsys-domain-adapted -o cross_refs.json
@@ -1137,7 +1137,7 @@ def main():
         epilog="""
 Examples:
     # Train a domain-adapted model with intelligent extraction
-    python3 cross_refs.py -t -d ../../contents/core/ -o ./t5-mlsys-domain-adapted
+    python3 cross_refs.py --train -d ../../contents/core/ -o ./t5-mlsys-domain-adapted
     
     # Generate with domain-adapted model (uses pypandoc by default)
     python3 cross_refs.py -g -m ./t5-mlsys-domain-adapted -o cross_refs.json -d ../../contents/core/
@@ -1151,7 +1151,7 @@ Examples:
     
     # Mode selection
     mode_group = parser.add_mutually_exclusive_group(required=True)
-    mode_group.add_argument('-t', '--train', action='store_true', help='Training mode: Domain-adapt a base model')
+    mode_group.add_argument('--train', action='store_true', help='Training mode: Domain-adapt a base model')
     mode_group.add_argument('-g', '--generate', action='store_true', help='Generation mode: Generate cross-references')
     
     # Common arguments
@@ -1176,7 +1176,7 @@ Examples:
     parser.add_argument('--verbose', action='store_true', help='Enable verbose output')
     parser.add_argument('--max-suggestions', type=int, default=5, 
                         help='Max cross-references per section (default: 5)')
-    parser.add_argument('-threshold', '--similarity-threshold', type=float, default=0.65,
+    parser.add_argument('-t', '--threshold', type=float, default=0.65,
                         help='Minimum similarity for cross-references (default: 0.65)')
     parser.add_argument('--quiet', action='store_true',
                         help='Reduce output verbosity (only show essential information)')
@@ -1216,7 +1216,7 @@ Examples:
                 output_file=args.output,
                 exclude_chapters=args.exclude_chapters,
                 max_suggestions=args.max_suggestions,
-                similarity_threshold=args.similarity_threshold,
+                similarity_threshold=args.threshold,
                 verbose=args.verbose,
                 quiet=args.quiet
             )
