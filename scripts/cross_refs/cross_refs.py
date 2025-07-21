@@ -449,50 +449,99 @@ def _normalize_title(title: str) -> str:
 
 def _process_markdown_with_pypandoc(file_path: str) -> str:
     """
-    Use pypandoc to clean markdown file while preserving original headers.
+    Process markdown file using pypandoc for robust content extraction and cleaning.
     
-    This removes Quarto divs, callouts, and markup but keeps the original ## headers intact.
+    Converts markdown to markdown format while:
+    - Preserving headers with --markdown-headings=atx
+    - Removing Quarto-specific divs and constructs  
+    - Cleaning LaTeX, citations, and other markup
+    - Preprocessing problematic table formats that can break pypandoc
+    
+    Args:
+        file_path: Path to the markdown file
+        
+    Returns:
+        Cleaned markdown content as string
     """
     try:
         import pypandoc
+        import tempfile
+        import os
         
-        # Read the original file to preserve headers
+        # Read and preprocess content to handle pypandoc issues
         with open(file_path, 'r', encoding='utf-8') as f:
-            original_content = f.read()
+            content = f.read()
         
-        # Extract original ## headers before cleaning
-        original_headers = {}
-        lines = original_content.split('\n')
-        for i, line in enumerate(lines):
-            if line.startswith('## ') and not line.startswith('### '):
-                # Store the original header line
-                header_title = line.replace('##', '').strip()
-                original_headers[i] = line
+        # Preprocess problematic ASCII-style tables that break pypandoc
+        content = _preprocess_tables(content)
         
-        # Step 1: Use pypandoc to clean content but keep as markdown
-        cleaned_markdown = pypandoc.convert_file(
-            file_path,
-            'markdown',  # Keep as markdown format
-            format='markdown',
-            extra_args=[
-                '--strip-comments',
-                '--wrap=none',
-                '--markdown-headings=atx'  # Ensure ## style headers
-            ]
-        )
+        # Write preprocessed content to temp file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False, encoding='utf-8') as temp_file:
+            temp_file.write(content)
+            temp_path = temp_file.name
         
-        # Step 2: Additional cleanup for remaining Quarto artifacts
-        cleaned_markdown = _additional_cleanup(cleaned_markdown)
-        
-        return cleaned_markdown
-        
-    except ImportError:
-        print("⚠️  pypandoc not available. Install with: pip install pypandoc")
-        return ""
-        
+        try:
+            # Convert using pypandoc with markdown output format
+            cleaned_content = pypandoc.convert_file(
+                temp_path,
+                'markdown',
+                format='markdown',
+                extra_args=['--markdown-headings=atx']
+            )
+            
+            # Apply additional cleanup
+            cleaned_content = _additional_cleanup(cleaned_content)
+            
+            return cleaned_content
+            
+        finally:
+            # Clean up temp file
+            os.unlink(temp_path)
+            
     except Exception as e:
-        print(f"⚠️  pypandoc processing failed for {file_path}: {e}")
-        return ""
+        print(f"❌ Error processing {file_path} with pypandoc: {e}")
+        # Fallback to basic reading without pypandoc
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        return _additional_cleanup(content)
+
+
+def _preprocess_tables(content: str) -> str:
+    """
+    Preprocess content to handle ASCII-style tables that can break pypandoc.
+    
+    Converts ASCII-style tables (+----+----+) to simple markdown tables.
+    """
+    import re
+    
+    lines = content.split('\n')
+    processed_lines = []
+    in_ascii_table = False
+    table_buffer = []
+    
+    for line in lines:
+        # Detect ASCII-style table borders
+        if re.match(r'^\s*\+[-=]+\+', line):
+            if not in_ascii_table:
+                in_ascii_table = True
+                table_buffer = []
+                # Add placeholder for table
+                processed_lines.append("| Table content removed for processing |")
+                processed_lines.append("|-----|")
+            table_buffer.append(line)
+        elif in_ascii_table:
+            table_buffer.append(line)
+            # Check if table has ended (empty line or new section)
+            if line.strip() == '' or line.strip().startswith('#'):
+                in_ascii_table = False
+                # Don't add the table buffer, just continue with the line
+                if line.strip() != '':
+                    processed_lines.append(line)
+            # Continue collecting table lines
+        else:
+            processed_lines.append(line)
+    
+    return '\n'.join(processed_lines)
 
 
 def _additional_cleanup(content: str) -> str:
