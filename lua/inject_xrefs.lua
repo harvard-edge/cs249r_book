@@ -1,207 +1,144 @@
--- inject_xrefs.lua
--- Cross-Reference Injection Filter for ML Systems Book
--- Reads cross-reference suggestions from JSON and injects callout blocks
+-- lua/inject_xrefs.lua
 
-local json = require("pandoc.json")
-local utils = pandoc.utils
+-- This script is a Pandoc Lua filter that injects cross-references
+-- into a Quarto document based on a JSON file.
 
--- Global state: cross-reference suggestions organized by section ID
-local xref_suggestions = {}
-local current_document_file = "unknown"
+-- It reads a JSON file where cross-references are grouped by source file,
+-- then injects a "Chapter Connection" callout box into the appropriate sections.
 
--- Load cross-reference JSON data
-local function load_xref_data(path)
-  local f, err = io.open(path, "r")
-  if not f then
-    io.stderr:write("⚠️  [XREF] Cross-reference file not found: " .. path .. " (this is optional)\n")
+local json = require("json")
+local anpan = require("anpan")
+
+-- Helper function to read file content
+local function read_file(path)
+  local file = io.open(path, "r")
+  if not file then return nil end
+  local content = file:read("*a")
+  file:close()
+  return content
+end
+
+-- Load and parse the cross-references JSON file
+local function load_cross_references()
+  local json_path = "scripts/cross_referencing/cross_references.json"
+  local json_content = read_file(json_path)
+  if not json_content then
+    -- Don't raise a warning if the file simply doesn't exist
     return nil
   end
   
-  local content = f:read("*all")
-  f:close()
-
-  local ok, data = pcall(json.decode, content)
-  if not ok or type(data) ~= "table" then
-    io.stderr:write("❌ [XREF] Failed to parse JSON from file: " .. path .. "\n")
+  local ok, data = pcall(json.decode, json_content)
+  if not ok then
+    -- Raise a warning if the file is invalid
+    quarto.log.warning("Could not parse " .. json_path)
     return nil
   end
-  
   return data
 end
 
--- Register cross-reference suggestions from JSON data
-local function register_xref_suggestions(data, file_path)
-  local suggestions_count = 0
-  
-  if not data.suggestions then
-    io.stderr:write("⚠️  [XREF] No 'suggestions' field found in " .. file_path .. "\n")
-    return suggestions_count
-  end
-  
-  for _, suggestion in ipairs(data.suggestions) do
-    -- Only process enabled suggestions
-    if suggestion.enabled ~= false then
-      local section_id = suggestion.source.section_id
-      
-      -- Ensure section_id starts with '#'
-      if not section_id:match("^#") then
-        section_id = "#" .. section_id
-      end
-      
-      -- Store suggestion by section ID
-      if not xref_suggestions[section_id] then
-        xref_suggestions[section_id] = {}
-      end
-      
-      table.insert(xref_suggestions[section_id], {
-        target_id = suggestion.target.section_id,
-        target_title = suggestion.target.enhanced_title or suggestion.target.section_title,
-        connection_type = suggestion.target.connection_type or "related",
-        similarity = suggestion.similarity
-      })
-      
-      suggestions_count = suggestions_count + 1
-    end
-  end
-  
-  return suggestions_count
+-- Store the loaded cross-references
+local xrefs_data = load_cross_references()
+if not xrefs_data then
+  -- If there's no data, there's nothing to do
+  return {}
 end
 
--- Create a cross-reference callout block
-local function create_xref_callout(suggestions)
-  local callout_content = {}
-  
-  -- Create callout header
-  table.insert(callout_content, pandoc.Para({
-    pandoc.Strong({ pandoc.Str("Foundation") }),
-    pandoc.Str(": This builds on ")
-  }))
-  
-  -- Build the reference list
-  local ref_parts = {}
-  
-  for i, suggestion in ipairs(suggestions) do
-    -- Add comma separator for multiple references
-    if i > 1 then
-      table.insert(ref_parts, pandoc.Str(", "))
-    end
-    
-    -- Add connection type icon
-    local icon = ""
-    if suggestion.connection_type == "foundation" then
-      icon = "🔗 "
-    elseif suggestion.connection_type == "example" then
-      icon = "📖 "
-    else
-      icon = ""
-    end
-    
-    -- Add the reference
-    if icon ~= "" then
-      table.insert(ref_parts, pandoc.Str(icon))
-    end
-    
-    table.insert(ref_parts, pandoc.Str(suggestion.target_title))
-    table.insert(ref_parts, pandoc.Str(" ("))
-    table.insert(ref_parts, pandoc.Str("@" .. suggestion.target_id))
-    table.insert(ref_parts, pandoc.Str(")"))
-  end
-  
-  -- Add period at the end
-  table.insert(ref_parts, pandoc.Str("."))
-  
-  -- Create the paragraph with references
-  local ref_para = pandoc.Para(ref_parts)
-  table.insert(callout_content, ref_para)
-  
-  -- Create the callout div
-  local callout_div = pandoc.Div(
-    callout_content,
-    {
-      class = "callout-chapter-connection"
-    }
-  )
-  
-  return callout_div
-end
-
--- Meta phase: load cross-reference data
-local function handle_meta(meta)
-  -- Try to get current document filename
-  if PANDOC_DOCUMENT and PANDOC_DOCUMENT.meta and PANDOC_DOCUMENT.meta.filename then
-    current_document_file = utils.stringify(PANDOC_DOCUMENT.meta.filename)
-  elseif PANDOC_STATE and PANDOC_STATE.input_files and PANDOC_STATE.input_files[1] then
-    current_document_file = PANDOC_STATE.input_files[1]
-  end
-
-  -- Get xref configuration from global metadata
-  local xref_config = meta["xref-config"] or {}
-  local file_path = xref_config["file-path"] or "cross_references.json"
-  local auto_load = xref_config["auto-load"] ~= false -- default to true
-  
-  -- Convert Meta objects to strings if needed
-  if type(file_path) == "table" then
-    file_path = utils.stringify(file_path)
-  end
-  
-  if type(auto_load) == "table" and auto_load.t == "MetaBool" then
-    auto_load = auto_load.bool
-  elseif type(auto_load) == "table" then
-    auto_load = utils.stringify(auto_load) ~= "false"
-  end
-
-  -- Load cross-reference data if auto-load is enabled
-  if auto_load then
-    local data = load_xref_data(file_path)
-    if data then
-      local count = register_xref_suggestions(data, file_path)
-      if count > 0 then
-        io.stderr:write("✅ [XREF] Loaded " .. count .. " cross-reference suggestions from " .. file_path .. "\n")
+-- Organize references by source section ID for quick lookup
+local refs_by_source_id = {}
+if xrefs_data and xrefs_data.cross_references then
+  for source_file, refs in pairs(xrefs_data.cross_references) do
+    for _, ref in ipairs(refs) do
+      if not refs_by_source_id[ref.source_section_id] then
+        refs_by_source_id[ref.source_section_id] = {}
       end
+      table.insert(refs_by_source_id[ref.source_section_id], ref)
+    end
+  end
+end
+
+-- Function to create the markdown for the connection box
+local function create_connection_box(refs)
+  local previews = {}
+  local foundations = {}
+  
+  -- Sort references by type
+  for _, ref in ipairs(refs) do
+    if ref.connection_type == "Preview" then
+      table.insert(previews, ref)
+    elseif ref.connection_type == "Foundation" then
+      table.insert(foundations, ref)
+    end
+  end
+
+  -- Don't create a box if there are no valid references
+  if #previews == 0 and #foundations == 0 then
+    return nil
+  end
+
+  local lines = {"::: {.callout-chapter-connection}", "##### Connections"}
+  
+  if #previews > 0 then
+    table.insert(lines, "")
+    table.insert(lines, "**Preview**")
+    for _, ref in ipairs(previews) do
+      -- Format: * **{Chapter}:** For more on *{Section}*, see @{id}.
+      local chapter_name = ref.target_chapter_name:gsub("_", " "):gsub("%b()", "")
+      chapter_name = chapter_name:gsub("^%s*%d*%.?%d*\\s*", "") -- remove leading numbers
+      chapter_name = string.upper(string.sub(chapter_name, 1, 1)) .. string.sub(chapter_name, 2)
+
+      table.insert(lines, 
+        string.format("* **%s:** For more on *%s*, see `@%s`.", 
+          chapter_name, 
+          ref.target_section_title, 
+          ref.target_section_id))
     end
   end
   
-  return meta
-end
-
--- Main document processing: inject cross-references
-local function inject_xrefs(doc)
-  local new_blocks = {}
-  local blocks = doc.blocks
-  
-  for i = 1, #blocks do
-    local block = blocks[i]
-    
-    -- Add the current block
-    table.insert(new_blocks, block)
-    
-    -- Check if this is a level 2 header (##) with an identifier
-    if block.t == "Header" and block.level == 2 and block.identifier then
-      local section_id = "#" .. block.identifier
-      local suggestions = xref_suggestions[section_id]
+  if #foundations > 0 then
+    table.insert(lines, "")
+    table.insert(lines, "**Foundation**")
+    for _, ref in ipairs(foundations) do
+      -- Format: * **{Chapter}:** This builds on *{Section}* (`@{id}`).
+      local chapter_name = ref.target_chapter_name:gsub("_", " "):gsub("%b()", "")
+      chapter_name = chapter_name:gsub("^%s*%d*%.?%d*\\s*", "") -- remove leading numbers
+      chapter_name = string.upper(string.sub(chapter_name, 1, 1)) .. string.sub(chapter_name, 2)
       
-      if suggestions and #suggestions > 0 then
-        -- Limit to maximum 2 suggestions for readability
-        local limited_suggestions = {}
-        for j = 1, math.min(2, #suggestions) do
-          table.insert(limited_suggestions, suggestions[j])
-        end
-        
-        -- Create and insert the callout
-        local callout = create_xref_callout(limited_suggestions)
-        table.insert(new_blocks, callout)
-        
-        -- Add some spacing
-        table.insert(new_blocks, pandoc.Para({}))
-      end
+      table.insert(lines, 
+        string.format("* **%s:** This builds on the principles of *%s* (`@%s`).", 
+          chapter_name,
+          ref.target_section_title, 
+          ref.target_section_id))
     end
   end
   
-  return pandoc.Pandoc(new_blocks, doc.meta)
+  table.insert(lines, ":::")
+  
+  return table.concat(lines, "\n")
 end
 
--- Register the filter
+-- This is the main filter function called by Pandoc
 return {
-  { Meta = handle_meta },
-  { Pandoc = inject_xrefs }
+  ['Div'] = function(div)
+    -- We are looking for sections, which are Divs with an ID
+    if div.id and div.id ~= "" then
+      local section_id = div.id
+      
+      -- Check if we have references for this section
+      if refs_by_source_id[section_id] then
+        local connection_box_md = create_connection_box(refs_by_source_id[section_id])
+        
+        if connection_box_md then
+          -- Parse the markdown into Pandoc AST
+          local new_content = anpan.parse(connection_box_md)
+          
+          -- Inject the connection box at the beginning of the section's content
+          for i = #new_content.blocks, 1, -1 do
+            table.insert(div.content, 1, new_content.blocks[i])
+          end
+          
+          return div
+        end
+      end
+    end
+  end
 } 
