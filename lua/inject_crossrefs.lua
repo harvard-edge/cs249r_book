@@ -7,8 +7,9 @@
 -- then injects a "Chapter Connection" callout box into the appropriate sections.
 -- 
 -- Cross-references are formatted in academic style with bold directional arrows:
--- **→** Forward Section Title (§\ref{sec-target-id}) - AI-generated explanation
--- **←** Background Section Title (§\ref{sec-target-id}) - AI-generated explanation
+-- **→** Forward Section Title (§\ref{sec-target-id}) **—** AI-generated explanation
+-- **←** Background Section Title (§\ref{sec-target-id}) **—** AI-generated explanation
+-- • General Section Title (§\ref{sec-target-id}) **—** AI-generated explanation (fallback)
 -- 
 -- Expected JSON format:
 -- {
@@ -247,17 +248,23 @@ local function create_connection_box(refs)
        arrow = "**→** "  -- Forward reference (material comes later)
      elseif ref.connection_type == "Background" then
        arrow = "**←** "  -- Backward reference (material from earlier)
+     else
+       arrow = "• "      -- Fallback bullet for unclear direction
      end
      
           if ref.explanation and ref.explanation ~= "" then
-       -- With explanation: **→** Title (§\ref{sec-id}) - explanation
-       arrow_content = arrow .. ref.target_section_title .. " (§\\ref{" .. ref.target_section_id .. "}) - " .. ref.explanation
+       -- With explanation: **→** Title (§\ref{sec-id}) **—** explanation
+       arrow_content = arrow .. ref.target_section_title .. " (§\\ref{" .. ref.target_section_id .. "}) **—** " .. ref.explanation
      else
-       -- Without explanation: **→** Title (§\ref{sec-id})
+       -- Without explanation: **→** Title (§\ref{sec-id}) or • Title (§\ref{sec-id})
        arrow_content = arrow .. ref.target_section_title .. " (§\\ref{" .. ref.target_section_id .. "})"
      end
      
-     log_info("DEBUG: Bold directional arrow (" .. ref.connection_type .. "): " .. arrow_content)
+     local display_type = ref.connection_type or "Unknown"
+     if display_type ~= "Preview" and display_type ~= "Background" then
+       display_type = display_type .. " [Fallback Bullet]"
+     end
+     log_info("DEBUG: Cross-reference (" .. display_type .. "): " .. arrow_content)
           local arrow_doc = pandoc.read(arrow_content, "markdown")
      if arrow_doc.blocks[1] then
        table.insert(content_blocks, arrow_doc.blocks[1])
