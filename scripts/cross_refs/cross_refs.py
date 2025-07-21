@@ -1176,7 +1176,7 @@ Examples:
     parser.add_argument('--verbose', action='store_true', help='Enable verbose output')
     parser.add_argument('--max-suggestions', type=int, default=5, 
                         help='Max cross-references per section (default: 5)')
-    parser.add_argument('--similarity-threshold', type=float, default=0.65,
+    parser.add_argument('-threshold', '--similarity-threshold', type=float, default=0.65,
                         help='Minimum similarity for cross-references (default: 0.65)')
     parser.add_argument('--quiet', action='store_true',
                         help='Reduce output verbosity (only show essential information)')
