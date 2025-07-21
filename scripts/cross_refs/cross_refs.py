@@ -3,7 +3,7 @@
 ML Systems Cross-Reference Generator
 ====================================
 
-Complete toolkit for domain adaptation and cross-reference generation.
+Complete toolkit for domain adaptation and cross-reference generation using pypandoc for clean content extraction.
 
 MODES:
     Training Mode:
@@ -18,6 +18,19 @@ MODES:
         python3 cross_referencing.py -g -m sentence-t5-base -o cross_refs.json
         python3 cross_referencing.py --generate --model all-MiniLM-L6-v2 --output cross_refs.json
 
+CONTENT EXTRACTION:
+    • Uses pypandoc to intelligently clean markdown files
+    • Removes all Quarto divs (:::), callouts, TikZ code, citations, footnotes
+    • Extracts only ## level sections for focused embeddings
+    • Applies quality filtering via filters.yml to exclude meta-content
+    • Produces clean semantic content ideal for embeddings
+
+CONFIGURATION:
+    • Section filtering rules defined in filters.yml
+    • Excludes meta-sections like "Purpose", "Overview", "Learning Objectives"
+    • Configurable content filters for length and quality
+    • Pattern matching for quiz/exercise sections
+
 TRAINING:
     • Extracts content from specified directories
     • Excludes introduction/conclusion chapters (champion approach)
@@ -27,21 +40,155 @@ TRAINING:
 
 GENERATION:
     • Works with domain-adapted models OR base sentence-transformer models
-    • Extracts sections and generates embeddings
+    • Generates embeddings from cleaned section content
     • Finds cross-references with 65%+ similarity threshold
     • Outputs Lua-compatible JSON for inject_xrefs.lua
 
 REQUIREMENTS:
-    pip install sentence-transformers scikit-learn numpy torch pyyaml
+    pip install sentence-transformers scikit-learn numpy torch pyyaml pypandoc
+    
+    Core libraries:
+    • sentence-transformers: Embedding generation and model handling
+    • scikit-learn: Nearest neighbors for similarity search  
+    • numpy: Numerical operations
+    • torch: PyTorch backend for transformers
+    • pyyaml: YAML configuration file processing
+    • pypandoc: Markdown cleaning and conversion
 """
 
 import json
 import numpy as np
 import argparse
 import sys
-import yaml
+import re
 from pathlib import Path
 from typing import List, Dict, Optional, Any, cast
+
+try:
+    import yaml
+except ImportError:
+    print("❌ Error: PyYAML not installed")
+    print("   Install with: pip install pyyaml")
+    sys.exit(1)
+
+
+def load_section_filters() -> Dict:
+    """Load section filtering configuration from filters.yml."""
+    filter_file = Path(__file__).parent / "filters.yml"
+    
+    if not filter_file.exists():
+        print(f"📄 No filters.yml found at {filter_file}, using default filters")
+        # Default config if file doesn't exist
+        return {
+            'exclude_sections': {
+                'exact': ['purpose', 'overview', 'learning objectives', 'prerequisites'],
+                'patterns': ['.*quiz.*', '.*exercise.*']
+            },
+            'content_filters': {
+                'min_length': 200,
+                'max_length': 15000,
+                'exclude_if_contains': ['learning outcome', 'this chapter will']
+            },
+            'quality_filters': {
+                'max_list_ratio': 0.7,
+                'max_code_ratio': 0.8,
+                'max_citation_ratio': 0.3
+            }
+        }
+    
+    try:
+        with open(filter_file, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+            
+        if not isinstance(config, dict):
+            raise ValueError("filters.yml must contain a valid YAML dictionary")
+            
+        # Validate required sections
+        required_sections = ['exclude_sections', 'content_filters', 'quality_filters']
+        for section in required_sections:
+            if section not in config:
+                print(f"⚠️  Warning: Missing '{section}' in filters.yml, using defaults")
+                
+        return config
+        
+    except yaml.YAMLError as e:
+        print(f"❌ Error parsing filters.yml: {e}")
+        print(f"   Please check YAML syntax in {filter_file}")
+        return {}
+    except FileNotFoundError:
+        print(f"❌ Could not find filters.yml at {filter_file}")
+        return {}
+    except Exception as e:
+        print(f"❌ Unexpected error loading filters.yml: {e}")
+        return {}
+
+
+def should_exclude_section(title: str, content: str, config: Dict) -> tuple[bool, str]:
+    """
+    Determine if section should be excluded from cross-referencing.
+    
+    Returns:
+        (should_exclude: bool, reason: str)
+    """
+    if not config:
+        return False, ""
+        
+    title_lower = title.lower().strip()
+    content_lower = content.lower()
+    
+    # Exact title matches
+    exact_matches = config.get('exclude_sections', {}).get('exact', [])
+    if title_lower in [item.lower() for item in exact_matches]:
+        return True, f"exact title match: '{title}'"
+    
+    # Pattern matching
+    patterns = config.get('exclude_sections', {}).get('patterns', [])
+    for pattern in patterns:
+        try:
+            if re.match(pattern.lower(), title_lower):
+                return True, f"pattern match: '{pattern}'"
+        except re.error:
+            continue
+    
+    # Content length filters
+    content_filters = config.get('content_filters', {})
+    min_length = content_filters.get('min_length', 0)
+    max_length = content_filters.get('max_length', float('inf'))
+    
+    if len(content) < min_length:
+        return True, f"too short ({len(content)} < {min_length} chars)"
+    
+    if len(content) > max_length:
+        return True, f"too long ({len(content)} > {max_length} chars)"
+    
+    # Meta-content detection
+    exclude_keywords = content_filters.get('exclude_if_contains', [])
+    for keyword in exclude_keywords:
+        if keyword.lower() in content_lower:
+            return True, f"contains meta-content: '{keyword}'"
+    
+    # Quality filters
+    quality_filters = config.get('quality_filters', {})
+    
+    # Check list ratio
+    lines = content.split('\n')
+    list_lines = sum(1 for line in lines if line.strip().startswith(('-', '*', '•')))
+    list_ratio = list_lines / len(lines) if lines else 0
+    max_list_ratio = quality_filters.get('max_list_ratio', 1.0)
+    
+    if list_ratio > max_list_ratio:
+        return True, f"too much list content ({list_ratio:.1%} > {max_list_ratio:.1%})"
+    
+    # Check code ratio (lines starting with spaces/tabs or in code blocks)
+    code_lines = sum(1 for line in lines if line.startswith(('    ', '\t', '```')))
+    code_ratio = code_lines / len(lines) if lines else 0
+    max_code_ratio = quality_filters.get('max_code_ratio', 1.0)
+    
+    if code_ratio > max_code_ratio:
+        return True, f"too much code ({code_ratio:.1%} > {max_code_ratio:.1%})"
+    
+    return False, ""
+
 
 def get_quarto_file_order() -> List[str]:
     """Extract file order from _quarto.yml chapters section, including commented lines."""
@@ -157,57 +304,369 @@ def find_qmd_files(directories: List[str]) -> List[str]:
     
     return ordered_files
 
-def extract_sections(file_path: str) -> List[Dict]:
-    """Extract sections from a Quarto markdown file."""
+def extract_sections(file_path: str, verbose: bool = False) -> List[Dict]:
+    """
+    Extract ## level sections from Quarto markdown files using pypandoc for clean content.
+    
+    1. Uses pypandoc to convert markdown to clean text (removes all Quarto markup)
+    2. Extracts only ## level headers and their content until next ##
+    3. Applies section-level filtering to remove meta-content
+    4. Creates embeddings from this cleaned content
+    """
     sections = []
     
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        lines = content.split('\n')
-        current_section = None
-        section_content = []
-        
-        for line in lines:
-            if line.startswith('## ') or line.startswith('### '):
-                # Save previous section
-                if current_section and section_content:
-                    clean_content = '\n'.join(section_content).strip()
-                    if len(clean_content) > 100:  # Only substantial sections
-                        sections.append({
-                            'file_path': file_path,
-                            'title': current_section,
-                            'content': clean_content[:1500]  # Limit for embeddings
-                        })
-                
-                # Start new section
-                current_section = line.replace('#', '').strip()
-                section_content = []
-            else:
-                section_content.append(line)
-        
-        # Save final section
-        if current_section and section_content:
-            clean_content = '\n'.join(section_content).strip()
-            if len(clean_content) > 100:
-                sections.append({
-                    'file_path': file_path,
-                    'title': current_section,
-                    'content': clean_content[:1500]
-                })
+    # Load filtering configuration
+    filter_config = load_section_filters()
+    excluded_sections = []
     
+    try:
+        # First, use pypandoc to clean the entire file
+        cleaned_markdown = _process_markdown_with_pypandoc(file_path)
+        if not cleaned_markdown:
+            print(f"⚠️  Failed to process {file_path} with pypandoc")
+            return []
+        
+        # Now extract ## level sections from the cleaned content
+        section_chunks = _extract_h2_sections_from_text(cleaned_markdown)
+        
+        for section_title, section_content in section_chunks:
+            if not section_title or not section_content:
+                continue
+                
+            # Apply section filtering
+            should_exclude, exclude_reason = should_exclude_section(
+                section_title, section_content, filter_config
+            )
+            
+            if should_exclude:
+                excluded_sections.append((section_title, exclude_reason))
+                if verbose:
+                    print(f"      🚫 Excluded '{section_title}': {exclude_reason}")
+                continue
+            
+            # Only include sections that pass all filters
+            content = section_content.strip()
+            sections.append({
+                'file_path': file_path,
+                'title': section_title,
+                'content': content[:2000]  # Limit for embeddings
+            })
+        
+        # Show filtering summary
+        if excluded_sections:
+            chapter_name = Path(file_path).parent.name
+            print(f"      📋 [{chapter_name}] Excluded {len(excluded_sections)} sections:")
+            for title, reason in excluded_sections[:3]:  # Show first 3
+                print(f"         • '{title}' ({reason})")
+            if len(excluded_sections) > 3:
+                print(f"         • ... and {len(excluded_sections) - 3} more")
+                
     except Exception as e:
-        print(f"Error reading {file_path}: {e}")
+        print(f"Error processing {file_path}: {e}")
     
     return sections
 
-def load_content(directories: List[str], exclude_chapters: Optional[List[str]] = None) -> List[Dict]:
-    """Load and filter content from directories."""
+
+def _process_markdown_with_pypandoc(file_path: str) -> str:
+    """
+    Use pypandoc to clean markdown file and remove all Quarto divs.
+    
+    This removes all ::: divs, callouts, figures, and Quarto-specific markup.
+    """
+    try:
+        import pypandoc
+        
+        # Step 1: Convert to plain text to strip all formatting and divs
+        plain_text = pypandoc.convert_file(
+            file_path,
+            'plain',  # Output format: plain text
+            format='markdown',  # Input format
+            extra_args=[
+                '--strip-comments',  # Remove HTML comments
+                '--wrap=none',  # Don't wrap lines
+            ]
+        )
+        
+        # Step 2: Process the plain text to reconstruct clean markdown with headers
+        cleaned_markdown = _reconstruct_markdown_from_plain_text(plain_text)
+        
+        # Step 3: Additional cleanup to remove any remaining Quarto artifacts
+        cleaned_markdown = _additional_cleanup(cleaned_markdown)
+        
+        return cleaned_markdown
+        
+    except ImportError:
+        print("⚠️  pypandoc not available. Install with: pip install pypandoc")
+        return ""
+        
+    except Exception as e:
+        print(f"⚠️  pypandoc processing failed for {file_path}: {e}")
+        return ""
+
+
+def _reconstruct_markdown_from_plain_text(plain_text: str) -> str:
+    """
+    Reconstruct markdown with proper headers from plain text.
+    
+    Pandoc converts headers to plain text, so we need to detect and restore them.
+    """
+    lines = plain_text.split('\n')
+    markdown_lines = []
+    
+    # Common header patterns to look for
+    common_headers = {
+        'purpose', 'overview', 'introduction', 'summary', 'conclusion',
+        'background', 'methodology', 'results', 'discussion', 'challenges',
+        'design patterns', 'global challenges', 'key ai applications',
+        'engineering challenges', 'selection framework', 'ai pervasiveness',
+        'ai evolution', 'ml systems engineering', 'defining ml systems',
+        'lifecycle of ml systems', 'practical applications', 'looking ahead',
+        'book structure and learning path', 'cloud-based machine learning',
+        'edge machine learning', 'mobile machine learning', 'tiny machine learning',
+        'hybrid machine learning', 'shared principles', 'system comparison',
+        'deployment decision framework', 'global development perspective'
+    }
+    
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        
+        # Skip empty lines
+        if not stripped:
+            continue
+            
+        # Check if this looks like a header
+        is_header = False
+        
+        # Method 1: Known header patterns
+        if stripped.lower() in common_headers:
+            is_header = True
+            
+        # Method 2: Short lines that look like titles (3-50 chars, title case or caps)
+        elif (3 <= len(stripped) <= 50 and
+              not stripped.endswith('.') and  # Not sentences
+              not stripped.startswith('-') and  # Not list items
+              not stripped.startswith('*') and  # Not bullet points
+              not stripped.startswith('•') and  # Not bullet points
+              not '(' in stripped and  # Not parenthetical
+              not '"' in stripped and  # Not quotes
+              not stripped.lower().startswith('http') and  # Not URLs
+              (stripped[0].isupper() or stripped.isupper())):  # Starts with capital or all caps
+            
+            # Additional checks: should be standalone (surrounded by different content)
+            prev_line = lines[i-1].strip() if i > 0 else ""
+            next_line = lines[i+1].strip() if i < len(lines)-1 else ""
+            
+            # It's likely a header if:
+            # - Previous line is empty or very different
+            # - Next line starts content (longer, starts with lowercase/number)
+            if (not prev_line or len(prev_line) > 50 or prev_line.endswith('.')) and \
+               (not next_line or len(next_line) > 50 or next_line[0].islower() or next_line[0].isdigit()):
+                is_header = True
+        
+        if is_header:
+            # Convert to proper header format
+            header_text = stripped.title() if not stripped.isupper() else stripped.title()
+            markdown_lines.append(f"## {header_text}")
+        else:
+            # Regular content line
+            markdown_lines.append(line)
+    
+    return '\n'.join(markdown_lines)
+
+
+def _additional_cleanup(content: str) -> str:
+    """
+    Additional cleanup to remove any remaining Quarto artifacts and LaTeX/TikZ code.
+    
+    Specifically targets ::: divs, TikZ blocks, and other markup that shouldn't be in embeddings.
+    """
+    import re
+    
+    lines = content.split('\n')
+    cleaned_lines = []
+    in_div_block = False
+    in_tikz_block = False
+    in_latex_block = False
+    div_level = 0
+    
+    for line in lines:
+        stripped_line = line.strip()
+        
+        # Handle TikZ blocks - remove them completely
+        if '\\begin{tikzpicture}' in stripped_line:
+            in_tikz_block = True
+            continue
+        if '\\end{tikzpicture}' in stripped_line:
+            in_tikz_block = False
+            continue
+        if in_tikz_block:
+            continue
+            
+        # Handle other LaTeX environments
+        if re.match(r'\\begin\{(axis|figure|table|equation|align|gather|multline)\}', stripped_line):
+            in_latex_block = True
+            continue
+        if re.match(r'\\end\{(axis|figure|table|equation|align|gather|multline)\}', stripped_line):
+            in_latex_block = False
+            continue
+        if in_latex_block:
+            continue
+        
+        # Handle ::: div blocks - remove them completely
+        if stripped_line.startswith(':::'):
+            if stripped_line == ':::':
+                # Closing div
+                if in_div_block:
+                    div_level -= 1
+                    if div_level == 0:
+                        in_div_block = False
+                continue
+            else:
+                # Opening div like ::: {.callout-note}
+                in_div_block = True
+                div_level += 1
+                continue
+        
+        # Skip content inside div blocks
+        if in_div_block:
+            # Check for nested divs
+            if stripped_line.startswith(':::') and not stripped_line == ':::':
+                div_level += 1
+            elif stripped_line == ':::':
+                div_level -= 1
+                if div_level == 0:
+                    in_div_block = False
+            continue
+        
+        # Remove LaTeX commands and environments
+        line = re.sub(r'\\[a-zA-Z]+(\[[^\]]*\])?(\{[^}]*\})*', '', line)  # LaTeX commands
+        line = re.sub(r'\$[^$]*\$', '', line)  # Inline math
+        line = re.sub(r'\$\$[^$]*\$\$', '', line)  # Display math
+        
+        # Remove any remaining Quarto-specific patterns
+        line = re.sub(r'\{\{<.*?>\}\}', '', line)  # Quarto shortcodes
+        line = re.sub(r'@fig-[a-zA-Z0-9-_]+', '', line)  # Figure references
+        line = re.sub(r'@lst-[a-zA-Z0-9-_]+', '', line)  # List references
+        line = re.sub(r'@vid-[a-zA-Z0-9-_]+', '', line)  # Video references
+        line = re.sub(r'@tbl-[a-zA-Z0-9-_]+', '', line)  # Table references
+        line = re.sub(r'\{#[^}]+\}', '', line)  # Section IDs
+        line = re.sub(r'\{\.[\w-]+\}', '', line)  # CSS classes
+        line = re.sub(r'!\[.*?\]\([^)]+\)', '', line)  # Images
+        line = re.sub(r'<[^>]+>', '', line)  # HTML tags
+        
+        # Remove academic citations and footnotes
+        line = re.sub(r'\[@[^\]]+\]', '', line)  # Academic citations [@author2024]
+        line = re.sub(r'\[[0-9]+\]', '', line)  # Footnote numbers [1], [2], etc.
+        
+        # Remove image captions (DALL·E prompts and similar)
+        line = re.sub(r'\[DALL·E[^\]]*\]', '', line)  # DALL·E prompts
+        line = re.sub(r'\[.*?Prompt:.*?\]', '', line)  # Other prompts
+        line = re.sub(r'\[Source:.*?\]', '', line)  # Source attributions
+        
+        # Fix broken references to removed figures
+        line = re.sub(r'(\w+,?\s+)?(shown|depicted|illustrated|presented)\s+in\s*,?\s*', r'\1', line)
+        line = re.sub(r',\s*as\s+(shown|depicted|illustrated)\s+in\s*,?\s*', ', ', line)
+        line = re.sub(r'the timeline shows', 'the timeline showed', line)
+        line = re.sub(r'(\w+)\s+shows?\s+', r'\1 demonstrates ', line)
+        
+        # Remove code blocks (lines that look like pure code)
+        if (stripped_line.startswith('\\') and 
+            any(cmd in stripped_line for cmd in ['draw', 'node', 'fill', 'coordinate', 'clip'])):
+            continue
+            
+        # Skip lines that are mostly LaTeX syntax
+        if re.match(r'^[\\{}()[\],;\s%\-\d\.]*$', stripped_line) and len(stripped_line) > 10:
+            continue
+        
+        # Skip footnote definitions (lines starting with [number] Definition:)
+        if re.match(r'^\[\d+\]\s+[A-Z][\w\s]+:', stripped_line):
+            continue
+            
+        # Clean up the line and add if not empty and meaningful
+        cleaned_line = line.strip()
+        if (cleaned_line and 
+            len(cleaned_line) > 3 and  # Minimum meaningful length
+            not re.match(r'^[\\{}()[\],;\s%\-\d\.]*$', cleaned_line)):  # Not just syntax
+            cleaned_lines.append(cleaned_line)
+    
+    # Join and clean up multiple spaces/newlines
+    cleaned_content = '\n'.join(cleaned_lines)
+    cleaned_content = re.sub(r'\n\s*\n\s*\n+', '\n\n', cleaned_content)  # Multiple newlines to double
+    cleaned_content = re.sub(r'[ \t]+', ' ', cleaned_content)  # Multiple spaces to single
+    
+    # Final cleanup pass for any remaining artifacts
+    cleaned_content = re.sub(r'\s*,\s*,\s*', ', ', cleaned_content)  # Multiple commas
+    cleaned_content = re.sub(r'\s*\.\s*\.\s*', '. ', cleaned_content)  # Multiple periods
+    cleaned_content = re.sub(r'\s+([,.;:!?])', r'\1', cleaned_content)  # Space before punctuation
+    cleaned_content = re.sub(r'([.!?])\s*([a-z])', r'\1 \2', cleaned_content)  # Proper sentence spacing
+    
+    return cleaned_content.strip()
+
+
+def _extract_h2_sections_from_text(text: str) -> List[tuple]:
+    """
+    Extract ## level headers and their content from cleaned text.
+    
+    Only extracts content between ## headers, stopping at the next ##.
+    """
+    lines = text.split('\n')
+    sections = []
+    current_section_title = None
+    current_section_lines = []
+    
+    for line in lines:
+        stripped_line = line.strip()
+        
+        # Check for ## header (exactly 2 #, not more)
+        if stripped_line.startswith('## ') and not stripped_line.startswith('### '):
+            # Save previous section if it exists
+            if current_section_title and current_section_lines:
+                section_content = '\n'.join(current_section_lines).strip()
+                if section_content:  # Only add non-empty sections
+                    sections.append((current_section_title, section_content))
+            
+            # Start new section
+            current_section_title = stripped_line.replace('##', '').strip()
+            # Remove any remaining Quarto markup from title
+            current_section_title = _clean_title(current_section_title)
+            current_section_lines = []
+            
+        elif current_section_title:
+            # Add content to current section
+            current_section_lines.append(line)
+    
+    # Don't forget the last section
+    if current_section_title and current_section_lines:
+        section_content = '\n'.join(current_section_lines).strip()
+        if section_content:
+            sections.append((current_section_title, section_content))
+    
+    return sections
+
+
+def _clean_title(title: str) -> str:
+    """Clean section title of any remaining Quarto markup."""
+    import re
+    
+    # Remove section references like {#sec-something}
+    title = re.sub(r'\{#[^}]+\}', '', title)
+    # Remove class references like {.unnumbered}
+    title = re.sub(r'\{\.[\w-]+\}', '', title)
+    # Remove any remaining braces
+    title = re.sub(r'[{}]', '', title)
+    
+    return title.strip()
+
+
+
+
+def load_content(directories: List[str], exclude_chapters: Optional[List[str]] = None, verbose: bool = False) -> List[Dict]:
+    """Load and filter content from directories using pypandoc for clean extraction."""
     if exclude_chapters is None:
         exclude_chapters = []  # Default to including all chapters
     
     print(f"📚 Loading content from: {', '.join(directories)}")
+    print(f"🔧 Using pypandoc-based content extraction with section filtering")
     qmd_files = find_qmd_files(directories)
     
     print(f"📋 Found {len(qmd_files)} .qmd files:")
@@ -221,9 +680,10 @@ def load_content(directories: List[str], exclude_chapters: Optional[List[str]] =
     all_sections = []
     processed_files = []
     excluded_files = []
+    total_excluded_sections = 0
     
     for file_path in qmd_files:
-        sections = extract_sections(file_path)
+        sections = extract_sections(file_path, verbose=verbose)
         if sections:
             # Apply filtering
             filtered_sections = []
@@ -263,6 +723,7 @@ def load_content(directories: List[str], exclude_chapters: Optional[List[str]] =
     print(f"    • Files processed: {len(processed_files)}")
     print(f"    • Files excluded: {len(excluded_files)}")
     print(f"    • Sections extracted: {len(all_sections)}")
+    print(f"    • Quality filtering: Sections excluded for being meta-content, too short, or low-quality")
     
     return all_sections
 
@@ -337,7 +798,7 @@ def create_training_examples(sections: List[Dict]) -> List:
     return train_examples
 
 def train_model(directories: List[str], output_path: str, base_model: str = "sentence-t5-base", 
-                epochs: int = 5, exclude_chapters: Optional[List[str]] = None) -> bool:
+                epochs: int = 5, exclude_chapters: Optional[List[str]] = None, verbose: bool = False) -> bool:
     """Train a domain-adapted model."""
     print("🔥 TRAINING MODE: Domain Adaptation")
     print("=" * 50)
@@ -351,7 +812,7 @@ def train_model(directories: List[str], output_path: str, base_model: str = "sen
         return False
     
     # Load content
-    all_sections = load_content(directories, exclude_chapters)
+    all_sections = load_content(directories, exclude_chapters, verbose=verbose)
     if len(all_sections) < 50:
         print(f"❌ Need at least 50 sections for training, got {len(all_sections)}")
         return False
@@ -419,6 +880,22 @@ def extract_section_id(title: str) -> str:
     match = re.search(r'\{(sec-[^}]+)\}', title)
     return match.group(1) if match else ""
 
+
+def generate_section_id(title: str, chapter_name: str) -> str:
+    """Generate a section ID from cleaned title and chapter name."""
+    import re
+    
+    # Clean the title: lowercase, remove special chars, replace spaces with hyphens
+    clean_title = re.sub(r'[^\w\s-]', '', title.lower())
+    clean_title = re.sub(r'\s+', '-', clean_title.strip())
+    clean_title = re.sub(r'-+', '-', clean_title)  # Remove multiple hyphens
+    clean_title = clean_title.strip('-')  # Remove leading/trailing hyphens
+    
+    # Create section ID with chapter prefix
+    section_id = f"sec-{chapter_name}-{clean_title}"
+    
+    return section_id
+
 def clean_title(title: str) -> str:
     """Remove section ID from title for display."""
     import re
@@ -450,7 +927,7 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
         return {}
     
     # Load content
-    all_sections = load_content(directories, exclude_chapters)
+    all_sections = load_content(directories, exclude_chapters, verbose=verbose)
     if not all_sections:
         print("❌ No content loaded")
         return {}
@@ -483,7 +960,11 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
         source_file = section['file_path']
         source_filename = Path(source_file).name
         source_chapter = Path(section['file_path']).parent.name
+        
+        # Try to extract existing section ID, otherwise generate one
         source_section_id = extract_section_id(section['title'])
+        if not source_section_id:
+            source_section_id = generate_section_id(section['title'], source_chapter)
         
         if not source_section_id:
             continue
@@ -513,7 +994,10 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
             if (similarity > similarity_threshold and 
                 source_chapter != target_chapter):
                 
+                # Try to extract existing section ID, otherwise generate one
                 target_id = extract_section_id(target_section['title'])
+                if not target_id:
+                    target_id = generate_section_id(target_section['title'], target_chapter)
 
                 if target_id:
                     # Determine connection type
@@ -587,17 +1071,17 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    # Train a domain-adapted model
-    python3 cross_referencing.py -t -d ../../contents/core/ -o ./t5-mlsys-domain-adapted
+    # Train a domain-adapted model with intelligent extraction
+    python3 cross_refs.py -t -d ../../contents/core/ -o ./t5-mlsys-domain-adapted
     
-    # Generate with domain-adapted model  
-    python3 cross_referencing.py -g -m ./t5-mlsys-domain-adapted -o cross_refs.json -d ../../contents/core/
+    # Generate with domain-adapted model (uses pypandoc by default)
+    python3 cross_refs.py -g -m ./t5-mlsys-domain-adapted -o cross_refs.json -d ../../contents/core/
     
     # Generate with base model (no training needed)
-    python3 cross_referencing.py -g -m sentence-t5-base -o cross_refs.json -d ../../contents/core/
+    python3 cross_refs.py -g -m sentence-t5-base -o cross_refs.json -d ../../contents/core/
     
-    # Train with custom parameters
-    python3 cross_referencing.py -t -d ../../contents/core/ -o ./t5-mini-custom --base-model all-MiniLM-L6-v2 --epochs 3
+    # Test extraction methods
+    python3 test_intelligent_extraction.py
         """)
     
     # Mode selection
@@ -637,8 +1121,6 @@ Examples:
         print("❌ Generation mode requires --model argument")
         return 1
     
-    # Exclusions are now handled by argparse `exclude_chapters`
-    
     # Validate directories
     for directory in args.dirs:
         if not Path(directory).exists():
@@ -653,7 +1135,8 @@ Examples:
                 output_path=args.output,
                 base_model=args.base_model,
                 epochs=args.epochs,
-                exclude_chapters=args.exclude_chapters
+                exclude_chapters=args.exclude_chapters,
+                verbose=args.verbose
             )
             return 0 if success else 1
             
