@@ -16,7 +16,10 @@ local has_quizzes = false -- track if current document has any quiz sections
 local function document_has_quizzes(doc, quiz_lookup)
   for _, block in ipairs(doc.blocks) do
     if block.t == "Header" and block.identifier and block.identifier ~= "" then
-      if quiz_lookup[block.identifier] then
+      -- Check both with and without "#" prefix since quiz system uses "#" prefix
+      local section_id = block.identifier
+      local section_id_with_hash = "#" .. section_id
+      if quiz_lookup[section_id] or quiz_lookup[section_id_with_hash] then
         return true
       end
     end
@@ -297,7 +300,8 @@ local function insert_quizzes(doc)
   end
   
   -- Document has quizzes, show clean processing info
-  io.stderr:write("📝 [Quiz Filter] 📚 Document has quizzes - processing...\n")
+  io.stderr:write("📝 [Quiz Filter] 🚀 Quiz Injection Filter\n")
+  io.stderr:write("📝 [Quiz Filter] 🔍 Document has quizzes - processing...\n")
 
   local quizzes_injected = 0
 
