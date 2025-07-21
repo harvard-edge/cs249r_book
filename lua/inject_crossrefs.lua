@@ -6,9 +6,9 @@
 -- It reads a JSON file with an array of files, each containing sections with targets,
 -- then injects a "Chapter Connection" callout box into the appropriate sections.
 -- 
--- Cross-references are formatted in academic style with directional arrows:
--- → Forward Section Title (§\ref{sec-target-id}) - AI-generated explanation
--- ← Background Section Title (§\ref{sec-target-id}) - AI-generated explanation
+-- Cross-references are formatted in academic style with bold directional arrows:
+-- **→** Forward Section Title (§\ref{sec-target-id}) - AI-generated explanation
+-- **←** Background Section Title (§\ref{sec-target-id}) - AI-generated explanation
 -- 
 -- Expected JSON format:
 -- {
@@ -241,23 +241,23 @@ local function create_connection_box(refs)
   for _, ref in ipairs(refs) do
          local arrow_content = ""
     
-         -- Create the academic-style entry with directional arrows
+         -- Create the academic-style entry with bold directional arrows
      local arrow = ""
      if ref.connection_type == "Preview" then
-       arrow = "→ "  -- Forward reference (material comes later)
+       arrow = "**→** "  -- Forward reference (material comes later)
      elseif ref.connection_type == "Background" then
-       arrow = "← "  -- Backward reference (material from earlier)
+       arrow = "**←** "  -- Backward reference (material from earlier)
      end
      
           if ref.explanation and ref.explanation ~= "" then
-       -- With explanation: → Title (§\ref{sec-id}) - explanation
+       -- With explanation: **→** Title (§\ref{sec-id}) - explanation
        arrow_content = arrow .. ref.target_section_title .. " (§\\ref{" .. ref.target_section_id .. "}) - " .. ref.explanation
      else
-       -- Without explanation: → Title (§\ref{sec-id})
+       -- Without explanation: **→** Title (§\ref{sec-id})
        arrow_content = arrow .. ref.target_section_title .. " (§\\ref{" .. ref.target_section_id .. "})"
      end
      
-     log_info("DEBUG: Directional arrow (" .. ref.connection_type .. "): " .. arrow_content)
+     log_info("DEBUG: Bold directional arrow (" .. ref.connection_type .. "): " .. arrow_content)
           local arrow_doc = pandoc.read(arrow_content, "markdown")
      if arrow_doc.blocks[1] then
        table.insert(content_blocks, arrow_doc.blocks[1])
@@ -266,7 +266,7 @@ local function create_connection_box(refs)
 
   -- Create a simple div with callout-chapter-connection class
   -- This structure is exactly what margin-connections.lua expects
-  log_info("DEBUG: Creating clean academic callout with " .. #content_blocks .. " directional arrows")
+  log_info("DEBUG: Creating clean academic callout with " .. #content_blocks .. " bold directional arrows")
   for i, block in ipairs(content_blocks) do
     log_info("DEBUG: Block " .. i .. " type: " .. block.t)
   end
