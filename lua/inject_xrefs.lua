@@ -141,10 +141,43 @@ end
 -- Global variable to store the lookup table
 local refs_by_source_id = {}
 
+-- Global variable to track current file being processed
+local current_file = nil
+
+-- Helper function to get current file name from Pandoc environment
+local function get_current_file()
+  -- Try to get the input file from Pandoc's environment
+  if PANDOC_STATE and PANDOC_STATE.input_files and #PANDOC_STATE.input_files > 0 then
+    local full_path = PANDOC_STATE.input_files[1]
+    return full_path:match("([^/\\]+)$") -- Extract just the filename
+  end
+  return nil
+end
+
+-- Helper function to detect if we're processing HTML output
+local function is_html_output(meta)
+  -- Check if this is HTML format processing
+  if meta and meta.format then
+    local format = pandoc.utils.stringify(meta.format):lower()
+    return format:match("html")
+  end
+  return false
+end
+
 -- Initialize cross-references from metadata
 local function init_cross_references(meta)
   log_info("🚀 Initializing Cross-Reference Injection Filter")
   log_info("================================================")
+
+  -- Detect current processing context
+  current_file = get_current_file()
+  local is_html = is_html_output(meta)
+  
+  if is_html and current_file then
+    log_info("📄 HTML mode - processing file: " .. current_file)
+  else
+    log_info("📚 Book mode - processing all files")
+  end
 
   local xrefs_data = load_cross_references(meta)
   if not xrefs_data then
@@ -154,18 +187,30 @@ local function init_cross_references(meta)
 
   -- Organize references by source section ID for quick lookup
   local total_refs_processed = 0
+  local files_processed = 0
   
   if xrefs_data and xrefs_data.cross_references then
     -- New format: array of file objects with sections and targets
     for _, file_data in ipairs(xrefs_data.cross_references) do
       local filename = file_data.file
+      
+      -- In HTML mode, only process the current file
+      if is_html and current_file and filename ~= current_file then
+        -- Skip files that don't match current file in HTML mode
+        goto continue
+      end
+      
+      files_processed = files_processed + 1
       log_info("Processing file: " .. filename .. " (" .. #file_data.sections .. " sections)")
       
       for _, section in ipairs(file_data.sections) do
         local source_section_id = section.section_id
         local source_section_title = section.section_title
         
-        log_info("  Section: " .. source_section_id .. " (" .. #section.targets .. " targets)")
+        -- In HTML mode, be less verbose about individual sections
+        if not (is_html and current_file) then
+          log_info("  Section: " .. source_section_id .. " (" .. #section.targets .. " targets)")
+        end
         
         for _, target in ipairs(section.targets) do
           -- Convert to internal format
@@ -185,6 +230,8 @@ local function init_cross_references(meta)
           total_refs_processed = total_refs_processed + 1
         end
       end
+      
+      ::continue::
     end
   elseif xrefs_data and xrefs_data.suggestions then
     -- New format: flat array of suggestions
@@ -217,8 +264,15 @@ local function init_cross_references(meta)
   end
 
   log_info("Cross-reference lookup table built:")
-  log_info("  • " .. section_count .. " sections with references")
-  log_info("  • " .. total_refs_processed .. " total references processed")
+  if is_html and current_file then
+    log_info("  • File: " .. current_file)
+    log_info("  • " .. section_count .. " sections with references")
+    log_info("  • " .. total_refs_processed .. " references processed")
+  else
+    log_info("  • " .. files_processed .. " files processed")
+    log_info("  • " .. section_count .. " sections with references") 
+    log_info("  • " .. total_refs_processed .. " total references processed")
+  end
   
   stats.total_references = total_refs_processed
 end
@@ -326,8 +380,8 @@ local function inject_cross_references(doc)
       local section_id = block.identifier
       stats.sections_found = stats.sections_found + 1
       
-      -- Debug: Show what sections we're finding
-      if section_id:match("^sec-introduction-") then
+      -- Debug: Show what sections we're finding (only in book mode)
+      if not current_file and section_id:match("^sec-introduction-") then
         log_info("🔍 Found introduction section: " .. section_id)
       end
       
@@ -345,8 +399,9 @@ local function inject_cross_references(doc)
           stats.injections_made = stats.injections_made + 1
           log_success("✨ Injected connection box after: " .. section_id)
         end
-      else
-        if section_id:match("^sec-introduction-") then
+              else
+        -- Only log missing references in book mode for debugging
+        if not current_file and section_id:match("^sec-introduction-") then
           log_info("❌ No references found for: " .. section_id)
         end
       end
@@ -356,11 +411,17 @@ local function inject_cross_references(doc)
   -- Final summary
   if stats.sections_found > 0 then
     log_info("================================================")
-    log_success("📊 INJECTION SUMMARY:")
+    if current_file then
+      log_success("📊 INJECTION SUMMARY (" .. current_file .. "):")
+    else
+      log_success("📊 INJECTION SUMMARY:")
+    end
     log_success("   • Sections processed: " .. stats.sections_found)
     log_success("   • Connection boxes injected: " .. stats.injections_made)
-    log_success("   • Total cross-references available: " .. stats.total_references)
-    log_success("   • Injection rate: " .. string.format("%.1f%%", (stats.injections_made / stats.sections_found) * 100))
+    if stats.injections_made > 0 then
+      log_success("   • Total cross-references available: " .. stats.total_references)
+      log_success("   • Injection rate: " .. string.format("%.1f%%", (stats.injections_made / stats.sections_found) * 100))
+    end
     log_info("================================================")
   end
   
