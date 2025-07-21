@@ -337,17 +337,12 @@ local function inject_cross_references(doc)
       
       -- Check if we have references for this section
       if refs_by_source_id[section_id] then
-        local num_refs = #refs_by_source_id[section_id]
-        log_info("📍 Processing section: " .. section_id .. " (" .. num_refs .. " references)")
-        
         local connection_box = create_connection_box(refs_by_source_id[section_id])
       
         if connection_box then
           -- Inject the connection box right after the header
           table.insert(new_blocks, connection_box)
-          
           stats.injections_made = stats.injections_made + 1
-          log_success("✨ Injected connection box after: " .. section_id)
         end
       end
     end
