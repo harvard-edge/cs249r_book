@@ -254,7 +254,7 @@ local function create_connection_box(refs)
      
           if ref.explanation and ref.explanation ~= "" then
        -- With explanation: **→** Title (§\ref{sec-id}) **—** explanation
-       arrow_content = arrow .. ref.target_section_title .. " (§\\ref{" .. ref.target_section_id .. "}) **—** " .. ref.explanation
+       arrow_content = arrow .. ref.target_section_title .. " (§\\ref{" .. ref.target_section_id .. "}) " .. ref.explanation
      else
        -- Without explanation: **→** Title (§\ref{sec-id}) or • Title (§\ref{sec-id})
        arrow_content = arrow .. ref.target_section_title .. " (§\\ref{" .. ref.target_section_id .. "})"

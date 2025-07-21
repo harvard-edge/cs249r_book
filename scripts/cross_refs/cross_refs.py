@@ -8,7 +8,7 @@ Complete toolkit for domain adaptation and cross-reference generation using pypa
 MODES:
     Training Mode:
         python3 cross_referencing.py --train -d ../../contents/core/ -o ./my_model
-python3 cross_referencing.py --train --dirs ../../contents/core/ --output ./my_model --base-model sentence-t5-base --epochs 5
+        python3 cross_referencing.py --train --dirs ../../contents/core/ --output ./my_model --base-model sentence-t5-base --epochs 5
     
     Generation Mode (Domain-adapted):
         python3 cross_referencing.py -g -m ./t5-mlsys-domain-adapted -o cross_refs.json
@@ -275,13 +275,13 @@ def get_quarto_file_order(quiet: bool = False) -> List[str]:
                         ordered_files.append(file_part)
         
         if not quiet:
-            print(f"📋 Found {len(ordered_files)} ordered files in _quarto.yml (including commented)")
-            if ordered_files:
-                print("🔍 _quarto.yml file order preview:")
-                for i, file_path in enumerate(ordered_files[:5], 1):
-                    print(f"    {i}. {file_path}")
-                if len(ordered_files) > 5:
-                    print(f"    ... and {len(ordered_files) - 5} more")
+        print(f"📋 Found {len(ordered_files)} ordered files in _quarto.yml (including commented)")
+        if ordered_files:
+            print("🔍 _quarto.yml file order preview:")
+            for i, file_path in enumerate(ordered_files[:5], 1):
+                print(f"    {i}. {file_path}")
+            if len(ordered_files) > 5:
+                print(f"    ... and {len(ordered_files) - 5} more")
         return ordered_files
         
     except Exception as e:
@@ -302,7 +302,7 @@ def find_qmd_files(directories: List[str], quiet: bool = False) -> List[str]:
     if not quarto_order:
         # Fallback to alphabetical sorting
         if not quiet:
-            print("📂 Using alphabetical file ordering (no _quarto.yml order found)")
+        print("📂 Using alphabetical file ordering (no _quarto.yml order found)")
         return sorted(list(set(all_qmd_files)))
     
     # Create mapping for efficient lookup
@@ -342,7 +342,7 @@ def find_qmd_files(directories: List[str], quiet: bool = False) -> List[str]:
     ordered_files.extend(remaining_files)
     
     if not quiet:
-        print(f"📊 File ordering: {len(ordered_files)} total ({len(ordered_files) - len(remaining_files)} from _quarto.yml, {len(remaining_files)} alphabetical)")
+    print(f"📊 File ordering: {len(ordered_files)} total ({len(ordered_files) - len(remaining_files)} from _quarto.yml, {len(remaining_files)} alphabetical)")
     
     return ordered_files
 
@@ -419,7 +419,7 @@ def extract_sections(file_path: str, verbose: bool = False, quiet: bool = False)
                 print(f"         • '{title}' ({reason})")
             if len(excluded_sections) > 3:
                 print(f"         • ... and {len(excluded_sections) - 3} more")
-                
+    
     except Exception as e:
         print(f"Error processing {file_path}: {e}")
     
@@ -663,7 +663,7 @@ def generate_explanation(source_content: str, target_content: str, source_title:
     source_snippet = source_content[:800] + "..." if len(source_content) > 800 else source_content
     target_snippet = target_content[:800] + "..." if len(target_content) > 800 else target_content
     
-    prompt = f"""You are analyzing connections between sections in a Machine Learning Systems textbook.
+    prompt = f"""You are writing cross-reference explanations for a Machine Learning Systems textbook. Create natural, varied explanations that tell students WHY they should follow the connection.
 
 Source Section: "{source_title}"
 {source_snippet}
@@ -671,14 +671,19 @@ Source Section: "{source_title}"
 Target Section: "{target_title}"  
 {target_snippet}
 
-Write a concise 8-15 word explanation of why someone reading the source section should also read the target section. Focus on the specific relationship between these topics.
+Write a natural 8-15 word explanation that completes: "See also: {target_title} - [your explanation]"
 
-Format your response as a short phrase like:
-- "explains the mathematical foundations for these optimization techniques"
-- "provides practical implementation details for the concepts discussed here"
-- "shows real-world deployment scenarios for these algorithms"
+Use varied, engaging language. Examples of good explanations:
+- "provides essential background on neural network mathematics"
+- "shows practical applications of these optimization techniques"  
+- "dives deeper into the implementation details"
+- "explains why this matters for deployment decisions"
+- "contrasts different approaches to model compression"
+- "demonstrates real-world uses of edge computing"
+- "covers prerequisite concepts for understanding transformers"
+- "explores advanced aspects of distributed training"
 
-Explanation:"""
+Write ONLY a natural explanation phrase (no labels, no "Explanation:" prefix):"""
 
     try:
         response = requests.post(
@@ -688,9 +693,9 @@ Explanation:"""
                 "prompt": prompt,
                 "stream": False,
                 "options": {
-                    "temperature": 0.1,
+                    "temperature": 0.3,
                     "top_p": 0.9,
-                    "max_tokens": 50
+                    "max_tokens": 60
                 }
             },
             timeout=30
@@ -701,12 +706,24 @@ Explanation:"""
             explanation = result.get("response", "").strip()
             
             # Clean up the explanation
-            explanation = explanation.replace("Explanation:", "").strip()
-            explanation = explanation.replace('"', '').strip()
+            explanation = explanation.strip()
             
-            # Ensure it's reasonably short
-            if len(explanation) > 100:
-                explanation = explanation[:97] + "..."
+            # Remove common prefixes/suffixes that might appear
+            prefixes_to_remove = ["Explanation:", "- ", "• ", '"', "'", "contextual:", "foundational:", "practical:", "detailed:", "comparative:"]
+            for prefix in prefixes_to_remove:
+                if explanation.lower().startswith(prefix.lower()):
+                    explanation = explanation[len(prefix):].strip()
+            
+            # Remove quotes and clean up
+            explanation = explanation.replace('"', '').replace("'", "").strip()
+            
+            # Ensure it starts with lowercase (for natural flow)
+            if explanation and explanation[0].isupper() and not explanation.startswith(('AI', 'ML', 'GPU', 'CPU')):
+                explanation = explanation[0].lower() + explanation[1:]
+            
+            # Ensure reasonable length
+            if len(explanation) > 120:
+                explanation = explanation[:117] + "..."
                 
             return explanation
         else:
@@ -896,18 +913,18 @@ def load_content(directories: List[str], exclude_chapters: Optional[List[str]] =
         exclude_chapters = []  # Default to including all chapters
     
     if not quiet:
-        print(f"📚 Loading content from: {', '.join(directories)}")
+    print(f"📚 Loading content from: {', '.join(directories)}")
         print(f"🔧 Using pypandoc-based content extraction with section filtering")
     qmd_files = find_qmd_files(directories, quiet=quiet)
     
     if not quiet:
-        print(f"📋 Found {len(qmd_files)} .qmd files:")
-        for i, file_path in enumerate(qmd_files, 1):
-            try:
-                relative_path = str(Path(file_path).relative_to(Path.cwd()))
-            except ValueError:
-                relative_path = str(Path(file_path))
-            print(f"    {i:2d}. {relative_path}")
+    print(f"📋 Found {len(qmd_files)} .qmd files:")
+    for i, file_path in enumerate(qmd_files, 1):
+        try:
+            relative_path = str(Path(file_path).relative_to(Path.cwd()))
+        except ValueError:
+            relative_path = str(Path(file_path))
+        print(f"    {i:2d}. {relative_path}")
     
     all_sections = []
     processed_files = []
@@ -941,32 +958,32 @@ def load_content(directories: List[str], exclude_chapters: Optional[List[str]] =
                 all_sections.extend(filtered_sections)
     
     if not quiet:
-        print(f"\n✅ PROCESSING SUMMARY:")
-        print(f"📖 Processing {len(processed_files)} files:")
-        for i, file_path in enumerate(processed_files, 1):
+    print(f"\n✅ PROCESSING SUMMARY:")
+    print(f"📖 Processing {len(processed_files)} files:")
+    for i, file_path in enumerate(processed_files, 1):
+        try:
+            relative_path = str(Path(file_path).relative_to(Path.cwd()))
+        except ValueError:
+            relative_path = str(Path(file_path))
+        chapter_name = Path(file_path).parent.name
+        sections_count = len([s for s in all_sections if s['file_path'] == file_path])
+        print(f"    {i:2d}. {relative_path} [{chapter_name}] ({sections_count} sections)")
+    
+    if excluded_files:
+        print(f"\n🚫 Excluded {len(excluded_files)} files ({', '.join(exclude_chapters)} chapters):")
+        for i, file_path in enumerate(excluded_files, 1):
             try:
                 relative_path = str(Path(file_path).relative_to(Path.cwd()))
             except ValueError:
                 relative_path = str(Path(file_path))
             chapter_name = Path(file_path).parent.name
-            sections_count = len([s for s in all_sections if s['file_path'] == file_path])
-            print(f"    {i:2d}. {relative_path} [{chapter_name}] ({sections_count} sections)")
-        
-        if excluded_files:
-            print(f"\n🚫 Excluded {len(excluded_files)} files ({', '.join(exclude_chapters)} chapters):")
-            for i, file_path in enumerate(excluded_files, 1):
-                try:
-                    relative_path = str(Path(file_path).relative_to(Path.cwd()))
-                except ValueError:
-                    relative_path = str(Path(file_path))
-                chapter_name = Path(file_path).parent.name
-                print(f"    {i:2d}. {relative_path} [{chapter_name}]")
-        
-        print(f"\n📊 FINAL COUNTS:")
-        print(f"    • Total files found: {len(qmd_files)}")
-        print(f"    • Files processed: {len(processed_files)}")
-        print(f"    • Files excluded: {len(excluded_files)}")
-        print(f"    • Sections extracted: {len(all_sections)}")
+            print(f"    {i:2d}. {relative_path} [{chapter_name}]")
+    
+    print(f"\n📊 FINAL COUNTS:")
+    print(f"    • Total files found: {len(qmd_files)}")
+    print(f"    • Files processed: {len(processed_files)}")
+    print(f"    • Files excluded: {len(excluded_files)}")
+    print(f"    • Sections extracted: {len(all_sections)}")
         print(f"    • Quality filtering: Sections excluded for being meta-content, too short, or low-quality")
     else:
         print(f"📊 Processed {len(processed_files)} files, extracted {len(all_sections)} sections")
@@ -1133,8 +1150,8 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
     """
     
     if not quiet:
-        print("🚀 GENERATION MODE: Cross-Reference Generation")
-        print("=" * 50)
+    print("🚀 GENERATION MODE: Cross-Reference Generation")
+    print("=" * 50)
     
     # Handle AI explanation setup
     selected_model = "qwen2.5:7b"  # Default
@@ -1154,14 +1171,14 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
     model_type = "Domain-adapted" if is_local_model else "Base HuggingFace"
     
     if not quiet:
-        print(f"📂 Model: {model_path} ({model_type})")
+    print(f"📂 Model: {model_path} ({model_type})")
     
     # Load model
     try:
         from sentence_transformers import SentenceTransformer
         model = SentenceTransformer(model_path)
         if not quiet:
-            print(f"✅ Model loaded: {model.get_sentence_embedding_dimension()} dimensions")
+        print(f"✅ Model loaded: {model.get_sentence_embedding_dimension()} dimensions")
     except Exception as e:
         print(f"❌ Error loading model: {e}")
         return {}
@@ -1177,22 +1194,22 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
         sys.stderr = devnull
     
     try:
-        # Load content
+    # Load content
         all_sections = load_content(directories, exclude_chapters, verbose=verbose, quiet=quiet)
-        if not all_sections:
+    if not all_sections:
             if not quiet:
-                print("❌ No content loaded")
-            return {}
-        
-        # Generate embeddings
+        print("❌ No content loaded")
+        return {}
+    
+    # Generate embeddings
         if not quiet:
-            print("🧮 Generating embeddings...")
+    print("🧮 Generating embeddings...")
         embeddings = model.encode([section['content'] for section in all_sections], 
                                 show_progress_bar=not quiet)
-        
-        # Find similar sections
+    
+    # Find similar sections
         if not quiet:
-            print("🔍 Finding cross-references...")
+    print("🔍 Finding cross-references...")
         
     finally:
         # Restore stderr if we suppressed it
@@ -1226,18 +1243,18 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
         source_section_id = section.get('section_id')
         if not source_section_id:
             continue  # Skip sections without valid IDs
-                
+            
         if source_filename not in file_section_refs:
             file_section_refs[source_filename] = {}
-                
+            
         if source_section_id not in file_section_refs[source_filename]:
             file_section_refs[source_filename][source_section_id] = {
                 'section_title': section['title'],  # Use exact original title
                 'targets': []
             }
-            
+        
         suggestions_count = 0
-            
+        
         for j in range(1, min(10, len(indices[i]))):
             if suggestions_count >= max_suggestions:
                 break
@@ -1251,20 +1268,20 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
             # Filter: different chapter, good similarity
             if (similarity > similarity_threshold and 
                 source_chapter != target_chapter):
-                    
+                
                 # Use the exact section ID from extraction
                 target_id = target_section.get('section_id')
                 if not target_id:
                     continue  # Skip targets without valid IDs
 
-                # Determine connection type
-                source_idx = file_index_map.get(source_file, -1)
-                target_idx_map = file_index_map.get(target_section['file_path'], -1)
-                connection_type = "related" # Default
-                if source_idx != -1 and target_idx_map != -1:
-                    if target_idx_map > source_idx:
-                        connection_type = "Preview"
-                    else:
+                    # Determine connection type
+                    source_idx = file_index_map.get(source_file, -1)
+                    target_idx_map = file_index_map.get(target_section['file_path'], -1)
+                    connection_type = "related" # Default
+                    if source_idx != -1 and target_idx_map != -1:
+                        if target_idx_map > source_idx:
+                            connection_type = "Preview"
+                        else:
                         connection_type = "Background"
 
                 # Generate explanation if requested
@@ -1281,10 +1298,10 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
                     )
 
                 target_data = {
-                    'target_section_id': target_id,
+                        'target_section_id': target_id,
                     'target_section_title': target_section['title'],  # Use exact original title
-                    'connection_type': connection_type,
-                    'similarity': float(similarity)
+                        'connection_type': connection_type,
+                        'similarity': float(similarity)
                 }
                 
                 # Add explanation if generated
@@ -1292,7 +1309,7 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
                     target_data['explanation'] = explanation
                 
                 file_section_refs[source_filename][source_section_id]['targets'].append(target_data)
-                suggestions_count += 1
+                    suggestions_count += 1
     
     # Convert to final array structure
     cross_references = []
@@ -1333,11 +1350,11 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
         json.dump(result, f, indent=2)
     
     if not quiet:
-        print(f"\n✅ Generated {total_refs} cross-references across {len(cross_references)} files.")
-        all_sims = [target['similarity'] for file_entry in cross_references for section in file_entry['sections'] for target in section['targets']]
-        print(f"📊 Average similarity: {np.mean(all_sims):.3f}" if all_sims else "📊 No valid cross-references")
-        print(f"📄 Results saved to: {output_file}")
-        print(f"🎯 Model type: {model_type}")
+    print(f"\n✅ Generated {total_refs} cross-references across {len(cross_references)} files.")
+    all_sims = [target['similarity'] for file_entry in cross_references for section in file_entry['sections'] for target in section['targets']]
+    print(f"📊 Average similarity: {np.mean(all_sims):.3f}" if all_sims else "📊 No valid cross-references")
+    print(f"📄 Results saved to: {output_file}")
+    print(f"🎯 Model type: {model_type}")
     else:
         print(f"✅ Generated {total_refs} cross-references → {output_file}")
     
@@ -1443,11 +1460,11 @@ Examples:
             
             if result and 'cross_references' in result and result['cross_references']:
                 if not args.quiet:
-                    print(f"🎉 Success! Ready for Quarto injection. NOTE: lua/inject_xrefs.lua may need updates for the new JSON structure.")
+                print(f"🎉 Success! Ready for Quarto injection. NOTE: lua/inject_xrefs.lua may need updates for the new JSON structure.")
                 return 0
             else:
                 if not args.quiet:
-                    print("⚠️  No cross-references generated")
+                print("⚠️  No cross-references generated")
                 return 1
                 
     except KeyboardInterrupt:
