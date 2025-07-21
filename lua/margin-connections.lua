@@ -40,10 +40,10 @@ function Div(el)
 
     else
       -- 3) HTML → return the DIV unchanged (or let him custom-numbered-blocks to stylize
-  if quarto.doc.is_format("html") then
-    el.classes:insert("margin-chapter-connection")
-    return pandoc.Div({el}, pandoc.Attr("", {"margin-container"}))
-  end
+      if quarto.doc.is_format("html") then
+        el.classes:insert("margin-chapter-connection")
+        return pandoc.Div({el}, pandoc.Attr("", {"margin-container"}))
+      end
     end
   end
 

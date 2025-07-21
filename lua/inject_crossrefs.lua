@@ -239,74 +239,60 @@ local function create_connection_box(refs)
     return nil
   end
 
-  -- Create the content paragraphs
-  local content_paras = {}
+  -- Build content as simple paragraph blocks (compatible with margin-connections.lua)
+  local content_blocks = {}
   
   -- Add preview references
   for _, ref in ipairs(previews) do
     -- Extract chapter name from target_section_id (e.g., sec-training-overview -> training)
-    local chapter_name = "Related"
+    local chapter_name = ""
     if ref.target_section_id then
       local extracted = ref.target_section_id:match("^sec%-([^%-]+)")
       if extracted then
-        chapter_name = extracted:gsub("_", " ")
-        chapter_name = string.upper(string.sub(chapter_name, 1, 1)) .. string.sub(chapter_name, 2)
+        chapter_name = extracted:gsub("_", " "):gsub("(%a)([%w_']*)", function(first, rest) return first:upper() .. rest:lower() end)
       end
     end
     
-    local para_content = {
-      pandoc.Str("→ "),
-      pandoc.Strong({pandoc.Str(chapter_name .. ":")}),
-      pandoc.Space(),
-      pandoc.Str(ref.target_section_title)
-    }
-    table.insert(content_paras, pandoc.Para(para_content))
+    -- Preview: forward-looking reference
+    local content_md = "**Preview:** " .. chapter_name .. " → \\ref{" .. ref.target_section_id .. "} (" .. ref.target_section_title .. ")"
+    log_info("DEBUG: Preview content_md = " .. content_md)
+    local para_doc = pandoc.read(content_md, "markdown")
+    if para_doc.blocks[1] then
+      table.insert(content_blocks, para_doc.blocks[1])
+    end
   end
   
   -- Add foundation references  
   for _, ref in ipairs(foundations) do
     -- Extract chapter name from target_section_id (e.g., sec-training-overview -> training)
-    local chapter_name = "Related"
+    local chapter_name = ""
     if ref.target_section_id then
       local extracted = ref.target_section_id:match("^sec%-([^%-]+)")
       if extracted then
-        chapter_name = extracted:gsub("_", " ")
-        chapter_name = string.upper(string.sub(chapter_name, 1, 1)) .. string.sub(chapter_name, 2)
+        chapter_name = extracted:gsub("_", " "):gsub("(%a)([%w_']*)", function(first, rest) return first:upper() .. rest:lower() end)
       end
     end
     
-    local para_content = {
-      pandoc.Str("↩ "),
-      pandoc.Strong({pandoc.Str(chapter_name .. ":")}),
-      pandoc.Space(),
-      pandoc.Str(ref.target_section_title)
-    }
-    table.insert(content_paras, pandoc.Para(para_content))
+    -- Foundation: backward-looking reference
+    local content_md = "**Foundation:** " .. chapter_name .. " ← \\ref{" .. ref.target_section_id .. "} (" .. ref.target_section_title .. ")"
+    log_info("DEBUG: Foundation content_md = " .. content_md)
+    local para_doc = pandoc.read(content_md, "markdown")
+    if para_doc.blocks[1] then
+      table.insert(content_blocks, para_doc.blocks[1])
+    end
   end
 
-  -- Create the exact structure that Quarto's callout system produces
-  local details_content_div = pandoc.Div(content_paras)
+  -- Create a simple div with callout-chapter-connection class
+  -- This structure is exactly what margin-connections.lua expects
+  log_info("DEBUG: Creating callout with " .. #content_blocks .. " content blocks")
+  for i, block in ipairs(content_blocks) do
+    log_info("DEBUG: Block " .. i .. " type: " .. block.t)
+  end
   
-  local summary = pandoc.RawInline("html", "<summary><strong>Chapter connection</strong></summary>")
-  local details = pandoc.RawBlock("html", 
-    "<details class=\"callout-chapter-connection fbx-simplebox fbx-default\">" ..
-    "<summary><strong>Chapter connection</strong></summary>" ..
-    "<div>")
-  
-  local details_end = pandoc.RawBlock("html", "</div></details>")
-  
-  -- Generate unique ID for this callout
-  local unique_id = "callout-chapter-connection*-auto-" .. tostring(math.random(1000, 9999))
-  
-  local inner_div = pandoc.Div(
-    {details, table.unpack(content_paras), details_end},
-    {
-      id = unique_id,
-      class = "callout-chapter-connection margin-chapter-connection"
-    }
+  local callout_div = pandoc.Div(
+    content_blocks,
+    pandoc.Attr("", {"callout", "callout-chapter-connection"}, {})
   )
-  
-  local callout_div = pandoc.Div({inner_div}, {class = "margin-container"})
   
   return callout_div
 end
