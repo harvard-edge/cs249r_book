@@ -45,7 +45,12 @@ GENERATION:
     • Outputs Lua-compatible JSON for inject_xrefs.lua
 
 REQUIREMENTS:
-    pip install sentence-transformers scikit-learn numpy torch pyyaml pypandoc
+    pip install sentence-transformers scikit-learn numpy torch pyyaml pypandoc requests
+
+For AI explanations (--explain flag):
+    brew install ollama  # macOS
+    # or: curl -fsSL https://ollama.ai/install.sh | sh  # Linux
+    ollama run qwen2.5:7b  # Download recommended model
     
     Core libraries:
     • sentence-transformers: Embedding generation and model handling
@@ -62,7 +67,7 @@ import argparse
 import sys
 import re
 from pathlib import Path
-from typing import List, Dict, Optional, Any, cast
+from typing import List, Dict, Optional, Any, cast, Tuple
 
 try:
     import yaml
@@ -70,6 +75,14 @@ except ImportError:
     print("❌ Error: PyYAML not installed")
     print("   Install with: pip install pyyaml")
     sys.exit(1)
+
+# Add for explanation generation
+try:
+    import requests
+    import json as json_lib
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
 
 
 def load_section_filters() -> Dict:
@@ -544,6 +557,170 @@ def _preprocess_tables(content: str) -> str:
     return '\n'.join(processed_lines)
 
 
+def check_ollama_setup() -> Tuple[bool, List[str]]:
+    """
+    Check if Ollama is running and return available models.
+    
+    Returns:
+        (is_running, available_models)
+    """
+    try:
+        response = requests.get("http://localhost:11434/api/tags", timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            models = [model['name'] for model in data.get('models', [])]
+            return True, models
+        return False, []
+    except:
+        return False, []
+
+
+def setup_ollama_interactive() -> str:
+    """
+    Interactive setup for Ollama with model selection.
+    
+    Returns:
+        Selected model name or empty string if setup failed
+    """
+    print("\n🤖 AI EXPLANATION SETUP")
+    print("=" * 40)
+    
+    # Check if Ollama is running
+    is_running, models = check_ollama_setup()
+    
+    if not is_running:
+        print("❌ Ollama is not running or not installed.")
+        print("\n📥 INSTALLATION INSTRUCTIONS:")
+        print("   macOS:  brew install ollama")
+        print("   Linux:  curl -fsSL https://ollama.ai/install.sh | sh")
+        print("   Windows: Download from https://ollama.ai")
+        print("\n🚀 AFTER INSTALLATION:")
+        print("   1. Start Ollama: ollama serve")
+        print("   2. Download a model: ollama run qwen2.5:7b")
+        print("   3. Re-run this script with --explain")
+        return ""
+    
+    print("✅ Ollama is running!")
+    
+    if not models:
+        print("\n📥 NO MODELS FOUND. Recommended models for explanations:")
+        print("   1. ollama run qwen2.5:7b     (Recommended - excellent reasoning)")
+        print("   2. ollama run llama3.1:8b    (Alternative - good performance)")
+        print("   3. ollama run phi3:medium    (Smaller option)")
+        print("\nRun one of the above commands and then re-run this script.")
+        return ""
+    
+    print(f"\n📚 Found {len(models)} model(s):")
+    
+    # Recommend best model for explanations
+    recommended_models = [
+        "qwen2.5:7b", "qwen2.5:14b", "qwen2.5:3b",
+        "llama3.1:8b", "llama3.1:7b", 
+        "phi3:medium", "phi3:mini"
+    ]
+    
+    best_model = None
+    for rec in recommended_models:
+        for model in models:
+            if rec in model:
+                best_model = model
+                break
+        if best_model:
+            break
+    
+    for i, model in enumerate(models, 1):
+        marker = " ⭐ (Recommended)" if model == best_model else ""
+        print(f"   {i}. {model}{marker}")
+    
+    if best_model:
+        print(f"\n✅ Using recommended model: {best_model}")
+        return best_model
+    else:
+        print(f"\n🔄 Using first available: {models[0]}")
+        return models[0]
+
+
+def generate_explanation(source_content: str, target_content: str, source_title: str, target_title: str, 
+                        model: str = "qwen2.5:7b", max_retries: int = 2) -> str:
+    """
+    Generate a concise explanation of why two sections are connected using local LLM.
+    
+    Args:
+        source_content: Content of the source section
+        target_content: Content of the target section  
+        source_title: Title of the source section
+        target_title: Title of the target section
+        model: Ollama model to use
+        max_retries: Maximum number of retry attempts
+        
+    Returns:
+        Short explanation string or empty string if generation fails
+    """
+    if not REQUESTS_AVAILABLE:
+        return ""
+    
+    # Truncate content to manageable size for LLM
+    source_snippet = source_content[:800] + "..." if len(source_content) > 800 else source_content
+    target_snippet = target_content[:800] + "..." if len(target_content) > 800 else target_content
+    
+    prompt = f"""You are analyzing connections between sections in a Machine Learning Systems textbook.
+
+Source Section: "{source_title}"
+{source_snippet}
+
+Target Section: "{target_title}"  
+{target_snippet}
+
+Write a concise 8-15 word explanation of why someone reading the source section should also read the target section. Focus on the specific relationship between these topics.
+
+Format your response as a short phrase like:
+- "explains the mathematical foundations for these optimization techniques"
+- "provides practical implementation details for the concepts discussed here"
+- "shows real-world deployment scenarios for these algorithms"
+
+Explanation:"""
+
+    try:
+        response = requests.post(
+            "http://localhost:11434/api/generate",
+            json={
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.1,
+                    "top_p": 0.9,
+                    "max_tokens": 50
+                }
+            },
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            explanation = result.get("response", "").strip()
+            
+            # Clean up the explanation
+            explanation = explanation.replace("Explanation:", "").strip()
+            explanation = explanation.replace('"', '').strip()
+            
+            # Ensure it's reasonably short
+            if len(explanation) > 100:
+                explanation = explanation[:97] + "..."
+                
+            return explanation
+        else:
+            print(f"⚠️  Ollama API error: {response.status_code}")
+            return ""
+            
+    except requests.exceptions.ConnectionError:
+        return ""  # Silent fail - setup check already handled this
+    except requests.exceptions.Timeout:
+        return ""  # Silent fail - likely model overloaded
+    except Exception:
+        return ""  # Silent fail - don't spam with errors
+
+
 def _additional_cleanup(content: str) -> str:
     """
     Additional cleanup to remove any remaining Quarto artifacts and LaTeX/TikZ code.
@@ -947,12 +1124,30 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
                             exclude_chapters: Optional[List[str]] = None,
                             max_suggestions: int = 5,
                             similarity_threshold: float = 0.65,
-                            verbose: bool = False, quiet: bool = False) -> Dict:
-    """Generate cross-references using any sentence-transformer model."""
+                            verbose: bool = False, quiet: bool = False,
+                            explain: bool = False) -> Dict:
+    """Generate cross-references using any sentence-transformer model.
+    
+    Args:
+        explain: If True, generate AI explanations for each cross-reference using local LLM (requires Ollama)
+    """
     
     if not quiet:
         print("🚀 GENERATION MODE: Cross-Reference Generation")
         print("=" * 50)
+    
+    # Handle AI explanation setup
+    selected_model = "qwen2.5:7b"  # Default
+    if explain:
+        if not REQUESTS_AVAILABLE:
+            print("❌ requests library not available. Install with: pip install requests")
+            return {}
+        
+        selected_model = setup_ollama_interactive()
+        if not selected_model:
+            print("\n⚠️  Skipping explanation generation - setup incomplete.")
+            print("   Cross-references will be generated without explanations.")
+            explain = False
     
     # Determine if model_path is a local path or HuggingFace model name
     is_local_model = Path(model_path).exists()
@@ -1072,12 +1267,31 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
                     else:
                         connection_type = "Background"
 
-                file_section_refs[source_filename][source_section_id]['targets'].append({
+                # Generate explanation if requested
+                explanation = ""
+                if explain:
+                    if not quiet:
+                        print(f"   🤖 Generating explanation for: {section['title']} → {target_section['title']}")
+                    explanation = generate_explanation(
+                        section['content'], 
+                        target_section['content'],
+                        section['title'],
+                        target_section['title'],
+                        model=selected_model
+                    )
+
+                target_data = {
                     'target_section_id': target_id,
                     'target_section_title': target_section['title'],  # Use exact original title
                     'connection_type': connection_type,
                     'similarity': float(similarity)
-                })
+                }
+                
+                # Add explanation if generated
+                if explanation:
+                    target_data['explanation'] = explanation
+                
+                file_section_refs[source_filename][source_section_id]['targets'].append(target_data)
                 suggestions_count += 1
     
     # Convert to final array structure
@@ -1145,6 +1359,9 @@ Examples:
     # Generate with base model (no training needed)
     python3 cross_refs.py -g -m sentence-t5-base -o cross_refs.json -d ../../contents/core/
     
+    # Generate with AI explanations (requires Ollama + qwen2.5:7b)
+    python3 cross_refs.py -g -m sentence-t5-base -o cross_refs.json -d ../../contents/core/ --explain
+    
     # Test extraction methods
     python3 test_intelligent_extraction.py
         """)
@@ -1178,6 +1395,8 @@ Examples:
                         help='Max cross-references per section (default: 5)')
     parser.add_argument('-t', '--threshold', type=float, default=0.65,
                         help='Minimum similarity for cross-references (default: 0.65)')
+    parser.add_argument('--explain', action='store_true',
+                        help='Generate AI explanations for cross-references using local LLM (requires Ollama)')
     parser.add_argument('--quiet', action='store_true',
                         help='Reduce output verbosity (only show essential information)')
     
@@ -1218,7 +1437,8 @@ Examples:
                 max_suggestions=args.max_suggestions,
                 similarity_threshold=args.threshold,
                 verbose=args.verbose,
-                quiet=args.quiet
+                quiet=args.quiet,
+                explain=args.explain
             )
             
             if result and 'cross_references' in result and result['cross_references']:
