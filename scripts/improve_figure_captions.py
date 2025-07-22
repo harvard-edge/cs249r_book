@@ -20,6 +20,7 @@ import os
 import re
 import requests
 import subprocess
+import yaml
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -142,11 +143,78 @@ class FigureCaptionImprover:
         }
         self.content_map_file = "content_map.json"
         self.quality_checker = CaptionQualityChecker()
+        self.quarto_config_file = "_quarto.yml"
         
     def find_qmd_files(self, directory: str) -> List[Path]:
         """Find all .qmd files in a directory recursively."""
         directory_path = Path(directory)
         return list(directory_path.rglob("*.qmd"))
+    
+    def get_book_chapters_from_quarto(self) -> List[str]:
+        """Parse _quarto.yml and return list of active chapter files in order."""
+        if not os.path.exists(self.quarto_config_file):
+            print(f"❌ Quarto config not found: {self.quarto_config_file}")
+            return []
+        
+        try:
+            with open(self.quarto_config_file, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+            
+            chapters = config.get('book', {}).get('chapters', [])
+            active_chapters = []
+            
+            for chapter in chapters:
+                # Handle different chapter formats
+                if isinstance(chapter, str):
+                    # Simple string chapter (e.g., "index.qmd")
+                    if chapter.endswith('.qmd'):
+                        active_chapters.append(chapter)
+                elif isinstance(chapter, dict):
+                    # Part or complex chapter structure
+                    if 'part' in chapter and chapter['part'].endswith('.qmd'):
+                        active_chapters.append(chapter['part'])
+                    # Could add more complex handling here if needed
+                
+            print(f"📚 Found {len(active_chapters)} active chapters in book structure")
+            return active_chapters
+            
+        except Exception as e:
+            print(f"❌ Error parsing {self.quarto_config_file}: {e}")
+            return []
+    
+    def find_qmd_files_in_order(self, directories: List[str]) -> List[Path]:
+        """Find QMD files following the book's chapter order from _quarto.yml."""
+        book_chapters = self.get_book_chapters_from_quarto()
+        
+        if not book_chapters:
+            print("⚠️  No book structure found, falling back to directory scan")
+            # Fallback to original method
+            all_files = []
+            for directory in directories:
+                all_files.extend(self.find_qmd_files(directory))
+            return all_files
+        
+        # Filter book chapters to only those in specified directories
+        filtered_chapters = []
+        directory_set = {os.path.normpath(d) for d in directories}
+        
+        for chapter_path in book_chapters:
+            chapter_full_path = Path(chapter_path)
+            
+            # Check if this chapter is within any of the specified directories
+            for directory in directory_set:
+                try:
+                    # Try to see if chapter is within directory
+                    chapter_full_path.relative_to(directory)
+                    if chapter_full_path.exists():
+                        filtered_chapters.append(chapter_full_path)
+                    break
+                except ValueError:
+                    # Not within this directory, continue
+                    continue
+        
+        print(f"📖 Processing {len(filtered_chapters)} chapters in book order")
+        return filtered_chapters
     
     def build_content_map_from_tex(self, tex_file: str = "Machine-Learning-Systems.tex") -> Dict:
         """Build comprehensive content map by parsing generated .tex file."""
@@ -1387,7 +1455,7 @@ Do not include any other text, markdown, or formatting - just the JSON object.""
         """Phase 2: Scan QMD files and validate mapping for all figures/tables."""
         print(f"🔍 Phase 2: Validating QMD mapping...")
         
-        qmd_files = self.find_qmd_files(directories)
+        qmd_files = self.find_qmd_files_in_order(directories)
         print(f"📁 Scanning {len(qmd_files)} QMD files")
         
         # Track what we find in QMD files
@@ -1480,7 +1548,7 @@ Do not include any other text, markdown, or formatting - just the JSON object.""
             return {}
         
         # Find all QMD files
-        qmd_files = self.find_qmd_files(directories)
+        qmd_files = self.find_qmd_files_in_order(directories)
         
         report = {
             'total_captions': 0,
