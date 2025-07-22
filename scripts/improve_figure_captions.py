@@ -614,12 +614,14 @@ class FigureCaptionImprover:
         """
         Detect table captions.
         
-        Format: : Caption text {#tbl-id}
+        Supports both formats:
+        - Old: : Caption text {#tbl-id}
+        - New: Caption text {#tbl-id}
         
         Examples:
-            : AI model comparison {#tbl-models}
-            : Performance metrics {width=80% #tbl-performance}
-            : Data summary {#tbl-data .striped}
+            : AI model comparison {#tbl-models}  (old format)
+            AI model comparison {#tbl-models}   (new format)
+            Performance metrics {width=80% #tbl-performance}
         
         Args:
             content: QMD file content
@@ -628,10 +630,14 @@ class FigureCaptionImprover:
         Returns:
             Dict with 'caption', 'full_match' or None if not found
         """
-        # Simplified pattern: just find any line containing #tbl-id
-        # More flexible: tbl-id can be anywhere in the attributes
-        pattern = rf'^:\s*([^{{]+?)\s*\{{[^}}]*#{re.escape(tbl_id)}(?:\s|[^}}])*\}}'
-        match = re.search(pattern, content, re.MULTILINE)
+        # Try new format first (without colon)
+        pattern_new = rf'^([^{{\n:]+?)\s*\{{[^}}]*#{re.escape(tbl_id)}(?:\s|[^}}])*\}}\s*$'
+        match = re.search(pattern_new, content, re.MULTILINE)
+        
+        if not match:
+            # Fall back to old format (with colon)
+            pattern_old = rf'^:\s*([^{{\n]+?)\s*\{{[^}}]*#{re.escape(tbl_id)}(?:\s|[^}}])*\}}\s*$'
+            match = re.search(pattern_old, content, re.MULTILINE)
         
         if match:
             return {
@@ -744,7 +750,9 @@ class FigureCaptionImprover:
         """
         Update table captions.
         
-        Updates: : old caption {#tbl-id} → : new caption {#tbl-id}
+        Converts old format to new format:
+        - Old: : old caption {#tbl-id} → new caption {#tbl-id}
+        - New: old caption {#tbl-id} → new caption {#tbl-id}
         
         Args:
             content: QMD file content
@@ -754,10 +762,21 @@ class FigureCaptionImprover:
         Returns:
             Updated content
         """
-        # More flexible pattern: tbl-id can be anywhere in the attributes
-        pattern = rf'^(:\s*)[^{{]+?(\s*\{{[^}}]*#{re.escape(tbl_id)}(?:\s|[^}}])*\}})'
-        replacement = rf'\g<1>{new_caption}\g<2>'
-        return re.sub(pattern, replacement, content, flags=re.MULTILINE)
+        # Try old format first (with colon) - convert to new format
+        pattern_old = rf'^:\s*([^{{\n]+?)(\s*\{{[^}}]*#{re.escape(tbl_id)}(?:\s|[^}}])*\}})\s*$'
+        match_old = re.search(pattern_old, content, re.MULTILINE)
+        
+        if match_old:
+            # Convert from old format to new format (remove colon)
+            replacement = rf'{new_caption}\g<2>'
+            return re.sub(pattern_old, replacement, content, flags=re.MULTILINE)
+        else:
+            # Handle new format (no colon)
+            pattern_new = rf'^([^{{\n:]+?)(\s*\{{[^}}]*#{re.escape(tbl_id)}(?:\s|[^}}])*\}})\s*$'
+            replacement = rf'{new_caption}\g<2>'
+            return re.sub(pattern_new, replacement, content, flags=re.MULTILINE)
+        
+        return content
     
     def update_table_caption_in_qmd(self, content: str, tbl_id: str, new_caption: str) -> str:
         """
