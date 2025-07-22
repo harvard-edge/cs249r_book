@@ -245,9 +245,9 @@ local function create_connection_box(refs)
          -- Create the academic-style entry with bold directional arrows
      local arrow = ""
      if ref.connection_type == "Preview" then
-       arrow = "**→** "  -- Forward reference (material comes later)
+       arrow = "→ "  -- Forward reference (material comes later)
      elseif ref.connection_type == "Background" then
-       arrow = "**←** "  -- Backward reference (material from earlier)
+       arrow = "← "  -- Backward reference (material from earlier)
      else
        arrow = "• "      -- Fallback bullet for unclear direction
      end
