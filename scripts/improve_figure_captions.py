@@ -316,10 +316,86 @@ class FigureCaptionImprover:
         # Use titlecase library for proper English title case
         return titlecase(caption)
     
+    def apply_sentence_case(self, text: str) -> str:
+        """
+        Apply proper sentence case using comprehensive rules for technical content.
+        
+        Rules:
+        - Capitalize first word
+        - Preserve proper nouns, acronyms, and technical terms  
+        - Handle contractions and possessives correctly
+        - Don't lowercase words that should stay capitalized
+        """
+        if not text:
+            return text
+        
+        # Comprehensive list of terms to preserve (case-sensitive)
+        preserve_exact = {
+            # Technical acronyms
+            'AI', 'ML', 'IoT', 'GPU', 'CPU', 'API', 'UI', 'UX', 'PDF', 'HTML', 'JSON', 'XML',
+            'HTTP', 'HTTPS', 'SQL', 'NoSQL', 'REST', 'SOAP', 'TCP', 'UDP', 'IP', 'DNS',
+            'TinyML', 'MLOps', 'DevOps', 'CI/CD', 'SDK', 'IDE', 'CLI', 'GUI',
+            
+            # Companies and products
+            'AlexNet', 'FarmBeats', 'TikZ', 'LaTeX', 'GitHub', 'YouTube', 'Microsoft', 
+            'Google', 'Amazon', 'Facebook', 'Netflix', 'Tesla', 'OpenAI', 'NVIDIA',
+            'PyTorch', 'TensorFlow', 'Keras', 'Scikit-learn',
+            
+            # Research terms
+            'CNN', 'RNN', 'LSTM', 'GRU', 'BERT', 'GPT', 'ResNet', 'VGG', 'YOLO',
+            'IoU', 'mAP', 'BLEU', 'ROUGE', 'F1', 'ROC', 'AUC', 'MSE', 'RMSE',
+            'SGD', 'Adam', 'AdaGrad', 'RMSprop',
+            
+            # File formats and standards
+            'PNG', 'JPEG', 'SVG', 'CSV', 'YAML', 'TOML', 'HDF5', 'ONNX',
+            'Docker', 'Kubernetes', 'AWS', 'GCP', 'Azure', 'S3',
+            
+            # Programming languages and tools
+            'Python', 'JavaScript', 'TypeScript', 'Java', 'C++', 'C#', 'Go', 'Rust',
+            'React', 'Vue', 'Angular', 'Node.js', 'MongoDB', 'PostgreSQL', 'Redis'
+        }
+        
+        # Split into words while preserving spaces and punctuation
+        tokens = re.findall(r'\b\w+(?:\'\w+)?\b|\s+|[^\w\s]', text)
+        result_tokens = []
+        word_index = 0  # Track actual words (not spaces/punctuation)
+        
+        for token in tokens:
+            if re.match(r'\s+', token):  # Preserve whitespace
+                result_tokens.append(token)
+            elif not re.match(r'\w', token):  # Preserve punctuation
+                result_tokens.append(token)
+            else:  # Process words
+                # First word is always capitalized
+                if word_index == 0:
+                    # Check if it's a preserved term first
+                    if token.upper() in [p.upper() for p in preserve_exact]:
+                        # Find the exact preserved form
+                        preserved_form = next(p for p in preserve_exact if p.upper() == token.upper())
+                        result_tokens.append(preserved_form)
+                    else:
+                        result_tokens.append(token.capitalize())
+                else:
+                    # Check if word should be preserved as-is
+                    if token.upper() in [p.upper() for p in preserve_exact]:
+                        # Find the exact preserved form
+                        preserved_form = next(p for p in preserve_exact if p.upper() == token.upper())
+                        result_tokens.append(preserved_form)
+                    elif token.isupper() and len(token) > 1:
+                        # Preserve all-caps words (likely acronyms)
+                        result_tokens.append(token)
+                    else:
+                        # Apply lowercase for regular words
+                        result_tokens.append(token.lower())
+                
+                word_index += 1
+        
+        return ''.join(result_tokens)
+
     def format_bold_explanation_caption(self, caption: str) -> str:
         """
         Format caption to ensure proper **bold**: explanation capitalization.
-        Bold part: Title Case, Explanation part: Sentence case
+        Bold part: Title Case, Explanation part: Proper sentence case
         """
         if not caption or '**' not in caption or ':' not in caption:
             return caption
@@ -335,23 +411,8 @@ class FigureCaptionImprover:
         # Apply title case to bold part
         bold_part = titlecase(bold_part)
         
-        # Apply sentence case to explanation part (first word capitalized)
-        if explanation_part:
-            explanation_part = explanation_part[0].upper() + explanation_part[1:].lower()
-            
-            # Preserve common proper nouns and acronyms
-            preserve_words = ['AI', 'ML', 'IoT', 'GPU', 'CPU', 'API', 'UI', 'UX', 'PDF', 
-                            'HTML', 'JSON', 'TinyML', 'AlexNet', 'FarmBeats', 'TikZ', 
-                            'LaTeX', 'GitHub', 'YouTube', 'Microsoft', 'Google']
-            
-            for word in preserve_words:
-                # Case-insensitive replacement
-                explanation_part = re.sub(
-                    r'\b' + re.escape(word.lower()) + r'\b', 
-                    word, 
-                    explanation_part, 
-                    flags=re.IGNORECASE
-                )
+        # Apply proper sentence case to explanation part
+        explanation_part = self.apply_sentence_case(explanation_part)
         
         return f"**{bold_part}**: {explanation_part}"
     
@@ -494,7 +555,7 @@ TEXTBOOK CONTEXT (for reference):
 
 ✅ REQUIREMENTS:
 
-1. **Key Phrase**: A single bolded noun phrase (1–3 words) that captures the main idea. Avoid full sentences or multiple bolded phrases. If similar figures exist in this section, choose a unique but relevant phrase.
+1. **Key Phrase**: A single bolded noun phrase (1–5 words) that captures the main idea. Avoid full sentences or multiple bolded phrases. If similar figures exist in this section, choose a unique but relevant phrase.
 
 2. **Explanation**: 1–2 concise, natural sentences that express what the student *learns* from the figure or table. Use active voice. Avoid simply describing what the figure “shows”—explain what *insight* it provides or how it advances understanding.
 
@@ -504,7 +565,7 @@ TEXTBOOK CONTEXT (for reference):
 
 5. **Clarity & Precision**: Be specific, pedagogical, and concrete. Emphasize learning outcomes over general description.
 
-6. **Tone**: Use technical but student-friendly language appropriate for upper-level undergraduates or early graduate students. Avoid jargon unless it is defined or central to the concept.
+6. **Tone**: Use a textbook tone. Use technical but student-friendly language appropriate for upper-level undergraduates or early graduate students. Avoid jargon unless it is defined or central to the concept. 
 
 7. **Sources**: If the original caption includes a source (e.g., “Source: IEEE Spectrum”), retain it at the end of the caption in italics. Append it after a period.
 
@@ -2090,14 +2151,9 @@ TEXTBOOK CONTEXT (for reference):
             new_caption = improvement['new']
             
             try:
-                if item_type == 'figure':
-                    success = self.apply_targeted_caption_update(
-                        file_path, item_id, original_caption, new_caption, is_table=False
-                    )
-                elif item_type == 'table':
-                    success = self.apply_targeted_caption_update(
-                        file_path, item_id, original_caption, new_caption, is_table=True
-                    )
+                success = self.apply_targeted_caption_update(
+                    file_path, item_id, item_type, original_caption, new_caption
+                )
                 
                 if success:
                     success_count += 1
