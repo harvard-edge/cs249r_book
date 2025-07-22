@@ -150,11 +150,11 @@ class FigureCaptionImprover:
         directory_path = Path(directory)
         return list(directory_path.rglob("*.qmd"))
     
-    def get_book_chapters_from_quarto(self) -> List[str]:
-        """Parse _quarto.yml and return list of active chapter files in order."""
+    def get_book_chapters_from_quarto(self) -> Dict[str, List[str]]:
+        """Parse _quarto.yml and return active and commented chapter files."""
         if not os.path.exists(self.quarto_config_file):
             print(f"❌ Quarto config not found: {self.quarto_config_file}")
-            return []
+            return {'active': [], 'commented': []}
         
         try:
             with open(self.quarto_config_file, 'r', encoding='utf-8') as f:
@@ -174,19 +174,36 @@ class FigureCaptionImprover:
                     if 'part' in chapter and chapter['part'].endswith('.qmd'):
                         active_chapters.append(chapter['part'])
                     # Could add more complex handling here if needed
-                
-            print(f"📚 Found {len(active_chapters)} active chapters in book structure")
-            return active_chapters
+            
+            # Also read the raw file to find commented chapters
+            with open(self.quarto_config_file, 'r', encoding='utf-8') as f:
+                raw_content = f.read()
+            
+            # Find commented chapter lines
+            commented_chapters = []
+            for line in raw_content.split('\n'):
+                line = line.strip()
+                if line.startswith('# - ') and line.endswith('.qmd'):
+                    # Remove '# - ' prefix and clean up
+                    commented_chapter = line[4:].strip()
+                    commented_chapters.append(commented_chapter)
+            
+            print(f"📚 Found {len(active_chapters)} active chapters, {len(commented_chapters)} commented chapters")
+            return {
+                'active': active_chapters,
+                'commented': commented_chapters
+            }
             
         except Exception as e:
             print(f"❌ Error parsing {self.quarto_config_file}: {e}")
-            return []
+            return {'active': [], 'commented': []}
     
     def find_qmd_files_in_order(self, directories: List[str]) -> List[Path]:
         """Find QMD files following the book's chapter order from _quarto.yml."""
-        book_chapters = self.get_book_chapters_from_quarto()
+        book_structure = self.get_book_chapters_from_quarto()
+        active_chapters = book_structure.get('active', [])
         
-        if not book_chapters:
+        if not active_chapters:
             print("⚠️  No book structure found, falling back to directory scan")
             # Fallback to original method
             all_files = []
@@ -198,7 +215,7 @@ class FigureCaptionImprover:
         filtered_chapters = []
         directory_set = {os.path.normpath(d) for d in directories}
         
-        for chapter_path in book_chapters:
+        for chapter_path in active_chapters:
             chapter_full_path = Path(chapter_path)
             
             # Check if this chapter is within any of the specified directories
@@ -215,6 +232,72 @@ class FigureCaptionImprover:
         
         print(f"📖 Processing {len(filtered_chapters)} chapters in book order")
         return filtered_chapters
+    
+    def check_commented_chapter_consistency(self, content_map: Dict) -> Dict:
+        """Check if any figures/tables come from commented-out chapters."""
+        book_structure = self.get_book_chapters_from_quarto()
+        active_chapters = set(book_structure.get('active', []))
+        commented_chapters = set(book_structure.get('commented', []))
+        
+        issues = {
+            'figures_in_commented_chapters': [],
+            'tables_in_commented_chapters': [],
+            'total_issues': 0
+        }
+        
+        # Check figures
+        for fig_id, fig_data in content_map.get('figures', {}).items():
+            source_file = fig_data.get('source_file', '')
+            if source_file:
+                # Check if this source file is in commented chapters
+                if source_file in commented_chapters:
+                    issues['figures_in_commented_chapters'].append({
+                        'id': fig_id,
+                        'source_file': source_file,
+                        'caption': fig_data.get('current_caption', '')[:50] + '...'
+                    })
+        
+        # Check tables
+        for tbl_id, tbl_data in content_map.get('tables', {}).items():
+            source_file = tbl_data.get('source_file', '')
+            if source_file:
+                # Check if this source file is in commented chapters
+                if source_file in commented_chapters:
+                    issues['tables_in_commented_chapters'].append({
+                        'id': tbl_id,
+                        'source_file': source_file,
+                        'caption': tbl_data.get('current_caption', '')[:50] + '...'
+                    })
+        
+        issues['total_issues'] = len(issues['figures_in_commented_chapters']) + len(issues['tables_in_commented_chapters'])
+        
+        return issues
+    
+    def print_consistency_warnings(self, issues: Dict):
+        """Print warnings about consistency issues."""
+        if issues['total_issues'] == 0:
+            return
+            
+        print(f"\n⚠️  CONSISTENCY WARNING:")
+        print(f"Found {issues['total_issues']} figures/tables from commented-out chapters")
+        print(f"These exist in the .tex file but their QMD sources are not active.")
+        
+        if issues['figures_in_commented_chapters']:
+            print(f"\n📊 Figures in commented chapters ({len(issues['figures_in_commented_chapters'])}):")
+            for item in issues['figures_in_commented_chapters'][:5]:  # Show first 5
+                print(f"  • {item['id']} ({item['source_file']})")
+            if len(issues['figures_in_commented_chapters']) > 5:
+                print(f"  ... and {len(issues['figures_in_commented_chapters']) - 5} more")
+        
+        if issues['tables_in_commented_chapters']:
+            print(f"\n📋 Tables in commented chapters ({len(issues['tables_in_commented_chapters'])}):")
+            for item in issues['tables_in_commented_chapters'][:5]:  # Show first 5
+                print(f"  • {item['id']} ({item['source_file']})")
+            if len(issues['tables_in_commented_chapters']) > 5:
+                print(f"  ... and {len(issues['tables_in_commented_chapters']) - 5} more")
+        
+        print(f"\n💡 To fix: Either uncomment chapters in _quarto.yml or rebuild with updated content.")
+        print(f"   These items will be skipped during caption updates.")
     
     def build_content_map_from_tex(self, tex_file: str = "Machine-Learning-Systems.tex") -> Dict:
         """Build comprehensive content map by parsing generated .tex file."""
@@ -1602,6 +1685,10 @@ Do not include any other text, markdown, or formatting - just the JSON object.""
         
         if not missing_figures and not missing_tables:
             print(f"\n✅ Perfect mapping! All items found in QMD files.")
+        
+        # Check for consistency issues with commented chapters
+        consistency_issues = self.check_commented_chapter_consistency(content_map)
+        self.print_consistency_warnings(consistency_issues)
         
         return content_map
 
