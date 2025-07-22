@@ -233,71 +233,63 @@ class FigureCaptionImprover:
         print(f"📖 Processing {len(filtered_chapters)} chapters in book order")
         return filtered_chapters
     
-    def check_commented_chapter_consistency(self, content_map: Dict) -> Dict:
-        """Check if any figures/tables come from commented-out chapters."""
+    def check_commented_chapters_in_directories(self, directories: List[str]) -> Dict:
+        """Check if any chapters are commented out within the target directories."""
         book_structure = self.get_book_chapters_from_quarto()
-        active_chapters = set(book_structure.get('active', []))
-        commented_chapters = set(book_structure.get('commented', []))
+        commented_chapters = book_structure.get('commented', [])
+        
+        # Normalize directory paths
+        directory_set = {os.path.normpath(d) for d in directories}
         
         issues = {
-            'figures_in_commented_chapters': [],
-            'tables_in_commented_chapters': [],
-            'total_issues': 0
+            'commented_in_target_dirs': [],
+            'total_issues': 0,
+            'should_halt': False
         }
         
-        # Check figures
-        for fig_id, fig_data in content_map.get('figures', {}).items():
-            source_file = fig_data.get('source_file', '')
-            if source_file:
-                # Check if this source file is in commented chapters
-                if source_file in commented_chapters:
-                    issues['figures_in_commented_chapters'].append({
-                        'id': fig_id,
-                        'source_file': source_file,
-                        'caption': fig_data.get('current_caption', '')[:50] + '...'
+        # Check if any commented chapters are within our target directories
+        for commented_chapter in commented_chapters:
+            chapter_path = Path(commented_chapter)
+            
+            # Check if this commented chapter is within any target directory
+            for directory in directory_set:
+                try:
+                    chapter_path.relative_to(directory)
+                    # If we get here, the commented chapter is within this directory
+                    issues['commented_in_target_dirs'].append({
+                        'chapter': commented_chapter,
+                        'directory': directory
                     })
+                    break
+                except ValueError:
+                    # Not within this directory, continue
+                    continue
         
-        # Check tables
-        for tbl_id, tbl_data in content_map.get('tables', {}).items():
-            source_file = tbl_data.get('source_file', '')
-            if source_file:
-                # Check if this source file is in commented chapters
-                if source_file in commented_chapters:
-                    issues['tables_in_commented_chapters'].append({
-                        'id': tbl_id,
-                        'source_file': source_file,
-                        'caption': tbl_data.get('current_caption', '')[:50] + '...'
-                    })
-        
-        issues['total_issues'] = len(issues['figures_in_commented_chapters']) + len(issues['tables_in_commented_chapters'])
+        issues['total_issues'] = len(issues['commented_in_target_dirs'])
+        issues['should_halt'] = issues['total_issues'] > 0
         
         return issues
     
-    def print_consistency_warnings(self, issues: Dict):
-        """Print warnings about consistency issues."""
+    def print_commented_chapter_issues(self, issues: Dict):
+        """Print issues about commented chapters and halt if necessary."""
         if issues['total_issues'] == 0:
-            return
+            return False
             
-        print(f"\n⚠️  CONSISTENCY WARNING:")
-        print(f"Found {issues['total_issues']} figures/tables from commented-out chapters")
-        print(f"These exist in the .tex file but their QMD sources are not active.")
+        print(f"\n🚨 CRITICAL ISSUE:")
+        print(f"Found {issues['total_issues']} commented chapters in target directories")
+        print(f"Processing cannot continue as .tex and QMD files will be inconsistent.")
         
-        if issues['figures_in_commented_chapters']:
-            print(f"\n📊 Figures in commented chapters ({len(issues['figures_in_commented_chapters'])}):")
-            for item in issues['figures_in_commented_chapters'][:5]:  # Show first 5
-                print(f"  • {item['id']} ({item['source_file']})")
-            if len(issues['figures_in_commented_chapters']) > 5:
-                print(f"  ... and {len(issues['figures_in_commented_chapters']) - 5} more")
+        print(f"\n📁 Commented chapters in target directories:")
+        for item in issues['commented_in_target_dirs']:
+            print(f"  • {item['chapter']} (in directory: {item['directory']})")
         
-        if issues['tables_in_commented_chapters']:
-            print(f"\n📋 Tables in commented chapters ({len(issues['tables_in_commented_chapters'])}):")
-            for item in issues['tables_in_commented_chapters'][:5]:  # Show first 5
-                print(f"  • {item['id']} ({item['source_file']})")
-            if len(issues['tables_in_commented_chapters']) > 5:
-                print(f"  ... and {len(issues['tables_in_commented_chapters']) - 5} more")
+        print(f"\n💡 To fix:")
+        print(f"   1. Uncomment these chapters in _quarto.yml, OR")
+        print(f"   2. Exclude these directories from processing, OR") 
+        print(f"   3. Run 'quarto render --to titlepage-pdf' after uncommenting")
+        print(f"\n❌ HALTING EXECUTION - Please resolve these issues first.")
         
-        print(f"\n💡 To fix: Either uncomment chapters in _quarto.yml or rebuild with updated content.")
-        print(f"   These items will be skipped during caption updates.")
+        return True  # Should halt
     
     def build_content_map_from_tex(self, tex_file: str = "Machine-Learning-Systems.tex") -> Dict:
         """Build comprehensive content map by parsing generated .tex file."""
@@ -738,6 +730,12 @@ class FigureCaptionImprover:
     def process_qmd_files(self, directories: List[str], content_map: Dict):
         """Phase 3: Process QMD files to update captions using validated content map."""
         print(f"✏️ Phase 3: Updating QMD files...")
+        
+        # Check for commented chapters in target directories first
+        commented_issues = self.check_commented_chapters_in_directories(directories)
+        should_halt = self.print_commented_chapter_issues(commented_issues)
+        if should_halt:
+            return content_map
         
         # Filter to only items with confirmed QMD locations
         figures_to_update = {
@@ -1606,6 +1604,12 @@ Do not include any other text, markdown, or formatting - just the JSON object.""
         """Phase 2: Scan QMD files and validate mapping for all figures/tables."""
         print(f"🔍 Phase 2: Validating QMD mapping...")
         
+        # Check for commented chapters in target directories first
+        commented_issues = self.check_commented_chapters_in_directories(directories)
+        should_halt = self.print_commented_chapter_issues(commented_issues)
+        if should_halt:
+            return content_map
+        
         qmd_files = self.find_qmd_files_in_order(directories)
         print(f"📁 Scanning {len(qmd_files)} QMD files")
         
@@ -1686,15 +1690,19 @@ Do not include any other text, markdown, or formatting - just the JSON object.""
         if not missing_figures and not missing_tables:
             print(f"\n✅ Perfect mapping! All items found in QMD files.")
         
-        # Check for consistency issues with commented chapters
-        consistency_issues = self.check_commented_chapter_consistency(content_map)
-        self.print_consistency_warnings(consistency_issues)
+        # Check already performed at start of validation
         
         return content_map
 
     def check_caption_quality(self, directories: List[str]) -> Dict[str, any]:
         """Analyze all captions and generate quality report."""
         print("🔍 Analyzing caption quality...")
+        
+        # Check for commented chapters in target directories first
+        commented_issues = self.check_commented_chapters_in_directories(directories)
+        should_halt = self.print_commented_chapter_issues(commented_issues)
+        if should_halt:
+            return {}
         
         # Load content map
         content_map = self.load_content_map()
@@ -1801,6 +1809,12 @@ Do not include any other text, markdown, or formatting - just the JSON object.""
         """Repair only captions that need fixing."""
         print("🔧 Repairing captions that need fixing...")
         
+        # Check for commented chapters in target directories first
+        commented_issues = self.check_commented_chapters_in_directories(directories)
+        should_halt = self.print_commented_chapter_issues(commented_issues)
+        if should_halt:
+            return
+        
         # First check what needs repair
         report = self.check_caption_quality(directories)
         if not report or report['captions_needing_repair'] == 0:
@@ -1861,6 +1875,7 @@ def main():
 Examples:
   # Build content map from .tex file
   python improve_figure_captions.py --build-map
+  python improve_figure_captions.py --build-map --tex-file path/to/custom.tex
   
   # Check caption quality
   python improve_figure_captions.py --check -d contents/core/
@@ -1896,6 +1911,10 @@ Examples:
     parser.add_argument('-m', '--model', default="llama3.2:3b",
                        help='Ollama model to use (default: llama3.2:3b)')
     
+    # LaTeX file input
+    parser.add_argument('--tex-file', default="Machine-Learning-Systems.tex",
+                       help='Path to .tex file to parse (default: Machine-Learning-Systems.tex)')
+    
     args = parser.parse_args()
     
     # Validate arguments
@@ -1915,7 +1934,7 @@ Examples:
     # Execute based on action
     if args.build_map:
         # Phase 1: Build content map from .tex
-        improver.build_content_map_from_tex()
+        improver.build_content_map_from_tex(args.tex_file)
         
     elif args.check:
         # Check caption quality
