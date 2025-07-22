@@ -315,6 +315,45 @@ class FigureCaptionImprover:
         # Use titlecase library for proper English title case
         return titlecase(caption)
     
+    def format_bold_explanation_caption(self, caption: str) -> str:
+        """
+        Format caption to ensure proper **bold**: explanation capitalization.
+        Bold part: Title Case, Explanation part: Sentence case
+        """
+        if not caption or '**' not in caption or ':' not in caption:
+            return caption
+        
+        # Parse **bold**: explanation format
+        match = re.match(r'^\*\*([^*]+)\*\*:\s*(.+)$', caption.strip())
+        if not match:
+            return caption
+        
+        bold_part = match.group(1).strip()
+        explanation_part = match.group(2).strip()
+        
+        # Apply title case to bold part
+        bold_part = titlecase(bold_part)
+        
+        # Apply sentence case to explanation part (first word capitalized)
+        if explanation_part:
+            explanation_part = explanation_part[0].upper() + explanation_part[1:].lower()
+            
+            # Preserve common proper nouns and acronyms
+            preserve_words = ['AI', 'ML', 'IoT', 'GPU', 'CPU', 'API', 'UI', 'UX', 'PDF', 
+                            'HTML', 'JSON', 'TinyML', 'AlexNet', 'FarmBeats', 'TikZ', 
+                            'LaTeX', 'GitHub', 'YouTube', 'Microsoft', 'Google']
+            
+            for word in preserve_words:
+                # Case-insensitive replacement
+                explanation_part = re.sub(
+                    r'\b' + re.escape(word.lower()) + r'\b', 
+                    word, 
+                    explanation_part, 
+                    flags=re.IGNORECASE
+                )
+        
+        return f"**{bold_part}**: {explanation_part}"
+    
     def encode_image(self, image_path: str) -> Optional[str]:
         """Encode an image to base64 for multimodal models."""
         try:
@@ -393,8 +432,12 @@ Task: Create an improved caption that:
 4. Uses proper academic language
 5. Is concise but comprehensive
 
+FORMATTING RULES:
+- Bold part (between **): Use Title Case (Every Important Word Capitalized)
+- Explanation part (after colon): Use sentence case (only first word capitalized, plus proper nouns)
+
 CRITICAL: Your response must be ONLY the improved caption in this exact format:
-**Bold Key Concept**: Educational explanation that helps students learn
+**Title Case Bold Concept**: Sentence case explanation that helps students learn
 
 Example good format:
 **Machine Learning Pipeline**: Comprehensive workflow showing data preprocessing, model training, and evaluation stages for developing robust AI systems.
@@ -438,6 +481,8 @@ Respond with ONLY the improved caption, nothing else:"""
                 
                 # Validate the format contains **bold**: 
                 if '**' in new_caption and ':' in new_caption:
+                    # Apply proper formatting (title case for bold, sentence case for explanation)
+                    new_caption = self.format_bold_explanation_caption(new_caption)
                     return new_caption
                 else:
                     print(f"      ⚠️  Generated caption doesn't follow **bold**: format: {new_caption[:100]}")
