@@ -22,7 +22,7 @@ class ExperimentRunner:
     
     def __init__(self, ollama_url: str = "http://localhost:11434"):
         self.ollama_url = ollama_url
-        self.results_dir = Path("scripts/llm_experiments/results")
+        self.results_dir = Path("results")
         self.results_dir.mkdir(exist_ok=True)
         
         # Models to test (add more as they become available)

@@ -45,7 +45,7 @@ scripts/llm_experiments/
 ### Run Experiments
 ```bash
 cd scripts/llm_experiments
-python run_experiments.py
+python3 run_experiments.py
 ```
 
 The script will:

@@ -7,7 +7,7 @@ and explanation length for cross-reference generation. It's designed to run
 unattended while you're away from the computer.
 
 Usage:
-    python run_experiments.py
+    python3 run_experiments.py
 
 Results will be saved in scripts/llm_experiments/results/
 """
