@@ -499,6 +499,7 @@ TEXTBOOK CONTEXT (for reference):
 4. Do **not** start with “This figure/table…” or state the obvious (e.g., “Shows a diagram of…”).
 5. Be **specific**, pedagogical, and clear—aim to make the visual useful in learning the section’s core concepts.
 6. Use an academic but readable tone.
+7. If there is a source, keep the source in the caption. 
 
 📌 STRONG EXAMPLES:
 **Edge Deployment**: Demonstrates how AI and IoT technologies are integrated at the farm edge to optimize agricultural practices and enhance productivity through real-world ML applications.  
