@@ -260,9 +260,9 @@ def get_quarto_file_order(quiet: bool = False) -> List[str]:
             
             if in_chapters_section:
                 # Extract file paths from both commented and uncommented lines
-                if stripped.startswith('- ') or stripped.startswith('#     - '):
-                    # Remove comment markers and list indicators
-                    file_part = stripped.replace('# ', '').replace('- ', '').strip()
+                if stripped.startswith('- ') or line.startswith('    # - '):
+                    # Remove comment markers and list indicators  
+                    file_part = line.replace('    # - ', '').replace('    - ', '').strip()
                     
                     # Handle 'part:' entries
                     if file_part.startswith('part: '):
@@ -981,12 +981,13 @@ def load_content(directories: List[str], exclude_chapters: Optional[List[str]] =
             chapter_name = Path(file_path).parent.name
             print(f"    {i:2d}. {relative_path} [{chapter_name}]")
     
-    print(f"\n📊 FINAL COUNTS:")
-    print(f"    • Total files found: {len(qmd_files)}")
-    print(f"    • Files processed: {len(processed_files)}")
-    print(f"    • Files excluded: {len(excluded_files)}")
-    print(f"    • Sections extracted: {len(all_sections)}")
-    print(f"    • Quality filtering: Sections excluded for being meta-content, too short, or low-quality")
+    if not quiet:
+        print(f"\n📊 FINAL COUNTS:")
+        print(f"    • Total files found: {len(qmd_files)}")
+        print(f"    • Files processed: {len(processed_files)}")
+        print(f"    • Files excluded: {len(excluded_files)}")
+        print(f"    • Sections extracted: {len(all_sections)}")
+        print(f"    • Quality filtering: Sections excluded for being meta-content, too short, or low-quality")
     else:
         print(f"📊 Processed {len(processed_files)} files, extracted {len(all_sections)} sections")
     
