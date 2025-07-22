@@ -6,11 +6,11 @@ A comprehensive tool for analyzing, validating, and improving figure and table c
 in a Quarto-based textbook using local Ollama models.
 
 Workflow:
-1. Build content map from .tex file (--build-map/-b)
-2. Validate QMD mapping (--validate/-v) 
+1. Build content map from QMD files (--build-qmd-map)
+2. Validate QMD mapping (--validate) 
 3. Check caption quality (--check/-c)
 4. Repair only broken captions (--repair/-r)
-5. Update all captions (--update/-u)
+5. Update all captions (--update)
 """
 
 import argparse
@@ -278,7 +278,7 @@ class FigureCaptionImprover:
             
         print(f"\n🚨 CRITICAL ISSUE:")
         print(f"Found {issues['total_issues']} commented chapters in target directories")
-        print(f"Processing cannot continue as .tex and QMD files will be inconsistent.")
+        print(f"Processing cannot continue as QMD files will be inconsistent.")
         
         print(f"\n📁 Commented chapters in target directories:")
         for item in issues['commented_in_target_dirs']:
@@ -292,170 +292,6 @@ class FigureCaptionImprover:
         
         return True  # Should halt
     
-    def build_content_map_from_tex(self, tex_file: str = "caps.tex") -> Dict:
-        """Build comprehensive content map by parsing generated .tex file."""
-        if not os.path.exists(tex_file):
-            print(f"❌ .tex file not found: {tex_file}")
-            print(f"💡 Run: quarto render --to titlepage-pdf")
-            return {}
-        
-        print(f"📄 Parsing .tex file: {tex_file}")
-        
-        content_map = {
-            "figures": {},
-            "tables": {},
-            "metadata": {
-                "generated_at": subprocess.run(['date', '-Iseconds'], capture_output=True, text=True).stdout.strip(),
-                "tex_source": tex_file,
-                "total_figures": 0,
-                "total_tables": 0
-            }
-        }
-        
-        try:
-            with open(tex_file, 'r', encoding='utf-8') as f:
-                tex_content = f.read()
-            
-            # Parse figures - handle both orders: includegraphics before or after caption
-            figure_pattern = r'\\begin\{figure\}(.*?)\\caption\{\\label\{(fig-[^}]+)\}([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}(.*?)\\end\{figure\}'
-            
-            def extract_caption_text(raw_caption):
-                """Extract clean caption text from LaTeX with nested braces."""
-                # Handle nested braces by counting brace levels
-                brace_count = 0
-                caption_chars = []
-                
-                for char in raw_caption:
-                    if char == '{':
-                        brace_count += 1
-                    elif char == '}':
-                        brace_count -= 1
-                        if brace_count < 0:  # End of caption
-                            break
-                    
-                    if brace_count >= 0:
-                        caption_chars.append(char)
-                
-                caption = ''.join(caption_chars).strip()
-                
-                # Clean up LaTeX formatting
-                caption = re.sub(r'\\textbf\{([^}]*)\}', r'\1', caption)  # Remove \textbf{}
-                caption = re.sub(r'\\[a-zA-Z]+\{([^}]*)\}', r'\1', caption)  # Remove other LaTeX commands
-                caption = re.sub(r'\s+', ' ', caption)  # Normalize whitespace
-                caption = caption.strip()
-                
-                return caption
-
-            for match in re.finditer(figure_pattern, tex_content, re.DOTALL):
-                before_caption = match.group(1)
-                fig_id = match.group(2)
-                raw_caption = match.group(3)
-                after_caption = match.group(4)
-                
-                caption = extract_caption_text(raw_caption)
-                caption = self.normalize_caption_case(caption)
-                caption = self.normalize_caption_punctuation(caption)
-                
-                # Find includegraphics path in either before or after caption
-                pdf_path = None
-                includegraphics_pattern = r'(?:\\includegraphics(?:\[[^\]]*\])?\{([^}]+)\}|\\pandocbounded\{\\includegraphics(?:\[[^\]]*\])?\{([^}]+)\})'
-                
-                # Check before caption first
-                img_match = re.search(includegraphics_pattern, before_caption)
-                if not img_match:
-                    # Check after caption
-                    img_match = re.search(includegraphics_pattern, after_caption)
-                
-                if img_match:
-                    pdf_path = img_match.group(1) or img_match.group(2)
-                
-                # Determine figure type
-                fig_type = "tikz" if "figure-pdf" in (pdf_path or "") else "regular"
-                
-                content_map["figures"][fig_id] = {
-                    "current_caption": caption,
-                    "new_caption": "",
-                    "pdf_path": pdf_path,
-                    "source_file": "",  # Will be determined during processing
-                    "tex_line": tex_content[:match.start()].count('\n') + 1
-                }
-            
-            # Parse subfigures with \subcaption pattern
-            subfigure_pattern = r'\\subcaption\{\\label\{(fig-[^}]+)\}([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}'
-            
-            for match in re.finditer(subfigure_pattern, tex_content, re.DOTALL):
-                fig_id = match.group(1)
-                raw_caption = match.group(2)
-                caption = extract_caption_text(raw_caption)
-                caption = self.normalize_caption_case(caption)
-                caption = self.normalize_caption_punctuation(caption)
-                
-                # For subfigures, find the nearest includegraphics in the same minipage
-                # Look backwards from subcaption to find includegraphics in same minipage
-                match_start = match.start()
-                
-                # Look backwards up to 300 chars to find the includegraphics
-                context_start = max(0, match_start - 300)
-                before_context = tex_content[context_start:match_start]
-                
-                pdf_path = None
-                includegraphics_pattern = r'(?:\\includegraphics(?:\[[^\]]*\])?\{([^}]+)\}|\\pandocbounded\{\\includegraphics(?:\[[^\]]*\])?\{([^}]+)\})'
-                
-                # Find all images in the before context and take the closest one (last one found)
-                img_matches = list(re.finditer(includegraphics_pattern, before_context))
-                if img_matches:
-                    img_match = img_matches[-1]  # Take the last (closest) match
-                
-                if img_match:
-                    pdf_path = img_match.group(1) or img_match.group(2)
-                
-                # Determine figure type
-                fig_type = "tikz" if pdf_path and "figure-pdf" in pdf_path else "regular"
-                
-                content_map["figures"][fig_id] = {
-                    "current_caption": caption,
-                    "new_caption": "",
-                    "pdf_path": pdf_path,
-                    "source_file": "",  # Will be determined during processing
-                    "tex_line": tex_content[:match.start()].count('\n') + 1
-                }
-                
-            # Parse tables - format is \caption{Caption text}\label{tbl-id}\tabularnewline  
-            # Look for caption followed immediately by table label
-            table_pattern = r'\\caption\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}\\label\{(tbl-[^}]+)\}'
-            
-            for match in re.finditer(table_pattern, tex_content, re.DOTALL):
-                raw_caption = match.group(1)
-                tbl_id = match.group(2)
-                caption = extract_caption_text(raw_caption)
-                caption = self.normalize_caption_case(caption)
-                caption = self.normalize_caption_punctuation(caption)
-                
-                content_map["tables"][tbl_id] = {
-                    "current_caption": caption,
-                    "new_caption": "",
-                    "source_file": "",  # Will be determined during processing
-                    "tex_line": tex_content[:match.start()].count('\n') + 1
-                }
-            
-            content_map["metadata"]["total_figures"] = len(content_map["figures"])
-            content_map["metadata"]["total_tables"] = len(content_map["tables"])
-            
-            print(f"✅ Found {len(content_map['figures'])} figures and {len(content_map['tables'])} tables")
-            
-            # Save content map
-            with open(self.content_map_file, 'w', encoding='utf-8') as f:
-                json.dump(content_map, f, indent=2, ensure_ascii=False)
-            
-            print(f"💾 Content map saved to: {self.content_map_file}")
-            
-        except Exception as e:
-            error_msg = f"Error parsing .tex file: {e}"
-            print(f"❌ {error_msg}")
-            self.stats['errors'].append(error_msg)
-        
-        return content_map
-
     def normalize_caption_punctuation(self, caption: str) -> str:
         """Ensure caption ends with a period for academic formatting."""
         if not caption:
@@ -1204,8 +1040,8 @@ class FigureCaptionImprover:
         self.print_summary()
 
     def validate_qmd_mapping(self, directories: List[str], content_map: Dict) -> Dict:
-        """Phase 2: Scan QMD files and validate mapping for all figures/tables."""
-        print(f"🔍 Phase 2: Validating QMD mapping...")
+        """Scan QMD files and validate mapping for all figures/tables."""
+        print(f"🔍 Validating QMD mapping...")
         
         # Check for commented chapters in target directories first
         commented_issues = self.check_commented_chapters_in_directories(directories)
@@ -1675,10 +1511,6 @@ Examples:
   
   # Build content map and save to JSON file for review
   python improve_figure_captions.py --build-qmd-map --save-json -d contents/core/
-
-  # Build content map from .tex file (uses caps.tex by default)
-  python improve_figure_captions.py --build-map
-  python improve_figure_captions.py --build-map --tex-file path/to/custom.tex
   
   # Check caption quality
   python improve_figure_captions.py --check -d contents/core/
@@ -1694,30 +1526,24 @@ Examples:
 """
     )
     
-    # Main operation mode (mutually exclusive)
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument('--build-map', action='store_true', 
-                      help='Build content map from .tex file (Phase 1 - .tex approach)')
-    group.add_argument('--build-qmd-map', action='store_true',
-                      help='Build content map from .qmd files directly (QMD-focused approach)')
-    group.add_argument('--validate', action='store_true', 
-                      help='Validate QMD mapping against content map (Phase 2)')
-    group.add_argument('--update', action='store_true', 
-                      help='Update QMD files with improved captions (Phase 3)')
-    group.add_argument('--check', '-c', action='store_true',
-                      help='Check caption quality and generate report')
-    group.add_argument('--repair', '-r', action='store_true', 
-                      help='Repair captions with common issues automatically')
+    # Multiple file/directory input
+    parser.add_argument('-f', '--files', action='append',
+                       help='QMD files to process (can be used multiple times)')
+    parser.add_argument('-d', '--directories', action='append',
+                       help='Directories to scan for QMD files (can be used multiple times)')
 
-    # File/directory inputs
-    parser.add_argument('--files', '-f', action='append', 
-                       help='Specific .qmd files to process')
-    parser.add_argument('--directories', '-d', action='append', 
-                       help='Directories to scan for .qmd files')
-    
-    # LaTeX file input
-    parser.add_argument('--tex-file', default="caps.tex",
-                       help='Path to .tex file to parse (default: caps.tex)')
+    # Mode selection
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--build-qmd-map', action='store_true',
+                      help='Build content map from QMD files directly')
+    group.add_argument('--validate', action='store_true',
+                      help='Validate QMD files against content map')
+    group.add_argument('--update', action='store_true',
+                      help='Update QMD files with improved captions')
+    group.add_argument('--check', '-c', action='store_true',
+                      help='Check caption quality without making changes')
+    group.add_argument('--repair', '-r', action='store_true',
+                      help='Repair caption formatting issues')
 
     # Output options
     parser.add_argument('--save-json', action='store_true',
@@ -1745,18 +1571,7 @@ Examples:
     improver = FigureCaptionImprover()
     
     try:
-        if args.build_map:
-            # Phase 1: Build content map from .tex file (.tex approach)
-            print("🔍 Phase 1: Building content map from .tex file...")
-            content_map = improver.build_content_map_from_tex(args.tex_file)
-            if content_map:
-                improver.save_content_map(content_map)
-                print("✅ Content map building completed!")
-            else:
-                print("❌ Content map building failed!")
-                return 1
-                
-        elif args.build_qmd_map:
+        if args.build_qmd_map:
             # QMD-focused approach: Build content map from .qmd files directly
             print("🔍 QMD-Focused: Building content map from .qmd files...")
             content_map = improver.build_content_map_from_qmd(directories)
@@ -1812,13 +1627,13 @@ Examples:
                 print("✅ Caption repair completed!")
             
         elif args.validate:
-            # Phase 2: Validate QMD mapping
-            print("🔍 Phase 2: Validating QMD mapping...")
+            # Validate QMD mapping
+            print("🔍 Validating QMD mapping...")
             improver.validate_qmd_mapping(directories)
             
         elif args.update:
-            # Phase 3: Update QMD files
-            print("✏️ Phase 3: Updating QMD files...")
+            # Update QMD files
+            print("✏️ Updating QMD files...")
             content_map = improver.load_content_map()
             if content_map:
                 improver.process_qmd_files(directories, content_map)
@@ -1828,16 +1643,16 @@ Examples:
                 return 1
         else:
             # Default: Run validation + update (legacy behavior)
-            print("🔍 Running default workflow: Phase 2 (Validate) + Phase 3 (Update)")
+            print("🔍 Running default workflow: Validate + Update")
             content_map = improver.load_content_map()
             if not content_map:
                 print("❌ No content map found. Run --build-map or --build-qmd-map first.")
                 return 1
                 
-            print("\n🔍 Phase 2: Validating QMD mapping...")
+            print("\n🔍 Validating QMD mapping...")
             improver.validate_qmd_mapping(directories)
             
-            print("\n✏️ Phase 3: Updating QMD files...")
+            print("\n✏️ Updating QMD files...")
             improver.process_qmd_files(directories, content_map)
             print("✅ Default workflow completed!")
             
