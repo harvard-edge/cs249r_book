@@ -275,13 +275,13 @@ def get_quarto_file_order(quiet: bool = False) -> List[str]:
                         ordered_files.append(file_part)
         
         if not quiet:
-        print(f"📋 Found {len(ordered_files)} ordered files in _quarto.yml (including commented)")
-        if ordered_files:
-            print("🔍 _quarto.yml file order preview:")
-            for i, file_path in enumerate(ordered_files[:5], 1):
-                print(f"    {i}. {file_path}")
-            if len(ordered_files) > 5:
-                print(f"    ... and {len(ordered_files) - 5} more")
+            print(f"📋 Found {len(ordered_files)} ordered files in _quarto.yml (including commented)")
+            if ordered_files:
+                print("🔍 _quarto.yml file order preview:")
+                for i, file_path in enumerate(ordered_files[:5], 1):
+                    print(f"    {i}. {file_path}")
+                if len(ordered_files) > 5:
+                    print(f"    ... and {len(ordered_files) - 5} more")
         return ordered_files
         
     except Exception as e:
@@ -302,7 +302,7 @@ def find_qmd_files(directories: List[str], quiet: bool = False) -> List[str]:
     if not quarto_order:
         # Fallback to alphabetical sorting
         if not quiet:
-        print("📂 Using alphabetical file ordering (no _quarto.yml order found)")
+            print("📂 Using alphabetical file ordering (no _quarto.yml order found)")
         return sorted(list(set(all_qmd_files)))
     
     # Create mapping for efficient lookup
@@ -342,7 +342,7 @@ def find_qmd_files(directories: List[str], quiet: bool = False) -> List[str]:
     ordered_files.extend(remaining_files)
     
     if not quiet:
-    print(f"📊 File ordering: {len(ordered_files)} total ({len(ordered_files) - len(remaining_files)} from _quarto.yml, {len(remaining_files)} alphabetical)")
+        print(f"📊 File ordering: {len(ordered_files)} total ({len(ordered_files) - len(remaining_files)} from _quarto.yml, {len(remaining_files)} alphabetical)")
     
     return ordered_files
 
@@ -671,7 +671,9 @@ Source Section: "{source_title}"
 Target Section: "{target_title}"  
 {target_snippet}
 
-Write a natural 4-7 word explanation that completes: "See also: {target_title} - [your explanation]"
+Write a natural 6-12 word explanation that provides helpful context that completes: "See also: {target_title} - [your explanation]"
+
+Focus on WHY this connection matters for learning and what specific value it provides to readers.
 
 Use varied, engaging language. Examples of good explanations:
 - "provides essential background on neural network mathematics"
@@ -695,7 +697,7 @@ Write ONLY a natural explanation phrase (no labels, no "Explanation:" prefix):""
                 "options": {
                     "temperature": 0.3,
                     "top_p": 0.9,
-                    "max_tokens": 50
+                    "max_tokens": 80
                 }
             },
             timeout=30
@@ -913,18 +915,18 @@ def load_content(directories: List[str], exclude_chapters: Optional[List[str]] =
         exclude_chapters = []  # Default to including all chapters
     
     if not quiet:
-    print(f"📚 Loading content from: {', '.join(directories)}")
+        print(f"📚 Loading content from: {', '.join(directories)}")
         print(f"🔧 Using pypandoc-based content extraction with section filtering")
     qmd_files = find_qmd_files(directories, quiet=quiet)
     
     if not quiet:
-    print(f"📋 Found {len(qmd_files)} .qmd files:")
-    for i, file_path in enumerate(qmd_files, 1):
-        try:
-            relative_path = str(Path(file_path).relative_to(Path.cwd()))
-        except ValueError:
-            relative_path = str(Path(file_path))
-        print(f"    {i:2d}. {relative_path}")
+        print(f"📋 Found {len(qmd_files)} .qmd files:")
+        for i, file_path in enumerate(qmd_files, 1):
+            try:
+                relative_path = str(Path(file_path).relative_to(Path.cwd()))
+            except ValueError:
+                relative_path = str(Path(file_path))
+            print(f"    {i:2d}. {relative_path}")
     
     all_sections = []
     processed_files = []
@@ -958,16 +960,16 @@ def load_content(directories: List[str], exclude_chapters: Optional[List[str]] =
                 all_sections.extend(filtered_sections)
     
     if not quiet:
-    print(f"\n✅ PROCESSING SUMMARY:")
-    print(f"📖 Processing {len(processed_files)} files:")
-    for i, file_path in enumerate(processed_files, 1):
-        try:
-            relative_path = str(Path(file_path).relative_to(Path.cwd()))
-        except ValueError:
-            relative_path = str(Path(file_path))
-        chapter_name = Path(file_path).parent.name
-        sections_count = len([s for s in all_sections if s['file_path'] == file_path])
-        print(f"    {i:2d}. {relative_path} [{chapter_name}] ({sections_count} sections)")
+        print(f"\n✅ PROCESSING SUMMARY:")
+        print(f"📖 Processing {len(processed_files)} files:")
+        for i, file_path in enumerate(processed_files, 1):
+            try:
+                relative_path = str(Path(file_path).relative_to(Path.cwd()))
+            except ValueError:
+                relative_path = str(Path(file_path))
+            chapter_name = Path(file_path).parent.name
+            sections_count = len([s for s in all_sections if s['file_path'] == file_path])
+            print(f"    {i:2d}. {relative_path} [{chapter_name}] ({sections_count} sections)")
     
     if excluded_files:
         print(f"\n🚫 Excluded {len(excluded_files)} files ({', '.join(exclude_chapters)} chapters):")
@@ -984,7 +986,7 @@ def load_content(directories: List[str], exclude_chapters: Optional[List[str]] =
     print(f"    • Files processed: {len(processed_files)}")
     print(f"    • Files excluded: {len(excluded_files)}")
     print(f"    • Sections extracted: {len(all_sections)}")
-        print(f"    • Quality filtering: Sections excluded for being meta-content, too short, or low-quality")
+    print(f"    • Quality filtering: Sections excluded for being meta-content, too short, or low-quality")
     else:
         print(f"📊 Processed {len(processed_files)} files, extracted {len(all_sections)} sections")
     
@@ -1150,11 +1152,11 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
     """
     
     if not quiet:
-    print("🚀 GENERATION MODE: Cross-Reference Generation")
-    print("=" * 50)
+        print("🚀 GENERATION MODE: Cross-Reference Generation")
+        print("=" * 50)
     
     # Handle AI explanation setup
-    selected_model = "qwen2.5:7b"  # Default
+    selected_model = "llama3.1:8b"  # Default - optimized from experiments
     if explain:
         if not REQUESTS_AVAILABLE:
             print("❌ requests library not available. Install with: pip install requests")
@@ -1171,14 +1173,14 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
     model_type = "Domain-adapted" if is_local_model else "Base HuggingFace"
     
     if not quiet:
-    print(f"📂 Model: {model_path} ({model_type})")
+        print(f"📂 Model: {model_path} ({model_type})")
     
     # Load model
     try:
         from sentence_transformers import SentenceTransformer
         model = SentenceTransformer(model_path)
         if not quiet:
-        print(f"✅ Model loaded: {model.get_sentence_embedding_dimension()} dimensions")
+            print(f"✅ Model loaded: {model.get_sentence_embedding_dimension()} dimensions")
     except Exception as e:
         print(f"❌ Error loading model: {e}")
         return {}
@@ -1194,22 +1196,22 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
         sys.stderr = devnull
     
     try:
-    # Load content
+        # Load content
         all_sections = load_content(directories, exclude_chapters, verbose=verbose, quiet=quiet)
-    if not all_sections:
+        if not all_sections:
             if not quiet:
-        print("❌ No content loaded")
-        return {}
+                print("❌ No content loaded")
+            return {}
     
-    # Generate embeddings
+        # Generate embeddings
         if not quiet:
-    print("🧮 Generating embeddings...")
+            print("🧮 Generating embeddings...")
         embeddings = model.encode([section['content'] for section in all_sections], 
                                 show_progress_bar=not quiet)
     
-    # Find similar sections
+        # Find similar sections
         if not quiet:
-    print("🔍 Finding cross-references...")
+            print("🔍 Finding cross-references...")
         
     finally:
         # Restore stderr if we suppressed it
@@ -1274,14 +1276,14 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
                 if not target_id:
                     continue  # Skip targets without valid IDs
 
-                    # Determine connection type
-                    source_idx = file_index_map.get(source_file, -1)
-                    target_idx_map = file_index_map.get(target_section['file_path'], -1)
-                    connection_type = "related" # Default
-                    if source_idx != -1 and target_idx_map != -1:
-                        if target_idx_map > source_idx:
-                            connection_type = "Preview"
-                        else:
+                # Determine connection type
+                source_idx = file_index_map.get(source_file, -1)
+                target_idx_map = file_index_map.get(target_section['file_path'], -1)
+                connection_type = "related" # Default
+                if source_idx != -1 and target_idx_map != -1:
+                    if target_idx_map > source_idx:
+                        connection_type = "Preview"
+                    else:
                         connection_type = "Background"
 
                 # Generate explanation if requested
@@ -1309,7 +1311,7 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
                     target_data['explanation'] = explanation
                 
                 file_section_refs[source_filename][source_section_id]['targets'].append(target_data)
-                    suggestions_count += 1
+                suggestions_count += 1
     
     # Convert to final array structure
     cross_references = []
@@ -1350,11 +1352,11 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
         json.dump(result, f, indent=2)
     
     if not quiet:
-    print(f"\n✅ Generated {total_refs} cross-references across {len(cross_references)} files.")
-    all_sims = [target['similarity'] for file_entry in cross_references for section in file_entry['sections'] for target in section['targets']]
-    print(f"📊 Average similarity: {np.mean(all_sims):.3f}" if all_sims else "📊 No valid cross-references")
-    print(f"📄 Results saved to: {output_file}")
-    print(f"🎯 Model type: {model_type}")
+        print(f"\n✅ Generated {total_refs} cross-references across {len(cross_references)} files.")
+        all_sims = [target['similarity'] for file_entry in cross_references for section in file_entry['sections'] for target in section['targets']]
+        print(f"�� Average similarity: {np.mean(all_sims):.3f}" if all_sims else "📊 No valid cross-references")
+        print(f"📄 Results saved to: {output_file}")
+        print(f"🎯 Model type: {model_type}")
     else:
         print(f"✅ Generated {total_refs} cross-references → {output_file}")
     
@@ -1460,11 +1462,11 @@ Examples:
             
             if result and 'cross_references' in result and result['cross_references']:
                 if not args.quiet:
-                print(f"🎉 Success! Ready for Quarto injection. NOTE: lua/inject_xrefs.lua may need updates for the new JSON structure.")
+                    print(f"🎉 Success! Ready for Quarto injection. NOTE: lua/inject_xrefs.lua may need updates for the new JSON structure.")
                 return 0
             else:
                 if not args.quiet:
-                print("⚠️  No cross-references generated")
+                    print("⚠️  No cross-references generated")
                 return 1
                 
     except KeyboardInterrupt:
