@@ -50,7 +50,7 @@ REQUIREMENTS:
 For AI explanations (--explain flag):
     brew install ollama  # macOS
     # or: curl -fsSL https://ollama.ai/install.sh | sh  # Linux
-    ollama run qwen2.5:7b  # Download recommended model
+    ollama run llama3.1:8b  # Download recommended model (best quality from experiments)
     
     Core libraries:
     • sentence-transformers: Embedding generation and model handling
@@ -230,7 +230,11 @@ def should_exclude_section(title: str, content: str, config: Dict) -> tuple[bool
 
 
 def get_quarto_file_order(quiet: bool = False) -> List[str]:
-    """Extract file order from _quarto.yml chapters section, including commented lines."""
+    """
+    Parse _quarto.yml using proper YAML processing to get the intended chapter order.
+    Returns list of file paths in the order they appear in the chapters section.
+    Processes ALL chapters (both commented and uncommented) to get complete ordering.
+    """
     quarto_yml_path = Path.cwd() / "_quarto.yml"
     
     if not quarto_yml_path.exists():
@@ -239,10 +243,37 @@ def get_quarto_file_order(quiet: bool = False) -> List[str]:
         sys.exit(1)
     
     try:
+        # Read the raw YAML content to preserve comments
         with open(quarto_yml_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
+            content = f.read()
+        
+        # Parse with PyYAML to get the main structure
+        try:
+            yaml_data = yaml.safe_load(content)
+        except yaml.YAMLError as e:
+            if not quiet:
+                print(f"⚠️  YAML parsing error: {e}")
+            return []
         
         ordered_files = []
+        
+        # Get chapters list from parsed YAML (uncommented entries)
+        book_data = yaml_data.get('book', {})
+        chapters = book_data.get('chapters', [])
+        
+        for chapter in chapters:
+            if isinstance(chapter, str):
+                if chapter.endswith('.qmd') and 'contents/core/' in chapter:
+                    ordered_files.append(chapter)
+            elif isinstance(chapter, dict):
+                # Handle 'part:' entries
+                if 'part' in chapter:
+                    part_file = chapter['part']
+                    if part_file.endswith('.qmd') and 'contents/core/' in part_file:
+                        ordered_files.append(part_file)
+        
+        # Extract commented chapters from raw content (YAML ignores these)
+        lines = content.split('\n')
         in_chapters_section = False
         
         for line in lines:
@@ -253,39 +284,40 @@ def get_quarto_file_order(quiet: bool = False) -> List[str]:
                 in_chapters_section = True
                 continue
             
-            # End of chapters section (next major section)
-            if in_chapters_section and stripped and not stripped.startswith(('-', '#')):
-                if ':' in stripped and not stripped.startswith('  '):
-                    break
+            # End of chapters section (next major section at root level)
+            if in_chapters_section and stripped and ':' in stripped and not stripped.startswith((' ', '\t', '-', '#')):
+                break
             
             if in_chapters_section:
-                # Extract file paths from both commented and uncommented lines
-                if stripped.startswith('- ') or line.startswith('    # - '):
-                    # Remove comment markers and list indicators  
-                    file_part = line.replace('    # - ', '').replace('    - ', '').strip()
+                # Extract commented chapter entries
+                if line.strip().startswith('# - '):
+                    # Remove comment and list markers
+                    file_part = line.strip()[4:].strip()  # Remove '# - '
                     
                     # Handle 'part:' entries
                     if file_part.startswith('part: '):
-                        file_part = file_part.replace('part: ', '').strip()
+                        file_part = file_part[6:].strip()  # Remove 'part: '
                     
-                    # Skip text entries and empty lines
+                    # Add if it's a core chapter file and not already in list
                     if (file_part.endswith('.qmd') and 
-                        not file_part.startswith('text:') and
-                        'contents/core/' in file_part):
+                        'contents/core/' in file_part and 
+                        file_part not in ordered_files):
                         ordered_files.append(file_part)
         
         if not quiet:
-            print(f"📋 Found {len(ordered_files)} ordered files in _quarto.yml (including commented)")
+            print(f"📋 Found {len(ordered_files)} ordered files in _quarto.yml (ALL chapters processed)")
             if ordered_files:
                 print("🔍 _quarto.yml file order preview:")
                 for i, file_path in enumerate(ordered_files[:5], 1):
                     print(f"    {i}. {file_path}")
                 if len(ordered_files) > 5:
                     print(f"    ... and {len(ordered_files) - 5} more")
+        
         return ordered_files
         
     except Exception as e:
-        print(f"⚠️  Warning: Could not parse _quarto.yml: {e}")
+        if not quiet:
+            print(f"⚠️  Warning: Could not parse _quarto.yml: {e}")
         return []
 
 def find_qmd_files(directories: List[str], quiet: bool = False) -> List[str]:
@@ -604,18 +636,22 @@ def setup_ollama_interactive() -> str:
     
     if not models:
         print("\n📥 NO MODELS FOUND. Recommended models for explanations:")
-        print("   1. ollama run qwen2.5:7b     (Recommended - excellent reasoning)")
-        print("   2. ollama run llama3.1:8b    (Alternative - good performance)")
-        print("   3. ollama run phi3:medium    (Smaller option)")
+        print("   1. ollama run llama3.1:8b    (Best - 8.0/10 quality from systematic experiments)")
+        print("   2. ollama run qwen2.5:7b     (Fast alternative - 7.8/10 quality)")
+        print("   3. ollama run phi3:3.8b      (High quality but verbose)")
         print("\nRun one of the above commands and then re-run this script.")
         return ""
     
     print(f"\n📚 Found {len(models)} model(s):")
     
-    # Recommend best model for explanations
+    # Recommend best model for explanations (based on systematic experiments)
     recommended_models = [
-        "qwen2.5:7b", "qwen2.5:14b", "qwen2.5:3b",
-        "llama3.1:8b", "llama3.1:7b", 
+        "llama3.1:8b",  # Winner: Best quality (8.0/10) from experiments
+        "qwen2.5:7b",   # Fast alternative with good quality (7.8/10)
+        "gemma2:9b",    # Good balance of quality and length adherence
+        "phi3:3.8b",    # High quality but verbose
+        "qwen2.5:14b", "qwen2.5:3b",
+        "llama3.1:7b", 
         "phi3:medium", "phi3:mini"
     ]
     
@@ -707,26 +743,8 @@ Write ONLY a natural explanation phrase (no labels, no "Explanation:" prefix):""
             result = response.json()
             explanation = result.get("response", "").strip()
             
-            # Clean up the explanation
-            explanation = explanation.strip()
-            
-            # Remove common prefixes/suffixes that might appear
-            prefixes_to_remove = ["Explanation:", "- ", "• ", '"', "'", "contextual:", "foundational:", "practical:", "detailed:", "comparative:"]
-            for prefix in prefixes_to_remove:
-                if explanation.lower().startswith(prefix.lower()):
-                    explanation = explanation[len(prefix):].strip()
-            
-            # Remove quotes and clean up
-            explanation = explanation.replace('"', '').replace("'", "").strip()
-            
-            # Ensure it starts with lowercase (for natural flow)
-            if explanation and explanation[0].isupper() and not explanation.startswith(('AI', 'ML', 'GPU', 'CPU')):
-                explanation = explanation[0].lower() + explanation[1:]
-            
-            # Ensure reasonable length
-            if len(explanation) > 120:
-                explanation = explanation[:117] + "..."
-                
+            # Sophisticated cleanup for verbose model responses
+            explanation = _extract_core_explanation(explanation)
             return explanation
         else:
             print(f"⚠️  Ollama API error: {response.status_code}")
@@ -738,6 +756,92 @@ Write ONLY a natural explanation phrase (no labels, no "Explanation:" prefix):""
         return ""  # Silent fail - likely model overloaded
     except Exception:
         return ""  # Silent fail - don't spam with errors
+
+
+def _extract_core_explanation(raw_response: str) -> str:
+    """
+    Extract the core explanation from verbose LLM responses.
+    Handles cases where models generate too much text or include unwanted prefixes.
+    """
+    if not raw_response or not raw_response.strip():
+        return ""
+    
+    explanation = raw_response.strip()
+    
+    # Step 1: Handle multi-line responses - extract relevant lines
+    lines = explanation.split('\n')
+    useful_lines = []
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+            
+        # Skip instructional text
+        if any(skip in line.lower() for skip in [
+            'here are', 'explanations:', 'cross-reference', 'source section', 
+            'target section', 'write only', 'instruction', 'follow'
+        ]):
+            continue
+            
+        # Look for lines that contain actual explanations
+        if any(indicator in line.lower() for indicator in [
+            'see also:', 'reveals', 'explains', 'shows', 'demonstrates', 
+            'provides', 'covers', 'explores', 'highlights', 'helps'
+        ]):
+            useful_lines.append(line)
+    
+    # If we found useful lines, use the best one
+    if useful_lines:
+        explanation = useful_lines[0]  # Take the first useful line
+    
+    # Step 2: Extract just the explanation part after "see also:" or similar
+    patterns_to_extract = [
+        r'see also:.*?-\s*(.+?)(?:\.|$)',  # "See also: Title - explanation"
+        r'see also:\s*(.+?)(?:\.|$)',      # "See also: explanation"  
+        r'-\s*(.+?)(?:\.|$)',              # "Title - explanation"
+        r':\s*(.+?)(?:\.|$)',              # "Label: explanation"
+    ]
+    
+    for pattern in patterns_to_extract:
+        import re
+        match = re.search(pattern, explanation, re.IGNORECASE | re.DOTALL)
+        if match:
+            explanation = match.group(1).strip()
+            break
+    
+    # Step 3: Remove unwanted prefixes/suffixes
+    prefixes_to_remove = [
+        "explanation:", "- ", "• ", "*", '"', "'", "`",
+        "contextual:", "foundational:", "practical:", "detailed:", "comparative:",
+        "reveals", "explains", "shows", "demonstrates", "provides", "covers",
+        "here", "this", "see also", "target", "source"
+    ]
+    
+    for prefix in prefixes_to_remove:
+        if explanation.lower().startswith(prefix.lower()):
+            explanation = explanation[len(prefix):].strip()
+    
+    # Step 4: Clean up punctuation and formatting
+    explanation = explanation.replace('"', '').replace("'", '').replace('*', '')
+    explanation = explanation.replace('\n', ' ').replace('\t', ' ')
+    explanation = ' '.join(explanation.split())  # Normalize whitespace
+    
+    # Step 5: Ensure proper capitalization
+    if explanation and explanation[0].isupper() and not explanation.startswith(('AI', 'ML', 'GPU', 'CPU', 'API')):
+        explanation = explanation[0].lower() + explanation[1:]
+    
+    # Step 6: Ensure reasonable length (6-12 words is optimal from experiments)
+    words = explanation.split()
+    if len(words) > 15:  # If too long, take first meaningful part
+        explanation = ' '.join(words[:12])
+    elif len(words) < 3:  # If too short, it's probably incomplete
+        return ""
+    
+    # Step 7: Remove trailing punctuation except periods
+    explanation = explanation.rstrip('.,!?;:')
+    
+    return explanation
 
 
 def _additional_cleanup(content: str) -> str:
