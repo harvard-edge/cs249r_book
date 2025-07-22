@@ -291,7 +291,7 @@ class FigureCaptionImprover:
         
         return True  # Should halt
     
-    def build_content_map_from_tex(self, tex_file: str = "Machine-Learning-Systems.tex") -> Dict:
+    def build_content_map_from_tex(self, tex_file: str = "caps.tex") -> Dict:
         """Build comprehensive content map by parsing generated .tex file."""
         if not os.path.exists(tex_file):
             print(f"❌ .tex file not found: {tex_file}")
@@ -1873,7 +1873,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Build content map from .tex file
+  # Build content map from .tex file (uses caps.tex by default)
   python improve_figure_captions.py --build-map
   python improve_figure_captions.py --build-map --tex-file path/to/custom.tex
   
@@ -1912,8 +1912,8 @@ Examples:
                        help='Ollama model to use (default: llama3.2:3b)')
     
     # LaTeX file input
-    parser.add_argument('--tex-file', default="Machine-Learning-Systems.tex",
-                       help='Path to .tex file to parse (default: Machine-Learning-Systems.tex)')
+    parser.add_argument('--tex-file', default="caps.tex",
+                       help='Path to .tex file to parse (default: caps.tex)')
     
     args = parser.parse_args()
     
