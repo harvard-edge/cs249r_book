@@ -24,6 +24,8 @@ import yaml
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
+import requests
+from titlecase import titlecase
 
 class CaptionQualityChecker:
     """Analyzes caption quality and identifies issues."""
@@ -306,90 +308,13 @@ class FigureCaptionImprover:
         return caption
 
     def normalize_caption_case(self, caption: str) -> str:
-        """Normalize caption case: title case for bold parts, sentence case for explanations."""
+        """Normalize caption case using proper English title case."""
         if not caption:
             return caption
-            
-        # Check if caption has the pattern **Bold Part**: explanation
-        bold_pattern = re.match(r'^(\*\*[^*]+\*\*):?\s*(.*)$', caption)
         
-        if bold_pattern:
-            bold_part = bold_pattern.group(1)
-            explanation_part = bold_pattern.group(2)
-            
-            # Title case the bold part (but preserve the ** markers)
-            bold_text = bold_part.strip('*')
-            bold_text = self.apply_title_case(bold_text)
-            
-            # Sentence case the explanation part
-            if explanation_part:
-                explanation_part = explanation_part.strip()
-                if explanation_part:
-                    # Capitalize first letter, keep rest as sentence case
-                    explanation_part = explanation_part[0].upper() + explanation_part[1:]
-            
-            # Reconstruct with proper formatting
-            if explanation_part:
-                return f"**{bold_text}**: {explanation_part}"
-            else:
-                return f"**{bold_text}**"
-        else:
-            # No bold pattern, just apply title case to the whole thing
-            return self.apply_title_case(caption)
+        # Use titlecase library for proper English title case
+        return titlecase(caption)
     
-    def apply_title_case(self, text: str) -> str:
-        """Apply proper title case to text."""
-        if not text:
-            return text
-            
-        # Articles, prepositions, and conjunctions to keep lowercase (unless at start)
-        small_words = {
-            'a', 'an', 'and', 'as', 'at', 'but', 'by', 'for', 'if', 'in', 
-            'nor', 'of', 'on', 'or', 'so', 'the', 'to', 'up', 'yet', 'vs'
-        }
-        
-        # Preserve specific terms that should keep their original case
-        preserve_case = {
-            'AI', 'ML', 'IoT', 'GPU', 'CPU', 'API', 'UI', 'UX', 'PDF', 'HTML', 'JSON',
-            'SocratiQ', 'TinyML', 'AlexNet', 'FarmBeats', 'TikZ', 'LaTeX', 'GitHub'
-        }
-        
-        words = text.split()
-        if not words:
-            return text
-            
-        result = []
-        
-        for i, word in enumerate(words):
-            # Remove punctuation for comparison but keep it for result
-            clean_word = word.strip('.,!?;:()[]{}')
-            punct = word[len(clean_word):] if len(word) > len(clean_word) else ''
-            
-            # Check if this exact word should be preserved
-            if clean_word in preserve_case:
-                result.append(clean_word + punct)
-            # First word is always capitalized (unless it's a preserved term)
-            elif i == 0:
-                if clean_word.lower() in [p.lower() for p in preserve_case]:
-                    preserved = next((p for p in preserve_case if p.lower() == clean_word.lower()), clean_word)
-                    result.append(preserved + punct)
-                else:
-                    result.append(clean_word.capitalize() + punct)
-            # Keep small words lowercase unless they're at the start
-            elif clean_word.lower() in small_words:
-                result.append(clean_word.lower() + punct)
-            # Keep words that are already all caps (likely acronyms)
-            elif clean_word.isupper() and len(clean_word) > 1:
-                result.append(clean_word + punct)
-            # Check for preserved case versions
-            elif clean_word.lower() in [p.lower() for p in preserve_case]:
-                preserved = next((p for p in preserve_case if p.lower() == clean_word.lower()), clean_word)
-                result.append(preserved + punct)
-            else:
-                result.append(clean_word.capitalize() + punct)
-        
-        return ' '.join(result)
-
     def load_content_map(self) -> Dict:
         """Load existing content map from JSON file."""
         if not os.path.exists(self.content_map_file):
