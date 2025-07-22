@@ -264,7 +264,6 @@ local function create_connection_box(refs)
      if display_type ~= "Preview" and display_type ~= "Background" then
        display_type = display_type .. " [Fallback Bullet]"
      end
-     log_info("DEBUG: Cross-reference (" .. display_type .. "): " .. arrow_content)
           local arrow_doc = pandoc.read(arrow_content, "markdown")
      if arrow_doc.blocks[1] then
        table.insert(content_blocks, arrow_doc.blocks[1])
@@ -273,10 +272,6 @@ local function create_connection_box(refs)
 
   -- Create a simple div with callout-chapter-connection class
   -- This structure is exactly what margin-connections.lua expects
-  log_info("DEBUG: Creating clean academic callout with " .. #content_blocks .. " bold directional arrows")
-  for i, block in ipairs(content_blocks) do
-    log_info("DEBUG: Block " .. i .. " type: " .. block.t)
-  end
   
   local callout_div = pandoc.Div(
     content_blocks,
