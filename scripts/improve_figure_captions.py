@@ -477,9 +477,9 @@ class FigureCaptionImprover:
         """Generate improved caption using Ollama multimodal model."""
         
         # Construct a focused, context-aware prompt
-        prompt = f"""You are editing a caption for a visual (figure or table) in a technical AI/ML systems textbook.
+        prompt = f"""You are an expert at editing a caption for a visual (figure or table) in a technical AI/ML systems textbook.
 
-Your task is to improve the caption so that it *teaches*. The goal is to help students understand what the visual illustrates in the context of machine learning systems.
+Your task is to improve the caption so that it *teaches*. The goal is to help students understand what the visual conveys in the context of machine learning systems.
 
 SECTION: {section_title}  
 ORIGINAL CAPTION: {current_caption}  
@@ -487,30 +487,36 @@ ORIGINAL CAPTION: {current_caption}
 TEXTBOOK CONTEXT (for reference):
 {section_text[:1500]}
 
-🧠 TASK: Rewrite the caption to make it more educational, precise, and aligned with the surrounding content.
+🧠 TASK: Rewrite the caption to make it educational, precise, and aligned with the visual’s teaching purpose.
 
 ✍️ FORMAT:
-**<Key Phrase>**: Explanation sentence
+**<Key Phrase>**: Explanation sentence(s)
 
 ✅ REQUIREMENTS:
-✅ REQUIREMENTS:
 
-1. **Key Phrase**: A single bolded concept, 1–3 words long. This should be noun-based and capture the main idea of the figure or table. Do not use full sentences or multiple bold phrases.
-2. **Explanation**: 1–2 concise, student-friendly sentences that explain what the visual teaches. Use active voice and focus on the *educational insight* the student gains.
-3. **Terminology**: Incorporate domain-specific terms or phrasing from the original caption *only if* they improve clarity or relevance. Rephrase them for pedagogical value.
-4. **No Weak Openers**: Do not start with “This figure…” or similar boilerplate. Dive directly into the insight or explanation.
-5. **Be Specific**: Clearly explain what this particular figure or table helps students understand—focus on its teaching purpose, not just what it shows.
-6. **Tone**: Use clear, precise language suitable for advanced undergraduates or early graduate students. Avoid jargon unless necessary.
-7. **Sources**: If the original caption includes a source (e.g., “Source: IEEE Spectrum”), retain it at the end of the caption. Append after a period and format in italics.
+1. **Key Phrase**: A single bolded noun phrase (1–3 words) that captures the main idea. Avoid full sentences or multiple bolded phrases. If similar figures exist in this section, choose a unique but relevant phrase.
+
+2. **Explanation**: 1–2 concise, natural sentences that express what the student *learns* from the figure or table. Use active voice. Avoid simply describing what the figure “shows”—explain what *insight* it provides or how it advances understanding.
+
+3. **Terminology**: Use domain-specific language from the original caption if helpful, but rephrase it to clarify meaning for students.
+
+4. **No Weak Openers**: Do not begin with “This figure...”, “This table...”, or “This diagram...”. Begin with the concept or the takeaway.
+
+5. **Clarity & Precision**: Be specific, pedagogical, and concrete. Emphasize learning outcomes over general description.
+
+6. **Tone**: Use technical but student-friendly language appropriate for upper-level undergraduates or early graduate students. Avoid jargon unless it is defined or central to the concept.
+
+7. **Sources**: If the original caption includes a source (e.g., “Source: IEEE Spectrum”), retain it at the end of the caption in italics. Append it after a period.
 
 📌 STRONG EXAMPLES:
-**Edge Deployment**: Demonstrates how AI and IoT technologies are integrated at the farm edge to optimize agricultural practices and enhance productivity through real-world ML applications.  
-**Key Strengths**: Highlights advantages of different AI paradigms, showing how statistical approaches enabled large-scale performance evaluation.
+**Attention Weights**: Shows how transformer models compute attention using query, key, and value interactions, enabling dynamic focus across input sequences.  
+**Edge Deployment**: Demonstrates how AI and IoT technologies are integrated at the farm edge to optimize agricultural practices through real-world ML applications.  
+**Dataset Splits**: Explains how ML workflows partition data into training, validation, and testing sets to support model development and evaluation.
 
 🚫 AVOID:
-- Vague key phrases (**BAD**: “AI Diagram”, “ML Overview”)
-- Full sentences in bold or multiple bolded terms
-- Generic language or repeated section titles
+- Starting with “This figure shows…” or “This table illustrates…”
+- Using a full sentence or list as the bold key phrase
+- Repeating the section title or being too vague (e.g., **AI System**)
 
 🖊️ OUTPUT: Write only the improved caption below:
 """
@@ -1907,7 +1913,7 @@ TEXTBOOK CONTEXT (for reference):
         return None, None
 
     def improve_captions_with_llm(self, directories: List[str], content_map: Optional[Dict] = None):
-        """Improve captions using LLM based on extracted content map and context."""
+        """Improve captions using LLM and immediately update each file after processing."""
         print("🤖 Improving captions with LLM...")
         
         # Build content map if not provided
@@ -1927,98 +1933,182 @@ TEXTBOOK CONTEXT (for reference):
         
         print(f"📊 Processing: {total_figures} figures, {total_tables} tables")
         
-        improved_count = 0
+        # Group items by source file for efficient processing
+        files_to_process = {}
         
-        # Process figures
+        # Group figures by file
         for fig_id, fig_data in content_map.get('figures', {}).items():
             source_file = fig_data.get('source_file')
-            if not source_file:
-                continue
-                
-            print(f"  📊 Processing figure: {fig_id}")
-            
-            try:
-                # Read the source file for context extraction
-                with open(source_file, 'r', encoding='utf-8') as f:
-                    file_content = f.read()
-                
-                # Extract context around this figure
-                context = self.extract_section_context(file_content, fig_id)
-                
-                # Find image path if it's a markdown figure
-                image_path = None
-                if fig_data.get('type') == 'markdown':
-                    # Try to extract image path from the figure definition
-                    image_pattern = rf'!\[[^\]]*\]\(([^)]+)\)[^{{]*{{[^}}]*#{re.escape(fig_id)}'
-                    match = re.search(image_pattern, file_content)
-                    if match:
-                        relative_path = match.group(1)
-                        # Resolve relative to the source file directory
-                        source_dir = Path(source_file).parent
-                        image_path = str(source_dir / relative_path)
-                        if not os.path.exists(image_path):
-                            image_path = None
-                
-                # Generate improved caption
-                current_caption = fig_data.get('original_caption', '')
-                new_caption = self.generate_caption_with_ollama(
-                    context['title'], 
-                    context['content'], 
-                    fig_id, 
-                    current_caption, 
-                    image_path
-                )
-                
-                if new_caption and new_caption != current_caption:
-                    fig_data['new_caption'] = new_caption
-                    improved_count += 1
-                    word_count = len(new_caption.split())
-                    print(f"    ✅ Improved ({word_count} words): {new_caption[:80]}{'...' if len(new_caption) > 80 else ''}")
-                else:
-                    print(f"    ⚠️  No improvement generated")
-                    
-            except Exception as e:
-                print(f"    ❌ Error processing {fig_id}: {e}")
+            if source_file:
+                if source_file not in files_to_process:
+                    files_to_process[source_file] = {'figures': [], 'tables': []}
+                files_to_process[source_file]['figures'].append((fig_id, fig_data))
         
-        # Process tables
+        # Group tables by file
         for tbl_id, tbl_data in content_map.get('tables', {}).items():
             source_file = tbl_data.get('source_file')
-            if not source_file:
-                continue
-                
-            print(f"  📋 Processing table: {tbl_id}")
+            if source_file:
+                if source_file not in files_to_process:
+                    files_to_process[source_file] = {'figures': [], 'tables': []}
+                files_to_process[source_file]['tables'].append((tbl_id, tbl_data))
+        
+        total_improved = 0
+        files_updated = 0
+        
+        # Process each file independently
+        for source_file, items in files_to_process.items():
+            print(f"\n📄 Processing file: {source_file}")
             
             try:
-                # Read the source file for context extraction
+                # Read file content once for this file
                 with open(source_file, 'r', encoding='utf-8') as f:
                     file_content = f.read()
                 
-                # Extract context around this table
-                context = self.extract_section_context(file_content, tbl_id)
+                file_improvements = []
+                file_improved_count = 0
                 
-                # Generate improved caption (no image for tables)
-                current_caption = tbl_data.get('original_caption', '')
-                new_caption = self.generate_caption_with_ollama(
-                    context['title'], 
-                    context['content'], 
-                    tbl_id, 
-                    current_caption, 
-                    None  # No image for tables
-                )
+                # Process all figures in this file
+                for fig_id, fig_data in items['figures']:
+                    print(f"  📊 Processing figure: {fig_id}")
+                    
+                    try:
+                        # Extract context around this figure
+                        context = self.extract_section_context(file_content, fig_id)
+                        
+                        # Find image path if it's a markdown figure
+                        image_path = None
+                        if fig_data.get('type') == 'markdown':
+                            # Try to extract image path from the figure definition
+                            image_pattern = rf'!\[[^\]]*\]\(([^)]+)\)[^{{]*{{[^}}]*#{re.escape(fig_id)}'
+                            match = re.search(image_pattern, file_content)
+                            if match:
+                                relative_path = match.group(1)
+                                # Resolve relative to the source file directory
+                                source_dir = Path(source_file).parent
+                                image_path = str(source_dir / relative_path)
+                                if not os.path.exists(image_path):
+                                    image_path = None
+                        
+                        # Generate improved caption
+                        current_caption = fig_data.get('original_caption', '')
+                        new_caption = self.generate_caption_with_ollama(
+                            context['title'], 
+                            context['content'], 
+                            fig_id, 
+                            current_caption, 
+                            image_path
+                        )
+                        
+                        if new_caption and new_caption != current_caption:
+                            fig_data['new_caption'] = new_caption
+                            file_improvements.append({
+                                'id': fig_id,
+                                'type': 'figure',
+                                'original': current_caption,
+                                'new': new_caption
+                            })
+                            file_improved_count += 1
+                            word_count = len(new_caption.split())
+                            print(f"    ✅ Improved ({word_count} words): {new_caption[:80]}{'...' if len(new_caption) > 80 else ''}")
+                        else:
+                            print(f"    ⚠️  No improvement generated")
+                            
+                    except Exception as e:
+                        print(f"    ❌ Error processing {fig_id}: {e}")
                 
-                if new_caption and new_caption != current_caption:
-                    tbl_data['new_caption'] = new_caption
-                    improved_count += 1
-                    word_count = len(new_caption.split())
-                    print(f"    ✅ Improved ({word_count} words): {new_caption[:80]}{'...' if len(new_caption) > 80 else ''}")
+                # Process all tables in this file
+                for tbl_id, tbl_data in items['tables']:
+                    print(f"  📋 Processing table: {tbl_id}")
+                    
+                    try:
+                        # Extract context around this table
+                        context = self.extract_section_context(file_content, tbl_id)
+                        
+                        # Generate improved caption (no image for tables)
+                        current_caption = tbl_data.get('original_caption', '')
+                        new_caption = self.generate_caption_with_ollama(
+                            context['title'], 
+                            context['content'], 
+                            tbl_id, 
+                            current_caption, 
+                            None  # No image for tables
+                        )
+                        
+                        if new_caption and new_caption != current_caption:
+                            tbl_data['new_caption'] = new_caption
+                            file_improvements.append({
+                                'id': tbl_id,
+                                'type': 'table',
+                                'original': current_caption,
+                                'new': new_caption
+                            })
+                            file_improved_count += 1
+                            word_count = len(new_caption.split())
+                            print(f"    ✅ Improved ({word_count} words): {new_caption[:80]}{'...' if len(new_caption) > 80 else ''}")
+                        else:
+                            print(f"    ⚠️  No improvement generated")
+                            
+                    except Exception as e:
+                        print(f"    ❌ Error processing {tbl_id}: {e}")
+                
+                # Immediately update this file if we have improvements
+                if file_improvements:
+                    print(f"  ✏️  Updating file with {file_improved_count} improvements...")
+                    self.update_single_file_captions(source_file, file_improvements)
+                    files_updated += 1
+                    print(f"  ✅ File updated successfully!")
                 else:
-                    print(f"    ⚠️  No improvement generated")
+                    print(f"  ℹ️  No improvements for this file - skipping update")
+                
+                total_improved += file_improved_count
+                
+            except Exception as e:
+                print(f"  ❌ Error processing file {source_file}: {e}")
+        
+        print(f"\n🎉 LLM improvement complete!")
+        print(f"   📊 Total captions improved: {total_improved}")
+        print(f"   📁 Files updated: {files_updated}")
+        return content_map
+    
+    def update_single_file_captions(self, file_path: str, improvements: List[Dict]):
+        """
+        Update a single QMD file with improved captions using targeted search-and-replace.
+        
+        Args:
+            file_path: Path to the QMD file to update
+            improvements: List of dicts with 'id', 'type', 'original', 'new' keys
+        """
+        if not improvements:
+            return
+        
+        success_count = 0
+        
+        for improvement in improvements:
+            item_id = improvement['id']
+            item_type = improvement['type']
+            original_caption = improvement['original']
+            new_caption = improvement['new']
+            
+            try:
+                if item_type == 'figure':
+                    success = self.apply_targeted_caption_update(
+                        file_path, item_id, original_caption, new_caption, is_table=False
+                    )
+                elif item_type == 'table':
+                    success = self.apply_targeted_caption_update(
+                        file_path, item_id, original_caption, new_caption, is_table=True
+                    )
+                
+                if success:
+                    success_count += 1
+                    print(f"    ✅ Updated {item_id}")
+                else:
+                    print(f"    ⚠️  Failed to update {item_id}")
                     
             except Exception as e:
-                print(f"    ❌ Error processing {tbl_id}: {e}")
+                print(f"    ❌ Error updating {item_id}: {e}")
         
-        print(f"🎉 LLM improvement complete: {improved_count} captions improved")
-        return content_map
+        print(f"    📊 Successfully updated {success_count}/{len(improvements)} items in {file_path}")
     
     def complete_caption_improvement_workflow(self, directories: List[str], save_json: bool = False):
         """
@@ -2048,7 +2138,7 @@ TEXTBOOK CONTEXT (for reference):
             self.save_content_map(content_map)
             print("💾 Content map saved to content_map.json for inspection")
         
-        # Step 2: Improve captions using LLM
+        # Step 2: Improve captions using LLM (files updated immediately during processing)
         print("\n🤖 Step 2: Improving captions with LLM...")
         improved_content_map = self.improve_captions_with_llm(directories, content_map)
         
@@ -2065,14 +2155,10 @@ TEXTBOOK CONTEXT (for reference):
             print("⚠️  No captions were improved. Workflow complete.")
             return improved_content_map
         
-        print(f"✅ {improved_count} captions improved")
+        print(f"✅ {improved_count} captions improved and files updated")
         
-        # Step 3: Update QMD files with improvements
-        print("\n✏️  Step 3: Updating QMD files...")
-        self.process_qmd_files(directories, improved_content_map)
-        
-        # Step 4: Save improvements summary to JSON file  
-        print("\n💾 Step 4: Saving improvements summary...")
+        # Step 3: Save improvements summary to JSON file  
+        print("\n💾 Step 3: Saving improvements summary...")
         improvements_file = self.save_improvements_summary(improved_content_map, directories, improved_count, total_items)
         
         print("\n🎉 Complete workflow finished successfully!")
