@@ -51,6 +51,7 @@ For AI explanations (--explain flag):
     brew install ollama  # macOS
     # or: curl -fsSL https://ollama.ai/install.sh | sh  # Linux
     ollama run llama3.1:8b  # Download recommended model (best quality from experiments)
+    # Use --ollama-model to specify a different model (e.g., --ollama-model qwen2.5:7b)
     
     Core libraries:
     • sentence-transformers: Embedding generation and model handling
@@ -677,7 +678,7 @@ def setup_ollama_interactive() -> str:
 
 
 def generate_explanation(source_content: str, target_content: str, source_title: str, target_title: str, 
-                        model: str = "qwen2.5:7b", max_retries: int = 2) -> str:
+                        model: str = "qwen2.5:7b", max_retries: int = 3) -> str:
     """
     Generate a concise explanation of why two sections are connected using local LLM.
     
@@ -699,7 +700,9 @@ def generate_explanation(source_content: str, target_content: str, source_title:
     source_snippet = source_content[:800] + "..." if len(source_content) > 800 else source_content
     target_snippet = target_content[:800] + "..." if len(target_content) > 800 else target_content
     
-    prompt = f"""You are writing cross-reference explanations for a Machine Learning Systems textbook. Create natural, varied explanations that tell students WHY they should follow the connection.
+
+    
+    prompt = f"""You are writing cross-reference explanations for a Machine Learning Systems textbook. Create natural, flowing explanations that tell students WHY they should follow the connection.
 
 Source Section: "{source_title}"
 {source_snippet}
@@ -707,55 +710,103 @@ Source Section: "{source_title}"
 Target Section: "{target_title}"  
 {target_snippet}
 
-Write a natural 6-12 word explanation that provides helpful context that completes: "See also: {target_title} - [your explanation]"
+Write ONLY the explanation text - a 6-12 word phrase starting with an action verb.
 
-Focus on WHY this connection matters for learning and what specific value it provides to readers.
+DO NOT include arrows, section titles, or references - just the explanation.
 
-Use varied, engaging language. Examples of good explanations:
-- "provides essential background on neural network mathematics"
-- "shows practical applications of these optimization techniques"  
-- "dives deeper into the implementation details"
-- "explains why this matters for deployment decisions"
+Your text will complete this: "→ Section Title (ref) [YOUR TEXT HERE]"
+
+JUST WRITE THE EXPLANATION PART. Examples of what YOU should generate:
+✓ "provides essential mathematical foundations for neural networks"
+✓ "explains practical deployment strategies for edge devices"  
+✓ "demonstrates optimization techniques for mobile inference"
+✓ "explores advanced architectural design patterns"
+
+DO NOT WRITE:
+✗ "→ provides essential foundations"
+✗ "Section explains advanced topics"  
+✗ "← explores implementation details"
+
+GOOD examples - EXACTLY what you should write:
+- "provides essential mathematical foundations for neural networks"
+- "demonstrates practical optimization techniques for deployment"  
+- "explores advanced GPU acceleration strategies"
+- "explains fundamental concepts driving ML system design"
+- "reveals critical performance bottlenecks in inference"
 - "contrasts different approaches to model compression"
-- "demonstrates real-world uses of edge computing"
-- "covers prerequisite concepts for understanding transformers"
-- "explores advanced aspects of distributed training"
+- "introduces key principles for scalable architectures"
 
-Write ONLY a natural explanation phrase (no labels, no "Explanation:" prefix):"""
+BAD examples - DO NOT write these:
+- "→ provides essential foundations" (has arrow - forbidden!)
+- "Section explains advanced topics" (includes section reference)
+- "← explores implementation details" (has arrow - forbidden!)  
+- "understands how this works" (section doesn't understand)
+- "essential background" (missing action verb)
+- "helps readers understand" (section doesn't help)
 
-    try:
-        response = requests.post(
-            "http://localhost:11434/api/generate",
-            json={
-                "model": model,
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "temperature": 0.3,
-                    "top_p": 0.9,
-                    "max_tokens": 80
-                }
-            },
-            timeout=30
-        )
-        
-        if response.status_code == 200:
-            result = response.json()
-            explanation = result.get("response", "").strip()
+CRITICAL: Write ONLY the explanation text. No arrows (→←), no section names, no references.
+
+Start with verbs like: provides, shows, explains, demonstrates, covers, explores, reveals, contrasts, introduces, details, established, introduced, covered, defined, built, etc.
+
+Generate ONE explanation phrase only:"""
+
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(
+                "http://localhost:11434/api/generate",
+                json={
+                    "model": model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.3,
+                        "top_p": 0.9,
+                        "max_tokens": 80
+                    }
+                },
+                timeout=30
+            )
             
-            # Sophisticated cleanup for verbose model responses
-            explanation = _extract_core_explanation(explanation)
-            return explanation
-        else:
-            print(f"⚠️  Ollama API error: {response.status_code}")
-            return ""
-            
-    except requests.exceptions.ConnectionError:
-        return ""  # Silent fail - setup check already handled this
-    except requests.exceptions.Timeout:
-        return ""  # Silent fail - likely model overloaded
-    except Exception:
-        return ""  # Silent fail - don't spam with errors
+            if response.status_code == 200:
+                result = response.json()
+                explanation = result.get("response", "").strip()
+                
+                # Sophisticated cleanup for verbose model responses
+                explanation = _extract_core_explanation(explanation)
+                
+                # If we got a valid explanation, return it
+                if explanation and len(explanation.strip()) > 3:
+                    return explanation
+                else:
+                    # Empty or too short explanation, try again
+                    if attempt < max_retries - 1:
+                        continue
+                    else:
+                        return ""  # Give up after max retries
+            else:
+                if attempt < max_retries - 1:
+                    continue  # Try again
+                else:
+                    print(f"⚠️  Ollama API error after {max_retries} attempts: {response.status_code}")
+                    return ""
+                
+        except requests.exceptions.ConnectionError:
+            if attempt < max_retries - 1:
+                continue  # Try again
+            else:
+                return ""  # Give up - connection issues
+        except requests.exceptions.Timeout:
+            if attempt < max_retries - 1:
+                continue  # Try again
+            else:
+                return ""  # Give up - timeout issues
+        except Exception:
+            if attempt < max_retries - 1:
+                continue  # Try again
+            else:
+                return ""  # Give up - other errors
+    
+    return ""  # Fallback
 
 
 def _extract_core_explanation(raw_response: str) -> str:
@@ -1249,11 +1300,12 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
                             max_suggestions: int = 5,
                             similarity_threshold: float = 0.65,
                             verbose: bool = False, quiet: bool = False,
-                            explain: bool = False) -> Dict:
+                            explain: bool = False, ollama_model: Optional[str] = None) -> Dict:
     """Generate cross-references using any sentence-transformer model.
     
     Args:
         explain: If True, generate AI explanations for each cross-reference using local LLM (requires Ollama)
+        ollama_model: Specific ollama model to use for explanations (e.g. 'llama3.1:8b', 'qwen2.5:7b')
     """
     
     if not quiet:
@@ -1267,11 +1319,33 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
             print("❌ requests library not available. Install with: pip install requests")
             return {}
         
-        selected_model = setup_ollama_interactive()
-        if not selected_model:
-            print("\n⚠️  Skipping explanation generation - setup incomplete.")
-            print("   Cross-references will be generated without explanations.")
-            explain = False
+        # Use user-specified model if provided
+        if ollama_model:
+            if not quiet:
+                print(f"🤖 Using specified ollama model: {ollama_model}")
+            selected_model = ollama_model
+            
+            # Verify the model is available
+            is_running, available_models = check_ollama_setup()
+            if not is_running:
+                print("❌ Ollama is not running. Please start it with: ollama serve")
+                return {}
+            
+            if available_models and ollama_model not in available_models:
+                print(f"⚠️  Warning: Model '{ollama_model}' not found in available models.")
+                print(f"📚 Available models: {', '.join(available_models)}")
+                print(f"💡 Download with: ollama run {ollama_model}")
+                explain = False
+            else:
+                if not quiet:
+                    print(f"✅ Model '{ollama_model}' is available and will be used for explanations.")
+        else:
+            # Use interactive setup if no model specified
+            selected_model = setup_ollama_interactive()
+            if not selected_model:
+                print("\n⚠️  Skipping explanation generation - setup incomplete.")
+                print("   Cross-references will be generated without explanations.")
+                explain = False
     
     # Determine if model_path is a local path or HuggingFace model name
     is_local_model = Path(model_path).exists()
@@ -1341,6 +1415,8 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
     # Use a dictionary to collect cross-references by file and section
     file_section_refs = {}
     
+
+    
     for i, section in enumerate(all_sections):
         source_file = section['file_path']
         source_filename = Path(source_file).name
@@ -1403,6 +1479,14 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
                         target_section['title'],
                         model=selected_model
                     )
+                    
+                    # Show the generated explanation nicely formatted
+                    if not quiet and explanation:
+                        direction_symbol = "→" if connection_type == "Preview" else "←" if connection_type == "Background" else "•"
+                        full_ref = f"      {direction_symbol} {target_section['title']} (§\\ref{{{target_id}}}) {explanation}"
+                        print(f"      ✨ {full_ref}")
+                    elif not quiet:
+                        print(f"      ❌ No explanation generated")
 
                 target_data = {
                         'target_section_id': target_id,
@@ -1459,7 +1543,7 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
     if not quiet:
         print(f"\n✅ Generated {total_refs} cross-references across {len(cross_references)} files.")
         all_sims = [target['similarity'] for file_entry in cross_references for section in file_entry['sections'] for target in section['targets']]
-        print(f"�� Average similarity: {np.mean(all_sims):.3f}" if all_sims else "📊 No valid cross-references")
+        print(f"📊 Average similarity: {np.mean(all_sims):.3f}" if all_sims else "📊 No valid cross-references")
         print(f"📄 Results saved to: {output_file}")
         print(f"🎯 Model type: {model_type}")
     else:
@@ -1483,8 +1567,11 @@ Examples:
     # Generate with base model (no training needed)
     python3 cross_refs.py -g -m sentence-t5-base -o cross_refs.json -d ../../contents/core/
     
-    # Generate with AI explanations (requires Ollama + qwen2.5:7b)
+    # Generate with AI explanations (requires Ollama + any model)
     python3 cross_refs.py -g -m sentence-t5-base -o cross_refs.json -d ../../contents/core/ --explain
+    
+    # Generate with specific ollama model for explanations
+    python3 cross_refs.py -g -m sentence-t5-base -o cross_refs.json -d ../../contents/core/ --explain --ollama-model llama3.1:8b
     
     # Test extraction methods
     python3 test_intelligent_extraction.py
@@ -1523,6 +1610,8 @@ Examples:
                         help='Generate AI explanations for cross-references using local LLM (requires Ollama)')
     parser.add_argument('--quiet', action='store_true',
                         help='Reduce output verbosity (only show essential information)')
+    parser.add_argument('--ollama-model', 
+                        help='Specific Ollama model to use for explanations (e.g., llama3.1:8b, qwen2.5:7b)')
     
     args = parser.parse_args()
     
@@ -1562,7 +1651,8 @@ Examples:
                 similarity_threshold=args.threshold,
                 verbose=args.verbose,
                 quiet=args.quiet,
-                explain=args.explain
+                explain=args.explain,
+                ollama_model=args.ollama_model
             )
             
             if result and 'cross_references' in result and result['cross_references']:
