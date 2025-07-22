@@ -524,18 +524,52 @@ class FigureCaptionImprover:
         # Extract just the ID part after 'fig-'
         id_part = fig_id.replace('fig-', '')
         
-        # Pattern: ![caption](path){#fig-id ...}
-        pattern = rf'!\[([^\]]*)\]\([^)]+\)\s*\{{[^}}]*#fig-{re.escape(id_part)}[^}}]*\}}'
+        # Pattern 1: Standard markdown image: ![caption](path){#fig-id ...}
+        # Use a more robust pattern that handles nested brackets correctly
+        pattern1 = rf'!\[(.*?)\]\([^)]+\)\s*\{{[^}}]*#fig-{re.escape(id_part)}[^}}]*\}}'
         
-        match = re.search(pattern, content, re.MULTILINE | re.DOTALL)
+        match = re.search(pattern1, content, re.MULTILINE | re.DOTALL)
         if match:
             return {
                 'found': True,
                 'current_caption': match.group(1),
                 'full_match': match.group(0),
                 'start': match.start(),
-                'end': match.end()
+                'end': match.end(),
+                'type': 'markdown'
             }
+            
+        # Pattern 2: TikZ/Div figures: ::: {#fig-id ...} ... caption ... :::
+        pattern2 = rf':::\s*\{{[^}}]*#fig-{re.escape(id_part)}[^}}]*\}}(.*?):::'
+        
+        match = re.search(pattern2, content, re.MULTILINE | re.DOTALL)
+        if match:
+            div_content = match.group(1)
+            
+            # Extract caption - it's typically after the closing ``` and before :::
+            # Look for text after a closing ``` block
+            caption_pattern = r'```\s*\n\s*(.+?)(?=\s*$)'
+            caption_match = re.search(caption_pattern, div_content, re.MULTILINE | re.DOTALL)
+            
+            if caption_match:
+                caption = caption_match.group(1).strip()
+            else:
+                # Fallback: look for any text content after tikz block
+                # Remove tikz code block and get remaining text
+                cleaned_content = re.sub(r'```\{\.tikz\}.*?```', '', div_content, flags=re.DOTALL)
+                caption = cleaned_content.strip()
+                if not caption:
+                    caption = f"TikZ figure {fig_id}"
+            
+            return {
+                'found': True,
+                'current_caption': caption,
+                'full_match': match.group(0),
+                'start': match.start(),
+                'end': match.end(),
+                'type': 'tikz'
+            }
+            
         return {'found': False}
 
     def find_table_definition_in_qmd(self, content: str, tbl_id: str) -> Dict:
@@ -563,11 +597,45 @@ class FigureCaptionImprover:
         # Extract just the ID part after 'fig-'
         id_part = fig_id.replace('fig-', '')
         
-        # Pattern: ![old_caption](path){#fig-id ...}
-        pattern = rf'(!\[)[^\]]*(\]\([^)]+\)\s*\{{[^}}]*#fig-{re.escape(id_part)}[^}}]*\}})'
-        
-        replacement = rf'\g<1>{new_caption}\g<2>'
-        updated_content = re.sub(pattern, replacement, content, flags=re.MULTILINE | re.DOTALL)
+        # First, determine what type of figure this is
+        fig_def = self.find_figure_definition_in_qmd(content, fig_id)
+        if not fig_def['found']:
+            return content
+            
+        if fig_def.get('type') == 'markdown':
+            # Pattern: ![old_caption](path){#fig-id ...}
+            pattern = rf'(!\[)[^\]]*(\]\([^)]+\)\s*\{{[^}}]*#fig-{re.escape(id_part)}[^}}]*\}})'
+            replacement = rf'\g<1>{new_caption}\g<2>'
+            updated_content = re.sub(pattern, replacement, content, flags=re.MULTILINE | re.DOTALL)
+            
+        elif fig_def.get('type') == 'tikz':
+            # For TikZ figures, replace the caption text after the tikz block but before :::
+            # Pattern: find the div block and replace the caption part
+            pattern = rf'(:::\s*\{{[^}}]*#fig-{re.escape(id_part)}[^}}]*\}}.*?```\s*\n\s*)([^:]+?)((?:\s*:::))'
+            
+            def replace_caption(match):
+                before = match.group(1)
+                after = match.group(3)
+                return f"{before}{new_caption}{after}"
+            
+            updated_content = re.sub(pattern, replace_caption, content, flags=re.MULTILINE | re.DOTALL)
+            
+            # If that didn't work, try a simpler approach - replace text at the end of the div
+            if updated_content == content:
+                # Find the complete div block and replace just the text portion
+                div_pattern = rf'(:::\s*\{{[^}}]*#fig-{re.escape(id_part)}[^}}]*\}}.*?```\s*\n)([^:]*?)(:::'
+                
+                def replace_div_caption(match):
+                    before = match.group(1)
+                    after = match.group(3)
+                    return f"{before}{new_caption}\n{after}"
+                
+                updated_content = re.sub(div_pattern, replace_div_caption, content, flags=re.MULTILINE | re.DOTALL)
+        else:
+            # Fallback to original method
+            pattern = rf'(!\[)[^\]]*(\]\([^)]+\)\s*\{{[^}}]*#fig-{re.escape(id_part)}[^}}]*\}})'
+            replacement = rf'\g<1>{new_caption}\g<2>'
+            updated_content = re.sub(pattern, replacement, content, flags=re.MULTILINE | re.DOTALL)
         
         return updated_content
 
