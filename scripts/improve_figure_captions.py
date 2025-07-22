@@ -477,39 +477,40 @@ class FigureCaptionImprover:
         """Generate improved caption using Ollama multimodal model."""
         
         # Construct a focused, context-aware prompt
-        prompt = f"""You are editing captions for an AI/ML systems textbook. Read the context carefully and write a better caption.
+        prompt = f"""You are editing a caption for a visual (figure or table) in a technical AI/ML systems textbook.
 
-Section: {section_title}
-Current caption: {current_caption}
+Your task is to improve the caption so that it *teaches*. The goal is to help students understand what the visual illustrates in the context of machine learning systems.
 
-Context from textbook:
+SECTION: {section_title}  
+ORIGINAL CAPTION: {current_caption}  
+
+TEXTBOOK CONTEXT (for reference):
 {section_text[:1500]}
 
-TASK: Write a better caption that helps students understand what this figure/table teaches. 
+🧠 TASK: Rewrite the caption to make it more educational, precise, and aligned with the surrounding content.
 
-REQUIREMENTS:
-1. Format: **Key Concept**: Explanation
-2. Bold part: 1-3 words, captures the main concept
-3. Explanation: What students learn from this visual, written naturally
-4. Be specific to the actual content, not generic
-5. Academic but readable tone
+✍️ FORMAT:
+**<Key Phrase>**: Explanation sentence
 
-FOCUS ON THE ACTUAL CONTENT:
-- What does this figure/table specifically show?
-- How does it help students understand the concepts in this section?
-- What educational insight does it provide?
+✅ REQUIREMENTS:
+1. **Key Phrase**: 1–3 words **only**. A single concept that captures the main idea. Do not use more than one bold phrase or a full sentence.
+2. **Explanation**: 1–2 natural, student-friendly sentences explaining what the figure or table helps the student understand.
+3. Use **domain-specific terms** from the original caption if helpful.
+4. Do **not** start with “This figure/table…” or state the obvious (e.g., “Shows a diagram of…”).
+5. Be **specific**, pedagogical, and clear—aim to make the visual useful in learning the section’s core concepts.
+6. Use an academic but readable tone.
 
-GOOD EXAMPLES:
-**Forward Propagation**: Step-by-step computation flow through neural network layers showing data transformation.
-**USPS Digits**: Handwritten digit examples demonstrating classification challenges in computer vision.
-**Training Pipeline**: Sequential stages from data preprocessing to model deployment in production systems.
+📌 STRONG EXAMPLES:
+**Edge Deployment**: Demonstrates how AI and IoT technologies are integrated at the farm edge to optimize agricultural practices and enhance productivity through real-world ML applications.  
+**Key Strengths**: Highlights advantages of different AI paradigms, showing how statistical approaches enabled large-scale performance evaluation.
 
-BAD (too generic):
-**Neural Network Post-Processing**: Comprehensive workflow for adapting neural network...
-**Machine Learning Systems**: Advanced techniques for...
+🚫 AVOID:
+- Vague key phrases (**BAD**: “AI Diagram”, “ML Overview”)
+- Full sentences in bold or multiple bolded terms
+- Generic language or repeated section titles
 
-Write ONLY the improved caption:"""
-
+🖊️ OUTPUT: Write only the improved caption below:
+"""
         try:
             # Prepare the request payload
             payload = {
@@ -768,20 +769,113 @@ Write ONLY the improved caption:"""
         Returns:
             Dict with 'caption', 'path', 'full_match' or None if not found
         """
-        # Fixed pattern: Capture caption without crossing newlines
-        # Pattern: ![caption](path){...#fig-id...}
-        pattern = rf'!\[([^\]]*)\]\(([^)]+)\)\s*\{{[^}}]*#{re.escape(fig_id)}(?:\s|[^}}])*\}}'
-        match = re.search(pattern, content, re.MULTILINE)
+        # Enhanced pattern: Handle nested brackets in captions like [Source](url)
+        # We need to balance brackets properly for captions containing citations
         
-        if match:
-            return {
-                'type': 'markdown',
-                'caption': match.group(1).strip(),
-                'path': match.group(2).strip(),
-                'full_match': match.group(0),
-                'start': match.start(),
-                'end': match.end()
-            }
+        # First, find the start of our figure pattern
+        start_pattern = rf'!\['
+        id_pattern = rf'\s*\{{[^}}]*#{re.escape(fig_id)}(?:\s|[^}}])*\}}'
+        
+        # Use a more sophisticated approach to extract the caption
+        # Look for the pattern and then parse it properly
+        simple_pattern = rf'!\[.*?\]\([^)]+\)\s*\{{[^}}]*#{re.escape(fig_id)}(?:\s|[^}}])*\}}'
+        rough_match = re.search(simple_pattern, content, re.MULTILINE)
+        
+        if rough_match:
+            full_text = rough_match.group(0)
+            # Now carefully extract the caption and path
+            # Find the balanced caption between ![...] 
+            caption = self._extract_balanced_caption(full_text)
+            if caption is not None:
+                # Extract the path - handle escaped characters properly
+                path = self._extract_balanced_path(full_text)
+                if path is not None:
+                    return {
+                        'type': 'markdown',
+                        'caption': caption.strip(),
+                        'path': path.strip(),
+                        'full_match': full_text,
+                        'start': rough_match.start(),
+                        'end': rough_match.end()
+                    }
+        
+        return None
+        
+    def _extract_balanced_caption(self, figure_text: str) -> Optional[str]:
+        """
+        Extract caption from ![caption] handling nested [brackets](links).
+        
+        Args:
+            figure_text: The full figure markdown text starting with ![
+            
+        Returns:
+            The caption text or None if parsing fails
+        """
+        if not figure_text.startswith('!['):
+            return None
+            
+        # Start after ![
+        pos = 2
+        bracket_count = 0
+        caption_end = None
+        
+        # Walk through the text, counting brackets
+        for i in range(pos, len(figure_text)):
+            char = figure_text[i]
+            if char == '[':
+                bracket_count += 1
+            elif char == ']':
+                if bracket_count == 0:
+                    # This is the closing ] for the main caption
+                    caption_end = i
+                    break
+                else:
+                    bracket_count -= 1
+        
+        if caption_end is not None:
+            return figure_text[2:caption_end]  # Skip ![ and get text before ]
+        
+        return None
+    
+    def _extract_balanced_path(self, figure_text: str) -> Optional[str]:
+        """
+        Extract path from ](path) handling escaped characters like \\(partially\\).
+        
+        Args:
+            figure_text: The full figure markdown text
+            
+        Returns:
+            The path text or None if parsing fails
+        """
+        # Find the ]( that starts the path
+        path_start_pattern = r'\]\('
+        path_start_match = re.search(path_start_pattern, figure_text)
+        if not path_start_match:
+            return None
+        
+        # Start after ](
+        start_pos = path_start_match.end()
+        pos = start_pos
+        path_end = None
+        
+        # Walk through characters, handling escapes
+        while pos < len(figure_text):
+            char = figure_text[pos]
+            
+            if char == '\\':
+                # Skip the escaped character
+                pos += 2  # Skip both \ and the next character
+                continue
+            elif char == ')':
+                # Found the closing )
+                path_end = pos
+                break
+            else:
+                pos += 1
+        
+        if path_end is not None:
+            return figure_text[start_pos:path_end]
+        
         return None
     
     def detect_tikz_figure(self, content: str, fig_id: str) -> Optional[Dict[str, str]]:
@@ -1495,14 +1589,11 @@ Write ONLY the improved caption:"""
                     try:
                         fig_def = self.find_figure_definition_in_qmd(content, fig_id)
                         if fig_def:
-                            # Normalize caption
-                            current_caption = fig_def['caption']
-                            normalized_caption = self.normalize_caption_punctuation(current_caption)
-                            normalized_caption = self.normalize_caption_case(normalized_caption)
+                            # Store original caption as-is from the file
+                            original_caption = fig_def['caption']
                             
                             content_map['figures'][fig_id] = {
-                                'current_caption': normalized_caption,
-                                'original_caption': current_caption,
+                                'original_caption': original_caption,
                                 'new_caption': '',
                                 'type': fig_def['type'],
                                 'source_file': qmd_file
@@ -1537,14 +1628,11 @@ Write ONLY the improved caption:"""
                     try:
                         tbl_def = self.detect_table(content, tbl_id)
                         if tbl_def:
-                            # Normalize caption
-                            current_caption = tbl_def['caption']
-                            normalized_caption = self.normalize_caption_punctuation(current_caption)
-                            normalized_caption = self.normalize_caption_case(normalized_caption)
+                            # Store original caption as-is from the file
+                            original_caption = tbl_def['caption']
                             
                             content_map['tables'][tbl_id] = {
-                                'current_caption': normalized_caption,
-                                'original_caption': current_caption,
+                                'original_caption': original_caption,
                                 'new_caption': '',
                                 'type': 'table',
                                 'source_file': qmd_file
@@ -1858,7 +1946,7 @@ Write ONLY the improved caption:"""
                             image_path = None
                 
                 # Generate improved caption
-                current_caption = fig_data.get('current_caption', '')
+                current_caption = fig_data.get('original_caption', '')
                 new_caption = self.generate_caption_with_ollama(
                     context['title'], 
                     context['content'], 
@@ -1895,7 +1983,7 @@ Write ONLY the improved caption:"""
                 context = self.extract_section_context(file_content, tbl_id)
                 
                 # Generate improved caption (no image for tables)
-                current_caption = tbl_data.get('current_caption', '')
+                current_caption = tbl_data.get('original_caption', '')
                 new_caption = self.generate_caption_with_ollama(
                     context['title'], 
                     context['content'], 
@@ -2020,7 +2108,7 @@ Write ONLY the improved caption:"""
         
         # Process figures
         for fig_id, fig_data in content_map.get('figures', {}).items():
-            original = fig_data.get('original_caption', fig_data.get('current_caption', ''))
+            original = fig_data.get('original_caption', '')
             improved = fig_data.get('new_caption', '')
             
             improvement_entry = {
@@ -2029,8 +2117,7 @@ Write ONLY the improved caption:"""
                 'source_file': fig_data.get('source_file', ''),
                 'original_caption': original,
                 'improved_caption': improved,
-                'status': 'improved' if improved and improved != original else 'no_change',
-                'improvement_length': len(improved) - len(original) if improved else 0
+                'status': 'improved' if improved and improved != original else 'no_change'
             }
             
             improvements['improvements']['figures'][fig_id] = improvement_entry
@@ -2042,7 +2129,7 @@ Write ONLY the improved caption:"""
         
         # Process tables
         for tbl_id, tbl_data in content_map.get('tables', {}).items():
-            original = tbl_data.get('original_caption', tbl_data.get('current_caption', ''))
+            original = tbl_data.get('original_caption', '')
             improved = tbl_data.get('new_caption', '')
             
             improvement_entry = {
@@ -2051,8 +2138,7 @@ Write ONLY the improved caption:"""
                 'source_file': tbl_data.get('source_file', ''),
                 'original_caption': original,
                 'improved_caption': improved,
-                'status': 'improved' if improved and improved != original else 'no_change',
-                'improvement_length': len(improved) - len(original) if improved else 0
+                'status': 'improved' if improved and improved != original else 'no_change'
             }
             
             improvements['improvements']['tables'][tbl_id] = improvement_entry
