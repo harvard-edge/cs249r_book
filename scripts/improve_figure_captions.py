@@ -493,13 +493,15 @@ TEXTBOOK CONTEXT (for reference):
 **<Key Phrase>**: Explanation sentence
 
 ✅ REQUIREMENTS:
-1. **Key Phrase**: 1–3 words **only**. A single concept that captures the main idea. Do not use more than one bold phrase or a full sentence.
-2. **Explanation**: 1–2 natural, student-friendly sentences explaining what the figure or table helps the student understand.
-3. Use **domain-specific terms** from the original caption if helpful.
-4. Do **not** start with “This figure/table…” or state the obvious (e.g., “Shows a diagram of…”).
-5. Be **specific**, pedagogical, and clear—aim to make the visual useful in learning the section’s core concepts.
-6. Use an academic but readable tone.
-7. If there is a source, keep the source in the caption. 
+✅ REQUIREMENTS:
+
+1. **Key Phrase**: A single bolded concept, 1–3 words long. This should be noun-based and capture the main idea of the figure or table. Do not use full sentences or multiple bold phrases.
+2. **Explanation**: 1–2 concise, student-friendly sentences that explain what the visual teaches. Use active voice and focus on the *educational insight* the student gains.
+3. **Terminology**: Incorporate domain-specific terms or phrasing from the original caption *only if* they improve clarity or relevance. Rephrase them for pedagogical value.
+4. **No Weak Openers**: Do not start with “This figure…” or similar boilerplate. Dive directly into the insight or explanation.
+5. **Be Specific**: Clearly explain what this particular figure or table helps students understand—focus on its teaching purpose, not just what it shows.
+6. **Tone**: Use clear, precise language suitable for advanced undergraduates or early graduate students. Avoid jargon unless necessary.
+7. **Sources**: If the original caption includes a source (e.g., “Source: IEEE Spectrum”), retain it at the end of the caption. Append after a period and format in italics.
 
 📌 STRONG EXAMPLES:
 **Edge Deployment**: Demonstrates how AI and IoT technologies are integrated at the farm edge to optimize agricultural practices and enhance productivity through real-world ML applications.  
@@ -1560,6 +1562,7 @@ TEXTBOOK CONTEXT (for reference):
                     'tikz_figures': 0, 
                     'code_figures': 0,
                     'extraction_failures': 0,
+                    'failed_extractions': [],
                     'files_with_issues': []
                 }
             }
@@ -1615,12 +1618,14 @@ TEXTBOOK CONTEXT (for reference):
                         else:
                             print(f"    ⚠️  Failed to extract: {fig_id}")
                             stats['extraction_failures'] += 1
+                            stats['failed_extractions'].append(fig_id)
                             if qmd_file not in stats['files_with_issues']:
                                 stats['files_with_issues'].append(qmd_file)
                                 
                     except Exception as e:
                         print(f"    ❌ Error processing {fig_id}: {e}")
                         stats['extraction_failures'] += 1
+                        stats['failed_extractions'].append(fig_id)
                         if qmd_file not in stats['files_with_issues']:
                             stats['files_with_issues'].append(qmd_file)
                 
@@ -1646,12 +1651,14 @@ TEXTBOOK CONTEXT (for reference):
                         else:
                             print(f"    ⚠️  Failed to extract: {tbl_id}")
                             stats['extraction_failures'] += 1
+                            stats['failed_extractions'].append(tbl_id)
                             if qmd_file not in stats['files_with_issues']:
                                 stats['files_with_issues'].append(qmd_file)
                                 
                     except Exception as e:
                         print(f"    ❌ Error processing {tbl_id}: {e}")
                         stats['extraction_failures'] += 1
+                        stats['failed_extractions'].append(tbl_id)
                         if qmd_file not in stats['files_with_issues']:
                             stats['files_with_issues'].append(qmd_file)
                 
@@ -1673,6 +1680,12 @@ TEXTBOOK CONTEXT (for reference):
         print(f"      • Code: {stats['code_figures']}")
         print(f"   📋 Tables: {stats['tables_found']} found")
         print(f"   ⚠️  Extraction failures: {stats['extraction_failures']}")
+        
+        # Show specific failed extractions
+        if stats['extraction_failures'] > 0 and 'failed_extractions' in stats:
+            print(f"   📋 Failed extractions:")
+            for failed_id in stats['failed_extractions']:
+                print(f"      • {failed_id}")
         
         if stats['files_with_issues']:
             print(f"   📁 Files with issues: {len(stats['files_with_issues'])}")
