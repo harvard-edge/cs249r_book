@@ -129,7 +129,7 @@ class CaptionQualityChecker:
         }
 
 class FigureCaptionImprover:
-    def __init__(self, model_name="llama3.2:3b"):
+    def __init__(self, model_name="llava:7b"):
         self.model_name = model_name
         self.figure_pattern = re.compile(r'@fig-([a-zA-Z0-9_-]+)')
         self.stats = {
@@ -314,6 +314,243 @@ class FigureCaptionImprover:
         
         # Use titlecase library for proper English title case
         return titlecase(caption)
+    
+    def encode_image(self, image_path: str) -> Optional[str]:
+        """Encode an image to base64 for multimodal models."""
+        try:
+            with open(image_path, "rb") as image_file:
+                return base64.b64encode(image_file.read()).decode('utf-8')
+        except Exception as e:
+            print(f"❌ Error encoding image {image_path}: {e}")
+            return None
+    
+    def extract_section_context(self, content: str, figure_or_table_id: str) -> Dict[str, str]:
+        """Extract the section context around a figure or table reference."""
+        lines = content.split('\n')
+        context_lines = []
+        section_title = "Unknown Section"
+        
+        # Find the line containing the figure/table reference
+        ref_line_idx = None
+        for i, line in enumerate(lines):
+            if figure_or_table_id in line and (line.strip().startswith('![') or line.strip().startswith(':') or ':::' in line):
+                ref_line_idx = i
+                break
+        
+        if ref_line_idx is None:
+            # Fallback: search for @fig- or @tbl- references
+            for i, line in enumerate(lines):
+                if f"@{figure_or_table_id}" in line:
+                    ref_line_idx = i
+                    break
+        
+        if ref_line_idx is not None:
+            # Extract context around the reference (±20 lines)
+            start_idx = max(0, ref_line_idx - 20)
+            end_idx = min(len(lines), ref_line_idx + 20)
+            
+            # Find section heading above the reference
+            for i in range(ref_line_idx, -1, -1):
+                line = lines[i].strip()
+                if line.startswith('#') and not line.startswith('###'):
+                    # Extract section title (remove # and {#...} tags)
+                    section_title = re.sub(r'^#+\s*', '', line)
+                    section_title = re.sub(r'\s*\{#[^}]+\}.*$', '', section_title)
+                    break
+            
+            context_lines = lines[start_idx:end_idx]
+        else:
+            # No specific reference found, use first few paragraphs
+            context_lines = lines[:50]
+        
+        context_text = '\n'.join(context_lines).strip()
+        
+        return {
+            'title': section_title,
+            'content': context_text
+        }
+    
+    def generate_caption_with_ollama(self, section_title: str, section_text: str, 
+                                   figure_id: str, current_caption: str, 
+                                   image_path: Optional[str] = None) -> Optional[str]:
+        """Generate improved caption using Ollama multimodal model."""
+        
+        # Construct the prompt requesting **bold**: explanation format
+        prompt = f"""You are a textbook editor expert improving figure and table captions for educational materials.
+
+Context:
+- Section: {section_title}
+- Figure/Table ID: {figure_id}
+- Current caption: {current_caption}
+
+Section content:
+{section_text[:2000]}  # Limit context to avoid token limits
+
+Task: Create an improved caption that:
+1. Uses EXACTLY this format: **Bold Key Concept**: Clear educational explanation
+2. Is more informative and educational than the current caption
+3. Helps students understand the figure/table's educational purpose
+4. Uses proper academic language
+5. Is concise but comprehensive
+
+CRITICAL: Your response must be ONLY the improved caption in this exact format:
+**Bold Key Concept**: Educational explanation that helps students learn
+
+Example good format:
+**Machine Learning Pipeline**: Comprehensive workflow showing data preprocessing, model training, and evaluation stages for developing robust AI systems.
+
+Respond with ONLY the improved caption, nothing else:"""
+
+        try:
+            # Prepare the request payload
+            payload = {
+                "model": self.model_name,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.3,  # Lower temperature for more consistent formatting
+                    "num_predict": 150   # Limit response length
+                }
+            }
+            
+            # Add image if provided (for multimodal models)
+            if image_path and os.path.exists(image_path):
+                encoded_image = self.encode_image(image_path)
+                if encoded_image:
+                    payload["images"] = [encoded_image]
+            
+            # Make request to Ollama
+            response = requests.post(
+                "http://localhost:11434/api/generate",
+                json=payload,
+                timeout=60
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                new_caption = result.get('response', '').strip()
+                
+                # Clean up any markdown code blocks
+                if new_caption.startswith('```') and new_caption.endswith('```'):
+                    new_caption = new_caption.strip('`').strip()
+                if new_caption.startswith('json\n'):
+                    new_caption = new_caption[5:].strip()
+                
+                # Validate the format contains **bold**: 
+                if '**' in new_caption and ':' in new_caption:
+                    return new_caption
+                else:
+                    print(f"      ⚠️  Generated caption doesn't follow **bold**: format: {new_caption[:100]}")
+                    return None
+            else:
+                print(f"      ❌ Ollama API error: {response.status_code}")
+                return None
+                
+        except requests.exceptions.RequestException as e:
+            print(f"      ❌ Request error: {e}")
+            return None
+        except Exception as e:
+            print(f"      ❌ Unexpected error: {e}")
+            return None
+    
+    def compile_tikz_to_image(self, tikz_code: str, figure_id: str) -> Optional[str]:
+        """Compile TikZ code to a PNG image for multimodal processing."""
+        temp_dir = Path("temp_tikz")
+        temp_dir.mkdir(exist_ok=True)
+        
+        tex_file = temp_dir / f"{figure_id}.tex"
+        pdf_file = temp_dir / f"{figure_id}.pdf"
+        png_file = temp_dir / f"{figure_id}.png"
+        
+        # Create minimal LaTeX document with TikZ
+        latex_content = f"""\\documentclass{{standalone}}
+\\usepackage{{tikz}}
+\\usepackage{{pgfplots}}
+\\usetikzlibrary{{positioning,arrows,shapes,calc}}
+\\begin{{document}}
+{tikz_code}
+\\end{{document}}"""
+        
+        try:
+            # Write LaTeX file
+            with open(tex_file, 'w', encoding='utf-8') as f:
+                f.write(latex_content)
+            
+            # Compile to PDF
+            result = subprocess.run(
+                ["pdflatex", "-output-directory", str(temp_dir), str(tex_file)],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if result.returncode != 0 or not pdf_file.exists():
+                print(f"      ❌ LaTeX compilation failed for {figure_id}")
+                return None
+            
+            # Convert PDF to PNG using ImageMagick
+            result = subprocess.run(
+                ["magick", "convert", "-density", "150", str(pdf_file), str(png_file)],
+                capture_output=True,
+                text=True,
+                timeout=15
+            )
+            
+            if result.returncode != 0 or not png_file.exists():
+                print(f"      ❌ PDF to PNG conversion failed for {figure_id}")
+                return None
+            
+            return str(png_file)
+            
+        except subprocess.TimeoutExpired:
+            print(f"      ❌ Compilation timeout for {figure_id}")
+            return None
+        except Exception as e:
+            print(f"      ❌ Compilation error for {figure_id}: {e}")
+            return None
+        finally:
+            # Clean up intermediate files
+            for temp_file in [tex_file, pdf_file, tex_file.with_suffix('.aux'), 
+                            tex_file.with_suffix('.log')]:
+                if temp_file.exists():
+                    try:
+                        temp_file.unlink()
+                    except:
+                        pass
+    
+    def parse_sections(self, content: str) -> List[Dict[str, any]]:
+        """Parse QMD content to extract sections with their positions."""
+        lines = content.split('\n')
+        sections = []
+        current_section = None
+        
+        for i, line in enumerate(lines):
+            # Detect section headers (## or ###)
+            if re.match(r'^##\s+', line) and not line.startswith('###'):
+                # Save previous section
+                if current_section:
+                    current_section['end_line'] = i - 1
+                    current_section['content'] = '\n'.join(lines[current_section['start_line']:i])
+                    sections.append(current_section)
+                
+                # Start new section
+                title = re.sub(r'^##\s*', '', line)
+                title = re.sub(r'\s*\{#[^}]+\}.*$', '', title)  # Remove {#id} tags
+                
+                current_section = {
+                    'title': title.strip(),
+                    'start_line': i,
+                    'end_line': len(lines) - 1,  # Will be updated when next section found
+                    'content': ''
+                }
+        
+        # Don't forget the last section
+        if current_section:
+            current_section['end_line'] = len(lines) - 1
+            current_section['content'] = '\n'.join(lines[current_section['start_line']:])
+            sections.append(current_section)
+        
+        return sections
     
     def load_content_map(self) -> Dict:
         """Load existing content map from JSON file."""
@@ -1507,6 +1744,110 @@ class FigureCaptionImprover:
         
         print(f"📊 Summary: Updated {total_figures_updated} figures and {total_tables_updated} tables across {len(files_to_update)} files")
 
+    def improve_captions_with_llm(self, directories: List[str], content_map: Dict):
+        """Improve captions using LLM based on extracted content map and context."""
+        print("🤖 Improving captions with LLM...")
+        
+        total_figures = len(content_map.get('figures', {}))
+        total_tables = len(content_map.get('tables', {}))
+        
+        if total_figures == 0 and total_tables == 0:
+            print("❌ No figures or tables found in content map")
+            return content_map
+        
+        print(f"📊 Processing: {total_figures} figures, {total_tables} tables")
+        
+        improved_count = 0
+        
+        # Process figures
+        for fig_id, fig_data in content_map.get('figures', {}).items():
+            source_file = fig_data.get('source_file')
+            if not source_file:
+                continue
+                
+            print(f"  📊 Processing figure: {fig_id}")
+            
+            try:
+                # Read the source file for context extraction
+                with open(source_file, 'r', encoding='utf-8') as f:
+                    file_content = f.read()
+                
+                # Extract context around this figure
+                context = self.extract_section_context(file_content, fig_id)
+                
+                # Find image path if it's a markdown figure
+                image_path = None
+                if fig_data.get('type') == 'markdown':
+                    # Try to extract image path from the figure definition
+                    image_pattern = rf'!\[[^\]]*\]\(([^)]+)\)[^{{]*{{[^}}]*#{re.escape(fig_id)}'
+                    match = re.search(image_pattern, file_content)
+                    if match:
+                        relative_path = match.group(1)
+                        # Resolve relative to the source file directory
+                        source_dir = Path(source_file).parent
+                        image_path = str(source_dir / relative_path)
+                        if not os.path.exists(image_path):
+                            image_path = None
+                
+                # Generate improved caption
+                current_caption = fig_data.get('current_caption', '')
+                new_caption = self.generate_caption_with_ollama(
+                    context['title'], 
+                    context['content'], 
+                    fig_id, 
+                    current_caption, 
+                    image_path
+                )
+                
+                if new_caption and new_caption != current_caption:
+                    fig_data['new_caption'] = new_caption
+                    improved_count += 1
+                    print(f"    ✅ Improved: {new_caption[:80]}{'...' if len(new_caption) > 80 else ''}")
+                else:
+                    print(f"    ⚠️  No improvement generated")
+                    
+            except Exception as e:
+                print(f"    ❌ Error processing {fig_id}: {e}")
+        
+        # Process tables
+        for tbl_id, tbl_data in content_map.get('tables', {}).items():
+            source_file = tbl_data.get('source_file')
+            if not source_file:
+                continue
+                
+            print(f"  📋 Processing table: {tbl_id}")
+            
+            try:
+                # Read the source file for context extraction
+                with open(source_file, 'r', encoding='utf-8') as f:
+                    file_content = f.read()
+                
+                # Extract context around this table
+                context = self.extract_section_context(file_content, tbl_id)
+                
+                # Generate improved caption (no image for tables)
+                current_caption = tbl_data.get('current_caption', '')
+                new_caption = self.generate_caption_with_ollama(
+                    context['title'], 
+                    context['content'], 
+                    tbl_id, 
+                    current_caption, 
+                    None  # No image for tables
+                )
+                
+                if new_caption and new_caption != current_caption:
+                    tbl_data['new_caption'] = new_caption
+                    improved_count += 1
+                    print(f"    ✅ Improved: {new_caption[:80]}{'...' if len(new_caption) > 80 else ''}")
+                else:
+                    print(f"    ⚠️  No improvement generated")
+                    
+            except Exception as e:
+                print(f"    ❌ Error processing {tbl_id}: {e}")
+        
+        print(f"🎉 LLM improvement complete: {improved_count} captions improved")
+        return content_map
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -1521,6 +1862,9 @@ Examples:
   # Build content map and save to JSON file for review
   python improve_figure_captions.py --build-qmd-map --save-json -d contents/core/
   
+  # Improve captions using LLM (requires existing content map)
+  python improve_figure_captions.py --improve -d contents/core/
+  
   # Check caption quality
   python improve_figure_captions.py --check -d contents/core/
   
@@ -1531,6 +1875,11 @@ Examples:
   python improve_figure_captions.py --validate -d contents/core/
   
   # Update QMD files with improved captions (requires content_map.json with new_caption fields)
+  python improve_figure_captions.py --update -d contents/core/
+  
+  # Complete workflow: Build map → Improve → Update
+  python improve_figure_captions.py --build-qmd-map -d contents/core/
+  python improve_figure_captions.py --improve -d contents/core/
   python improve_figure_captions.py --update -d contents/core/
 """
     )
@@ -1545,6 +1894,8 @@ Examples:
     group = parser.add_mutually_exclusive_group()
     group.add_argument('--build-qmd-map', action='store_true',
                       help='Build content map from QMD files directly')
+    group.add_argument('--improve', action='store_true',
+                      help='Improve captions using LLM (requires existing content map)')
     group.add_argument('--validate', action='store_true',
                       help='Validate QMD files against content map')
     group.add_argument('--update', action='store_true',
@@ -1561,7 +1912,7 @@ Examples:
     args = parser.parse_args()
     
     # Validate that we have input files/directories for certain operations
-    if args.build_qmd_map or args.validate or args.update or args.check or args.repair:
+    if args.build_qmd_map or args.improve or args.validate or args.update or args.check or args.repair:
         if not args.files and not args.directories:
             print("❌ Error: --files or --directories required for this operation")
             return 1
@@ -1621,6 +1972,21 @@ Examples:
             else:
                 print("❌ QMD content map building failed!")
                 return 1
+                
+        elif args.improve:
+            # Improve captions using LLM
+            print("🤖 Improving captions using LLM...")
+            content_map = improver.load_content_map()
+            if not content_map:
+                print("❌ No content map found. Run --build-qmd-map first.")
+                return 1
+            
+            # Run LLM improvement
+            improved_content_map = improver.improve_captions_with_llm(directories, content_map)
+            
+            # Save the updated content map with new captions
+            improver.save_content_map(improved_content_map)
+            print("✅ Caption improvement completed! Use --update to apply changes to QMD files.")
                 
         elif args.check:
             # Check caption quality
