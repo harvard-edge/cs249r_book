@@ -1517,6 +1517,82 @@ class FigureCaptionImprover:
         
         return content_map
 
+    def process_qmd_files(self, directories: List[str], content_map: Dict):
+        """
+        Process QMD files to update captions based on content map.
+        
+        Groups figures/tables by source file and updates each file once
+        with all caption changes to minimize file I/O operations.
+        
+        Args:
+            directories: List of directories to process
+            content_map: Content map with figures and tables data
+        """
+        print("📝 Processing QMD files for caption updates...")
+        
+        # Group all items by source file
+        files_to_update = {}
+        
+        # Collect figures that need updates
+        for fig_id, fig_data in content_map.get('figures', {}).items():
+            if 'new_caption' in fig_data and fig_data.get('new_caption'):
+                source_file = fig_data.get('source_file')
+                if source_file:
+                    if source_file not in files_to_update:
+                        files_to_update[source_file] = {'figures': [], 'tables': []}
+                    files_to_update[source_file]['figures'].append((fig_id, fig_data['new_caption']))
+        
+        # Collect tables that need updates  
+        for tbl_id, tbl_data in content_map.get('tables', {}).items():
+            if 'new_caption' in tbl_data and tbl_data.get('new_caption'):
+                source_file = tbl_data.get('source_file')
+                if source_file:
+                    if source_file not in files_to_update:
+                        files_to_update[source_file] = {'figures': [], 'tables': []}
+                    files_to_update[source_file]['tables'].append((tbl_id, tbl_data['new_caption']))
+        
+        if not files_to_update:
+            print("ℹ️  No caption updates needed (no new_caption entries found)")
+            return
+        
+        # Process each file once with all its updates
+        total_figures_updated = 0
+        total_tables_updated = 0
+        
+        for file_path, updates in files_to_update.items():
+            try:
+                print(f"📄 Updating {file_path}...")
+                print(f"   📊 {len(updates['figures'])} figures, {len(updates['tables'])} tables")
+                
+                # Read file content
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                original_content = content
+                
+                # Apply all figure updates
+                for fig_id, new_caption in updates['figures']:
+                    content = self.update_figure_caption_in_qmd(content, fig_id, new_caption)
+                    total_figures_updated += 1
+                
+                # Apply all table updates  
+                for tbl_id, new_caption in updates['tables']:
+                    content = self.update_table_caption_in_qmd(content, tbl_id, new_caption)
+                    total_tables_updated += 1
+                
+                # Write back only if content changed
+                if content != original_content:
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        f.write(content)
+                    print(f"   ✅ Updated successfully")
+                else:
+                    print(f"   ⚠️  No changes applied (patterns may not have matched)")
+                    
+            except Exception as e:
+                print(f"   ❌ Error updating {file_path}: {e}")
+        
+        print(f"📊 Summary: Updated {total_figures_updated} figures and {total_tables_updated} tables across {len(files_to_update)} files")
+
 
 def main():
     parser = argparse.ArgumentParser(
