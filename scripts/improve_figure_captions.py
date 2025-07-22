@@ -1410,16 +1410,9 @@ class FigureCaptionImprover:
                             content_map['figures'][fig_id] = {
                                 'current_caption': normalized_caption,
                                 'original_caption': current_caption,
+                                'new_caption': '',
                                 'type': fig_def['type'],
-                                'source_file': qmd_file,
-                                'metadata': {
-                                    'detection_method': fig_def['type'],
-                                    'start_pos': fig_def.get('start', 0),
-                                    'end_pos': fig_def.get('end', 0),
-                                    'path': fig_def.get('path', ''),
-                                    'language': fig_def.get('language', ''),
-                                    'tikz_code': fig_def.get('tikz_code', '')
-                                }
+                                'source_file': qmd_file
                             }
                             
                             print(f"    ✅ Found figure: {fig_id} ({fig_def['type']})")
@@ -1459,13 +1452,9 @@ class FigureCaptionImprover:
                             content_map['tables'][tbl_id] = {
                                 'current_caption': normalized_caption,
                                 'original_caption': current_caption,
+                                'new_caption': '',
                                 'type': 'table',
-                                'source_file': qmd_file,
-                                'metadata': {
-                                    'detection_method': 'table',
-                                    'start_pos': tbl_def.get('start', 0),
-                                    'end_pos': tbl_def.get('end', 0)
-                                }
+                                'source_file': qmd_file
                             }
                             
                             print(f"    ✅ Found table: {tbl_id}")
