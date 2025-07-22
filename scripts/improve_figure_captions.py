@@ -594,780 +594,368 @@ class FigureCaptionImprover:
                             qmd_files.append(os.path.join(root, file))
         return qmd_files
 
-    def find_figure_definition_in_qmd(self, content: str, fig_id: str) -> Dict:
-        """Find figure definition in QMD content."""
-        # Extract just the ID part after 'fig-'
-        id_part = fig_id.replace('fig-', '')
+    def find_figure_definition_in_qmd(self, content: str, fig_id: str) -> Optional[Dict[str, str]]:
+        """
+        Unified figure detection across all supported formats.
         
-        # Pattern 1: Standard markdown image: ![caption](path){#fig-id ...}
-        # Use a more robust pattern that handles nested brackets correctly
-        pattern1 = rf'!\[(.*?)\]\([^)]+\)\s*\{{[^}}]*#fig-{re.escape(id_part)}[^}}]*\}}'
+        Tries each detection method in order:
+        1. Code-generated figures (most specific)
+        2. TikZ/Div figures 
+        3. Standard markdown figures
         
-        match = re.search(pattern1, content, re.MULTILINE | re.DOTALL)
+        Args:
+            content: QMD file content
+            fig_id: Full figure ID (e.g., "fig-example")
+            
+        Returns:
+            Dict with type-specific information or None if not found
+        """
+        # Try each detection method in order of specificity
+        for detector in [self.detect_code_figure, self.detect_tikz_figure, self.detect_markdown_figure]:
+            result = detector(content, fig_id)
+            if result:
+                return result
+        return None
+    
+    def detect_markdown_figure(self, content: str, fig_id: str) -> Optional[Dict[str, str]]:
+        """
+        Detect standard markdown figures.
+        
+        Format: ![caption](path){#fig-id}
+        
+        Examples:
+            ![AI timeline](images/ai-timeline.png){#fig-ai-timeline}
+            ![Complex caption with [links]](path.png){width=80% #fig-id}
+            ![Caption](path.png){#fig-id width=80% height=60%}
+        
+        Args:
+            content: QMD file content
+            fig_id: Full figure ID (e.g., "fig-ai-timeline")
+            
+        Returns:
+            Dict with 'caption', 'path', 'full_match' or None if not found
+        """
+        # More flexible pattern: fig-id can be anywhere in the attributes
+        # Pattern: ![caption](path){...#fig-id...}
+        pattern = rf'!\[([^\]]*)\]\(([^)]+(?:\\.[^)]*)*)\)\s*\{{[^}}]*#{re.escape(fig_id)}(?:\s|[^}}])*\}}'
+        match = re.search(pattern, content, re.DOTALL)
+        
         if match:
             return {
-                'found': True,
-                'current_caption': match.group(1),
-                'full_match': match.group(0),
-                'start': match.start(),
-                'end': match.end(),
-                'type': 'markdown'
-            }
-            
-        # Pattern 2: TikZ/Div figures: ::: {#fig-id ...} ... caption ... :::
-        pattern2 = rf':::\s*\{{[^}}]*#fig-{re.escape(id_part)}[^}}]*\}}(.*?):::'
-        
-        match = re.search(pattern2, content, re.MULTILINE | re.DOTALL)
-        if match:
-            div_content = match.group(1)
-            
-            # Extract caption - it's typically after the closing ``` and before :::
-            # Look for text after a closing ``` block
-            caption_pattern = r'```\s*\n\s*(.+?)(?=\s*$)'
-            caption_match = re.search(caption_pattern, div_content, re.MULTILINE | re.DOTALL)
-            
-            if caption_match:
-                caption = caption_match.group(1).strip()
-            else:
-                # Fallback: look for any text content after tikz block
-                # Remove tikz code block and get remaining text
-                cleaned_content = re.sub(r'```\{\.tikz\}.*?```', '', div_content, flags=re.DOTALL)
-                caption = cleaned_content.strip()
-                if not caption:
-                    caption = f"TikZ figure {fig_id}"
-            
-            return {
-                'found': True,
-                'current_caption': caption,
-                'full_match': match.group(0),
-                'start': match.start(),
-                'end': match.end(),
-                'type': 'tikz'
-            }
-            
-        return {'found': False}
-
-    def find_table_definition_in_qmd(self, content: str, tbl_id: str) -> Dict:
-        """Find table definition in QMD content."""
-        # Extract just the ID part after 'tbl-'
-        id_part = tbl_id.replace('tbl-', '')
-        
-        # Pattern: any line that starts with : and has the table ID in braces
-        # `: anything {#tbl-id ...}`
-        pattern = rf'^:\s*(.+?)\s*\{{[^}}]*#tbl-{re.escape(id_part)}[^}}]*\}}'
-        
-        match = re.search(pattern, content, re.MULTILINE)
-        if match:
-            return {
-                'found': True,
-                'current_caption': match.group(1).strip(),
+                'type': 'markdown',
+                'caption': match.group(1).strip(),
+                'path': match.group(2).strip(),
                 'full_match': match.group(0),
                 'start': match.start(),
                 'end': match.end()
             }
-        return {'found': False}
-
-    def update_figure_caption_in_qmd(self, content: str, fig_id: str, new_caption: str) -> str:
-        """Update figure caption in QMD content."""
-        # Extract just the ID part after 'fig-'
-        id_part = fig_id.replace('fig-', '')
+        return None
+    
+    def detect_tikz_figure(self, content: str, fig_id: str) -> Optional[Dict[str, str]]:
+        """
+        Detect TikZ/Div block figures.
         
-        # First, determine what type of figure this is
-        fig_def = self.find_figure_definition_in_qmd(content, fig_id)
-        if not fig_def['found']:
-            return content
+        Format: 
+            ::: {#fig-id}
+            ```{.tikz}
+            % TikZ code here
+            ```
+            Caption text here
+            :::
+        
+        Examples:
+            ::: {#fig-neural-network}
+            ::: {width=80% #fig-neural-network}
+            ::: {#fig-neural-network .column-margin}
+        
+        Args:
+            content: QMD file content
+            fig_id: Full figure ID (e.g., "fig-neural-network")
             
-        if fig_def.get('type') == 'markdown':
-            # Pattern: ![old_caption](path){#fig-id ...}
-            pattern = rf'(!\[)[^\]]*(\]\([^)]+\)\s*\{{[^}}]*#fig-{re.escape(id_part)}[^}}]*\}})'
-            replacement = rf'\g<1>{new_caption}\g<2>'
-            updated_content = re.sub(pattern, replacement, content, flags=re.MULTILINE | re.DOTALL)
+        Returns:
+            Dict with 'caption', 'tikz_code', 'full_match' or None if not found
+        """
+        # More flexible pattern: fig-id can be anywhere in the attributes
+        pattern = rf':::\s*\{{[^}}]*#{re.escape(fig_id)}(?:\s|[^}}])*\}}(.*?):::'
+        match = re.search(pattern, content, re.DOTALL)
+        
+        if match:
+            div_content = match.group(1)
             
-        elif fig_def.get('type') == 'tikz':
-            # For TikZ figures, replace the caption text after the tikz block but before :::
-            # Pattern: find the div block and replace the caption part
-            pattern = rf'(:::\s*\{{[^}}]*#fig-{re.escape(id_part)}[^}}]*\}}.*?```\s*\n\s*)([^:]+?)((?:\s*:::))'
+            # Extract TikZ code block
+            tikz_match = re.search(r'```\{\.tikz\}(.*?)```', div_content, re.DOTALL)
+            tikz_code = tikz_match.group(1).strip() if tikz_match else ""
             
-            def replace_caption(match):
+            # Extract caption (usually the last text line before :::)
+            lines = [line.strip() for line in div_content.split('\n') if line.strip()]
+            caption = ""
+            for line in reversed(lines):
+                if line and not line.startswith('\\') and not line.startswith('```'):
+                    caption = line
+                    break
+            
+            return {
+                'type': 'tikz',
+                'caption': caption,
+                'tikz_code': tikz_code,
+                'full_match': match.group(0),
+                'start': match.start(),
+                'end': match.end()
+            }
+        return None
+    
+    def detect_code_figure(self, content: str, fig_id: str) -> Optional[Dict[str, str]]:
+        """
+        Detect code-generated figures (R/Python blocks).
+        
+        Format:
+            ```{r}
+            #| label: fig-id
+            #| fig-cap: "Caption text"
+            #| other-options: values
+            
+            # R or Python code here
+            ggplot(data) + ...
+            ```
+        
+        Examples:
+            ```{r}
+            #| label: fig-datacenter-energy
+            #| fig-cap: "Energy usage over time"
+            #| echo: false
+            
+            library(ggplot2)
+            ggplot(data, aes(x=year, y=usage)) + geom_line()
+            ```
+        
+        Args:
+            content: QMD file content
+            fig_id: Full figure ID (e.g., "fig-datacenter-energy")
+            
+        Returns:
+            Dict with 'caption', 'code', 'language', 'full_match' or None if not found
+        """
+        # Pattern: ```{r|python} ... #| label: fig-id ... #| fig-cap: "caption" ... ```
+        pattern = rf'```\{{(r|python)[^}}]*\}}([^`]*?#\|\s*label:\s*{re.escape(fig_id)}[^`]*?)```'
+        match = re.search(pattern, content, re.DOTALL | re.MULTILINE)
+        
+        if match:
+            language = match.group(1)
+            code_block = match.group(2)
+            
+            # Extract fig-cap from the code block
+            cap_pattern = r'#\|\s*fig-cap:\s*["\']?([^"\'\n]+)["\']?'
+            cap_match = re.search(cap_pattern, code_block)
+            caption = cap_match.group(1).strip() if cap_match else ""
+            
+            return {
+                'type': 'code',
+                'caption': caption,
+                'language': language,
+                'code': code_block.strip(),
+                'full_match': match.group(0),
+                'start': match.start(),
+                'end': match.end()
+            }
+        return None
+    
+    def detect_table(self, content: str, tbl_id: str) -> Optional[Dict[str, str]]:
+        """
+        Detect table captions.
+        
+        Format: : Caption text {#tbl-id}
+        
+        Examples:
+            : AI model comparison {#tbl-models}
+            : Performance metrics {width=80% #tbl-performance}
+            : Data summary {#tbl-data .striped}
+        
+        Args:
+            content: QMD file content
+            tbl_id: Full table ID (e.g., "tbl-models")
+            
+        Returns:
+            Dict with 'caption', 'full_match' or None if not found
+        """
+        # Simplified pattern: just find any line containing #tbl-id
+        # More flexible: tbl-id can be anywhere in the attributes
+        pattern = rf'^:\s*([^{{]+?)\s*\{{[^}}]*#{re.escape(tbl_id)}(?:\s|[^}}])*\}}'
+        match = re.search(pattern, content, re.MULTILINE)
+        
+        if match:
+            return {
+                'type': 'table',
+                'caption': match.group(1).strip(),
+                'full_match': match.group(0),
+                'start': match.start(),
+                'end': match.end()
+            }
+        return None
+    
+    def find_table_definition_in_qmd(self, content: str, tbl_id: str) -> Optional[Dict[str, str]]:
+        """
+        Unified table detection using the specialized detect_table function.
+        
+        Args:
+            content: QMD file content
+            tbl_id: Full table ID (e.g., "tbl-models")
+            
+        Returns:
+            Dict with table information or None if not found
+        """
+        return self.detect_table(content, tbl_id)
+
+    # ================================================================
+    # SPECIALIZED UPDATE FUNCTIONS FOR DIFFERENT FIGURE/TABLE TYPES  
+    # ================================================================
+    
+    def update_markdown_figure(self, content: str, fig_id: str, new_caption: str) -> str:
+        """
+        Update caption in standard markdown figures.
+        
+        Updates: ![old_caption](path){#fig-id} → ![new_caption](path){#fig-id}
+        
+        Args:
+            content: QMD file content
+            fig_id: Full figure ID (e.g., "fig-ai-timeline")
+            new_caption: New caption text
+            
+        Returns:
+            Updated content
+        """
+        # More flexible pattern: fig-id can be anywhere in the attributes
+        pattern = rf'(!\[)[^\]]*(\]\([^)]+\)\s*\{{[^}}]*#{re.escape(fig_id)}(?:\s|[^}}])*\}})'
+        replacement = rf'\g<1>{new_caption}\g<2>'
+        return re.sub(pattern, replacement, content, flags=re.MULTILINE | re.DOTALL)
+    
+    def update_tikz_figure(self, content: str, fig_id: str, new_caption: str) -> str:
+        """
+        Update caption in TikZ/Div block figures.
+        
+        Updates the caption text between the closing ``` and :::
+        
+        Args:
+            content: QMD file content  
+            fig_id: Full figure ID (e.g., "fig-neural-network")
+            new_caption: New caption text
+            
+        Returns:
+            Updated content
+        """
+        # Method 1: Replace caption after tikz block  
+        # More flexible pattern: fig-id can be anywhere in the attributes
+        pattern = rf'(:::\s*\{{[^}}]*#{re.escape(fig_id)}(?:\s|[^}}])*\}}.*?```\s*\n\s*)([^:]+?)((?:\s*:::))'
+        
+        def replace_caption(match):
+            before = match.group(1)
+            after = match.group(3)
+            return f"{before}{new_caption}{after}"
+        
+        updated_content = re.sub(pattern, replace_caption, content, flags=re.MULTILINE | re.DOTALL)
+        
+        # Method 2: If that didn't work, try simpler approach
+        if updated_content == content:
+            div_pattern = rf'(:::\s*\{{[^}}]*#{re.escape(fig_id)}(?:\s|[^}}])*\}}.*?```\s*\n)([^:]*?)(:::'
+            
+            def replace_div_caption(match):
                 before = match.group(1)
                 after = match.group(3)
-                return f"{before}{new_caption}{after}"
+                return f"{before}{new_caption}\n{after}"
             
-            updated_content = re.sub(pattern, replace_caption, content, flags=re.MULTILINE | re.DOTALL)
-            
-            # If that didn't work, try a simpler approach - replace text at the end of the div
-            if updated_content == content:
-                # Find the complete div block and replace just the text portion
-                div_pattern = rf'(:::\s*\{{[^}}]*#fig-{re.escape(id_part)}[^}}]*\}}.*?```\s*\n)([^:]*?)(:::'
-                
-                def replace_div_caption(match):
-                    before = match.group(1)
-                    after = match.group(3)
-                    return f"{before}{new_caption}\n{after}"
-                
-                updated_content = re.sub(div_pattern, replace_div_caption, content, flags=re.MULTILINE | re.DOTALL)
-        else:
-            # Fallback to original method
-            pattern = rf'(!\[)[^\]]*(\]\([^)]+\)\s*\{{[^}}]*#fig-{re.escape(id_part)}[^}}]*\}})'
-            replacement = rf'\g<1>{new_caption}\g<2>'
-            updated_content = re.sub(pattern, replacement, content, flags=re.MULTILINE | re.DOTALL)
+            updated_content = re.sub(div_pattern, replace_div_caption, content, flags=re.MULTILINE | re.DOTALL)
         
         return updated_content
-
+    
+    def update_code_figure(self, content: str, fig_id: str, new_caption: str) -> str:
+        """
+        Update caption in code-generated figures (R/Python blocks).
+        
+        Updates: #| fig-cap: "old caption" → #| fig-cap: "new caption"
+        
+        Args:
+            content: QMD file content
+            fig_id: Full figure ID (e.g., "fig-datacenter-energy")  
+            new_caption: New caption text
+            
+        Returns:
+            Updated content
+        """
+        # Find the fig-cap line specifically for this figure's code block
+        pattern = rf'(```\{{(r|python)[^}}]*\}}[^`]*?#\|\s*label:\s*{re.escape(fig_id)}[^`]*?#\|\s*fig-cap:\s*)([^\n]+)'
+        
+        def replace_fig_cap(match):
+            before = match.group(1)
+            return f'{before}"{new_caption}"'
+        
+        return re.sub(pattern, replace_fig_cap, content, flags=re.MULTILINE | re.DOTALL)
+    
+    def update_table_caption(self, content: str, tbl_id: str, new_caption: str) -> str:
+        """
+        Update table captions.
+        
+        Updates: : old caption {#tbl-id} → : new caption {#tbl-id}
+        
+        Args:
+            content: QMD file content
+            tbl_id: Full table ID (e.g., "tbl-models")
+            new_caption: New caption text
+            
+        Returns:
+            Updated content
+        """
+        # More flexible pattern: tbl-id can be anywhere in the attributes
+        pattern = rf'^(:\s*)[^{{]+?(\s*\{{[^}}]*#{re.escape(tbl_id)}(?:\s|[^}}])*\}})'
+        replacement = rf'\g<1>{new_caption}\g<2>'
+        return re.sub(pattern, replacement, content, flags=re.MULTILINE)
+    
     def update_table_caption_in_qmd(self, content: str, tbl_id: str, new_caption: str) -> str:
-        """Update table caption in QMD content."""
-        # Extract just the ID part after 'tbl-'
-        id_part = tbl_id.replace('tbl-', '')
+        """
+        Unified table caption update using the specialized update_table_caption function.
         
-        # Pattern: `: old_caption {#tbl-id ...}`
-        pattern = rf'^(:\s*)(.+?)(\s*\{{[^}}]*#tbl-{re.escape(id_part)}[^}}]*\}})'
-        
-        replacement = rf'\g<1>{new_caption}\g<3>'
-        updated_content = re.sub(pattern, replacement, content, flags=re.MULTILINE)
-        
-        return updated_content
-
-    def process_qmd_files(self, directories: List[str], content_map: Dict):
-        """Phase 3: Process QMD files to update captions using validated content map."""
-        print(f"✏️ Phase 3: Updating QMD files...")
-        
-        # Check for commented chapters in target directories first
-        commented_issues = self.check_commented_chapters_in_directories(directories)
-        should_halt = self.print_commented_chapter_issues(commented_issues)
-        if should_halt:
-            return content_map
-        
-        # Filter to only items with confirmed QMD locations
-        figures_to_update = {
-            fig_id: fig_data for fig_id, fig_data in content_map.get('figures', {}).items()
-            if fig_data.get('new_caption') and fig_data.get('source_file')
-        }
-        
-        tables_to_update = {
-            tbl_id: tbl_data for tbl_id, tbl_data in content_map.get('tables', {}).items()
-            if tbl_data.get('new_caption') and tbl_data.get('source_file')
-        }
-        
-        print(f"📋 Items to update:")
-        print(f"   Figures: {len(figures_to_update)} (with new captions & QMD locations)")
-        print(f"   Tables:  {len(tables_to_update)} (with new captions & QMD locations)")
-        
-        if not figures_to_update and not tables_to_update:
-            print("ℹ️  No items to update. Add new_caption values to content map first.")
-            return content_map
-        
-        # Group updates by file for efficiency
-        files_to_update = {}
-        
-        for fig_id, fig_data in figures_to_update.items():
-            qmd_file = fig_data['source_file']
-            if qmd_file not in files_to_update:
-                files_to_update[qmd_file] = {'figures': [], 'tables': []}
-            files_to_update[qmd_file]['figures'].append((fig_id, fig_data))
-        
-        for tbl_id, tbl_data in tables_to_update.items():
-            qmd_file = tbl_data['source_file']
-            if qmd_file not in files_to_update:
-                files_to_update[qmd_file] = {'figures': [], 'tables': []}
-            files_to_update[qmd_file]['tables'].append((tbl_id, tbl_data))
-        
-        figures_updated = 0
-        tables_updated = 0
-        
-        for qmd_file, file_data in files_to_update.items():
-            try:
-                print(f"\n📄 Processing: {qmd_file}")
-                
-                with open(qmd_file, 'r', encoding='utf-8') as f:
-                    original_content = f.read()
-                
-                updated_content = original_content
-                file_updated = False
-                
-                # Process figures
-                for (fig_id, fig_data) in file_data.get('figures', []):
-                    fig_def = self.find_figure_definition_in_qmd(updated_content, fig_id)
-                    if fig_def['found']:
-                        normalized_caption = self.normalize_caption_case(fig_data['new_caption'])
-                        normalized_caption = self.normalize_caption_punctuation(normalized_caption)
-                        print(f"  📊 Updating figure: {fig_id}")
-                        print(f"    📝 {fig_def['current_caption'][:60]}...")
-                        print(f"    ✨ {normalized_caption[:60]}...")
-                        
-                        updated_content = self.update_figure_caption_in_qmd(
-                            updated_content, fig_id, normalized_caption
-                        )
-                        
-                        # Update source file in content map
-                        content_map['figures'][fig_id]['source_file'] = qmd_file
-                        file_updated = True
-                        figures_updated += 1
-                
-                # Process tables
-                for (tbl_id, tbl_data) in file_data.get('tables', []):
-                    tbl_def = self.find_table_definition_in_qmd(updated_content, tbl_id)
-                    if tbl_def['found']:
-                        normalized_caption = self.normalize_caption_case(tbl_data['new_caption'])
-                        normalized_caption = self.normalize_caption_punctuation(normalized_caption)
-                        print(f"  📋 Updating table: {tbl_id}")
-                        print(f"    📝 {tbl_def['current_caption'][:60]}...")
-                        print(f"    ✨ {normalized_caption[:60]}...")
-                        
-                        updated_content = self.update_table_caption_in_qmd(
-                            updated_content, tbl_id, normalized_caption
-                        )
-                        
-                        # Update source file in content map
-                        content_map['tables'][tbl_id]['source_file'] = qmd_file
-                        file_updated = True
-                        tables_updated += 1
-                
-                # Write updated content back to file
-                if file_updated:
-                    with open(qmd_file, 'w', encoding='utf-8') as f:
-                        f.write(updated_content)
-                    print(f"  ✅ Updated: {qmd_file}")
-                
-            except Exception as e:
-                error_msg = f"Error processing {qmd_file}: {e}"
-                print(f"  ❌ {error_msg}")
-                self.stats['errors'].append(error_msg)
-        
-        print(f"\n🎉 Phase 3 completed!")
-        print(f"   📊 Figures updated: {figures_updated}")
-        print(f"   📋 Tables updated: {tables_updated}")
-        print(f"   📁 Files modified: {len([f for f in files_to_update if any(files_to_update[f].values())])}")
-        
-        return content_map
-    
-    def parse_sections(self, content: str) -> List[Dict]:
-        """Parse markdown content into sections with their headers and content."""
-        lines = content.split('\n')
-        sections = []
-        current_section = None
-        
-        for i, line in enumerate(lines):
-            # Check if line is a header
-            header_match = re.match(r'^(#{1,6})\s+(.+)', line)
-            if header_match:
-                # Save previous section if exists
-                if current_section:
-                    sections.append(current_section)
-                
-                # Start new section
-                level = len(header_match.group(1))
-                title = header_match.group(2).strip()
-                current_section = {
-                    'level': level,
-                    'title': title,
-                    'start_line': i,
-                    'content_lines': [],
-                    'raw_content': []
-                }
-            elif current_section:
-                current_section['content_lines'].append(line)
-                current_section['raw_content'].append(line)
-        
-        # Add the last section
-        if current_section:
-            sections.append(current_section)
+        Args:
+            content: QMD file content
+            tbl_id: Full table ID (e.g., "tbl-models")
+            new_caption: New caption text
             
-        return sections
+        Returns:
+            Updated content
+        """
+        return self.update_table_caption(content, tbl_id, new_caption)
     
-    def find_figure_references(self, content: str) -> List[Dict]:
-        """Find all figure references (@fig-*) in the content."""
-        references = []
-        lines = content.split('\n')
-        
-        for line_num, line in enumerate(lines):
-            matches = self.figure_pattern.findall(line)
-            for match in matches:
-                references.append({
-                    'figure_id': match,
-                    'line_number': line_num,
-                    'line_content': line.strip()
-                })
-        
-        return references
+    # ================================================================
+    # UNIFIED UPDATE FUNCTION
+    # ================================================================
     
-    def find_figure_definition(self, content: str, figure_id: str) -> Optional[Dict]:
-        """Find the figure definition and its current caption."""
-        lines = content.split('\n')
+    def update_figure_caption_in_qmd(self, content: str, fig_id: str, new_caption: str) -> str:
+        """
+        Unified figure caption update across all supported formats.
         
-        # Look for figure definition patterns
-        patterns = [
-            rf'!\[([^\]]*)\]\(([^)]+)\)\s*\{{[^}}]*#fig-{figure_id}[^}}]*\}}',  # ![caption](image){... #fig-id ...}
-            rf'```{{.*#fig-{figure_id}.*}}',  # Code blocks with figure ids
-        ]
+        Detects the figure type and calls the appropriate update function.
         
-        for line_num, line in enumerate(lines):
-            for pattern in patterns:
-                match = re.search(pattern, line)
-                if match:
-                    # Try to extract current caption and image path
-                    caption_match = re.search(r'!\[([^\]]*)\]', line)
-                    current_caption = caption_match.group(1) if caption_match else ""
-                    
-                    image_match = re.search(r'!\[[^\]]*\]\(([^)]+)\)', line)
-                    image_path = image_match.group(1) if image_match else ""
-                    
-                    return {
-                        'line_number': line_num,
-                        'line_content': line,
-                        'current_caption': current_caption,
-                        'image_path': image_path,
-                        'figure_id': figure_id
-                    }
-        
-        return None
-    
-    def get_section_for_line(self, sections: List[Dict], target_line: int) -> Optional[Dict]:
-        """Find which section contains the given line number."""
-        current_section = None
-        
-        for section in sections:
-            if section['start_line'] <= target_line:
-                current_section = section
-            else:
-                break
-                
-        return current_section
-    
-    def extract_section_text(self, section: Dict) -> str:
-        """Extract clean text content from a section, removing markdown formatting."""
-        if not section:
-            return ""
+        Args:
+            content: QMD file content
+            fig_id: Full figure ID (e.g., "fig-example")
+            new_caption: New caption text
             
-        content = '\n'.join(section['content_lines'])
+        Returns:
+            Updated content
+        """
+        # First, determine what type of figure this is
+        fig_def = self.find_figure_definition_in_qmd(content, fig_id)
+        if not fig_def:
+            return content
         
-        # Remove common markdown formatting but keep the meaning
-        # Remove headers
-        content = re.sub(r'^#{1,6}\s+', '', content, flags=re.MULTILINE)
-        # Remove code blocks
-        content = re.sub(r'```[^`]*```', '[CODE BLOCK]', content, flags=re.DOTALL)
-        # Remove inline code
-        content = re.sub(r'`([^`]+)`', r'\1', content)
-        # Remove links but keep text
-        content = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', content)
-        # Remove bold/italic
-        content = re.sub(r'\*\*([^*]+)\*\*', r'\1', content)
-        content = re.sub(r'\*([^*]+)\*', r'\1', content)
-        # Remove figure references from context to avoid confusion
-        content = re.sub(r'@fig-[a-zA-Z0-9_-]+', '', content)
-        
-        # Clean up extra whitespace
-        content = re.sub(r'\n\s*\n', '\n\n', content)
-        content = content.strip()
-        
-        return content
-    
+        # Route to appropriate update function based on type
+        if fig_def['type'] == 'markdown':
+            return self.update_markdown_figure(content, fig_id, new_caption)
+        elif fig_def['type'] == 'tikz':
+            return self.update_tikz_figure(content, fig_id, new_caption)
+        elif fig_def['type'] == 'code':
+            return self.update_code_figure(content, fig_id, new_caption)
+        else:
+            # Fallback to markdown method
+            return self.update_markdown_figure(content, fig_id, new_caption)
 
-
-    def encode_image(self, image_path: str) -> Optional[str]:
-        """Encode image to base64 for Ollama API."""
-        try:
-            with open(image_path, 'rb') as image_file:
-                encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
-                return encoded_string
-        except Exception as e:
-            print(f"Error encoding image {image_path}: {e}")
-            return None
-    
-    def find_image_file(self, file_path: Path, image_path: str) -> Optional[str]:
-        """Find the actual image file based on the path in the markdown."""
-        # If it's already an absolute path, check if it exists
-        if os.path.isabs(image_path) and os.path.exists(image_path):
-            return image_path
-        
-        # Try relative to the .qmd file directory
-        file_dir = file_path.parent
-        candidate_paths = [
-            file_dir / image_path,
-            file_dir / "images" / image_path,
-            file_dir / "images" / "png" / image_path,
-            file_dir / "images" / "jpg" / image_path,
-            file_dir / "images" / "jpeg" / image_path,
-        ]
-        
-        # Also try common image extensions if no extension provided
-        if '.' not in image_path:
-            for ext in ['.png', '.jpg', '.jpeg', '.gif', '.svg']:
-                for base_path in candidate_paths:
-                    candidate_paths.append(base_path.with_suffix(ext))
-        
-        for candidate in candidate_paths:
-            if candidate.exists():
-                return str(candidate)
-        
-        return None
-    
-    def find_tikz_figures_with_pypandoc(self, content: str) -> List[Dict]:
-        """Find TikZ figures using pypandoc AST parsing."""
-        tikz_figures = []
-        
-        try:
-            # Write content to temp file for pypandoc
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.qmd', delete=False) as tmp:
-                tmp.write(content)
-                tmp_path = tmp.name
-            
-            # Convert to pandoc AST
-            ast_json = pypandoc.convert_file(tmp_path, 'json', format='markdown')
-            doc = json.loads(ast_json)
-            
-            def walk_ast(element, line_counter={"count": 0}):
-                if isinstance(element, dict):
-                    # Look for Div elements with fig- IDs
-                    if element.get('t') == 'Div':
-                        attrs = element.get('c', [None, None])[0]
-                        if attrs and isinstance(attrs, list):
-                            # Debug: print the actual structure we're seeing
-                            # print(f"DEBUG: Div attrs structure: {attrs}")
-                            
-                            fig_id = None
-                            
-                            # Pandoc AST format can vary, let's be flexible
-                            if len(attrs) >= 3:
-                                # Standard format: [identifier, classes, key-value pairs]
-                                identifier = attrs[0] if attrs[0] else ""
-                                classes = attrs[1] if len(attrs) > 1 else []
-                                key_values = attrs[2] if len(attrs) > 2 else []
-                                
-                                # Check if identifier starts with 'fig-' (without the #)
-                                if identifier and identifier.startswith('fig-'):
-                                    fig_id = identifier
-                                else:
-                                    # Also check in key-value pairs for id attribute
-                                    if isinstance(key_values, list):
-                                        for kv in key_values:
-                                            if (isinstance(kv, list) and len(kv) >= 2 and 
-                                                kv[0] == 'id' and kv[1].startswith('fig-')):
-                                                fig_id = kv[1]
-                                                break
-                            
-                            # Fallback: search through all attributes for any fig- pattern
-                            if not fig_id:
-                                for attr in attrs:
-                                    if isinstance(attr, str) and attr.startswith('fig-'):
-                                        fig_id = attr
-                                        break
-                                    elif isinstance(attr, list):
-                                        for item in attr:
-                                            if isinstance(item, str) and item.startswith('fig-'):
-                                                fig_id = item
-                                                break
-                            
-                            if fig_id:
-                                content_blocks = element.get('c', [None, None])[1]
-                                tikz_fig = self.parse_tikz_div_content(fig_id, content_blocks)
-                                if tikz_fig:
-                                    tikz_fig['line_number'] = line_counter["count"]
-                                    tikz_figures.append(tikz_fig)
-                                    self.stats['tikz_found'] += 1
-                    
-                    # Recursively walk through all elements
-                    for key, value in element.items():
-                        if isinstance(value, (list, dict)):
-                            walk_ast(value, line_counter)
-                elif isinstance(element, list):
-                    for item in element:
-                        walk_ast(item, line_counter)
-                        line_counter["count"] += 1
-            
-            walk_ast(doc)
-            
-            # Clean up temp file
-            os.unlink(tmp_path)
-            
-        except Exception as e:
-            error_msg = f"Error parsing TikZ figures with pypandoc: {e}"
-            self.stats['errors'].append(error_msg)
-            print(f"        ⚠️  {error_msg}")
-        
-        return tikz_figures
-    
-    def parse_tikz_div_content(self, fig_id: str, content_blocks: List) -> Optional[Dict]:
-        """Extract TikZ code and caption from div content blocks."""
-        tikz_code = None
-        caption_blocks = []
-        
-        for block in content_blocks:
-            if isinstance(block, dict):
-                if (block.get('t') == 'CodeBlock' and 
-                    len(block.get('c', [])) >= 2 and
-                    isinstance(block['c'][0], list) and
-                    len(block['c'][0]) >= 2 and
-                    'tikz' in block['c'][0][1]):
-                    # Found TikZ code block
-                    tikz_code = block['c'][1]
-                else:
-                    # Collect non-code blocks as caption
-                    caption_blocks.append(block)
-        
-        if tikz_code:
-            return {
-                'figure_id': fig_id,
-                'tikz_code': tikz_code,
-                'caption_blocks': caption_blocks,
-                'raw_caption': self.extract_text_from_blocks(caption_blocks)
-            }
-        
-        return None
-    
-    def extract_text_from_blocks(self, blocks: List) -> str:
-        """Extract plain text from Pandoc AST blocks."""
-        text_parts = []
-        
-        def extract_from_element(element):
-            if isinstance(element, dict):
-                if element.get('t') == 'Str':
-                    return element.get('c', '')
-                elif element.get('t') == 'Space':
-                    return ' '
-                elif element.get('t') == 'Para':
-                    content = element.get('c', [])
-                    return ''.join(extract_from_element(item) for item in content)
-                elif 'c' in element:
-                    if isinstance(element['c'], list):
-                        return ''.join(extract_from_element(item) for item in element['c'])
-                    else:
-                        return str(element['c'])
-            elif isinstance(element, list):
-                return ''.join(extract_from_element(item) for item in element)
-            elif isinstance(element, str):
-                return element
-            return ''
-        
-        for block in blocks:
-            text_parts.append(extract_from_element(block))
-        
-        return ' '.join(text_parts).strip()
-    
-    def compile_tikz_to_image(self, tikz_code: str, figure_id: str) -> Optional[str]:
-        """Compile TikZ code to PNG image using LaTeX."""
-        try:
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                # Create LaTeX document with TikZ
-                latex_content = f"""
-\\documentclass[border=2pt]{{standalone}}
-\\usepackage{{tikz}}
-\\usetikzlibrary{{arrows,shapes,positioning,shadows,trees,calc,backgrounds,fit,decorations.pathreplacing,patterns}}
-\\usepackage{{pgfplots}}
-\\pgfplotsset{{compat=1.18}}
-
-% Common colors that might be used
-\\definecolor{{GreenLine}}{{RGB}}{{0,128,0}}
-\\definecolor{{GreenL}}{{RGB}}{{200,255,200}}
-\\definecolor{{RedLine}}{{RGB}}{{128,0,0}}
-\\definecolor{{RedL}}{{RGB}}{{255,200,200}}
-\\definecolor{{BrownLine}}{{RGB}}{{139,69,19}}
-\\definecolor{{OliveLine}}{{RGB}}{{128,128,0}}
-
-\\begin{{document}}
-{tikz_code}
-\\end{{document}}
-"""
-                
-                tex_file = os.path.join(tmp_dir, f"{figure_id}.tex")
-                with open(tex_file, 'w') as f:
-                    f.write(latex_content)
-                
-                # Compile LaTeX to PDF
-                result = subprocess.run([
-                    'pdflatex', '-interaction=nonstopmode', 
-                    '-output-directory', tmp_dir, tex_file
-                ], capture_output=True, text=True, timeout=30)
-                
-                if result.returncode != 0:
-                    print(f"        ❌ LaTeX compilation failed for {figure_id}")
-                    print(f"        Error: {result.stderr[:200]}...")
-                    self.stats['tikz_failed'] += 1
-                    return None
-                
-                pdf_file = os.path.join(tmp_dir, f"{figure_id}.pdf")
-                if not os.path.exists(pdf_file):
-                    print(f"        ❌ PDF not generated for {figure_id}")
-                    self.stats['tikz_failed'] += 1
-                    return None
-                
-                # Convert PDF to PNG
-                png_file = os.path.join(tmp_dir, f"{figure_id}.png")
-                convert_result = subprocess.run([
-                    'magick', '-density', '300', pdf_file, png_file
-                ], capture_output=True, text=True, timeout=15)
-                
-                if convert_result.returncode != 0 or not os.path.exists(png_file):
-                    print(f"        ❌ PDF to PNG conversion failed for {figure_id}")
-                    self.stats['tikz_failed'] += 1
-                    return None
-                
-                # Copy PNG to a permanent location
-                output_png = f"/tmp/{figure_id}_compiled.png"
-                subprocess.run(['cp', png_file, output_png], check=True)
-                
-                print(f"        ✅ TikZ compiled to {output_png}")
-                self.stats['tikz_compiled'] += 1
-                return output_png
-                
-        except subprocess.TimeoutExpired:
-            print(f"        ⚠️  TikZ compilation timeout for {figure_id}")
-            self.stats['tikz_failed'] += 1
-            return None
-        except Exception as e:
-            print(f"        ❌ TikZ compilation error for {figure_id}: {e}")
-            self.stats['tikz_failed'] += 1
-            return None
-    
-    def update_tikz_caption_in_content(self, content: str, tikz_fig: Dict, new_caption: str) -> str:
-        """Update TikZ caption in the original content."""
-        lines = content.split('\n')
-        
-        # Find the TikZ figure div by looking for the figure ID
-        fig_id = tikz_fig['figure_id']
-        old_caption = tikz_fig['raw_caption']
-        
-        # Look for the div start and caption
-        in_tikz_div = False
-        after_code_block = False
-        
-        for i, line in enumerate(lines):
-            # Check if we're entering the TikZ div
-            if f"#fig-{fig_id}" in line and line.strip().startswith(':::'):
-                in_tikz_div = True
-                continue
-                
-            if in_tikz_div:
-                # Check if we're past the code block
-                if line.strip() == '```' and after_code_block:
-                    # Next non-empty line should be the caption
-                    for j in range(i + 1, len(lines)):
-                        if lines[j].strip() and not lines[j].strip().startswith(':::'):
-                            # This is the caption line
-                            lines[j] = new_caption
-                            return '\n'.join(lines)
-                        elif lines[j].strip().startswith(':::'):
-                            # Reached end of div without finding caption
-                            break
-                elif line.strip() == '```' and not after_code_block:
-                    after_code_block = True
-                elif line.strip().startswith(':::') and after_code_block:
-                    # End of div
-                    break
-        
-        return content  # Return unchanged if we couldn't find the caption
-    
-    def generate_caption_with_ollama(self, section_title: str, section_content: str, 
-                                   figure_id: str, current_caption: str, 
-                                   image_path: str = None) -> Optional[str]:
-        """Use Ollama multimodal model to generate an improved caption."""
-        
-        # Prepare the prompt
-        prompt = f"""You are an expert textbook editor specializing in understanding textbook material and examining figures to generate educational captions. You have extensive experience analyzing visual content in academic publications and creating captions that enhance student learning and comprehension. 
-
-SECTION: "{section_title}"
-
-SECTION CONTENT:
-{section_content}
-
-FIGURE ID: {figure_id}
-CURRENT CAPTION: "{current_caption}"
-
-Using your expertise in textbook editing and figure analysis, examine the provided image and section content to generate an improved, educational figure caption.
-
-Requirements:
-1. Analyze the visual elements in the image (diagrams, interfaces, charts, etc.)
-2. Create a bold concept title (2-4 words) that captures the key educational concept
-3. Write an educational explanation (1-3 sentences) that helps students understand both what they're seeing and why it matters for learning ML systems
-4. Connect the visual content to the surrounding textbook material and learning objectives
-5. Use clear, pedagogical language appropriate for university-level computer science students
-
-Respond with ONLY valid JSON in this exact format:
-{{
-  "bold": "Key Concept Title",
-  "explanation": "Educational explanation that describes the visual elements and explains their significance for understanding ML systems concepts."
-}}
-
-Do not include any other text, markdown, or formatting - just the JSON object."""
-
-        try:
-            # Prepare the request data
-            request_data = {
-                "model": self.model_name,
-                "prompt": prompt,
-                "stream": False
-            }
-            
-            # Add image if available
-            if image_path:
-                encoded_image = self.encode_image(image_path)
-                if encoded_image:
-                    request_data["images"] = [encoded_image]
-                    print(f"        🖼️  Using image: {os.path.basename(image_path)}")
-                    self.stats['images_found'] += 1
-                else:
-                    print(f"        ⚠️  Image encoding failed: {os.path.basename(image_path)} - continuing with text-only")
-                    self.stats['images_missing'] += 1
-            else:
-                print(f"        📝 Text-only mode (no image found)")
-                self.stats['images_missing'] += 1
-            
-            # Call ollama API using requests (handles large payloads better than curl)
-            try:
-                response = requests.post(
-                    'http://localhost:11434/api/generate',
-                    json=request_data,
-                    timeout=120
-                )
-                response.raise_for_status()
-                
-                if response.status_code == 200:
-                    ollama_response = response.json()
-                    raw_response = ollama_response.get('response', '').strip()
-                    
-                    # Parse the JSON response from the model
-                    try:
-                        # Clean up markdown formatting if present
-                        json_text = raw_response
-                        if json_text.startswith('```json'):
-                            json_text = json_text.replace('```json', '').replace('```', '').strip()
-                        elif json_text.startswith('```'):
-                            json_text = json_text.replace('```', '').strip()
-                        
-                        caption_data = json.loads(json_text)
-                        bold_part = caption_data.get('bold', '').strip()
-                        explanation_part = caption_data.get('explanation', '').strip()
-                        
-                        if bold_part and explanation_part:
-                            # Format consistently as **Bold**: explanation
-                            caption = f"**{bold_part}**: {explanation_part}"
-                            print(f"        ✅ JSON parsed successfully")
-                            self.stats['json_success'] += 1
-                            return caption
-                        else:
-                            print(f"        ⚠️  Missing fields in JSON response")
-                            self.stats['json_failed'] += 1
-                            return None
-                            
-                    except json.JSONDecodeError as e:
-                        print(f"        ⚠️  Invalid JSON response: {e}")
-                        print(f"        Raw response: {raw_response[:100]}...")
-                        self.stats['json_failed'] += 1
-                        return None
-                else:
-                    print(f"        ❌ Ollama API error: HTTP {response.status_code}")
-                    return None
-                    
-            except requests.exceptions.Timeout:
-                print(f"        ⚠️  Timeout calling ollama for figure {figure_id}")
-                return None
-            except requests.exceptions.RequestException as e:
-                print(f"        ❌ Request error: {e}")
-                return None
-                
-        except Exception as e:
-            print(f"        ❌ Error calling ollama: {e}")
-            return None
-    
     def update_caption_in_content(self, content: str, figure_def: Dict, new_caption: str) -> str:
         """Update the caption in the file content."""
         lines = content.split('\n')
@@ -1631,10 +1219,10 @@ Do not include any other text, markdown, or formatting - just the JSON object.""
                 for fig_id in content_map.get('figures', {}):
                     if fig_id not in found_figures:
                         fig_def = self.find_figure_definition_in_qmd(content, fig_id)
-                        if fig_def['found']:
+                        if fig_def:
                             found_figures[fig_id] = {
                                 'qmd_file': qmd_file,
-                                'current_caption': fig_def['current_caption'],
+                                'current_caption': fig_def['caption'],
                                 'definition': fig_def
                             }
                             print(f"    ✅ Found figure: {fig_id}")
@@ -1643,10 +1231,10 @@ Do not include any other text, markdown, or formatting - just the JSON object.""
                 for tbl_id in content_map.get('tables', {}):
                     if tbl_id not in found_tables:
                         tbl_def = self.find_table_definition_in_qmd(content, tbl_id)
-                        if tbl_def['found']:
+                        if tbl_def:
                             found_tables[tbl_id] = {
                                 'qmd_file': qmd_file,
-                                'current_caption': tbl_def['current_caption'],
+                                'current_caption': tbl_def['caption'],
                                 'definition': tbl_def
                             }
                             print(f"    ✅ Found table: {tbl_id}")
