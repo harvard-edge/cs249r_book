@@ -613,8 +613,11 @@ class FigureCaptionImprover:
         if has_table_prefix:
             caption = caption[2:]  # Remove ': ' prefix
         
+        # Clean up any extra leading colons and spaces (handles edge cases like ::, :  :, etc.)
+        caption = re.sub(r'^:+\s*', '', caption)
+        
         # Parse **bold**: explanation format (handle spaces around colon)
-        match = re.match(r'^(.*?\*\*[^*]+\*\*)\s*:\s*(.+)$', caption)
+        match = re.match(r'^(\*\*[^*]+\*\*)\s*:\s*(.+)$', caption)
         if not match:
             return caption
         
