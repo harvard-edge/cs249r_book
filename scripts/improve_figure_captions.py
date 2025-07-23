@@ -1308,6 +1308,7 @@ TEXTBOOK CONTEXT (for reference):
             : AI model comparison {#tbl-models}  (old format)
             AI model comparison {#tbl-models}   (new format)
             Performance metrics {width=80% #tbl-performance}
+            **Special Function Units**: Details... {#tbl-sfu}
         
         Args:
             content: QMD file content
@@ -1316,12 +1317,12 @@ TEXTBOOK CONTEXT (for reference):
         Returns:
             Dict with 'caption', 'full_match' or None if not found
         """
-        # Try new format first (without colon)
-        pattern_new = rf'^([^{{\n:]+?)\s*\{{[^}}]*#{re.escape(tbl_id)}(?:\s|[^}}])*\}}\s*$'
+        # Try new format first (without leading colon) - allow colons in caption text
+        pattern_new = rf'^([^{{\n]+?)\s*\{{[^}}]*#{re.escape(tbl_id)}(?:\s|[^}}])*\}}\s*$'
         match = re.search(pattern_new, content, re.MULTILINE)
         
         if not match:
-            # Fall back to old format (with colon)
+            # Fall back to old format (with leading colon)
             pattern_old = rf'^:\s*([^{{\n]+?)\s*\{{[^}}]*#{re.escape(tbl_id)}(?:\s|[^}}])*\}}\s*$'
             match = re.search(pattern_old, content, re.MULTILINE)
         
