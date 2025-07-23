@@ -2964,6 +2964,7 @@ Examples:
   
   # Analysis and utilities:
   python improve_figure_captions.py --build-map -d contents/core/
+  python improve_figure_captions.py -b -d contents/core/
   python improve_figure_captions.py --analyze -d contents/core/
   python improve_figure_captions.py --repair -d contents/core/
   
@@ -2983,7 +2984,7 @@ Examples:
 
     # Mode selection
     group = parser.add_mutually_exclusive_group()
-    group.add_argument('--build-map', action='store_true',
+    group.add_argument('--build-map', '-b', action='store_true',
                       help='Build content map from QMD files and save to JSON')
     group.add_argument('--analyze', '-a', action='store_true',
                       help='Analyze caption quality and validate file structure')
