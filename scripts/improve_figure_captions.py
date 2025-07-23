@@ -608,6 +608,11 @@ class FigureCaptionImprover:
         # Normalize input spacing first
         caption = self.normalize_spacing(caption)
         
+        # Check if caption already has table prefix and remove it for processing
+        has_table_prefix = caption.startswith(': ')
+        if has_table_prefix:
+            caption = caption[2:]  # Remove ': ' prefix
+        
         # Parse **bold**: explanation format (handle spaces around colon)
         match = re.match(r'^(.*?\*\*[^*]+\*\*)\s*:\s*(.+)$', caption)
         if not match:
@@ -628,7 +633,7 @@ class FigureCaptionImprover:
         # Combine with proper single space after colon
         improved = f"{bold_part}: {explanation}"
         
-        # For tables, ensure proper : prefix format
+        # For tables, ensure proper : prefix format (don't double up)
         if is_table:
             improved = f": {improved}"
         
