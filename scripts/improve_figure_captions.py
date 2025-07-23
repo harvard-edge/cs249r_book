@@ -1529,35 +1529,29 @@ Instead, write DIRECT, ACTIVE statements:
     
     def update_table_caption(self, content: str, tbl_id: str, new_caption: str) -> str:
         """
-        Update table captions.
+        Update table captions using the simple, consistent format.
         
-        Converts old format to new format:
-        - Old: : old caption {#tbl-id} → new caption {#tbl-id}
-        - New: old caption {#tbl-id} → new caption {#tbl-id}
+        Format: `: [caption]. {#tbl-id [attributes]}`
         
         Args:
             content: QMD file content
             tbl_id: Full table ID (e.g., "tbl-models")
-            new_caption: New caption text
+            new_caption: New caption text (without the `: ` prefix)
             
         Returns:
             Updated content
         """
-        # Try old format first (with colon) - convert to new format
-        pattern_old = rf'^:\s*([^{{\n]+?)(\s*\{{[^}}]*#{re.escape(tbl_id)}(?:\s|[^}}])*\}})\s*$'
-        match_old = re.search(pattern_old, content, re.MULTILINE)
+        # Find the table caption line (with or without existing colon prefix)
+        # Match pattern: optional colon + caption + {#tbl-id ...}
+        pattern = rf'^:?\s*([^{{\n]+?)(\s*\{{[^}}]*#{re.escape(tbl_id)}(?:\s|[^}}])*\}})\s*$'
         
-        if match_old:
-            # Convert from old format to new format (remove colon)
-            replacement = rf'{new_caption}\g<2>'
-            return re.sub(pattern_old, replacement, content, flags=re.MULTILINE)
-        else:
-            # Handle new format (no colon)
-            pattern_new = rf'^([^{{\n:]+?)(\s*\{{[^}}]*#{re.escape(tbl_id)}(?:\s|[^}}])*\}})\s*$'
-            replacement = rf'{new_caption}\g<2>'
-            return re.sub(pattern_new, replacement, content, flags=re.MULTILINE)
+        def replacement_func(match):
+            # Always use the simple format: `: new_caption. {#tbl-id attributes}`
+            attributes = match.group(2)  # Preserve the {#tbl-id ...} part
+            return f': {new_caption}. {attributes.strip()}'
         
-        return content
+        updated_content = re.sub(pattern, replacement_func, content, flags=re.MULTILINE)
+        return updated_content
     
     def update_table_caption_in_qmd(self, content: str, tbl_id: str, new_caption: str) -> str:
         """
@@ -2299,51 +2293,30 @@ Instead, write DIRECT, ACTIVE statements:
     def build_table_search_patterns(self, tbl_id: str, original_caption: str, 
                                   new_caption: str, content: str) -> Tuple[str, str]:
         """
-        Build precise search patterns for table caption replacement.
+        Build simple search patterns for table caption replacement.
+        
+        Always produces the simple format: `: [caption]. {#tbl-id [attributes]}`
         
         Returns:
             Tuple of (old_pattern, new_pattern) or (None, None) if not found
         """
-        # Try both old and new table formats, and handle cases with/without line breaks
+        # Simple approach: Find any line with the table ID and caption
+        # Handles both `: caption {#tbl-id}` and `caption {#tbl-id}` formats
+        pattern = rf'^:?\s*{re.escape(original_caption)}(\s*\{{[^}}]*#{re.escape(tbl_id)}[^}}]*\}})(.*)$'
         
-        # 1. Old format: : Caption {#tbl-id} (with proper line break)
-        old_format_pattern = rf'^:\s*{re.escape(original_caption)}(\s*\{{[^}}]*#{re.escape(tbl_id)}[^}}]*\}})(\s*)$'
-        match = re.search(old_format_pattern, content, re.MULTILINE)
+        match = re.search(pattern, content, re.MULTILINE)
         if match:
             old_pattern = match.group(0)
-            # Ensure there's a line break after the caption AND preserve the : prefix
-            line_break = match.group(2) if match.group(2) else '\n'
-            new_pattern = ': ' + new_caption + match.group(1) + line_break
-            return old_pattern, new_pattern
-        
-        # 2. Old format: : Caption {#tbl-id} (content stuck to same line - problematic case)
-        old_format_stuck_pattern = rf'^:\s*{re.escape(original_caption)}(\s*\{{[^}}]*#{re.escape(tbl_id)}[^}}]*\}})([^\n]*)'
-        match = re.search(old_format_stuck_pattern, content, re.MULTILINE)
-        if match:
-            old_pattern = match.group(0)
-            # Force a line break before the following content AND preserve the : prefix
-            following_content = match.group(2)
-            new_pattern = ': ' + new_caption + match.group(1) + '\n' + following_content
-            return old_pattern, new_pattern
-        
-        # 3. New format: Caption {#tbl-id} (with proper line break) - convert to old format with :
-        new_format_pattern = rf'^{re.escape(original_caption)}(\s*\{{[^}}]*#{re.escape(tbl_id)}[^}}]*\}})(\s*)$'
-        match = re.search(new_format_pattern, content, re.MULTILINE)
-        if match:
-            old_pattern = match.group(0)
-            # Ensure there's a line break after the caption AND add : prefix for consistency
-            line_break = match.group(2) if match.group(2) else '\n'
-            new_pattern = ': ' + new_caption + match.group(1) + line_break
-            return old_pattern, new_pattern
-        
-        # 4. New format: Caption {#tbl-id} (content stuck to same line) - convert to old format with :
-        new_format_stuck_pattern = rf'^{re.escape(original_caption)}(\s*\{{[^}}]*#{re.escape(tbl_id)}[^}}]*\}})([^\n]*)'
-        match = re.search(new_format_stuck_pattern, content, re.MULTILINE)
-        if match:
-            old_pattern = match.group(0)
-            # Force a line break before the following content AND add : prefix for consistency
-            following_content = match.group(2)
-            new_pattern = ': ' + new_caption + match.group(1) + '\n' + following_content
+            attributes = match.group(1)  # The {#tbl-id ...} part
+            trailing = match.group(2)    # Anything after the }
+            
+            # Ensure new_caption ends with a period but avoid double periods
+            if not new_caption.endswith('.'):
+                new_caption = new_caption + '.'
+            
+            # Always output the simple format: `: new_caption {#tbl-id [attributes]}`
+            new_pattern = f': {new_caption} {attributes.strip()}{trailing}'
+            
             return old_pattern, new_pattern
         
         return None, None
