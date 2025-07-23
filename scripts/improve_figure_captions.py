@@ -811,7 +811,7 @@ ORIGINAL CAPTION: {current_caption}
 TEXTBOOK CONTEXT (for reference):
 {section_text[:1500]}
 
-🧠 TASK: Rewrite the caption to make it educational, precise, and aligned with the visual’s teaching purpose.
+🧠 TASK: Rewrite the caption to make it educational, precise, and aligned with the visual's teaching purpose.
 
 ✍️ FORMAT:
 **<Key Phrase>**: Explanation sentence(s)
@@ -830,17 +830,17 @@ Instead, write DIRECT, ACTIVE statements:
 
 1. **Key Phrase**: A single bolded noun phrase (1–5 words) that captures the main idea. Avoid full sentences or multiple bolded phrases. If similar figures exist in this section, choose a unique but relevant phrase.
 
-2. **Explanation**: 1–2 concise, natural sentences that express what the student *learns* from the figure or table. Use active voice. Avoid simply describing what the figure “shows”—explain what *insight* it provides or how it advances understanding.
+2. **Explanation**: 1–2 concise, natural sentences that express what the student *learns* from the figure or table. Use active voice. Avoid simply describing what the figure "shows"—explain what *insight* it provides or how it advances understanding.
 
 3. **Terminology**: Use domain-specific language from the original caption if helpful, but rephrase it to clarify meaning for students.
 
-4. **No Weak Openers**: Do not begin with “This figure...”, “This table...”, or “This diagram...”. Begin with the concept or the takeaway.
+4. **No Weak Openers**: Do not begin with "This figure...", "This table...", or "This diagram...". Begin with the concept or the takeaway.
 
 5. **Clarity & Precision**: Be specific, pedagogical, and concrete. Emphasize learning outcomes over general description.
 
 6. **Tone**: Use a textbook tone. Use technical but student-friendly language appropriate for upper-level undergraduates or early graduate students. Avoid jargon unless it is defined or central to the concept. 
 
-7. **Sources**: If the original caption includes a source (e.g., “Source: IEEE Spectrum”), retain it at the end of the caption in italics. Append it after a period.
+7. **Sources**: If the original caption includes a source (e.g., "Source: IEEE Spectrum"), retain it at the end of the caption in italics. Append it after a period.
 
 📌 EXCELLENT TEXTBOOK EXAMPLES:
 **Attention Mechanism**: Transformer models compute attention through query-key-value interactions, enabling dynamic focus across input sequences for improved language understanding.
@@ -848,7 +848,7 @@ Instead, write DIRECT, ACTIVE statements:
 **Training Pipeline**: Machine learning workflows partition datasets into training, validation, and test sets to ensure robust model development and unbiased evaluation.
 
 🚫 AVOID:
-- Starting with “This figure shows…” or “This table illustrates…”
+- Starting with "This figure shows..." or "This table illustrates..."
 - Using a full sentence or list as the bold key phrase
 - Repeating the section title or being too vague (e.g., **AI System**)
 
@@ -884,8 +884,8 @@ Instead, write DIRECT, ACTIVE statements:
 """
         
         # Retry logic: up to 3 attempts with exponential backoff
-        max_retries = 3
-        base_delay = 2  # seconds
+        max_retries = 2
+        base_delay = 1  # seconds
         
         for attempt in range(max_retries):
             try:
@@ -1744,8 +1744,18 @@ Instead, write DIRECT, ACTIVE statements:
         
         return content_map
 
-    def check_caption_quality(self, directories: List[str]) -> Dict[str, any]:
-        """Analyze all captions and generate quality report."""
+    def check_caption_quality(self, directories: List[str], figures_only: bool = False, tables_only: bool = False) -> Dict[str, any]:
+        """
+        Analyze all captions and generate quality report.
+        
+        Args:
+            directories: List of directories to scan
+            figures_only: If True, only analyze figures (ignore tables)
+            tables_only: If True, only analyze tables (ignore figures)
+            
+        Returns:
+            Dict with quality analysis results
+        """
         print("🔍 Analyzing caption quality...")
         
         # Check for commented chapters in target directories first
@@ -1754,10 +1764,10 @@ Instead, write DIRECT, ACTIVE statements:
         if should_halt:
             return {}
         
-        # Load content map
-        content_map = self.load_content_map()
+        # Load content map or build fresh one with filtering
+        content_map = self.build_content_map_from_qmd(directories, figures_only=figures_only, tables_only=tables_only)
         if not content_map:
-            print("❌ No content map found. Run --build-map first.")
+            print("❌ Failed to build content map for analysis.")
             return {}
         
         # Find all QMD files
@@ -1855,33 +1865,29 @@ Instead, write DIRECT, ACTIVE statements:
         else:
             print(f"\n✅ All captions look good!")
     
-    def repair_captions(self, directories: List[str]):
-        """Repair only captions that need fixing."""
+    def repair_captions(self, directories: List[str], figures_only: bool = False, tables_only: bool = False):
+        """
+        Repair only captions that need fixing.
+        
+        Args:
+            directories: List of directories to scan
+            figures_only: If True, only repair figures (ignore tables)
+            tables_only: If True, only repair tables (ignore figures)
+        """
         print("🔧 Repairing captions that need fixing...")
         
-        # Check for commented chapters in target directories first
+        # Check for commented chapters first
         commented_issues = self.check_commented_chapters_in_directories(directories)
         should_halt = self.print_commented_chapter_issues(commented_issues)
         if should_halt:
-            return
+            return {}
         
-        # First check what needs repair
-        report = self.check_caption_quality(directories)
-        if not report or report['captions_needing_repair'] == 0:
-            print("✅ No captions need repair!")
-            return
-        
-        print(f"🎯 Found {report['captions_needing_repair']} captions needing repair")
-        
-        # Load content map
-        content_map = self.load_content_map()
-        if not content_map:
-            print("❌ No content map found. Run --build-map first.")
-            return
+        # Build content map with filtering
+        content_map = self.build_content_map_from_qmd(directories, figures_only=figures_only, tables_only=tables_only)
         
         # Create repair list - only items that need fixing
         repair_items = []
-        for issue_item in report['detailed_issues']:
+        for issue_item in self.check_caption_quality(directories, figures_only=figures_only, tables_only=tables_only)['detailed_issues']:
             item_id = issue_item['id']
             item_type = issue_item['type']
             
@@ -1920,7 +1926,7 @@ Instead, write DIRECT, ACTIVE statements:
     # QMD-FOCUSED CONTENT MAP BUILDING
     # ================================================================
     
-    def build_content_map_from_qmd(self, directories: List[str]) -> Dict:
+    def build_content_map_from_qmd(self, directories: List[str], figures_only: bool = False, tables_only: bool = False) -> Dict:
         """
         Build comprehensive content map by scanning QMD files directly.
         
@@ -1933,6 +1939,8 @@ Instead, write DIRECT, ACTIVE statements:
         
         Args:
             directories: List of directories to scan for .qmd files
+            figures_only: If True, only process figures (ignore tables)
+            tables_only: If True, only process tables (ignore figures)
             
         Returns:
             Dict with figures, tables, metadata, and extraction stats
@@ -1990,79 +1998,85 @@ Instead, write DIRECT, ACTIVE statements:
                 tbl_id_pattern = r'#(tbl-[a-zA-Z0-9_-]+)'
                 potential_tbl_ids = set(re.findall(tbl_id_pattern, content))
                 
-                # Process each potential figure ID
-                for fig_id in potential_fig_ids:
-                    try:
-                        fig_def = self.find_figure_definition_in_qmd(content, fig_id)
-                        if fig_def:
-                            # Store original caption as-is from the file
-                            original_caption = fig_def['caption']
-                            
-                            content_map['figures'][fig_id] = {
-                                'original_caption': original_caption,
-                                'new_caption': '',
-                                'type': fig_def['type'],
-                                'source_file': qmd_file
-                            }
-                            
-                            print(f"    ✅ Found figure: {fig_id} ({fig_def['type']})")
-                            file_figures += 1
-                            stats['figures_found'] += 1
-                            
-                            # Count by type
-                            if fig_def['type'] == 'markdown':
-                                stats['markdown_figures'] += 1
-                            elif fig_def['type'] == 'tikz':
-                                stats['tikz_figures'] += 1
-                            elif fig_def['type'] == 'code':
-                                stats['code_figures'] += 1
+                # Process each potential figure ID (unless tables-only mode)
+                if not tables_only:
+                    for fig_id in potential_fig_ids:
+                        try:
+                            fig_def = self.find_figure_definition_in_qmd(content, fig_id)
+                            if fig_def:
+                                # Store original caption as-is from the file
+                                original_caption = fig_def['caption']
                                 
-                        else:
-                            print(f"    ⚠️  Failed to extract: {fig_id}")
+                                content_map['figures'][fig_id] = {
+                                    'original_caption': original_caption,
+                                    'new_caption': '',
+                                    'type': fig_def['type'],
+                                    'source_file': qmd_file
+                                }
+                                
+                                print(f"    ✅ Found figure: {fig_id} ({fig_def['type']})")
+                                file_figures += 1
+                                stats['figures_found'] += 1
+                                
+                                # Count by type
+                                if fig_def['type'] == 'markdown':
+                                    stats['markdown_figures'] += 1
+                                elif fig_def['type'] == 'tikz':
+                                    stats['tikz_figures'] += 1
+                                elif fig_def['type'] == 'code':
+                                    stats['code_figures'] += 1
+                                    
+                            else:
+                                print(f"    ⚠️  Failed to extract: {fig_id}")
+                                stats['extraction_failures'] += 1
+                                stats['failed_extractions'].append(fig_id)
+                                if qmd_file not in stats['files_with_issues']:
+                                    stats['files_with_issues'].append(qmd_file)
+                                    
+                        except Exception as e:
+                            print(f"    ❌ Error processing {fig_id}: {e}")
                             stats['extraction_failures'] += 1
                             stats['failed_extractions'].append(fig_id)
                             if qmd_file not in stats['files_with_issues']:
                                 stats['files_with_issues'].append(qmd_file)
-                                
-                    except Exception as e:
-                        print(f"    ❌ Error processing {fig_id}: {e}")
-                        stats['extraction_failures'] += 1
-                        stats['failed_extractions'].append(fig_id)
-                        if qmd_file not in stats['files_with_issues']:
-                            stats['files_with_issues'].append(qmd_file)
+                else:
+                    print(f"    ⏭️  Skipping {len(potential_fig_ids)} figures (tables-only mode)")
                 
-                # Process each potential table ID
-                for tbl_id in potential_tbl_ids:
-                    try:
-                        tbl_def = self.detect_table(content, tbl_id)
-                        if tbl_def:
-                            # Store original caption as-is from the file
-                            original_caption = tbl_def['caption']
-                            
-                            content_map['tables'][tbl_id] = {
-                                'original_caption': original_caption,
-                                'new_caption': '',
-                                'type': 'table',
-                                'source_file': qmd_file
-                            }
-                            
-                            print(f"    ✅ Found table: {tbl_id}")
-                            file_tables += 1
-                            stats['tables_found'] += 1
-                            
-                        else:
-                            print(f"    ⚠️  Failed to extract: {tbl_id}")
+                # Process each potential table ID (unless figures-only mode)
+                if not figures_only:
+                    for tbl_id in potential_tbl_ids:
+                        try:
+                            tbl_def = self.detect_table(content, tbl_id)
+                            if tbl_def:
+                                # Store original caption as-is from the file
+                                original_caption = tbl_def['caption']
+                                
+                                content_map['tables'][tbl_id] = {
+                                    'original_caption': original_caption,
+                                    'new_caption': '',
+                                    'type': 'table',
+                                    'source_file': qmd_file
+                                }
+                                
+                                print(f"    ✅ Found table: {tbl_id}")
+                                file_tables += 1
+                                stats['tables_found'] += 1
+                                
+                            else:
+                                print(f"    ⚠️  Failed to extract: {tbl_id}")
+                                stats['extraction_failures'] += 1
+                                stats['failed_extractions'].append(tbl_id)
+                                if qmd_file not in stats['files_with_issues']:
+                                    stats['files_with_issues'].append(qmd_file)
+                                    
+                        except Exception as e:
+                            print(f"    ❌ Error processing {tbl_id}: {e}")
                             stats['extraction_failures'] += 1
                             stats['failed_extractions'].append(tbl_id)
                             if qmd_file not in stats['files_with_issues']:
                                 stats['files_with_issues'].append(qmd_file)
-                                
-                    except Exception as e:
-                        print(f"    ❌ Error processing {tbl_id}: {e}")
-                        stats['extraction_failures'] += 1
-                        stats['failed_extractions'].append(tbl_id)
-                        if qmd_file not in stats['files_with_issues']:
-                            stats['files_with_issues'].append(qmd_file)
+                else:
+                    print(f"    ⏭️  Skipping {len(potential_tbl_ids)} tables (figures-only mode)")
                 
                 # Summary for this file
                 if file_figures > 0 or file_tables > 0:
@@ -2529,24 +2543,29 @@ Instead, write DIRECT, ACTIVE statements:
         
         print(f"    📊 Successfully updated {success_count}/{len(improvements)} items in {file_path}")
     
-    def complete_caption_improvement_workflow(self, directories: List[str], save_json: bool = False):
+    def complete_caption_improvement_workflow(self, directories: List[str], save_json: bool = False, figures_only: bool = False, tables_only: bool = False):
         """
         Complete LLM caption improvement process (used by --improve and default mode).
         
         Process: Extract → Analyze → Improve with LLM → Update files → Validate
         
         Args:
-            directories: List of directories to process (follows _quarto.yml order)
-            save_json: Whether to save detailed content map to JSON file
-            
-        Returns:
-            Final content map with all improvements applied
+            directories: List of directories to process
+            save_json: Whether to save detailed JSON output
+            figures_only: If True, only process figures (ignore tables)
+            tables_only: If True, only process tables (ignore figures)
         """
-        print("🚀 Starting LLM caption improvement process...")
+        print("🚀 Starting complete caption improvement workflow...")
         
-        # Step 1: Extract content map from QMD files
-        print("\n📄 Step 1: Extracting figures and tables from QMD files...")
-        content_map = self.build_content_map_from_qmd(directories)
+        # Check for commented chapters first
+        commented_issues = self.check_commented_chapters_in_directories(directories)
+        should_halt = self.print_commented_chapter_issues(commented_issues)
+        if should_halt:
+            return {}
+        
+        # Step 1: Build content map with filtering
+        print("📄 Step 1: Building content map...")
+        content_map = self.build_content_map_from_qmd(directories, figures_only=figures_only, tables_only=tables_only)
         if not content_map:
             print("❌ Failed to build content map")
             return {}
@@ -3058,11 +3077,22 @@ Examples:
   python improve_figure_captions.py -i -d contents/core/ -m qwen2.5:14b
   python improve_figure_captions.py -d contents/core/ --model mistral:7b
   
+  # Content filtering:
+  python improve_figure_captions.py -d contents/core/ --figures-only
+  python improve_figure_captions.py -d contents/core/ -F  # Short form
+  python improve_figure_captions.py -d contents/core/ --tables-only
+  python improve_figure_captions.py -d contents/core/ -T  # Short form
+  
   # Analysis and utilities:
   python improve_figure_captions.py --build-map -d contents/core/
   python improve_figure_captions.py -b -d contents/core/
   python improve_figure_captions.py --analyze -d contents/core/
   python improve_figure_captions.py --repair -d contents/core/
+  
+  # Content filtering with other modes:
+  python improve_figure_captions.py --analyze -d contents/core/ --figures-only
+  python improve_figure_captions.py --repair -d contents/core/ --tables-only
+  python improve_figure_captions.py --build-map -d contents/core/ -F
   
   # Multiple directories:
   python improve_figure_captions.py -d contents/core/ -d contents/frontmatter/ -m llama3.2:3b
@@ -3088,6 +3118,13 @@ Examples:
                       help='Repair caption formatting issues only')
     group.add_argument('--improve', '-i', action='store_true',
                       help='Improve captions using LLM and update files (default mode)')
+
+    # Content type filtering
+    content_group = parser.add_mutually_exclusive_group()
+    content_group.add_argument('--figures-only', '-F', action='store_true',
+                              help='Process only figures (ignore tables)')
+    content_group.add_argument('--tables-only', '-T', action='store_true',
+                              help='Process only tables (ignore figures)')
 
     # Model options
     parser.add_argument('--model', '-m', default='qwen2.5:7b',
@@ -3135,7 +3172,9 @@ Examples:
         if args.build_map:
             # Build content map and save to JSON
             print("🔍 Building content map from QMD files...")
-            content_map = improver.build_content_map_from_qmd(directories)
+            content_map = improver.build_content_map_from_qmd(directories, 
+                                                             figures_only=args.figures_only,
+                                                             tables_only=args.tables_only)
             if content_map:
                 print("✅ Content map building completed!")
                 
@@ -3171,13 +3210,17 @@ Examples:
             print("🔍 Analyzing caption quality and file structure...")
             
             # Build content map for validation
-            content_map = improver.build_content_map_from_qmd(directories)
+            content_map = improver.build_content_map_from_qmd(directories,
+                                                             figures_only=args.figures_only,
+                                                             tables_only=args.tables_only)
             if not content_map:
                 print("❌ Failed to build content map for analysis")
                 return 1
             
             # Check caption quality
-            improver.check_caption_quality(directories)
+            improver.check_caption_quality(directories,
+                                         figures_only=args.figures_only,
+                                         tables_only=args.tables_only)
             
             # Validate QMD mapping
             improver.validate_qmd_mapping(directories, content_map)
@@ -3187,7 +3230,9 @@ Examples:
         elif args.repair:
             # Repair caption formatting issues only
             print("🔧 Repairing caption formatting issues...")
-            content_map = improver.repair_captions(directories)
+            content_map = improver.repair_captions(directories,
+                                                  figures_only=args.figures_only,
+                                                  tables_only=args.tables_only)
             if content_map and args.save_json:
                 improver.save_content_map(content_map)
                 print("💾 Repaired content map saved to content_map.json")
@@ -3196,14 +3241,18 @@ Examples:
         elif args.improve:
             # LLM caption improvement mode (explicit)
             print("🚀 Improving captions with LLM...")
-            improved_content_map = improver.complete_caption_improvement_workflow(directories, args.save_json)
+            improved_content_map = improver.complete_caption_improvement_workflow(directories, args.save_json,
+                                                                                figures_only=args.figures_only,
+                                                                                tables_only=args.tables_only)
             if not improved_content_map:
                 return 1
                 
         else:
             # Default: Same as --improve (LLM improvement)
             print("🚀 Improving captions with LLM (default mode)...")
-            improved_content_map = improver.complete_caption_improvement_workflow(directories, args.save_json)
+            improved_content_map = improver.complete_caption_improvement_workflow(directories, args.save_json,
+                                                                                figures_only=args.figures_only,
+                                                                                tables_only=args.tables_only)
             if not improved_content_map:
                 return 1
             
