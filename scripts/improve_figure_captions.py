@@ -1536,7 +1536,7 @@ Instead, write DIRECT, ACTIVE statements:
         Args:
             content: QMD file content
             tbl_id: Full table ID (e.g., "tbl-models")
-            new_caption: New caption text (without the `: ` prefix)
+            new_caption: New caption text (may or may not have `: ` prefix)
             
         Returns:
             Updated content
@@ -1546,9 +1546,21 @@ Instead, write DIRECT, ACTIVE statements:
         pattern = rf'^:?\s*([^{{\n]+?)(\s*\{{[^}}]*#{re.escape(tbl_id)}(?:\s|[^}}])*\}})\s*$'
         
         def replacement_func(match):
-            # Always use the simple format: `: new_caption. {#tbl-id attributes}`
+            # Always use the simple format: `: new_caption {#tbl-id attributes}`
             attributes = match.group(2)  # Preserve the {#tbl-id ...} part
-            return f': {new_caption}. {attributes.strip()}'
+            
+            # Check if new_caption already has the `: ` prefix to avoid double colons
+            if new_caption.startswith(': '):
+                # New caption already has prefix, use as-is
+                formatted_caption = new_caption
+            else:
+                # Add the `: ` prefix and ensure it ends with a period
+                if not new_caption.endswith('.'):
+                    formatted_caption = f': {new_caption}.'
+                else:
+                    formatted_caption = f': {new_caption}'
+            
+            return f'{formatted_caption} {attributes.strip()}'
         
         updated_content = re.sub(pattern, replacement_func, content, flags=re.MULTILINE)
         return updated_content
@@ -1599,12 +1611,8 @@ Instead, write DIRECT, ACTIVE statements:
             return self.update_code_figure(content, fig_id, new_caption)
         else:
             # Fallback to markdown method
-            return self.update_markdown_figure(content, fig_id, new_caption)
-
-
-    
-
-    
+            return self.update_markdown_figure(content, fig_id, new_caption) 
+  
     def print_summary(self) -> None:
         """Print a summary of the processing results."""
         print(f"\n{'='*60}")
