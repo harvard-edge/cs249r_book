@@ -2953,30 +2953,25 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Complete workflow (recommended): Build → Improve → Update (all in memory)
-  python improve_figure_captions.py --workflow -d contents/core/
-  python improve_figure_captions.py -w -d contents/core/ --save-json
-  
-  # Default behavior (same as --workflow)
+  # Improve captions with LLM (recommended default):
   python improve_figure_captions.py -d contents/core/
+  python improve_figure_captions.py --improve -d contents/core/
   
   # Using different models:
   python improve_figure_captions.py -d contents/core/ --model llama3.2:3b
-  python improve_figure_captions.py -w -d contents/core/ -m qwen2.5:14b
+  python improve_figure_captions.py -i -d contents/core/ -m qwen2.5:14b
   python improve_figure_captions.py -d contents/core/ --model mistral:7b
   
-  # Individual steps (all work in memory, no disk dependency):
-  python improve_figure_captions.py --build-qmd-map -d contents/core/ --save-json
-  python improve_figure_captions.py --improve -d contents/core/ --model qwen2.5:14b
-  python improve_figure_captions.py --update -d contents/core/
-  
-  # Quality analysis:
-  python improve_figure_captions.py --check -d contents/core/
+  # Analysis and utilities:
+  python improve_figure_captions.py --build-map -d contents/core/
+  python improve_figure_captions.py --analyze -d contents/core/
   python improve_figure_captions.py --repair -d contents/core/
-  python improve_figure_captions.py --validate -d contents/core/
   
   # Multiple directories:
-  python improve_figure_captions.py -w -d contents/core/ -d contents/frontmatter/ -m llama3.2:3b
+  python improve_figure_captions.py -d contents/core/ -d contents/frontmatter/ -m llama3.2:3b
+  
+  # Save detailed JSON output:
+  python improve_figure_captions.py -d contents/core/ --save-json
 """
     )
     
@@ -2988,20 +2983,14 @@ Examples:
 
     # Mode selection
     group = parser.add_mutually_exclusive_group()
-    group.add_argument('--build-qmd-map', action='store_true',
-                      help='Build content map from QMD files directly')
-    group.add_argument('--improve', action='store_true',
-                      help='Improve captions using LLM (builds content map automatically)')
-    group.add_argument('--validate', action='store_true',
-                      help='Validate QMD files against content map')
-    group.add_argument('--update', action='store_true',
-                      help='Update QMD files with improved captions (builds content map automatically)')
-    group.add_argument('--check', '-c', action='store_true',
-                      help='Check caption quality without making changes')
+    group.add_argument('--build-map', action='store_true',
+                      help='Build content map from QMD files and save to JSON')
+    group.add_argument('--analyze', '-a', action='store_true',
+                      help='Analyze caption quality and validate file structure')
     group.add_argument('--repair', '-r', action='store_true',
-                      help='Repair caption formatting issues')
-    group.add_argument('--workflow', '-w', action='store_true',
-                      help='Complete workflow: Build → Improve → Update (default when no mode specified)')
+                      help='Repair caption formatting issues only')
+    group.add_argument('--improve', '-i', action='store_true',
+                      help='Improve captions using LLM and update files (default mode)')
 
     # Model options
     parser.add_argument('--model', '-m', default='qwen2.5:7b',
@@ -3011,7 +3000,7 @@ Examples:
 
     # Output options
     parser.add_argument('--save-json', action='store_true',
-                       help='Save content map to JSON file (for --build-qmd-map)')
+                       help='Save detailed content map to JSON file')
 
     args = parser.parse_args()
     
@@ -3046,16 +3035,15 @@ Examples:
         return 1
     
     try:
-        if args.build_qmd_map:
-            # QMD-focused approach: Build content map from .qmd files directly
-            print("🔍 QMD-Focused: Building content map from .qmd files...")
+        if args.build_map:
+            # Build content map and save to JSON
+            print("🔍 Building content map from QMD files...")
             content_map = improver.build_content_map_from_qmd(directories)
             if content_map:
-                print("✅ QMD content map building completed!")
+                print("✅ Content map building completed!")
                 
-                # Save JSON if requested
-                if args.save_json:
-                    improver.save_content_map(content_map)
+                # Always save JSON for --build-map
+                improver.save_content_map(content_map)
                 
                 # Show extraction report
                 stats = content_map['metadata']['extraction_stats']
@@ -3065,7 +3053,7 @@ Examples:
                     print(f"⚠️  {stats['extraction_failures']} extraction failures detected.")
                     print("💡 Consider reviewing the files with issues for manual fixes.")
                 
-                # Show brief summary of what was found
+                # Show brief summary
                 print(f"\n📋 CONTENT SUMMARY:")
                 print(f"   📊 Figures: {stats['figures_found']} total")
                 print(f"      • Markdown: {stats['markdown_figures']}")
@@ -3074,86 +3062,50 @@ Examples:
                 print(f"   📋 Tables: {stats['tables_found']} total")
                 print(f"   📁 Files processed: {content_map['metadata']['qmd_files_scanned']}")
                 
-                if args.save_json:
-                    print(f"\n💾 Content map saved to: content_map.json")
-                    print(f"📄 You can now review the complete JSON structure!")
-                
-                if stats['extraction_failures'] > 0:
-                    print(f"\n💡 Next steps:")
-                    print(f"   1. Review extraction failures to improve detection patterns")
-                    print(f"   2. Use this content map for caption improvements")
-                    print(f"   3. Update QMD files directly with improved captions")
+                print(f"\n💾 Content map saved to: content_map.json")
+                print(f"📄 You can now review the complete JSON structure!")
                 
             else:
-                print("❌ QMD content map building failed!")
+                print("❌ Content map building failed!")
                 return 1
                 
-        elif args.improve:
-            # Improve captions using LLM (in-memory workflow)
-            print("🤖 Improving captions using LLM...")
-            improved_content_map = improver.improve_captions_with_llm(directories)
+        elif args.analyze:
+            # Analyze caption quality and validate file structure
+            print("🔍 Analyzing caption quality and file structure...")
             
-            # Count improvements for summary
-            improved_count = 0
-            total_items = len(improved_content_map.get('figures', {})) + len(improved_content_map.get('tables', {}))
+            # Build content map for validation
+            content_map = improver.build_content_map_from_qmd(directories)
+            if not content_map:
+                print("❌ Failed to build content map for analysis")
+                return 1
             
-            for fig_data in improved_content_map.get('figures', {}).values():
-                if fig_data.get('new_caption'):
-                    improved_count += 1
-            for tbl_data in improved_content_map.get('tables', {}).values():
-                if tbl_data.get('new_caption'):
-                    improved_count += 1
-            
-            # Save improvements summary
-            improvements_file = improver.save_improvements_summary(improved_content_map, directories, improved_count, total_items)
-            
-            # Optional: Save full content map for inspection
-            if args.save_json:
-                improver.save_content_map(improved_content_map)
-                print("💾 Full content map saved to content_map.json for inspection")
-            
-            print("✅ Caption improvement completed!")
-            print(f"📄 Improvements summary: {improvements_file}")
-                
-        elif args.check:
             # Check caption quality
-            print("🔍 Checking caption quality...")
             improver.check_caption_quality(directories)
             
+            # Validate QMD mapping
+            improver.validate_qmd_mapping(directories, content_map)
+            
+            print("✅ Analysis completed!")
+            
         elif args.repair:
-            # Repair captions automatically  
-            print("🔧 Repairing captions...")
+            # Repair caption formatting issues only
+            print("🔧 Repairing caption formatting issues...")
             content_map = improver.repair_captions(directories)
             if content_map and args.save_json:
                 improver.save_content_map(content_map)
                 print("💾 Repaired content map saved to content_map.json")
             print("✅ Caption repair completed!")
             
-        elif args.validate:
-            # Validate QMD mapping (requires building content map first)
-            print("🔍 Validating QMD mapping...")
-            content_map = improver.build_content_map_from_qmd(directories)
-            if content_map:
-                improver.validate_qmd_mapping(directories, content_map)
-            else:
-                print("❌ Failed to build content map for validation")
-                return 1
-            
-        elif args.update:
-            # Update QMD files (in-memory workflow)
-            print("✏️ Updating QMD files...")
-            improver.process_qmd_files(directories)
-            print("✅ QMD file updates completed!")
-            
-        elif args.workflow:
-            # Complete workflow: Build → Improve → Update (all in memory)
+        elif args.improve:
+            # Complete workflow: Build → Improve → Update (LLM mode)
+            print("🚀 Improving captions with LLM...")
             improved_content_map = improver.complete_caption_improvement_workflow(directories, args.save_json)
             if not improved_content_map:
                 return 1
                 
         else:
-            # Default: Complete workflow (same as --workflow)
-            print("🚀 Running complete caption improvement workflow (default)...")
+            # Default: Same as --improve (complete workflow)
+            print("🚀 Improving captions with LLM (default mode)...")
             improved_content_map = improver.complete_caption_improvement_workflow(directories, args.save_json)
             if not improved_content_map:
                 return 1
