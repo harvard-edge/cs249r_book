@@ -513,6 +513,12 @@ class FigureCaptionImprover:
                 (r'^depicts how (.+)$', r'\1'),
                 (r'^reveals how (.+)$', r'\1'),
                 (r'^highlights how (.+)$', r'\1'),
+                (r'^visualizes how (.+)$', r'\1'),
+                (r'^exemplifies how (.+)$', r'\1'),
+                (r'^traces how (.+)$', r'\1'),
+                (r'^explains how (.+)$', r'\1'),
+                (r'^displays how (.+)$', r'\1'),
+                (r'^presents how (.+)$', r'\1'),
                 
                 # "Illustrates the X" -> "The X" (remove weak verb)
                 (r'^illustrates the (.+)$', r'The \1'),
@@ -521,6 +527,12 @@ class FigureCaptionImprover:
                 (r'^depicts the (.+)$', r'The \1'),
                 (r'^reveals the (.+)$', r'The \1'),
                 (r'^highlights the (.+)$', r'The \1'),
+                (r'^visualizes the (.+)$', r'The \1'),
+                (r'^exemplifies the (.+)$', r'The \1'),
+                (r'^traces the (.+)$', r'The \1'),
+                (r'^explains the (.+)$', r'The \1'),
+                (r'^displays the (.+)$', r'The \1'),
+                (r'^presents the (.+)$', r'The \1'),
                 
                 # Generic weak starters at beginning - remove entirely
                 (r'^illustrates (.+)$', r'\1'),
@@ -529,6 +541,12 @@ class FigureCaptionImprover:
                 (r'^depicts (.+)$', r'\1'),
                 (r'^reveals (.+)$', r'\1'),
                 (r'^highlights (.+)$', r'\1'),
+                (r'^visualizes (.+)$', r'\1'),
+                (r'^exemplifies (.+)$', r'\1'),
+                (r'^traces (.+)$', r'\1'),
+                (r'^explains (.+)$', r'\1'),
+                (r'^displays (.+)$', r'\1'),
+                (r'^presents (.+)$', r'\1'),
             ]
             
             # Apply beginning-of-sentence patterns first
@@ -545,6 +563,12 @@ class FigureCaptionImprover:
                 (r'(.+?)\s+depicts how (.+)', r'\2 using \1'),
                 (r'(.+?)\s+reveals how (.+)', r'\2 through \1'),
                 (r'(.+?)\s+highlights how (.+)', r'\2 via \1'),
+                (r'(.+?)\s+visualizes how (.+)', r'\2 through \1'),
+                (r'(.+?)\s+exemplifies how (.+)', r'\2 via \1'),
+                (r'(.+?)\s+traces how (.+)', r'\2 through \1'),
+                (r'(.+?)\s+explains how (.+)', r'\2 via \1'),
+                (r'(.+?)\s+displays how (.+)', r'\2 using \1'),
+                (r'(.+?)\s+presents how (.+)', r'\2 through \1'),
                 
                 # "X illustrates that Y" -> "X confirms that Y" / "X establishes that Y"
                 (r'(.+?)\s+illustrates that (.+)', r'\1 confirms that \2'),
@@ -552,6 +576,12 @@ class FigureCaptionImprover:
                 (r'(.+?)\s+depicts that (.+)', r'\1 confirms that \2'),
                 (r'(.+?)\s+reveals that (.+)', r'\1 establishes that \2'),
                 (r'(.+?)\s+highlights that (.+)', r'\1 emphasizes that \2'),
+                (r'(.+?)\s+visualizes that (.+)', r'\1 confirms that \2'),
+                (r'(.+?)\s+exemplifies that (.+)', r'\1 establishes that \2'),
+                (r'(.+?)\s+traces that (.+)', r'\1 confirms that \2'),
+                (r'(.+?)\s+explains that (.+)', r'\1 establishes that \2'),
+                (r'(.+?)\s+displays that (.+)', r'\1 confirms that \2'),
+                (r'(.+?)\s+presents that (.+)', r'\1 establishes that \2'),
                 
                 # "X illustrates Y" -> "X enables Y" / "X provides Y"
                 (r'(.+?)\s+illustrates (.+)', r'\1 enables \2'),
@@ -559,6 +589,12 @@ class FigureCaptionImprover:
                 (r'(.+?)\s+depicts (.+)', r'\1 presents \2'),
                 (r'(.+?)\s+reveals (.+)', r'\1 exposes \2'),
                 (r'(.+?)\s+highlights (.+)', r'\1 emphasizes \2'),
+                (r'(.+?)\s+visualizes (.+)', r'\1 presents \2'),
+                (r'(.+?)\s+exemplifies (.+)', r'\1 provides \2'),
+                (r'(.+?)\s+traces (.+)', r'\1 reveals \2'),
+                (r'(.+?)\s+explains (.+)', r'\1 clarifies \2'),
+                (r'(.+?)\s+displays (.+)', r'\1 presents \2'),
+                (r'(.+?)\s+presents (.+)', r'\1 provides \2'),
             ]
             
             # Apply mid-sentence patterns
@@ -796,10 +832,10 @@ TEXTBOOK CONTEXT (for reference):
 
 7. **Sources**: If the original caption includes a source (e.g., “Source: IEEE Spectrum”), retain it at the end of the caption in italics. Append it after a period.
 
-📌 STRONG EXAMPLES:
-**Attention Weights**: Shows how transformer models compute attention using query, key, and value interactions, enabling dynamic focus across input sequences.  
-**Edge Deployment**: Demonstrates how AI and IoT technologies are integrated at the farm edge to optimize agricultural practices through real-world ML applications.  
-**Dataset Splits**: Explains how ML workflows partition data into training, validation, and testing sets to support model development and evaluation.
+📌 EXCELLENT TEXTBOOK EXAMPLES:
+**Attention Mechanism**: Transformer models compute attention through query-key-value interactions, enabling dynamic focus across input sequences for improved language understanding.
+**Farm Edge Integration**: Modern agricultural systems deploy AI directly on IoT devices to process sensor data locally, reducing latency and improving real-time decision making.
+**Training Pipeline**: Machine learning workflows partition datasets into training, validation, and test sets to ensure robust model development and unbiased evaluation.
 
 🚫 AVOID:
 - Starting with “This figure shows…” or “This table illustrates…”
@@ -808,16 +844,31 @@ TEXTBOOK CONTEXT (for reference):
 
 🖊️ OUTPUT: Write only the improved caption below:
 
-🚫 AVOID WEAK SENTENCE STARTERS:
-- Do NOT use: "Illustrates", "Shows", "Demonstrates", "Depicts", "Reveals", "Highlights" 
-- Instead use direct language: "The system processes...", "Machine learning models...", "This approach enables..."
-- Be direct and specific about what the student learns
+🚫 CRITICAL: NEVER START WITH WEAK VERBS:
+- BANNED WORDS: "Shows", "Demonstrates", "Illustrates", "Depicts", "Reveals", "Highlights", "Displays", "Presents", "Exhibits", "Portrays", "Visualizes", "Exemplifies", "Traces", "Explains"
+- BANNED PHRASES: "This figure/table/diagram...", "As shown in...", "The illustration demonstrates...", "The visual depicts..."
+- These make captions sound like descriptions, not teaching tools
 
-💡 EXAMPLES OF STRONG vs WEAK:
-❌ Weak: "Illustrates how neural networks process data"  
-✅ Strong: "Neural networks process data through layered transformations"
-❌ Weak: "Shows the relationship between accuracy and efficiency"
-✅ Strong: "Higher accuracy typically requires more computational resources"
+✅ STRONG SENTENCE PATTERNS TO USE:
+- Direct statements: "Neural networks process data through..."
+- System descriptions: "The architecture combines..."
+- Process explanations: "Training requires..."
+- Comparative insights: "Edge computing reduces latency while..."
+- Technical definitions: "Convolutional layers extract..."
+- Causal relationships: "Larger models achieve higher accuracy but..."
+
+💡 BEFORE vs AFTER EXAMPLES:
+❌ WEAK: "Illustrates how neural networks process data"  
+✅ STRONG: "Neural networks process input data through hierarchical feature extraction"
+
+❌ WEAK: "Shows the relationship between accuracy and efficiency"
+✅ STRONG: "Model accuracy increases with computational complexity, creating efficiency trade-offs"
+
+❌ WEAK: "Demonstrates edge computing benefits"
+✅ STRONG: "Edge computing reduces latency by processing data locally rather than in the cloud"
+
+❌ WEAK: "Visualizes the ML pipeline stages"
+✅ STRONG: "Machine learning pipelines consist of data preprocessing, training, and deployment phases"
 """
         
         # Retry logic: up to 3 attempts with exponential backoff
