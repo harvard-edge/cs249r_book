@@ -1995,9 +1995,9 @@ TEXTBOOK CONTEXT (for reference):
         match = re.search(old_format_pattern, content, re.MULTILINE)
         if match:
             old_pattern = match.group(0)
-            # Ensure there's a line break after the caption
+            # Ensure there's a line break after the caption AND preserve the : prefix
             line_break = match.group(2) if match.group(2) else '\n'
-            new_pattern = new_caption + match.group(1) + line_break
+            new_pattern = ': ' + new_caption + match.group(1) + line_break
             return old_pattern, new_pattern
         
         # 2. Old format: : Caption {#tbl-id} (content stuck to same line - problematic case)
@@ -2005,29 +2005,29 @@ TEXTBOOK CONTEXT (for reference):
         match = re.search(old_format_stuck_pattern, content, re.MULTILINE)
         if match:
             old_pattern = match.group(0)
-            # Force a line break before the following content
+            # Force a line break before the following content AND preserve the : prefix
             following_content = match.group(2)
-            new_pattern = new_caption + match.group(1) + '\n' + following_content
+            new_pattern = ': ' + new_caption + match.group(1) + '\n' + following_content
             return old_pattern, new_pattern
         
-        # 3. New format: Caption {#tbl-id} (with proper line break)
+        # 3. New format: Caption {#tbl-id} (with proper line break) - convert to old format with :
         new_format_pattern = rf'^{re.escape(original_caption)}(\s*\{{[^}}]*#{re.escape(tbl_id)}[^}}]*\}})(\s*)$'
         match = re.search(new_format_pattern, content, re.MULTILINE)
         if match:
             old_pattern = match.group(0)
-            # Ensure there's a line break after the caption
+            # Ensure there's a line break after the caption AND add : prefix for consistency
             line_break = match.group(2) if match.group(2) else '\n'
-            new_pattern = new_caption + match.group(1) + line_break
+            new_pattern = ': ' + new_caption + match.group(1) + line_break
             return old_pattern, new_pattern
         
-        # 4. New format: Caption {#tbl-id} (content stuck to same line - problematic case)
+        # 4. New format: Caption {#tbl-id} (content stuck to same line) - convert to old format with :
         new_format_stuck_pattern = rf'^{re.escape(original_caption)}(\s*\{{[^}}]*#{re.escape(tbl_id)}[^}}]*\}})([^\n]*)'
         match = re.search(new_format_stuck_pattern, content, re.MULTILINE)
         if match:
             old_pattern = match.group(0)
-            # Force a line break before the following content
+            # Force a line break before the following content AND add : prefix for consistency
             following_content = match.group(2)
-            new_pattern = new_caption + match.group(1) + '\n' + following_content
+            new_pattern = ': ' + new_caption + match.group(1) + '\n' + following_content
             return old_pattern, new_pattern
         
         return None, None
