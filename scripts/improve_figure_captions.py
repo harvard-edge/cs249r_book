@@ -816,6 +816,16 @@ TEXTBOOK CONTEXT (for reference):
 ✍️ FORMAT:
 **<Key Phrase>**: Explanation sentence(s)
 
+🚫 CRITICAL RULE - NEVER START WITH WEAK DESCRIPTIVE VERBS:
+You must NEVER begin explanation sentences with these weak words:
+"Shows", "Demonstrates", "Illustrates", "Depicts", "Reveals", "Highlights", "Displays", "Presents", "Exhibits", "Portrays", "Visualizes", "Exemplifies", "Traces", "Explains"
+
+Instead, write DIRECT, ACTIVE statements:
+❌ BAD: "Shows how neural networks process data"
+✅ GOOD: "Neural networks process data through layered transformations"
+❌ BAD: "Demonstrates the relationship between accuracy and efficiency"  
+✅ GOOD: "Higher model accuracy requires more computational resources"
+
 ✅ REQUIREMENTS:
 
 1. **Key Phrase**: A single bolded noun phrase (1–5 words) that captures the main idea. Avoid full sentences or multiple bolded phrases. If similar figures exist in this section, choose a unique but relevant phrase.
@@ -869,6 +879,8 @@ TEXTBOOK CONTEXT (for reference):
 
 ❌ WEAK: "Visualizes the ML pipeline stages"
 ✅ STRONG: "Machine learning pipelines consist of data preprocessing, training, and deployment phases"
+
+🎯 FINAL REMINDER: Write the explanation sentence(s) with DIRECT, ACTIVE language. NO weak descriptive verbs!
 """
         
         # Retry logic: up to 3 attempts with exponential backoff
