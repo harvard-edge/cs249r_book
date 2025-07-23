@@ -1962,11 +1962,13 @@ TEXTBOOK CONTEXT (for reference):
             return old_pattern, new_pattern
         
         # 2. TikZ figure: look for caption line in div block
-        tikz_div_pattern = rf'(:::\s*\{{[^}}]*#{re.escape(fig_id)}[^}}]*\}}.*?```\s*\n\s*){re.escape(original_caption)}(\s*:::)'
+        tikz_div_pattern = rf'(:::\s*\{{[^}}]*#{re.escape(fig_id)}[^}}]*\}}.*?```\s*\n\s*){re.escape(original_caption)}(\s*)(:::)'
         match = re.search(tikz_div_pattern, content, re.DOTALL)
         if match:
             old_pattern = match.group(0)
-            new_pattern = match.group(1) + new_caption + match.group(2)
+            # Ensure there's a line break before the closing :::
+            line_break = match.group(2) if match.group(2) else '\n'
+            new_pattern = match.group(1) + new_caption + line_break + match.group(3)
             return old_pattern, new_pattern
         
         # 3. Code figure: #| fig-cap: "caption"
@@ -1986,22 +1988,46 @@ TEXTBOOK CONTEXT (for reference):
         Returns:
             Tuple of (old_pattern, new_pattern) or (None, None) if not found
         """
-        # Try both old and new table formats
+        # Try both old and new table formats, and handle cases with/without line breaks
         
-        # 1. Old format: : Caption {#tbl-id}
-        old_format_pattern = rf'^:\s*{re.escape(original_caption)}(\s*\{{[^}}]*#{re.escape(tbl_id)}[^}}]*\}})\s*$'
+        # 1. Old format: : Caption {#tbl-id} (with proper line break)
+        old_format_pattern = rf'^:\s*{re.escape(original_caption)}(\s*\{{[^}}]*#{re.escape(tbl_id)}[^}}]*\}})(\s*)$'
         match = re.search(old_format_pattern, content, re.MULTILINE)
         if match:
             old_pattern = match.group(0)
-            new_pattern = new_caption + match.group(1)  # Remove colon, convert to new format
+            # Ensure there's a line break after the caption
+            line_break = match.group(2) if match.group(2) else '\n'
+            new_pattern = new_caption + match.group(1) + line_break
             return old_pattern, new_pattern
         
-        # 2. New format: Caption {#tbl-id}
-        new_format_pattern = rf'^{re.escape(original_caption)}(\s*\{{[^}}]*#{re.escape(tbl_id)}[^}}]*\}})\s*$'
+        # 2. Old format: : Caption {#tbl-id} (content stuck to same line - problematic case)
+        old_format_stuck_pattern = rf'^:\s*{re.escape(original_caption)}(\s*\{{[^}}]*#{re.escape(tbl_id)}[^}}]*\}})([^\n]*)'
+        match = re.search(old_format_stuck_pattern, content, re.MULTILINE)
+        if match:
+            old_pattern = match.group(0)
+            # Force a line break before the following content
+            following_content = match.group(2)
+            new_pattern = new_caption + match.group(1) + '\n' + following_content
+            return old_pattern, new_pattern
+        
+        # 3. New format: Caption {#tbl-id} (with proper line break)
+        new_format_pattern = rf'^{re.escape(original_caption)}(\s*\{{[^}}]*#{re.escape(tbl_id)}[^}}]*\}})(\s*)$'
         match = re.search(new_format_pattern, content, re.MULTILINE)
         if match:
             old_pattern = match.group(0)
-            new_pattern = new_caption + match.group(1)
+            # Ensure there's a line break after the caption
+            line_break = match.group(2) if match.group(2) else '\n'
+            new_pattern = new_caption + match.group(1) + line_break
+            return old_pattern, new_pattern
+        
+        # 4. New format: Caption {#tbl-id} (content stuck to same line - problematic case)
+        new_format_stuck_pattern = rf'^{re.escape(original_caption)}(\s*\{{[^}}]*#{re.escape(tbl_id)}[^}}]*\}})([^\n]*)'
+        match = re.search(new_format_stuck_pattern, content, re.MULTILINE)
+        if match:
+            old_pattern = match.group(0)
+            # Force a line break before the following content
+            following_content = match.group(2)
+            new_pattern = new_caption + match.group(1) + '\n' + following_content
             return old_pattern, new_pattern
         
         return None, None
