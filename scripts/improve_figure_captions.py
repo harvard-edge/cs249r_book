@@ -459,7 +459,7 @@ class FigureCaptionImprover:
     
     def improve_sentence_starters(self, text: str) -> str:
         """
-        Replace weak sentence starters with stronger, more direct language.
+        Replace weak sentence starters and mid-sentence weak patterns with stronger, more direct language.
         """
         if not text:
             return text
@@ -481,9 +481,9 @@ class FigureCaptionImprover:
             # Apply improvements to this sentence
             improved = original
             
-            # Simple replacements using re.sub with case-insensitive matching
-            weak_patterns = [
-                # "Illustrates how X" -> "X" (with proper capitalization)
+            # Patterns for beginning-of-sentence weak starters
+            beginning_patterns = [
+                # "Illustrates how X" -> "X" (direct approach)
                 (r'^illustrates how (.+)$', r'\1'),
                 (r'^shows how (.+)$', r'\1'),
                 (r'^demonstrates how (.+)$', r'\1'),
@@ -491,7 +491,7 @@ class FigureCaptionImprover:
                 (r'^reveals how (.+)$', r'\1'),
                 (r'^highlights how (.+)$', r'\1'),
                 
-                # "Illustrates the X" -> "The X"
+                # "Illustrates the X" -> "The X" (remove weak verb)
                 (r'^illustrates the (.+)$', r'The \1'),
                 (r'^shows the (.+)$', r'The \1'),
                 (r'^demonstrates the (.+)$', r'The \1'),
@@ -499,7 +499,7 @@ class FigureCaptionImprover:
                 (r'^reveals the (.+)$', r'The \1'),
                 (r'^highlights the (.+)$', r'The \1'),
                 
-                # Generic weak starters at beginning
+                # Generic weak starters at beginning - remove entirely
                 (r'^illustrates (.+)$', r'\1'),
                 (r'^shows (.+)$', r'\1'),
                 (r'^demonstrates (.+)$', r'\1'),
@@ -508,8 +508,38 @@ class FigureCaptionImprover:
                 (r'^highlights (.+)$', r'\1'),
             ]
             
-            # Apply the first matching pattern
-            for pattern, replacement in weak_patterns:
+            # Apply beginning-of-sentence patterns first
+            for pattern, replacement in beginning_patterns:
+                if re.search(pattern, improved, re.IGNORECASE):
+                    improved = re.sub(pattern, replacement, improved, flags=re.IGNORECASE)
+                    break
+            
+            # Patterns for mid-sentence weak constructions
+            mid_sentence_patterns = [
+                # "X illustrates how Y" -> stronger constructions
+                (r'(.+?)\s+illustrates how (.+)', r'\2 through \1'),
+                (r'(.+?)\s+demonstrates how (.+)', r'\2 via \1'),
+                (r'(.+?)\s+depicts how (.+)', r'\2 using \1'),
+                (r'(.+?)\s+reveals how (.+)', r'\2 through \1'),
+                (r'(.+?)\s+highlights how (.+)', r'\2 via \1'),
+                
+                # "X illustrates that Y" -> "X confirms that Y" / "X establishes that Y"
+                (r'(.+?)\s+illustrates that (.+)', r'\1 confirms that \2'),
+                (r'(.+?)\s+demonstrates that (.+)', r'\1 establishes that \2'),
+                (r'(.+?)\s+depicts that (.+)', r'\1 confirms that \2'),
+                (r'(.+?)\s+reveals that (.+)', r'\1 establishes that \2'),
+                (r'(.+?)\s+highlights that (.+)', r'\1 emphasizes that \2'),
+                
+                # "X illustrates Y" -> "X enables Y" / "X provides Y"
+                (r'(.+?)\s+illustrates (.+)', r'\1 enables \2'),
+                (r'(.+?)\s+demonstrates (.+)', r'\1 provides \2'),
+                (r'(.+?)\s+depicts (.+)', r'\1 presents \2'),
+                (r'(.+?)\s+reveals (.+)', r'\1 exposes \2'),
+                (r'(.+?)\s+highlights (.+)', r'\1 emphasizes \2'),
+            ]
+            
+            # Apply mid-sentence patterns
+            for pattern, replacement in mid_sentence_patterns:
                 if re.search(pattern, improved, re.IGNORECASE):
                     improved = re.sub(pattern, replacement, improved, flags=re.IGNORECASE)
                     break
