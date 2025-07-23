@@ -672,10 +672,6 @@ class FigureCaptionImprover:
         # Combine with proper single space after colon
         improved = f"{bold_part}: {explanation}"
         
-        # For tables, ensure proper : prefix format (don't double up)
-        if is_table:
-            improved = f": {improved}"
-        
         return improved
     
     def encode_image(self, image_path: str) -> Optional[str]:
@@ -2674,16 +2670,6 @@ Instead, write DIRECT, ACTIVE statements:
         filename = f"caption_improvements_{timestamp}.json"
         
         # Convert any Path objects to strings for JSON serialization
-        def convert_paths_to_strings(obj):
-            """Recursively convert Path objects to strings for JSON serialization."""
-            if isinstance(obj, Path):
-                return str(obj)
-            elif isinstance(obj, dict):
-                return {key: convert_paths_to_strings(value) for key, value in obj.items()}
-            elif isinstance(obj, list):
-                return [convert_paths_to_strings(item) for item in obj]
-            else:
-                return obj
         
         # Save to JSON file
         try:
