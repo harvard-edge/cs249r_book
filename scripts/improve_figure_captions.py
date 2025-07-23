@@ -416,6 +416,156 @@ class FigureCaptionImprover:
         
         return f"**{bold_part}**: {explanation_part}"
     
+    def fix_capitalization_after_periods(self, text: str) -> str:
+        """
+        Fix capitalization after periods, handling edge cases properly.
+        """
+        if not text:
+            return text
+        
+        # Common abbreviations that shouldn't trigger capitalization of next word
+        abbreviations = {
+            'dr.', 'prof.', 'mr.', 'mrs.', 'ms.', 'vs.', 'etc.', 'i.e.', 'e.g.',
+            'fig.', 'tbl.', 'eq.', 'sec.', 'ch.', 'vol.', 'no.', 'p.', 'pp.',
+            'ml.', 'ai.', 'gpu.', 'cpu.', 'api.', 'url.', 'http.', 'https.'
+        }
+        
+        # Split into sentences while preserving the structure
+        sentences = re.split(r'(\. )', text)
+        result_parts = []
+        
+        for i, part in enumerate(sentences):
+            if i == 0:
+                # First part - capitalize first letter
+                if part and part[0].islower():
+                    part = part[0].upper() + part[1:]
+            elif part == '. ' and i + 1 < len(sentences):
+                # Period followed by space - check next part
+                next_part = sentences[i + 1] if i + 1 < len(sentences) else ""
+                if next_part:
+                    # Check if previous word was an abbreviation
+                    prev_parts = ''.join(sentences[:i])
+                    words = prev_parts.split()
+                    last_word = words[-1].lower() if words else ""
+                    
+                    # If not an abbreviation, capitalize next sentence
+                    if last_word not in abbreviations:
+                        if next_part and next_part[0].islower():
+                            sentences[i + 1] = next_part[0].upper() + next_part[1:]
+            
+            result_parts.append(part)
+        
+        return ''.join(result_parts)
+    
+    def improve_sentence_starters(self, text: str) -> str:
+        """
+        Replace weak sentence starters with stronger, more direct language.
+        """
+        if not text:
+            return text
+        
+        # Split into sentences and improve each one
+        sentences = re.split(r'(\. )', text)
+        improved_sentences = []
+        
+        for sentence in sentences:
+            if sentence == '. ':
+                improved_sentences.append(sentence)
+                continue
+            
+            original = sentence.strip()
+            if not original:
+                improved_sentences.append(sentence)
+                continue
+            
+            # Apply improvements to this sentence
+            improved = original
+            
+            # Simple replacements using re.sub with case-insensitive matching
+            weak_patterns = [
+                # "Illustrates how X" -> "X" (with proper capitalization)
+                (r'^illustrates how (.+)$', r'\1'),
+                (r'^shows how (.+)$', r'\1'),
+                (r'^demonstrates how (.+)$', r'\1'),
+                (r'^depicts how (.+)$', r'\1'),
+                (r'^reveals how (.+)$', r'\1'),
+                (r'^highlights how (.+)$', r'\1'),
+                
+                # "Illustrates the X" -> "The X"
+                (r'^illustrates the (.+)$', r'The \1'),
+                (r'^shows the (.+)$', r'The \1'),
+                (r'^demonstrates the (.+)$', r'The \1'),
+                (r'^depicts the (.+)$', r'The \1'),
+                (r'^reveals the (.+)$', r'The \1'),
+                (r'^highlights the (.+)$', r'The \1'),
+                
+                # Generic weak starters at beginning
+                (r'^illustrates (.+)$', r'\1'),
+                (r'^shows (.+)$', r'\1'),
+                (r'^demonstrates (.+)$', r'\1'),
+                (r'^depicts (.+)$', r'\1'),
+                (r'^reveals (.+)$', r'\1'),
+                (r'^highlights (.+)$', r'\1'),
+            ]
+            
+            # Apply the first matching pattern
+            for pattern, replacement in weak_patterns:
+                if re.search(pattern, improved, re.IGNORECASE):
+                    improved = re.sub(pattern, replacement, improved, flags=re.IGNORECASE)
+                    break
+            
+            # Ensure first letter is capitalized
+            if improved and improved[0].islower():
+                improved = improved[0].upper() + improved[1:]
+            
+            # Preserve original spacing structure
+            if sentence != sentence.strip():
+                # Preserve leading/trailing whitespace
+                leading_space = sentence[:len(sentence) - len(sentence.lstrip())]
+                trailing_space = sentence[len(sentence.rstrip()):]
+                improved_sentences.append(leading_space + improved + trailing_space)
+            else:
+                improved_sentences.append(improved)
+        
+        return ''.join(improved_sentences)
+    
+    def validate_and_improve_caption(self, caption: str, is_table: bool = False) -> str:
+        """
+        Apply all quality improvements to a caption.
+        
+        Args:
+            caption: The caption to improve
+            is_table: Whether this is a table caption (affects format requirements)
+            
+        Returns:
+            Improved caption with proper capitalization, strong language, and format
+        """
+        if not caption:
+            return caption
+        
+        # Parse **bold**: explanation format
+        match = re.match(r'^(.*?\*\*[^*]+\*\*:\s*)(.+)$', caption.strip())
+        if not match:
+            return caption
+        
+        prefix = match.group(1)
+        explanation = match.group(2)
+        
+        # Improve sentence starters in explanation
+        explanation = self.improve_sentence_starters(explanation)
+        
+        # Fix capitalization after periods
+        explanation = self.fix_capitalization_after_periods(explanation)
+        
+        # Combine back
+        improved = prefix + explanation
+        
+        # For tables, ensure proper : prefix format
+        if is_table and not improved.startswith(':'):
+            improved = ': ' + improved
+        
+        return improved
+    
     def encode_image(self, image_path: str) -> Optional[str]:
         """Encode an image to base64 for multimodal models."""
         try:
@@ -534,7 +684,7 @@ class FigureCaptionImprover:
     
     def generate_caption_with_ollama(self, section_title: str, section_text: str, 
                                    figure_id: str, current_caption: str, 
-                                   image_path: Optional[str] = None) -> Optional[str]:
+                                   image_path: Optional[str] = None, is_table: bool = False) -> Optional[str]:
         """Generate improved caption using Ollama multimodal model with retry logic."""
         import time
         
@@ -581,6 +731,17 @@ TEXTBOOK CONTEXT (for reference):
 - Repeating the section title or being too vague (e.g., **AI System**)
 
 🖊️ OUTPUT: Write only the improved caption below:
+
+🚫 AVOID WEAK SENTENCE STARTERS:
+- Do NOT use: "Illustrates", "Shows", "Demonstrates", "Depicts", "Reveals", "Highlights" 
+- Instead use direct language: "The system processes...", "Machine learning models...", "This approach enables..."
+- Be direct and specific about what the student learns
+
+💡 EXAMPLES OF STRONG vs WEAK:
+❌ Weak: "Illustrates how neural networks process data"  
+✅ Strong: "Neural networks process data through layered transformations"
+❌ Weak: "Shows the relationship between accuracy and efficiency"
+✅ Strong: "Higher accuracy typically requires more computational resources"
 """
         
         # Retry logic: up to 3 attempts with exponential backoff
@@ -633,16 +794,17 @@ TEXTBOOK CONTEXT (for reference):
                     
                     # Validate the format contains **bold**: 
                     if '**' in new_caption and ':' in new_caption:
-                        # Apply proper formatting (title case for bold, sentence case for explanation)
+                        # Apply comprehensive quality improvements
                         formatted_caption = self.format_bold_explanation_caption(new_caption)
+                        improved_caption = self.validate_and_improve_caption(formatted_caption, is_table)
                         
-                        # Double-check word count after formatting
-                        final_word_count = len(formatted_caption.split())
+                        # Double-check word count after improvements
+                        final_word_count = len(improved_caption.split())
                         if final_word_count > 100:
-                            print(f"      ⚠️  Formatted caption too long ({final_word_count} words): {formatted_caption[:100]}...")
+                            print(f"      ⚠️  Improved caption too long ({final_word_count} words): {improved_caption[:100]}...")
                             return None
                         
-                        return formatted_caption
+                        return improved_caption
                     else:
                         print(f"      ⚠️  Generated caption doesn't follow **bold**: format: {new_caption[:100]}")
                         # Don't retry for format issues - this is a generation problem, not API error
@@ -2116,7 +2278,8 @@ TEXTBOOK CONTEXT (for reference):
                             context['content'], 
                             fig_id, 
                             current_caption, 
-                            image_path
+                            image_path,
+                            is_table=False
                         )
                         
                         if new_caption and new_caption != current_caption:
@@ -2151,7 +2314,8 @@ TEXTBOOK CONTEXT (for reference):
                             context['content'], 
                             tbl_id, 
                             current_caption, 
-                            None  # No image for tables
+                            None,  # No image for tables
+                            is_table=True
                         )
                         
                         if new_caption and new_caption != current_caption:
