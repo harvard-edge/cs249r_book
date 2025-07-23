@@ -535,7 +535,8 @@ class FigureCaptionImprover:
     def generate_caption_with_ollama(self, section_title: str, section_text: str, 
                                    figure_id: str, current_caption: str, 
                                    image_path: Optional[str] = None) -> Optional[str]:
-        """Generate improved caption using Ollama multimodal model."""
+        """Generate improved caption using Ollama multimodal model with retry logic."""
+        import time
         
         # Construct a focused, context-aware prompt
         prompt = f"""You are an expert at editing a caption for a visual (figure or table) in a technical AI/ML systems textbook.
@@ -581,73 +582,105 @@ TEXTBOOK CONTEXT (for reference):
 
 🖊️ OUTPUT: Write only the improved caption below:
 """
-        try:
-            # Prepare the request payload
-            payload = {
-                "model": self.model_name,
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "temperature": 0.7,  # Higher temperature for more diverse, creative captions
-                    "num_predict": 120,  # Slightly shorter for focused responses
-                    "top_p": 0.9        # Add nucleus sampling for better variety
+        
+        # Retry logic: up to 3 attempts with exponential backoff
+        max_retries = 3
+        base_delay = 2  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                # Prepare the request payload
+                payload = {
+                    "model": self.model_name,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.7,  # Higher temperature for more diverse, creative captions
+                        "num_predict": 120,  # Slightly shorter for focused responses
+                        "top_p": 0.9        # Add nucleus sampling for better variety
+                    }
                 }
-            }
-            
-            # Add image if provided (for multimodal models)
-            if image_path and os.path.exists(image_path):
-                encoded_image = self.encode_image(image_path)
-                if encoded_image:
-                    payload["images"] = [encoded_image]
-            
-            # Make request to Ollama
-            response = requests.post(
-                "http://localhost:11434/api/generate",
-                json=payload,
-                timeout=60
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                new_caption = result.get('response', '').strip()
                 
-                # Clean up any markdown code blocks
-                if new_caption.startswith('```') and new_caption.endswith('```'):
-                    new_caption = new_caption.strip('`').strip()
-                if new_caption.startswith('json\n'):
-                    new_caption = new_caption[5:].strip()
+                # Add image if provided (for multimodal models)
+                if image_path and os.path.exists(image_path):
+                    encoded_image = self.encode_image(image_path)
+                    if encoded_image:
+                        payload["images"] = [encoded_image]
                 
-                # Sanity check: Reject overly long captions (likely hallucination)
-                word_count = len(new_caption.split())
-                if word_count > 100:
-                    print(f"      ⚠️  Generated caption too long ({word_count} words, max 100): {new_caption[:100]}...")
-                    return None
+                # Make request to Ollama
+                response = requests.post(
+                    "http://localhost:11434/api/generate",
+                    json=payload,
+                    timeout=60
+                )
                 
-                # Validate the format contains **bold**: 
-                if '**' in new_caption and ':' in new_caption:
-                    # Apply proper formatting (title case for bold, sentence case for explanation)
-                    formatted_caption = self.format_bold_explanation_caption(new_caption)
+                if response.status_code == 200:
+                    result = response.json()
+                    new_caption = result.get('response', '').strip()
                     
-                    # Double-check word count after formatting
-                    final_word_count = len(formatted_caption.split())
-                    if final_word_count > 100:
-                        print(f"      ⚠️  Formatted caption too long ({final_word_count} words): {formatted_caption[:100]}...")
+                    # Clean up any markdown code blocks
+                    if new_caption.startswith('```') and new_caption.endswith('```'):
+                        new_caption = new_caption.strip('`').strip()
+                    if new_caption.startswith('json\n'):
+                        new_caption = new_caption[5:].strip()
+                    
+                    # Sanity check: Reject overly long captions (likely hallucination)
+                    word_count = len(new_caption.split())
+                    if word_count > 100:
+                        print(f"      ⚠️  Generated caption too long ({word_count} words, max 100): {new_caption[:100]}...")
+                        # Don't retry for long captions - this is a formatting issue, not API error
                         return None
                     
-                    return formatted_caption
+                    # Validate the format contains **bold**: 
+                    if '**' in new_caption and ':' in new_caption:
+                        # Apply proper formatting (title case for bold, sentence case for explanation)
+                        formatted_caption = self.format_bold_explanation_caption(new_caption)
+                        
+                        # Double-check word count after formatting
+                        final_word_count = len(formatted_caption.split())
+                        if final_word_count > 100:
+                            print(f"      ⚠️  Formatted caption too long ({final_word_count} words): {formatted_caption[:100]}...")
+                            return None
+                        
+                        return formatted_caption
+                    else:
+                        print(f"      ⚠️  Generated caption doesn't follow **bold**: format: {new_caption[:100]}")
+                        # Don't retry for format issues - this is a generation problem, not API error
+                        return None
                 else:
-                    print(f"      ⚠️  Generated caption doesn't follow **bold**: format: {new_caption[:100]}")
+                    # API error - this is worth retrying
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)
+                        print(f"      ⚠️  Ollama API error {response.status_code}, retrying in {delay}s (attempt {attempt + 1}/{max_retries})")
+                        time.sleep(delay)
+                        continue
+                    else:
+                        print(f"      ❌ Ollama API error: {response.status_code} (all {max_retries} attempts failed)")
+                        return None
+                        
+            except requests.exceptions.RequestException as e:
+                # Network/connection error - worth retrying
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    print(f"      ⚠️  Request error: {e}, retrying in {delay}s (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(delay)
+                    continue
+                else:
+                    print(f"      ❌ Request error: {e} (all {max_retries} attempts failed)")
                     return None
-            else:
-                print(f"      ❌ Ollama API error: {response.status_code}")
-                return None
-                
-        except requests.exceptions.RequestException as e:
-            print(f"      ❌ Request error: {e}")
-            return None
-        except Exception as e:
-            print(f"      ❌ Unexpected error: {e}")
-            return None
+            except Exception as e:
+                # Unexpected error - worth retrying once but likely a code issue
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    print(f"      ⚠️  Unexpected error: {e}, retrying in {delay}s (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(delay)
+                    continue
+                else:
+                    print(f"      ❌ Unexpected error: {e} (all {max_retries} attempts failed)")
+                    return None
+        
+        # Should never reach here due to the loop structure, but just in case
+        return None
     
     def compile_tikz_to_image(self, tikz_code: str, figure_id: str) -> Optional[str]:
         """Compile TikZ code to a PNG image for multimodal processing."""
