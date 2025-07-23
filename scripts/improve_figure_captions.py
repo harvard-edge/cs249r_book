@@ -1411,14 +1411,14 @@ Instead, write DIRECT, ACTIVE statements:
         Returns:
             Dict with 'caption', 'full_match' or None if not found
         """
-        # Try new format first (without leading colon) - allow colons in caption text
-        pattern_new = rf'^([^{{\n]+?)\s*\{{[^}}]*#{re.escape(tbl_id)}(?:\s|[^}}])*\}}\s*$'
-        match = re.search(pattern_new, content, re.MULTILINE)
+        # Try old format first (with leading colon) - this must be checked first to properly strip `: ` prefix
+        pattern_old = rf'^:\s*([^{{\n]+?)\s*\{{[^}}]*#{re.escape(tbl_id)}(?:\s|[^}}])*\}}\s*$'
+        match = re.search(pattern_old, content, re.MULTILINE)
         
         if not match:
-            # Fall back to old format (with leading colon)
-            pattern_old = rf'^:\s*([^{{\n]+?)\s*\{{[^}}]*#{re.escape(tbl_id)}(?:\s|[^}}])*\}}\s*$'
-            match = re.search(pattern_old, content, re.MULTILINE)
+            # Fall back to new format (without leading colon) - allow colons in caption text
+            pattern_new = rf'^([^{{\n]+?)\s*\{{[^}}]*#{re.escape(tbl_id)}(?:\s|[^}}])*\}}\s*$'
+            match = re.search(pattern_new, content, re.MULTILINE)
         
         if match:
             return {
