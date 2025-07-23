@@ -518,16 +518,25 @@ class FigureCaptionImprover:
             if improved and improved[0].islower():
                 improved = improved[0].upper() + improved[1:]
             
-            # Preserve original spacing structure
-            if sentence != sentence.strip():
-                # Preserve leading/trailing whitespace
-                leading_space = sentence[:len(sentence) - len(sentence.lstrip())]
-                trailing_space = sentence[len(sentence.rstrip()):]
-                improved_sentences.append(leading_space + improved + trailing_space)
-            else:
-                improved_sentences.append(improved)
+            # Add the improved sentence (spacing will be normalized later)
+            improved_sentences.append(improved)
         
         return ''.join(improved_sentences)
+    
+    def normalize_spacing(self, text: str) -> str:
+        """
+        Normalize spacing in text - remove multiple spaces, leading/trailing spaces.
+        """
+        if not text:
+            return text
+        
+        # Replace multiple spaces with single space
+        text = re.sub(r'\s+', ' ', text)
+        
+        # Remove leading/trailing spaces
+        text = text.strip()
+        
+        return text
     
     def validate_and_improve_caption(self, caption: str, is_table: bool = False) -> str:
         """
@@ -543,12 +552,15 @@ class FigureCaptionImprover:
         if not caption:
             return caption
         
-        # Parse **bold**: explanation format
-        match = re.match(r'^(.*?\*\*[^*]+\*\*:\s*)(.+)$', caption.strip())
+        # Normalize input spacing first
+        caption = self.normalize_spacing(caption)
+        
+        # Parse **bold**: explanation format (handle spaces around colon)
+        match = re.match(r'^(.*?\*\*[^*]+\*\*)\s*:\s*(.+)$', caption)
         if not match:
             return caption
         
-        prefix = match.group(1)
+        bold_part = match.group(1)
         explanation = match.group(2)
         
         # Improve sentence starters in explanation
@@ -557,12 +569,15 @@ class FigureCaptionImprover:
         # Fix capitalization after periods
         explanation = self.fix_capitalization_after_periods(explanation)
         
-        # Combine back
-        improved = prefix + explanation
+        # Normalize spacing in explanation
+        explanation = self.normalize_spacing(explanation)
+        
+        # Combine with proper single space after colon
+        improved = f"{bold_part}: {explanation}"
         
         # For tables, ensure proper : prefix format
-        if is_table and not improved.startswith(':'):
-            improved = ': ' + improved
+        if is_table:
+            improved = f": {improved}"
         
         return improved
     
