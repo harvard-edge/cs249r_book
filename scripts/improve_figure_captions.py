@@ -646,6 +646,35 @@ class FigureCaptionImprover:
         
         return text
     
+    def escape_caption_for_regex(self, caption: str) -> str:
+        """
+        Escape caption text for use in regex patterns.
+        
+        Unlike re.escape(), this only escapes true regex metacharacters
+        that would break pattern matching, while preserving normal text
+        characters like parentheses () which are common in captions.
+        
+        Args:
+            caption: Caption text that may contain special characters
+            
+        Returns:
+            Caption with only problematic regex chars escaped
+        """
+        if not caption:
+            return caption
+            
+        # Only escape characters that are actual regex metacharacters
+        # and would break pattern matching. Common caption chars like () are preserved.
+        # Regex metacharacters to escape: . ^ $ * + ? { } [ ] \ |
+        metacharacters = r'\.^$*+?{}[]\\|'
+        escaped = ''
+        for char in caption:
+            if char in metacharacters:
+                escaped += '\\' + char
+            else:
+                escaped += char
+        return escaped
+    
     def ensure_yaml_safe_caption(self, caption: str) -> str:
         """
         Ensure caption is safe for YAML parsing by adding quotes when needed.
@@ -979,7 +1008,7 @@ Instead, write DIRECT, ACTIVE statements:
                     "stream": False,
                     "options": {
                         "temperature": 0.7,  # Higher temperature for more diverse, creative captions
-                        "num_predict": 120,  # Slightly shorter for focused responses
+                        "num_predict": -1,   # No token limit - generate complete responses
                         "top_p": 0.9        # Add nucleus sampling for better variety
                     }
                 }
@@ -1007,12 +1036,11 @@ Instead, write DIRECT, ACTIVE statements:
                     if new_caption.startswith('json\n'):
                         new_caption = new_caption[5:].strip()
                     
-                    # Sanity check: Reject overly long captions (likely hallucination)
+                    # Log word count but never reject based on length
                     word_count = len(new_caption.split())
-                    if word_count > 100:
-                        print(f"      ⚠️  Generated caption too long ({word_count} words, max 100): {new_caption[:100]}...")
-                        # Don't retry for long captions - this is a formatting issue, not API error
-                        return None
+                    if word_count > 150:
+                        print(f"      ℹ️  Long caption generated ({word_count} words): {new_caption[:100]}...")
+                        # Continue processing - user wants NO truncation limits
                     
                     # Validate the format contains **bold**: 
                     if '**' in new_caption and ':' in new_caption:
@@ -1020,11 +1048,10 @@ Instead, write DIRECT, ACTIVE statements:
                         formatted_caption = self.format_bold_explanation_caption(new_caption)
                         improved_caption = self.validate_and_improve_caption(formatted_caption, is_table)
                         
-                        # Double-check word count after improvements
+                        # Log final word count but never reject
                         final_word_count = len(improved_caption.split())
-                        if final_word_count > 100:
-                            print(f"      ⚠️  Improved caption too long ({final_word_count} words): {improved_caption[:100]}...")
-                            return None
+                        if final_word_count > 150:
+                            print(f"      ℹ️  Large improved caption ({final_word_count} words): continuing anyway...")
                         
                         return improved_caption
                     else:
@@ -1832,14 +1859,15 @@ Instead, write DIRECT, ACTIVE statements:
         
         return content_map
 
-    def check_caption_quality(self, directories: List[str], figures_only: bool = False, tables_only: bool = False, content_map: Optional[Dict] = None) -> Dict[str, any]:
+    def check_caption_quality(self, directories: List[str], figures_only: bool = False, tables_only: bool = False, listings_only: bool = False, content_map: Optional[Dict] = None) -> Dict[str, any]:
         """
         Analyze all captions and generate quality report.
         
         Args:
             directories: List of directories to scan
-            figures_only: If True, only analyze figures (ignore tables)
-            tables_only: If True, only analyze tables (ignore figures)
+            figures_only: If True, only analyze figures (ignore tables and listings)
+            tables_only: If True, only analyze tables (ignore figures and listings)
+            listings_only: If True, only analyze listings (ignore figures and tables)
             content_map: Optional pre-built content map to avoid rebuilding
             
         Returns:
@@ -1855,7 +1883,7 @@ Instead, write DIRECT, ACTIVE statements:
         
         # Use provided content map or build fresh one with filtering
         if content_map is None:
-            content_map = self.build_content_map_from_qmd(directories, figures_only=figures_only, tables_only=tables_only)
+            content_map = self.build_content_map_from_qmd(directories, figures_only=figures_only, tables_only=tables_only, listings_only=listings_only)
             if not content_map:
                 print("❌ Failed to build content map for analysis.")
                 return {}
@@ -1955,14 +1983,15 @@ Instead, write DIRECT, ACTIVE statements:
         else:
             print(f"\n✅ All captions look good!")
     
-    def repair_captions(self, directories: List[str], figures_only: bool = False, tables_only: bool = False, specific_files: List[str] = None):
+    def repair_captions(self, directories: List[str], figures_only: bool = False, tables_only: bool = False, listings_only: bool = False, specific_files: List[str] = None):
         """
         Repair only captions that need fixing.
         
         Args:
             directories: List of directories to scan
-            figures_only: If True, only repair figures (ignore tables)
-            tables_only: If True, only repair tables (ignore figures)
+            figures_only: If True, only repair figures (ignore tables and listings)
+            tables_only: If True, only repair tables (ignore figures and listings)
+            listings_only: If True, only repair listings (ignore figures and tables)
         """
         print("🔧 Repairing captions that need fixing...")
         
@@ -1973,10 +2002,10 @@ Instead, write DIRECT, ACTIVE statements:
             return {}
         
         # Build content map with filtering
-        content_map = self.build_content_map_from_qmd(directories, figures_only=figures_only, tables_only=tables_only, specific_files=specific_files)
+        content_map = self.build_content_map_from_qmd(directories, figures_only=figures_only, tables_only=tables_only, listings_only=listings_only, specific_files=specific_files)
         
         # Check caption quality once using the existing content map
-        quality_report = self.check_caption_quality(directories, figures_only=figures_only, tables_only=tables_only, content_map=content_map)
+        quality_report = self.check_caption_quality(directories, figures_only=figures_only, tables_only=tables_only, listings_only=listings_only, content_map=content_map)
         
         # Create repair list - only items that need fixing
         repair_items = []
@@ -2163,7 +2192,7 @@ Instead, write DIRECT, ACTIVE statements:
     # QMD-FOCUSED CONTENT MAP BUILDING
     # ================================================================
     
-    def build_content_map_from_qmd(self, directories: List[str], figures_only: bool = False, tables_only: bool = False, specific_files: List[str] = None) -> Dict:
+    def build_content_map_from_qmd(self, directories: List[str], figures_only: bool = False, tables_only: bool = False, listings_only: bool = False, specific_files: List[str] = None) -> Dict:
         """
         Build comprehensive content map by scanning QMD files directly.
         
@@ -2176,8 +2205,9 @@ Instead, write DIRECT, ACTIVE statements:
         
         Args:
             directories: List of directories to scan for .qmd files
-            figures_only: If True, only process figures (ignore tables)
-            tables_only: If True, only process tables (ignore figures)
+            figures_only: If True, only process figures (ignore tables and listings)
+            tables_only: If True, only process tables (ignore figures and listings)
+            listings_only: If True, only process listings (ignore figures and tables)
             specific_files: List of specific files to include (optional)
             
         Returns:
@@ -2253,11 +2283,11 @@ Instead, write DIRECT, ACTIVE statements:
                 potential_tbl_ids = set(re.findall(tbl_id_pattern, content))
                 
                 # Find all potential listing IDs  
-                lst_id_pattern = r'#\|\s*lst-label:\s*(lst-[a-zA-Z0-9_-]+)'
+                lst_id_pattern = r'#(lst-[a-zA-Z0-9_-]+)'
                 potential_lst_ids = set(re.findall(lst_id_pattern, content))
                 
-                # Process each potential figure ID (unless tables-only mode)
-                if not tables_only:
+                # Process each potential figure ID (unless tables-only or listings-only mode)
+                if not tables_only and not listings_only:
                     for fig_id in potential_fig_ids:
                         try:
                             fig_def = self.find_figure_definition_in_qmd(content, fig_id)
@@ -2304,11 +2334,15 @@ Instead, write DIRECT, ACTIVE statements:
                             stats['failed_extractions'].append(fig_id)
                             if qmd_file not in stats['files_with_issues']:
                                 stats['files_with_issues'].append(qmd_file)
-                else:
-                    print(f"    ⏭️  Skipping {len(potential_fig_ids)} figures (tables-only mode)")
+                # Skip messages only shown in general mode (not when using type filters)
+                # else:
+                #     if tables_only:
+                #         print(f"    ⏭️  Skipping {len(potential_fig_ids)} figures (tables-only mode)")
+                #     else:  # listings_only
+                #         print(f"    ⏭️  Skipping {len(potential_fig_ids)} figures (listings-only mode)")
                 
-                # Process each potential table ID (unless figures-only mode)
-                if not figures_only:
+                # Process each potential table ID (unless figures-only or listings-only mode)
+                if not figures_only and not listings_only:
                     for tbl_id in potential_tbl_ids:
                         try:
                             tbl_def = self.detect_table(content, tbl_id)
@@ -2341,14 +2375,18 @@ Instead, write DIRECT, ACTIVE statements:
                             stats['failed_extractions'].append(tbl_id)
                             if qmd_file not in stats['files_with_issues']:
                                 stats['files_with_issues'].append(qmd_file)
-                else:
-                    print(f"    ⏭️  Skipping {len(potential_tbl_ids)} tables (figures-only mode)")
+                # Skip messages only shown in general mode (not when using type filters)
+                # else:
+                #     if figures_only:
+                #         print(f"    ⏭️  Skipping {len(potential_tbl_ids)} tables (figures-only mode)")
+                #     else:  # listings_only
+                #         print(f"    ⏭️  Skipping {len(potential_tbl_ids)} tables (listings-only mode)")
                 
-                # Process each potential listing ID (unless in restrictive mode)
-                if not figures_only and not tables_only:
+                # Process each potential listing ID (unless figures-only or tables-only mode, or if explicitly listings-only)
+                if (not figures_only and not tables_only) or listings_only:
                     for lst_id in potential_lst_ids:
                         try:
-                            lst_def = self.find_listing_definition_in_qmd(content, lst_id)
+                            lst_def = self.find_listing_definition_enhanced(content, lst_id)
                             if lst_def:
                                 # Store original caption as-is from the file
                                 original_caption = lst_def['caption']
@@ -2359,7 +2397,9 @@ Instead, write DIRECT, ACTIVE statements:
                                     'new_caption': '',
                                     'type': 'listing',
                                     'language': lst_def.get('language', ''),
-                                    'source_file': qmd_file
+                                    'source_file': qmd_file,
+                                    'instances': lst_def.get('instances', []),  # Store for atomic updates
+                                    'consistency_warnings': lst_def.get('consistency_warnings', [])
                                 }
                                 
                                 print(f"    ✅ Found listing: {lst_id} ({lst_def.get('language', 'unknown')})")
@@ -2379,8 +2419,12 @@ Instead, write DIRECT, ACTIVE statements:
                             stats['failed_extractions'].append(lst_id)
                             if qmd_file not in stats['files_with_issues']:
                                 stats['files_with_issues'].append(qmd_file)
-                else:
-                    print(f"    ⏭️  Skipping {len(potential_lst_ids)} listings (restrictive mode)")
+                # Skip messages only shown in general mode (not when using type filters)
+                # else:
+                #     if figures_only:
+                #         print(f"    ⏭️  Skipping {len(potential_lst_ids)} listings (figures-only mode)")
+                #     else:  # tables_only
+                #         print(f"    ⏭️  Skipping {len(potential_lst_ids)} listings (tables-only mode)")
                 
                 # Summary for this file
                 if file_figures > 0 or file_tables > 0 or file_listings > 0:
@@ -2392,15 +2436,25 @@ Instead, write DIRECT, ACTIVE statements:
                 if qmd_file not in stats['files_with_issues']:
                     stats['files_with_issues'].append(qmd_file)
         
-        # Final summary
+        # Final summary - only show relevant types based on filter mode
         print(f"\n📊 QMD EXTRACTION SUMMARY:")
-        print(f"   📊 Figures: {stats['figures_found']} found")
-        print(f"      • Markdown: {stats['markdown_figures']}")
-        print(f"      • TikZ: {stats['tikz_figures']}")
-        print(f"      • R: {stats['r_figures']}")
-        print(f"      • Code: {stats['code_figures']}")
-        print(f"   📋 Tables: {stats['tables_found']} found")
-        print(f"   📝 Listings: {stats['listings_found']} found")
+        
+        # Show figures info only if processing figures
+        if not tables_only and not listings_only:
+            print(f"   📊 Figures: {stats['figures_found']} found")
+            print(f"      • Markdown: {stats['markdown_figures']}")
+            print(f"      • TikZ: {stats['tikz_figures']}")
+            print(f"      • R: {stats['r_figures']}")
+            print(f"      • Code: {stats['code_figures']}")
+        
+        # Show tables info only if processing tables
+        if not figures_only and not listings_only:
+            print(f"   📋 Tables: {stats['tables_found']} found")
+        
+        # Show listings info only if processing listings
+        if not figures_only and not tables_only:
+            print(f"   📝 Listings: {stats['listings_found']} found")
+        
         print(f"   ⚠️  Extraction failures: {stats['extraction_failures']}")
         
         # Show specific failed extractions
@@ -2416,9 +2470,17 @@ Instead, write DIRECT, ACTIVE statements:
             if len(stats['files_with_issues']) > 5:
                 print(f"      • ... and {len(stats['files_with_issues']) - 5} more")
         
-        # Calculate success rate
-        total_ids = stats['figures_found'] + stats['tables_found'] + stats['listings_found'] + stats['extraction_failures']
-        success_rate = (stats['figures_found'] + stats['tables_found'] + stats['listings_found']) / total_ids * 100 if total_ids > 0 else 0
+        # Calculate success rate based on what we're processing
+        processed_count = 0
+        if not tables_only and not listings_only:
+            processed_count += stats['figures_found']
+        if not figures_only and not listings_only:
+            processed_count += stats['tables_found']
+        if not figures_only and not tables_only:
+            processed_count += stats['listings_found']
+            
+        total_ids = processed_count + stats['extraction_failures']
+        success_rate = processed_count / total_ids * 100 if total_ids > 0 else 0
         print(f"   ✅ Success rate: {success_rate:.1f}%")
         
         return content_map
@@ -2535,11 +2597,12 @@ Instead, write DIRECT, ACTIVE statements:
                                     original_caption: str, new_caption: str) -> bool:
         """
         Apply a single targeted caption update using precise search-and-replace.
+        Enhanced to handle multiple instances for listings using atomic updates.
         
         Args:
             file_path: Path to the QMD file
-            item_id: Figure or table ID (e.g., "fig-example", "tbl-data")
-            item_type: "figure" or "table"
+            item_id: Figure or table ID (e.g., "fig-example", "tbl-data", "lst-code")
+            item_type: "figure", "table", or "listing"
             original_caption: Current caption text to find
             new_caption: New caption text to replace with
             
@@ -2551,17 +2614,48 @@ Instead, write DIRECT, ACTIVE statements:
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             
-            # Build targeted search pattern based on type
+            # Use enhanced atomic update system for listings
+            if item_type == 'listing':
+                # Detect all instances of this listing
+                instances = self.detect_all_instances_by_id(content, item_id, "listing")
+                
+                if not instances:
+                    print(f"      ⚠️  No instances found for {item_id}")
+                    return False
+                
+                # Verify captions match what we expect
+                canonical_caption, warnings = self.canonicalize_caption(instances)
+                if canonical_caption != original_caption:
+                    print(f"      ⚠️  Caption mismatch for {item_id}: expected '{original_caption}', found '{canonical_caption}'")
+                    # Try to proceed anyway if close
+                    if original_caption.strip() not in canonical_caption and canonical_caption.strip() not in original_caption:
+                        return False
+                
+                # Apply atomic update to all instances
+                updated_content, success, errors = self.update_all_instances_atomically(
+                    content, item_id, instances, new_caption
+                )
+                
+                if not success:
+                    for error in errors:
+                        print(f"      ❌ {error}")
+                    return False
+                
+                # Write updated content
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(updated_content)
+                
+                # Success message with instance count
+                print(f"      ✅ Updated {len(instances)} instances atomically")
+                return True
+            
+            # Fall back to original logic for figures and tables
             if item_type == 'figure':
                 old_pattern, new_pattern = self.build_figure_search_patterns(
                     item_id, original_caption, new_caption, content
                 )
             elif item_type == 'table':
                 old_pattern, new_pattern = self.build_table_search_patterns(
-                    item_id, original_caption, new_caption, content
-                )
-            elif item_type == 'listing':
-                old_pattern, new_pattern = self.build_listing_search_patterns(
                     item_id, original_caption, new_caption, content
                 )
             else:
@@ -2599,14 +2693,17 @@ Instead, write DIRECT, ACTIVE statements:
         # Try different figure formats in order of specificity
         
         # 1. Markdown figure: ![caption](path){#fig-id}
-        markdown_pattern = rf'!\[{re.escape(original_caption)}\](\([^)]+\)\s*\{{[^}}]*#{re.escape(fig_id)}[^}}]*\}})'
+        # Use smart escaping that preserves parentheses and other normal caption characters
+        escaped_caption = self.escape_caption_for_regex(original_caption)
+        markdown_pattern = rf'!\[{escaped_caption}\](\([^)]+\)\s*\{{[^}}]*#{re.escape(fig_id)}[^}}]*\}})'
         if re.search(markdown_pattern, content):
             old_pattern = re.search(markdown_pattern, content).group(0)
             new_pattern = f'![{new_caption}]' + re.search(markdown_pattern, content).group(1)
             return old_pattern, new_pattern
         
         # 2. TikZ figure: look for caption line in div block
-        tikz_div_pattern = rf'(:::\s*\{{[^}}]*#{re.escape(fig_id)}[^}}]*\}}.*?```\s*\n\s*){re.escape(original_caption)}(\s*)(:::)'
+        escaped_caption = self.escape_caption_for_regex(original_caption)
+        tikz_div_pattern = rf'(:::\s*\{{[^}}]*#{re.escape(fig_id)}[^}}]*\}}.*?```\s*\n\s*){escaped_caption}(\s*)(:::)'
         match = re.search(tikz_div_pattern, content, re.DOTALL)
         if match:
             old_pattern = match.group(0)
@@ -2633,7 +2730,8 @@ Instead, write DIRECT, ACTIVE statements:
                 return old_pattern, new_pattern
         
         # Fallback for non-R code figures
-        code_pattern = rf'(#\|\s*fig-cap:\s*["\']?){re.escape(original_caption)}(["\']?)'
+        escaped_caption = self.escape_caption_for_regex(original_caption)
+        code_pattern = rf'(#\|\s*fig-cap:\s*["\']?){escaped_caption}(["\']?)'
         if re.search(code_pattern, content):
             old_pattern = re.search(code_pattern, content).group(0)
             new_pattern = re.search(code_pattern, content).group(1) + new_caption + re.search(code_pattern, content).group(2)
@@ -2653,7 +2751,8 @@ Instead, write DIRECT, ACTIVE statements:
         """
         # Simple approach: Find any line with the table ID and caption
         # Handles both `: caption {#tbl-id}` and `caption {#tbl-id}` formats
-        pattern = rf'^:?\s*{re.escape(original_caption)}(\s*\{{[^}}]*#{re.escape(tbl_id)}[^}}]*\}})(.*)$'
+        escaped_caption = self.escape_caption_for_regex(original_caption)
+        pattern = rf'^:?\s*{escaped_caption}(\s*\{{[^}}]*#{re.escape(tbl_id)}[^}}]*\}})(.*)$'
         
         match = re.search(pattern, content, re.MULTILINE)
         if match:
@@ -2713,14 +2812,15 @@ Instead, write DIRECT, ACTIVE statements:
         
         return None, None
 
-    def improve_captions_with_llm(self, directories: List[str], content_map: Optional[Dict] = None):
+    def improve_captions_with_llm(self, directories: List[str], content_map: Optional[Dict] = None, 
+                                figures_only: bool = False, tables_only: bool = False, listings_only: bool = False):
         """Improve captions using LLM and immediately update each file after processing."""
         print("🤖 Improving captions with LLM...")
         
         # Build content map if not provided
         if content_map is None:
             print("📄 Building content map from QMD files...")
-            content_map = self.build_content_map_from_qmd(directories)
+            content_map = self.build_content_map_from_qmd(directories, figures_only=figures_only, tables_only=tables_only, listings_only=listings_only)
             if not content_map:
                 print("❌ Failed to build content map")
                 return {}
@@ -2733,7 +2833,19 @@ Instead, write DIRECT, ACTIVE statements:
             print("❌ No figures, tables, or listings found in content map")
             return content_map
         
-        print(f"📊 Processing: {total_figures} figures, {total_tables} tables, {total_listings} listings")
+        # Show processing message with only relevant types
+        processing_parts = []
+        if not tables_only and not listings_only and total_figures > 0:
+            processing_parts.append(f"{total_figures} figures")
+        if not figures_only and not listings_only and total_tables > 0:
+            processing_parts.append(f"{total_tables} tables")
+        if not figures_only and not tables_only and total_listings > 0:
+            processing_parts.append(f"{total_listings} listings")
+        
+        if processing_parts:
+            print(f"📊 Processing: {', '.join(processing_parts)}")
+        else:
+            print("📊 No items to process")
         
         # Group items by source file for efficient processing
         files_to_process = {}
@@ -2820,7 +2932,7 @@ Instead, write DIRECT, ACTIVE statements:
                             })
                             file_improved_count += 1
                             word_count = len(new_caption.split())
-                            print(f"    ✅ Improved ({word_count} words): {new_caption[:80]}{'...' if len(new_caption) > 80 else ''}")
+                            print(f"    ✅ Improved ({word_count} words): {new_caption[:120]}{'...' if len(new_caption) > 120 else ''}")
                         else:
                             print(f"    ⚠️  No improvement generated")
                             
@@ -2856,7 +2968,7 @@ Instead, write DIRECT, ACTIVE statements:
                             })
                             file_improved_count += 1
                             word_count = len(new_caption.split())
-                            print(f"    ✅ Improved ({word_count} words): {new_caption[:80]}{'...' if len(new_caption) > 80 else ''}")
+                            print(f"    ✅ Improved ({word_count} words): {new_caption[:120]}{'...' if len(new_caption) > 120 else ''}")
                         else:
                             print(f"    ⚠️  No improvement generated")
                             
@@ -2904,7 +3016,7 @@ Instead, write DIRECT, ACTIVE statements:
                             })
                             file_improved_count += 1
                             word_count = len(new_caption.split())
-                            print(f"    ✅ Improved ({word_count} words): {new_caption[:80]}{'...' if len(new_caption) > 80 else ''}")
+                            print(f"    ✅ Improved ({word_count} words): {new_caption[:120]}{'...' if len(new_caption) > 120 else ''}")
                         else:
                             print(f"    ⚠️  No improvement generated")
                             
@@ -2965,7 +3077,7 @@ Instead, write DIRECT, ACTIVE statements:
         
         print(f"    📊 Successfully updated {success_count}/{len(improvements)} items in {file_path}")
     
-    def complete_caption_improvement_workflow(self, directories: List[str], save_json: bool = False, figures_only: bool = False, tables_only: bool = False):
+    def complete_caption_improvement_workflow(self, directories: List[str], save_json: bool = False, figures_only: bool = False, tables_only: bool = False, listings_only: bool = False):
         """
         Complete LLM caption improvement process (used by --improve and default mode).
         
@@ -2974,8 +3086,9 @@ Instead, write DIRECT, ACTIVE statements:
         Args:
             directories: List of directories to process
             save_json: Whether to save detailed JSON output
-            figures_only: If True, only process figures (ignore tables)
-            tables_only: If True, only process tables (ignore figures)
+            figures_only: If True, only process figures (ignore tables and listings)
+            tables_only: If True, only process tables (ignore figures and listings)
+            listings_only: If True, only process listings (ignore figures and tables)
         """
         print("🚀 Starting complete caption improvement workflow...")
         
@@ -2987,7 +3100,7 @@ Instead, write DIRECT, ACTIVE statements:
         
         # Step 1: Build content map with filtering
         print("📄 Step 1: Building content map...")
-        content_map = self.build_content_map_from_qmd(directories, figures_only=figures_only, tables_only=tables_only)
+        content_map = self.build_content_map_from_qmd(directories, figures_only=figures_only, tables_only=tables_only, listings_only=listings_only)
         if not content_map:
             print("❌ Failed to build content map")
             return {}
@@ -3002,7 +3115,7 @@ Instead, write DIRECT, ACTIVE statements:
         
         # Step 2: Improve captions using LLM (files updated immediately during processing)
         print("\n🤖 Step 2: Improving captions with LLM...")
-        improved_content_map = self.improve_captions_with_llm(directories, content_map)
+        improved_content_map = self.improve_captions_with_llm(directories, content_map, figures_only=figures_only, tables_only=tables_only, listings_only=listings_only)
         
         # Count improvements
         improved_count = 0
@@ -3548,6 +3661,269 @@ Instead, write DIRECT, ACTIVE statements:
                 
         return None
 
+    # ================================================================
+    # GENERIC MULTI-INSTANCE DETECTION SYSTEM
+    # ================================================================
+    
+    def detect_all_instances_by_id(self, content: str, item_id: str, item_type: str) -> List[Dict]:
+        """
+        Generic method to find ALL instances of any ID (fig-, tbl-, lst-) in content.
+        
+        This handles the common scenario where the same ID appears multiple times
+        due to HTML/PDF conditional rendering (e.g., content-visible blocks).
+        
+        Args:
+            content: QMD file content
+            item_id: Full ID (e.g., "fig-example", "tbl-data", "lst-code")
+            item_type: Type hint ("figure", "table", "listing") 
+        
+        Returns:
+            List of all instances with their captions, formats, and locations
+        """
+        instances = []
+        
+        if item_type == "listing":
+            # Pattern 1: HTML callout format
+            # ::: {#lst-id .callout-important title="Caption"}
+            callout_pattern = rf':::\s*\{{[^}}]*#{re.escape(item_id)}[^}}]*title=["\']([^"\']*)["\'][^}}]*\}}'
+            for match in re.finditer(callout_pattern, content, re.DOTALL):
+                instances.append({
+                    'format': 'html_callout',
+                    'caption': match.group(1).strip(),
+                    'full_text': match.group(0),
+                    'start': match.start(),
+                    'end': match.end(),
+                    'pattern_type': 'callout'
+                })
+            
+            # Pattern 2: PDF code block format  
+            # #| lst-label: lst-id
+            # #| lst-cap: Caption (or "Caption")
+            label_pattern = rf'#\|\s*lst-label:\s*{re.escape(item_id)}'
+            
+            # Find all code blocks that contain this label
+            code_blocks = re.finditer(r'```\{([^}]+)\}(.*?)```', content, re.DOTALL)
+            for code_match in code_blocks:
+                code_content = code_match.group(2)
+                if re.search(label_pattern, code_content):
+                    # Look for lst-cap in this code block
+                    cap_match = re.search(r'#\|\s*lst-cap:\s*(?:["\']([^"\']*)["\']|([^\n]*))', code_content)
+                    if cap_match:
+                        caption = (cap_match.group(1) or cap_match.group(2) or '').strip()
+                        language = code_match.group(1).strip()
+                        
+                        instances.append({
+                            'format': 'pdf_code',
+                            'caption': caption,
+                            'full_text': code_match.group(0),
+                            'start': code_match.start(),
+                            'end': code_match.end(),
+                            'pattern_type': 'code_block',
+                            'language': language
+                        })
+        
+        elif item_type == "figure":
+            # TODO: Add figure detection patterns (markdown, tikz, code)
+            # For now, fall back to existing detection
+            pass
+            
+        elif item_type == "table":
+            # TODO: Add table detection patterns
+            # For now, fall back to existing detection  
+            pass
+        
+        return instances
+    
+
+    
+    def update_all_instances_atomically(self, content: str, item_id: str, 
+                                      instances: List[Dict], new_caption: str) -> Tuple[str, bool, List[str]]:
+        """
+        Update ALL instances of an ID atomically - success/fail as a unit.
+        
+        Args:
+            content: Original file content
+            item_id: ID to update
+            instances: List of instances from detect_all_instances_by_id  
+            new_caption: New caption text
+            
+        Returns:
+            Tuple of (updated_content, success, error_messages)
+        """
+        if not instances:
+            return content, False, ["No instances to update"]
+        
+        updated_content = content
+        error_messages = []
+        
+        # Process instances in reverse order (by position) to maintain string positions
+        sorted_instances = sorted(instances, key=lambda x: x['start'], reverse=True)
+        
+        for instance in sorted_instances:
+            try:
+                if instance['format'] == 'html_callout':
+                    # Update: title="old caption" -> title="new caption"
+                    pattern = rf'(:::\s*\{{[^}}]*#{re.escape(item_id)}[^}}]*title=["\'])([^"\']*?)(["\'][^}}]*\}})'
+                    replacement = rf'\1{new_caption}\3'
+                    
+                    new_content = re.sub(pattern, replacement, updated_content, count=1)
+                    if new_content == updated_content:
+                        error_messages.append(f"Failed to update HTML callout for {item_id}")
+                        return content, False, error_messages
+                    updated_content = new_content
+                    
+                elif instance['format'] == 'pdf_code':
+                    # Update: #| lst-cap: old -> #| lst-cap: "new" (with quotes)
+                    # Handle both quoted and unquoted original captions
+                    pattern = rf'(#\|\s*lst-cap:\s*)(?:["\']([^"\']*)["\']|([^\n]*))'
+                    replacement = rf'\1"{new_caption}"'
+                    
+                    # Apply within the specific code block
+                    start_pos = instance['start']
+                    end_pos = instance['end']
+                    block_content = updated_content[start_pos:end_pos]
+                    
+                    new_block_content = re.sub(pattern, replacement, block_content, count=1)
+                    if new_block_content == block_content:
+                        error_messages.append(f"Failed to update PDF code block for {item_id}")
+                        return content, False, error_messages
+                    
+                    # Replace the block in the full content
+                    updated_content = updated_content[:start_pos] + new_block_content + updated_content[end_pos:]
+                    
+            except Exception as e:
+                error_messages.append(f"Error updating {instance['format']} instance: {e}")
+                return content, False, error_messages
+        
+        return updated_content, True, []
+
+    # ================================================================
+    # ENHANCED LISTING DETECTION USING GENERIC SYSTEM
+    # ================================================================
+    
+    def find_listing_definition_enhanced(self, content: str, lst_id: str) -> Optional[Dict[str, str]]:
+        """
+        Enhanced listing detection that handles multiple instances.
+        
+        Args:
+            content: QMD file content
+            lst_id: Listing ID to search for (e.g., 'lst-mlp_layer_matrix')
+            
+        Returns:
+            Dict with canonical caption and instance information
+        """
+        # Use the generic detection system
+        instances = self.detect_all_instances_by_id(content, lst_id, "listing")
+        
+        if not instances:
+            # Fall back to original method for compatibility
+            return self.find_listing_definition_in_qmd(content, lst_id)
+        
+        # Get canonical caption and validate consistency
+        canonical_caption, warnings = self.canonicalize_caption(instances)
+        
+        if warnings:
+            print(f"    ⚠️  {lst_id}: {'; '.join(warnings)}")
+        
+        # Determine primary language (prefer from code blocks)
+        language = 'unknown'
+        for instance in instances:
+            if instance['format'] == 'pdf_code' and 'language' in instance:
+                language = instance['language']
+                break
+        
+        return {
+            'type': 'listing',
+            'caption': canonical_caption,
+            'language': language,
+            'instances': instances,  # Store for later atomic updates
+            'consistency_warnings': warnings,
+            'full_text': instances[0]['full_text'] if instances else ''
+        }
+
+    def clean_caption_artifacts(self, caption: str) -> str:
+        """
+        Clean unwanted artifacts from captions.
+        
+        Removes patterns like:
+        - *Source: ...* 
+        - "via This code snippet"
+        - Other common artifacts
+        
+        Args:
+            caption: Raw caption text
+            
+        Returns:
+            Cleaned caption text
+        """
+        if not caption:
+            return caption
+        
+        # Remove *Source: ...* patterns
+        caption = re.sub(r'\*\s*Source:\s*[^*]*\*', '', caption, flags=re.IGNORECASE)
+        
+        # Remove "via This code snippet" and similar artifacts
+        caption = re.sub(r'via\s+this\s+code\s+snippet\.?', '', caption, flags=re.IGNORECASE)
+        caption = re.sub(r'through\s+the\s+code\.?', '', caption, flags=re.IGNORECASE)
+        
+        # Remove multiple consecutive spaces and trim
+        caption = re.sub(r'\s+', ' ', caption).strip()
+        
+        # Remove trailing/leading periods that might be left over
+        caption = re.sub(r'^\.\s*|\s*\.$', '', caption).strip()
+        
+        return caption
+
+    def canonicalize_caption(self, instances: List[Dict]) -> Tuple[str, List[str]]:
+        """
+        Choose canonical caption from multiple instances and validate consistency.
+        Enhanced with artifact cleanup.
+        
+        Args:
+            instances: List of instances from detect_all_instances_by_id
+            
+        Returns:
+            Tuple of (canonical_caption, warnings_if_inconsistent)
+        """
+        if not instances:
+            return "", ["No instances found"]
+        
+        if len(instances) == 1:
+            cleaned_caption = self.clean_caption_artifacts(instances[0]['caption'])
+            return cleaned_caption, []
+        
+        # Clean artifacts from all captions before comparison
+        cleaned_instances = []
+        for instance in instances:
+            cleaned_caption = self.clean_caption_artifacts(instance['caption'])
+            cleaned_instances.append({**instance, 'cleaned_caption': cleaned_caption})
+        
+        # Collect all unique cleaned captions
+        captions = [inst['cleaned_caption'] for inst in cleaned_instances if inst['cleaned_caption']]
+        unique_captions = list(set(captions))
+        
+        warnings = []
+        
+        if len(unique_captions) > 1:
+            warnings.append(f"Inconsistent captions found: {unique_captions}")
+        
+        # Preference logic: HTML callout > PDF code block (using cleaned captions)
+        for instance in cleaned_instances:
+            if instance['format'] == 'html_callout' and instance['cleaned_caption']:
+                canonical = instance['cleaned_caption']
+                if len(unique_captions) > 1:
+                    warnings.append(f"Using HTML callout caption: '{canonical}'")
+                return canonical, warnings
+        
+        # Fallback to first non-empty cleaned caption
+        for caption in captions:
+            if caption:
+                if len(unique_captions) > 1:
+                    warnings.append(f"Using first available caption: '{caption}'")
+                return caption, warnings
+        
+        return "", ["No valid captions found"]
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -3569,6 +3945,8 @@ Examples:
   python improve_figure_captions.py -d contents/core/ -F  # Short form
   python improve_figure_captions.py -d contents/core/ --tables-only
   python improve_figure_captions.py -d contents/core/ -T  # Short form
+  python improve_figure_captions.py -d contents/core/ --listings-only
+  python improve_figure_captions.py -d contents/core/ -L  # Short form
   
   # Analysis and utilities:
   python improve_figure_captions.py --build-map -d contents/core/
@@ -3579,6 +3957,7 @@ Examples:
   # Content filtering with other modes:
   python improve_figure_captions.py --analyze -d contents/core/ --figures-only
   python improve_figure_captions.py --repair -d contents/core/ --tables-only
+  python improve_figure_captions.py --build-map -d contents/core/ --listings-only
   python improve_figure_captions.py --build-map -d contents/core/ -F
   
   # Multiple directories:
@@ -3609,9 +3988,11 @@ Examples:
     # Content type filtering
     content_group = parser.add_mutually_exclusive_group()
     content_group.add_argument('--figures-only', '-F', action='store_true',
-                              help='Process only figures (ignore tables)')
+                              help='Process only figures (ignore tables and listings)')
     content_group.add_argument('--tables-only', '-T', action='store_true',
-                              help='Process only tables (ignore figures)')
+                              help='Process only tables (ignore figures and listings)')
+    content_group.add_argument('--listings-only', '-L', action='store_true',
+                              help='Process only code listings (ignore figures and tables)')
 
     # Model options
     parser.add_argument('--model', '-m', default='qwen2.5:7b',
@@ -3669,6 +4050,7 @@ Examples:
             content_map = improver.build_content_map_from_qmd(directories, 
                                                              figures_only=args.figures_only,
                                                              tables_only=args.tables_only,
+                                                             listings_only=args.listings_only,
                                                              specific_files=specific_files)
             if content_map:
                 print("✅ Content map building completed!")
@@ -3709,6 +4091,7 @@ Examples:
             content_map = improver.build_content_map_from_qmd(directories,
                                                              figures_only=args.figures_only,
                                                              tables_only=args.tables_only,
+                                                             listings_only=args.listings_only,
                                                              specific_files=specific_files)
             if not content_map:
                 print("❌ Failed to build content map for analysis")
@@ -3718,6 +4101,7 @@ Examples:
             improver.check_caption_quality(directories,
                                          figures_only=args.figures_only,
                                          tables_only=args.tables_only,
+                                         listings_only=args.listings_only,
                                          content_map=content_map)
             
             # Validate QMD mapping
@@ -3731,6 +4115,7 @@ Examples:
             content_map = improver.repair_captions(directories,
                                                   figures_only=args.figures_only,
                                                   tables_only=args.tables_only,
+                                                  listings_only=args.listings_only,
                                                   specific_files=specific_files)
             if content_map and args.save_json:
                 improver.save_content_map(content_map)
@@ -3742,7 +4127,8 @@ Examples:
             print("🚀 Improving captions with LLM...")
             improved_content_map = improver.complete_caption_improvement_workflow(directories, args.save_json,
                                                                                 figures_only=args.figures_only,
-                                                                                tables_only=args.tables_only)
+                                                                                tables_only=args.tables_only,
+                                                                                listings_only=args.listings_only)
             if not improved_content_map:
                 return 1
                 
@@ -3751,7 +4137,8 @@ Examples:
             print("🚀 Improving captions with LLM (default mode)...")
             improved_content_map = improver.complete_caption_improvement_workflow(directories, args.save_json,
                                                                                 figures_only=args.figures_only,
-                                                                                tables_only=args.tables_only)
+                                                                                tables_only=args.tables_only,
+                                                                                listings_only=args.listings_only)
             if not improved_content_map:
                 return 1
             
