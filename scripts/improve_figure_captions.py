@@ -646,6 +646,69 @@ class FigureCaptionImprover:
         
         return text
     
+    def ensure_yaml_safe_caption(self, caption: str) -> str:
+        """
+        Ensure caption is safe for YAML parsing by adding quotes when needed.
+        
+        YAML interprets text starting with ** as alias references, which causes parsing errors.
+        This function adds quotes around captions that start with ** to prevent YAML issues.
+        
+        Args:
+            caption: The caption text to make YAML-safe
+            
+        Returns:
+            Caption with proper YAML quoting if needed
+        """
+        if not caption:
+            return caption
+        
+        caption = caption.strip()
+        
+        # Check if caption starts with ** (which causes YAML parsing issues)
+        if caption.startswith('**'):
+            # Check if it's already properly quoted
+            if (caption.startswith('"') and caption.endswith('"')) or \
+               (caption.startswith("'") and caption.endswith("'")):
+                # Already quoted, return as-is
+                return caption
+            else:
+                # Add double quotes to make it YAML-safe
+                # Escape any existing double quotes within the caption
+                escaped_caption = caption.replace('"', '\\"')
+                return f'"{escaped_caption}"'
+        
+        return caption
+    
+    def extract_caption_from_yaml_value(self, yaml_value: str) -> str:
+        """
+        Extract the actual caption text from a YAML value, handling quoted and unquoted cases.
+        
+        Args:
+            yaml_value: The YAML value which might be quoted or unquoted
+            
+        Returns:
+            The clean caption text without YAML quoting
+        """
+        if not yaml_value:
+            return yaml_value
+        
+        yaml_value = yaml_value.strip()
+        
+        # Handle double quotes
+        if yaml_value.startswith('"') and yaml_value.endswith('"'):
+            # Remove quotes and unescape any escaped quotes
+            clean_caption = yaml_value[1:-1].replace('\\"', '"')
+            return clean_caption
+        
+        # Handle single quotes  
+        if yaml_value.startswith("'") and yaml_value.endswith("'"):
+            # Remove quotes and handle single quote escaping
+            clean_caption = yaml_value[1:-1].replace("''", "'")
+            return clean_caption
+        
+        # Not quoted, return as-is
+        return yaml_value
+    
     def validate_and_improve_caption(self, caption: str, is_table: bool = False) -> str:
         """
         Apply all quality improvements to a caption.
@@ -1370,16 +1433,28 @@ Instead, write DIRECT, ACTIVE statements:
             code_block = match.group(2)
             
             # Extract fig-cap from the code block (handle both quoted and unquoted)
-            # Generic regex based on actual codebase patterns:
-            # - Quoted: #| fig-cap: "Caption text"
-            # - Unquoted: #| fig-cap: Caption text  
-            cap_pattern = r'#\|\s*fig-cap:\s*(?:"([^"]*)"|(.+))$'
-            cap_match = re.search(cap_pattern, code_block, re.MULTILINE)
-            if cap_match:
-                # Group 1: quoted caption, Group 2: unquoted caption
-                caption = (cap_match.group(1) or cap_match.group(2) or '').strip()
+            # For R figures: Handle YAML-quoted values properly (captions starting with **)
+            # For other languages: Use simpler extraction
+            if language == 'r':
+                # Enhanced regex to handle YAML-quoted values for R figures
+                cap_pattern = r'#\|\s*fig-cap:\s*(.+)$'
+                cap_match = re.search(cap_pattern, code_block, re.MULTILINE)
+                if cap_match:
+                    # Extract the full YAML value and then clean it
+                    yaml_value = cap_match.group(1).strip()
+                    # Remove quotes if they exist and extract clean caption
+                    caption = self.extract_caption_from_yaml_value(yaml_value)
+                else:
+                    caption = ""
             else:
-                caption = ""
+                # Standard extraction for non-R figures
+                cap_pattern = r'#\|\s*fig-cap:\s*(?:"([^"]*)"|(.+))$'
+                cap_match = re.search(cap_pattern, code_block, re.MULTILINE)
+                if cap_match:
+                    # Group 1: quoted caption, Group 2: unquoted caption
+                    caption = (cap_match.group(1) or cap_match.group(2) or '').strip()
+                else:
+                    caption = ""
             
             return {
                 'type': 'code',
@@ -1511,6 +1586,7 @@ Instead, write DIRECT, ACTIVE statements:
         Update caption in code-generated figures (R/Python blocks).
         
         Updates: #| fig-cap: "old caption" → #| fig-cap: "new caption"
+        For R figures: Ensures proper YAML quoting for captions starting with **
         
         Args:
             content: QMD file content
@@ -1525,7 +1601,15 @@ Instead, write DIRECT, ACTIVE statements:
         
         def replace_fig_cap(match):
             before = match.group(1)
-            return f'{before}"{new_caption}"'
+            language = match.group(2)
+            
+            # For R figures: Ensure YAML-safe quoting (adds quotes if needed for ** captions)
+            # For other languages: Use standard quoting
+            if language == 'r':
+                yaml_safe_caption = self.ensure_yaml_safe_caption(new_caption)
+                return f'{before}{yaml_safe_caption}'
+            else:
+                return f'{before}"{new_caption}"'
         
         return re.sub(pattern, replace_fig_cap, content, flags=re.MULTILINE | re.DOTALL)
     
@@ -2531,7 +2615,24 @@ Instead, write DIRECT, ACTIVE statements:
             new_pattern = match.group(1) + new_caption + line_break + match.group(3)
             return old_pattern, new_pattern
         
-        # 3. Code figure: #| fig-cap: "caption"
+        # 3. Code figure: #| fig-cap: "caption" (with R figure YAML-safe handling)
+        # Check if this is an R figure by looking at the code block context
+        r_code_pattern = rf'```\{{r[^}}]*\}}[^`]*?#\|\s*label:\s*{re.escape(fig_id)}[^`]*?#\|\s*fig-cap:\s*([^\n]+)'
+        r_match = re.search(r_code_pattern, content, re.DOTALL | re.MULTILINE)
+        if r_match:
+            # This is an R figure - handle YAML-safe extraction and updating
+            yaml_value = r_match.group(1).strip()
+            clean_caption = self.extract_caption_from_yaml_value(yaml_value)
+            if clean_caption == original_caption:
+                old_pattern = r_match.group(0)
+                # Ensure new caption is YAML-safe for R figures
+                yaml_safe_new_caption = self.ensure_yaml_safe_caption(new_caption)
+                # Replace just the caption part
+                prefix = old_pattern[:old_pattern.rfind(yaml_value)]
+                new_pattern = prefix + yaml_safe_new_caption
+                return old_pattern, new_pattern
+        
+        # Fallback for non-R code figures
         code_pattern = rf'(#\|\s*fig-cap:\s*["\']?){re.escape(original_caption)}(["\']?)'
         if re.search(code_pattern, content):
             old_pattern = re.search(code_pattern, content).group(0)
