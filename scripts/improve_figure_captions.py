@@ -646,6 +646,35 @@ class FigureCaptionImprover:
         
         return text
     
+    def escape_caption_for_regex(self, caption: str) -> str:
+        """
+        Escape caption text for use in regex patterns.
+        
+        Unlike re.escape(), this only escapes true regex metacharacters
+        that would break pattern matching, while preserving normal text
+        characters like parentheses () which are common in captions.
+        
+        Args:
+            caption: Caption text that may contain special characters
+            
+        Returns:
+            Caption with only problematic regex chars escaped
+        """
+        if not caption:
+            return caption
+            
+        # Only escape characters that are actual regex metacharacters
+        # and would break pattern matching. Common caption chars like () are preserved.
+        # Regex metacharacters to escape: . ^ $ * + ? { } [ ] \ |
+        metacharacters = r'\.^$*+?{}[]\\|'
+        escaped = ''
+        for char in caption:
+            if char in metacharacters:
+                escaped += '\\' + char
+            else:
+                escaped += char
+        return escaped
+    
     def ensure_yaml_safe_caption(self, caption: str) -> str:
         """
         Ensure caption is safe for YAML parsing by adding quotes when needed.
@@ -2599,14 +2628,17 @@ Instead, write DIRECT, ACTIVE statements:
         # Try different figure formats in order of specificity
         
         # 1. Markdown figure: ![caption](path){#fig-id}
-        markdown_pattern = rf'!\[{re.escape(original_caption)}\](\([^)]+\)\s*\{{[^}}]*#{re.escape(fig_id)}[^}}]*\}})'
+        # Use smart escaping that preserves parentheses and other normal caption characters
+        escaped_caption = self.escape_caption_for_regex(original_caption)
+        markdown_pattern = rf'!\[{escaped_caption}\](\([^)]+\)\s*\{{[^}}]*#{re.escape(fig_id)}[^}}]*\}})'
         if re.search(markdown_pattern, content):
             old_pattern = re.search(markdown_pattern, content).group(0)
             new_pattern = f'![{new_caption}]' + re.search(markdown_pattern, content).group(1)
             return old_pattern, new_pattern
         
         # 2. TikZ figure: look for caption line in div block
-        tikz_div_pattern = rf'(:::\s*\{{[^}}]*#{re.escape(fig_id)}[^}}]*\}}.*?```\s*\n\s*){re.escape(original_caption)}(\s*)(:::)'
+        escaped_caption = self.escape_caption_for_regex(original_caption)
+        tikz_div_pattern = rf'(:::\s*\{{[^}}]*#{re.escape(fig_id)}[^}}]*\}}.*?```\s*\n\s*){escaped_caption}(\s*)(:::)'
         match = re.search(tikz_div_pattern, content, re.DOTALL)
         if match:
             old_pattern = match.group(0)
@@ -2633,7 +2665,8 @@ Instead, write DIRECT, ACTIVE statements:
                 return old_pattern, new_pattern
         
         # Fallback for non-R code figures
-        code_pattern = rf'(#\|\s*fig-cap:\s*["\']?){re.escape(original_caption)}(["\']?)'
+        escaped_caption = self.escape_caption_for_regex(original_caption)
+        code_pattern = rf'(#\|\s*fig-cap:\s*["\']?){escaped_caption}(["\']?)'
         if re.search(code_pattern, content):
             old_pattern = re.search(code_pattern, content).group(0)
             new_pattern = re.search(code_pattern, content).group(1) + new_caption + re.search(code_pattern, content).group(2)
@@ -2653,7 +2686,8 @@ Instead, write DIRECT, ACTIVE statements:
         """
         # Simple approach: Find any line with the table ID and caption
         # Handles both `: caption {#tbl-id}` and `caption {#tbl-id}` formats
-        pattern = rf'^:?\s*{re.escape(original_caption)}(\s*\{{[^}}]*#{re.escape(tbl_id)}[^}}]*\}})(.*)$'
+        escaped_caption = self.escape_caption_for_regex(original_caption)
+        pattern = rf'^:?\s*{escaped_caption}(\s*\{{[^}}]*#{re.escape(tbl_id)}[^}}]*\}})(.*)$'
         
         match = re.search(pattern, content, re.MULTILINE)
         if match:
