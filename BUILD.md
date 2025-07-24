@@ -1,271 +1,410 @@
 # 🛠 How to Build the Book Locally
 
-Welcome! 👋 If you’re here, you’re probably trying to **build the Machine Learning Systems book locally** on your own machine.
+Welcome! 👋 If you're here, you're probably trying to **build the Machine Learning Systems book locally** on your own machine.
 
-This guide will walk you through **how to get set up manually**, especially if you're not using GitHub Actions or Docker. We'll cover what tools you need, why you need them, and how to test everything is working.
-
----
-
-## 📚 What Are We Trying to Build?
-
-This project is written using [**Quarto**](https://quarto.org), which lets us render:
-
-- A website (HTML version of the book)
-- A typeset PDF (for printable reading)
-
-By default, Quarto can build the HTML version pretty easily. But **building the PDF version** is a bit trickier — it requires LaTeX, Inkscape, and a few other tools to properly render graphics and fonts.
+This guide will walk you through **how to get set up manually** for local development. The instructions are based on our production GitHub Actions workflow but adapted for local use.
 
 ---
 
-## ✅ What You’ll Need (And Why)
+## 📚 What Are We Building?
 
-| Tool | Why It's Needed |
-|------|------------------|
-| **Quarto** | The core tool that converts the `.qmd` files into HTML/PDF |
-| **R** | Some chapters include R code chunks and R-based plots |
-| **R packages** | Supporting packages (defined in `install_packages.R`) |
-| **TinyTeX + TeX Live** | Needed for LaTeX → PDF rendering |
-| **Inkscape** | Converts `.svg` diagrams into `.pdf` (especially TikZ) |
-| **Ghostscript** | Compresses large PDF files |
-| **Python 3** | Needed for PDF compression scripts |
-| **System libraries** | Fonts and rendering support on Linux systems |
+This project uses [**Quarto**](https://quarto.org) to render multiple formats:
 
-Don’t worry — this guide will walk you through installing all of them, step by step.
+- **HTML**: Website version of the book (default)
+- **PDF**: Typeset PDF using custom titlepage format
+- **EPUB**: E-book format
+
+The HTML version builds easily, but **PDF and EPUB require additional dependencies** like LaTeX, Inkscape, and specialized packages.
 
 ---
 
-## 🐧 Setting Things Up on **Linux**
+## ✅ Prerequisites Overview
+
+| Tool | Version | Purpose |
+|------|---------|----------|
+| **Quarto** | 1.7.31+ | Core rendering engine |
+| **Python** | 3.13+ | Build tools and compression scripts |
+| **R** | 4.3.2+ | Code execution and plotting |
+| **TeX Live** | 2025 | PDF typesetting and LaTeX packages |
+| **Inkscape** | Latest | SVG to PDF conversion for diagrams |
+| **Ghostscript** | Latest | PDF compression and optimization |
+| **System Libraries** | Various | Font rendering and graphics support |
+
+> **Note**: These versions match our production GitHub Actions workflow for consistency.
+
+---
+
+## 🐧 Linux Setup (Ubuntu/Debian)
 
 ### 1. 🔧 Install Quarto
 
-Quarto is what drives the entire build process.
+```bash
+# Download and install Quarto (matches production version)
+wget https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.31/quarto-1.7.31-linux-amd64.deb
+sudo dpkg -i quarto-1.7.31-linux-amd64.deb
 
-```sh
-wget https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.13/quarto-1.7.13-linux-amd64.deb
-sudo dpkg -i quarto-1.7.13-linux-amd64.deb
-```
-
-Test it with:
-
-```sh
+# Verify installation
 quarto --version
+quarto check
 ```
 
----
+### 2. 🐍 Install Python and Dependencies
 
-### 2. 📊 Install R
-
-If you're using Ubuntu or Debian:
-
-```sh
+```bash
+# Install Python 3.13+ (or latest available)
 sudo apt-get update
-sudo apt-get install -y r-base
+sudo apt-get install -y python3 python3-pip python3-venv
+
+# Install Python dependencies
+pip3 install -r requirements.txt
+
+# Verify installation
+python3 --version
 ```
 
-Test R:
+### 3. 📊 Install R and Packages
 
-```sh
+```bash
+# Install R 4.3.2+ (or latest)
+sudo apt-get install -y r-base
+
+# Install R packages using the provided script
+Rscript install_packages.R
+
+# Verify R installation
 R --version
 ```
 
----
+### 4. 📚 Install TeX Live (Production Method)
 
-### 3. 📦 Install Required R Packages
+We use the same TeX Live setup as our GitHub Actions:
 
-Once R is installed, open it by typing `R`, then run:
+```bash
+# Install TeX Live base
+wget -qO- "https://yihui.org/tinytex/install-bin-unix.sh" | sh
 
-```r
-install.packages("remotes")
-source("install_packages.R")
-```
-
-This installs everything the book needs to render code, plots, etc.
-
----
-
-### 4. ✒️ Install TinyTeX (LaTeX Distribution)
-
-TinyTeX is a lightweight version of TeX Live, which Quarto uses to generate PDFs.
-
-```sh
-quarto install tinytex
-```
-
-Then add it to your shell:
-
-```sh
-echo 'export PATH=$HOME/.TinyTeX/bin/x86_64-linux:$PATH' >> ~/.bashrc
+# Add to PATH
+echo 'export PATH="$HOME/.TinyTeX/bin/x86_64-linux:$PATH"' >> ~/.bashrc
 source ~/.bashrc
+
+# Install required TeX packages (matches tl_packages file)
+tlmgr install \
+  collection-basic \
+  collection-fontsextra \
+  collection-fontutils \
+  collection-latex \
+  collection-latexextra \
+  collection-latexrecommended \
+  collection-fontsrecommended \
+  collection-luatex \
+  collection-pictures
 ```
 
----
+### 5. 🖼️ Install Inkscape (Production Method)
 
-### 5. 🧰 Install Additional TeX Live Packages (for diagrams, fonts, etc.)
+```bash
+# Remove any existing Inkscape
+sudo apt-get remove -y inkscape || true
 
-These give us broader LaTeX support:
-
-```sh
-sudo apt-get install -y texlive-latex-recommended texlive-fonts-recommended texlive-latex-extra \
-  texlive-pictures texlive-luatex
-```
-
----
-
-### 6. 🖼️ Install Inkscape
-
-This is needed to convert `.svg` images into `.pdf` (especially for TikZ diagrams).
-
-```sh
+# Install from PPA for reliable version
 sudo add-apt-repository ppa:inkscape.dev/stable -y
 sudo apt-get update
 sudo apt-get install -y inkscape
-```
 
-Test with:
+# Install font dependencies
+sudo apt-get install -y \
+  fonts-freefont-ttf \
+  fonts-liberation \
+  fontconfig
 
-```sh
+# Update font cache
+sudo fc-cache -fv
+
+# Test Inkscape
 inkscape --version
 ```
 
----
+### 6. 📉 Install Ghostscript
 
-### 7. 📉 Install Ghostscript (for compressing the final PDF)
-
-```sh
+```bash
 sudo apt-get install -y ghostscript
+
+# Verify installation
+gs --version
+```
+
+### 7. 🛠️ Install System Dependencies
+
+```bash
+# Install system libraries (matches GitHub Actions)
+sudo apt-get install -y \
+  fonts-dejavu \
+  fonts-freefont-ttf \
+  gdk-pixbuf2.0-bin \
+  libcairo2 \
+  libfontconfig1 \
+  libfreetype6 \
+  libpango-1.0-0 \
+  libpangocairo-1.0-0 \
+  libpangoft2-1.0-0 \
+  libxml2-dev \
+  libcurl4-openssl-dev \
+  libjpeg-dev \
+  libtiff5-dev \
+  libpng-dev
+```
+
+### 8. ✅ Verify Installation
+
+```bash
+# Test all components
+echo "Testing Quarto..."
+quarto check
+
+echo "Testing Python dependencies..."
+python3 -c "import nltk, openai, gradio; print('Python deps OK')"
+
+echo "Testing R packages..."
+Rscript -e "library(ggplot2); library(knitr); cat('R packages OK\\n')"
+
+echo "Testing Inkscape..."
+echo '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><circle cx="50" cy="50" r="40" fill="red"/></svg>' > test.svg
+inkscape --export-type=pdf --export-filename=test.pdf test.svg && echo "Inkscape OK" && rm test.svg test.pdf
+
+echo "Testing Ghostscript..."
+gs --version > /dev/null && echo "Ghostscript OK"
+
+echo "✅ All dependencies verified!"
 ```
 
 ---
 
-### 8. 🐍 Install Python 3 and pip (used for helper scripts)
+## 🧱 Building the Book
 
-```sh
-sudo apt-get install -y python3 python3-pip
-```
+Navigate to the project root and use these commands:
 
-Test with:
-
-```sh
-python3 --version
-pip3 --version
-```
-
----
-
-### 9. 🧪 Test That It All Works
-
-Once you’ve installed everything, you're ready to try building the book!
-
----
-
-## 🧱 How to Build the Book
-
-Navigate to the root folder of the project:
-
-```sh
-cd path/to/the/book
-```
-
-### 🔹 To Build the **Website (HTML)** version:
-```sh
+### 🌐 Build HTML (Website)
+```bash
+# Build website version
 quarto render --to html
+
+# View output
+open _book/index.html  # macOS
+# or
+xdg-open _book/index.html  # Linux
 ```
 
-You’ll find the output in the `_book/` folder — you can open `index.html` in your browser to preview it.
-
----
-
-### 🔹 To Build the **PDF** version:
-```sh
+### 📖 Build PDF (Typeset)
+```bash
+# Build PDF with custom titlepage format
 quarto render --to titlepage-pdf
+
+# Output location
+ls -lh _book/Machine-Learning-Systems.pdf
 ```
 
-This uses a custom format defined in `_quarto.yml`. The output will be in:
+### 📱 Build EPUB (E-book)
+```bash
+# Build EPUB format
+quarto render --to epub
 
+# Output location
+ls -lh _book/Machine-Learning-Systems.epub
 ```
-_book/Machine-Learning-Systems.pdf
+
+### 🚀 Build All Formats
+```bash
+# Build everything (HTML, PDF, EPUB)
+quarto render
+```
+
+### 📉 Compress PDF (Production Method)
+
+The PDF can be large. Use Ghostscript compression (matches production):
+
+```bash
+# Compress PDF using production settings
+gs \
+  -sDEVICE=pdfwrite \
+  -dCompatibilityLevel=1.4 \
+  -dPDFSETTINGS=/ebook \
+  -dNOPAUSE \
+  -dQUIET \
+  -dBATCH \
+  -sOutputFile="_book/ebook.pdf" \
+  "_book/Machine-Learning-Systems.pdf"
+
+# Replace original with compressed version
+mv _book/ebook.pdf _book/Machine-Learning-Systems.pdf
+
+# Check file size
+ls -lh _book/Machine-Learning-Systems.pdf
 ```
 
 ---
 
-### 🔹 (Optional) Compress the PDF
-The final PDF can be large. You can compress it using the provided script:
+## 🪟 Windows Setup
 
-```sh
-python3 ./scripts/quarto_publish/gs_compress_pdf.py \
-  -i ./_book/Machine-Learning-Systems.pdf \
-  -o ./_book/ebook.pdf \
-  -s "/ebook"
+### Option 1: Using Chocolatey (Recommended)
+
+```powershell
+# Install Chocolatey if not already installed
+Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+
+# Install all dependencies
+choco install quarto python r.project inkscape ghostscript -y
+
+# Install Python dependencies
+pip install -r requirements.txt
+
+# Install R packages
+Rscript install_packages.R
 ```
 
-If you're happy with the result, replace the original:
+### Option 2: Manual Installation
 
-```sh
-mv ./_book/ebook.pdf ./_book/Machine-Learning-Systems.pdf
-```
-
----
-
-## 🪟 Setup on **Windows**
-
-1. **Install Quarto**  
+1. **Install Quarto 1.7.31+**  
    Download from [quarto.org](https://quarto.org/docs/download/)
 
-2. **Install R**  
-   Download from [CRAN](https://cran.r-project.org/)
+2. **Install Python 3.13+**  
+   Download from [python.org](https://www.python.org/downloads/)
+   ```powershell
+   pip install -r requirements.txt
+   ```
 
-3. **Install R Packages**  
-   Open R and run:
+3. **Install R 4.3.2+**  
+   Download from [CRAN](https://cran.r-project.org/)
    ```r
-   install.packages("remotes")
    source("install_packages.R")
    ```
 
-4. **Install TinyTeX**  
-   ```r
-   install.packages("tinytex")
-   tinytex::install_tinytex()
-   ```
+4. **Install Inkscape**  
+   Download from [inkscape.org](https://inkscape.org/release/)
 
-5. **Install Inkscape, Ghostscript, Python**  
-   Open PowerShell (as Administrator), then run:
-   ```powershell
-   choco install inkscape ghostscript python -y
-   ```
+5. **Install Ghostscript**  
+   Download from [ghostscript.com](https://www.ghostscript.com/download/gsdnld.html)
 
-6. **Test Everything Works**  
-   Open a new terminal and try:
-   ```powershell
-   quarto render --to html
-   quarto render --to titlepage-pdf
-   ```
+### Windows Build Commands
 
----
+```powershell
+# Build HTML
+quarto render --to html
 
-## 💡 Troubleshooting Tips
+# Build PDF
+quarto render --to titlepage-pdf
 
-**Quarto not found?**  
-Make sure it’s in your PATH and installed correctly.
-
-**PDF build fails?**  
-- Check that LaTeX and Inkscape are working.
-- Make sure you're using `--to titlepage-pdf` and not just `--to pdf`.
-
-**Compression script doesn’t work?**  
-- Make sure Ghostscript is installed and accessible.
-- You may need to install Python packages:
-  ```sh
-  pip3 install pikepdf ghostscript PyPDF2
-  ```
+# Compress PDF (Windows method)
+$input = "./_book/Machine-Learning-Systems.pdf"
+$output = "./_book/ebook.pdf"
+gswin64c -sDEVICE=pdfwrite -dCompatibilityLevel:1.4 -dPDFSETTINGS=/ebook -dNOPAUSE -dBATCH -sOutputFile="$output" "$input"
+Move-Item -Force $output $input
+```
 
 ---
 
-## 🎉 That’s It!
+## 🔧 Development Workflow
 
-Once everything is set up, you’ll be able to:
+### Quick Development Loop
+```bash
+# 1. Make changes to .qmd files
+# 2. Preview changes (HTML is fastest)
+quarto render --to html
 
-- Preview changes locally
-- Build clean HTML and PDF versions
-- Contribute to the book like a pro 💪
+# 3. Test locally
+open _book/index.html
 
-Let me know if you'd like this saved as `manual_setup.md` or included in your Quarto documentation!
+# 4. Build PDF when ready
+quarto render --to titlepage-pdf
+```
+
+### Using Quarto Preview
+```bash
+# Live preview with auto-reload (HTML only)
+quarto preview
+
+# Preview will be available at http://localhost:4200
+```
+
+---
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+**❌ Quarto not found**  
+```bash
+# Check installation
+quarto --version
+which quarto  # Linux/Mac
+where quarto  # Windows
+```
+
+**❌ PDF build fails**  
+```bash
+# Check LaTeX installation
+tlmgr --version
+
+# Check Inkscape
+inkscape --version
+
+# Ensure using correct format
+quarto render --to titlepage-pdf  # ✅ Correct
+quarto render --to pdf            # ❌ Wrong
+```
+
+**❌ Missing LaTeX packages**  
+```bash
+# Install missing packages
+tlmgr install <package-name>
+
+# Or reinstall collections
+tlmgr install collection-latex collection-pictures
+```
+
+**❌ Inkscape SVG conversion fails**  
+```bash
+# Test Inkscape directly
+echo '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="blue"/></svg>' > test.svg
+inkscape --export-type=pdf --export-filename=test.pdf test.svg
+```
+
+**❌ Python dependencies missing**  
+```bash
+# Reinstall requirements
+pip install -r requirements.txt --upgrade
+
+# Check specific imports
+python3 -c "import nltk, openai, gradio"
+```
+
+### Performance Tips
+
+- **Use HTML for development**: Much faster than PDF
+- **Cache heavy operations**: R packages and TeX Live installations
+- **Parallel builds**: Use `quarto render --parallel` if available
+- **Incremental builds**: Only changed files will be re-rendered
+
+### Getting Help
+
+1. **Check GitHub Actions**: Our `.github/workflows/quarto-build.yml` shows the exact production setup
+2. **Compare versions**: Ensure your local versions match the workflow
+3. **Test individual components**: Verify each tool works independently
+4. **Check logs**: Quarto provides detailed error messages
+
+---
+
+## 🎯 Production Parity
+
+These instructions match our GitHub Actions workflow:
+- **Quarto**: 1.7.31
+- **Python**: 3.13+
+- **R**: 4.3.2+
+- **TeX Live**: 2025 collections
+- **Inkscape**: Latest stable
+- **Ghostscript**: Latest stable
+
+For exact package versions, see:
+- `requirements.txt` (Python)
+- `install_packages.R` (R)
+- `tl_packages` (TeX Live)
+- `.github/workflows/quarto-build.yml` (Full workflow)

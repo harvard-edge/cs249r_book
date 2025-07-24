@@ -30,13 +30,13 @@ ollama pull llama3.2:3b     # Fast lightweight option
 ### Improve All Captions (Recommended)
 ```bash
 # Process all core chapters with default model
-python3 scripts/improve_figure_captions.py -d contents/core/
+python3 tools/improve_figure_captions.py -d contents/core/
 
 # Use specific model
-python3 scripts/improve_figure_captions.py -d contents/core/ -m gemma2:9b
+python3 tools/improve_figure_captions.py -d contents/core/ -m gemma2:9b
 
 # Process specific files
-python3 scripts/improve_figure_captions.py -f contents/core/introduction/introduction.qmd
+python3 tools/improve_figure_captions.py -f contents/core/introduction/introduction.qmd
 ```
 
 ## Command Line Options
@@ -65,43 +65,43 @@ All main options have both short and long forms:
 ### Complete Caption Improvement
 ```bash
 # Default workflow - improve all captions
-python3 scripts/improve_figure_captions.py -d contents/core/
+python3 tools/improve_figure_captions.py -d contents/core/
 
 # Equivalent explicit command
-python3 scripts/improve_figure_captions.py --improve -d contents/core/
+python3 tools/improve_figure_captions.py --improve -d contents/core/
 
 # With different model
-python3 scripts/improve_figure_captions.py -i -d contents/core/ -m gemma2:9b
+python3 tools/improve_figure_captions.py -i -d contents/core/ -m gemma2:9b
 
 # Multiple directories
-python3 scripts/improve_figure_captions.py -d contents/core/ -d contents/frontmatter/
+python3 tools/improve_figure_captions.py -d contents/core/ -d contents/frontmatter/
 ```
 
 ### Analysis and Utilities
 ```bash
 # Build content map only
-python3 scripts/improve_figure_captions.py --build-map -d contents/core/
-python3 scripts/improve_figure_captions.py -b -d contents/core/
+python3 tools/improve_figure_captions.py --build-map -d contents/core/
+python3 tools/improve_figure_captions.py -b -d contents/core/
 
 # Analyze caption quality and validate structure
-python3 scripts/improve_figure_captions.py --analyze -d contents/core/
-python3 scripts/improve_figure_captions.py -a -d contents/core/
+python3 tools/improve_figure_captions.py --analyze -d contents/core/
+python3 tools/improve_figure_captions.py -a -d contents/core/
 
 # Fix formatting issues only (no LLM)
-python3 scripts/improve_figure_captions.py --repair -d contents/core/
-python3 scripts/improve_figure_captions.py -r -d contents/core/
+python3 tools/improve_figure_captions.py --repair -d contents/core/
+python3 tools/improve_figure_captions.py -r -d contents/core/
 ```
 
 ### Development and Debugging
 ```bash
 # Save detailed JSON output for inspection
-python3 scripts/improve_figure_captions.py -d contents/core/ --save-json
+python3 tools/improve_figure_captions.py -d contents/core/ --save-json
 
 # List available Ollama models
-python3 scripts/improve_figure_captions.py --list-models
+python3 tools/improve_figure_captions.py --list-models
 
 # Process single file for testing
-python3 scripts/improve_figure_captions.py -f contents/core/introduction/introduction.qmd -m gemma2:9b
+python3 tools/improve_figure_captions.py -f contents/core/introduction/introduction.qmd -m gemma2:9b
 ```
 
 ## Model Selection Guide
@@ -188,19 +188,19 @@ ollama list
 #### Extraction Failures
 ```bash
 # Analyze extraction issues
-python3 scripts/improve_figure_captions.py --analyze -d contents/core/
+python3 tools/improve_figure_captions.py --analyze -d contents/core/
 
 # Build content map to see details
-python3 scripts/improve_figure_captions.py --build-map -d contents/core/
+python3 tools/improve_figure_captions.py --build-map -d contents/core/
 ```
 
 #### Quality Issues
 ```bash
 # Try different model
-python3 scripts/improve_figure_captions.py -d contents/core/ -m gemma2:9b
+python3 tools/improve_figure_captions.py -d contents/core/ -m gemma2:9b
 
 # Check specific file
-python3 scripts/improve_figure_captions.py -f problematic_file.qmd --save-json
+python3 tools/improve_figure_captions.py -f problematic_file.qmd --save-json
 ```
 
 ### Performance Optimization
@@ -253,7 +253,7 @@ The script works seamlessly with Quarto's build process:
 ### Build Process
 ```bash
 # 1. Improve captions
-python3 scripts/improve_figure_captions.py -d contents/core/
+python3 tools/improve_figure_captions.py -d contents/core/
 
 # 2. Build book normally
 quarto render

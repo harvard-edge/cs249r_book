@@ -9,11 +9,11 @@ The `improve_figure_captions.py` script provides automated caption enhancement u
 
 ```bash
 # Improve all captions (recommended)
-python3 scripts/improve_figure_captions.py -d contents/core/
+python3 tools/improve_figure_captions.py -d contents/core/
 
 # Analysis and utilities
-python3 scripts/improve_figure_captions.py --analyze -d contents/core/
-python3 scripts/improve_figure_captions.py --build-map -d contents/core/
+python3 tools/improve_figure_captions.py --analyze -d contents/core/
+python3 tools/improve_figure_captions.py --build-map -d contents/core/
 ```
 
 📖 **Full documentation**: See [`FIGURE_CAPTIONS.md`](FIGURE_CAPTIONS.md) for complete usage guide, model selection, and troubleshooting.
@@ -52,8 +52,8 @@ The current dependencies include:
 
 Some subdirectories have their own `requirements.txt` files for specific workflows:
 
-- `scripts/genai/requirements.txt` - AI-specific dependencies
-- `scripts/quarto_publish/requirements.txt` - Publishing dependencies
+- `tools/genai/requirements.txt` - AI-specific dependencies
+- `tools/quarto_publish/requirements.txt` - Publishing dependencies
 
 These are kept for reference but the main workflow uses the root `requirements.txt`.
 

@@ -28,9 +28,9 @@ ollama run llama3.1:8b
 ### Quick Command (Recommended)
 ```bash
 # Generate cross-references with explanations using optimal settings
-python3 ./scripts/cross_refs/cross_refs.py \
+python3 ./tools/cross_refs/cross_refs.py \
     -g \
-    -m ./scripts/cross_refs/t5-mlsys-domain-adapted/ \
+    -m ./tools/cross_refs/t5-mlsys-domain-adapted/ \
     -o data/cross_refs.json \
     -d ./contents/core/ \
     -t 0.5 \
@@ -46,13 +46,13 @@ python3 ./scripts/cross_refs/cross_refs.py \
 ### Alternative Thresholds
 ```bash
 # Higher quality, fewer references (92 refs)
-python3 ./scripts/cross_refs/cross_refs.py ... -t 0.6
+python3 ./tools/cross_refs/cross_refs.py ... -t 0.6
 
 # More references, lower quality (294 refs)  
-python3 ./scripts/cross_refs/cross_refs.py ... -t 0.4
+python3 ./tools/cross_refs/cross_refs.py ... -t 0.4
 
 # Very high quality, very few (36 refs)
-python3 ./scripts/cross_refs/cross_refs.py ... -t 0.65
+python3 ./tools/cross_refs/cross_refs.py ... -t 0.65
 ```
 
 ### Expected Output
@@ -67,7 +67,7 @@ python3 ./scripts/cross_refs/cross_refs.py ... -t 0.65
 ### Evaluate with LLM Judges
 ```bash
 # Evaluate sample with Student, TA, Instructor judges
-python3 ./scripts/cross_refs/evaluate_explanations.py \
+python3 ./tools/cross_refs/evaluate_explanations.py \
     data/cross_refs.json \
     --sample 20 \
     --output evaluation_results.json
@@ -130,7 +130,7 @@ If some cross-references don't resolve:
 grep -r "sec-" contents/core/ | head -10
 
 # Regenerate with verbose logging
-python3 ./scripts/cross_refs/cross_refs.py ... --verbose
+python3 ./tools/cross_refs/cross_refs.py ... --verbose
 ```
 
 ### Ollama Connection Issues
@@ -180,7 +180,7 @@ ollama list
 
 ## File Structure
 ```
-scripts/cross_refs/
+tools/cross_refs/
 ├── cross_refs.py              # Main generation script
 ├── evaluate_explanations.py   # LLM judge evaluation
 ├── filters.yml               # Content filtering rules
@@ -208,10 +208,10 @@ lua/
 When content changes significantly:
 ```bash
 # Regenerate cross-references
-python3 ./scripts/cross_refs/cross_refs.py -g ... 
+python3 ./tools/cross_refs/cross_refs.py -g ... 
 
 # Re-evaluate quality
-python3 ./scripts/cross_refs/evaluate_explanations.py ...
+python3 ./tools/cross_refs/evaluate_explanations.py ...
 
 # Test build
 quarto render --to pdf
@@ -224,10 +224,10 @@ When new Ollama models become available:
 ollama run new-model:version
 
 # Test with sample
-python3 ./scripts/cross_refs/cross_refs.py ... --ollama-model new-model:version --sample 10
+python3 ./tools/cross_refs/cross_refs.py ... --ollama-model new-model:version --sample 10
 
 # Evaluate quality difference
-python3 ./scripts/cross_refs/evaluate_explanations.py ...
+python3 ./tools/cross_refs/evaluate_explanations.py ...
 ```
 
 ---
