@@ -9,11 +9,11 @@ The `improve_figure_captions.py` script provides automated caption enhancement u
 
 ```bash
 # Improve all captions (recommended)
-python3 tools/improve_figure_captions.py -d contents/core/
+python3 tools/content/improve_figure_captions.py -d contents/core/
 
 # Analysis and utilities
-python3 tools/improve_figure_captions.py --analyze -d contents/core/
-python3 tools/improve_figure_captions.py --build-map -d contents/core/
+python3 tools/content/improve_figure_captions.py --analyze -d contents/core/
+python3 tools/content/improve_figure_captions.py --build-map -d contents/core/
 ```
 
 📖 **Full documentation**: See [`FIGURE_CAPTIONS.md`](FIGURE_CAPTIONS.md) for complete usage guide, model selection, and troubleshooting.
