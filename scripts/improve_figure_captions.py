@@ -101,7 +101,7 @@ class CaptionQualityChecker:
         pattern = r'^\*\*[^*]+\*\*:\s*.+'
         
         if re.match(pattern, caption.strip()):
-            return True, ""
+        return True, ""
         else:
             return False, "Missing **Bold Title**: format"
     
@@ -447,7 +447,7 @@ class FigureCaptionImprover:
                 word_index += 1
         
         return ''.join(result_tokens)
-
+    
     def format_bold_explanation_caption(self, caption: str) -> str:
         """
         Format caption to ensure proper **bold**: explanation capitalization.
@@ -889,9 +889,9 @@ class FigureCaptionImprover:
                     check_line = lines[j].strip()
                     if check_line.startswith('##') and not check_line.startswith('###'):
                         section_title = re.sub(r'^#+\s*', '', check_line)
-                        section_title = re.sub(r'\s*\{#[^}]+\}.*$', '', section_title)
-                        break
-                
+                    section_title = re.sub(r'\s*\{#[^}]+\}.*$', '', section_title)
+                    break
+            
                 # Extract context around reference (±10 lines, then expand to word boundaries)
                 start_idx = max(0, i - 10)
                 end_idx = min(len(lines), i + 10)
@@ -911,11 +911,11 @@ class FigureCaptionImprover:
                         start_word = max(0, fig_word_pos - 150)
                         end_word = min(len(words), fig_word_pos + 150)
                         context_text = ' '.join(words[start_word:end_word])
-                
-                return {
-                    'title': section_title,
-                    'content': context_text
-                }
+        
+        return {
+            'title': section_title,
+            'content': context_text
+        }
         
         # Ultimate fallback
         return {
@@ -1021,42 +1021,42 @@ Instead, write DIRECT, ACTIVE statements:
         base_delay = 1  # seconds
         
         for attempt in range(max_retries):
-            try:
-                # Prepare the request payload
-                payload = {
-                    "model": self.model_name,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {
+        try:
+            # Prepare the request payload
+            payload = {
+                "model": self.model_name,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
                         "temperature": 0.7,  # Higher temperature for more diverse, creative captions
                         "num_predict": 120,  # Slightly shorter for focused responses
                         "top_p": 0.9        # Add nucleus sampling for better variety
-                    }
                 }
+            }
+            
+            # Add image if provided (for multimodal models)
+            if image_path and os.path.exists(image_path):
+                encoded_image = self.encode_image(image_path)
+                if encoded_image:
+                    payload["images"] = [encoded_image]
+            
+            # Make request to Ollama
+            response = requests.post(
+                "http://localhost:11434/api/generate",
+                json=payload,
+                timeout=60
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                new_caption = result.get('response', '').strip()
                 
-                # Add image if provided (for multimodal models)
-                if image_path and os.path.exists(image_path):
-                    encoded_image = self.encode_image(image_path)
-                    if encoded_image:
-                        payload["images"] = [encoded_image]
+                # Clean up any markdown code blocks
+                if new_caption.startswith('```') and new_caption.endswith('```'):
+                    new_caption = new_caption.strip('`').strip()
+                if new_caption.startswith('json\n'):
+                    new_caption = new_caption[5:].strip()
                 
-                # Make request to Ollama
-                response = requests.post(
-                    "http://localhost:11434/api/generate",
-                    json=payload,
-                    timeout=60
-                )
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    new_caption = result.get('response', '').strip()
-                    
-                    # Clean up any markdown code blocks
-                    if new_caption.startswith('```') and new_caption.endswith('```'):
-                        new_caption = new_caption.strip('`').strip()
-                    if new_caption.startswith('json\n'):
-                        new_caption = new_caption[5:].strip()
-                    
                     # Sanity check: Reject overly long captions (likely hallucination)
                     word_count = len(new_caption.split())
                     if word_count > 100:
@@ -1064,8 +1064,8 @@ Instead, write DIRECT, ACTIVE statements:
                         # Don't retry for long captions - this is a formatting issue, not API error
                         return None
                     
-                    # Validate the format contains **bold**: 
-                    if '**' in new_caption and ':' in new_caption:
+                # Validate the format contains **bold**: 
+                if '**' in new_caption and ':' in new_caption:
                         # Apply comprehensive quality improvements
                         formatted_caption = self.format_bold_explanation_caption(new_caption)
                         improved_caption = self.validate_and_improve_caption(formatted_caption, is_table)
@@ -1077,11 +1077,11 @@ Instead, write DIRECT, ACTIVE statements:
                             return None
                         
                         return improved_caption
-                    else:
-                        print(f"      ⚠️  Generated caption doesn't follow **bold**: format: {new_caption[:100]}")
-                        # Don't retry for format issues - this is a generation problem, not API error
-                        return None
                 else:
+                    print(f"      ⚠️  Generated caption doesn't follow **bold**: format: {new_caption[:100]}")
+                        # Don't retry for format issues - this is a generation problem, not API error
+                    return None
+            else:
                     # API error - this is worth retrying
                     if attempt < max_retries - 1:
                         delay = base_delay * (2 ** attempt)
@@ -1090,9 +1090,9 @@ Instead, write DIRECT, ACTIVE statements:
                         continue
                     else:
                         print(f"      ❌ Ollama API error: {response.status_code} (all {max_retries} attempts failed)")
-                        return None
-                        
-            except requests.exceptions.RequestException as e:
+                return None
+                
+        except requests.exceptions.RequestException as e:
                 # Network/connection error - worth retrying
                 if attempt < max_retries - 1:
                     delay = base_delay * (2 ** attempt)
@@ -1101,8 +1101,8 @@ Instead, write DIRECT, ACTIVE statements:
                     continue
                 else:
                     print(f"      ❌ Request error: {e} (all {max_retries} attempts failed)")
-                    return None
-            except Exception as e:
+            return None
+        except Exception as e:
                 # Unexpected error - worth retrying once but likely a code issue
                 if attempt < max_retries - 1:
                     delay = base_delay * (2 ** attempt)
@@ -1114,7 +1114,7 @@ Instead, write DIRECT, ACTIVE statements:
                     return None
         
         # Should never reach here due to the loop structure, but just in case
-        return None
+            return None
     
     def compile_tikz_to_image(self, tikz_code: str, figure_id: str) -> Optional[str]:
         """Compile TikZ code to a PNG image for multimodal processing."""
@@ -1327,8 +1327,8 @@ Instead, write DIRECT, ACTIVE statements:
                 # Extract the path - handle escaped characters properly
                 path = self._extract_balanced_path(full_text)
                 if path is not None:
-                    return {
-                        'type': 'markdown',
+            return {
+                'type': 'markdown',
                         'caption': caption.strip(),
                         'path': path.strip(),
                         'full_match': full_text,
@@ -1545,8 +1545,8 @@ Instead, write DIRECT, ACTIVE statements:
             Dict with 'caption', 'full_match' or None if not found
         """
         # Try old format first (with leading colon) - this must be checked first to properly strip `: ` prefix
-        pattern_old = rf'^:\s*([^{{\n]+?)\s*\{{[^}}]*#{re.escape(tbl_id)}(?:\s|[^}}])*\}}\s*$'
-        match = re.search(pattern_old, content, re.MULTILINE)
+            pattern_old = rf'^:\s*([^{{\n]+?)\s*\{{[^}}]*#{re.escape(tbl_id)}(?:\s|[^}}])*\}}\s*$'
+            match = re.search(pattern_old, content, re.MULTILINE)
         
         if not match:
             # Fall back to new format (without leading colon) - allow colons in caption text
@@ -1686,7 +1686,7 @@ Instead, write DIRECT, ACTIVE statements:
             if new_caption.startswith(': '):
                 # New caption already has prefix, use as-is
                 formatted_caption = new_caption
-            else:
+        else:
                 # Add the `: ` prefix and ensure it ends with a period
                 if not new_caption.endswith('.'):
                     formatted_caption = f': {new_caption}.'
@@ -1744,8 +1744,8 @@ Instead, write DIRECT, ACTIVE statements:
             return self.update_code_figure(content, fig_id, new_caption)
         else:
             # Fallback to markdown method
-            return self.update_markdown_figure(content, fig_id, new_caption) 
-  
+            return self.update_markdown_figure(content, fig_id, new_caption)
+    
     def print_summary(self) -> None:
         """Print a summary of the processing results."""
         print(f"\n{'='*60}")
@@ -2093,8 +2093,8 @@ Instead, write DIRECT, ACTIVE statements:
             qmd_files = [Path(f) for f in specific_files if f.endswith('.qmd')]
             print(f"📖 Processing {len(qmd_files)} specific QMD files")
         else:
-            qmd_files = self.find_qmd_files_in_order(directories)
-            print(f"📖 Scanning {len(qmd_files)} QMD files in book order")
+        qmd_files = self.find_qmd_files_in_order(directories)
+        print(f"📖 Scanning {len(qmd_files)} QMD files in book order")
         
         content_map = {
             'figures': {},
@@ -2139,81 +2139,81 @@ Instead, write DIRECT, ACTIVE statements:
                 
                 # Process each potential figure ID (unless tables-only mode)
                 if not tables_only:
-                    for fig_id in potential_fig_ids:
-                        try:
-                            fig_def = self.find_figure_definition_in_qmd(content, fig_id)
-                            if fig_def:
+                for fig_id in potential_fig_ids:
+                    try:
+                        fig_def = self.find_figure_definition_in_qmd(content, fig_id)
+                        if fig_def:
                                 # Store original caption as-is from the file
                                 original_caption = fig_def['caption']
-                                
-                                content_map['figures'][fig_id] = {
+                            
+                            content_map['figures'][fig_id] = {
                                     'original_caption': original_caption,
-                                    'new_caption': '',
-                                    'type': fig_def['type'],
-                                    'source_file': qmd_file
-                                }
+                                'new_caption': '',
+                                'type': fig_def['type'],
+                                'source_file': qmd_file
+                            }
+                            
+                            print(f"    ✅ Found figure: {fig_id} ({fig_def['type']})")
+                            file_figures += 1
+                            stats['figures_found'] += 1
+                            
+                            # Count by type
+                            if fig_def['type'] == 'markdown':
+                                stats['markdown_figures'] += 1
+                            elif fig_def['type'] == 'tikz':
+                                stats['tikz_figures'] += 1
+                            elif fig_def['type'] == 'code':
+                                stats['code_figures'] += 1
                                 
-                                print(f"    ✅ Found figure: {fig_id} ({fig_def['type']})")
-                                file_figures += 1
-                                stats['figures_found'] += 1
-                                
-                                # Count by type
-                                if fig_def['type'] == 'markdown':
-                                    stats['markdown_figures'] += 1
-                                elif fig_def['type'] == 'tikz':
-                                    stats['tikz_figures'] += 1
-                                elif fig_def['type'] == 'code':
-                                    stats['code_figures'] += 1
-                                    
-                            else:
-                                print(f"    ⚠️  Failed to extract: {fig_id}")
-                                stats['extraction_failures'] += 1
-                                stats['failed_extractions'].append(fig_id)
-                                if qmd_file not in stats['files_with_issues']:
-                                    stats['files_with_issues'].append(qmd_file)
-                                    
-                        except Exception as e:
-                            print(f"    ❌ Error processing {fig_id}: {e}")
+                        else:
+                            print(f"    ⚠️  Failed to extract: {fig_id}")
                             stats['extraction_failures'] += 1
-                            stats['failed_extractions'].append(fig_id)
+                                stats['failed_extractions'].append(fig_id)
                             if qmd_file not in stats['files_with_issues']:
                                 stats['files_with_issues'].append(qmd_file)
+                                
+                    except Exception as e:
+                        print(f"    ❌ Error processing {fig_id}: {e}")
+                        stats['extraction_failures'] += 1
+                            stats['failed_extractions'].append(fig_id)
+                        if qmd_file not in stats['files_with_issues']:
+                            stats['files_with_issues'].append(qmd_file)
                 else:
                     print(f"    ⏭️  Skipping {len(potential_fig_ids)} figures (tables-only mode)")
                 
                 # Process each potential table ID (unless figures-only mode)
                 if not figures_only:
-                    for tbl_id in potential_tbl_ids:
-                        try:
-                            tbl_def = self.detect_table(content, tbl_id)
-                            if tbl_def:
+                for tbl_id in potential_tbl_ids:
+                    try:
+                        tbl_def = self.detect_table(content, tbl_id)
+                        if tbl_def:
                                 # Store original caption as-is from the file
                                 original_caption = tbl_def['caption']
-                                
-                                content_map['tables'][tbl_id] = {
+                            
+                            content_map['tables'][tbl_id] = {
                                     'original_caption': original_caption,
-                                    'new_caption': '',
-                                    'type': 'table',
-                                    'source_file': qmd_file
-                                }
-                                
-                                print(f"    ✅ Found table: {tbl_id}")
-                                file_tables += 1
-                                stats['tables_found'] += 1
-                                
-                            else:
-                                print(f"    ⚠️  Failed to extract: {tbl_id}")
-                                stats['extraction_failures'] += 1
-                                stats['failed_extractions'].append(tbl_id)
-                                if qmd_file not in stats['files_with_issues']:
-                                    stats['files_with_issues'].append(qmd_file)
-                                    
-                        except Exception as e:
-                            print(f"    ❌ Error processing {tbl_id}: {e}")
+                                'new_caption': '',
+                                'type': 'table',
+                                'source_file': qmd_file
+                            }
+                            
+                            print(f"    ✅ Found table: {tbl_id}")
+                            file_tables += 1
+                            stats['tables_found'] += 1
+                            
+                        else:
+                            print(f"    ⚠️  Failed to extract: {tbl_id}")
                             stats['extraction_failures'] += 1
-                            stats['failed_extractions'].append(tbl_id)
+                                stats['failed_extractions'].append(tbl_id)
                             if qmd_file not in stats['files_with_issues']:
                                 stats['files_with_issues'].append(qmd_file)
+                                
+                    except Exception as e:
+                        print(f"    ❌ Error processing {tbl_id}: {e}")
+                        stats['extraction_failures'] += 1
+                            stats['failed_extractions'].append(tbl_id)
+                        if qmd_file not in stats['files_with_issues']:
+                            stats['files_with_issues'].append(qmd_file)
                 else:
                     print(f"    ⏭️  Skipping {len(potential_tbl_ids)} tables (figures-only mode)")
                 
@@ -2365,9 +2365,9 @@ Instead, write DIRECT, ACTIVE statements:
         """
         try:
             # Read current file content
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
             # Build targeted search pattern based on type
             if item_type == 'figure':
                 old_pattern, new_pattern = self.build_figure_search_patterns(
@@ -2390,12 +2390,12 @@ Instead, write DIRECT, ACTIVE statements:
             new_content = content.replace(old_pattern, new_pattern)
             
             # Write back the file
-            with open(file_path, 'w', encoding='utf-8') as f:
+                    with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(new_content)
             
             return True
-            
-        except Exception as e:
+                    
+            except Exception as e:
             print(f"      ❌ Error in targeted update: {e}")
             return False
     
@@ -2524,36 +2524,36 @@ Instead, write DIRECT, ACTIVE statements:
                     print(f"  📊 Processing figure: {fig_id}")
                     
                     try:
-                        # Extract context around this figure
-                        context = self.extract_section_context(file_content, fig_id)
-                        
-                        # Find image path if it's a markdown figure
-                        image_path = None
-                        if fig_data.get('type') == 'markdown':
-                            # Try to extract image path from the figure definition
-                            image_pattern = rf'!\[[^\]]*\]\(([^)]+)\)[^{{]*{{[^}}]*#{re.escape(fig_id)}'
-                            match = re.search(image_pattern, file_content)
-                            if match:
-                                relative_path = match.group(1)
-                                # Resolve relative to the source file directory
-                                source_dir = Path(source_file).parent
-                                image_path = str(source_dir / relative_path)
-                                if not os.path.exists(image_path):
-                                    image_path = None
-                        
-                        # Generate improved caption
+                # Extract context around this figure
+                context = self.extract_section_context(file_content, fig_id)
+                
+                # Find image path if it's a markdown figure
+                image_path = None
+                if fig_data.get('type') == 'markdown':
+                    # Try to extract image path from the figure definition
+                    image_pattern = rf'!\[[^\]]*\]\(([^)]+)\)[^{{]*{{[^}}]*#{re.escape(fig_id)}'
+                    match = re.search(image_pattern, file_content)
+                    if match:
+                        relative_path = match.group(1)
+                        # Resolve relative to the source file directory
+                        source_dir = Path(source_file).parent
+                        image_path = str(source_dir / relative_path)
+                        if not os.path.exists(image_path):
+                            image_path = None
+                
+                # Generate improved caption
                         current_caption = fig_data.get('original_caption', '')
-                        new_caption = self.generate_caption_with_ollama(
-                            context['title'], 
-                            context['content'], 
-                            fig_id, 
-                            current_caption, 
+                new_caption = self.generate_caption_with_ollama(
+                    context['title'], 
+                    context['content'], 
+                    fig_id, 
+                    current_caption, 
                             image_path,
                             is_table=False
-                        )
-                        
-                        if new_caption and new_caption != current_caption:
-                            fig_data['new_caption'] = new_caption
+                )
+                
+                if new_caption and new_caption != current_caption:
+                    fig_data['new_caption'] = new_caption
                             file_improvements.append({
                                 'id': fig_id,
                                 'type': 'figure',
@@ -2563,33 +2563,33 @@ Instead, write DIRECT, ACTIVE statements:
                             file_improved_count += 1
                             word_count = len(new_caption.split())
                             print(f"    ✅ Improved ({word_count} words): {new_caption[:80]}{'...' if len(new_caption) > 80 else ''}")
-                        else:
-                            print(f"    ⚠️  No improvement generated")
-                            
-                    except Exception as e:
-                        print(f"    ❌ Error processing {fig_id}: {e}")
-                
+                else:
+                    print(f"    ⚠️  No improvement generated")
+                    
+            except Exception as e:
+                print(f"    ❌ Error processing {fig_id}: {e}")
+        
                 # Process all tables in this file
                 for tbl_id, tbl_data in items['tables']:
-                    print(f"  📋 Processing table: {tbl_id}")
-                    
-                    try:
-                        # Extract context around this table
-                        context = self.extract_section_context(file_content, tbl_id)
-                        
-                        # Generate improved caption (no image for tables)
+            print(f"  📋 Processing table: {tbl_id}")
+            
+            try:
+                # Extract context around this table
+                context = self.extract_section_context(file_content, tbl_id)
+                
+                # Generate improved caption (no image for tables)
                         current_caption = tbl_data.get('original_caption', '')
-                        new_caption = self.generate_caption_with_ollama(
-                            context['title'], 
-                            context['content'], 
-                            tbl_id, 
-                            current_caption, 
+                new_caption = self.generate_caption_with_ollama(
+                    context['title'], 
+                    context['content'], 
+                    tbl_id, 
+                    current_caption, 
                             None,  # No image for tables
                             is_table=True
-                        )
-                        
-                        if new_caption and new_caption != current_caption:
-                            tbl_data['new_caption'] = new_caption
+                )
+                
+                if new_caption and new_caption != current_caption:
+                    tbl_data['new_caption'] = new_caption
                             file_improvements.append({
                                 'id': tbl_id,
                                 'type': 'table',
@@ -2599,12 +2599,12 @@ Instead, write DIRECT, ACTIVE statements:
                             file_improved_count += 1
                             word_count = len(new_caption.split())
                             print(f"    ✅ Improved ({word_count} words): {new_caption[:80]}{'...' if len(new_caption) > 80 else ''}")
-                        else:
-                            print(f"    ⚠️  No improvement generated")
-                            
-                    except Exception as e:
-                        print(f"    ❌ Error processing {tbl_id}: {e}")
-                
+                else:
+                    print(f"    ⚠️  No improvement generated")
+                    
+            except Exception as e:
+                print(f"    ❌ Error processing {tbl_id}: {e}")
+        
                 # Immediately update this file if we have improvements
                 if file_improvements:
                     print(f"  ✏️  Updating file with {file_improved_count} improvements...")
@@ -3251,9 +3251,9 @@ Examples:
         return 0 if success else 1
     
     # Validate that we have input files/directories for other operations
-    if not args.files and not args.directories:
+        if not args.files and not args.directories:
         print("❌ Error: --files or --directories required")
-        return 1
+            return 1
     
     # Determine which files/directories to process
     directories = []
@@ -3289,7 +3289,7 @@ Examples:
                 print("✅ Content map building completed!")
                 
                 # Always save JSON for --build-map
-                improver.save_content_map(content_map)
+                    improver.save_content_map(content_map)
                 
                 # Show extraction report
                 stats = content_map['metadata']['extraction_stats']
@@ -3308,8 +3308,8 @@ Examples:
                 print(f"   📋 Tables: {stats['tables_found']} total")
                 print(f"   📁 Files processed: {content_map['metadata']['qmd_files_scanned']}")
                 
-                print(f"\n💾 Content map saved to: content_map.json")
-                print(f"📄 You can now review the complete JSON structure!")
+                    print(f"\n💾 Content map saved to: content_map.json")
+                    print(f"📄 You can now review the complete JSON structure!")
                 
             else:
                 print("❌ Content map building failed!")
@@ -3347,7 +3347,7 @@ Examples:
             if content_map and args.save_json:
                 improver.save_content_map(content_map)
                 print("💾 Repaired content map saved to content_map.json")
-            print("✅ Caption repair completed!")
+                print("✅ Caption repair completed!")
             
         elif args.improve:
             # LLM caption improvement mode (explicit)
@@ -3358,7 +3358,7 @@ Examples:
             if not improved_content_map:
                 return 1
                 
-        else:
+            else:
             # Default: Same as --improve (LLM improvement)
             print("🚀 Improving captions with LLM (default mode)...")
             improved_content_map = improver.complete_caption_improvement_workflow(directories, args.save_json,
