@@ -31,7 +31,7 @@ ollama run llama3.1:8b
 python3 ./tools/cross_refs/cross_refs.py \
     -g \
     -m ./tools/cross_refs/t5-mlsys-domain-adapted/ \
-    -o data/cross_refs.json \
+    -o metadata/cross_refs.json \
     -d ./contents/core/ \
     -t 0.5 \
     --explain \
@@ -59,7 +59,7 @@ python3 ./tools/cross_refs/cross_refs.py ... -t 0.65
 ```
 ✅ Generated 230 cross-references across 18 files.
 📊 Average similarity: 0.591
-📄 Results saved to: data/cross_refs.json
+📄 Results saved to: metadata/cross_refs.json
 ```
 
 ## Step 2: Quality Evaluation (Optional)
@@ -68,7 +68,7 @@ python3 ./tools/cross_refs/cross_refs.py ... -t 0.65
 ```bash
 # Evaluate sample with Student, TA, Instructor judges
 python3 ./tools/cross_refs/evaluate_explanations.py \
-    data/cross_refs.json \
+    metadata/cross_refs.json \
     --sample 20 \
     --output evaluation_results.json
 ```
@@ -85,7 +85,7 @@ python3 ./tools/cross_refs/evaluate_explanations.py \
 Ensure `_quarto.yml` has cross-reference configuration:
 ```yaml
 cross-references:
-  file: "data/cross_refs.json"
+  file: "metadata/cross_refs.json"
   enabled: true
 
 filters:
@@ -187,7 +187,7 @@ tools/cross_refs/
 ├── t5-mlsys-domain-adapted/  # Domain-adapted model
 └── RECIPE.md                 # This documentation
 
-data/
+metadata/
 └── cross_refs.json          # Generated cross-references
 
 lua/
