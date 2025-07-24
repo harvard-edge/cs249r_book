@@ -38,7 +38,7 @@ local function read_summaries(path)
 end
 
 -- ✅ Load summaries once at filter initialization
-local summaries = read_summaries("summaries.yml")
+local summaries = read_summaries("part_summaries.yml")
 
 -- 🧠 Insert \setpartsummary before any heading whose title matches a summary key
 function Header(el)
