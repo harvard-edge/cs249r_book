@@ -1008,7 +1008,7 @@ Instead, write DIRECT, ACTIVE statements:
                     "stream": False,
                     "options": {
                         "temperature": 0.7,  # Higher temperature for more diverse, creative captions
-                        "num_predict": 120,  # Slightly shorter for focused responses
+                        "num_predict": 200,  # Increased for complete responses (was 120)
                         "top_p": 0.9        # Add nucleus sampling for better variety
                     }
                 }
@@ -1038,8 +1038,8 @@ Instead, write DIRECT, ACTIVE statements:
                     
                     # Sanity check: Reject overly long captions (likely hallucination)
                     word_count = len(new_caption.split())
-                    if word_count > 100:
-                        print(f"      ⚠️  Generated caption too long ({word_count} words, max 100): {new_caption[:100]}...")
+                    if word_count > 150:
+                        print(f"      ⚠️  Generated caption too long ({word_count} words, max 150): {new_caption[:100]}...")
                         # Don't retry for long captions - this is a formatting issue, not API error
                         return None
                     
@@ -1051,7 +1051,7 @@ Instead, write DIRECT, ACTIVE statements:
                         
                         # Double-check word count after improvements
                         final_word_count = len(improved_caption.split())
-                        if final_word_count > 100:
+                        if final_word_count > 150:
                             print(f"      ⚠️  Improved caption too long ({final_word_count} words): {improved_caption[:100]}...")
                             return None
                         
@@ -2934,7 +2934,7 @@ Instead, write DIRECT, ACTIVE statements:
                             })
                             file_improved_count += 1
                             word_count = len(new_caption.split())
-                            print(f"    ✅ Improved ({word_count} words): {new_caption[:80]}{'...' if len(new_caption) > 80 else ''}")
+                            print(f"    ✅ Improved ({word_count} words): {new_caption[:120]}{'...' if len(new_caption) > 120 else ''}")
                         else:
                             print(f"    ⚠️  No improvement generated")
                             
@@ -2970,7 +2970,7 @@ Instead, write DIRECT, ACTIVE statements:
                             })
                             file_improved_count += 1
                             word_count = len(new_caption.split())
-                            print(f"    ✅ Improved ({word_count} words): {new_caption[:80]}{'...' if len(new_caption) > 80 else ''}")
+                            print(f"    ✅ Improved ({word_count} words): {new_caption[:120]}{'...' if len(new_caption) > 120 else ''}")
                         else:
                             print(f"    ⚠️  No improvement generated")
                             
@@ -3018,7 +3018,7 @@ Instead, write DIRECT, ACTIVE statements:
                             })
                             file_improved_count += 1
                             word_count = len(new_caption.split())
-                            print(f"    ✅ Improved ({word_count} words): {new_caption[:80]}{'...' if len(new_caption) > 80 else ''}")
+                            print(f"    ✅ Improved ({word_count} words): {new_caption[:120]}{'...' if len(new_caption) > 120 else ''}")
                         else:
                             print(f"    ⚠️  No improvement generated")
                             
