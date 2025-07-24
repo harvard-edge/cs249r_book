@@ -92,10 +92,19 @@ class CaptionQualityChecker:
     def _check_bold_pattern(self, caption: str) -> Tuple[bool, str]:
         """Check if caption follows **Concept**: explanation pattern."""
         if not caption:
-            return True, ""
+            return False, "Empty caption"
         
-        # This is optional - some captions might not need bold pattern
-        # For now, we'll be lenient and not require it
+        caption = caption.strip()
+        
+        # Check for **Bold**: explanation pattern
+        bold_pattern = r'^\*\*[^*]+\*\*:'
+        if not re.match(bold_pattern, caption):
+            return False, "Missing **Bold**: explanation format"
+        
+        # Check minimum length even with format
+        if len(caption) < 20:
+            return False, "Too short even with proper format"
+        
         return True, ""
     
     def _check_formatting(self, caption: str) -> Tuple[bool, str]:
@@ -331,12 +340,23 @@ class FigureCaptionImprover:
         return caption
 
     def normalize_caption_case(self, caption: str) -> str:
-        """Normalize caption case using proper English title case."""
+        """Normalize caption case using proper sentence case for technical content."""
         if not caption:
             return caption
         
-        # Use titlecase library for proper English title case
-        return titlecase(caption)
+        # Check if this follows **Bold**: explanation format
+        bold_pattern = r'^(\*\*[^*]+\*\*:\s*)(.+)$'
+        match = re.match(bold_pattern, caption.strip())
+        
+        if match:
+            # Only apply sentence case to the explanation part after the colon
+            bold_part = match.group(1)  # **Bold**: 
+            explanation_part = match.group(2)  # explanation text
+            fixed_explanation = self.apply_sentence_case(explanation_part)
+            return bold_part + fixed_explanation
+        else:
+            # Apply sentence case to entire caption if not in **Bold**: format
+            return self.apply_sentence_case(caption)
     
     def apply_sentence_case(self, text: str) -> str:
         """
@@ -788,20 +808,28 @@ class FigureCaptionImprover:
     
     def generate_caption_with_ollama(self, section_title: str, section_text: str, 
                                    figure_id: str, current_caption: str, 
-                                   image_path: Optional[str] = None, is_table: bool = False) -> Optional[str]:
+                                   image_path: Optional[str] = None, is_table: bool = False,
+                                   is_listing: bool = False, code_content: Optional[str] = None) -> Optional[str]:
         """Generate improved caption using Ollama multimodal model with retry logic."""
         import time
         
         # Construct a focused, context-aware prompt
-        prompt = f"""You are an expert at editing a caption for a visual (figure or table) in a technical AI/ML systems textbook.
+        content_type = "code listing" if is_listing else "visual (figure or table)"
+        
+        prompt = f"""You are an expert at editing a caption for a {content_type} in a technical AI/ML systems textbook.
 
-Your task is to improve the caption so that it *teaches*. The goal is to help students understand what the visual conveys in the context of machine learning systems.
+Your task is to improve the caption so that it *teaches*. The goal is to help students understand what the {"code demonstrates or implements" if is_listing else "visual conveys"} in the context of machine learning systems.
 
 SECTION: {section_title}  
 ORIGINAL CAPTION: {current_caption}  
 
 TEXTBOOK CONTEXT (for reference):
 {section_text[:1500]}
+
+{f'''CODE CONTENT:
+{code_content[:1500] if code_content else "No code content provided"}
+
+''' if is_listing else ""}
 
 🧠 TASK: Rewrite the caption to make it educational, precise, and aligned with the visual's teaching purpose.
 
@@ -1115,10 +1143,12 @@ Instead, write DIRECT, ACTIVE statements:
         """
         Unified figure detection across all supported formats.
         
-        Tries each detection method in order:
-        1. Code-generated figures (most specific)
-        2. TikZ/Div figures 
-        3. Standard markdown figures
+        Detects 4 types of figures in order of specificity:
+        1. Code-generated figures: ```{r|python} #| label: fig-id #| fig-cap: "caption" ...
+        2. TikZ/Div figures: ::: {#fig-id} ```{.tikz} ... ``` caption :::
+        3. Markdown figures: ![caption](path){#fig-id}
+        
+        Note: R figures are detected as 'code' type with language='r'
         
         Args:
             content: QMD file content
@@ -1128,7 +1158,13 @@ Instead, write DIRECT, ACTIVE statements:
             Dict with type-specific information or None if not found
         """
         # Try each detection method in order of specificity
-        for detector in [self.detect_code_figure, self.detect_tikz_figure, self.detect_markdown_figure]:
+        detectors = [
+            self.detect_code_figure, 
+            self.detect_tikz_figure,
+            self.detect_markdown_figure
+        ]
+        
+        for detector in detectors:
             result = detector(content, fig_id)
             if result:
                 return result
@@ -1136,144 +1172,119 @@ Instead, write DIRECT, ACTIVE statements:
     
     def detect_markdown_figure(self, content: str, fig_id: str) -> Optional[Dict[str, str]]:
         """
-        Detect standard markdown figures.
+        Detect standard markdown figures with precise pattern matching.
         
-        Format: ![caption](path){#fig-id}
+        Required format: ![caption](image_path){#fig-id optional-attributes}
         
-        Examples:
-            ![AI timeline](images/ai-timeline.png){#fig-ai-timeline}
-            ![Complex caption with [citations]](path.png){width=80% #fig-id}
-            ![Caption](path.png){#fig-id width=80% height=60%}
+        Examples from the codebase:
+            ![Simple caption](images/example.png){#fig-example}
+            ![**Bold Caption**: Description](./images/png/file.png){#fig-example}
+            ![Caption with [citation]](path.jpg){#fig-example width=40%}
+            ![Caption](images/file.png){#fig-example width=95% fig-pos='H'}
         
         Args:
             content: QMD file content
-            fig_id: Full figure ID (e.g., "fig-ai-timeline")
+            fig_id: Full figure ID (e.g., "fig-example")
             
         Returns:
             Dict with 'caption', 'path', 'full_match' or None if not found
         """
-        # Enhanced pattern: Handle nested brackets in captions like [Source](url)
-        # We need to balance brackets properly for captions containing citations
+        # Precise pattern based on actual codebase format:
+        # ![caption](path){#fig-id optional-attributes}
+        # Handle nested brackets in captions and ensure exact ID match
+        escaped_fig_id = re.escape(fig_id)
+        pattern = rf'!\[((?:[^\[\]]|\[[^\]]*\])*)\]\(([^)]+)\)\s*\{{\s*#{escaped_fig_id}(?=\s|}})[^}}]*\}}'
         
-        # First, find the start of our figure pattern
-        start_pattern = rf'!\['
-        id_pattern = rf'\s*\{{[^}}]*#{re.escape(fig_id)}(?:\s|[^}}])*\}}'
-        
-        # Use a more sophisticated approach to extract the caption
-        # Look for the pattern and then parse it properly
-        simple_pattern = rf'!\[.*?\]\([^)]+\)\s*\{{[^}}]*#{re.escape(fig_id)}(?:\s|[^}}])*\}}'
-        rough_match = re.search(simple_pattern, content, re.MULTILINE)
-        
-        if rough_match:
-            full_text = rough_match.group(0)
-            # Now carefully extract the caption and path
-            # Find the balanced caption between ![...] 
-            caption = self._extract_balanced_caption(full_text)
-            if caption is not None:
-                # Extract the path - handle escaped characters properly
-                path = self._extract_balanced_path(full_text)
-                if path is not None:
-                    return {
-                        'type': 'markdown',
-                        'caption': caption.strip(),
-                        'path': path.strip(),
-                        'full_match': full_text,
-                        'start': rough_match.start(),
-                        'end': rough_match.end()
-                    }
-        
-        return None
-        
-    def _extract_balanced_caption(self, figure_text: str) -> Optional[str]:
-        """
-        Extract caption from ![caption] handling nested [brackets](links).
-        
-        Args:
-            figure_text: The full figure markdown text starting with ![
-            
-        Returns:
-            The caption text or None if parsing fails
-        """
-        if not figure_text.startswith('!['):
+        match = re.search(pattern, content, re.MULTILINE)
+        if not match:
             return None
             
-        # Start after ![
-        pos = 2
-        bracket_count = 0
-        caption_end = None
+        caption = match.group(1).strip()
+        path = match.group(2).strip()
+        full_text = match.group(0)
         
-        # Walk through the text, counting brackets
-        for i in range(pos, len(figure_text)):
-            char = figure_text[i]
-            if char == '[':
-                bracket_count += 1
-            elif char == ']':
-                if bracket_count == 0:
-                    # This is the closing ] for the main caption
-                    caption_end = i
-                    break
-                else:
-                    bracket_count -= 1
+        return {
+            'type': 'markdown',
+            'caption': caption,
+            'path': path,
+            'full_match': full_text,
+            'start': match.start(),
+            'end': match.end()
+        }
         
-        if caption_end is not None:
-            return figure_text[2:caption_end]  # Skip ![ and get text before ]
-        
-        return None
-    
-    def _extract_balanced_path(self, figure_text: str) -> Optional[str]:
+    def detect_r_figure(self, content: str, fig_id: str) -> Optional[Dict[str, str]]:
         """
-        Extract path from ](path) handling escaped characters like \\(partially\\).
+        Detect R code block figures with labels and fig-cap.
+        
+        Required format:
+            ```{r}
+            #| label: fig-id
+            #| fig-cap: "Caption text"
+            #| echo: false  (optional)
+            ... R code ...
+            ```
+        
+        Examples from the codebase:
+            ```{r}
+            #| label: fig-imagenet-challenge
+            #| fig-cap: "ImageNet accuracy improvements over the years."
+            #| echo: false
+            ... R plotting code ...
+            ```
         
         Args:
-            figure_text: The full figure markdown text
+            content: QMD file content
+            fig_id: Full figure ID (e.g., "fig-imagenet-challenge")
             
         Returns:
-            The path text or None if parsing fails
+            Dict with 'caption', 'r_code', 'full_match' or None if not found
         """
-        # Find the ]( that starts the path
-        path_start_pattern = r'\]\('
-        path_start_match = re.search(path_start_pattern, figure_text)
-        if not path_start_match:
-            return None
+        # Pattern to match R code blocks with specific label and fig-cap
+        # Handle both quoted and unquoted fig-cap values
+        escaped_fig_id = re.escape(fig_id)
         
-        # Start after ](
-        start_pos = path_start_match.end()
-        pos = start_pos
-        path_end = None
+        # Try pattern with label first, then fig-cap (with or without quotes)
+        pattern = rf'```\{{r\}}(.*?)#\|\s*label:\s*{escaped_fig_id}\s*\n(.*?)#\|\s*fig-cap:\s*(?:["\']([^"\']*)["\']|([^\n]*))([^`]*?)```'
         
-        # Walk through characters, handling escapes
-        while pos < len(figure_text):
-            char = figure_text[pos]
-            
-            if char == '\\':
-                # Skip the escaped character
-                pos += 2  # Skip both \ and the next character
-                continue
-            elif char == ')':
-                # Found the closing )
-                path_end = pos
-                break
+        match = re.search(pattern, content, re.DOTALL)
+        if match:
+            # Extract caption from either quoted (group 3) or unquoted (group 4)
+            caption = (match.group(3) or match.group(4) or '').strip()
+        else:
+            # Try alternative pattern where fig-cap comes before label
+            pattern = rf'```\{{r\}}(.*?)#\|\s*fig-cap:\s*(?:["\']([^"\']*)["\']|([^\n]*?))\s*\n(.*?)#\|\s*label:\s*{escaped_fig_id}([^`]*?)```'
+            match = re.search(pattern, content, re.DOTALL)
+            if match:
+                # Extract caption from either quoted (group 2) or unquoted (group 3)
+                caption = (match.group(2) or match.group(3) or '').strip()
             else:
-                pos += 1
+                return None
         
-        if path_end is not None:
-            return figure_text[start_pos:path_end]
+        # Extract the full R code
+        r_code = match.group(0)[7:-3]  # Remove ```{r} and ``` wrappers
         
-        return None
+        return {
+            'type': 'r',
+            'caption': caption,
+            'r_code': r_code.strip(),
+            'full_match': match.group(0),
+            'start': match.start(),
+            'end': match.end()
+        }
     
     def detect_tikz_figure(self, content: str, fig_id: str) -> Optional[Dict[str, str]]:
         """
-        Detect TikZ/Div block figures.
+        Detect TikZ/Div block figures with robust structure matching.
         
-        Format: 
-            ::: {#fig-id}
+        Required structure: 
+            ::: {attributes with #fig-id}
             ```{.tikz}
             % TikZ code here
             ```
             Caption text here
             :::
         
-        Examples:
+        Examples from the codebase:
             ::: {#fig-neural-network}
             ::: {width=80% #fig-neural-network}
             ::: {#fig-neural-network .column-margin}
@@ -1285,34 +1296,39 @@ Instead, write DIRECT, ACTIVE statements:
         Returns:
             Dict with 'caption', 'tikz_code', 'full_match' or None if not found
         """
-        # More flexible pattern: fig-id can be anywhere in the attributes
-        pattern = rf':::\s*\{{[^}}]*#{re.escape(fig_id)}(?:\s|[^}}])*\}}(.*?):::'
-        match = re.search(pattern, content, re.DOTALL)
+        # Robust pattern: Must have div block with EXACT fig-id AND tikz code block
+        # This ensures we only match actual TikZ figures, not other div blocks
+        pattern = rf':::\s*\{{[^}}]*#{re.escape(fig_id)}(?=\s|[}}])[^}}]*\}}\s*\n(.*?):::'
         
-        if match:
-            div_content = match.group(1)
+        match = re.search(pattern, content, re.DOTALL)
+        if not match:
+            return None
             
-            # Extract TikZ code block
-            tikz_match = re.search(r'```\{\.tikz\}(.*?)```', div_content, re.DOTALL)
-            tikz_code = tikz_match.group(1).strip() if tikz_match else ""
+        div_content = match.group(1)
+        
+        # Verify this actually contains a TikZ code block
+        tikz_match = re.search(r'```\s*\{\.tikz\}\s*(.*?)\s*```', div_content, re.DOTALL)
+        if not tikz_match:
+            return None  # Not a TikZ figure if no tikz code block
             
-            # Extract caption (usually the last text line before :::)
-            lines = [line.strip() for line in div_content.split('\n') if line.strip()]
-            caption = ""
-            for line in reversed(lines):
-                if line and not line.startswith('\\') and not line.startswith('```'):
-                    caption = line
-                    break
-            
-            return {
-                'type': 'tikz',
-                'caption': caption,
-                'tikz_code': tikz_code,
-                'full_match': match.group(0),
-                'start': match.start(),
-                'end': match.end()
-            }
-        return None
+        tikz_code = tikz_match.group(1).strip()
+        
+        # Extract caption: text after the tikz block but before :::
+        tikz_end = tikz_match.end()
+        caption_text = div_content[tikz_end:].strip()
+        
+        # Clean up caption - remove empty lines and trailing whitespace
+        caption_lines = [line.strip() for line in caption_text.split('\n') if line.strip()]
+        caption = ' '.join(caption_lines) if caption_lines else ""
+        
+        return {
+            'type': 'tikz',
+            'caption': caption,
+            'tikz_code': tikz_code,
+            'full_match': match.group(0),
+            'start': match.start(),
+            'end': match.end()
+        }
     
     def detect_code_figure(self, content: str, fig_id: str) -> Optional[Dict[str, str]]:
         """
@@ -1353,10 +1369,17 @@ Instead, write DIRECT, ACTIVE statements:
             language = match.group(1)
             code_block = match.group(2)
             
-            # Extract fig-cap from the code block
-            cap_pattern = r'#\|\s*fig-cap:\s*["\']?([^"\'\n]+)["\']?'
-            cap_match = re.search(cap_pattern, code_block)
-            caption = cap_match.group(1).strip() if cap_match else ""
+            # Extract fig-cap from the code block (handle both quoted and unquoted)
+            # Generic regex based on actual codebase patterns:
+            # - Quoted: #| fig-cap: "Caption text"
+            # - Unquoted: #| fig-cap: Caption text  
+            cap_pattern = r'#\|\s*fig-cap:\s*(?:"([^"]*)"|(.+))$'
+            cap_match = re.search(cap_pattern, code_block, re.MULTILINE)
+            if cap_match:
+                # Group 1: quoted caption, Group 2: unquoted caption
+                caption = (cap_match.group(1) or cap_match.group(2) or '').strip()
+            else:
+                caption = ""
             
             return {
                 'type': 'code',
@@ -1590,7 +1613,7 @@ Instead, write DIRECT, ACTIVE statements:
             return self.update_code_figure(content, fig_id, new_caption)
         else:
             # Fallback to markdown method
-            return self.update_markdown_figure(content, fig_id, new_caption) 
+            return self.update_markdown_figure(content, fig_id, new_caption)
   
     def print_summary(self) -> None:
         """Print a summary of the processing results."""
@@ -1848,7 +1871,7 @@ Instead, write DIRECT, ACTIVE statements:
         else:
             print(f"\n✅ All captions look good!")
     
-    def repair_captions(self, directories: List[str], figures_only: bool = False, tables_only: bool = False):
+    def repair_captions(self, directories: List[str], figures_only: bool = False, tables_only: bool = False, specific_files: List[str] = None):
         """
         Repair only captions that need fixing.
         
@@ -1866,11 +1889,14 @@ Instead, write DIRECT, ACTIVE statements:
             return {}
         
         # Build content map with filtering
-        content_map = self.build_content_map_from_qmd(directories, figures_only=figures_only, tables_only=tables_only)
+        content_map = self.build_content_map_from_qmd(directories, figures_only=figures_only, tables_only=tables_only, specific_files=specific_files)
+        
+        # Check caption quality once using the existing content map
+        quality_report = self.check_caption_quality(directories, figures_only=figures_only, tables_only=tables_only, content_map=content_map)
         
         # Create repair list - only items that need fixing
         repair_items = []
-        for issue_item in self.check_caption_quality(directories, figures_only=figures_only, tables_only=tables_only)['detailed_issues']:
+        for issue_item in quality_report['detailed_issues']:
             item_id = issue_item['id']
             item_type = issue_item['type']
             
@@ -1879,9 +1905,60 @@ Instead, write DIRECT, ACTIVE statements:
             elif item_type == 'table' and item_id in content_map.get('tables', {}):
                 repair_items.append(('table', item_id, content_map['tables'][item_id]))
         
-        # Apply basic fixes (punctuation, capitalization)
-        fixed_count = 0
+        # If no repairs needed, exit early
+        if not repair_items:
+            print("✅ No captions need repair!")
+            return content_map
+        
+        # Separate items by fix type and show preview
+        basic_fixes = []
+        llm_fixes = []
+        
+        print(f"\n📋 Found {len(repair_items)} captions that need repair:")
+        print("=" * 60)
+        
         for item_type, item_id, item_data in repair_items:
+            # Check what type of issues this item has (from existing report)
+            issues = []
+            issue_descriptions = []
+            for issue_item in quality_report['detailed_issues']:
+                if issue_item['id'] == item_id:
+                    issues = [issue['type'] for issue in issue_item['issues']]
+                    issue_descriptions = [issue['description'] for issue in issue_item['issues']]
+                    break
+            
+            # Determine fix type and icon
+            if 'missing_bold_pattern' in issues:
+                llm_fixes.append((item_type, item_id, item_data))
+                icon = "🤖"  # LLM fix needed
+                fix_type = "LLM regeneration"
+            else:
+                basic_fixes.append((item_type, item_id, item_data))
+                icon = "🔧"  # Basic fix
+                fix_type = "Basic formatting"
+            
+            # Show preview
+            type_icon = "📊" if item_type == "figure" else "📋"
+            source_file = item_data.get('source_file', 'unknown')
+            current_caption = item_data.get('current_caption', '')[:50] + "..." if len(item_data.get('current_caption', '')) > 50 else item_data.get('current_caption', '')
+            
+            print(f"{icon} {type_icon} {item_id}")
+            print(f"   File: {source_file}")
+            print(f"   Current: {current_caption}")
+            print(f"   Issues: {', '.join(issue_descriptions)}")
+            print(f"   Fix: {fix_type}")
+            print()
+        
+        print(f"🔧 Basic fixes: {len(basic_fixes)} items")
+        print(f"🤖 LLM fixes: {len(llm_fixes)} items")
+        print("=" * 60)
+        print("🚀 Starting repairs...\n")
+        
+        fixed_count = 0
+        
+        # Apply basic normalization fixes
+        for item_type, item_id, item_data in basic_fixes:
+            print(f"🔧 Processing {item_id}...", end="")
             current_caption = item_data.get('current_caption', '')
             
             # Apply normalization fixes
@@ -1892,8 +1969,17 @@ Instead, write DIRECT, ACTIVE statements:
             if fixed_caption != current_caption:
                 item_data['new_caption'] = fixed_caption
                 item_data['current_caption'] = fixed_caption  # Update current_caption too
-                print(f"🔧 {item_id}: '{current_caption}' → '{fixed_caption}'")
+                print(f" ✅")
                 fixed_count += 1
+            else:
+                print(f" 🔄 (no change needed)")
+        
+        
+        # Apply LLM fixes for missing **Bold**: format
+        if llm_fixes:
+            print(f"🤖 Generating properly formatted captions for {len(llm_fixes)} items...")
+            llm_fixed = self._apply_llm_repairs(llm_fixes, content_map)
+            fixed_count += llm_fixed
         
         if fixed_count > 0:
             # Save updated content map
@@ -1901,9 +1987,93 @@ Instead, write DIRECT, ACTIVE statements:
             
             # Update QMD files
             self.process_qmd_files(directories, content_map)
-            print(f"✅ Repaired {fixed_count} captions")
+            
+            # Show summary of what was changed
+            print("\n" + "=" * 60)
+            print(f"✅ Successfully repaired {fixed_count} captions!")
+            print(f"🔧 Basic fixes: {len([f for f in basic_fixes if f[2].get('new_caption')])}")
+            print(f"🤖 LLM fixes: {len([f for f in llm_fixes if f[2].get('new_caption')])}")
+            print("💾 Content map saved to content_map.json")
+            print("📝 Check git diff to see what changed in the QMD files")
+            print("=" * 60)
         else:
-            print("ℹ️  No automatic repairs possible. Manual review may be needed.")
+            print("\n✅ No automatic repairs needed!")
+    
+    def _apply_llm_repairs(self, llm_fixes, content_map):
+        """Apply LLM-based repairs for captions missing **Bold**: format."""
+        fixed_count = 0
+        
+        for item_type, item_id, item_data in llm_fixes:
+            print(f"🤖 Generating caption for {item_id}...", end="")
+            try:
+                source_file = item_data.get('source_file')
+                if not source_file:
+                    print(f" ❌ (no source file)")
+                    continue
+                
+                # Read file content for context extraction
+                with open(source_file, 'r', encoding='utf-8') as f:
+                    file_content = f.read()
+                
+                # Extract context around this item
+                context = self.extract_section_context(file_content, item_id)
+                current_caption = item_data.get('current_caption', '')
+                
+                # Generate improved caption with appropriate parameters
+                if item_type == 'figure':
+                    # Check if it's a markdown figure for image path
+                    image_path = None
+                    if item_data.get('type') == 'markdown':
+                        image_pattern = rf'!\[[^\]]*\]\(([^)]+)\)[^{{]*{{[^}}]*#{re.escape(item_id)}'
+                        match = re.search(image_pattern, file_content)
+                        if match:
+                            relative_path = match.group(1)
+                            source_dir = Path(source_file).parent
+                            image_path = str(source_dir / relative_path)
+                            if not os.path.exists(image_path):
+                                image_path = None
+                    
+                    new_caption = self.generate_caption_with_ollama(
+                        context['title'], context['content'], item_id, current_caption,
+                        image_path, is_table=False
+                    )
+                    
+                elif item_type == 'table':
+                    new_caption = self.generate_caption_with_ollama(
+                        context['title'], context['content'], item_id, current_caption,
+                        None, is_table=True
+                    )
+                    
+                elif item_type == 'listing':
+                    # Get code content for listings
+                    code_content = ""
+                    lst_def = self.find_listing_definition_in_qmd(file_content, item_id)
+                    if lst_def:
+                        code_pattern = r'```[^`]*```'
+                        code_match = re.search(code_pattern, lst_def['full_text'], re.DOTALL)
+                        if code_match:
+                            code_content = code_match.group(0)
+                    
+                    new_caption = self.generate_caption_with_ollama(
+                        context['title'], context['content'], item_id, current_caption,
+                        None, is_table=False, is_listing=True, code_content=code_content
+                    )
+                else:
+                    continue
+                
+                if new_caption and new_caption != current_caption:
+                    item_data['new_caption'] = new_caption
+                    item_data['current_caption'] = new_caption
+                    word_count = len(new_caption.split())
+                    print(f" ✅ ({word_count} words)")
+                    fixed_count += 1
+                else:
+                    print(f" 🔄 (no improvement)")
+                    
+            except Exception as e:
+                print(f" ❌ (error: {str(e)[:50]}...)")
+        
+        return fixed_count
 
     # ================================================================
     # QMD-FOCUSED CONTENT MAP BUILDING
@@ -1931,11 +2101,12 @@ Instead, write DIRECT, ACTIVE statements:
         """
         print(f"📄 Building content map from QMD files...")
         
-        # Check for commented chapters first
-        commented_issues = self.check_commented_chapters_in_directories(directories)
-        should_halt = self.print_commented_chapter_issues(commented_issues)
-        if should_halt:
-            return {}
+        # Check for commented chapters first (only if processing directories, not specific files)
+        if not specific_files and directories:
+            commented_issues = self.check_commented_chapters_in_directories(directories)
+            should_halt = self.print_commented_chapter_issues(commented_issues)
+            if should_halt:
+                return {}
         
         # Get QMD files - use specific files if provided, otherwise scan directories
         if specific_files:
@@ -1948,6 +2119,7 @@ Instead, write DIRECT, ACTIVE statements:
         content_map = {
             'figures': {},
             'tables': {},
+            'listings': {},
             'metadata': {
                 'creation_time': datetime.now().isoformat(),
                 'source': 'qmd_direct_scan',
@@ -1956,8 +2128,10 @@ Instead, write DIRECT, ACTIVE statements:
                 'extraction_stats': {
                     'figures_found': 0,
                     'tables_found': 0,
+                    'listings_found': 0,
                     'markdown_figures': 0,
                     'tikz_figures': 0, 
+                    'r_figures': 0,
                     'code_figures': 0,
                     'extraction_failures': 0,
                     'failed_extractions': [],
@@ -1977,14 +2151,26 @@ Instead, write DIRECT, ACTIVE statements:
                 
                 file_figures = 0
                 file_tables = 0
+                file_listings = 0
                 
                 # Find all potential figure IDs in the content using regex
-                fig_id_pattern = r'#(fig-[a-zA-Z0-9_-]+)'
-                potential_fig_ids = set(re.findall(fig_id_pattern, content))
+                # Pattern matches both {#fig-id} and #| label: fig-id formats
+                fig_id_pattern = r'(?:#\|\s*label:\s*(fig-[a-zA-Z0-9_-]+)|#(fig-[a-zA-Z0-9_-]+))'
+                matches = re.findall(fig_id_pattern, content)
+                # Extract non-empty matches (either group 1 or group 2)
+                potential_fig_ids = set()
+                for match in matches:
+                    fig_id = match[0] or match[1]  # Get non-empty group
+                    if fig_id:
+                        potential_fig_ids.add(fig_id)
                 
                 # Find all potential table IDs
                 tbl_id_pattern = r'#(tbl-[a-zA-Z0-9_-]+)'
                 potential_tbl_ids = set(re.findall(tbl_id_pattern, content))
+                
+                # Find all potential listing IDs  
+                lst_id_pattern = r'#\|\s*lst-label:\s*(lst-[a-zA-Z0-9_-]+)'
+                potential_lst_ids = set(re.findall(lst_id_pattern, content))
                 
                 # Process each potential figure ID (unless tables-only mode)
                 if not tables_only:
@@ -1997,6 +2183,7 @@ Instead, write DIRECT, ACTIVE statements:
                                 
                                 content_map['figures'][fig_id] = {
                                     'original_caption': original_caption,
+                                    'current_caption': original_caption,  # Set current_caption for quality analysis
                                     'new_caption': '',
                                     'type': fig_def['type'],
                                     'source_file': qmd_file
@@ -2011,8 +2198,14 @@ Instead, write DIRECT, ACTIVE statements:
                                     stats['markdown_figures'] += 1
                                 elif fig_def['type'] == 'tikz':
                                     stats['tikz_figures'] += 1
+                                elif fig_def['type'] == 'r':
+                                    stats['r_figures'] += 1
                                 elif fig_def['type'] == 'code':
-                                    stats['code_figures'] += 1
+                                    # Distinguish R figures from other code figures
+                                    if fig_def.get('language') == 'r':
+                                        stats['r_figures'] += 1
+                                    else:
+                                        stats['code_figures'] += 1
                                     
                             else:
                                 print(f"    ⚠️  Failed to extract: {fig_id}")
@@ -2041,6 +2234,7 @@ Instead, write DIRECT, ACTIVE statements:
                                 
                                 content_map['tables'][tbl_id] = {
                                     'original_caption': original_caption,
+                                    'current_caption': original_caption,  # Set current_caption for quality analysis
                                     'new_caption': '',
                                     'type': 'table',
                                     'source_file': qmd_file
@@ -2066,9 +2260,47 @@ Instead, write DIRECT, ACTIVE statements:
                 else:
                     print(f"    ⏭️  Skipping {len(potential_tbl_ids)} tables (figures-only mode)")
                 
+                # Process each potential listing ID (unless in restrictive mode)
+                if not figures_only and not tables_only:
+                    for lst_id in potential_lst_ids:
+                        try:
+                            lst_def = self.find_listing_definition_in_qmd(content, lst_id)
+                            if lst_def:
+                                # Store original caption as-is from the file
+                                original_caption = lst_def['caption']
+                                
+                                content_map['listings'][lst_id] = {
+                                    'original_caption': original_caption,
+                                    'current_caption': original_caption,  # Set current_caption for quality analysis
+                                    'new_caption': '',
+                                    'type': 'listing',
+                                    'language': lst_def.get('language', ''),
+                                    'source_file': qmd_file
+                                }
+                                
+                                print(f"    ✅ Found listing: {lst_id} ({lst_def.get('language', 'unknown')})")
+                                file_listings += 1
+                                stats['listings_found'] += 1
+                                
+                            else:
+                                print(f"    ⚠️  Failed to extract: {lst_id}")
+                                stats['extraction_failures'] += 1
+                                stats['failed_extractions'].append(lst_id)
+                                if qmd_file not in stats['files_with_issues']:
+                                    stats['files_with_issues'].append(qmd_file)
+                                    
+                        except Exception as e:
+                            print(f"    ❌ Error processing {lst_id}: {e}")
+                            stats['extraction_failures'] += 1
+                            stats['failed_extractions'].append(lst_id)
+                            if qmd_file not in stats['files_with_issues']:
+                                stats['files_with_issues'].append(qmd_file)
+                else:
+                    print(f"    ⏭️  Skipping {len(potential_lst_ids)} listings (restrictive mode)")
+                
                 # Summary for this file
-                if file_figures > 0 or file_tables > 0:
-                    print(f"    📊 File summary: {file_figures} figures, {file_tables} tables")
+                if file_figures > 0 or file_tables > 0 or file_listings > 0:
+                    print(f"    📊 File summary: {file_figures} figures, {file_tables} tables, {file_listings} listings")
                     
             except Exception as e:
                 print(f"  ❌ Error reading {qmd_file}: {e}")
@@ -2080,9 +2312,11 @@ Instead, write DIRECT, ACTIVE statements:
         print(f"\n📊 QMD EXTRACTION SUMMARY:")
         print(f"   📊 Figures: {stats['figures_found']} found")
         print(f"      • Markdown: {stats['markdown_figures']}")
-        print(f"      • TikZ: {stats['tikz_figures']}") 
+        print(f"      • TikZ: {stats['tikz_figures']}")
+        print(f"      • R: {stats['r_figures']}")
         print(f"      • Code: {stats['code_figures']}")
         print(f"   📋 Tables: {stats['tables_found']} found")
+        print(f"   📝 Listings: {stats['listings_found']} found")
         print(f"   ⚠️  Extraction failures: {stats['extraction_failures']}")
         
         # Show specific failed extractions
@@ -2099,8 +2333,8 @@ Instead, write DIRECT, ACTIVE statements:
                 print(f"      • ... and {len(stats['files_with_issues']) - 5} more")
         
         # Calculate success rate
-        total_ids = stats['figures_found'] + stats['tables_found'] + stats['extraction_failures']
-        success_rate = (stats['figures_found'] + stats['tables_found']) / total_ids * 100 if total_ids > 0 else 0
+        total_ids = stats['figures_found'] + stats['tables_found'] + stats['listings_found'] + stats['extraction_failures']
+        success_rate = (stats['figures_found'] + stats['tables_found'] + stats['listings_found']) / total_ids * 100 if total_ids > 0 else 0
         print(f"   ✅ Success rate: {success_rate:.1f}%")
         
         return content_map
@@ -2157,6 +2391,22 @@ Instead, write DIRECT, ACTIVE statements:
                         'file': source_file,
                         'id': tbl_id,
                         'type': 'table',
+                        'original_caption': original_caption,
+                        'new_caption': new_caption
+                    })
+        
+        # Collect listings that need updates  
+        for lst_id, lst_data in content_map.get('listings', {}).items():
+            if 'new_caption' in lst_data and lst_data.get('new_caption'):
+                source_file = lst_data.get('source_file')
+                original_caption = lst_data.get('original_caption', '')
+                new_caption = lst_data.get('new_caption', '')
+                
+                if source_file and original_caption and new_caption:
+                    updates_to_apply.append({
+                        'file': source_file,
+                        'id': lst_id,
+                        'type': 'listing',
                         'original_caption': original_caption,
                         'new_caption': new_caption
                     })
@@ -2222,10 +2472,16 @@ Instead, write DIRECT, ACTIVE statements:
                 old_pattern, new_pattern = self.build_figure_search_patterns(
                     item_id, original_caption, new_caption, content
                 )
-            else:  # table
+            elif item_type == 'table':
                 old_pattern, new_pattern = self.build_table_search_patterns(
                     item_id, original_caption, new_caption, content
                 )
+            elif item_type == 'listing':
+                old_pattern, new_pattern = self.build_listing_search_patterns(
+                    item_id, original_caption, new_caption, content
+                )
+            else:
+                return False
             
             if not old_pattern:
                 return False
@@ -2314,6 +2570,47 @@ Instead, write DIRECT, ACTIVE statements:
             return old_pattern, new_pattern
         
         return None, None
+    
+    def build_listing_search_patterns(self, lst_id: str, original_caption: str, 
+                                    new_caption: str, content: str) -> Tuple[str, str]:
+        """
+        Build precise search patterns for listing caption replacement.
+        
+        Handles two patterns:
+        1. Traditional: #| lst-cap: "caption" or #| lst-cap: caption
+        2. HTML callout: title="caption"
+        
+        Returns:
+            Tuple of (old_pattern, new_pattern) or (None, None) if not found
+        """
+        
+        # Method 1: Traditional lst-cap pattern
+        # Try quoted version first
+        quoted_pattern = rf'(#\|\s*lst-cap:\s*"){re.escape(original_caption)}(")'
+        match = re.search(quoted_pattern, content)
+        if match:
+            old_pattern = match.group(0)
+            new_pattern = match.group(1) + new_caption + match.group(2)
+            return old_pattern, new_pattern
+        
+        # Try unquoted version
+        unquoted_pattern = rf'(#\|\s*lst-cap:\s*){re.escape(original_caption)}(\s*$)'
+        match = re.search(unquoted_pattern, content, re.MULTILINE)
+        if match:
+            old_pattern = match.group(0)
+            new_pattern = match.group(1) + new_caption + match.group(2)
+            return old_pattern, new_pattern
+        
+        # Method 2: HTML callout title pattern
+        # Pattern: title="original_caption" within a div containing lst-id
+        title_pattern = rf'(:::\s*\{{[^}}]*#{re.escape(lst_id)}[^}}]*title\s*=\s*"){re.escape(original_caption)}("[^}}]*\}})'
+        match = re.search(title_pattern, content)
+        if match:
+            old_pattern = match.group(0)
+            new_pattern = match.group(1) + new_caption + match.group(2)
+            return old_pattern, new_pattern
+        
+        return None, None
 
     def improve_captions_with_llm(self, directories: List[str], content_map: Optional[Dict] = None):
         """Improve captions using LLM and immediately update each file after processing."""
@@ -2329,12 +2626,13 @@ Instead, write DIRECT, ACTIVE statements:
         
         total_figures = len(content_map.get('figures', {}))
         total_tables = len(content_map.get('tables', {}))
+        total_listings = len(content_map.get('listings', {}))
         
-        if total_figures == 0 and total_tables == 0:
-            print("❌ No figures or tables found in content map")
+        if total_figures == 0 and total_tables == 0 and total_listings == 0:
+            print("❌ No figures, tables, or listings found in content map")
             return content_map
         
-        print(f"📊 Processing: {total_figures} figures, {total_tables} tables")
+        print(f"📊 Processing: {total_figures} figures, {total_tables} tables, {total_listings} listings")
         
         # Group items by source file for efficient processing
         files_to_process = {}
@@ -2344,7 +2642,7 @@ Instead, write DIRECT, ACTIVE statements:
             source_file = fig_data.get('source_file')
             if source_file:
                 if source_file not in files_to_process:
-                    files_to_process[source_file] = {'figures': [], 'tables': []}
+                    files_to_process[source_file] = {'figures': [], 'tables': [], 'listings': []}
                 files_to_process[source_file]['figures'].append((fig_id, fig_data))
         
         # Group tables by file
@@ -2352,8 +2650,16 @@ Instead, write DIRECT, ACTIVE statements:
             source_file = tbl_data.get('source_file')
             if source_file:
                 if source_file not in files_to_process:
-                    files_to_process[source_file] = {'figures': [], 'tables': []}
+                    files_to_process[source_file] = {'figures': [], 'tables': [], 'listings': []}
                 files_to_process[source_file]['tables'].append((tbl_id, tbl_data))
+        
+        # Group listings by file
+        for lst_id, lst_data in content_map.get('listings', {}).items():
+            source_file = lst_data.get('source_file')
+            if source_file:
+                if source_file not in files_to_process:
+                    files_to_process[source_file] = {'figures': [], 'tables': [], 'listings': []}
+                files_to_process[source_file]['listings'].append((lst_id, lst_data))
         
         total_improved = 0
         files_updated = 0
@@ -2455,6 +2761,54 @@ Instead, write DIRECT, ACTIVE statements:
                             
                     except Exception as e:
                         print(f"    ❌ Error processing {tbl_id}: {e}")
+                
+                # Process all listings in this file
+                for lst_id, lst_data in items['listings']:
+                    print(f"  📝 Processing listing: {lst_id}")
+                    
+                    try:
+                        # Extract context around this listing
+                        context = self.extract_section_context(file_content, lst_id)
+                        
+                        # Get the actual code content from the listing
+                        code_content = ""
+                        lst_def = self.find_listing_definition_in_qmd(file_content, lst_id)
+                        if lst_def:
+                            # Extract code from the full_text
+                            code_pattern = r'```[^`]*```'
+                            code_match = re.search(code_pattern, lst_def['full_text'], re.DOTALL)
+                            if code_match:
+                                code_content = code_match.group(0)
+                        
+                        # Generate improved caption with code content
+                        current_caption = lst_data.get('original_caption', '')
+                        new_caption = self.generate_caption_with_ollama(
+                            context['title'], 
+                            context['content'], 
+                            lst_id, 
+                            current_caption, 
+                            None,  # No image for listings
+                            is_table=False,
+                            is_listing=True,
+                            code_content=code_content
+                        )
+                        
+                        if new_caption and new_caption != current_caption:
+                            lst_data['new_caption'] = new_caption
+                            file_improvements.append({
+                                'id': lst_id,
+                                'type': 'listing',
+                                'original': current_caption,
+                                'new': new_caption
+                            })
+                            file_improved_count += 1
+                            word_count = len(new_caption.split())
+                            print(f"    ✅ Improved ({word_count} words): {new_caption[:80]}{'...' if len(new_caption) > 80 else ''}")
+                        else:
+                            print(f"    ⚠️  No improvement generated")
+                            
+                    except Exception as e:
+                        print(f"    ❌ Error processing {lst_id}: {e}")
                 
                 # Immediately update this file if we have improvements
                 if file_improvements:
@@ -2993,6 +3347,106 @@ Instead, write DIRECT, ACTIVE statements:
         # Fallback to original paragraph-based approach
         return self.extract_paragraph_context(content, figure_or_table_id)
 
+    def detect_code_listing(self, content, lst_id):
+        """
+        Detect code listings with lst-label and lst-cap OR HTML callout with title.
+        
+        Handles two patterns:
+        1. Traditional: #| lst-label: lst-id + #| lst-cap: Caption
+        2. HTML callout: ::: {#lst-id .callout-important title="Caption"}
+        
+        Args:
+            content (str): File content
+            lst_id (str): Listing ID to search for (e.g., 'lst-mlp_layer_matrix')
+            
+        Returns:
+            dict: Listing definition with caption, full_text, type='listing', language
+        """
+        
+        # Method 1: Traditional pattern with #| lst-label: and #| lst-cap:
+        # Pattern for code listings: #| lst-label: lst-id
+        label_pattern = rf'#\|\s*lst-label:\s*{re.escape(lst_id)}'
+        
+        # Find the code block containing this label
+        code_block_pattern = r'```\{([^}]+)\}(.*?)```'
+        
+        for block_match in re.finditer(code_block_pattern, content, re.DOTALL):
+            code_block = block_match.group(0)
+            language = block_match.group(1).strip()
+            
+            # Check if this block contains our listing label
+            if not re.search(label_pattern, code_block):
+                continue
+                
+            # Extract lst-cap from the code block (handle both quoted and unquoted)
+            # Generic regex based on actual codebase patterns:
+            # - Quoted: #| lst-cap: "Caption text"
+            # - Unquoted: #| lst-cap: Caption text  
+            cap_pattern = r'#\|\s*lst-cap:\s*(?:"([^"]*)"|(.+))$'
+            cap_match = re.search(cap_pattern, code_block, re.MULTILINE)
+            if cap_match:
+                # Group 1: quoted caption, Group 2: unquoted caption
+                caption = (cap_match.group(1) or cap_match.group(2) or '').strip()
+            else:
+                caption = ""
+            
+            result = {
+                'caption': caption,
+                'full_text': code_block,
+                'type': 'listing',
+                'language': language,
+                'pattern': 'traditional'
+            }
+            return result
+        
+        # Method 2: HTML callout pattern with title="Caption"
+        # Pattern: ::: {#lst-id .callout-important title="Caption"} ... code block ... :::
+        callout_pattern = rf':::\s*\{{[^}}]*#{re.escape(lst_id)}[^}}]*title\s*=\s*"([^"]*)"[^}}]*\}}(.*?):::'
+        
+        callout_match = re.search(callout_pattern, content, re.DOTALL)
+        if callout_match:
+            caption = callout_match.group(1).strip()
+            callout_content = callout_match.group(2)
+            full_callout = callout_match.group(0)
+            
+            # Extract language from the code block within the callout
+            code_in_callout = re.search(r'```\{\.?([^}]+)\}', callout_content)
+            language = code_in_callout.group(1).strip() if code_in_callout else 'unknown'
+            
+            result = {
+                'caption': caption,
+                'full_text': full_callout,
+                'type': 'listing',
+                'language': language,
+                'pattern': 'callout'
+            }
+            return result
+            
+        return None
+
+    def find_listing_definition_in_qmd(self, content, lst_id):
+        """
+        Find a listing definition in QMD content.
+        
+        Args:
+            content (str): QMD file content
+            lst_id (str): Listing ID to search for (e.g., 'lst-mlp_layer_matrix')
+            
+        Returns:
+            dict: Listing definition with type, caption, full_text, language
+        """
+        # Only one detector for code listings
+        detectors = [
+            self.detect_code_listing,
+        ]
+        
+        for detector in detectors:
+            result = detector(content, lst_id)
+            if result:
+                return result
+                
+        return None
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -3036,9 +3490,9 @@ Examples:
     
     # Multiple file/directory input
     parser.add_argument('-f', '--files', action='append',
-                       help='QMD files to process (can be used multiple times)')
+                       help='Process specific QMD files (can be used multiple times)')
     parser.add_argument('-d', '--directories', action='append',
-                       help='Directories to scan for QMD files (can be used multiple times)')
+                       help='Process directories recursively for .qmd files (can be used multiple times)')
 
     # Mode selection
     group = parser.add_mutually_exclusive_group()
@@ -3134,6 +3588,7 @@ Examples:
                 print(f"   📊 Figures: {stats['figures_found']} total")
                 print(f"      • Markdown: {stats['markdown_figures']}")
                 print(f"      • TikZ: {stats['tikz_figures']}")
+                print(f"      • R: {stats['r_figures']}")
                 print(f"      • Code: {stats['code_figures']}")
                 print(f"   📋 Tables: {stats['tables_found']} total")
                 print(f"   📁 Files processed: {content_map['metadata']['qmd_files_scanned']}")
@@ -3174,7 +3629,8 @@ Examples:
             print("🔧 Repairing caption formatting issues...")
             content_map = improver.repair_captions(directories,
                                                   figures_only=args.figures_only,
-                                                  tables_only=args.tables_only)
+                                                  tables_only=args.tables_only,
+                                                  specific_files=specific_files)
             if content_map and args.save_json:
                 improver.save_content_map(content_map)
                 print("💾 Repaired content map saved to content_map.json")
