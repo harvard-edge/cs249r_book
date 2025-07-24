@@ -37,8 +37,6 @@ local function read_summaries(path)
   return summaries
 end
 
-
-
 -- ✅ Load summaries once at filter initialization
 local summaries = read_summaries("summaries.yml")
 
