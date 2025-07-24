@@ -1,4 +1,4 @@
--- lua/inject_xrefs.lua
+-- lua/inject_crossrefs.lua
 
 -- This script is a Pandoc Lua filter that injects cross-references
 -- into a Quarto document based on a JSON file.
@@ -68,6 +68,15 @@ local function read_file(path)
   return content
 end
 
+-- Koliko linija teksta želimo da ostane ispod section
+local NEEDSPACE_LINES = 6
+
+-- Helper da ubacimo \Needspace{<n>\baselineskip}
+local function needspace_block()
+  return pandoc.RawBlock('latex',
+    '\\Needspace{' .. NEEDSPACE_LINES .. '\\baselineskip}')
+end
+
 -- Load and parse the cross-references JSON file
 local function load_cross_references(meta)
   -- Check if cross-references are defined in _quarto.yml
@@ -79,9 +88,10 @@ local function load_cross_references(meta)
   local xref_config = meta["cross-references"]
   
   -- Check if enabled
-  if xref_config.enabled then
-    local enabled_str = pandoc.utils.stringify(xref_config.enabled):lower()
-    if enabled_str ~= "true" then
+local enabled = xref_config.enabled
+  if enabled ~= nil then
+    local enabled_str = pandoc.utils.stringify(enabled):lower()
+      if enabled_str ~= "true" then
       log_info("Cross-references disabled in _quarto.yml")
       return nil
     end
@@ -204,7 +214,8 @@ local function init_cross_references(meta)
           source_section_title = suggestion.source.section_title,
           target_section_id = suggestion.target.section_id,
           target_section_title = suggestion.target.section_title,
-          connection_type = suggestion.target.connection_type == "foundation" and "Foundation" or "Preview",
+          connection_type = suggestion.target.connection_type == "foundation" and 
+          "Foundation" or "Preview",
           similarity = suggestion.similarity,
           explanation = suggestion.explanation or ""
         }
@@ -254,10 +265,12 @@ local function create_connection_box(refs)
      
      if ref.explanation and ref.explanation ~= "" then
        -- With explanation: **→** Title (§\ref{sec-id}) explanation
-       arrow_content = arrow .. ref.target_section_title .. " (§\\ref{" .. ref.target_section_id .. "}): " .. ref.explanation
+       arrow_content = arrow .. ref.target_section_title .. " (§\\ref{" .. 
+       ref.target_section_id .. "}): " .. ref.explanation
      else
        -- Without explanation: **→** Title (§\ref{sec-id}) or • Title (§\ref{sec-id})
-       arrow_content = arrow .. ref.target_section_title .. " (§\\ref{" .. ref.target_section_id .. "})"
+       arrow_content = arrow .. ref.target_section_title .. " (§\\ref{" .. 
+       ref.target_section_id .. "})"
      end
      
      local display_type = ref.connection_type or "Unknown"
@@ -283,49 +296,59 @@ end
 
 -- Process the entire document to inject cross-references
 local function inject_cross_references(doc)
-  -- Check if this document has any cross-references
+  -- Proveri da li ovaj dokument uopšte ima cross-references
   has_cross_references = document_has_cross_references(doc, refs_by_source_id)
-  
   if not has_cross_references then
-    -- No cross-references for this document, process silently
     return doc
   end
-  
-  -- Document has cross-references, show initialization info
+
+  -- Prva log-poruka
   log_info("🚀 Cross-Reference Injection Filter")
   log_info("🔍 Document has cross-references - processing...")
-  
+
   local new_blocks = {}
-  
-  for i, block in ipairs(doc.blocks) do
-    table.insert(new_blocks, block)
-    
-    -- Look for headers with identifiers
-    if block.t == "Header" and block.identifier and block.identifier ~= "" then
-      local section_id = block.identifier
-      stats.sections_found = stats.sections_found + 1
-      
-      -- Check if we have references for this section
-      if refs_by_source_id[section_id] then
-        local connection_box = create_connection_box(refs_by_source_id[section_id])
-      
-        if connection_box then
-          -- Inject the connection box right after the header
-          table.insert(new_blocks, connection_box)
-          stats.injections_made = stats.injections_made + 1
-        end
+  -- Detekcija da li je izlaz PDF/LaTeX
+  local is_pdf = quarto.doc.isFormat("pdf")
+
+  -- Iteriraj kroz sve blokove
+  for _, block in ipairs(doc.blocks) do
+    -- Kada naiđemo na Header sa identifier-om koji ima refs
+    if block.t == "Header"
+       and block.identifier and block.identifier ~= ""
+       and refs_by_source_id[block.identifier]
+    then
+      -- (1) Za PDF: garantuj minimum linija pre section
+      if is_pdf then
+        table.insert(new_blocks, needspace_block())
       end
+
+      -- (2) Ubaci sam Header
+      table.insert(new_blocks, block)
+      stats.sections_found = stats.sections_found + 1
+
+      -- (3) Generiši i ubaci margin-callout odmah ispod
+      local connection_box = create_connection_box(refs_by_source_id[block.identifier])
+      if connection_box then
+        table.insert(new_blocks, connection_box)
+        stats.injections_made = stats.injections_made + 1
+      end
+
+    else
+      -- Sve ostale blokove samo prenesi
+      table.insert(new_blocks, block)
     end
   end
-  
-  -- Final summary
+
+  -- Zaključna log-poruka
   if stats.injections_made > 0 then
     log_success("📊 SUMMARY: " .. stats.injections_made .. " connection boxes injected")
   end
-  
+
+  -- Vrati novi Pandoc dokument
   return pandoc.Pandoc(new_blocks, doc.meta)
 end
 
+  
 -- This is the main filter function called by Pandoc
 return {
   -- Initialize cross-references when we first see metadata
