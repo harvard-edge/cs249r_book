@@ -43,7 +43,8 @@ class CaptionQualityChecker:
             'poor_capitalization': self._check_capitalization, 
             'too_generic': self._check_generic,
             'missing_bold_pattern': self._check_bold_pattern,
-            'broken_formatting': self._check_formatting
+            'broken_formatting': self._check_formatting,
+            'weak_starters': self._check_weak_starters
         }
     
     def _check_punctuation(self, caption: str) -> Tuple[bool, str]:
@@ -95,9 +96,14 @@ class CaptionQualityChecker:
         if not caption:
             return True, ""
         
-        # This is optional - some captions might not need bold pattern
-        # For now, we'll be lenient and not require it
-        return True, ""
+        # Check if caption has the required **Bold Title**: format
+        # This pattern matches: **Text**: followed by explanation
+        pattern = r'^\*\*[^*]+\*\*:\s*.+'
+        
+        if re.match(pattern, caption.strip()):
+            return True, ""
+        else:
+            return False, "Missing **Bold Title**: format"
     
     def _check_formatting(self, caption: str) -> Tuple[bool, str]:
         """Check for broken markdown formatting."""
@@ -112,6 +118,33 @@ class CaptionQualityChecker:
         # Check for other formatting issues
         if '{{' in caption or '}}' in caption:
             return False, "LaTeX artifacts"
+        
+        return True, ""
+    
+    def _check_weak_starters(self, caption: str) -> Tuple[bool, str]:
+        """Check for weak descriptive starters that should be avoided."""
+        if not caption:
+            return True, ""
+        
+        # Extract the explanation part after **Bold**: 
+        match = re.match(r'^\*\*[^*]+\*\*:\s*(.+)$', caption.strip())
+        if not match:
+            # If not in **Bold**: format, check the whole caption
+            explanation = caption.strip()
+        else:
+            explanation = match.group(1).strip()
+        
+        # List of weak starters to avoid
+        weak_starters = [
+            'shows', 'demonstrates', 'illustrates', 'depicts', 'reveals', 
+            'highlights', 'displays', 'presents', 'exhibits', 'portrays', 
+            'visualizes', 'exemplifies', 'traces', 'explains'
+        ]
+        
+        # Check if explanation starts with any weak starter
+        for starter in weak_starters:
+            if explanation.lower().startswith(starter.lower()):
+                return False, f"Weak starter: '{starter}'"
         
         return True, ""
     
@@ -627,6 +660,106 @@ class FigureCaptionImprover:
         
         return text
     
+    def add_missing_bold_title(self, caption: str, is_table: bool = False) -> str:
+        """
+        Add a bold title to captions that are missing the **Bold Title**: format.
+        
+        Args:
+            caption: The caption text without bold title format
+            is_table: Whether this is a table caption
+            
+        Returns:
+            Caption with generated **Bold Title**: format
+        """
+        if not caption.strip():
+            return caption
+            
+        # Generate a title based on the content
+        words = caption.split()
+        if len(words) < 3:
+            # Very short caption - use generic title
+            title = "Table Comparison" if is_table else "System Overview"
+        else:
+            # Extract key concepts from the first part of the caption
+            first_sentence = caption.split('.')[0] if '.' in caption else caption
+            first_words = first_sentence.split()[:8]  # First 8 words
+            
+            # Look for key terms and patterns for better title generation
+            content_lower = caption.lower()
+            
+            # Common comparison patterns for tables
+            if is_table:
+                if 'traditional' in content_lower and ('machine learning' in content_lower or 'ml' in content_lower):
+                    title = "Traditional vs ML Development"
+                elif 'software' in content_lower and ('machine learning' in content_lower or 'ml' in content_lower):
+                    title = "Software vs ML Systems"
+                elif 'development' in content_lower and 'process' in content_lower:
+                    title = "Development Process Comparison"
+                elif 'lifecycle' in content_lower:
+                    title = "Lifecycle Comparison"
+                elif 'vs' in content_lower or 'versus' in content_lower:
+                    # Try to extract what's being compared
+                    parts = re.split(r'\s+(?:vs|versus)\s+', content_lower)
+                    if len(parts) >= 2:
+                        first_part = parts[0].split()[-2:]  # Last 2 words before vs
+                        second_part = parts[1].split()[:2]  # First 2 words after vs
+                        title = f"{' '.join(first_part).title()} vs {' '.join(second_part).title()}"
+                    else:
+                        title = "Comparison Overview"
+                else:
+                    # Extract key terms approach
+                    key_terms = []
+                    important_words = {
+                        'system', 'systems', 'model', 'models', 'learning', 'machine', 
+                        'neural', 'network', 'networks', 'data', 'training', 'inference',
+                        'performance', 'architecture', 'framework', 'pipeline',
+                        'workflow', 'process', 'development', 'software'
+                    }
+                    
+                    for word in first_words:
+                        clean_word = re.sub(r'[^a-zA-Z]', '', word.lower())
+                        if clean_word in important_words:
+                            key_terms.append(word.title())
+                            
+                    if len(key_terms) >= 2:
+                        title = f"{key_terms[0]} vs {key_terms[1]}"
+                    elif key_terms:
+                        title = f"{key_terms[0]} Comparison"
+                    else:
+                        title = "Comparison Overview"
+            else:
+                # Figure titles - use key terms approach
+                key_terms = []
+                important_words = {
+                    'system', 'systems', 'model', 'models', 'learning', 'machine', 
+                    'neural', 'network', 'networks', 'data', 'training', 'inference',
+                    'performance', 'architecture', 'framework', 'pipeline',
+                    'workflow', 'process', 'development'
+                }
+                
+                for word in first_words:
+                    clean_word = re.sub(r'[^a-zA-Z]', '', word.lower())
+                    if clean_word in important_words:
+                        key_terms.append(word.title())
+                        
+                if len(key_terms) >= 3:
+                    title = " ".join(key_terms[:3])
+                elif len(key_terms) >= 2:
+                    title = " ".join(key_terms[:2])
+                elif key_terms:
+                    title = f"{key_terms[0]} Overview"
+                else:
+                    title = "System Architecture"
+        
+        # Ensure title is properly formatted
+        title = titlecase(title)
+        
+        # Improve the caption content (remove weak starters, fix capitalization)
+        improved_caption = self.improve_sentence_starters(caption)
+        improved_caption = self.normalize_spacing(improved_caption)
+        
+        return f"**{title}**: {improved_caption}"
+
     def validate_and_improve_caption(self, caption: str, is_table: bool = False) -> str:
         """
         Apply all quality improvements to a caption.
@@ -655,7 +788,11 @@ class FigureCaptionImprover:
         # Parse **bold**: explanation format (handle spaces around colon)
         match = re.match(r'^(\*\*[^*]+\*\*)\s*:\s*(.+)$', caption)
         if not match:
-            return caption
+            # Caption is missing the required **Bold Title**: format
+            # Generate an appropriate title and reformat
+            return self.add_missing_bold_title(caption, is_table)
+        
+        # Caption already has proper format - improve it
         
         bold_part = match.group(1)
         explanation = match.group(2)
@@ -1742,7 +1879,7 @@ Instead, write DIRECT, ACTIVE statements:
         
         return content_map
 
-    def check_caption_quality(self, directories: List[str], figures_only: bool = False, tables_only: bool = False) -> Dict[str, any]:
+    def check_caption_quality(self, directories: List[str], figures_only: bool = False, tables_only: bool = False, specific_files: List[str] = None) -> Dict[str, any]:
         """
         Analyze all captions and generate quality report.
         
@@ -1763,7 +1900,7 @@ Instead, write DIRECT, ACTIVE statements:
             return {}
         
         # Load content map or build fresh one with filtering
-        content_map = self.build_content_map_from_qmd(directories, figures_only=figures_only, tables_only=tables_only)
+        content_map = self.build_content_map_from_qmd(directories, figures_only=figures_only, tables_only=tables_only, specific_files=specific_files)
         if not content_map:
             print("❌ Failed to build content map for analysis.")
             return {}
@@ -1780,7 +1917,7 @@ Instead, write DIRECT, ACTIVE statements:
         
         # Analyze figures
         for fig_id, fig_data in content_map.get('figures', {}).items():
-            current_caption = fig_data.get('current_caption', '')
+            current_caption = fig_data.get('current_caption', '') or fig_data.get('original_caption', '')
             analysis = self.quality_checker.analyze_caption(current_caption)
             
             report['total_captions'] += 1
@@ -1800,7 +1937,7 @@ Instead, write DIRECT, ACTIVE statements:
         
         # Analyze tables  
         for tbl_id, tbl_data in content_map.get('tables', {}).items():
-            current_caption = tbl_data.get('current_caption', '')
+            current_caption = tbl_data.get('current_caption', '') or tbl_data.get('original_caption', '')
             analysis = self.quality_checker.analyze_caption(current_caption)
             
             report['total_captions'] += 1
@@ -1863,7 +2000,7 @@ Instead, write DIRECT, ACTIVE statements:
         else:
             print(f"\n✅ All captions look good!")
     
-    def repair_captions(self, directories: List[str], figures_only: bool = False, tables_only: bool = False):
+    def repair_captions(self, directories: List[str], figures_only: bool = False, tables_only: bool = False, specific_files: List[str] = None):
         """
         Repair only captions that need fixing.
         
@@ -1881,11 +2018,11 @@ Instead, write DIRECT, ACTIVE statements:
             return {}
         
         # Build content map with filtering
-        content_map = self.build_content_map_from_qmd(directories, figures_only=figures_only, tables_only=tables_only)
+        content_map = self.build_content_map_from_qmd(directories, figures_only=figures_only, tables_only=tables_only, specific_files=specific_files)
         
         # Create repair list - only items that need fixing
         repair_items = []
-        for issue_item in self.check_caption_quality(directories, figures_only=figures_only, tables_only=tables_only)['detailed_issues']:
+        for issue_item in self.check_caption_quality(directories, figures_only=figures_only, tables_only=tables_only, specific_files=specific_files)['detailed_issues']:
             item_id = issue_item['id']
             item_type = issue_item['type']
             
@@ -1894,14 +2031,14 @@ Instead, write DIRECT, ACTIVE statements:
             elif item_type == 'table' and item_id in content_map.get('tables', {}):
                 repair_items.append(('table', item_id, content_map['tables'][item_id]))
         
-        # Apply basic fixes (punctuation, capitalization)
+        # Apply comprehensive fixes (including missing bold titles, punctuation, capitalization)
         fixed_count = 0
         for item_type, item_id, item_data in repair_items:
-            current_caption = item_data.get('current_caption', '')
+            current_caption = item_data.get('current_caption', '') or item_data.get('original_caption', '')
             
-            # Apply normalization fixes
-            fixed_caption = self.normalize_caption_punctuation(current_caption)
-            fixed_caption = self.normalize_caption_case(fixed_caption)
+            # Apply comprehensive validation and improvement (includes our bold title fix)
+            is_table = (item_type == 'table')
+            fixed_caption = self.validate_and_improve_caption(current_caption, is_table=is_table)
             
             # Only update if it actually changed
             if fixed_caption != current_caption:
@@ -1924,7 +2061,7 @@ Instead, write DIRECT, ACTIVE statements:
     # QMD-FOCUSED CONTENT MAP BUILDING
     # ================================================================
     
-    def build_content_map_from_qmd(self, directories: List[str], figures_only: bool = False, tables_only: bool = False) -> Dict:
+    def build_content_map_from_qmd(self, directories: List[str], figures_only: bool = False, tables_only: bool = False, specific_files: List[str] = None) -> Dict:
         """
         Build comprehensive content map by scanning QMD files directly.
         
@@ -1951,9 +2088,13 @@ Instead, write DIRECT, ACTIVE statements:
         if should_halt:
             return {}
         
-        # Get ordered QMD files
-        qmd_files = self.find_qmd_files_in_order(directories)
-        print(f"📖 Scanning {len(qmd_files)} QMD files in book order")
+        # Get QMD files - use specific files if provided, otherwise scan directories
+        if specific_files:
+            qmd_files = [Path(f) for f in specific_files if f.endswith('.qmd')]
+            print(f"📖 Processing {len(qmd_files)} specific QMD files")
+        else:
+            qmd_files = self.find_qmd_files_in_order(directories)
+            print(f"📖 Scanning {len(qmd_files)} QMD files in book order")
         
         content_map = {
             'figures': {},
@@ -2275,14 +2416,12 @@ Instead, write DIRECT, ACTIVE statements:
             new_pattern = f'![{new_caption}]' + re.search(markdown_pattern, content).group(1)
             return old_pattern, new_pattern
         
-        # 2. TikZ figure: look for caption line in div block
-        tikz_div_pattern = rf'(:::\s*\{{[^}}]*#{re.escape(fig_id)}[^}}]*\}}.*?```\s*\n\s*){re.escape(original_caption)}(\s*)(:::)'
+        # 2. TikZ figure: caption comes AFTER ``` and BEFORE :::
+        tikz_div_pattern = rf'(:::\s*\{{[^}}]*#{re.escape(fig_id)}[^}}]*\}}.*?```\s*\n){re.escape(original_caption)}(\s*:::)'
         match = re.search(tikz_div_pattern, content, re.DOTALL)
         if match:
             old_pattern = match.group(0)
-            # Ensure there's a line break before the closing :::
-            line_break = match.group(2) if match.group(2) else '\n'
-            new_pattern = match.group(1) + new_caption + line_break + match.group(3)
+            new_pattern = match.group(1) + new_caption + match.group(2)
             return old_pattern, new_pattern
         
         # 3. Code figure: #| fig-cap: "caption"
@@ -3118,10 +3257,14 @@ Examples:
     
     # Determine which files/directories to process
     directories = []
+    specific_files = []
+    
     if args.directories:
         directories.extend(args.directories)
     if args.files:
-        # For individual files, add their parent directories
+        # Store specific files for targeted processing
+        specific_files.extend(args.files)
+        # Also add parent directories for directory-based functions
         for file in args.files:
             parent_dir = str(Path(file).parent)
             if parent_dir not in directories:
@@ -3199,7 +3342,8 @@ Examples:
             print("🔧 Repairing caption formatting issues...")
             content_map = improver.repair_captions(directories,
                                                   figures_only=args.figures_only,
-                                                  tables_only=args.tables_only)
+                                                  tables_only=args.tables_only,
+                                                  specific_files=specific_files if specific_files else None)
             if content_map and args.save_json:
                 improver.save_content_map(content_map)
                 print("💾 Repaired content map saved to content_map.json")
