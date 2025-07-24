@@ -1909,7 +1909,7 @@ Instead, write DIRECT, ACTIVE statements:
     # QMD-FOCUSED CONTENT MAP BUILDING
     # ================================================================
     
-    def build_content_map_from_qmd(self, directories: List[str], figures_only: bool = False, tables_only: bool = False) -> Dict:
+    def build_content_map_from_qmd(self, directories: List[str], figures_only: bool = False, tables_only: bool = False, specific_files: List[str] = None) -> Dict:
         """
         Build comprehensive content map by scanning QMD files directly.
         
@@ -1924,6 +1924,7 @@ Instead, write DIRECT, ACTIVE statements:
             directories: List of directories to scan for .qmd files
             figures_only: If True, only process figures (ignore tables)
             tables_only: If True, only process tables (ignore figures)
+            specific_files: List of specific files to include (optional)
             
         Returns:
             Dict with figures, tables, metadata, and extraction stats
@@ -1936,9 +1937,13 @@ Instead, write DIRECT, ACTIVE statements:
         if should_halt:
             return {}
         
-        # Get ordered QMD files
-        qmd_files = self.find_qmd_files_in_order(directories)
-        print(f"📖 Scanning {len(qmd_files)} QMD files in book order")
+        # Get QMD files - use specific files if provided, otherwise scan directories
+        if specific_files:
+            qmd_files = [Path(f) for f in specific_files]
+            print(f"📖 Processing {len(qmd_files)} specific QMD files")
+        else:
+            qmd_files = self.find_qmd_files_in_order(directories)
+            print(f"📖 Scanning {len(qmd_files)} QMD files in book order")
         
         content_map = {
             'figures': {},
@@ -2873,44 +2878,19 @@ Instead, write DIRECT, ACTIVE statements:
                 print(f"✅ Model {model_name} is ready!")
                 return True
             
-            # Model not found - try to pull it
-            print(f"📥 Model {model_name} not found. Pulling from Ollama registry...")
-            print(f"⏳ This may take several minutes for large models...")
-            
-            # Pull the model
-            pull_response = requests.post(
-                "http://localhost:11434/api/pull",
-                json={"name": model_name},
-                stream=True,
-                timeout=1800  # 30 minutes timeout for large models
-            )
-            
-            if pull_response.status_code == 200:
-                # Stream the pull progress
-                for line in pull_response.iter_lines():
-                    if line:
-                        try:
-                            progress_data = json.loads(line)
-                            status = progress_data.get('status', '')
-                            if 'pulling' in status.lower():
-                                if 'completed' in progress_data:
-                                    completed = progress_data['completed']
-                                    total = progress_data.get('total', completed)
-                                    if total > 0:
-                                        percent = (completed / total) * 100
-                                        print(f"\r📥 Pulling {model_name}: {percent:.1f}%", end='', flush=True)
-                            elif 'success' in status.lower():
-                                print(f"\n✅ Successfully pulled {model_name}")
-                                return True
-                        except json.JSONDecodeError:
-                            continue
-                
-                print(f"\n✅ Model {model_name} pull completed!")
-                return True
-            else:
-                print(f"\n❌ Failed to pull model {model_name}: {pull_response.status_code}")
-                print(f"💡 Try manually: ollama pull {model_name}")
-                return False
+            # Model not found - provide instructions instead of auto-pulling
+            print(f"❌ Model {model_name} not found locally.")
+            print("💡 To use this model, please run:")
+            print(f"   ollama pull {model_name}")
+            print()
+            print("📋 Available models:")
+            for model in available_models[:5]:  # Show first 5
+                print(f"   • {model}")
+            if len(available_models) > 5:
+                print(f"   ... and {len(available_models) - 5} more")
+            print()
+            print("🔧 To see all models: ollama list")
+            return False
                 
         except requests.exceptions.ConnectionError:
             print("❌ Cannot connect to Ollama. Please ensure Ollama is installed and running:")
@@ -3103,14 +3083,21 @@ Examples:
     
     # Determine which files/directories to process
     directories = []
+    specific_files = []
+    
     if args.directories:
         directories.extend(args.directories)
     if args.files:
-        # For individual files, add their parent directories
+        # Store specific files for targeted processing
+        specific_files.extend(args.files)
+        # Validate that files exist
         for file in args.files:
-            parent_dir = str(Path(file).parent)
-            if parent_dir not in directories:
-                directories.append(parent_dir)
+            if not Path(file).exists():
+                print(f"❌ File not found: {file}")
+                return 1
+            if not file.endswith('.qmd'):
+                print(f"❌ Not a QMD file: {file}")
+                return 1
     
     # Initialize improver with specified model
     improver = FigureCaptionImprover(model_name=args.model)
@@ -3126,7 +3113,8 @@ Examples:
             print("🔍 Building content map from QMD files...")
             content_map = improver.build_content_map_from_qmd(directories, 
                                                              figures_only=args.figures_only,
-                                                             tables_only=args.tables_only)
+                                                             tables_only=args.tables_only,
+                                                             specific_files=specific_files)
             if content_map:
                 print("✅ Content map building completed!")
                 
@@ -3164,7 +3152,8 @@ Examples:
             # Build content map for validation
             content_map = improver.build_content_map_from_qmd(directories,
                                                              figures_only=args.figures_only,
-                                                             tables_only=args.tables_only)
+                                                             tables_only=args.tables_only,
+                                                             specific_files=specific_files)
             if not content_map:
                 print("❌ Failed to build content map for analysis")
                 return 1
