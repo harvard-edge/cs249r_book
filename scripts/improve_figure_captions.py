@@ -1008,7 +1008,7 @@ Instead, write DIRECT, ACTIVE statements:
                     "stream": False,
                     "options": {
                         "temperature": 0.7,  # Higher temperature for more diverse, creative captions
-                        "num_predict": 200,  # Increased for complete responses (was 120)
+                        "num_predict": -1,   # No token limit - generate complete responses
                         "top_p": 0.9        # Add nucleus sampling for better variety
                     }
                 }
@@ -1036,12 +1036,11 @@ Instead, write DIRECT, ACTIVE statements:
                     if new_caption.startswith('json\n'):
                         new_caption = new_caption[5:].strip()
                     
-                    # Sanity check: Reject overly long captions (likely hallucination)
+                    # Log word count but never reject based on length
                     word_count = len(new_caption.split())
                     if word_count > 150:
-                        print(f"      ⚠️  Generated caption too long ({word_count} words, max 150): {new_caption[:100]}...")
-                        # Don't retry for long captions - this is a formatting issue, not API error
-                        return None
+                        print(f"      ℹ️  Long caption generated ({word_count} words): {new_caption[:100]}...")
+                        # Continue processing - user wants NO truncation limits
                     
                     # Validate the format contains **bold**: 
                     if '**' in new_caption and ':' in new_caption:
@@ -1049,11 +1048,10 @@ Instead, write DIRECT, ACTIVE statements:
                         formatted_caption = self.format_bold_explanation_caption(new_caption)
                         improved_caption = self.validate_and_improve_caption(formatted_caption, is_table)
                         
-                        # Double-check word count after improvements
+                        # Log final word count but never reject
                         final_word_count = len(improved_caption.split())
                         if final_word_count > 150:
-                            print(f"      ⚠️  Improved caption too long ({final_word_count} words): {improved_caption[:100]}...")
-                            return None
+                            print(f"      ℹ️  Large improved caption ({final_word_count} words): continuing anyway...")
                         
                         return improved_caption
                     else:
