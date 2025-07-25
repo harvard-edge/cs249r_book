@@ -2,7 +2,7 @@
 # MACHINE LEARNING SYSTEMS  
 *Principles and Practices of Engineering Artificially Intelligent Systems*
 
-[![📚 Quarto Build](https://github.com/harvard-edge/cs249r_book/actions/workflows/quarto-build.yml/badge.svg)](https://github.com/harvard-edge/cs249r_book/actions/workflows/quarto-build.yml)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/controller.yml?branch=dev&label=Build)](https://github.com/harvard-edge/cs249r_book/actions/workflows/controller.yml?query=branch%3Adev)
 [![🌐 Ecosystem](https://img.shields.io/website?url=https://mlsysbook.org&label=Ecosystem)](https://mlsysbook.org)
 [![📖 Book](https://img.shields.io/website?url=https://mlsysbook.ai&label=Book)](https://mlsysbook.ai)
 [![Last Commit](https://img.shields.io/github/last-commit/harvard-edge/cs249r_book?label=Last%20Commit)](https://github.com/harvard-edge/cs249r_book/commits/dev)
