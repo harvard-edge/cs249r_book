@@ -152,8 +152,8 @@ make build-all       # Build all formats (HTML, PDF, EPUB)
 
 # Continuous development
 make preview         # Auto-reload development server
-make test           # Run validation tests
-make lint           # Check content quality
+make test            # Run validation tests
+make lint            # Check content quality
 ```
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for the complete development guide.
