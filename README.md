@@ -12,7 +12,7 @@
 
 > **Our mission**: To make AI systems education globally accessible: one learner, one lab, and one system at a time.
 
-📘 This repo contains the source files for the **Machine Learning Systems: Principles and Practices of Engineering Artificially Intelligent Systems** textbook.
+📘 This repository contains the source files for the **Machine Learning Systems: Principles and Practices of Engineering Artificially Intelligent Systems** textbook.
 
 For the full learning experience and instructor materials, including the textbook, hands-on labs, educational frameworks, kits, and community, please visit:  👉 [**https://mlsysbook.org**](https://mlsysbook.org)
 
@@ -40,39 +40,167 @@ We go beyond training models — our goal is to help learners understand and bui
 
 ---
 
-## 🚀 Contribute
+## 🚀 Quick Start
 
-We welcome contributions from around the world — from students, educators, researchers, and practitioners.
+### For Readers
+```bash
+# View the book online
+open https://mlsysbook.ai
+```
 
-Ways to contribute:
-- Suggest edits or improvements
-- Add examples or diagrams
-- Translate or adapt content for local needs
-- Build companion tools or extensions
+### For Contributors
+```bash
+# Clone and setup
+git clone https://github.com/harvard-edge/cs249r_book.git
+cd cs249r_book
+make setup-hooks  # Setup automated quality controls
+make install      # Install dependencies
 
-🛠️ A detailed [contribution guide](contribute.md) is coming soon!
+# Daily development
+make clean build  # Clean and build
+make preview      # Start development server
+```
+
+---
+
+## 🛠️ Development Workflow
+
+This project features a **modern, automated development workflow** with quality controls and organized tooling.
+
+### ⚡ Quick Commands
+
+```bash
+# Building
+make build          # Build HTML version
+make build-pdf      # Build PDF version  
+make preview        # Start development server
+
+# Quality Control
+make clean          # Clean build artifacts
+make test           # Run validation tests
+make lint           # Check for issues
+make check          # Project health check
+
+# Get help
+make help           # Show all commands
+```
+
+### 🔧 Automated Quality Controls
+
+- **🧹 Pre-commit hooks**: Automatically clean build artifacts before commits
+- **📋 Linting**: Check for formatting and content issues
+- **✅ Validation**: Verify project structure and dependencies
+- **🔍 Testing**: Automated tests for content and scripts
+
+### 🗂️ Organized Development Tools
+
+Our development tools are organized into logical categories:
+
+```
+tools/scripts/
+├── build/           # Build and development scripts
+├── content/         # Content management tools
+├── maintenance/     # System maintenance scripts
+├── testing/         # Test and validation scripts
+├── utilities/       # General utility scripts
+└── docs/            # Comprehensive documentation
+```
+
+Each category includes focused tools with clear naming and documentation. See [`tools/scripts/README.md`](tools/scripts/README.md) for details.
+
+---
+
+## 📖 Documentation
+
+- **📋 [DEVELOPMENT.md](DEVELOPMENT.md)** — Comprehensive development guide
+- **🔨 [BUILD.md](BUILD.md)** — Detailed build instructions  
+- **🗂️ [tools/scripts/](tools/scripts/)** — Development tools documentation
+- **🤝 [contribute.md](contribute.md)** — Contribution guidelines
 
 ---
 
 ## 🔧 Build the Book Locally
 
-To build and preview the book using Quarto:
+### Prerequisites
+- [Quarto](https://quarto.org/docs/download/) (latest version)
+- Python 3.8+ with pip
+- Git
 
-1. Install [Quarto](https://quarto.org/docs/download/)
-2. Clone the repo:
-   ```bash
-   git clone https://github.com/MLSysBook/mlsysbook.git
-   cd mlsysbook
-   ```
+### Quick Build
+```bash
+# Clone the repository
+git clone https://github.com/harvard-edge/cs249r_book.git
+cd cs249r_book
 
-3. Render the book:
+# Setup development environment
+make setup-hooks  # Configure git hooks
+make install      # Install dependencies
 
-   ```bash
-   quarto render
-   ```
-4. Open `_book/index.html` in your browser.
+# Build and preview
+make clean build  # Clean and build HTML
+make preview      # Start development server
+```
 
-See [BUILD.md](BUILD.md) for full instructions.
+### Advanced Development
+```bash
+# Full development setup
+make clean-deep      # Deep clean
+make install         # Install all dependencies
+make build-all       # Build all formats (HTML, PDF, EPUB)
+
+# Continuous development
+make preview         # Auto-reload development server
+make test           # Run validation tests
+make lint           # Check content quality
+```
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for the complete development guide.
+
+---
+
+## 🤝 Contributing
+
+We welcome contributions from around the world — from students, educators, researchers, and practitioners.
+
+### Ways to Contribute
+- 📝 **Content**: Suggest edits, improvements, or new examples
+- 🛠️ **Tools**: Enhance development scripts and automation
+- 🎨 **Design**: Improve figures, diagrams, and visual elements
+- 🌍 **Localization**: Translate or adapt content for local needs
+- 🔧 **Infrastructure**: Help with build systems and deployment
+
+### Getting Started
+1. **Read**: [contribute.md](contribute.md) for detailed guidelines
+2. **Setup**: Follow the development workflow above
+3. **Explore**: Check existing [GitHub Issues](https://github.com/harvard-edge/cs249r_book/issues)
+4. **Connect**: Join [GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions)
+
+### Quality Standards
+All contributions go through automated quality checks:
+- ✅ **Pre-commit validation**: Automatic cleanup and checks
+- 📋 **Content review**: Formatting and style validation  
+- 🧪 **Testing**: Automated build and link verification
+- 👥 **Peer review**: Community and maintainer feedback
+
+---
+
+## 📊 Project Structure
+
+```
+MLSysBook/
+├── book/                   # Main book content (Quarto)
+│   ├── contents/          # Chapter content
+│   ├── _quarto.yml        # Book configuration
+│   └── assets/            # Images, styles, media
+├── tools/                 # Development automation
+│   ├── scripts/           # Organized development scripts
+│   ├── dependencies/      # Package requirements  
+│   └── setup/            # Setup and configuration
+├── config/               # Build configuration
+├── DEVELOPMENT.md        # Development guide
+├── Makefile             # Development commands
+└── README.md            # This file
+```
 
 ---
 
@@ -108,5 +236,18 @@ You may share and adapt the material for **non-commercial purposes**, with appro
 * 🌐 [mlsysbook.org](https://mlsysbook.org) — main site and learning platform
 * 🔥 [TinyTorch](https://mlsysbook.org/tinytorch) — educational ML framework
 * 💸 [Open Collective](https://opencollective.com/mlsysbook) — support this initiative
-* 🧠 [GitHub Discussions](https://github.com/MLSysBook/mlsysbook/discussions) — ask questions or share insights
+* 🧠 [GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions) — ask questions or share insights
+* 📱 [Community](https://mlsysbook.org/community) — join our global learning community
+
+---
+
+## 🎯 Features
+
+- **🚀 Modern Development Workflow**: Automated builds, quality checks, and deployment
+- **🗂️ Organized Tooling**: Professional script organization with comprehensive documentation
+- **🔧 Easy Contribution**: One-command setup with automated quality controls
+- **📚 Comprehensive Docs**: Detailed guides for development, building, and contribution
+- **🌐 Multi-format Output**: HTML, PDF, and EPUB with consistent styling
+- **⚡ Fast Iteration**: Live preview server with automatic reloading
+- **✅ Quality Assurance**: Automated testing, linting, and validation
 
