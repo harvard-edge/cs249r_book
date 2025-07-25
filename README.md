@@ -191,8 +191,8 @@ All contributions go through automated quality checks:
 
 ```
 MLSysBook/
-├── book/                   # Main book content (Quarto)
-│   ├── contents/          # Chapter content
+├── book/                 # Main book content (Quarto)
+│   ├── contents/         # Chapter content
 │   │   ├── core/         # Core chapters
 │   │   ├── labs/         # Hands-on labs
 │   │   ├── frontmatter/  # Preface, acknowledgments
@@ -200,7 +200,7 @@ MLSysBook/
 │   ├── _quarto.yml       # Book configuration
 │   ├── index.qmd         # Main entry point
 │   └── assets/           # Images, styles, media
-├── tools/                 # Development automation
+├── tools/                # Development automation
 │   ├── scripts/          # Organized development scripts
 │   │   ├── build/        # Build and development tools
 │   │   ├── content/      # Content management tools
@@ -209,16 +209,16 @@ MLSysBook/
 │   │   ├── utilities/    # General utility scripts
 │   │   └── docs/         # Script documentation
 │   ├── dependencies/     # Package requirements  
-│   └── setup/           # Setup and configuration
-├── config/              # Build configuration
-│   ├── _extensions/     # Quarto extensions
-│   ├── lua/            # Lua scripts
-│   └── tex/            # LaTeX templates
-├── assets/             # Global assets (covers, icons)
-├── DEVELOPMENT.md      # Development guide
-├── MAINTENANCE_GUIDE.md # Daily workflow guide
-├── Makefile           # Development commands
-└── README.md          # This file
+│   └── setup/            # Setup and configuration
+├── config/               # Build configuration
+│   ├── _extensions/      # Quarto extensions
+│   ├── lua/              # Lua scripts
+│   └── tex/              # LaTeX templates
+├── assets/               # Global assets (covers, icons)
+├── DEVELOPMENT.md        # Development guide
+├── MAINTENANCE_GUIDE.md  # Daily workflow guide
+├── Makefile              # Development commands
+└── README.md             # This file
 ```
 
 ---
