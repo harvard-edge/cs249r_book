@@ -3,8 +3,8 @@
 *Principles and Practices of Engineering Artificially Intelligent Systems*
 
 [![Build Status](https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/controller.yml?branch=dev&label=Build)](https://github.com/harvard-edge/cs249r_book/actions/workflows/controller.yml?query=branch%3Adev)
+[![📖 Website](https://img.shields.io/website?url=https://mlsysbook.ai&label=Book)](https://mlsysbook.ai)
 [![🌐 Ecosystem](https://img.shields.io/website?url=https://mlsysbook.org&label=Ecosystem)](https://mlsysbook.org)
-[![📖 Book](https://img.shields.io/website?url=https://mlsysbook.ai&label=Book)](https://mlsysbook.ai)
 [![Last Commit](https://img.shields.io/github/last-commit/harvard-edge/cs249r_book?label=Last%20Commit)](https://github.com/harvard-edge/cs249r_book/commits/dev)
 [![License](https://img.shields.io/badge/license-CC--BY--NC--SA%204.0-blue)](https://github.com/harvard-edge/cs249r_book/blob/dev/LICENSE)
 [![Open Collective](https://img.shields.io/badge/fund%20us-Open%20Collective-blue.svg)](https://opencollective.com/mlsysbook)
