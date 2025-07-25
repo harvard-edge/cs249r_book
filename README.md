@@ -113,6 +113,7 @@ Each category includes focused tools with clear naming and documentation. See [`
 ## 📖 Documentation
 
 - **📋 [DEVELOPMENT.md](DEVELOPMENT.md)** — Comprehensive development guide
+- **🛠️ [MAINTENANCE_GUIDE.md](MAINTENANCE_GUIDE.md)** — Daily workflow and maintenance tasks
 - **🔨 [BUILD.md](BUILD.md)** — Detailed build instructions  
 - **🗂️ [tools/scripts/](tools/scripts/)** — Development tools documentation
 - **🤝 [contribute.md](contribute.md)** — Contribution guidelines
