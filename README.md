@@ -19,6 +19,14 @@ The **open-source textbook** that teaches you to build real-world AI systems —
 
 For the full learning experience and instructor materials, including the textbook, hands-on labs, educational frameworks, kits, and community, please visit:  👉 [**https://mlsysbook.org**](https://mlsysbook.org)
 
+### ⭐ Show Community Support
+**Your star proves to funders this educational resource matters.**
+
+📊 [![Stars](https://img.shields.io/github/stars/harvard-edge/cs249r_book?style=social&label=Community%20support)](https://github.com/harvard-edge/cs249r_book/stargazers) demonstrate global value  
+🎯 **Goal:** 10,000 stars = $100,000 in additional education funding
+
+**[⭐ Star this project](https://github.com/harvard-edge/cs249r_book)** - takes 2 seconds!
+
 ---
 
 ## 📚 START HERE
@@ -88,7 +96,7 @@ We welcome contributions from around the world — from students, educators, res
 - 🔧 **Infrastructure**: Help with build systems and deployment
 
 ### Getting Started
-1. **Read**: [contribute.md](contribute.md) for detailed guidelines
+1. **Read**: [contribute.md](docs/contribute.md) for detailed guidelines
 2. **Setup**: Follow the development workflow below
 3. **Explore**: Check existing [GitHub Issues](https://github.com/harvard-edge/cs249r_book/issues)
 4. **Connect**: Join [GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions)
@@ -113,10 +121,7 @@ All contributions go through automated quality checks:
 
 ---
 
-<details>
-<summary>🛠️ Development Workflow & Technical Details</summary>
-
-## Development Workflow
+## 🛠️ Development Workflow & Technical Details
 
 This project features a **modern, automated development workflow** with quality controls and organized tooling.
 
@@ -164,11 +169,11 @@ Each category includes focused tools with clear naming and documentation. See [`
 
 ## 📖 Documentation
 
-- **📋 [DEVELOPMENT.md](DEVELOPMENT.md)** — Comprehensive development guide
-- **🛠️ [MAINTENANCE_GUIDE.md](MAINTENANCE_GUIDE.md)** — Daily workflow and maintenance tasks
-- **🔨 [BUILD.md](BUILD.md)** — Detailed build instructions  
+- **📋 [DEVELOPMENT.md](docs/DEVELOPMENT.md)** — Comprehensive development guide
+- **🛠️ [MAINTENANCE_GUIDE.md](docs/MAINTENANCE_GUIDE.md)** — Daily workflow and maintenance tasks
+- **🔨 [BUILD.md](docs/BUILD.md)** — Detailed build instructions  
 - **🗂️ [tools/scripts/](tools/scripts/)** — Development tools documentation
-- **🤝 [contribute.md](contribute.md)** — Contribution guidelines
+- **🤝 [contribute.md](docs/contribute.md)** — Contribution guidelines
 
 ## 🔧 Build the Book Locally
 
@@ -205,7 +210,7 @@ make test            # Run validation tests
 make lint            # Check content quality
 ```
 
-See [DEVELOPMENT.md](DEVELOPMENT.md) for the complete development guide.
+See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for the complete development guide.
 
 ## 📊 Project Structure
 
@@ -253,12 +258,11 @@ MLSysBook/
 - **📁 Clean Architecture**: Well-organized project structure with clear separation of concerns
 - **🛠️ Professional Tooling**: Category-based script organization for easy maintenance
 
-</details>
+---
 
-<details>
-<summary>📋 Project Information</summary>
+## 📋 Project Information
 
-## 📖 Citation
+### 📖 Citation
 
 ```bibtex
 @inproceedings{reddi2024mlsysbook,
@@ -273,13 +277,11 @@ MLSysBook/
 }
 ```
 
-## 🛡️ License
+### 🛡️ License
 
 This work is licensed under a
 **Creative Commons Attribution–NonCommercial–ShareAlike 4.0 International License**
 (CC BY-NC-SA 4.0)
 
 You may share and adapt the material for **non-commercial purposes**, with appropriate credit and under the same license.
-
-</details>
 
