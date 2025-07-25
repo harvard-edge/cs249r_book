@@ -79,13 +79,13 @@ end
 
 -- Load and parse the cross-references JSON file
 local function load_cross_references(meta)
-  -- Check if cross-references are defined in _quarto.yml
-  if not meta or not meta["cross-references"] then
-    log_info("No cross-references configuration in _quarto.yml - filter disabled")
+  -- Check if filter-metadata and cross-references are defined in _quarto.yml
+  if not meta or not meta["filter-metadata"] or not meta["filter-metadata"]["cross-references"] then
+    log_info("No filter-metadata.cross-references configuration in _quarto.yml - filter disabled")
     return nil
   end
   
-  local xref_config = meta["cross-references"]
+  local xref_config = meta["filter-metadata"]["cross-references"]
   
   -- Check if enabled
 local enabled = xref_config.enabled
@@ -111,7 +111,7 @@ local enabled = xref_config.enabled
   
   if not json_content then
     local error_msg = "❌ FATAL ERROR: Cross-references file not found: " .. json_path .. "\n" ..
-                      "The file '" .. config_file .. "' is specified in _quarto.yml cross-references.file but does not exist.\n" ..
+                      "The file '" .. config_file .. "' is specified in _quarto.yml filter-metadata.cross-references.file but does not exist.\n" ..
                       "Please ensure the file exists at the specified path or update your _quarto.yml configuration.\n" ..
                       "BUILD STOPPED."
     
