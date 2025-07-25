@@ -257,7 +257,7 @@ jobs:
         with:
           path: |
             ${{ env.R_LIBS_USER }}
-          key: r-pkgs-${{ runner.os }}-${{ inputs.r-version }}-${{ hashFiles('**/install_packages.R', '**/*.qmd') }}
+          key: r-pkgs-${{ runner.os }}-${{ inputs.r-version }}-${{ hashFiles('tools/dependencies/install_packages.R', '**/*.qmd') }}
           restore-keys: |
             r-pkgs-${{ runner.os }}-${{ inputs.r-version }}-
 
@@ -280,11 +280,11 @@ jobs:
           cat("📦 Installing remotes package...\n")
           install.packages("remotes")
           
-          if (file.exists("install_packages.R")) {
-            cat("📦 Installing packages from install_packages.R...\n")
-            source("install_packages.R")
+          if (file.exists("tools/dependencies/install_packages.R")) {
+            cat("📦 Installing packages from tools/dependencies/install_packages.R...\n")
+            source("tools/dependencies/install_packages.R")
           } else {
-            cat("⚠️ No install_packages.R found, installing common packages\n")
+            cat("⚠️ No tools/dependencies/install_packages.R found, installing common packages\n")
             pkgs <- c("rmarkdown", "knitr", "tidyverse", "ggplot2", "bookdown")
             cat(paste("📦 Installing packages:", paste(pkgs, collapse=", "), "\n"))
             install.packages(pkgs)
@@ -325,6 +325,7 @@ jobs:
         uses: quarto-dev/quarto-actions/render@v2
         with:
             to: html
+            working-directory: book
 
       # Build PDF after HTML to ensure all assets are available (esp. PDF)
       - name: 🔨 Render Quarto Project (PDF)
@@ -332,31 +333,33 @@ jobs:
         uses: quarto-dev/quarto-actions/render@v2
         with:
             to: titlepage-pdf
+            working-directory: book
 
       - name: 🔨 Render Quarto Project (EPUB)
         if: inputs.format == 'epub' || inputs.format == 'all'
         uses: quarto-dev/quarto-actions/render@v2
         with:
-            to: epub     
+            to: epub
+            working-directory: book     
       
       - name: 📋 Check Quarto Build Output
         shell: bash
         run: |
           echo "🔄 Checking Quarto build output..."
 
-          if [ -d "_book" ]; then
-            echo "✅ _book directory exists"
-            echo "📊 Files in _book directory:"
-            ls -la _book | head -n 20
-            echo "📊 Total files in _book:"
-            find _book -type f | wc -l
+          if [ -d "book/_book" ]; then
+            echo "✅ book/_book directory exists"
+            echo "📊 Files in book/_book directory:"
+            ls -la book/_book | head -n 20
+            echo "📊 Total files in book/_book:"
+            find book/_book -type f | wc -l
 
             # PDF check
             if [[ "${{ inputs.format }}" == "pdf" || "${{ inputs.format }}" == "all" ]]; then
-              if [ -f "_book/Machine-Learning-Systems.pdf" ]; then
+              if [ -f "book/_book/Machine-Learning-Systems.pdf" ]; then
                 echo "✅ PDF file exists"
                 echo "📊 PDF file size:"
-                du -h "_book/Machine-Learning-Systems.pdf"
+                du -h "book/_book/Machine-Learning-Systems.pdf"
               else
                 echo "⚠️ PDF file not found!"
               fi
@@ -364,23 +367,23 @@ jobs:
 
             # EPUB check
             if [[ "${{ inputs.format }}" == "epub" || "${{ inputs.format }}" == "all" ]]; then
-              if [ -f "_book/Machine-Learning-Systems.epub" ]; then
+              if [ -f "book/_book/Machine-Learning-Systems.epub" ]; then
                 echo "✅ EPUB file exists"
                 echo "📊 EPUB file size:"
-                du -h "_book/Machine-Learning-Systems.epub"
+                du -h "book/_book/Machine-Learning-Systems.epub"
               else
                 echo "⚠️ EPUB file not found!"
               fi
             fi
 
           else
-            echo "❌ _book directory not found!"
+            echo "❌ book/_book directory not found!"
           fi
 
       - name: 📉 Compress PDF with Ghostscript (Linux)
         if: runner.os == 'Linux' && (inputs.format == 'pdf' || inputs.format == 'all')
         run: |
-          if [ -f "_book/Machine-Learning-Systems.pdf" ]; then
+          if [ -f "book/_book/Machine-Learning-Systems.pdf" ]; then
             gs \
               -sDEVICE=pdfwrite \
               -dCompatibilityLevel=1.4 \
@@ -388,11 +391,11 @@ jobs:
               -dNOPAUSE \
               -dQUIET \
               -dBATCH \
-              -sOutputFile="./_book/ebook.pdf" \
-              "./_book/Machine-Learning-Systems.pdf"
+              -sOutputFile="./book/_book/ebook.pdf" \
+              "./book/_book/Machine-Learning-Systems.pdf"
 
             # Replace original with compressed
-            mv ./_book/ebook.pdf ./_book/Machine-Learning-Systems.pdf
+            mv ./book/_book/ebook.pdf ./book/_book/Machine-Learning-Systems.pdf
           else
             echo "⚠️ PDF file not found for compression"
           fi
@@ -401,8 +404,8 @@ jobs:
         if: runner.os == 'Windows' && (inputs.format == 'pdf' || inputs.format == 'all')
         shell: pwsh
         run: |
-          $input = "./_book/Machine-Learning-Systems.pdf"
-          $output = "./_book/ebook.pdf"
+          $input = "./book/_book/Machine-Learning-Systems.pdf"
+          $output = "./book/_book/ebook.pdf"
 
           if (!(Test-Path $input)) {
             Write-Warning "⚠️ Input PDF not found! Skipping compression..."
@@ -429,7 +432,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: _book-${{ inputs.os }}-${{ inputs.format }}
-          path: _book
+          path: book/_book
 
       - name: 🚀 Stage to Dev Site
         if: inputs.target == 'dev' && inputs.deploy == true && inputs.format == 'html' && runner.os == 'Linux'
@@ -452,7 +455,7 @@ jobs:
 
           echo "🧹 Cleaning existing docs/"
           rm -rf docs
-          cp -r "${GITHUB_WORKSPACE}/_book" docs
+          cp -r "${GITHUB_WORKSPACE}/book/_book" docs
           rm -f docs/CNAME  # remove if present
 
           echo "🔍 Validating deployment content..."
@@ -472,7 +475,7 @@ jobs:
           echo "📊 Deployed to repository: harvard-edge/cs249r_book_dev"
           echo "📊 Target branch: main"
           echo "📊 Target directory: docs"
-          echo "📊 Source directory: _book"
+          echo "📊 Source directory: book/_book"
           echo "✅ Deployment should be complete"
 
       # Deploy to GitHub Pages
@@ -491,7 +494,7 @@ jobs:
         run: |
           echo "🔄 GitHub Pages deployment information:"
           echo "📊 Deployed to: gh-pages branch"
-          echo "📊 Source directory: _book"
+          echo "📊 Source directory: book/_book"
           echo "✅ Deployment should be complete"
           echo "🌐 Site should be available at: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
 
