@@ -33,18 +33,18 @@ The cleanup system removes:
 ```bash
 # Regular cleanup (recommended before commits)
 make clean
-./tools/scripts/clean.sh
+./tools/scripts/build/clean.sh
 
 # See what would be cleaned (safe preview)
 make clean-dry
-./tools/scripts/clean.sh --dry-run
+./tools/scripts/build/clean.sh --dry-run
 
 # Deep clean (removes caches, virtual environments)
 make clean-deep
-./tools/scripts/clean.sh --deep
+./tools/scripts/build/clean.sh --deep
 
 # Quiet cleanup (minimal output)
-./tools/scripts/clean.sh --quiet
+./tools/scripts/build/clean.sh --quiet
 ```
 
 ### Pre-Commit Hook
@@ -252,9 +252,29 @@ make check          # Final health check
 
 - **`book/_quarto.yml`**: Main Quarto configuration
 - **`Makefile`**: Development commands
-- **`tools/scripts/clean.sh`**: Cleanup script
+- **`tools/scripts/build/clean.sh`**: Cleanup script
 - **`.git/hooks/pre-commit`**: Automated cleanup hook
 - **`.gitignore`**: Ignored file patterns
+
+## 🗂️ Scripts Organization
+
+The `tools/scripts/` directory is organized into logical categories:
+
+```
+tools/scripts/
+├── build/           # Build and development scripts (clean.sh, etc.)
+├── content/         # Content management tools
+├── maintenance/     # System maintenance scripts
+├── testing/         # Test and validation scripts
+├── utilities/       # General utility scripts
+├── docs/            # Script documentation
+├── genai/           # AI and generation tools
+├── cross_refs/      # Cross-reference management
+├── quarto_publish/  # Publishing workflows
+└── ai_menu/         # AI menu tools
+```
+
+Each directory has its own README.md with specific usage instructions.
 
 ## 🤝 Contributing
 

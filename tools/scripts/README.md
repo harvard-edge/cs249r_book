@@ -1,111 +1,239 @@
-# Scripts Directory
+# MLSysBook Scripts Directory
 
-This directory contains various Python scripts used for book maintenance and processing.
+This directory contains all automation scripts, tools, and utilities for the Machine Learning Systems book project. The scripts are organized into logical categories for easy discovery and maintenance.
 
-## Available Scripts
+## 📁 Directory Structure
 
-### Figure Caption Improvement
-The `improve_figure_captions.py` script provides automated caption enhancement using local Ollama LLM models:
-
-```bash
-# Improve all captions (recommended)
-python3 scripts/improve_figure_captions.py -d contents/core/
-
-# Analysis and utilities
-python3 scripts/improve_figure_captions.py --analyze -d contents/core/
-python3 scripts/improve_figure_captions.py --build-map -d contents/core/
+```
+tools/scripts/
+├── build/           # Build and development scripts
+├── content/         # Content management and editing tools
+├── maintenance/     # System maintenance and updates
+├── testing/         # Test scripts and validation
+├── utilities/       # General utility scripts
+├── docs/            # Documentation for scripts
+├── genai/           # AI and generation tools
+├── cross_refs/      # Cross-reference management
+├── quarto_publish/  # Publishing and deployment
+└── ai_menu/         # AI menu and interface tools
 ```
 
-📖 **Full documentation**: See [`FIGURE_CAPTIONS.md`](FIGURE_CAPTIONS.md) for complete usage guide, model selection, and troubleshooting.
+## 🔨 Build Scripts (`build/`)
 
-### Cross-Reference Generation
-The `cross_refs/` directory contains scripts for generating AI-powered cross-references with explanations.
+Scripts for building, cleaning, and development workflows:
 
-📖 **Full documentation**: See [`cross_refs/RECIPE.md`](cross_refs/RECIPE.md) for complete workflow.
+- **`clean.sh`** - Comprehensive cleanup script (build artifacts, caches, temp files)
+- **`standardize_sources.sh`** - Standardize source file formatting
+- **`generate_stats.py`** - Generate statistics about the Quarto project
 
-## Python Dependencies
+### Usage Examples
+```bash
+# Clean all build artifacts
+./build/clean.sh
 
-All Python dependencies are managed through the root-level `requirements.txt` file. This ensures consistent package versions across all scripts and the GitHub Actions workflow.
+# Deep clean including caches and virtual environments
+./build/clean.sh --deep
 
-### Adding New Dependencies
+# Generate project statistics
+python build/generate_stats.py
+```
 
-When adding new Python scripts that require external packages:
+## 📝 Content Management (`content/`)
 
-1. Add the required packages to `requirements.txt` at the project root
-2. Include version constraints where appropriate (e.g., `>=1.0.0`)
-3. Add comments to group related packages
-4. Test locally with: `pip install -r requirements.txt`
+Tools for managing, editing, and validating book content:
 
-### Current Dependencies
+- **`improve_figure_captions.py`** - Enhance figure captions using AI
+- **`manage_section_ids.py`** - Manage section IDs and cross-references
+- **`find_unreferenced_labels.py`** - Find unused labels and references
+- **`find_duplicate_labels.py`** - Detect duplicate labels
+- **`extract_headers.py`** - Extract headers from content files
+- **`find_acronyms.py`** - Find and manage acronyms
+- **`find_fig_references.py`** - Analyze figure references
+- **`fix_bibliography.py`** - Fix bibliography formatting
+- **`sync_bibliographies.py`** - Synchronize bibliography files
+- **`clean_callout_titles.py`** - Clean callout title formatting
+- **`collapse_blank_lines.py`** - Remove excessive blank lines
 
-The current dependencies include:
+### Usage Examples
+```bash
+# Improve figure captions
+python content/improve_figure_captions.py
 
-- **Quarto/Jupyter**: `jupyterlab-quarto`, `jupyter`
-- **NLP**: `nltk` (with stopwords and punkt data)
-- **AI Integration**: `openai`, `gradio`
-- **Document Processing**: `pybtex`, `pypandoc`, `pyyaml`
-- **Image Processing**: `Pillow`
-- **Validation**: `jsonschema`
-- **Utilities**: `absl-py`
+# Find unreferenced labels
+python content/find_unreferenced_labels.py
 
-### Subdirectory Requirements Files
+# Manage section IDs
+python content/manage_section_ids.py
+```
 
-Some subdirectories have their own `requirements.txt` files for specific workflows:
+## 🔧 Maintenance Scripts (`maintenance/`)
 
-- `scripts/genai/requirements.txt` - AI-specific dependencies
-- `scripts/quarto_publish/requirements.txt` - Publishing dependencies
+System maintenance, updates, and changelog management:
 
-These are kept for reference but the main workflow uses the root `requirements.txt`.
+- **`update_changelog.py`** - Update project changelog
+- **`fix_changelog.py`** - Fix changelog formatting issues
+- **`update_texlive_packages.py`** - Update LaTeX package dependencies
+- **`cleanup_old_runs.sh`** - Clean up old build runs
 
-### GitHub Actions Integration
+### Usage Examples
+```bash
+# Update changelog
+python maintenance/update_changelog.py
 
-The GitHub Actions workflow automatically:
+# Update LaTeX packages
+python maintenance/update_texlive_packages.py
+```
 
-1. Caches Python packages for faster builds
-2. Installs all dependencies from `requirements.txt`
-3. Downloads required NLTK data
-4. Reports cache status in build summaries
+## 🧪 Testing Scripts (`testing/`)
 
-Cache is invalidated when `requirements.txt` changes, ensuring dependencies stay up-to-date.
+Test scripts and validation tools:
 
-## Pre-commit Setup
+- **`run_tests.py`** - Run comprehensive test suite
+- **`test_section_ids.py`** - Test section ID management
 
-The project uses pre-commit hooks for code quality checks. The hooks run automatically on commit and include:
+### Usage Examples
+```bash
+# Run all tests
+python testing/run_tests.py
 
-- **Spell checking** with codespell
-- **YAML validation** for `_quarto.yml`
-- **Markdown formatting** and linting
-- **Bibliography formatting** with bibtex-tidy
-- **Custom Python scripts** for section ID management and unreferenced label detection
+# Test section ID system
+python testing/test_section_ids.py
+```
 
-### Setup Instructions
+## 🛠️ Utilities (`utilities/`)
 
-1. **Install pre-commit** (included in requirements.txt):
-   ```bash
-   pip install -r requirements.txt
-   ```
+General-purpose utility scripts:
 
-2. **Install the git hooks**:
-   ```bash
-   pre-commit install
-   ```
+- **`check_ascii.py`** - Check for non-ASCII characters
+- **`check_images.py`** - Validate image files and references
+- **`check_sources.py`** - Comprehensive source file validation
+- **`fix_titles.py`** - Fix title formatting
+- **`count_footnotes.sh`** - Count footnotes
+- **`analyze_footnotes.sh`** - Detailed footnote analysis
 
-3. **Run manually** (optional):
-   ```bash
-   # Run on all files
-   pre-commit run --all-files
-   
-   # Run on specific files
-   pre-commit run --files path/to/file.qmd
-   ```
+### Usage Examples
+```bash
+# Check for non-ASCII characters
+python utilities/check_ascii.py
 
-### Troubleshooting
+# Validate images
+python utilities/check_images.py
 
-- **NLTK data issues**: The hooks automatically download required NLTK data, but if you encounter issues, you can manually run:
-  ```python
-  import nltk
-  nltk.download('stopwords')
-  nltk.download('punkt')
-  ```
+# Check source files
+python utilities/check_sources.py
+```
 
-- **Python environment**: The hooks use isolated Python environments with the specified dependencies, so they should work regardless of your local Python setup. 
+## 📖 Documentation (`docs/`)
+
+Documentation for scripts and systems:
+
+- **`README.md`** - General scripts documentation
+- **`SECTION_ID_SYSTEM.md`** - Section ID management system guide
+- **`FIGURE_CAPTIONS.md`** - Figure caption enhancement guide
+
+## 🤖 Specialized Tools
+
+### AI and Generation (`genai/`)
+Tools for AI-powered content generation and enhancement.
+
+### Cross-References (`cross_refs/`)
+Advanced cross-reference management and validation tools.
+
+### Publishing (`quarto_publish/`)
+Scripts for publishing and deployment workflows.
+
+### AI Menu (`ai_menu/`)
+AI-powered menu and interface tools.
+
+## 🚀 Quick Start
+
+### First Time Setup
+```bash
+# Make all scripts executable
+find tools/scripts -name "*.sh" -exec chmod +x {} \;
+
+# Install Python dependencies (if needed)
+pip install -r tools/dependencies/requirements.txt
+```
+
+### Common Workflows
+
+#### Before Working on Content
+```bash
+# Clean workspace
+./build/clean.sh
+
+# Check project health
+python utilities/check_sources.py
+```
+
+#### Content Editing Session
+```bash
+# Improve figures
+python content/improve_figure_captions.py
+
+# Find issues
+python content/find_unreferenced_labels.py
+python content/find_duplicate_labels.py
+
+# Clean up formatting
+python content/collapse_blank_lines.py
+```
+
+#### Before Publishing
+```bash
+# Full validation
+python testing/run_tests.py
+python utilities/check_images.py
+python utilities/ascii_checker.py
+
+# Update changelog
+python maintenance/update_changelog.py
+
+# Final cleanup
+./build/clean.sh
+```
+
+## 📋 Script Categories Summary
+
+| Category | Purpose | Count | Key Scripts |
+|----------|---------|-------|-------------|
+| **build** | Development & building | 3 | `clean.sh`, `generate_stats.py` |
+| **content** | Content management | 11 | `manage_section_ids.py`, `improve_figure_captions.py` |
+| **maintenance** | System maintenance | 4 | `update_changelog.py`, `update_texlive_packages.py` |
+| **testing** | Testing & validation | 2 | `run_tests.py`, `test_section_ids.py` |
+| **utilities** | General utilities | 6 | `check_sources.py`, `check_ascii.py` |
+| **docs** | Documentation | 3 | Various `.md` files |
+
+## 🔍 Finding the Right Script
+
+### By Purpose
+- **Need to clean up?** → `build/clean.sh`
+- **Content has issues?** → `utilities/check_sources.py`
+- **Figures need improvement?** → `content/improve_figure_captions.py`
+- **Want project stats?** → `build/generate_stats.py`
+- **Need to test changes?** → `testing/run_tests.py`
+
+### By File Type
+- **`.sh` scripts** - Shell scripts (mostly in `build/` and `utilities/`)
+- **`.py` scripts** - Python scripts (distributed across categories)
+- **`.md` files** - Documentation (in `docs/`)
+
+## 🤝 Contributing New Scripts
+
+When adding new scripts:
+
+1. **Choose the right category** based on the script's primary purpose
+2. **Follow naming conventions** - descriptive, lowercase with underscores
+3. **Add documentation** - Include usage examples and descriptions
+4. **Update this README** - Add the script to the appropriate section
+5. **Make executable** - `chmod +x` for shell scripts
+6. **Test thoroughly** - Ensure scripts work in different environments
+
+## 📞 Support
+
+For issues with specific scripts:
+1. Check the script's docstring or comments
+2. Look for documentation in the `docs/` directory
+3. Run scripts with `--help` flag if available
+4. Review this README for context and examples 
