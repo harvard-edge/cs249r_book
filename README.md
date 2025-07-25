@@ -10,19 +10,18 @@
 
 ---
 
-> **Our mission**: To make AI systems education globally accessible — one learner, one lab, and one system at a time.
+> **Our mission**: To make AI systems education globally accessible: one learner, one lab, and one system at a time.
 
-📘 This repo contains the source for the open textbook **Machine Learning Systems: Principles and Practices of Engineering Artificially Intelligent Systems**.
+📘 This repo contains the source files for the **Machine Learning Systems: Principles and Practices of Engineering Artificially Intelligent Systems** textbook.
 
-🔗 For the full learning experience — textbook, hands-on labs, educational frameworks, kits, and community — visit:  
-👉 [**https://mlsysbook.org**](https://mlsysbook.org)
+For the full learning experience and instructor materials, including the textbook, hands-on labs, educational frameworks, kits, and community, please visit:  👉 [**https://mlsysbook.org**](https://mlsysbook.org)
 
 ---
 
 ## 📚 Read the Book
 
-- 📖 [Read online](https://mlsysbook.org) — continuously updated version
-- 📄 [Download PDF](https://mlsysbook.org/Machine-Learning-Systems.pdf) — for offline access
+- 📖 [Read online](https://mlsysbook.ai) — continuously updated version
+- 📄 [Download PDF](https://mlsysbook.ai/Machine-Learning-Systems.pdf) — for offline access
 
 ### Core Topics:
 - ML system design & modularity  
@@ -111,6 +110,3 @@ You may share and adapt the material for **non-commercial purposes**, with appro
 * 💸 [Open Collective](https://opencollective.com/mlsysbook) — support this initiative
 * 🧠 [GitHub Discussions](https://github.com/MLSysBook/mlsysbook/discussions) — ask questions or share insights
 
----
-
-> **Join us in making systems-level ML education open, practical, and global.**
