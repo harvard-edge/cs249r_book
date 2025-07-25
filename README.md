@@ -128,7 +128,7 @@ Each category includes focused tools with clear naming and documentation. See [`
 - Git
 
 ### Quick Build
-```bash
+   ```bash
 # Clone the repository
 git clone https://github.com/harvard-edge/cs249r_book.git
 cd cs249r_book
@@ -143,7 +143,7 @@ make preview      # Start development server
 ```
 
 ### Advanced Development
-```bash
+   ```bash
 # Full development setup
 make clean-deep      # Deep clean
 make install         # Install all dependencies
