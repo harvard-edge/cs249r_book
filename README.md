@@ -91,6 +91,7 @@ make help           # Show all commands
 - **📋 Linting**: Check for formatting and content issues
 - **✅ Validation**: Verify project structure and dependencies
 - **🔍 Testing**: Automated tests for content and scripts
+- **🗂️ Organized Structure**: Professional script organization with clear categories
 
 ### 🗂️ Organized Development Tools
 
@@ -137,7 +138,7 @@ cd cs249r_book
 make setup-hooks  # Configure git hooks
 make install      # Install dependencies
 
-# Build and preview
+# Build and preview (runs from book/ directory)
 make clean build  # Clean and build HTML
 make preview      # Start development server
 ```
@@ -182,6 +183,7 @@ All contributions go through automated quality checks:
 - 📋 **Content review**: Formatting and style validation  
 - 🧪 **Testing**: Automated build and link verification
 - 👥 **Peer review**: Community and maintainer feedback
+- 🗂️ **Organized workflow**: Professional development environment with clear tool categories
 
 ---
 
@@ -191,16 +193,32 @@ All contributions go through automated quality checks:
 MLSysBook/
 ├── book/                   # Main book content (Quarto)
 │   ├── contents/          # Chapter content
-│   ├── _quarto.yml        # Book configuration
-│   └── assets/            # Images, styles, media
+│   │   ├── core/         # Core chapters
+│   │   ├── labs/         # Hands-on labs
+│   │   ├── frontmatter/  # Preface, acknowledgments
+│   │   └── parts/        # Book parts and sections
+│   ├── _quarto.yml       # Book configuration
+│   ├── index.qmd         # Main entry point
+│   └── assets/           # Images, styles, media
 ├── tools/                 # Development automation
-│   ├── scripts/           # Organized development scripts
-│   ├── dependencies/      # Package requirements  
-│   └── setup/            # Setup and configuration
-├── config/               # Build configuration
-├── DEVELOPMENT.md        # Development guide
-├── Makefile             # Development commands
-└── README.md            # This file
+│   ├── scripts/          # Organized development scripts
+│   │   ├── build/        # Build and development tools
+│   │   ├── content/      # Content management tools
+│   │   ├── maintenance/  # System maintenance scripts
+│   │   ├── testing/      # Test and validation scripts
+│   │   ├── utilities/    # General utility scripts
+│   │   └── docs/         # Script documentation
+│   ├── dependencies/     # Package requirements  
+│   └── setup/           # Setup and configuration
+├── config/              # Build configuration
+│   ├── _extensions/     # Quarto extensions
+│   ├── lua/            # Lua scripts
+│   └── tex/            # LaTeX templates
+├── assets/             # Global assets (covers, icons)
+├── DEVELOPMENT.md      # Development guide
+├── MAINTENANCE_GUIDE.md # Daily workflow guide
+├── Makefile           # Development commands
+└── README.md          # This file
 ```
 
 ---
@@ -251,4 +269,6 @@ You may share and adapt the material for **non-commercial purposes**, with appro
 - **🌐 Multi-format Output**: HTML, PDF, and EPUB with consistent styling
 - **⚡ Fast Iteration**: Live preview server with automatic reloading
 - **✅ Quality Assurance**: Automated testing, linting, and validation
+- **📁 Clean Architecture**: Well-organized project structure with clear separation of concerns
+- **🛠️ Professional Tooling**: Category-based script organization for easy maintenance
 
