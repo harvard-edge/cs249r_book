@@ -9,8 +9,6 @@
 [![License](https://img.shields.io/badge/license-CC--BY--NC--SA%204.0-blue)](https://github.com/harvard-edge/cs249r_book/blob/dev/LICENSE)
 [![Open Collective](https://img.shields.io/badge/fund%20us-Open%20Collective-blue.svg)](https://opencollective.com/mlsysbook)
 
-**Founded at Harvard University**
-
 ---
 
 ## 🎯 What Is This?
