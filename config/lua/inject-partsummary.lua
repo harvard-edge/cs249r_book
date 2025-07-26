@@ -22,40 +22,66 @@ end
 -- 📄 Read summaries.yml into a Lua table
 local function read_summaries(path)
   local summaries = {}
-  local current_key = nil
-  local buffer = {}
-
+  
   local file = io.open(path, "r")
   if not file then 
     log_warning("Failed to open part summaries file: " .. path)
     return summaries 
   end
 
+  local content = file:read("*all")
+  file:close()
+  
+  -- Parse YAML manually for the new structure
   local entries_loaded = 0
-  for line in file:lines() do
-    local key, val = line:match("^([%w %-%._]+):%s*>?%s*(.*)")
-    if key then
-      if current_key and #buffer > 0 then
-        summaries[normalize(current_key)] = table.concat(buffer, " ")
+  local current_title = nil
+  local description_lines = {}
+  local in_description = false
+  
+  for line in content:gmatch("[^\r\n]+") do
+    -- Match title line: - title: "Part I — Systems Foundations"
+    local title = line:match('%s*%-%s*title:%s*"([^"]+)"')
+    if title then
+      -- Save previous entry if exists
+      if current_title and #description_lines > 0 then
+        summaries[normalize(current_title)] = table.concat(description_lines, " "):gsub("^%s+", ""):gsub("%s+$", "")
         entries_loaded = entries_loaded + 1
-        buffer = {}
       end
-      current_key = key
-      if val and val ~= "" then
-        table.insert(buffer, val)
+      current_title = title
+      description_lines = {}
+      in_description = false
+    -- Match description start: description: >
+    elseif line:match('%s*description:%s*>?') then
+      in_description = true
+    -- Match description content (indented lines after description:)
+    elseif in_description and current_title then
+      local desc_content = line:match('%s%s%s*(.+)')
+      if desc_content then
+        table.insert(description_lines, desc_content)
+      elseif line:match('^%s*$') then
+        -- Empty line, continue
+      elseif line:match('^%s*%-%s*title:') then
+        -- Hit next title, handle this line again
+        if current_title and #description_lines > 0 then
+          summaries[normalize(current_title)] = table.concat(description_lines, " "):gsub("^%s+", ""):gsub("%s+$", "")
+          entries_loaded = entries_loaded + 1
+        end
+        -- Parse this title line
+        local title = line:match('%s*%-%s*title:%s*"([^"]+)"')
+        if title then
+          current_title = title
+          description_lines = {}
+          in_description = false
+        end
       end
-    elseif current_key and line:match("^%s") then
-      local trimmed = line:gsub("^%s+", "")
-      table.insert(buffer, trimmed)
     end
   end
-
-  if current_key and #buffer > 0 then
-    summaries[normalize(current_key)] = table.concat(buffer, " ")
+  
+  -- Save last entry
+  if current_title and #description_lines > 0 then
+    summaries[normalize(current_title)] = table.concat(description_lines, " "):gsub("^%s+", ""):gsub("%s+$", "")
     entries_loaded = entries_loaded + 1
   end
-
-  file:close()
   
   if entries_loaded > 0 then
     log_success("Loaded " .. entries_loaded .. " part summaries from " .. path)
