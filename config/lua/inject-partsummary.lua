@@ -18,7 +18,9 @@ local function extract_key(title)
     ["part vii — laboratory exercises"] = "labs",
     ["part viii — arduino labs"] = "arduino",
     ["part ix — seeed xiao labs"] = "xiao",
+    ["part ix — seeed xiao esp32s3 labs"] = "xiao",  -- Handle full ESP32S3 name
     ["part x — grove vision labs"] = "grove",
+    ["part x — seeed grove vision ai v2 labs"] = "grove",  -- Handle full Grove name
     ["part xi — raspberry pi labs"] = "raspberry",
     ["part xii — shared labs"] = "shared"
   }
