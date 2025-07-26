@@ -34,42 +34,42 @@ local function read_summaries(path)
   
   -- Parse YAML manually for the new structure
   local entries_loaded = 0
-  local current_title = nil
+  local current_key = nil
   local description_lines = {}
   local in_description = false
   
   for line in content:gmatch("[^\r\n]+") do
-    -- Match title line: - title: "Part I — Systems Foundations"
-    local title = line:match('%s*%-%s*title:%s*"([^"]+)"')
-    if title then
+    -- Match key line: - key: "part i — systems foundations"
+    local key = line:match('%s*%-%s*key:%s*"([^"]+)"')
+    if key then
       -- Save previous entry if exists
-      if current_title and #description_lines > 0 then
-        summaries[normalize(current_title)] = table.concat(description_lines, " "):gsub("^%s+", ""):gsub("%s+$", "")
+      if current_key and #description_lines > 0 then
+        summaries[current_key] = table.concat(description_lines, " "):gsub("^%s+", ""):gsub("%s+$", "")
         entries_loaded = entries_loaded + 1
       end
-      current_title = title
+      current_key = key
       description_lines = {}
       in_description = false
     -- Match description start: description: >
     elseif line:match('%s*description:%s*>?') then
       in_description = true
     -- Match description content (indented lines after description:)
-    elseif in_description and current_title then
+    elseif in_description and current_key then
       local desc_content = line:match('%s%s%s*(.+)')
       if desc_content then
         table.insert(description_lines, desc_content)
       elseif line:match('^%s*$') then
         -- Empty line, continue
-      elseif line:match('^%s*%-%s*title:') then
-        -- Hit next title, handle this line again
-        if current_title and #description_lines > 0 then
-          summaries[normalize(current_title)] = table.concat(description_lines, " "):gsub("^%s+", ""):gsub("%s+$", "")
+      elseif line:match('^%s*%-%s*key:') then
+        -- Hit next key, handle this line again
+        if current_key and #description_lines > 0 then
+          summaries[current_key] = table.concat(description_lines, " "):gsub("^%s+", ""):gsub("%s+$", "")
           entries_loaded = entries_loaded + 1
         end
-        -- Parse this title line
-        local title = line:match('%s*%-%s*title:%s*"([^"]+)"')
-        if title then
-          current_title = title
+        -- Parse this key line
+        local key = line:match('%s*%-%s*key:%s*"([^"]+)"')
+        if key then
+          current_key = key
           description_lines = {}
           in_description = false
         end
@@ -78,8 +78,8 @@ local function read_summaries(path)
   end
   
   -- Save last entry
-  if current_title and #description_lines > 0 then
-    summaries[normalize(current_title)] = table.concat(description_lines, " "):gsub("^%s+", ""):gsub("%s+$", "")
+  if current_key and #description_lines > 0 then
+    summaries[current_key] = table.concat(description_lines, " "):gsub("^%s+", ""):gsub("%s+$", "")
     entries_loaded = entries_loaded + 1
   end
   
