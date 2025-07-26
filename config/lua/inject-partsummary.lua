@@ -3,6 +3,29 @@ local function normalize(str)
   return str:lower():gsub("^%s+", ""):gsub("%s+$", "")
 end
 
+-- 🗝️ Extract short key from part header title
+local function extract_key(title)
+  local normalized = normalize(title)
+  
+  -- Map full part titles to short keys
+  local key_map = {
+    ["part i — systems foundations"] = "foundations",
+    ["part ii — design principles"] = "principles", 
+    ["part iii — system optimization"] = "optimization",
+    ["part iv — deployment and reliability"] = "deployment",
+    ["part v — responsible ai"] = "responsible",
+    ["part vi — impact and futures"] = "futures",
+    ["part vii — laboratory exercises"] = "labs",
+    ["part viii — arduino labs"] = "arduino",
+    ["part ix — seeed xiao labs"] = "xiao",
+    ["part x — grove vision labs"] = "grove",
+    ["part xi — raspberry pi labs"] = "raspberry",
+    ["part xii — shared labs"] = "shared"
+  }
+  
+  return key_map[normalized]
+end
+
 -- Helper function for formatted logging
 local function log_info(message)
   io.stderr:write("📄 [Part Summary Filter] " .. message .. "\n")
@@ -151,11 +174,11 @@ function Header(el)
   end
   
   local title = pandoc.utils.stringify(el.content)
-  local key = normalize(title)
-  local summary = summaries[key]
+  local key = extract_key(title)
 
-  if summary then
-    log_info("💡 Injecting part summary for: '" .. title .. "'")
+  if key and summaries[key] then
+    local summary = summaries[key]
+    log_info("💡 Injecting part summary for: '" .. title .. "' (key: " .. key .. ")")
     local latex = "\\setpartsummary{" .. summary .. "}"
     return {
       pandoc.RawBlock("latex", latex),
