@@ -164,14 +164,16 @@ function RawBlock(el)
   
   local key = extract_key_from_latex(el.text)
   
-  if key and summaries[key] then
-    local summary = summaries[key]
-    log_info("💡 Injecting part summary for key: '" .. key .. "'")
-    local latex = "\\setpartsummary{" .. summary .. "}"
-    return {
-      el,
-      pandoc.RawBlock("latex", latex)
-    }
+  if key then
+    if summaries[key] then
+      local summary = summaries[key]
+      log_info("💡 Injecting part summary for key: '" .. key .. "'")
+      local latex = "\\setpartsummary{" .. summary .. "}"
+      return {
+        el,
+        pandoc.RawBlock("latex", latex)
+      }
+    end
   end
 
   return nil
