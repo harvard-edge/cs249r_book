@@ -3,29 +3,11 @@ local function normalize(str)
   return str:lower():gsub("^%s+", ""):gsub("%s+$", "")
 end
 
--- 🗝️ Extract short key from part header title
-local function extract_key(title)
-  local normalized = normalize(title)
-  
-  -- Map full part titles to short keys
-  local key_map = {
-    ["part i — systems foundations"] = "foundations",
-    ["part ii — design principles"] = "principles", 
-    ["part iii — system optimization"] = "optimization",
-    ["part iv — deployment and reliability"] = "deployment",
-    ["part v — responsible ai"] = "responsible",
-    ["part vi — impact and futures"] = "futures",
-    ["part vii — laboratory exercises"] = "labs",
-    ["part viii — arduino labs"] = "arduino",
-    ["part ix — seeed xiao labs"] = "xiao",
-    ["part ix — seeed xiao esp32s3 labs"] = "xiao",  -- Handle full ESP32S3 name
-    ["part x — grove vision labs"] = "grove",
-    ["part x — seeed grove vision ai v2 labs"] = "grove",  -- Handle full Grove name
-    ["part xi — raspberry pi labs"] = "raspberry",
-    ["part xii — shared labs"] = "shared"
-  }
-  
-  return key_map[normalized]
+-- 🗝️ Extract key from LaTeX part command
+local function extract_key_from_latex(content)
+  -- Look for \part*{key:xxx} pattern in content
+  local key = content:match("\\part%*?%{key:([^}]+)%}")
+  return key
 end
 
 -- Helper function for formatted logging
@@ -168,31 +150,40 @@ local function handle_meta(meta)
   return meta
 end
 
--- 🧠 Insert \setpartsummary before any heading whose title matches a summary key
-function Header(el)
+-- 🧠 Insert \setpartsummary after any RawBlock with \part*{key:xxx} pattern
+function RawBlock(el)
   -- Skip processing if we don't have any summaries loaded
   if not has_part_summaries then
     return nil
   end
   
-  local title = pandoc.utils.stringify(el.content)
-  local key = extract_key(title)
-
+  -- Only process LaTeX blocks
+  if el.format ~= "latex" then
+    return nil
+  end
+  
+  local key = extract_key_from_latex(el.text)
+  
   if key and summaries[key] then
     local summary = summaries[key]
-    log_info("💡 Injecting part summary for: '" .. title .. "' (key: " .. key .. ")")
+    log_info("💡 Injecting part summary for key: '" .. key .. "'")
     local latex = "\\setpartsummary{" .. summary .. "}"
     return {
-      pandoc.RawBlock("latex", latex),
-      el
+      el,
+      pandoc.RawBlock("latex", latex)
     }
   end
 
   return nil
 end
 
+-- Keep the header function as a fallback (can be removed later)
+function Header(el)
+  return nil
+end
+
 -- Register the filter with meta handler
 return {
   { Meta = handle_meta },
-  { Header = Header }
+  { RawBlock = RawBlock }
 }
