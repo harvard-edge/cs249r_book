@@ -14,7 +14,7 @@
 #   make check       - Check project health
 # =============================================================================
 
-.PHONY: help clean clean-deep clean-dry build build-pdf preview test install check setup-hooks lint
+.PHONY: help clean clean-deep clean-dry build build-html build-pdf build-all preview preview-pdf test install check setup-hooks lint
 
 # Default target
 help:
@@ -27,12 +27,14 @@ help:
 	@echo "  make clean-dry   - Show what would be cleaned (dry run)"
 	@echo ""
 	@echo "🔨 Building:"
-	@echo "  make build       - Build HTML version"
-	@echo "  make build-pdf   - Build PDF version"
+	@echo "  make build       - Interactive build (choose format)"
+	@echo "  make build-html  - Build HTML website"
+	@echo "  make build-pdf   - Build PDF book"
 	@echo "  make build-all   - Build all formats"
 	@echo ""
 	@echo "🔍 Development:"
-	@echo "  make preview     - Start development server"
+	@echo "  make preview     - Start HTML development server"
+	@echo "  make preview-pdf - Start PDF development server"
 	@echo "  make test        - Run tests and validation"
 	@echo "  make check       - Check project health"
 	@echo "  make lint        - Run linting checks"
@@ -42,8 +44,9 @@ help:
 	@echo "  make setup-hooks - Setup git hooks"
 	@echo ""
 	@echo "💡 Examples:"
-	@echo "  make clean build preview    # Clean, build, and start preview"
-	@echo "  make clean-dry              # See what would be cleaned"
+	@echo "  make clean build-html preview  # Clean, build HTML, and start preview"
+	@echo "  make build                     # Interactive build (choose format)"
+	@echo "  make clean-dry                 # See what would be cleaned"
 
 # =============================================================================
 # Cleaning Tasks
@@ -66,25 +69,63 @@ clean-dry:
 # =============================================================================
 
 build:
+	@echo "📚 What would you like to build?"
+	@echo ""
+	@echo "  1️⃣  HTML website (interactive, fast)"
+	@echo "  2️⃣  PDF book (academic, slower)"
+	@echo "  3️⃣  Both formats"
+	@echo ""
+	@read -p "Choose [1/2/3]: " choice; \
+	case $$choice in \
+		1|html|HTML) echo "🔨 Building HTML..."; make build-html ;; \
+		2|pdf|PDF) echo "📄 Building PDF..."; make build-pdf ;; \
+		3|both|all) echo "📚 Building both..."; make build-all ;; \
+		*) echo "❌ Invalid choice. Use: make build-html, make build-pdf, or make build-all" ;; \
+	esac
+
+build-html:
 	@echo "🔨 Building HTML version..."
+	@echo "  📝 Using HTML configuration..."
+	@cd book && ln -sf _quarto-html.yml _quarto.yml
 	@cd book && quarto render --to html
+	@cd book && rm _quarto.yml
+	@echo "  ✅ HTML build complete"
 
 build-pdf:
 	@echo "📄 Building PDF version..."
+	@echo "  📝 Using PDF configuration..."
+	@cd book && ln -sf _quarto-pdf.yml _quarto.yml
 	@cd book && quarto render --to titlepage-pdf
+	@cd book && rm _quarto.yml
+	@echo "  ✅ PDF build complete"
 
 build-all:
 	@echo "📚 Building all formats..."
-	@cd book && quarto render
+	@echo "  🔄 Building HTML..."
+	@make build-html
+	@echo "  🔄 Building PDF..."
+	@make build-pdf
+	@echo "  ✅ All formats complete"
 
 # =============================================================================
 # Development Tasks
 # =============================================================================
 
 preview:
-	@echo "🌐 Starting development preview server..."
+	@echo "🌐 Starting development preview server (HTML)..."
+	@echo "  📝 Using HTML configuration for preview..."
 	@echo "  -> Open your browser to the URL shown below"
-	@cd book && quarto preview
+	@echo "  🛑 Press Ctrl+C to stop the server"
+	@cd book && ln -sf _quarto-html.yml _quarto.yml
+	@cd book && trap 'rm -f _quarto.yml' EXIT INT TERM; quarto preview
+
+preview-pdf:
+	@echo "📄 Starting PDF development preview..."
+	@echo "  📝 Using PDF configuration for preview..."
+	@echo "  -> Open your browser to the URL shown below"
+	@echo "  🛑 Press Ctrl+C to stop the server"
+	@cd book && ln -sf _quarto-pdf.yml _quarto.yml
+	@cd book && trap 'rm -f _quarto.yml' EXIT INT TERM; quarto preview
 
 test:
 	@echo "🧪 Running tests and validation..."
