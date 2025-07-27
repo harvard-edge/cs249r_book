@@ -1,4 +1,3 @@
-
 # MACHINE LEARNING SYSTEMS  
 *Principles and Practices of Engineering Artificially Intelligent Systems*
 
@@ -13,43 +12,45 @@
 
 ## 🎯 What Is This?
 
-The **open-source textbook** that teaches you to build real-world AI systems — from edge devices to cloud deployment. Started as a Harvard course by Prof. Vijay Janapa Reddi, now used by universities and students worldwide.
+The **open-source textbook** that teaches you to build real-world AI systems — from edge devices to cloud deployment. Started as a Harvard University course (CS249r) by [Prof. Vijay Janapa Reddi](https://github.com/profvjreddi/homepage), now used by universities and students worldwide.
 
 > **Our mission:** Expand access to AI systems education worldwide — empowering learners, one chapter and one lab at a time.
 
-For the full learning experience and instructor materials, including the textbook, hands-on labs, educational frameworks, kits, and community, please visit:  👉 [**https://mlsysbook.org**](https://mlsysbook.org)
+## 💭 Why This Exists
+
+*"This grew out of a concern that while students could train AI models, few understood how to build the systems that actually make them work. It's like everyone can write an app, but few know how to build the smartphone that runs it. As AI becomes more capable and autonomous, the critical bottleneck won't be the algorithms - it will be the engineers who can build efficient, scalable, and sustainable systems that safely harness that intelligence. Richard Sutton's "The Bitter Lesson" taught us that general methods leveraging computation ultimately triumph over human-crafted approaches. The same principle applies here: the future belongs to those who can engineer the systems that unlock AI's computational potential. We're at an inflection point where we need an entirely new discipline - AI Engineering - focused not just on training models, but on the full systems stack that makes AI work in the real world. This book is my attempt to establish that foundation. We can't make this transformation happen overnight, but it has to start somewhere."*
+
+— *Vijay*
 
 ---
 
-## 📚 START HERE
+## 📚 GET STARTED
 
-### For Learners
+### 🎓 For Learners
 - 📖 **[Read online](https://mlsysbook.ai)** — continuously updated version
 - 📄 **[Download PDF](https://mlsysbook.ai/Machine-Learning-Systems.pdf)** — for offline access
-- 🌐 **[Explore the full experience](https://mlsysbook.org)** — complete ecosystem
+- 🌐 **[Explore the ecosystem](https://mlsysbook.org)** — complete learning experience with labs & frameworks
 
-### For Educators  
-- 🎓 **Course materials & labs** — hands-on learning resources
-- 📋 **Instructor resources** — teaching guides and materials
+### 👩‍🏫 For Educators  
+- 🎓 **[Course materials & labs](https://mlsysbook.org)** — hands-on learning resources
+- 📋 **[Instructor resources](https://mlsysbook.org)** — teaching guides and materials
 
-### For Contributors
+### 🛠️ For Contributors
 - 🤝 **[How to contribute](contribute.md)** — detailed guidelines
 - ⚡ **[Quick setup](#quick-start)** — get started in minutes
 
 ---
 
-## 🧠 About the Project
+## 🧠 What You'll Learn
 
-MLSysBook began as a Harvard course and has since grown into a **global educational movement** focused on teaching ML through a **systems-first lens**.
+We go beyond training models — this book teaches you to understand and build the **full stack** of real-world ML systems.
 
-We go beyond training models — our goal is to help learners understand and build the full stack of real-world ML systems, from edge devices to cloud-scale deployment.
-
-### Core Topics:
-- ML system design & modularity  
-- Data collection & labeling pipelines  
-- Model architecture & optimization  
-- Deployment, MLOps & monitoring  
-- Edge AI & resource-constrained platforms
+**Core Topics:**
+- **ML system design & architecture** — building scalable, maintainable systems
+- **Data pipelines & engineering** — collection, labeling, and processing at scale  
+- **Model optimization & deployment** — from prototypes to production
+- **MLOps & monitoring** — keeping systems running reliably
+- **Edge AI & resource constraints** — deploying on mobile, embedded, and IoT devices
 
 ---
 
@@ -78,7 +79,7 @@ make preview      # Start development server
 
 ## 🤝 Contributing
 
-We welcome contributions from around the world — from students, educators, researchers, and practitioners.
+We welcome contributions from students, educators, researchers, and practitioners worldwide.
 
 ### Ways to Contribute
 - 📝 **Content**: Suggest edits, improvements, or new examples
@@ -89,7 +90,7 @@ We welcome contributions from around the world — from students, educators, res
 
 ### Getting Started
 1. **Read**: [contribute.md](contribute.md) for detailed guidelines
-2. **Setup**: Follow the development workflow below
+2. **Setup**: Follow the [development workflow](#quick-start) above
 3. **Explore**: Check existing [GitHub Issues](https://github.com/harvard-edge/cs249r_book/issues)
 4. **Connect**: Join [GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions)
 
@@ -99,13 +100,24 @@ All contributions go through automated quality checks:
 - 📋 **Content review**: Formatting and style validation  
 - 🧪 **Testing**: Automated build and link verification
 - 👥 **Peer review**: Community and maintainer feedback
-- 🗂️ **Organized workflow**: Professional development environment with clear tool categories
 
 ---
 
-## 💡 Learn More
+## ⭐ Support This Work
 
-* 🌐 [mlsysbook.org](https://mlsysbook.org) — main site and learning platform
+**Show this matters:** If you find this valuable, please **star this repository** ⭐ — it signals to institutions and funding bodies that open AI education matters.
+
+**Fund the mission:** Help us expand AI systems education globally. You can sponsor TinyML kits for students in developing countries, fund learning materials, support workshops, or sustain our open-source infrastructure.
+
+[![Open Collective](https://img.shields.io/badge/💝%20Support%20AI%20Education-Open%20Collective-blue.svg)](https://opencollective.com/mlsysbook)
+
+From $15/month to sponsor a learner, to $250 for a hands-on workshop — every contribution democratizes AI systems education worldwide.
+
+---
+
+## 🌐 Learn More
+
+* 📚 [mlsysbook.org](https://mlsysbook.org) — main site and learning platform
 * 🔥 [TinyTorch](https://mlsysbook.org/tinytorch) — educational ML framework
 * 💸 [Open Collective](https://opencollective.com/mlsysbook) — support this initiative
 * 🧠 [GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions) — ask questions or share insights
@@ -282,4 +294,3 @@ This work is licensed under a
 You may share and adapt the material for **non-commercial purposes**, with appropriate credit and under the same license.
 
 </details>
-
