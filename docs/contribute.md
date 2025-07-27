@@ -51,7 +51,7 @@ Create a branch for your contribution. The branch name should start with issue n
 
 Make your changes to the code or documentation. Please make sure that your changes are consistent with the style of the rest of the code or documentation.
 
-- The `content` directory subfolders that each represent a chapter in the book. Each chapter folder contains the source files and documents to render the book. Any new files should be added to the `content` directory in its appropriate folder. Please create a new folder if needed. Make sure that the path in the `_quarto.yml` file is updated to include the new folder.
+- The `content` directory subfolders that each represent a chapter in the book. Each chapter folder contains the source files and documents to render the book. Any new files should be added to the `content` directory in its appropriate folder. Please create a new folder if needed. Make sure that the path in the `_quarto-html.yml` and `_quarto-pdf.yml` files is updated to include the new folder.
 
 - Each chapter folder also include an images folder. The images folder has 4 subfolders: `png`, `pdf`, `svg`, and `jpg`. Please add your images to the appropriate folder. This is important to keep the images organized and to make sure that the images are rendered correctly in the book.
 

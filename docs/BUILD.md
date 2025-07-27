@@ -218,7 +218,7 @@ make preview        # HTML preview with live reload
 make preview-pdf    # PDF preview
 ```
 
-You'll find outputs in the `_book/` folder.
+You'll find outputs in the `build/html/` folder for HTML and `build/pdf/` for PDF.
 
 ---
 

@@ -22,7 +22,7 @@ This project includes an **automated cleanup system** that runs before every com
 
 The cleanup system removes:
 - **Build artifacts**: `*.html`, `*.pdf`, `*.tex`, `*.aux`, `*.log`, `*.toc`
-- **Cache directories**: `.quarto/`, `site_libs/`, `index_files/`
+- **Cache directories**: `.quarto/`, `site_libs/`, `index_files/` (legacy)
 - **Python artifacts**: `__pycache__/`, `*.pyc`, `*.pyo`
 - **System files**: `.DS_Store`, `Thumbs.db`, `*.swp`
 - **Editor files**: `*~`, `.#*`
@@ -93,7 +93,8 @@ cd book && quarto preview
 
 ### Build Outputs
 
-- **HTML**: `_book/index.html` (main output directory)
+- **HTML**: `build/html/index.html` (main output directory)
+- **PDF**: `build/pdf/` (PDF output directory)
 - **PDF**: `book/index.pdf` (in book directory)
 - **Artifacts**: Automatically cleaned by git hooks
 
@@ -154,7 +155,7 @@ book/contents/
 
 For faster development, you can work with a minimal set of chapters:
 
-1. **Edit `book/_quarto.yml`**: Comment out chapters you're not working on
+1. **Edit `book/_quarto-html.yml`**: Comment out chapters you're not working on
 2. **Edit bibliography section**: Comment out unused `.bib` files
 3. **Build faster**: Only active chapters will be processed
 
@@ -250,7 +251,8 @@ make check          # Final health check
 
 ## ⚙️ Configuration Files
 
-- **`book/_quarto.yml`**: Main Quarto configuration
+- **`book/_quarto-html.yml`**: HTML website configuration
+- **`book/_quarto-pdf.yml`**: PDF book configuration
 - **`Makefile`**: Development commands
 - **`tools/scripts/build/clean.sh`**: Cleanup script
 - **`.git/hooks/pre-commit`**: Automated cleanup hook

@@ -129,7 +129,7 @@ python tools/scripts/maintenance/cleanup_old_runs.sh
 
 # Review project structure
 make status
-du -sh _book/           # Check output size
+du -sh build/           # Check output size
 ```
 
 ---
@@ -146,8 +146,10 @@ touch book/contents/core/new_chapter/new_chapter.{qmd,bib}
 touch book/contents/core/new_chapter/new_chapter_quizzes.json
 
 # 2. Add to book configuration
-# Edit book/_quarto.yml to add chapter to chapters list
-# Edit book/_quarto.yml to add .bib to bibliography list
+# Edit book/_quarto-html.yml to add chapter to chapters list
+# Edit book/_quarto-pdf.yml to add chapter to chapters list
+# Edit book/_quarto-html.yml to add .bib to bibliography list
+# Edit book/_quarto-pdf.yml to add .bib to bibliography list
 
 # 3. Test the build
 make clean build
@@ -306,7 +308,7 @@ watch -n 2 "ls -la book/contents/core/your_chapter/"
 tail -f *.log
 
 # Check project size
-du -sh _book/ book/ tools/
+du -sh build/ book/ tools/
 ```
 
 ### **🔍 Quick Diagnostics**

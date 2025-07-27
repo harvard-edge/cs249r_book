@@ -56,7 +56,7 @@ All main options have both short and long forms:
 |--------|-------|---------|
 | `--model` | `-m` | Specify Ollama model (default: qwen2.5:7b) |
 | `--files` | `-f` | Process specific QMD files |
-| `--directories` | `-d` | Process directories (follows _quarto.yml order) |
+| `--directories` | `-d` | Process directories (follows _quarto-html.yml order) |
 | `--save-json` |  | Save detailed content map to JSON |
 | `--list-models` |  | List available Ollama models |
 
@@ -156,7 +156,7 @@ Illustrates how machine learning models can serve as amplifiers.
 ## Processing Workflow
 
 ### What the Script Does
-1. **Extract**: Finds all figures and tables in QMD files (follows _quarto.yml order)
+1. **Extract**: Finds all figures and tables in QMD files (follows _quarto-html.yml order)
 2. **Analyze**: Builds content map with context extraction
 3. **Improve**: Uses LLM to generate better captions with quality validation
 4. **Update**: Applies improvements directly to QMD files
@@ -247,7 +247,7 @@ improvements_YYYYMMDD_HHMMSS.json  # Summary of changes made
 The script works seamlessly with Quarto's build process:
 - **Preserves**: All Quarto attributes (`{#fig-id .class}`)
 - **Maintains**: Reference links and cross-references  
-- **Follows**: _quarto.yml chapter ordering
+- **Follows**: _quarto-html.yml chapter ordering
 - **Supports**: TikZ, Markdown, and code block figures
 
 ### Build Process
@@ -259,7 +259,7 @@ python3 scripts/improve_figure_captions.py -d contents/core/
 quarto render
 
 # 3. Check results
-open _book/index.html
+open build/html/index.html
 ```
 
 ## Best Practices
