@@ -131,7 +131,9 @@ local function read_summaries(path)
   local entries_loaded = 0
   local current_key = nil
   local current_title = nil
+  local description_lines = {}
   local in_parts_section = false
+  local in_description = false
   
   for line in content:gmatch("[^\r\n]+") do
     -- Check if we're in the parts section
@@ -141,29 +143,53 @@ local function read_summaries(path)
     elseif in_parts_section and line:match('%s*%-%s*key:%s*"([^"]+)"') then
       -- Save previous entry if exists
       if current_key and current_title then
-        summaries[normalize(current_key)] = current_title
+        local description = table.concat(description_lines, " "):gsub("^%s+", ""):gsub("%s+$", "")
+        summaries[normalize(current_key)] = {
+          title = current_title,
+          description = description
+        }
         entries_loaded = entries_loaded + 1
-        log_info("📝 Loaded: '" .. current_key .. "' → '" .. current_title .. "'")
+        log_info("📝 Loaded: '" .. current_key .. "' → '" .. current_title .. "' + description")
       end
       current_key = line:match('%s*%-%s*key:%s*"([^"]+)"')
       current_title = nil
+      description_lines = {}
+      in_description = false
     -- Match title line: title: "Frontmatter"
     elseif in_parts_section and current_key and line:match('%s*title:%s*"([^"]+)"') then
       current_title = line:match('%s*title:%s*"([^"]+)"')
+    -- Match description start: description: >
+    elseif in_parts_section and current_key and line:match('%s*description:%s*>?') then
+      in_description = true
+    -- Match description content (indented lines after description:)
+    elseif in_description and current_key then
+      local desc_content = line:match('%s%s%s*(.+)')
+      if desc_content then
+        table.insert(description_lines, desc_content)
+      elseif line:match('^%s*$') then
+        -- Empty line, continue
+      else
+        -- End of description
+        in_description = false
+      end
     end
   end
   
   -- Save last entry
   if current_key and current_title then
-    summaries[normalize(current_key)] = current_title
+    local description = table.concat(description_lines, " "):gsub("^%s+", ""):gsub("%s+$", "")
+    summaries[normalize(current_key)] = {
+      title = current_title,
+      description = description
+    }
     entries_loaded = entries_loaded + 1
-    log_info("📝 Loaded: '" .. current_key .. "' → '" .. current_title .. "'")
+    log_info("📝 Loaded: '" .. current_key .. "' → '" .. current_title .. "' + description")
   end
   
   if entries_loaded > 0 then
-    log_success("Loaded " .. entries_loaded .. " part titles from " .. path)
+    log_success("Loaded " .. entries_loaded .. " part entries (title + description) from " .. path)
   else
-    log_warning("No part titles found in " .. path)
+    log_warning("No part entries found in " .. path)
   end
   
   return summaries
@@ -232,7 +258,7 @@ local function handle_meta(meta)
   return meta
 end
 
--- 🧠 Replace \part*{key:xxx} with actual title from summaries
+-- 🧠 Replace \part*{key:xxx} with actual title and description from summaries
 function RawBlock(el)
   -- Skip processing if we don't have any summaries loaded
   if not has_part_summaries then
@@ -249,22 +275,30 @@ function RawBlock(el)
   if key then
     local normalized_key = normalize(key)
     if summaries[normalized_key] then
-      local title = summaries[normalized_key]
+      local part_entry = summaries[normalized_key]
+      local title = part_entry.title
+      local description = part_entry.description
       local formatted_title = format_part_title(normalized_key, title)
       
-      -- Determine if this should be numbered or unnumbered
-      local new_latex
+      -- Generate both setpartsummary and part commands
+      local setpartsummary_cmd = "\\setpartsummary{" .. description .. "}"
+      local part_cmd
+      
       if is_unnumbered_part(normalized_key) then
         -- Keep as unnumbered part
-        new_latex = el.text:gsub("\\part%*?%{key:([^}]+)%}", "\\part*{" .. formatted_title .. "}")
-        log_info("🔄 Replacing key '" .. key .. "' with unnumbered title '" .. formatted_title .. "'")
+        part_cmd = "\\part*{" .. formatted_title .. "}"
+        log_info("🔄 Replacing key '" .. key .. "' with unnumbered part: '" .. formatted_title .. "' + description")
       else
         -- Change to numbered part
-        new_latex = el.text:gsub("\\part%*?%{key:([^}]+)%}", "\\part{" .. formatted_title .. "}")
-        log_info("🔄 Replacing key '" .. key .. "' with numbered title '" .. formatted_title .. "'")
+        part_cmd = "\\part{" .. formatted_title .. "}"
+        log_info("🔄 Replacing key '" .. key .. "' with numbered part: '" .. formatted_title .. "' + description")
       end
       
-      return pandoc.RawBlock("latex", new_latex)
+      -- Return both commands as separate RawBlock elements
+      return {
+        pandoc.RawBlock("latex", setpartsummary_cmd),
+        pandoc.RawBlock("latex", part_cmd)
+      }
     else
       log_error("UNDEFINED KEY: '" .. key .. "' not found in part_summaries.yml")
       log_error("Available keys: frontmatter, foundations, principles, optimization, deployment, responsible, futures, labs, arduino, xiao, grove, raspberry, shared")
