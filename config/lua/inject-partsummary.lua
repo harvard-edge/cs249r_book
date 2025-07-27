@@ -60,25 +60,9 @@ end
 
 -- Helper function to format title with part number
 local function format_part_title(key, title)
-  -- If title already contains "Part", don't modify it
-  if title:match("^Part ") then
-    return title
-  end
-  
-  -- Check if this should be unnumbered
-  if is_unnumbered_part(key) then
-    return title -- Just return the title as-is for unnumbered parts
-  end
-  
-  -- For numbered parts, add Part X — prefix
-  local part_num = get_part_number(key)
-  if part_num then
-    local roman = to_roman(part_num)
-    return "Part " .. roman .. " — " .. title
-  else
-    -- Fallback: just return the title if key not in ordered list
-    return title
-  end
+  -- Just return the clean title for all parts
+  -- The LaTeX template handles Roman numerals and "Part X" labels separately
+  return title
 end
 
 -- 🔧 Normalize keys (lowercase, trim leading/trailing whitespace)
