@@ -11,6 +11,8 @@
 
 **[📖 Read Online](https://mlsysbook.ai)** • **[💾 Download PDF](https://mlsysbook.ai/Machine-Learning-Systems.pdf)** • **[🌐 Explore Ecosystem](https://mlsysbook.org)**
 
+📚 **Hardcopy edition coming 2026 via MIT Press!**
+
 </div>
 
 ---
@@ -33,32 +35,13 @@ The **open-source textbook** that teaches you to build real-world AI systems —
 
 Go beyond training models — master the **full stack** of real-world ML systems.
 
-<table width="100%">
-<tr>
-<th width="30%">Topic</th>
-<th width="70%">What You'll Build</th>
-</tr>
-<tr>
-<td><strong>System Design</strong></td>
-<td>Scalable, maintainable ML architectures</td>
-</tr>
-<tr>
-<td><strong>Data Engineering</strong></td>
-<td>Robust pipelines for collection, labeling, and processing</td>
-</tr>
-<tr>
-<td><strong>Model Deployment</strong></td>
-<td>Production-ready systems from prototypes</td>
-</tr>
-<tr>
-<td><strong>MLOps & Monitoring</strong></td>
-<td>Reliable, continuously operating systems</td>
-</tr>
-<tr>
-<td><strong>Edge AI</strong></td>
-<td>Resource-efficient deployment on mobile, embedded, and IoT</td>
-</tr>
-</table>
+| Topic | What You'll Build |
+|-------|------------------|
+| **System Design** | Scalable, maintainable ML architectures |
+| **Data Engineering** | Robust pipelines for collection, labeling, and processing |
+| **Model Deployment** | Production-ready systems from prototypes |
+| **MLOps & Monitoring** | Reliable, continuously operating systems |
+| **Edge AI** | Resource-efficient deployment on mobile, embedded, and IoT |
 
 ---
 
@@ -75,8 +58,8 @@ Go beyond training models — master the **full stack** of real-world ML systems
 
 [**⭐ Star Now**](https://github.com/harvard-edge/cs249r_book) — *takes 2 seconds!*
 
-### Fund the Mission
-Help expand AI systems education globally. Support TinyML kits for students, fund workshops, or sustain our infrastructure.
+### Fund the Mission (New!)
+We've graduated this project from Harvard to enable global access and expand AI systems education worldwide. Please help us support educators globally, especially in the Global South, by providing TinyML kits for students, funding workshops, and sustaining our open-source infrastructure.
 
 [![Open Collective](https://img.shields.io/badge/💝%20Support%20AI%20Education-Open%20Collective-blue.svg?style=for-the-badge)](https://opencollective.com/mlsysbook)
 
@@ -88,61 +71,31 @@ Help expand AI systems education globally. Support TinyML kits for students, fun
 
 ## 🌐 Community & Resources
 
-<table width="100%">
-<tr>
-<th width="25%">Resource</th>
-<th width="75%">Description</th>
-</tr>
-<tr>
-<td><a href="https://mlsysbook.org"><strong>📚 Main Site</strong></a></td>
-<td>Complete learning platform</td>
-</tr>
-<tr>
-<td><a href="https://mlsysbook.org/tinytorch"><strong>🔥 TinyTorch</strong></a></td>
-<td>Educational ML framework</td>
-</tr>
-<tr>
-<td><a href="https://github.com/harvard-edge/cs249r_book/discussions"><strong>💬 Discussions</strong></a></td>
-<td>Ask questions, share insights</td>
-</tr>
-<tr>
-<td><a href="https://mlsysbook.org/community"><strong>👥 Community</strong></a></td>
-<td>Join our global learning community</td>
-</tr>
-</table>
+| Resource | Description |
+|----------|-------------|
+| [📚 **Main Site**](https://mlsysbook.org) | Complete learning platform |
+| [🔥 **TinyTorch**](https://mlsysbook.org/tinytorch) | Educational ML framework |
+| [💬 **Discussions**](https://github.com/harvard-edge/cs249r_book/discussions) | Ask questions, share insights |
+| [👥 **Community**](https://mlsysbook.org/community) | Join our global learning community |
 
 ---
 
 ## 🎯 For Different Audiences
-
-<table width="100%">
-<tr>
-<td width="33%">
 
 ### 🎓 Students
 - [📖 Read online](https://mlsysbook.ai)
 - [📄 Download PDF](https://mlsysbook.ai/Machine-Learning-Systems.pdf)
 - [🧪 Try hands-on labs](https://mlsysbook.org)
 
-</td>
-<td width="33%">
-
 ### 👩‍🏫 Educators
 - [📋 Course materials](https://mlsysbook.org)
 - [🎯 Instructor resources](https://mlsysbook.org)
 - [💡 Teaching guides](https://mlsysbook.org)
 
-</td>
-<td width="34%">
-
 ### 🛠️ Contributors
 - [🤝 Contribution guide](contribute.md)
 - [⚡ Development setup](#development)
 - [💬 Join discussions](https://github.com/harvard-edge/cs249r_book/discussions)
-
-</td>
-</tr>
-</table>
 
 ---
 
@@ -273,7 +226,7 @@ This work is licensed under **Creative Commons Attribution–NonCommercial–Sha
 
 <div align="center">
 
-**Made with ❤️ for the global AI education community**
+**Made for the global AI education community with ❤️**
 
 *Empowering the next generation of AI systems engineers*
 
