@@ -181,9 +181,17 @@ The build system automatically handles configuration switching using symlinks â€
 
 Use these **automated commands** that handle configuration switching:
 
-#### Build Website (HTML)
+#### Interactive Build (Recommended)
 ```sh
 make build
+```
+- Choose format interactively (HTML/PDF/Both)
+- User-friendly prompts
+- Perfect for development workflow
+
+#### Build Website (HTML)
+```sh
+make build-html
 ```
 - Uses HTML-optimized configuration
 - TikZ diagrams â†’ SVG conversion
