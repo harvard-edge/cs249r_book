@@ -1,3 +1,86 @@
+-- Helper function to convert number to Roman numerals
+local function to_roman(num)
+  local roman_numerals = {
+    {1000, "M"}, {900, "CM"}, {500, "D"}, {400, "CD"},
+    {100, "C"}, {90, "XC"}, {50, "L"}, {40, "XL"},
+    {10, "X"}, {9, "IX"}, {5, "V"}, {4, "IV"}, {1, "I"}
+  }
+  
+  local result = ""
+  for _, pair in ipairs(roman_numerals) do
+    local value, numeral = pair[1], pair[2]
+    while num >= value do
+      result = result .. numeral
+      num = num - value
+    end
+  end
+  return result
+end
+
+-- Part numbering mapping - defines the order and numbering of parts
+local part_order = {
+  "foundations",     -- Part I
+  "principles",      -- Part II
+  "optimization",    -- Part III
+  "deployment",      -- Part IV
+  "responsible",     -- Part V
+  "futures",         -- Part VI
+  "arduino",         -- Part VII
+  "xiao",           -- Part VIII
+  "grove",          -- Part IX
+  "raspberry",      -- Part X
+  "shared"          -- Part XI
+}
+
+-- Parts that should remain unnumbered (use \part*{} format)
+local unnumbered_parts = {
+  "frontmatter",
+  "labs"
+}
+
+-- Helper function to check if a part should be unnumbered
+local function is_unnumbered_part(key)
+  for _, unnumbered_key in ipairs(unnumbered_parts) do
+    if unnumbered_key == key then
+      return true
+    end
+  end
+  return false
+end
+
+-- Helper function to get part number for a key
+local function get_part_number(key)
+  for i, part_key in ipairs(part_order) do
+    if part_key == key then
+      return i
+    end
+  end
+  return nil -- Key not found in ordered list
+end
+
+-- Helper function to format title with part number
+local function format_part_title(key, title)
+  -- If title already contains "Part", don't modify it
+  if title:match("^Part ") then
+    return title
+  end
+  
+  -- Check if this should be unnumbered
+  if is_unnumbered_part(key) then
+    return title -- Just return the title as-is for unnumbered parts
+  end
+  
+  -- For numbered parts, add Part X — prefix
+  local part_num = get_part_number(key)
+  if part_num then
+    local roman = to_roman(part_num)
+    return "Part " .. roman .. " — " .. title
+  else
+    -- Fallback: just return the title if key not in ordered list
+    return title
+  end
+end
+
 -- 🔧 Normalize keys (lowercase, trim leading/trailing whitespace)
 local function normalize(str)
   return str:lower():gsub("^%s+", ""):gsub("%s+$", "")
@@ -167,10 +250,19 @@ function RawBlock(el)
     local normalized_key = normalize(key)
     if summaries[normalized_key] then
       local title = summaries[normalized_key]
-      log_info("🔄 Replacing key '" .. key .. "' with title '" .. title .. "'")
+      local formatted_title = format_part_title(normalized_key, title)
       
-      -- Replace the key with the actual title
-      local new_latex = el.text:gsub("\\part%*?%{key:([^}]+)%}", "\\part*{" .. title .. "}")
+      -- Determine if this should be numbered or unnumbered
+      local new_latex
+      if is_unnumbered_part(normalized_key) then
+        -- Keep as unnumbered part
+        new_latex = el.text:gsub("\\part%*?%{key:([^}]+)%}", "\\part*{" .. formatted_title .. "}")
+        log_info("🔄 Replacing key '" .. key .. "' with unnumbered title '" .. formatted_title .. "'")
+      else
+        -- Change to numbered part
+        new_latex = el.text:gsub("\\part%*?%{key:([^}]+)%}", "\\part{" .. formatted_title .. "}")
+        log_info("🔄 Replacing key '" .. key .. "' with numbered title '" .. formatted_title .. "'")
+      end
       
       return pandoc.RawBlock("latex", new_latex)
     else
