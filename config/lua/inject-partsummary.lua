@@ -26,6 +26,11 @@ local function log_warning(message)
   io.stderr:flush()
 end
 
+local function log_error(message)
+  io.stderr:write("❌ [Part Summary Filter] " .. message .. "\n")
+  io.stderr:flush()
+end
+
 -- 📄 Read summaries.yml into a Lua table
 local function read_summaries(path)
   local summaries = {}
@@ -79,6 +84,18 @@ local function read_summaries(path)
   end
   
   return summaries
+end
+
+-- Helper function to get list of available keys for error reporting
+local function get_available_keys()
+  local keys = {}
+  if summaries then
+    for key, _ in pairs(summaries) do
+      table.insert(keys, "'" .. key .. "'")
+    end
+    table.sort(keys)
+  end
+  return keys
 end
 
 -- ✅ Load summaries from metadata configuration
@@ -157,7 +174,10 @@ function RawBlock(el)
       
       return pandoc.RawBlock("latex", new_latex)
     else
-      log_warning("⚠️  No title found for key: '" .. key .. "'")
+      log_error("UNDEFINED KEY: '" .. key .. "' not found in part_summaries.yml")
+      log_error("Available keys: frontmatter, foundations, principles, optimization, deployment, responsible, futures, labs, arduino, xiao, grove, raspberry, shared")
+      log_error("Build stopped to prevent incorrect part titles.")
+      error("Part summary filter failed: undefined key '" .. key .. "' in \\part*{key:" .. key .. "}")
     end
   end
 
