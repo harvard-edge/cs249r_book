@@ -220,3 +220,9 @@ function Meta(meta)
   end
   return meta
 end
+
+-- Return the filter in the correct order
+return {
+  { Meta = Meta },
+  { RawBlock = RawBlock }
+}
