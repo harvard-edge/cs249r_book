@@ -69,7 +69,7 @@ clean-dry:
 build:
 	@echo "🔨 Building HTML version..."
 	@echo "  📝 Using HTML configuration..."
-	@cd book && cp _quarto-html.yml _quarto.yml
+	@cd book && ln -sf _quarto-html.yml _quarto.yml
 	@cd book && quarto render --to html
 	@cd book && rm _quarto.yml
 	@echo "  ✅ HTML build complete"
@@ -77,7 +77,7 @@ build:
 build-pdf:
 	@echo "📄 Building PDF version..."
 	@echo "  📝 Using PDF configuration..."
-	@cd book && cp _quarto-pdf.yml _quarto.yml
+	@cd book && ln -sf _quarto-pdf.yml _quarto.yml
 	@cd book && quarto render --to titlepage-pdf
 	@cd book && rm _quarto.yml
 	@echo "  ✅ PDF build complete"
@@ -99,7 +99,7 @@ preview:
 	@echo "  📝 Using HTML configuration for preview..."
 	@echo "  -> Open your browser to the URL shown below"
 	@echo "  🛑 Press Ctrl+C to stop the server"
-	@cd book && cp _quarto-html.yml _quarto.yml
+	@cd book && ln -sf _quarto-html.yml _quarto.yml
 	@cd book && trap 'rm -f _quarto.yml' EXIT INT TERM; quarto preview
 
 preview-pdf:
@@ -107,7 +107,7 @@ preview-pdf:
 	@echo "  📝 Using PDF configuration for preview..."
 	@echo "  -> Open your browser to the URL shown below"
 	@echo "  🛑 Press Ctrl+C to stop the server"
-	@cd book && cp _quarto-pdf.yml _quarto.yml
+	@cd book && ln -sf _quarto-pdf.yml _quarto.yml
 	@cd book && trap 'rm -f _quarto.yml' EXIT INT TERM; quarto preview
 
 test:
