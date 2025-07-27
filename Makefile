@@ -14,7 +14,7 @@
 #   make check       - Check project health
 # =============================================================================
 
-.PHONY: help clean clean-deep clean-dry build build-html build-pdf build-all preview preview-pdf test install check setup-hooks lint
+.PHONY: help clean clean-deep clean-dry build build-html build-pdf build-all preview preview-pdf test install check setup-hooks lint dev full-clean-build release-check status show-build help-clean help-build
 
 # Default target
 help:
@@ -38,6 +38,7 @@ help:
 	@echo "  make test        - Run tests and validation"
 	@echo "  make check       - Check project health"
 	@echo "  make lint        - Run linting checks"
+	@echo "  make show-build  - Show build directory structure"
 	@echo ""
 	@echo "⚙️ Setup:"
 	@echo "  make install     - Install dependencies"
@@ -86,18 +87,20 @@ build:
 build-html:
 	@echo "🔨 Building HTML version..."
 	@echo "  📝 Using HTML configuration..."
+	@mkdir -p build/html
 	@cd book && ln -sf _quarto-html.yml _quarto.yml
 	@cd book && quarto render --to html
 	@cd book && rm _quarto.yml
-	@echo "  ✅ HTML build complete"
+	@echo "  ✅ HTML build complete: build/html/"
 
 build-pdf:
 	@echo "📄 Building PDF version..."
 	@echo "  📝 Using PDF configuration..."
+	@mkdir -p build/pdf
 	@cd book && ln -sf _quarto-pdf.yml _quarto.yml
 	@cd book && quarto render --to titlepage-pdf
 	@cd book && rm _quarto.yml
-	@echo "  ✅ PDF build complete"
+	@echo "  ✅ PDF build complete: build/pdf/"
 
 build-all:
 	@echo "📚 Building all formats..."
@@ -215,13 +218,13 @@ setup-hooks:
 # Compound Tasks
 # =============================================================================
 
-dev: clean build preview
+dev: clean build-html preview
 	@echo "🚀 Development environment ready!"
 
-full-clean-build: clean-deep install build
+full-clean-build: clean-deep install build-html
 	@echo "🎯 Full clean build completed!"
 
-release-check: clean lint test build
+release-check: clean lint test build-html
 	@echo "📋 Release checks completed!"
 
 # =============================================================================
@@ -232,6 +235,22 @@ status:
 	@echo "📊 MLSysBook Project Status"
 	@echo "==========================="
 	@make check
+
+show-build:
+	@echo "📁 Build Directory Structure"
+	@echo "============================"
+	@if [ -d build ]; then \
+		echo "✅ Build directory exists"; \
+		echo ""; \
+		echo "Contents:"; \
+		find build -type d | sort | sed 's|^|  |'; \
+		echo ""; \
+		echo "Files:"; \
+		find build -type f | sort | sed 's|^|  |'; \
+	else \
+		echo "❌ Build directory does not exist"; \
+		echo "Run 'make build-html' or 'make build-pdf' to create it"; \
+	fi
 
 # Help with specific tasks
 help-clean:
@@ -253,13 +272,14 @@ help-build:
 	@echo "🔨 Building Help"
 	@echo "==============="
 	@echo ""
-	@echo "build     - Creates HTML version in _book/ directory"
-	@echo "build-pdf - Creates PDF version (requires LaTeX)"
+	@echo "build     - Interactive build (choose format)"
+	@echo "build-html - Creates HTML version in build/html/"
+	@echo "build-pdf - Creates PDF version in build/pdf/"
 	@echo "build-all - Creates all configured formats"
 	@echo ""
 	@echo "Build outputs go to:"
-	@echo "  • HTML: _book/index.html"
-	@echo "  • PDF: book/index.pdf"
+	@echo "  • HTML: build/html/"
+	@echo "  • PDF: build/pdf/"
 	@echo ""
 	@echo "Before building, ensure:"
 	@echo "  • Quarto is installed and updated"

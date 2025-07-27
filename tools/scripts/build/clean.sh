@@ -138,8 +138,11 @@ remove_item "book/index_files" "Quarto support files"
 remove_item "book/site_libs" "Site libraries"
 
 # Quarto build outputs in root
-remove_item "_book" "Generated book output"
-remove_item "index_files" "Root index files"
+remove_item "_book" "Generated book output (legacy)"
+remove_item "index_files" "Root index files (legacy)"
+
+# New build directory structure
+remove_item "build" "Build directory (all formats)"
 
 # =============================================================================
 # Quarto Cache and Temporary Files
