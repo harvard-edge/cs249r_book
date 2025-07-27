@@ -39,61 +39,43 @@ local function read_summaries(path)
   local content = file:read("*all")
   file:close()
   
-  -- Parse YAML manually for the new structure
+  -- Parse YAML manually for the new structure with parts array
   local entries_loaded = 0
   local current_key = nil
-  local description_lines = {}
-  local in_description = false
+  local current_title = nil
+  local in_parts_section = false
   
   for line in content:gmatch("[^\r\n]+") do
-    -- Match key line: - key: "part i — systems foundations"
-    local key = line:match('%s*%-%s*key:%s*"([^"]+)"')
-    if key then
+    -- Check if we're in the parts section
+    if line:match('^parts:') then
+      in_parts_section = true
+    -- Match key line: - key: "frontmatter"
+    elseif in_parts_section and line:match('%s*%-%s*key:%s*"([^"]+)"') then
       -- Save previous entry if exists
-      if current_key and #description_lines > 0 then
-        summaries[current_key] = table.concat(description_lines, " "):gsub("^%s+", ""):gsub("%s+$", "")
+      if current_key and current_title then
+        summaries[normalize(current_key)] = current_title
         entries_loaded = entries_loaded + 1
+        log_info("📝 Loaded: '" .. current_key .. "' → '" .. current_title .. "'")
       end
-      current_key = key
-      description_lines = {}
-      in_description = false
-    -- Match description start: description: >
-    elseif line:match('%s*description:%s*>?') then
-      in_description = true
-    -- Match description content (indented lines after description:)
-    elseif in_description and current_key then
-      local desc_content = line:match('%s%s%s*(.+)')
-      if desc_content then
-        table.insert(description_lines, desc_content)
-      elseif line:match('^%s*$') then
-        -- Empty line, continue
-      elseif line:match('^%s*%-%s*key:') then
-        -- Hit next key, handle this line again
-        if current_key and #description_lines > 0 then
-          summaries[current_key] = table.concat(description_lines, " "):gsub("^%s+", ""):gsub("%s+$", "")
-          entries_loaded = entries_loaded + 1
-        end
-        -- Parse this key line
-        local key = line:match('%s*%-%s*key:%s*"([^"]+)"')
-        if key then
-          current_key = key
-          description_lines = {}
-          in_description = false
-        end
-      end
+      current_key = line:match('%s*%-%s*key:%s*"([^"]+)"')
+      current_title = nil
+    -- Match title line: title: "Frontmatter"
+    elseif in_parts_section and current_key and line:match('%s*title:%s*"([^"]+)"') then
+      current_title = line:match('%s*title:%s*"([^"]+)"')
     end
   end
   
   -- Save last entry
-  if current_key and #description_lines > 0 then
-    summaries[current_key] = table.concat(description_lines, " "):gsub("^%s+", ""):gsub("%s+$", "")
+  if current_key and current_title then
+    summaries[normalize(current_key)] = current_title
     entries_loaded = entries_loaded + 1
+    log_info("📝 Loaded: '" .. current_key .. "' → '" .. current_title .. "'")
   end
   
   if entries_loaded > 0 then
-    log_success("Loaded " .. entries_loaded .. " part summaries from " .. path)
+    log_success("Loaded " .. entries_loaded .. " part titles from " .. path)
   else
-    log_warning("No part summaries found in " .. path)
+    log_warning("No part titles found in " .. path)
   end
   
   return summaries
@@ -150,7 +132,7 @@ local function handle_meta(meta)
   return meta
 end
 
--- 🧠 Insert \setpartsummary after any RawBlock with \part*{key:xxx} pattern
+-- 🧠 Replace \part*{key:xxx} with actual title from summaries
 function RawBlock(el)
   -- Skip processing if we don't have any summaries loaded
   if not has_part_summaries then
@@ -165,14 +147,17 @@ function RawBlock(el)
   local key = extract_key_from_latex(el.text)
   
   if key then
-    if summaries[key] then
-      local summary = summaries[key]
-      log_info("💡 Injecting part summary for key: '" .. key .. "'")
-      local latex = "\\setpartsummary{" .. summary .. "}"
-      return {
-        el,
-        pandoc.RawBlock("latex", latex)
-      }
+    local normalized_key = normalize(key)
+    if summaries[normalized_key] then
+      local title = summaries[normalized_key]
+      log_info("🔄 Replacing key '" .. key .. "' with title '" .. title .. "'")
+      
+      -- Replace the key with the actual title
+      local new_latex = el.text:gsub("\\part%*?%{key:([^}]+)%}", "\\part*{" .. title .. "}")
+      
+      return pandoc.RawBlock("latex", new_latex)
+    else
+      log_warning("⚠️  No title found for key: '" .. key .. "'")
     end
   end
 
