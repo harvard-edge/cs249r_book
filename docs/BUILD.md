@@ -163,46 +163,78 @@ Once you’ve installed everything, you're ready to try building the book!
 Navigate to the root folder of the project:
 
 ```sh
-cd path/to/the/book
+cd path/to/MLSysBook
 ```
 
-### 🔹 To Build the **Website (HTML)** version:
+### 🚀 **NEW: Dual-Configuration System**
+
+The book now uses a **dual-configuration approach** that automatically switches between optimized settings for different output formats:
+
+- **`book/_quarto-html.yml`** → Optimized for interactive website (clean navigation, TikZ→SVG, no citations)
+- **`book/_quarto-pdf.yml`** → Optimized for academic PDF (full citations, LaTeX rendering, book structure)
+
+The build system automatically handles configuration switching using symlinks — **no manual file copying needed!**
+
+---
+
+### 🔹 **Build Commands (Recommended)**
+
+Use these **automated commands** that handle configuration switching:
+
+#### Build Website (HTML)
 ```sh
+make build
+```
+- Uses HTML-optimized configuration
+- TikZ diagrams → SVG conversion
+- Clean navigation without chapter numbers
+- Interactive quizzes and cross-references
+
+#### Build PDF Book
+```sh
+make build-pdf  
+```
+- Uses PDF-optimized configuration  
+- Full LaTeX rendering with citations
+- Professional book formatting
+- Traditional chapter numbering
+
+#### Build Both Formats
+```sh
+make build-all
+```
+
+#### Development Preview
+```sh
+make preview        # HTML preview with live reload
+make preview-pdf    # PDF preview
+```
+
+You'll find outputs in the `_book/` folder.
+
+---
+
+### 🔹 **Manual Commands (Advanced)**
+
+If you need direct control, these commands work but require manual configuration management:
+
+#### Website (HTML) version:
+```sh
+cd book
+ln -sf _quarto-html.yml _quarto.yml
 quarto render --to html
+rm _quarto.yml
 ```
 
-You’ll find the output in the `_book/` folder — you can open `index.html` in your browser to preview it.
-
----
-
-### 🔹 To Build the **PDF** version:
+#### PDF version:
 ```sh
+cd book  
+ln -sf _quarto-pdf.yml _quarto.yml
 quarto render --to titlepage-pdf
+rm _quarto.yml
 ```
 
-This uses a custom format defined in `_quarto.yml`. The output will be in:
-
-```
-_book/Machine-Learning-Systems.pdf
-```
-
----
-
-### 🔹 (Optional) Compress the PDF
-The final PDF can be large. You can compress it using the provided script:
-
-```sh
-python3 ./scripts/quarto_publish/gs_compress_pdf.py \
-  -i ./_book/Machine-Learning-Systems.pdf \
-  -o ./_book/ebook.pdf \
-  -s "/ebook"
-```
-
-If you're happy with the result, replace the original:
-
-```sh
-mv ./_book/ebook.pdf ./_book/Machine-Learning-Systems.pdf
-```
+**Note:** The automated `make` commands are recommended as they handle configuration switching and cleanup automatically.
 
 ---
 
