@@ -14,7 +14,7 @@
 #   make check       - Check project health
 # =============================================================================
 
-.PHONY: help clean clean-deep clean-dry build build-pdf preview test install check setup-hooks lint
+.PHONY: help clean clean-deep clean-dry build build-pdf build-all preview preview-pdf test install check setup-hooks lint
 
 # Default target
 help:
@@ -32,7 +32,8 @@ help:
 	@echo "  make build-all   - Build all formats"
 	@echo ""
 	@echo "🔍 Development:"
-	@echo "  make preview     - Start development server"
+	@echo "  make preview     - Start HTML development server"
+	@echo "  make preview-pdf - Start PDF development server"
 	@echo "  make test        - Run tests and validation"
 	@echo "  make check       - Check project health"
 	@echo "  make lint        - Run linting checks"
@@ -67,24 +68,47 @@ clean-dry:
 
 build:
 	@echo "🔨 Building HTML version..."
+	@echo "  📝 Using HTML configuration..."
+	@cd book && cp _quarto-html.yml _quarto.yml
 	@cd book && quarto render --to html
+	@cd book && rm _quarto.yml
+	@echo "  ✅ HTML build complete"
 
 build-pdf:
 	@echo "📄 Building PDF version..."
+	@echo "  📝 Using PDF configuration..."
+	@cd book && cp _quarto-pdf.yml _quarto.yml
 	@cd book && quarto render --to titlepage-pdf
+	@cd book && rm _quarto.yml
+	@echo "  ✅ PDF build complete"
 
 build-all:
 	@echo "📚 Building all formats..."
-	@cd book && quarto render
+	@echo "  🔄 Building HTML..."
+	@make build
+	@echo "  🔄 Building PDF..."
+	@make build-pdf
+	@echo "  ✅ All formats complete"
 
 # =============================================================================
 # Development Tasks
 # =============================================================================
 
 preview:
-	@echo "🌐 Starting development preview server..."
+	@echo "🌐 Starting development preview server (HTML)..."
+	@echo "  📝 Using HTML configuration for preview..."
 	@echo "  -> Open your browser to the URL shown below"
-	@cd book && quarto preview
+	@echo "  🛑 Press Ctrl+C to stop the server"
+	@cd book && cp _quarto-html.yml _quarto.yml
+	@cd book && trap 'rm -f _quarto.yml' EXIT INT TERM; quarto preview
+
+preview-pdf:
+	@echo "📄 Starting PDF development preview..."
+	@echo "  📝 Using PDF configuration for preview..."
+	@echo "  -> Open your browser to the URL shown below"
+	@echo "  🛑 Press Ctrl+C to stop the server"
+	@cd book && cp _quarto-pdf.yml _quarto.yml
+	@cd book && trap 'rm -f _quarto.yml' EXIT INT TERM; quarto preview
 
 test:
 	@echo "🧪 Running tests and validation..."
