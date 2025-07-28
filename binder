@@ -201,8 +201,8 @@ class BookBinder:
             yield progress
             progress.update(task, completed=True)
     
-    def run_command(self, cmd, cwd=None, description=None):
-        """Run command with progress indicator"""
+    def run_command(self, cmd, cwd=None, description=None, capture_for_parsing=False):
+        """Run command with progress indicator and optional output capture"""
         if isinstance(cmd, str):
             cmd = cmd.split()
         
@@ -210,19 +210,85 @@ class BookBinder:
         
         try:
             with self.progress_context(desc):
-                result = subprocess.run(
-                    cmd, 
-                    cwd=cwd or self.root_dir,
-                    capture_output=False,
-                    text=True
-                )
-                return result.returncode == 0
+                if capture_for_parsing:
+                    # Capture output for parsing while still showing it
+                    result = subprocess.run(
+                        cmd, 
+                        cwd=cwd or self.root_dir,
+                        capture_output=True,
+                        text=True
+                    )
+                    # Print the output so user still sees it
+                    if result.stdout:
+                        print(result.stdout, end='')
+                    if result.stderr:
+                        print(result.stderr, end='')
+                    
+                    # Return both success status and captured output
+                    return result.returncode == 0, result.stdout + result.stderr
+                else:
+                    # Original behavior - stream output directly
+                    result = subprocess.run(
+                        cmd, 
+                        cwd=cwd or self.root_dir,
+                        capture_output=False,
+                        text=True
+                    )
+                    return result.returncode == 0
         except Exception as e:
             if RICH_AVAILABLE:
                 console.print(f"[red]Error: {e}[/red]")
             else:
                 print(f"Error: {e}")
             return False
+    
+    def open_output_file(self, output_text):
+        """Parse quarto output for 'Output created:' and open the file"""
+        lines = output_text.split('\n')
+        for line in lines:
+            if 'Output created:' in line:
+                # Extract the file path after "Output created: "
+                file_path = line.split('Output created: ', 1)[1].strip()
+                
+                # Fix quarto's incorrect relative path calculation
+                # Quarto outputs ../../../../build/... but it should be ../build/...
+                if file_path.startswith('../../../../build/'):
+                    file_path = file_path.replace('../../../../build/', '../build/')
+                
+                # Convert relative path to absolute - quarto runs from book dir
+                if not os.path.isabs(file_path):
+                    # Path is relative to book directory, resolve it properly
+                    full_path = (self.book_dir / file_path).resolve()
+                else:
+                    full_path = Path(file_path)
+                
+                if full_path.exists():
+                    if RICH_AVAILABLE:
+                        console.print(f"[green]🌐 Opening in browser: {full_path.name}[/green]")
+                    else:
+                        print(f"🌐 Opening in browser: {full_path.name}")
+                    
+                    try:
+                        # Use 'open' command on macOS
+                        subprocess.run(['open', str(full_path)], check=True)
+                        return True
+                    except subprocess.CalledProcessError:
+                        if RICH_AVAILABLE:
+                            console.print(f"[yellow]⚠️  Could not open file automatically: {full_path}[/yellow]")
+                        else:
+                            print(f"⚠️  Could not open file automatically: {full_path}")
+                        return False
+                else:
+                    if RICH_AVAILABLE:
+                        console.print(f"[yellow]⚠️  Output file not found: {full_path}[/yellow]")
+                        console.print(f"[dim]     Tried: {full_path}[/dim]")
+                    else:
+                        print(f"⚠️  Output file not found: {full_path}")
+                        print(f"     Tried: {full_path}")
+                    return False
+        
+        # No "Output created:" line found
+        return False
     
     def comment_qmd_files(self, config_file, target_path):
         """Comment out all .qmd files except index.qmd and target"""
@@ -414,17 +480,29 @@ class BookBinder:
             # Render just the target chapter file
             render_cmd = ["quarto", "render", target_path, "--to", format_arg]
             
-            success = self.run_command(
+            # Capture output to find the created file and open it
+            result = self.run_command(
                 render_cmd,
                 cwd=self.book_dir,
-                description=f"Building {chapter_name} ({format_type}) - 1 file only"
+                description=f"Building {chapter_name} ({format_type}) - 1 file only",
+                capture_for_parsing=True
             )
+            
+            # Handle the returned tuple (success, output)
+            if isinstance(result, tuple):
+                success, output = result
+            else:
+                success, output = result, ""
             
             if success:
                 if RICH_AVAILABLE:
                     console.print(f"[green]  ✅ Fast build complete: build/{build_subdir}/[/green]")
                 else:
                     print(f"  ✅ Fast build complete: build/{build_subdir}/")
+                
+                # Automatically open the output file if HTML
+                if format_type == "html" and output:
+                    self.open_output_file(output)
             else:
                 if RICH_AVAILABLE:
                     console.print("[red]  ❌ Build failed[/red]")
