@@ -1,0 +1,819 @@
+#!/usr/bin/env python3
+"""
+Book Binder - Beautiful Self-Contained CLI for MLSysBook
+A gorgeous, lightning-fast, completely self-contained book development tool
+"""
+
+import os
+import sys
+import subprocess
+import shutil
+import re
+import signal
+from pathlib import Path
+from contextlib import contextmanager
+
+try:
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+    from rich.tree import Tree
+    from rich.text import Text
+    from rich.live import Live
+    from rich import print as rprint
+    RICH_AVAILABLE = True
+except ImportError:
+    RICH_AVAILABLE = False
+    def rprint(*args, **kwargs):
+        print(*args, **kwargs)
+
+console = Console() if RICH_AVAILABLE else None
+
+class BookBinder:
+    def __init__(self):
+        self.root_dir = Path.cwd()
+        self.book_dir = self.root_dir / "book"
+        self.build_dir = self.root_dir / "build"
+        self.html_config = self.book_dir / "_quarto-html.yml"
+        self.pdf_config = self.book_dir / "_quarto-pdf.yml"
+        self.active_config = self.book_dir / "_quarto.yml"
+        
+    def show_banner(self):
+        """Display beautiful banner"""
+        if not RICH_AVAILABLE:
+            print("📚 Book Binder - Self-Contained MLSysBook CLI")
+            return
+            
+        banner = Panel.fit(
+            "[bold blue]📚 Book Binder[/bold blue]\n"
+            "[dim]Self-contained lightning-fast MLSysBook development CLI[/dim]",
+            border_style="blue",
+            padding=(1, 2)
+        )
+        console.print(banner)
+    
+    def find_chapters(self):
+        """Find all available chapters"""
+        contents_dir = self.book_dir / "contents"
+        if not contents_dir.exists():
+            return []
+        
+        chapters = []
+        for qmd_file in contents_dir.rglob("*.qmd"):
+            if "images" not in str(qmd_file):
+                rel_path = qmd_file.relative_to(contents_dir)
+                chapter_name = str(rel_path).replace(".qmd", "")
+                chapters.append(chapter_name)
+        
+        return sorted(chapters)
+    
+    def find_chapter_file(self, partial_name):
+        """Find chapter file that matches partial name"""
+        contents_dir = self.book_dir / "contents"
+        
+        # Try direct glob match first
+        matches = list(contents_dir.rglob(f"*{partial_name}*.qmd"))
+        if matches:
+            # Filter out images directories
+            valid_matches = [m for m in matches if "images" not in str(m)]
+            if valid_matches:
+                return valid_matches[0]
+        
+        return None
+    
+    def find_chapter_match(self, partial_name):
+        """Find chapter that matches partial name"""
+        file_path = self.find_chapter_file(partial_name)
+        if file_path:
+            rel_path = file_path.relative_to(self.book_dir / "contents")
+            return str(rel_path).replace(".qmd", "")
+        return None
+    
+    def get_status(self):
+        """Get current configuration status"""
+        if self.active_config.is_symlink():
+            target = self.active_config.readlink()
+            active_config = str(target)
+        else:
+            active_config = "No symlink found"
+        
+        # Check for commented lines
+        html_commented = 0
+        pdf_commented = 0
+        
+        try:
+            if self.html_config.exists():
+                with open(self.html_config, 'r') as f:
+                    html_commented = sum(1 for line in f if "FAST_BUILD_COMMENTED" in line)
+        except:
+            pass
+            
+        try:
+            if self.pdf_config.exists():
+                with open(self.pdf_config, 'r') as f:
+                    pdf_commented = sum(1 for line in f if "FAST_BUILD_COMMENTED" in line)
+        except:
+            pass
+        
+        return {
+            'active_config': active_config,
+            'html_commented': html_commented,
+            'pdf_commented': pdf_commented,
+            'is_clean': html_commented == 0 and pdf_commented == 0
+        }
+    
+    def show_status(self):
+        """Display beautiful status information"""
+        status = self.get_status()
+        
+        if not RICH_AVAILABLE:
+            print(f"📊 Status:")
+            print(f"  🔗 Active config: {status['active_config']}")
+            print(f"  ✅ Clean: {status['is_clean']}")
+            return
+        
+        table = Table(title="📊 Current Status", show_header=False, box=None)
+        table.add_column("", style="cyan", no_wrap=True)
+        table.add_column("", style="white")
+        
+        table.add_row("🔗 Active Config", f"[bold]{status['active_config']}[/bold]")
+        
+        if status['is_clean']:
+            table.add_row("✅ State", "[green]Configs are clean[/green]")
+        else:
+            table.add_row("⚠️  State", f"[yellow]{status['html_commented'] + status['pdf_commented']} commented lines[/yellow]")
+        
+        console.print(Panel(table, border_style="green"))
+    
+    def show_chapters(self):
+        """Display available chapters in a beautiful format"""
+        chapters = self.find_chapters()
+        
+        if not RICH_AVAILABLE:
+            print("📚 Available chapters:")
+            for chapter in chapters[:10]:
+                print(f"  {chapter}")
+            if len(chapters) > 10:
+                print(f"  ... and {len(chapters) - 10} more")
+            return
+        
+        tree = Tree("📚 [bold blue]Available Chapters[/bold blue]")
+        
+        # Group by category
+        categories = {}
+        for chapter in chapters:
+            parts = chapter.split('/')
+            if len(parts) > 1:
+                category = parts[0]
+                name = '/'.join(parts[1:])
+            else:
+                category = "root"
+                name = chapter
+            
+            if category not in categories:
+                categories[category] = []
+            categories[category].append(name)
+        
+        for category, items in sorted(categories.items()):
+            category_node = tree.add(f"[bold cyan]{category}[/bold cyan]")
+            for item in sorted(items):
+                category_node.add(f"[white]{item}[/white]")
+        
+        console.print(tree)
+    
+    @contextmanager
+    def progress_context(self, description):
+        """Context manager for progress display"""
+        if not RICH_AVAILABLE:
+            print(f"Running: {description}")
+            yield None
+            return
+        
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TimeElapsedColumn(),
+            console=console
+        ) as progress:
+            task = progress.add_task(description, total=None)
+            yield progress
+            progress.update(task, completed=True)
+    
+    def run_command(self, cmd, cwd=None, description=None):
+        """Run command with progress indicator"""
+        if isinstance(cmd, str):
+            cmd = cmd.split()
+        
+        desc = description or f"Running: {' '.join(cmd)}"
+        
+        try:
+            with self.progress_context(desc):
+                result = subprocess.run(
+                    cmd, 
+                    cwd=cwd or self.root_dir,
+                    capture_output=False,
+                    text=True
+                )
+                return result.returncode == 0
+        except Exception as e:
+            if RICH_AVAILABLE:
+                console.print(f"[red]Error: {e}[/red]")
+            else:
+                print(f"Error: {e}")
+            return False
+    
+    def comment_qmd_files(self, config_file, target_path):
+        """Comment out all .qmd files except index.qmd and target"""
+        backup_path = config_file.with_suffix('.yml.fast-build-backup')
+        
+        # Create backup
+        shutil.copy2(config_file, backup_path)
+        
+        # Read file
+        with open(config_file, 'r') as f:
+            lines = f.readlines()
+        
+        # Comment out .qmd lines
+        modified_lines = []
+        for line in lines:
+            if re.search(r'\.qmd($|[^a-zA-Z0-9_-])', line):
+                # Skip if it's index.qmd or our target
+                if 'index.qmd' in line or target_path in line:
+                    modified_lines.append(line)
+                else:
+                    modified_lines.append(f"# FAST_BUILD_COMMENTED: {line}")
+            else:
+                modified_lines.append(line)
+        
+        # Write back
+        with open(config_file, 'w') as f:
+            f.writelines(modified_lines)
+        
+        # Count changes
+        commented_count = sum(1 for line in modified_lines if "FAST_BUILD_COMMENTED" in line)
+        active_count = sum(1 for line in modified_lines if ".qmd" in line and "FAST_BUILD_COMMENTED" not in line)
+        
+        return commented_count, active_count, backup_path
+    
+    def restore_config(self, config_file, backup_path=None):
+        """Restore config from backup or uncomment lines"""
+        if backup_path and backup_path.exists():
+            # Restore from backup
+            shutil.move(backup_path, config_file)
+            return True
+        elif config_file.exists():
+            # Uncomment lines
+            with open(config_file, 'r') as f:
+                content = f.read()
+            
+            # Remove comment markers
+            content = re.sub(r'^# FAST_BUILD_COMMENTED: ', '', content, flags=re.MULTILINE)
+            
+            with open(config_file, 'w') as f:
+                f.write(content)
+            return True
+        return False
+    
+    def setup_symlink(self, format_type):
+        """Setup _quarto.yml symlink"""
+        config_file = "_quarto-html.yml" if format_type == "html" else "_quarto-pdf.yml"
+        
+        # Remove existing symlink/file
+        if self.active_config.exists() or self.active_config.is_symlink():
+            self.active_config.unlink()
+        
+        # Create new symlink
+        self.active_config.symlink_to(config_file)
+        
+        return config_file
+    
+    def build(self, chapter, format_type="html"):
+        """Build a chapter with beautiful progress display"""
+        # Find the actual chapter file
+        chapter_file = self.find_chapter_file(chapter)
+        if not chapter_file:
+            if RICH_AVAILABLE:
+                console.print(f"[red]❌ No chapter found matching '{chapter}'[/red]")
+                console.print("[yellow]💡 Available chapters:[/yellow]")
+                self.show_chapters()
+            else:
+                print(f"❌ No chapter found matching '{chapter}'")
+                print("💡 Available chapters:")
+                self.show_chapters()
+            return False
+        
+        # Get relative path from book directory
+        target_path = str(chapter_file.relative_to(self.book_dir))
+        chapter_name = str(chapter_file.relative_to(self.book_dir / "contents")).replace(".qmd", "")
+        
+        if RICH_AVAILABLE:
+            console.print(f"[green]🚀 Building[/green] [bold]{chapter_name}[/bold] [dim]({format_type})[/dim]")
+            console.print(f"[dim]  ✅ Found: {chapter_file}[/dim]")
+        else:
+            print(f"🚀 Building {chapter_name} ({format_type})")
+            print(f"  ✅ Found: {chapter_file}")
+        
+        # Setup configuration
+        config_file = self.html_config if format_type == "html" else self.pdf_config
+        render_cmd = ["quarto", "render", "--to", "html" if format_type == "html" else "titlepage-pdf"]
+        build_subdir = "html" if format_type == "html" else "pdf"
+        
+        # Create build directory
+        (self.build_dir / build_subdir).mkdir(parents=True, exist_ok=True)
+        
+        try:
+            # Comment out non-target files
+            if RICH_AVAILABLE:
+                console.print(f"[yellow]  📝 Commenting out non-target .qmd files in {config_file.name}[/yellow]")
+            else:
+                print(f"  📝 Commenting out non-target .qmd files in {config_file.name}")
+            
+            commented_count, active_count, backup_path = self.comment_qmd_files(config_file, target_path)
+            
+            if RICH_AVAILABLE:
+                console.print(f"[dim]  📊 Build scope: {commented_count} commented, {active_count} active[/dim]")
+            else:
+                print(f"  📊 Build scope: {commented_count} commented, {active_count} active")
+            
+            # Setup symlink
+            active_config_name = self.setup_symlink(format_type)
+            if RICH_AVAILABLE:
+                console.print(f"[blue]  🔗 _quarto.yml → {active_config_name}[/blue]")
+            else:
+                print(f"  🔗 _quarto.yml → {active_config_name}")
+            
+            # Build
+            if RICH_AVAILABLE:
+                console.print("[yellow]  🔨 Building with reduced config...[/yellow]")
+            else:
+                print("  🔨 Building with reduced config...")
+            
+            success = self.run_command(
+                render_cmd,
+                cwd=self.book_dir,
+                description=f"Building {chapter_name} ({format_type})"
+            )
+            
+            if success:
+                if RICH_AVAILABLE:
+                    console.print(f"[green]  ✅ Fast build complete: build/{build_subdir}/[/green]")
+                else:
+                    print(f"  ✅ Fast build complete: build/{build_subdir}/")
+            else:
+                if RICH_AVAILABLE:
+                    console.print("[red]  ❌ Build failed[/red]")
+                else:
+                    print("  ❌ Build failed")
+            
+            return success
+            
+        finally:
+            # Always restore config
+            if RICH_AVAILABLE:
+                console.print("[yellow]  🔄 Restoring original config...[/yellow]")
+            else:
+                print("  🔄 Restoring original config...")
+            
+            self.restore_config(config_file, backup_path)
+    
+    def preview(self, chapter):
+        """Start preview server for a chapter"""
+        # Find the actual chapter file
+        chapter_file = self.find_chapter_file(chapter)
+        if not chapter_file:
+            if RICH_AVAILABLE:
+                console.print(f"[red]❌ No chapter found matching '{chapter}'[/red]")
+            else:
+                print(f"❌ No chapter found matching '{chapter}'")
+            return False
+        
+        target_path = str(chapter_file.relative_to(self.book_dir))
+        chapter_name = str(chapter_file.relative_to(self.book_dir / "contents")).replace(".qmd", "")
+        
+        if RICH_AVAILABLE:
+            console.print(f"[blue]🌐 Starting preview for[/blue] [bold]{chapter_name}[/bold]")
+        else:
+            print(f"🌐 Starting preview for {chapter_name}")
+        
+        # Setup for HTML preview
+        config_file = self.html_config
+        
+        try:
+            # Comment out non-target files
+            commented_count, active_count, backup_path = self.comment_qmd_files(config_file, target_path)
+            
+            # Setup symlink
+            self.setup_symlink("html")
+            
+            if RICH_AVAILABLE:
+                console.print("[blue]  🌐 Starting preview server with reduced config...[/blue]")
+                console.print("[dim]  💡 TIP: You can inspect _quarto-html.yml to see what's commented out[/dim]")
+                console.print("[dim]  🛑 Press Ctrl+C to stop the server and restore config[/dim]")
+            else:
+                print("  🌐 Starting preview server with reduced config...")
+                print("  💡 TIP: You can inspect _quarto-html.yml to see what's commented out")
+                print("  🛑 Press Ctrl+C to stop the server and restore config")
+            
+            # Setup signal handler to restore config on exit
+            def signal_handler(signum, frame):
+                if RICH_AVAILABLE:
+                    console.print("\n[yellow]🔄 Restoring config and exiting...[/yellow]")
+                else:
+                    print("\n🔄 Restoring config and exiting...")
+                self.restore_config(config_file, backup_path)
+                sys.exit(0)
+            
+            signal.signal(signal.SIGINT, signal_handler)
+            signal.signal(signal.SIGTERM, signal_handler)
+            
+            # Start preview
+            try:
+                subprocess.run(
+                    ["quarto", "preview"],
+                    cwd=self.book_dir
+                )
+            finally:
+                # Restore config
+                self.restore_config(config_file, backup_path)
+            
+            return True
+            
+        except Exception as e:
+            # Always restore config on error
+            self.restore_config(config_file, backup_path)
+            if RICH_AVAILABLE:
+                console.print(f"[red]❌ Preview failed: {e}[/red]")
+            else:
+                print(f"❌ Preview failed: {e}")
+            return False
+    
+    def clean(self):
+        """Clean up configurations"""
+        if RICH_AVAILABLE:
+            console.print("[yellow]🧹 Fast Build Cleanup[/yellow]")
+            console.print("[dim]💡 Restoring master configs (_quarto-html.yml, _quarto-pdf.yml) only[/dim]")
+        else:
+            print("🧹 Fast Build Cleanup")
+            print("💡 Restoring master configs (_quarto-html.yml, _quarto-pdf.yml) only")
+        
+        restored = False
+        
+        for config_name in ["_quarto-html.yml", "_quarto-pdf.yml"]:
+            config_file = self.book_dir / config_name
+            backup_file = config_file.with_suffix('.yml.fast-build-backup')
+            
+            if backup_file.exists():
+                if RICH_AVAILABLE:
+                    console.print(f"[yellow]  🔄 Restoring {config_name} from backup...[/yellow]")
+                else:
+                    print(f"  🔄 Restoring {config_name} from backup...")
+                
+                shutil.move(backup_file, config_file)
+                restored = True
+                
+                if RICH_AVAILABLE:
+                    console.print(f"[green]  ✅ {config_name} restored[/green]")
+                else:
+                    print(f"  ✅ {config_name} restored")
+                    
+            elif config_file.exists():
+                # Check if there are commented lines to uncomment
+                with open(config_file, 'r') as f:
+                    content = f.read()
+                
+                if "FAST_BUILD_COMMENTED" in content:
+                    if RICH_AVAILABLE:
+                        console.print(f"[yellow]  🔄 Uncommenting {config_name}...[/yellow]")
+                    else:
+                        print(f"  🔄 Uncommenting {config_name}...")
+                    
+                    # Remove comment markers
+                    content = re.sub(r'^# FAST_BUILD_COMMENTED: ', '', content, flags=re.MULTILINE)
+                    
+                    with open(config_file, 'w') as f:
+                        f.write(content)
+                    
+                    restored = True
+                    
+                    if RICH_AVAILABLE:
+                        console.print(f"[green]  ✅ {config_name} uncommented[/green]")
+                    else:
+                        print(f"  ✅ {config_name} uncommented")
+                else:
+                    if RICH_AVAILABLE:
+                        console.print(f"[green]  ✅ {config_name} already clean[/green]")
+                    else:
+                        print(f"  ✅ {config_name} already clean")
+        
+        # Show current symlink status
+        if self.active_config.is_symlink():
+            current_target = self.active_config.readlink()
+            if RICH_AVAILABLE:
+                console.print(f"[blue]  🔗 Current symlink: _quarto.yml → {current_target}[/blue]")
+            else:
+                print(f"  🔗 Current symlink: _quarto.yml → {current_target}")
+        
+        if RICH_AVAILABLE:
+            console.print("[green]  ✅ All configs restored to clean state[/green]")
+        else:
+            print("  ✅ All configs restored to clean state")
+        
+        return True
+    
+    def switch(self, format_type):
+        """Switch configuration format"""
+        if format_type not in ["html", "pdf"]:
+            if RICH_AVAILABLE:
+                console.print("[red]❌ Format must be 'html' or 'pdf'[/red]")
+            else:
+                print("❌ Format must be 'html' or 'pdf'")
+            return False
+        
+        if RICH_AVAILABLE:
+            console.print(f"[blue]🔗 Switching to {format_type} config...[/blue]")
+        else:
+            print(f"🔗 Switching to {format_type} config...")
+        
+        # Clean up first
+        self.clean()
+        
+        # Setup new symlink
+        config_name = self.setup_symlink(format_type)
+        
+        if RICH_AVAILABLE:
+            console.print(f"[green]  ✅ _quarto.yml → {config_name}[/green]")
+        else:
+            print(f"  ✅ _quarto.yml → {config_name}")
+        
+        return True
+    
+    def build_full(self, format_type="html"):
+        """Build full book in specified format"""
+        if RICH_AVAILABLE:
+            console.print(f"[green]🔨 Building full {format_type.upper()} book...[/green]")
+        else:
+            print(f"🔨 Building full {format_type.upper()} book...")
+        
+        # Create build directory
+        build_subdir = format_type
+        (self.build_dir / build_subdir).mkdir(parents=True, exist_ok=True)
+        
+        # Setup config
+        config_name = self.setup_symlink(format_type)
+        render_cmd = ["quarto", "render", "--to", "html" if format_type == "html" else "titlepage-pdf"]
+        
+        if RICH_AVAILABLE:
+            console.print(f"[blue]  🔗 Using {config_name}[/blue]")
+        else:
+            print(f"  🔗 Using {config_name}")
+        
+        success = self.run_command(
+            render_cmd,
+            cwd=self.book_dir,
+            description=f"Building full {format_type.upper()} book"
+        )
+        
+        if success:
+            if RICH_AVAILABLE:
+                console.print(f"[green]  ✅ {format_type.upper()} build complete: build/{build_subdir}/[/green]")
+            else:
+                print(f"  ✅ {format_type.upper()} build complete: build/{build_subdir}/")
+        
+        return success
+    
+    def preview_full(self, format_type="html"):
+        """Start full preview server"""
+        if RICH_AVAILABLE:
+            console.print(f"[blue]🌐 Starting full {format_type.upper()} preview server...[/blue]")
+        else:
+            print(f"🌐 Starting full {format_type.upper()} preview server...")
+        
+        # Setup config
+        config_name = self.setup_symlink(format_type)
+        
+        if RICH_AVAILABLE:
+            console.print(f"[blue]  🔗 Using {config_name}[/blue]")
+            console.print("[dim]  🛑 Press Ctrl+C to stop the server[/dim]")
+        else:
+            print(f"  🔗 Using {config_name}")
+            print("  🛑 Press Ctrl+C to stop the server")
+        
+        try:
+            subprocess.run(["quarto", "preview"], cwd=self.book_dir)
+            return True
+        except KeyboardInterrupt:
+            if RICH_AVAILABLE:
+                console.print("\n[yellow]🛑 Preview server stopped[/yellow]")
+            else:
+                print("\n🛑 Preview server stopped")
+            return True
+        except Exception as e:
+            if RICH_AVAILABLE:
+                console.print(f"[red]❌ Preview failed: {e}[/red]")
+            else:
+                print(f"❌ Preview failed: {e}")
+            return False
+    
+    def show_help(self):
+        """Display beautiful help screen"""
+        if not RICH_AVAILABLE:
+            print("""
+📚 Book Binder - Self-Contained MLSysBook CLI
+
+Fast Chapter Commands:
+  build <chapter> [format]    Build single chapter (html/pdf)
+  preview <chapter>           Build and preview single chapter
+  
+Full Book Commands:
+  build-full [format]         Build complete book (html/pdf)
+  preview-full [format]       Preview complete book (html/pdf)
+
+Management:
+  clean                       Clean up configurations
+  switch <format>             Switch config (html/pdf)
+  status                      Show current status
+  list                        List available chapters
+  help                        Show this help
+
+Examples:
+  ./binder build intro        # Build introduction chapter (HTML)
+  ./binder build intro pdf    # Build introduction chapter (PDF)
+  ./binder preview ops        # Preview ops chapter
+  ./binder build-full pdf     # Build complete PDF book
+  ./binder switch pdf         # Switch to PDF config
+            """)
+            return
+        
+        # Create beautiful help panels
+        fast_table = Table(show_header=True, header_style="bold green", box=None)
+        fast_table.add_column("Command", style="green", width=22)
+        fast_table.add_column("Description", style="white")
+        fast_table.add_column("Example", style="dim")
+        
+        fast_table.add_row("build <chapter> [format]", "Build single chapter", "./binder build intro pdf")
+        fast_table.add_row("preview <chapter>", "Build and preview chapter", "./binder preview ops")
+        
+        full_table = Table(show_header=True, header_style="bold blue", box=None)
+        full_table.add_column("Command", style="blue", width=22)
+        full_table.add_column("Description", style="white")
+        full_table.add_column("Example", style="dim")
+        
+        full_table.add_row("build-full [format]", "Build complete book", "./binder build-full pdf")
+        full_table.add_row("preview-full [format]", "Preview complete book", "./binder preview-full")
+        
+        mgmt_table = Table(show_header=True, header_style="bold yellow", box=None)
+        mgmt_table.add_column("Command", style="yellow", width=22)
+        mgmt_table.add_column("Description", style="white")
+        mgmt_table.add_column("Example", style="dim")
+        
+        mgmt_table.add_row("clean", "Clean configurations", "./binder clean")
+        mgmt_table.add_row("switch <format>", "Switch config", "./binder switch pdf")
+        mgmt_table.add_row("status", "Show current status", "./binder status")
+        mgmt_table.add_row("list", "List chapters", "./binder list")
+        mgmt_table.add_row("help", "Show this help", "./binder help")
+        
+        shortcuts_table = Table(show_header=True, header_style="bold cyan", box=None)
+        shortcuts_table.add_column("Shortcut", style="cyan", width=10)
+        shortcuts_table.add_column("Full Command", style="white")
+        
+        shortcuts_table.add_row("b", "build")
+        shortcuts_table.add_row("p", "preview")
+        shortcuts_table.add_row("bf", "build-full")
+        shortcuts_table.add_row("pf", "preview-full")
+        shortcuts_table.add_row("c", "clean")
+        shortcuts_table.add_row("s", "switch")
+        shortcuts_table.add_row("st", "status")
+        shortcuts_table.add_row("l", "list")
+        shortcuts_table.add_row("h", "help")
+        
+        # Display everything
+        self.show_banner()
+        console.print(Panel(fast_table, title="⚡ Fast Chapter Commands", border_style="green"))
+        console.print(Panel(full_table, title="📚 Full Book Commands", border_style="blue"))
+        console.print(Panel(mgmt_table, title="🔧 Management", border_style="yellow"))
+        console.print(Panel(shortcuts_table, title="🚀 Shortcuts", border_style="cyan"))
+        
+        examples = Text()
+        examples.append("🎯 Power User Examples:\n", style="bold magenta")
+        examples.append("  ./binder b intro pdf ", style="cyan")
+        examples.append("# Quick chapter PDF\n", style="dim")
+        examples.append("  ./binder p intro     ", style="cyan") 
+        examples.append("# Preview chapter\n", style="dim")
+        examples.append("  ./binder bf html     ", style="cyan")
+        examples.append("# Full HTML book\n", style="dim")
+        examples.append("  ./binder st          ", style="cyan")
+        examples.append("# Quick status\n", style="dim")
+        
+        console.print(Panel(examples, title="💡 Pro Tips", border_style="magenta"))
+
+def main():
+    binder = BookBinder()
+    
+    if len(sys.argv) < 2:
+        binder.show_help()
+        return
+    
+    command = sys.argv[1].lower()
+    
+    # Handle shortcuts
+    shortcuts = {
+        'b': 'build',
+        'p': 'preview',
+        'bf': 'build-full',
+        'pf': 'preview-full',
+        'c': 'clean',
+        's': 'switch',
+        'st': 'status',
+        'l': 'list',
+        'h': 'help'
+    }
+    
+    command = shortcuts.get(command, command)
+    
+    try:
+        if command == "build":
+            if len(sys.argv) < 3:
+                if RICH_AVAILABLE:
+                    console.print("[red]❌ Usage: ./binder build <chapter> [format][/red]")
+                else:
+                    print("❌ Usage: ./binder build <chapter> [format]")
+                return
+            chapter = sys.argv[2]
+            format_type = sys.argv[3] if len(sys.argv) > 3 else "html"
+            binder.build(chapter, format_type)
+            
+        elif command == "preview":
+            if len(sys.argv) < 3:
+                if RICH_AVAILABLE:
+                    console.print("[red]❌ Usage: ./binder preview <chapter>[/red]")
+                else:
+                    print("❌ Usage: ./binder preview <chapter>")
+                return
+            chapter = sys.argv[2]
+            binder.preview(chapter)
+            
+        elif command == "build-full":
+            format_type = sys.argv[2] if len(sys.argv) > 2 else "html"
+            if format_type not in ["html", "pdf"]:
+                if RICH_AVAILABLE:
+                    console.print("[red]❌ Format must be 'html' or 'pdf'[/red]")
+                else:
+                    print("❌ Format must be 'html' or 'pdf'")
+                return
+            binder.build_full(format_type)
+            
+        elif command == "preview-full":
+            format_type = sys.argv[2] if len(sys.argv) > 2 else "html"
+            if format_type not in ["html", "pdf"]:
+                if RICH_AVAILABLE:
+                    console.print("[red]❌ Format must be 'html' or 'pdf'[/red]")
+                else:
+                    print("❌ Format must be 'html' or 'pdf'")
+                return
+            binder.preview_full(format_type)
+            
+        elif command == "clean":
+            binder.clean()
+            
+        elif command == "switch":
+            if len(sys.argv) < 3:
+                if RICH_AVAILABLE:
+                    console.print("[red]❌ Usage: ./binder switch <html|pdf>[/red]")
+                else:
+                    print("❌ Usage: ./binder switch <html|pdf>")
+                return
+            format_type = sys.argv[2]
+            binder.switch(format_type)
+            
+        elif command == "status":
+            binder.show_status()
+            
+        elif command == "list":
+            binder.show_chapters()
+            
+        elif command == "help":
+            binder.show_help()
+            
+        else:
+            if RICH_AVAILABLE:
+                console.print(f"[red]❌ Unknown command: {command}[/red]")
+                console.print("[yellow]💡 Run './binder help' for usage[/yellow]")
+            else:
+                print(f"❌ Unknown command: {command}")
+                print("💡 Run './binder help' for usage")
+                
+    except KeyboardInterrupt:
+        if RICH_AVAILABLE:
+            console.print("\n[yellow]👋 Goodbye![/yellow]")
+        else:
+            print("\n👋 Goodbye!")
+    except Exception as e:
+        if RICH_AVAILABLE:
+            console.print(f"[red]❌ Error: {e}[/red]")
+        else:
+            print(f"❌ Error: {e}")
+
+if __name__ == "__main__":
+    main() 
