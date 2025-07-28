@@ -12,9 +12,159 @@
 #   make test        - Run tests and validation
 #   make install     - Install dependencies
 #   make check       - Check project health
+#   make fast-<name> - Build single chapter (e.g., make fast-introduction)
 # =============================================================================
 
-.PHONY: help clean clean-deep clean-dry build build-html build-pdf build-all preview preview-pdf test install check setup-hooks lint dev full-clean-build release-check status show-build help-clean help-build
+.PHONY: help clean clean-deep clean-dry build build-html build-pdf build-all preview preview-pdf test install check setup-hooks lint dev full-clean-build release-check status show-build help-clean help-build _fast_build _fast_build_and_preview
+
+# =============================================================================
+# Fast Single-Chapter Build System
+# =============================================================================
+# Clean delegation to shell script for better argument handling
+#
+# Usage examples:
+#   make fast CHAPTER=introduction          # HTML build
+#   make fast CHAPTER=introduction FORMAT=pdf  # PDF build
+#   make fast-preview CHAPTER=introduction  # HTML + preview
+# =============================================================================
+
+# Fast build with arguments
+fast:
+	@if [ -z "$(CHAPTER)" ]; then \
+		echo "❌ Usage: make fast CHAPTER=<name> [FORMAT=html|pdf]"; \
+		echo "💡 Examples:"; \
+		echo "    make fast CHAPTER=introduction"; \
+		echo "    make fast CHAPTER=introduction FORMAT=pdf"; \
+		exit 1; \
+	fi
+	@echo "🚀 Fast $(or $(FORMAT),html) build for chapter: $(CHAPTER)"
+	@echo "  🔍 Searching for chapter matching: $(CHAPTER)"
+	@TARGET_FILE=$$(find book/contents -name "*$(CHAPTER)*.qmd" | head -1); \
+	if [ -z "$$TARGET_FILE" ]; then \
+		echo "❌ No .qmd file found matching '$(CHAPTER)'"; \
+		echo "💡 Available chapters:"; \
+		find book/contents -name "*.qmd" | grep -v "/images/" | sed 's|book/contents/||' | sed 's|\.qmd||' | sort | sed 's|^|     |'; \
+		exit 1; \
+	fi; \
+	echo "  ✅ Found: $$TARGET_FILE"; \
+	TARGET_PATH=$$(echo $$TARGET_FILE | sed 's|^book/||'); \
+	echo "  📄 Format: $(or $(FORMAT),html)"; \
+	if [ "$(FORMAT)" = "pdf" ]; then \
+		CONFIG_FILE="_quarto-pdf.yml"; \
+		RENDER_CMD="quarto render --to titlepage-pdf"; \
+		BUILD_DIR="build/pdf"; \
+	else \
+		CONFIG_FILE="_quarto-html.yml"; \
+		RENDER_CMD="quarto render --to html"; \
+		BUILD_DIR="build/html"; \
+	fi; \
+	CONFIG_PATH="book/$$CONFIG_FILE"; \
+	BACKUP_PATH="$$CONFIG_PATH.fast-build-backup"; \
+	echo "  📝 Temporarily commenting out non-target .qmd files in $$CONFIG_FILE"; \
+	cp "$$CONFIG_PATH" "$$BACKUP_PATH"; \
+	sed -i.tmp -E '/\.qmd($|[^a-zA-Z0-9_-])/s/^(.*)$$/# FAST_BUILD_COMMENTED: \1/' "$$CONFIG_PATH"; \
+	TARGET_ESCAPED=$$(echo $$TARGET_PATH | sed 's/[\/&]/\\&/g'); \
+	sed -i.tmp -E "/(index\.qmd|$$TARGET_ESCAPED)/s/^# FAST_BUILD_COMMENTED: (.*)$$/\1/" "$$CONFIG_PATH"; \
+	rm -f "$$CONFIG_PATH.tmp"; \
+	COMMENTED_COUNT=$$(grep -c "# FAST_BUILD_COMMENTED:" "$$CONFIG_PATH" || echo 0); \
+	ACTIVE_COUNT=$$(grep -c "\.qmd" "$$CONFIG_PATH" || echo 0); \
+	echo "  📊 Build scope: $$COMMENTED_COUNT commented, $$ACTIVE_COUNT active"; \
+	mkdir -p "$$(dirname book)/$$BUILD_DIR"; \
+	cd book && if [ -f "_quarto.yml" ] && [ ! -L "_quarto.yml" ]; then rm -f "_quarto.yml"; fi; \
+	cd book && ln -sf "$$CONFIG_FILE" "_quarto.yml"; \
+	echo "  🔗 _quarto.yml → $$CONFIG_FILE"; \
+	echo "  🔨 Building with reduced config..."; \
+	cd book && $$RENDER_CMD; \
+	echo "  🔄 Restoring original config..."; \
+	mv "$$BACKUP_PATH" "$$CONFIG_PATH"; \
+	echo "  ✅ Fast build complete: $$BUILD_DIR/"
+
+# Fast build + preview  
+fast-preview:
+	@if [ -z "$(CHAPTER)" ]; then \
+		echo "❌ Usage: make fast-preview CHAPTER=<name>"; \
+		echo "💡 Example: make fast-preview CHAPTER=introduction"; \
+		exit 1; \
+	fi
+	@echo "🌐 Fast preview for chapter: $(CHAPTER)"
+	@echo "  🔍 Searching for chapter matching: $(CHAPTER)"
+	@TARGET_FILE=$$(find book/contents -name "*$(CHAPTER)*.qmd" | head -1); \
+	if [ -z "$$TARGET_FILE" ]; then \
+		echo "❌ No .qmd file found matching '$(CHAPTER)'"; \
+		echo "💡 Available chapters:"; \
+		find book/contents -name "*.qmd" | grep -v "/images/" | sed 's|book/contents/||' | sed 's|\.qmd||' | sort | sed 's|^|     |'; \
+		exit 1; \
+	fi; \
+	echo "  ✅ Found: $$TARGET_FILE"; \
+	TARGET_PATH=$$(echo $$TARGET_FILE | sed 's|^book/||'); \
+	CONFIG_FILE="_quarto-html.yml"; \
+	CONFIG_PATH="book/$$CONFIG_FILE"; \
+	BACKUP_PATH="$$CONFIG_PATH.fast-build-backup"; \
+	echo "  📝 Temporarily commenting out non-target .qmd files in $$CONFIG_FILE"; \
+	cp "$$CONFIG_PATH" "$$BACKUP_PATH"; \
+	sed -i.tmp -E '/\.qmd($|[^a-zA-Z0-9_-])/s/^(.*)$$/# FAST_BUILD_COMMENTED: \1/' "$$CONFIG_PATH"; \
+	TARGET_ESCAPED=$$(echo $$TARGET_PATH | sed 's/[\/&]/\\&/g'); \
+	sed -i.tmp -E "/(index\.qmd|$$TARGET_ESCAPED)/s/^# FAST_BUILD_COMMENTED: (.*)$$/\1/" "$$CONFIG_PATH"; \
+	rm -f "$$CONFIG_PATH.tmp"; \
+	cd book && if [ -f "_quarto.yml" ] && [ ! -L "_quarto.yml" ]; then rm -f "_quarto.yml"; fi; \
+	cd book && ln -sf "$$CONFIG_FILE" "_quarto.yml"; \
+	echo "  🔗 _quarto.yml → $$CONFIG_FILE"; \
+	echo "  🌐 Starting preview server with reduced config..."; \
+	echo "  💡 TIP: You can inspect $$CONFIG_FILE to see what's commented out"; \
+	echo "  🛑 Press Ctrl+C to stop the server and restore config"; \
+	cd book && trap 'mv "$$BACKUP_PATH" "$$CONFIG_PATH" 2>/dev/null || true' EXIT INT TERM; quarto preview
+
+# Cleanup fast build state
+fast-cleanup:
+	@echo "🧹 Fast Build Cleanup"
+	@echo "💡 Restoring master configs (_quarto-html.yml, _quarto-pdf.yml) only"
+	@for config in "_quarto-html.yml" "_quarto-pdf.yml"; do \
+		CONFIG_PATH="book/$$config"; \
+		BACKUP_PATH="$$CONFIG_PATH.fast-build-backup"; \
+		if [ -f "$$BACKUP_PATH" ]; then \
+			echo "  🔄 Restoring $$config from backup..."; \
+			mv "$$BACKUP_PATH" "$$CONFIG_PATH"; \
+			echo "  ✅ $$config restored"; \
+		elif grep -q "FAST_BUILD_COMMENTED" "$$CONFIG_PATH" 2>/dev/null; then \
+			echo "  🔄 Uncommenting $$config..."; \
+			sed -i.tmp 's/^# FAST_BUILD_COMMENTED: //' "$$CONFIG_PATH"; \
+			rm -f "$$CONFIG_PATH.tmp"; \
+			echo "  ✅ $$config uncommented"; \
+		else \
+			echo "  ✅ $$config already clean"; \
+		fi; \
+	done
+	@if [ -L "book/_quarto.yml" ]; then \
+		CURRENT_TARGET=$$(readlink book/_quarto.yml); \
+		echo "  🔗 Current symlink: _quarto.yml → $$CURRENT_TARGET"; \
+	fi
+	@echo "  ✅ All configs restored to clean state"
+
+# Switch config symlink
+switch-html:
+	@echo "🔗 Switching to HTML config..."
+	@$(MAKE) fast-cleanup >/dev/null 2>&1
+	@cd book && rm -f "_quarto.yml" && ln -sf "_quarto-html.yml" "_quarto.yml"
+	@echo "  ✅ _quarto.yml → _quarto-html.yml"
+
+switch-pdf:  
+	@echo "🔗 Switching to PDF config..."
+	@$(MAKE) fast-cleanup >/dev/null 2>&1
+	@cd book && rm -f "_quarto.yml" && ln -sf "_quarto-pdf.yml" "_quarto.yml"
+	@echo "  ✅ _quarto.yml → _quarto-pdf.yml"
+
+# Legacy pattern targets (for backward compatibility)
+fast-%-pdf:
+	@$(MAKE) fast CHAPTER="$*" FORMAT=pdf
+
+fast-%-html:
+	@$(MAKE) fast CHAPTER="$*" FORMAT=html
+
+preview-%:
+	@$(MAKE) fast-preview CHAPTER="$*"
+
+fast-%: 
+	@$(MAKE) fast CHAPTER="$*"
 
 # Default target
 help:
@@ -32,6 +182,22 @@ help:
 	@echo "  make build-pdf   - Build PDF book"
 	@echo "  make build-all   - Build all formats"
 	@echo ""
+	@echo "⚡ Fast Single-Chapter Builds:"
+	@echo "  make fast CHAPTER=<name> [FORMAT=pdf] - Build single chapter"
+	@echo "  make fast-preview CHAPTER=<name>     - Build and preview chapter"
+	@echo "  make fast-cleanup                    - Restore configs to clean state"
+	@echo "  make switch-html / switch-pdf        - Switch _quarto.yml symlink"
+	@echo ""
+	@echo "  Legacy patterns (still work):"
+	@echo "    make fast-<name>     make fast-<name>-pdf     make preview-<name>"
+	@echo ""
+	@echo "  Examples:"
+	@echo "    make fast CHAPTER=introduction               # HTML build"
+	@echo "    make fast CHAPTER=introduction FORMAT=pdf   # PDF build"
+	@echo "    make fast-preview CHAPTER=ml_systems        # HTML + preview"
+	@echo "    make fast-introduction                       # Legacy pattern"
+	@echo "    make fast-cleanup                            # Clean up configs"
+	@echo ""
 	@echo "🔍 Development:"
 	@echo "  make preview     - Start HTML development server"
 	@echo "  make preview-pdf - Start PDF development server"
@@ -48,6 +214,7 @@ help:
 	@echo "  make clean build-html preview  # Clean, build HTML, and start preview"
 	@echo "  make build                     # Interactive build (choose format)"
 	@echo "  make clean-dry                 # See what would be cleaned"
+	@echo "  make fast-introduction         # Quick build of just introduction"
 
 # =============================================================================
 # Cleaning Tasks
