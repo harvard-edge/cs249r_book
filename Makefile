@@ -222,15 +222,15 @@ help:
 
 clean:
 	@echo "🧹 Cleaning build artifacts..."
-	@./tools/scripts/build/clean.sh
+	@./binder clean
 
 clean-deep:
 	@echo "🔥 Deep cleaning (including caches and environments)..."
-	@./tools/scripts/build/clean.sh --deep
+	@./binder clean deep
 
 clean-dry:
 	@echo "🔍 Dry run - showing what would be cleaned..."
-	@./tools/scripts/build/clean.sh --dry-run
+	@./binder clean dry
 
 # =============================================================================
 # Building Tasks
@@ -302,7 +302,7 @@ test:
 	@echo "  📋 Checking Quarto configuration..."
 	@cd book && quarto check
 	@echo "  🔍 Validating project structure..."
-	@./tools/scripts/build/clean.sh --dry-run > /dev/null
+	@./binder check > /dev/null
 	@echo "  ✅ Basic validation passed"
 
 check:
@@ -374,7 +374,7 @@ setup-hooks:
 		exit 1; \
 	fi
 	@chmod +x .git/hooks/pre-commit
-	@chmod +x tools/scripts/build/clean.sh
+	@chmod +x binder
 	@echo "  ✅ Git hooks are now active"
 	@echo "  📋 The pre-commit hook will automatically:"
 	@echo "     - Clean build artifacts before commits"

@@ -527,14 +527,22 @@ class BookBinder:
                 print(f"❌ Preview failed: {e}")
             return False
     
-    def clean(self):
-        """Clean up configurations"""
+    def clean(self, deep=False, dry_run=False):
+        """Clean up configurations and build artifacts"""
+        clean_type = "Deep Cleanup" if deep else "Fast Build Cleanup"
+        
         if RICH_AVAILABLE:
-            console.print("[yellow]🧹 Fast Build Cleanup[/yellow]")
-            console.print("[dim]💡 Restoring master configs (_quarto-html.yml, _quarto-pdf.yml) only[/dim]")
+            console.print(f"[yellow]🧹 {clean_type}[/yellow]")
+            if deep:
+                console.print("[dim]💡 Removing all build artifacts, caches, and temp files[/dim]")
+            else:
+                console.print("[dim]💡 Restoring master configs and basic cleanup[/dim]")
         else:
-            print("🧹 Fast Build Cleanup")
-            print("💡 Restoring master configs (_quarto-html.yml, _quarto-pdf.yml) only")
+            print(f"🧹 {clean_type}")
+            if deep:
+                print("💡 Removing all build artifacts, caches, and temp files")
+            else:
+                print("💡 Restoring master configs and basic cleanup")
         
         restored = False
         
@@ -598,8 +606,183 @@ class BookBinder:
         else:
             print("  ✅ All configs restored to clean state")
         
+        # Clean build artifacts and cache files
+        self.clean_build_artifacts(deep, dry_run)
+        
         return True
     
+    def clean_build_artifacts(self, deep=False, dry_run=False):
+        """Clean build artifacts, cache files, and temp files"""
+        removed_count = 0
+        
+        # Build artifacts to clean
+        artifacts = [
+            (self.build_dir, "Build directory (all formats)"),
+            (self.root_dir / "_book", "Legacy build output"),
+            (self.root_dir / "index_files", "Root index files"),
+            (self.book_dir / "index_files", "Book index files"),
+            (self.book_dir / "site_libs", "Site libraries"),
+            (self.book_dir / ".quarto", "Quarto cache (book)"),
+            (self.root_dir / ".quarto", "Quarto cache (root)")
+        ]
+        
+        # Add deep clean items
+        if deep:
+            artifacts.extend([
+                (self.root_dir / ".venv", "Python virtual environment"),
+                (self.root_dir / "venv", "Python virtual environment"),
+                (self.root_dir / "node_modules", "Node.js modules"),
+                (self.root_dir / ".pytest_cache", "Pytest cache")
+            ])
+        
+        # Remove directories and files
+        for item_path, description in artifacts:
+            if item_path.exists():
+                if dry_run:
+                    if RICH_AVAILABLE:
+                        console.print(f"[dim]  📁 Would remove: {item_path.name} ({description})[/dim]")
+                    else:
+                        print(f"  📁 Would remove: {item_path.name} ({description})")
+                else:
+                    if RICH_AVAILABLE:
+                        console.print(f"[dim]  🗑️  Removing: {item_path.name} ({description})[/dim]")
+                    else:
+                        print(f"  🗑️  Removing: {item_path.name} ({description})")
+                    
+                    try:
+                        if item_path.is_dir():
+                            shutil.rmtree(item_path)
+                        else:
+                            item_path.unlink()
+                        removed_count += 1
+                    except Exception as e:
+                        if RICH_AVAILABLE:
+                            console.print(f"[red]    ⚠️  Failed to remove {item_path.name}: {e}[/red]")
+                        else:
+                            print(f"    ⚠️  Failed to remove {item_path.name}: {e}")
+        
+        # Clean file patterns
+        patterns = [
+            ("**/*.html", "HTML build artifacts", "book/contents"),
+            ("**/diagram-*.pdf", "Generated TikZ diagrams", "book/contents"),
+            ("**/__pycache__", "Python cache directories", ""),
+            ("**/*.pyc", "Python compiled files", ""),
+            ("**/*.log", "Log files", "tools"),
+            ("**/.DS_Store", "macOS metadata files", ""),
+            ("**/*~", "Editor backup files", ""),
+            ("**/*.swp", "Vim swap files", "")
+        ]
+        
+        if deep:
+            patterns.extend([
+                ("**/figure-*", "Generated figure directories", ""),
+                ("**/diagram-*.pdf", "Generated TikZ diagrams", "book/contents"),
+                ("**/*.aux", "LaTeX auxiliary files", ""),
+                ("**/*.toc", "Table of contents files", ""),
+                ("**/*.out", "LaTeX outline files", ""),
+                ("**/mediabag", "Pandoc media bags", "")
+            ])
+        
+        # Remove pattern-based files
+        for pattern, description, base_dir in patterns:
+            search_dir = self.root_dir / base_dir if base_dir else self.root_dir
+            if search_dir.exists():
+                matches = list(search_dir.glob(pattern))
+                if matches:
+                    if dry_run:
+                        if RICH_AVAILABLE:
+                            console.print(f"[dim]  📄 Would remove {len(matches)} files: {description}[/dim]")
+                        else:
+                            print(f"  📄 Would remove {len(matches)} files: {description}")
+                    else:
+                        if RICH_AVAILABLE:
+                            console.print(f"[dim]  🗑️  Removing {len(matches)} files: {description}[/dim]")
+                        else:
+                            print(f"  🗑️  Removing {len(matches)} files: {description}")
+                        
+                        for match in matches:
+                            try:
+                                if match.is_dir():
+                                    shutil.rmtree(match)
+                                else:
+                                    match.unlink()
+                                removed_count += 1
+                            except Exception as e:
+                                if RICH_AVAILABLE:
+                                    console.print(f"[red]    ⚠️  Failed to remove {match.name}: {e}[/red]")
+                                else:
+                                    print(f"    ⚠️  Failed to remove {match.name}: {e}")
+        
+        # Summary
+        if dry_run:
+            if RICH_AVAILABLE:
+                console.print("[blue]  🔍 Dry run completed - no files were actually removed[/blue]")
+            else:
+                print("  🔍 Dry run completed - no files were actually removed")
+        else:
+            if RICH_AVAILABLE:
+                console.print(f"[green]  ✅ Cleaned {removed_count} items successfully[/green]")
+            else:
+                print(f"  ✅ Cleaned {removed_count} items successfully")
+    
+    def check_artifacts(self):
+        """Check for build artifacts that shouldn't be committed"""
+        if RICH_AVAILABLE:
+            console.print("[yellow]🔍 Checking for build artifacts...[/yellow]")
+        else:
+            print("🔍 Checking for build artifacts...")
+        
+        artifacts_found = []
+        
+        # Check for common build artifacts
+        artifact_patterns = [
+            (self.build_dir, "Build directory"),
+            (self.root_dir / "_book", "Legacy build output"),
+            (self.book_dir / "index_files", "Index files"),
+            (self.book_dir / "site_libs", "Site libraries"),
+            (self.book_dir / ".quarto", "Quarto cache")
+        ]
+        
+        for path, description in artifact_patterns:
+            if path.exists():
+                artifacts_found.append((str(path), description))
+        
+        # Check for specific file patterns (generated build artifacts)
+        file_patterns = [
+            ("**/*.html", "HTML files", "book/contents"),
+            ("**/diagram-*.pdf", "Generated diagram PDFs", "book/contents"),  # TikZ generated diagrams
+            ("**/*_files/figure-*.pdf", "Generated figure PDFs", "book/contents"),  # Quarto figure outputs
+            ("**/*.aux", "LaTeX auxiliary files", ""),
+            ("**/*.log", "Log files", ""),
+            ("**/__pycache__", "Python cache", "")
+        ]
+        
+        for pattern, description, base_dir in file_patterns:
+            search_dir = self.root_dir / base_dir if base_dir else self.root_dir
+            if search_dir.exists():
+                matches = list(search_dir.glob(pattern))
+                if matches:
+                    artifacts_found.extend([(str(m), description) for m in matches[:5]])  # Limit to first 5
+        
+        if artifacts_found:
+            if RICH_AVAILABLE:
+                console.print("[yellow]⚠️  Build artifacts detected:[/yellow]")
+                for artifact, desc in artifacts_found:
+                    console.print(f"[dim]  📄 {artifact} ({desc})[/dim]")
+                console.print("[blue]💡 Run './binder clean' to remove these artifacts[/blue]")
+            else:
+                print("⚠️  Build artifacts detected:")
+                for artifact, desc in artifacts_found:
+                    print(f"  📄 {artifact} ({desc})")
+                print("💡 Run './binder clean' to remove these artifacts")
+            return False
+        else:
+            if RICH_AVAILABLE:
+                console.print("[green]✅ No build artifacts detected[/green]")
+            else:
+                print("✅ No build artifacts detected")
+            return True
+
     def switch(self, format_type):
         """Switch configuration format"""
         if format_type not in ["html", "pdf"]:
@@ -709,7 +892,8 @@ Full Book Commands:
   preview-full [format]       Preview complete book (html/pdf)
 
 Management:
-  clean                       Clean up configurations
+  clean [deep] [dry]          Clean up configurations and build artifacts
+  check                       Check for build artifacts
   switch <format>             Switch config (html/pdf)
   status                      Show current status
   list                        List available chapters
@@ -720,6 +904,8 @@ Examples:
   ./binder build intro pdf    # Build introduction chapter (PDF)
   ./binder preview ops        # Preview ops chapter
   ./binder build-full pdf     # Build complete PDF book
+  ./binder clean deep         # Deep clean (all caches, venv, etc.)
+  ./binder clean dry          # Dry run (show what would be cleaned)
   ./binder switch pdf         # Switch to PDF config
             """)
             return
@@ -746,7 +932,8 @@ Examples:
         mgmt_table.add_column("Description", style="white")
         mgmt_table.add_column("Example", style="dim")
         
-        mgmt_table.add_row("clean", "Clean configurations", "./binder clean")
+        mgmt_table.add_row("clean [deep] [dry]", "Clean configs & artifacts", "./binder clean deep")
+        mgmt_table.add_row("check", "Check for build artifacts", "./binder check")
         mgmt_table.add_row("switch <format>", "Switch config", "./binder switch pdf")
         mgmt_table.add_row("status", "Show current status", "./binder status")
         mgmt_table.add_row("list", "List chapters", "./binder list")
@@ -761,6 +948,8 @@ Examples:
         shortcuts_table.add_row("bf", "build-full")
         shortcuts_table.add_row("pf", "preview-full")
         shortcuts_table.add_row("c", "clean")
+        shortcuts_table.add_row("cd", "clean-deep")
+        shortcuts_table.add_row("ch", "check")
         shortcuts_table.add_row("s", "switch")
         shortcuts_table.add_row("st", "status")
         shortcuts_table.add_row("l", "list")
@@ -777,10 +966,10 @@ Examples:
         examples.append("🎯 Power User Examples:\n", style="bold magenta")
         examples.append("  ./binder b intro pdf ", style="cyan")
         examples.append("# Quick chapter PDF\n", style="dim")
-        examples.append("  ./binder p intro     ", style="cyan") 
-        examples.append("# Preview chapter\n", style="dim")
-        examples.append("  ./binder bf html     ", style="cyan")
-        examples.append("# Full HTML book\n", style="dim")
+        examples.append("  ./binder cd          ", style="cyan") 
+        examples.append("# Deep clean all artifacts\n", style="dim")
+        examples.append("  ./binder ch          ", style="cyan")
+        examples.append("# Check for build artifacts\n", style="dim")
         examples.append("  ./binder st          ", style="cyan")
         examples.append("# Quick status\n", style="dim")
         
@@ -802,6 +991,8 @@ def main():
         'bf': 'build-full',
         'pf': 'preview-full',
         'c': 'clean',
+        'cd': 'clean-deep',
+        'ch': 'check',
         's': 'switch',
         'st': 'status',
         'l': 'list',
@@ -853,7 +1044,16 @@ def main():
             binder.preview_full(format_type)
             
         elif command == "clean":
-            binder.clean()
+            deep = "--deep" in sys.argv or "deep" in sys.argv
+            dry_run = "--dry-run" in sys.argv or "dry" in sys.argv
+            binder.clean(deep=deep, dry_run=dry_run)
+            
+        elif command == "clean-deep":
+            binder.clean(deep=True, dry_run=False)
+            
+        elif command == "check":
+            if not binder.check_artifacts():
+                sys.exit(1)  # Exit with error code when artifacts found
             
         elif command == "switch":
             if len(sys.argv) < 3:
