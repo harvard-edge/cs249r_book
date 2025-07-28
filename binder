@@ -289,6 +289,37 @@ class BookBinder:
         
         # No "Output created:" line found
         return False
+
+    def open_browser_if_needed(self, file_path):
+        """Open a file in the browser if it exists"""
+        if not os.path.isabs(file_path):
+            # Path is relative to book directory
+            full_path = (self.book_dir / file_path).resolve()
+        else:
+            full_path = Path(file_path)
+        
+        if full_path.exists():
+            if RICH_AVAILABLE:
+                console.print(f"[green]🌐 Opening in browser: {full_path.name}[/green]")
+            else:
+                print(f"🌐 Opening in browser: {full_path.name}")
+            
+            try:
+                # Use 'open' command on macOS
+                subprocess.run(['open', str(full_path)], check=True)
+                return True
+            except subprocess.CalledProcessError:
+                if RICH_AVAILABLE:
+                    console.print(f"[yellow]⚠️  Could not open file automatically: {full_path}[/yellow]")
+                else:
+                    print(f"⚠️  Could not open file automatically: {full_path}")
+                return False
+        else:
+            if RICH_AVAILABLE:
+                console.print(f"[yellow]⚠️  Output file not found: {full_path}[/yellow]")
+            else:
+                print(f"⚠️  Output file not found: {full_path}")
+            return False
     
     def set_fast_build_mode(self, config_file, target_path):
         """Set fast build mode - different approach for HTML vs PDF"""
@@ -385,6 +416,109 @@ class BookBinder:
             
         return True
 
+    def set_fast_build_mode_multiple(self, config_file, target_paths):
+        """Set fast build mode for multiple chapters in a single render"""
+        backup_path = config_file.with_suffix('.yml.fast-build-backup')
+        
+        # Create backup
+        shutil.copy2(config_file, backup_path)
+        
+        # Read current config
+        with open(config_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Get relative paths for all targets
+        target_relative_paths = [path.relative_to(self.book_dir).as_posix() for path in target_paths]
+        target_stems = [path.stem for path in target_paths]
+        
+        # Different approach for HTML (website) vs PDF (book)
+        if 'type: website' in content:
+            # HTML: Use project.render configuration with all target chapters
+            render_items = [
+                "    - index.qmd",
+                "    - 404.qmd", 
+                "    - contents/frontmatter/"
+            ]
+            
+            # Add all target chapters
+            for target_path in target_relative_paths:
+                render_items.append(f"    - {target_path}")
+            
+            render_config = f"""  render:
+{chr(10).join(render_items)}
+    # Fast build: only render essential files and target chapters
+"""
+            
+            # Insert render config after "navigate: true" in project section
+            if 'navigate: true' in content:
+                content = content.replace(
+                    'navigate: true',
+                    f'navigate: true\n{render_config}'
+                )
+            else:
+                if RICH_AVAILABLE:
+                    console.print(f"[yellow]⚠️  Could not find project navigation section in {config_file}[/yellow]")
+                else:
+                    print(f"⚠️  Could not find project navigation section in {config_file}")
+                return False
+                
+        elif 'type: book' in content:
+            # PDF: Comment out unwanted chapters in book.chapters list
+            lines = content.split('\n')
+            new_lines = []
+            in_chapters_section = False
+            targets_found = 0
+            
+            for line in lines:
+                if line.strip() == 'chapters:':
+                    in_chapters_section = True
+                    new_lines.append(line)
+                    continue
+                elif in_chapters_section and line.startswith('    - ') and '.qmd' in line:
+                    # This is a chapter line
+                    if any(target_path in line for target_path in target_relative_paths):
+                        # Keep target chapters
+                        new_lines.append(line)
+                        targets_found += 1
+                    elif any(essential in line for essential in ['index.qmd', 'foreword.qmd', 'about/', 'acknowledgements/']):
+                        # Keep essential frontmatter
+                        new_lines.append(line)
+                    else:
+                        # Comment out other chapters
+                        new_lines.append(f"    # {line.strip()[2:]}  # Commented for fast build")
+                elif in_chapters_section and line.strip() and not line.startswith('    '):
+                    # End of chapters section
+                    in_chapters_section = False
+                    new_lines.append(line)
+                else:
+                    new_lines.append(line)
+            
+            if targets_found != len(target_relative_paths):
+                if RICH_AVAILABLE:
+                    console.print(f"[yellow]⚠️  Only {targets_found}/{len(target_relative_paths)} target chapters found in chapters list[/yellow]")
+                else:
+                    print(f"⚠️  Only {targets_found}/{len(target_relative_paths)} target chapters found in chapters list")
+                return False
+            
+            content = '\n'.join(new_lines)
+        else:
+            if RICH_AVAILABLE:
+                console.print(f"[yellow]⚠️  Unknown project type in {config_file}[/yellow]")
+            else:
+                print(f"⚠️  Unknown project type in {config_file}")
+            return False
+        
+        # Write modified config
+        with open(config_file, 'w', encoding='utf-8') as f:
+            f.write(content)
+            
+        if RICH_AVAILABLE:
+            console.print(f"  📝 Fast build mode: Only rendering {', '.join(target_stems)} + essential files")
+        else:
+            print(f"  📝 Fast build mode: Only rendering {', '.join(target_stems)} + essential files")
+            
+        return True
+
     def restore_config(self, config_file):
         """Restore configuration from backup"""
         backup_path = config_file.with_suffix('.yml.fast-build-backup')
@@ -478,46 +612,111 @@ class BookBinder:
             return self.build_multiple(chapters, format_type)
     
     def build_multiple(self, chapter_list, format_type="html"):
-        """Build multiple chapters in sequence"""
+        """Build multiple chapters together in a single unified build"""
         if RICH_AVAILABLE:
-            console.print(f"[green]🚀 Building {len(chapter_list)} chapters[/green] [dim]({format_type})[/dim]")
+            console.print(f"[green]🚀 Building {len(chapter_list)} chapters together[/green] [dim]({format_type})[/dim]")
             console.print(f"[dim]  📋 Chapters: {', '.join(chapter_list)}[/dim]")
         else:
-            print(f"🚀 Building {len(chapter_list)} chapters ({format_type})")
+            print(f"🚀 Building {len(chapter_list)} chapters together ({format_type})")
             print(f"  📋 Chapters: {', '.join(chapter_list)}")
         
-        results = []
-        successful_builds = []
+        return self.build_multiple_unified(chapter_list, format_type)
+    
+    def build_multiple_unified(self, chapter_list, format_type="html"):
+        """Build multiple chapters in a single Quarto render command"""
+        # Resolve chapter paths
+        chapter_files = []
+        for chapter in chapter_list:
+            chapter_file = self.find_chapter_file(chapter)
+            if not chapter_file:
+                if RICH_AVAILABLE:
+                    console.print(f"[red]❌ Chapter not found: {chapter}[/red]")
+                else:
+                    print(f"❌ Chapter not found: {chapter}")
+                return False
+            chapter_files.append(chapter_file)
         
-        for i, chapter in enumerate(chapter_list, 1):
-            if RICH_AVAILABLE:
-                console.print(f"\n[blue]📖 Chapter {i}/{len(chapter_list)}[/blue]")
-            else:
-                print(f"\n📖 Chapter {i}/{len(chapter_list)}")
+        # Configure build settings
+        config_file = self.html_config if format_type == "html" else self.pdf_config
+        format_arg = "html" if format_type == "html" else "titlepage-pdf"
+        build_subdir = "html" if format_type == "html" else "pdf"
+        
+        # Create build directory
+        (self.build_dir / build_subdir).mkdir(parents=True, exist_ok=True)
+        
+        # Setup correct configuration symlink for the format
+        self.setup_symlink(format_type)
+        
+        try:
+            # Ensure config is clean (remove any render restrictions)
+            self.ensure_clean_config(config_file)
             
-            success = self.build_single(chapter, format_type, open_browser=(i == len(chapter_list)))
-            results.append(success)
-            if success:
-                successful_builds.append(chapter)
-        
-        # Summary
-        total_success = sum(results)
-        if RICH_AVAILABLE:
-            if total_success == len(chapter_list):
-                console.print(f"\n[green]✅ All {len(chapter_list)} chapters built successfully[/green]")
+            if RICH_AVAILABLE:
+                console.print(f"[green]🚀 Building {len(chapter_list)} chapters together[/green] [dim]({format_type})[/dim]")
             else:
-                console.print(f"\n[yellow]⚠️  {total_success}/{len(chapter_list)} chapters built successfully[/yellow]")
-                if successful_builds:
-                    console.print(f"[green]✅ Successful: {', '.join(successful_builds)}[/green]")
-        else:
-            if total_success == len(chapter_list):
-                print(f"\n✅ All {len(chapter_list)} chapters built successfully")
+                print(f"🚀 Building {len(chapter_list)} chapters together ({format_type})")
+            
+            # Set up unified fast build mode for all chapters
+            success = self.set_fast_build_mode_multiple(config_file, chapter_files)
+            if not success:
+                return False
+            
+            # Set up signal handlers for graceful shutdown
+            def signal_handler(signum, frame):
+                self.restore_config(config_file)
+                sys.exit(1)
+                
+            signal.signal(signal.SIGINT, signal_handler)
+            signal.signal(signal.SIGTERM, signal_handler)
+            
+            # Build with unified project.render configuration
+            if RICH_AVAILABLE:
+                console.print("[yellow]  🔨 Building all chapters in single render...[/yellow]")
             else:
-                print(f"\n⚠️  {total_success}/{len(chapter_list)} chapters built successfully")
-                if successful_builds:
-                    print(f"✅ Successful: {', '.join(successful_builds)}")
-        
-        return total_success == len(chapter_list)
+                print("  🔨 Building all chapters in single render...")
+            
+            # Render project with all target chapters
+            render_cmd = ["quarto", "render", "--to", format_arg]
+            
+            # Show the raw command being executed
+            cmd_str = " ".join(render_cmd)
+            if RICH_AVAILABLE:
+                console.print(f"[blue]  💻 Command: {cmd_str}[/blue]")
+            else:
+                print(f"  💻 Command: {cmd_str}")
+            
+            # Capture output to find the created file and open it
+            result = self.run_command(
+                render_cmd,
+                cwd=self.book_dir,
+                description=f"Building {len(chapter_list)} chapters ({format_type}) - unified build",
+                capture_for_parsing=True
+            )
+            
+            if result:
+                if RICH_AVAILABLE:
+                    console.print(f"  ✅ Unified build complete: build/{build_subdir}/")
+                else:
+                    print(f"  ✅ Unified build complete: build/{build_subdir}/")
+                
+                # Open browser for HTML builds
+                if format_type == "html" and result:
+                    self.open_browser_if_needed(f"../build/{build_subdir}/index.html")
+                    
+                return True
+            else:
+                if RICH_AVAILABLE:
+                    console.print(f"[red]❌ Build failed[/red]")
+                else:
+                    print("❌ Build failed")
+                return False
+                
+        finally:
+            # Always restore config, even if build fails
+            if RICH_AVAILABLE:
+                console.print("  🛡️  Ensuring pristine config restoration...")
+            
+            self.restore_config(config_file)
     
     def build_single(self, chapter, format_type="html", open_browser=True):
         """Build a single chapter with beautiful progress display"""
