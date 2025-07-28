@@ -291,7 +291,7 @@ class BookBinder:
         return False
     
     def set_fast_build_mode(self, config_file, target_path):
-        """Set fast build mode using render configuration instead of sidebar commenting"""
+        """Set fast build mode - different approach for HTML vs PDF"""
         backup_path = config_file.with_suffix('.yml.fast-build-backup')
         
         # Create backup
@@ -301,40 +301,89 @@ class BookBinder:
         with open(config_file, 'r', encoding='utf-8') as f:
             content = f.read()
         
-        # Add render configuration to project section
-        # This explicitly controls what gets built vs what appears in navigation
         target_stem = target_path.stem
+        target_relative_path = target_path.relative_to(self.book_dir).as_posix()
         
-        render_config = f"""  render:
+        # Different approach for HTML (website) vs PDF (book)
+        if 'type: website' in content:
+            # HTML: Use project.render configuration
+            render_config = f"""  render:
     - index.qmd
     - 404.qmd
     - contents/frontmatter/
-    - {target_path.relative_to(self.book_dir).as_posix()}
+    - {target_relative_path}
     # Fast build: only render essential files and target chapter
 """
-        
-        # Insert render config after "navigate: true" in project section
-        if 'navigate: true' in content:
-            content = content.replace(
-                'navigate: true',
-                f'navigate: true\n{render_config}'
-            )
             
-            with open(config_file, 'w', encoding='utf-8') as f:
-                f.write(content)
-                
-            if RICH_AVAILABLE:
-                console.print(f"  📝 Fast build mode: Only rendering {target_stem} + essential files")
+            # Insert render config after "navigate: true" in project section
+            if 'navigate: true' in content:
+                content = content.replace(
+                    'navigate: true',
+                    f'navigate: true\n{render_config}'
+                )
             else:
-                print(f"  📝 Fast build mode: Only rendering {target_stem} + essential files")
+                if RICH_AVAILABLE:
+                    console.print(f"[yellow]⚠️  Could not find project navigation section in {config_file}[/yellow]")
+                else:
+                    print(f"⚠️  Could not find project navigation section in {config_file}")
+                return False
                 
-            return True
+        elif 'type: book' in content:
+            # PDF: Comment out unwanted chapters in book.chapters list
+            lines = content.split('\n')
+            new_lines = []
+            in_chapters_section = False
+            target_found = False
+            
+            for line in lines:
+                if line.strip() == 'chapters:':
+                    in_chapters_section = True
+                    new_lines.append(line)
+                    continue
+                elif in_chapters_section and line.startswith('    - ') and '.qmd' in line:
+                    # This is a chapter line
+                    if target_relative_path in line:
+                        # Keep the target chapter
+                        new_lines.append(line)
+                        target_found = True
+                    elif any(essential in line for essential in ['index.qmd', 'foreword.qmd', 'about/', 'acknowledgements/']):
+                        # Keep essential frontmatter
+                        new_lines.append(line)
+                    else:
+                        # Comment out other chapters
+                        new_lines.append(f"    # {line.strip()[2:]}  # Commented for fast build")
+                elif in_chapters_section and line.strip() and not line.startswith('    '):
+                    # End of chapters section
+                    in_chapters_section = False
+                    new_lines.append(line)
+                else:
+                    new_lines.append(line)
+            
+            if not target_found:
+                if RICH_AVAILABLE:
+                    console.print(f"[yellow]⚠️  Target chapter {target_relative_path} not found in chapters list[/yellow]")
+                else:
+                    print(f"⚠️  Target chapter {target_relative_path} not found in chapters list")
+                return False
+            
+            content = '\n'.join(new_lines)
         else:
             if RICH_AVAILABLE:
-                console.print(f"[yellow]⚠️  Could not find project navigation section in {config_file}[/yellow]")
+                console.print(f"[yellow]⚠️  Unknown project type in {config_file}[/yellow]")
             else:
-                print(f"⚠️  Could not find project navigation section in {config_file}")
+                print(f"⚠️  Unknown project type in {config_file}")
             return False
+        
+        # Write modified config
+        with open(config_file, 'w', encoding='utf-8') as f:
+            f.write(content)
+            
+        if RICH_AVAILABLE:
+            console.print(f"  📝 Fast build mode: Only rendering {target_stem} + essential files")
+        else:
+            print(f"  📝 Fast build mode: Only rendering {target_stem} + essential files")
+            
+        return True
 
     def restore_config(self, config_file):
         """Restore configuration from backup"""
@@ -504,6 +553,9 @@ class BookBinder:
         # Create build directory
         (self.build_dir / build_subdir).mkdir(parents=True, exist_ok=True)
         
+        # Setup correct configuration symlink for the format
+        self.setup_symlink(format_type)
+        
         try:
             # Ensure config is clean (remove any render restrictions)
             self.ensure_clean_config(config_file)
@@ -527,20 +579,27 @@ class BookBinder:
             signal.signal(signal.SIGINT, signal_handler)
             signal.signal(signal.SIGTERM, signal_handler)
             
-            # Build only the target chapter (single file)
+            # Build with project.render configuration (fast build)
             if RICH_AVAILABLE:
-                console.print("[yellow]  🔨 Building only target file...[/yellow]")
+                console.print("[yellow]  🔨 Building with fast build configuration...[/yellow]")
             else:
-                print("  🔨 Building only target file...")
+                print("  🔨 Building with fast build configuration...")
             
-            # Render just the target chapter file
-            render_cmd = ["quarto", "render", target_path, "--to", format_arg]
+            # Render project with limited file scope
+            render_cmd = ["quarto", "render", "--to", format_arg]
+            
+            # Show the raw command being executed
+            cmd_str = " ".join(render_cmd)
+            if RICH_AVAILABLE:
+                console.print(f"[blue]  💻 Command: {cmd_str}[/blue]")
+            else:
+                print(f"  💻 Command: {cmd_str}")
             
             # Capture output to find the created file and open it
             result = self.run_command(
                 render_cmd,
                 cwd=self.book_dir,
-                description=f"Building {chapter_name} ({format_type}) - 1 file only",
+                description=f"Building {chapter_name} ({format_type}) - fast build",
                 capture_for_parsing=True
             )
             
@@ -621,6 +680,14 @@ class BookBinder:
             # Start preview with only the target file
             try:
                 preview_cmd = ["quarto", "preview", target_path]
+                
+                # Show the raw command being executed
+                cmd_str = " ".join(preview_cmd)
+                if RICH_AVAILABLE:
+                    console.print(f"[blue]  💻 Command: {cmd_str}[/blue]")
+                else:
+                    print(f"  💻 Command: {cmd_str}")
+                
                 subprocess.run(
                     preview_cmd,
                     cwd=self.book_dir
@@ -791,6 +858,13 @@ class BookBinder:
         else:
             print(f"  🔗 Using {config_name}")
         
+        # Show the raw command being executed
+        cmd_str = " ".join(render_cmd)
+        if RICH_AVAILABLE:
+            console.print(f"[blue]  💻 Command: {cmd_str}[/blue]")
+        else:
+            print(f"  💻 Command: {cmd_str}")
+        
         success = self.run_command(
             render_cmd,
             cwd=self.book_dir,
@@ -823,7 +897,16 @@ class BookBinder:
             print("  🛑 Press Ctrl+C to stop the server")
         
         try:
-            subprocess.run(["quarto", "preview"], cwd=self.book_dir)
+            preview_cmd = ["quarto", "preview"]
+            
+            # Show the raw command being executed
+            cmd_str = " ".join(preview_cmd)
+            if RICH_AVAILABLE:
+                console.print(f"[blue]  💻 Command: {cmd_str}[/blue]")
+            else:
+                print(f"  💻 Command: {cmd_str}")
+            
+            subprocess.run(preview_cmd, cwd=self.book_dir)
             return True
         except KeyboardInterrupt:
             if RICH_AVAILABLE:
