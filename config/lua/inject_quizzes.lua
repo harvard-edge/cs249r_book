@@ -91,17 +91,7 @@ local function process_quiz_questions(questions, section_id)
   local aid   = "quiz-answer-" .. clean
 
   for i, q in ipairs(questions) do
-    -- For HTML builds, don't number questions since there are no chapter numbers
-    local question_prefix = ""
-    local answer_prefix = ""
-    
-    -- Only add numbering for PDF/LaTeX builds where chapter numbers exist
-    if FORMAT and (FORMAT:lower():match("pdf") or FORMAT:lower():match("latex")) then
-      question_prefix = i..". "
-      answer_prefix = i..". "
-    end
-    
-    table.insert(ql, question_prefix..q.question)
+    table.insert(ql, i..". "..q.question)
     if q.question_type == "MCQ" and q.choices then
       local choices_line = {}
       for j, c in ipairs(q.choices) do
@@ -110,7 +100,7 @@ local function process_quiz_questions(questions, section_id)
       table.insert(ql, table.concat(choices_line, "\n"))
     end
     -- build answers
-    table.insert(al, answer_prefix.."**"..q.question.."**")
+    table.insert(al, i..". **"..q.question.."**")
     if q.question_type == "MCQ" and q.choices then
       local choices_line = {}
       for j, c in ipairs(q.choices) do
