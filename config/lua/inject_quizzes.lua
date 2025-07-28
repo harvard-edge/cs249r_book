@@ -1,4 +1,3 @@
--- inject_quizzes.lua
 ---@diagnostic disable-next-line: undefined-global
 PANDOC_DOCUMENT = PANDOC_DOCUMENT
 
@@ -10,22 +9,6 @@ local utils = pandoc.utils
 local quiz_sections = {}
 local quiz_sections_by_file = {} -- track which sections came from which file
 local current_document_file = "unknown" -- track which document is being processed
-local has_quizzes = false -- track if current document has any quiz sections
-
--- Helper function to check if document has any sections with quizzes
-local function document_has_quizzes(doc, quiz_lookup)
-  for _, block in ipairs(doc.blocks) do
-    if block.t == "Header" and block.identifier and block.identifier ~= "" then
-      -- Check both with and without "#" prefix since quiz system uses "#" prefix
-      local section_id = block.identifier
-      local section_id_with_hash = "#" .. section_id
-      if quiz_lookup[section_id] or quiz_lookup[section_id_with_hash] then
-        return true
-      end
-    end
-  end
-  return false
-end
 
 -- 1) Load a single JSON file
 local function load_quiz_data(path)
@@ -151,7 +134,6 @@ local function handle_meta(meta)
 
   -- Get quiz configuration from global metadata
   local quiz_config = meta["quiz-config"] or {}
-  
   local file_pattern = quiz_config["file-pattern"] or "*_quizzes.json"
   local scan_directory = quiz_config["scan-directory"] or "contents/core"
   local auto_discover_pdf = quiz_config["auto-discover-pdf"] ~= false -- default to true
@@ -358,20 +340,6 @@ end
 
 local function insert_quizzes(doc)
   if not next(quiz_sections) then return doc end
-  
-  -- Check if this document has any quiz sections
-  has_quizzes = document_has_quizzes(doc, quiz_sections)
-  
-  if not has_quizzes then
-    -- No quizzes for this document, process silently
-    return doc
-  end
-  
-  -- Document has quizzes, show clean processing info
-  io.stderr:write("📝 [Quiz Filter] 🚀 Quiz Injection Filter\n")
-  io.stderr:write("📝 [Quiz Filter] 🔍 Document has quizzes - processing...\n")
-
-  local quizzes_injected = 0
 
   local function has_class(classes, cls)
     for _, c in ipairs(classes) do
@@ -487,7 +455,6 @@ local function insert_quizzes(doc)
       if quiz then
         local q, a = process_quiz_questions(quiz, current_section_id)
         current_quiz_block, current_answer_block = q, a
-        quizzes_injected = quizzes_injected + 1
       end
       i = i + 1
       goto continue
@@ -506,11 +473,6 @@ local function insert_quizzes(doc)
     for _, x in ipairs(flush_chapter()) do
       table.insert(new_blocks, x)
     end
-  end
-
-  -- Show summary if quizzes were injected
-  if quizzes_injected > 0 then
-    io.stderr:write("✅ [Quiz Filter] 📊 SUMMARY: " .. quizzes_injected .. " quiz sections injected\n")
   end
 
   return pandoc.Pandoc(new_blocks, doc.meta)
