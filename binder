@@ -290,102 +290,117 @@ class BookBinder:
         # No "Output created:" line found
         return False
     
-    def comment_qmd_files(self, config_file, target_path):
-        """Comment out all .qmd files except index.qmd and target"""
+    def set_fast_build_mode(self, config_file, target_path):
+        """Set fast build mode using render configuration instead of sidebar commenting"""
         backup_path = config_file.with_suffix('.yml.fast-build-backup')
         
-        # Create bulletproof backup
-        try:
-            # Remove any existing backup first
-            if backup_path.exists():
-                backup_path.unlink()
+        # Create backup
+        shutil.copy2(config_file, backup_path)
+        
+        # Read current config
+        with open(config_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Add render configuration to project section
+        # This explicitly controls what gets built vs what appears in navigation
+        target_stem = target_path.stem
+        
+        render_config = f"""  render:
+    - index.qmd
+    - 404.qmd
+    - contents/frontmatter/
+    - {target_path.relative_to(self.book_dir).as_posix()}
+    # Fast build: only render essential files and target chapter
+"""
+        
+        # Insert render config after "navigate: true" in project section
+        if 'navigate: true' in content:
+            content = content.replace(
+                'navigate: true',
+                f'navigate: true\n{render_config}'
+            )
             
-            # Create fresh backup with metadata preservation
-            shutil.copy2(config_file, backup_path)
+            with open(config_file, 'w', encoding='utf-8') as f:
+                f.write(content)
+                
+            if RICH_AVAILABLE:
+                console.print(f"  📝 Fast build mode: Only rendering {target_stem} + essential files")
+            else:
+                print(f"  📝 Fast build mode: Only rendering {target_stem} + essential files")
+                
+            return True
+        else:
+            if RICH_AVAILABLE:
+                console.print(f"[yellow]⚠️  Could not find project navigation section in {config_file}[/yellow]")
+            else:
+                print(f"⚠️  Could not find project navigation section in {config_file}")
+            return False
+
+    def restore_config(self, config_file):
+        """Restore configuration from backup"""
+        backup_path = config_file.with_suffix('.yml.fast-build-backup')
+        
+        if backup_path.exists():
+            shutil.copy2(backup_path, config_file)
+            backup_path.unlink()
+            if RICH_AVAILABLE:
+                console.print(f"    🔄 Restored from backup: {backup_path.name}")
+            else:
+                print(f"    🔄 Restored from backup: {backup_path.name}")
+        else:
+            if RICH_AVAILABLE:
+                console.print(f"[yellow]⚠️  No backup found: {backup_path}[/yellow]")
+            else:
+                print(f"⚠️  No backup found: {backup_path}")
+
+    def ensure_clean_config(self, config_file):
+        """Ensure config is in clean state (remove any render restrictions)"""
+        backup_path = config_file.with_suffix('.yml.fast-build-backup')
+        
+        if backup_path.exists():
+            # Restore from backup if it exists
+            shutil.copy2(backup_path, config_file)
+            backup_path.unlink()
+            if RICH_AVAILABLE:
+                console.print(f"  ✅ {config_file.name} restored from backup")
+            else:
+                print(f"  ✅ {config_file.name} restored from backup")
+        else:
+            # Check if file has render restrictions and remove them
+            with open(config_file, 'r', encoding='utf-8') as f:
+                content = f.read()
             
-            # Verify backup was created successfully
-            if not backup_path.exists():
-                raise Exception(f"Failed to create backup at {backup_path}")
-                
-            if RICH_AVAILABLE:
-                console.print(f"[dim]    💾 Backup created: {backup_path.name}[/dim]")
-            else:
-                print(f"    💾 Backup created: {backup_path.name}")
-                
-        except Exception as e:
-            if RICH_AVAILABLE:
-                console.print(f"[red]❌ Failed to create backup: {e}[/red]")
-            else:
-                print(f"❌ Failed to create backup: {e}")
-            raise
-        
-        # Read file
-        with open(config_file, 'r') as f:
-            lines = f.readlines()
-        
-        # Comment out .qmd lines
-        modified_lines = []
-        for line in lines:
-            if re.search(r'\.qmd($|[^a-zA-Z0-9_-])', line):
-                # Skip if it's index.qmd or our target
-                if 'index.qmd' in line or target_path in line:
-                    modified_lines.append(line)
+            # Remove render configuration if present
+            lines = content.split('\n')
+            cleaned_lines = []
+            in_render_section = False
+            
+            for line in lines:
+                if line.strip().startswith('render:'):
+                    in_render_section = True
+                    continue
+                elif in_render_section and (line.startswith('    - ') or line.startswith('    #')):
+                    continue
+                elif in_render_section and line.strip() == '':
+                    continue
                 else:
-                    modified_lines.append(f"# FAST_BUILD_COMMENTED: {line}")
-            else:
-                modified_lines.append(line)
-        
-        # Write back
-        with open(config_file, 'w') as f:
-            f.writelines(modified_lines)
-        
-        # Count changes
-        commented_count = sum(1 for line in modified_lines if "FAST_BUILD_COMMENTED" in line)
-        active_count = sum(1 for line in modified_lines if ".qmd" in line and "FAST_BUILD_COMMENTED" not in line)
-        
-        return commented_count, active_count, backup_path
-    
-    def restore_config(self, config_file, backup_path=None):
-        """Restore config from backup or uncomment lines - bulletproof restoration"""
-        try:
-            if backup_path and backup_path.exists():
-                # Restore from backup (preferred method)
+                    in_render_section = False
+                    cleaned_lines.append(line)
+            
+            cleaned_content = '\n'.join(cleaned_lines)
+            
+            if cleaned_content != content:
+                with open(config_file, 'w', encoding='utf-8') as f:
+                    f.write(cleaned_content)
                 if RICH_AVAILABLE:
-                    console.print(f"[dim]    🔄 Restoring from backup: {backup_path.name}[/dim]")
+                    console.print(f"  ✅ {config_file.name} cleaned (removed render restrictions)")
                 else:
-                    print(f"    🔄 Restoring from backup: {backup_path.name}")
-                
-                # Ensure target is writable before attempting restore
-                if config_file.exists():
-                    config_file.chmod(0o644)
-                
-                shutil.move(backup_path, config_file)
-                return True
-                
-            elif config_file.exists():
-                # Fallback: uncomment lines in-place
-                if RICH_AVAILABLE:
-                    console.print(f"[dim]    🔄 Uncommenting lines in: {config_file.name}[/dim]")
-                else:
-                    print(f"    🔄 Uncommenting lines in: {config_file.name}")
-                
-                with open(config_file, 'r') as f:
-                    content = f.read()
-                
-                # Remove comment markers
-                content = re.sub(r'^# FAST_BUILD_COMMENTED: ', '', content, flags=re.MULTILINE)
-                
-                with open(config_file, 'w') as f:
-                    f.write(content)
-                return True
-        except Exception as e:
-            # Emergency fallback
-            if RICH_AVAILABLE:
-                console.print(f"[red]⚠️  Restore error: {e}[/red]")
+                    print(f"  ✅ {config_file.name} cleaned (removed render restrictions)")
             else:
-                print(f"⚠️  Restore error: {e}")
-        
-        return False
+                if RICH_AVAILABLE:
+                    console.print(f"  ✅ {config_file.name} already clean")
+                else:
+                    print(f"  ✅ {config_file.name} already clean")
     
     def setup_symlink(self, format_type):
         """Setup _quarto.yml symlink"""
@@ -490,13 +505,11 @@ class BookBinder:
         (self.build_dir / build_subdir).mkdir(parents=True, exist_ok=True)
         
         try:
-            # Comment out non-target files for clean navigation
-            if RICH_AVAILABLE:
-                console.print(f"[yellow]  📝 Preparing clean navigation in {config_file.name}[/yellow]")
-            else:
-                print(f"  📝 Preparing clean navigation in {config_file.name}")
+            # Ensure config is clean (remove any render restrictions)
+            self.ensure_clean_config(config_file)
             
-            commented_count, active_count, backup_path = self.comment_qmd_files(config_file, target_path)
+            # Set fast build mode for the target chapter
+            self.set_fast_build_mode(config_file, chapter_file)
             
             # Setup signal handler to restore config on Ctrl+C
             def signal_handler(signum, frame):
@@ -504,7 +517,7 @@ class BookBinder:
                     console.print("\n[yellow]🛡️  Ctrl+C detected - restoring config and exiting...[/yellow]")
                 else:
                     print("\n🛡️  Ctrl+C detected - restoring config and exiting...")
-                self.restore_config(config_file, backup_path)
+                self.restore_config(config_file)
                 if RICH_AVAILABLE:
                     console.print("[green]✅ Config restored to pristine state[/green]")
                 else:
@@ -513,18 +526,6 @@ class BookBinder:
             
             signal.signal(signal.SIGINT, signal_handler)
             signal.signal(signal.SIGTERM, signal_handler)
-            
-            if RICH_AVAILABLE:
-                console.print(f"[dim]  📊 Navigation: {commented_count} hidden, {active_count} visible[/dim]")
-            else:
-                print(f"  📊 Navigation: {commented_count} hidden, {active_count} visible")
-            
-            # Setup symlink
-            active_config_name = self.setup_symlink(format_type)
-            if RICH_AVAILABLE:
-                console.print(f"[blue]  🔗 _quarto.yml → {active_config_name}[/blue]")
-            else:
-                print(f"  🔗 _quarto.yml → {active_config_name}")
             
             # Build only the target chapter (single file)
             if RICH_AVAILABLE:
@@ -573,16 +574,7 @@ class BookBinder:
             else:
                 print("  🛡️  Ensuring pristine config restoration...")
             
-            if self.restore_config(config_file, backup_path):
-                if RICH_AVAILABLE:
-                    console.print("[green]  ✅ Config restored to pristine state[/green]")
-                else:
-                    print("  ✅ Config restored to pristine state")
-            else:
-                if RICH_AVAILABLE:
-                    console.print("[red]  ⚠️  Warning: Config restoration had issues[/red]")
-                else:
-                    print("  ⚠️  Warning: Config restoration had issues")
+            self.restore_config(config_file)
     
     def preview(self, chapter):
         """Start preview server for a chapter"""
@@ -607,20 +599,8 @@ class BookBinder:
         config_file = self.html_config
         
         try:
-            # Comment out non-target files for clean navigation
-            commented_count, active_count, backup_path = self.comment_qmd_files(config_file, target_path)
-            
-            # Setup symlink
-            self.setup_symlink("html")
-            
-            if RICH_AVAILABLE:
-                console.print("[blue]  🌐 Starting preview server for 1 file only...[/blue]")
-                console.print("[dim]  💡 TIP: Only the target chapter will be rendered[/dim]")
-                console.print("[dim]  🛑 Press Ctrl+C to stop the server and restore config[/dim]")
-            else:
-                print("  🌐 Starting preview server for 1 file only...")
-                print("  💡 TIP: Only the target chapter will be rendered")
-                print("  🛑 Press Ctrl+C to stop the server and restore config")
+            # Ensure config is clean (remove any render restrictions)
+            self.ensure_clean_config(config_file)
             
             # Setup signal handler to restore config on exit
             def signal_handler(signum, frame):
@@ -628,7 +608,7 @@ class BookBinder:
                     console.print("\n[yellow]🛡️  Ctrl+C detected - restoring config and exiting...[/yellow]")
                 else:
                     print("\n🛡️  Ctrl+C detected - restoring config and exiting...")
-                self.restore_config(config_file, backup_path)
+                self.restore_config(config_file)
                 if RICH_AVAILABLE:
                     console.print("[green]✅ Config restored to pristine state[/green]")
                 else:
@@ -647,273 +627,121 @@ class BookBinder:
                 )
             finally:
                 # Restore config
-                self.restore_config(config_file, backup_path)
+                self.restore_config(config_file)
             
             return True
             
         except Exception as e:
             # Always restore config on error
-            self.restore_config(config_file, backup_path)
+            self.restore_config(config_file)
             if RICH_AVAILABLE:
                 console.print(f"[red]❌ Preview failed: {e}[/red]")
             else:
                 print(f"❌ Preview failed: {e}")
             return False
     
-    def clean(self, deep=False, dry_run=False):
-        """Clean up configurations and build artifacts"""
-        clean_type = "Deep Cleanup" if deep else "Fast Build Cleanup"
-        
+    def clean(self):
+        """Clean build artifacts and restore configs"""
         if RICH_AVAILABLE:
-            console.print(f"[yellow]🧹 {clean_type}[/yellow]")
-            if deep:
-                console.print("[dim]💡 Removing all build artifacts, caches, and temp files[/dim]")
-            else:
-                console.print("[dim]💡 Restoring master configs and basic cleanup[/dim]")
+            console.print("[bold blue]🧹 Fast Build Cleanup[/bold blue]")
+            console.print("[dim]💡 Restoring master configs and basic cleanup[/dim]")
         else:
-            print(f"🧹 {clean_type}")
-            if deep:
-                print("💡 Removing all build artifacts, caches, and temp files")
-            else:
-                print("💡 Restoring master configs and basic cleanup")
+            print("🧹 Fast Build Cleanup")
+            print("💡 Restoring master configs and basic cleanup")
         
-        restored = False
+        # Restore HTML config
+        html_config = self.book_dir / "_quarto-html.yml"
+        self.ensure_clean_config(html_config)
         
-        for config_name in ["_quarto-html.yml", "_quarto-pdf.yml"]:
-            config_file = self.book_dir / config_name
-            backup_file = config_file.with_suffix('.yml.fast-build-backup')
-            
-            if backup_file.exists():
-                if RICH_AVAILABLE:
-                    console.print(f"[yellow]  🔄 Restoring {config_name} from backup...[/yellow]")
-                else:
-                    print(f"  🔄 Restoring {config_name} from backup...")
-                
-                shutil.move(backup_file, config_file)
-                restored = True
-                
-                if RICH_AVAILABLE:
-                    console.print(f"[green]  ✅ {config_name} restored[/green]")
-                else:
-                    print(f"  ✅ {config_name} restored")
-                    
-            elif config_file.exists():
-                # Check if there are commented lines to uncomment
-                with open(config_file, 'r') as f:
-                    content = f.read()
-                
-                if "FAST_BUILD_COMMENTED" in content:
-                    if RICH_AVAILABLE:
-                        console.print(f"[yellow]  🔄 Uncommenting {config_name}...[/yellow]")
-                    else:
-                        print(f"  🔄 Uncommenting {config_name}...")
-                    
-                    # Remove comment markers
-                    content = re.sub(r'^# FAST_BUILD_COMMENTED: ', '', content, flags=re.MULTILINE)
-                    
-                    with open(config_file, 'w') as f:
-                        f.write(content)
-                    
-                    restored = True
-                    
-                    if RICH_AVAILABLE:
-                        console.print(f"[green]  ✅ {config_name} uncommented[/green]")
-                    else:
-                        print(f"  ✅ {config_name} uncommented")
-                else:
-                    if RICH_AVAILABLE:
-                        console.print(f"[green]  ✅ {config_name} already clean[/green]")
-                    else:
-                        print(f"  ✅ {config_name} already clean")
+        # Restore PDF config  
+        pdf_config = self.book_dir / "_quarto-pdf.yml"
+        self.ensure_clean_config(pdf_config)
         
         # Show current symlink status
-        if self.active_config.is_symlink():
-            current_target = self.active_config.readlink()
+        symlink_path = self.book_dir / "_quarto.yml"
+        if symlink_path.exists() and symlink_path.is_symlink():
+            target = symlink_path.readlink()
             if RICH_AVAILABLE:
-                console.print(f"[blue]  🔗 Current symlink: _quarto.yml → {current_target}[/blue]")
+                console.print(f"[dim]  🔗 Current symlink: _quarto.yml → {target}[/dim]")
             else:
-                print(f"  🔗 Current symlink: _quarto.yml → {current_target}")
+                print(f"  🔗 Current symlink: _quarto.yml → {target}")
         
         if RICH_AVAILABLE:
             console.print("[green]  ✅ All configs restored to clean state[/green]")
         else:
             print("  ✅ All configs restored to clean state")
         
-        # Clean build artifacts and cache files
-        self.clean_build_artifacts(deep, dry_run)
-        
-        return True
-    
-    def clean_build_artifacts(self, deep=False, dry_run=False):
-        """Clean build artifacts, cache files, and temp files"""
-        removed_count = 0
-        
-        # Build artifacts to clean
-        artifacts = [
-            (self.build_dir, "Build directory (all formats)"),
-            (self.root_dir / "_book", "Legacy build output"),
-            (self.root_dir / "index_files", "Root index files"),
-            (self.book_dir / "index_files", "Book index files"),
-            (self.book_dir / "site_libs", "Site libraries"),
-            (self.book_dir / ".quarto", "Quarto cache (book)"),
-            (self.root_dir / ".quarto", "Quarto cache (root)")
+        # Clean build artifacts
+        artifacts_to_clean = [
+            (self.root_dir / "build", "Build directory (all formats)"),
+            (self.book_dir / "index_files", "Book index files"),  
+            (self.book_dir / ".quarto", "Quarto cache (book)")
         ]
         
-        # Add deep clean items
-        if deep:
-            artifacts.extend([
-                (self.root_dir / ".venv", "Python virtual environment"),
-                (self.root_dir / "venv", "Python virtual environment"),
-                (self.root_dir / "node_modules", "Node.js modules"),
-                (self.root_dir / ".pytest_cache", "Pytest cache")
-            ])
-        
-        # Remove directories and files
-        for item_path, description in artifacts:
-            if item_path.exists():
-                if dry_run:
-                    if RICH_AVAILABLE:
-                        console.print(f"[dim]  📁 Would remove: {item_path.name} ({description})[/dim]")
-                    else:
-                        print(f"  📁 Would remove: {item_path.name} ({description})")
+        cleaned_count = 0
+        for artifact_path, description in artifacts_to_clean:
+            if artifact_path.exists():
+                if artifact_path.is_dir():
+                    shutil.rmtree(artifact_path)
                 else:
-                    if RICH_AVAILABLE:
-                        console.print(f"[dim]  🗑️  Removing: {item_path.name} ({description})[/dim]")
-                    else:
-                        print(f"  🗑️  Removing: {item_path.name} ({description})")
-                    
-                    try:
-                        if item_path.is_dir():
-                            shutil.rmtree(item_path)
-                        else:
-                            item_path.unlink()
-                        removed_count += 1
-                    except Exception as e:
-                        if RICH_AVAILABLE:
-                            console.print(f"[red]    ⚠️  Failed to remove {item_path.name}: {e}[/red]")
-                        else:
-                            print(f"    ⚠️  Failed to remove {item_path.name}: {e}")
+                    artifact_path.unlink()
+                
+                if RICH_AVAILABLE:
+                    console.print(f"[yellow]  🗑️  Removing: {artifact_path.name} ({description})[/yellow]")
+                else:
+                    print(f"  🗑️  Removing: {artifact_path.name} ({description})")
+                cleaned_count += 1
         
-        # Clean file patterns
-        patterns = [
-            ("**/*.html", "HTML build artifacts", "book/contents"),
-            ("**/diagram-*.pdf", "Generated TikZ diagrams", "book/contents"),
-            ("**/__pycache__", "Python cache directories", ""),
-            ("**/*.pyc", "Python compiled files", ""),
-            ("**/*.log", "Log files", "tools"),
-            ("**/.DS_Store", "macOS metadata files", ""),
-            ("**/*~", "Editor backup files", ""),
-            ("**/*.swp", "Vim swap files", "")
-        ]
-        
-        if deep:
-            patterns.extend([
-                ("**/figure-*", "Generated figure directories", ""),
-                ("**/diagram-*.pdf", "Generated TikZ diagrams", "book/contents"),
-                ("**/*.aux", "LaTeX auxiliary files", ""),
-                ("**/*.toc", "Table of contents files", ""),
-                ("**/*.out", "LaTeX outline files", ""),
-                ("**/mediabag", "Pandoc media bags", "")
-            ])
-        
-        # Remove pattern-based files
-        for pattern, description, base_dir in patterns:
-            search_dir = self.root_dir / base_dir if base_dir else self.root_dir
-            if search_dir.exists():
-                matches = list(search_dir.glob(pattern))
-                if matches:
-                    if dry_run:
-                        if RICH_AVAILABLE:
-                            console.print(f"[dim]  📄 Would remove {len(matches)} files: {description}[/dim]")
-                        else:
-                            print(f"  📄 Would remove {len(matches)} files: {description}")
-                    else:
-                        if RICH_AVAILABLE:
-                            console.print(f"[dim]  🗑️  Removing {len(matches)} files: {description}[/dim]")
-                        else:
-                            print(f"  🗑️  Removing {len(matches)} files: {description}")
-                        
-                        for match in matches:
-                            try:
-                                if match.is_dir():
-                                    shutil.rmtree(match)
-                                else:
-                                    match.unlink()
-                                removed_count += 1
-                            except Exception as e:
-                                if RICH_AVAILABLE:
-                                    console.print(f"[red]    ⚠️  Failed to remove {match.name}: {e}[/red]")
-                                else:
-                                    print(f"    ⚠️  Failed to remove {match.name}: {e}")
-        
-        # Summary
-        if dry_run:
+        if cleaned_count > 0:
             if RICH_AVAILABLE:
-                console.print("[blue]  🔍 Dry run completed - no files were actually removed[/blue]")
+                console.print(f"[green]  ✅ Cleaned {cleaned_count} items successfully[/green]")
             else:
-                print("  🔍 Dry run completed - no files were actually removed")
+                print(f"  ✅ Cleaned {cleaned_count} items successfully")
         else:
             if RICH_AVAILABLE:
-                console.print(f"[green]  ✅ Cleaned {removed_count} items successfully[/green]")
+                console.print("[green]  ✅ No artifacts to clean[/green]")
             else:
-                print(f"  ✅ Cleaned {removed_count} items successfully")
+                print("  ✅ No artifacts to clean")
     
     def check_artifacts(self):
         """Check for build artifacts that shouldn't be committed"""
         if RICH_AVAILABLE:
-            console.print("[yellow]🔍 Checking for build artifacts...[/yellow]")
+            console.print("[blue]🔍 Checking for build artifacts...[/blue]")
         else:
             print("🔍 Checking for build artifacts...")
         
+        # Check for artifacts that shouldn't be committed
         artifacts_found = []
         
-        # Check for common build artifacts
-        artifact_patterns = [
-            (self.build_dir, "Build directory"),
-            (self.root_dir / "_book", "Legacy build output"),
-            (self.book_dir / "index_files", "Index files"),
-            (self.book_dir / "site_libs", "Site libraries"),
-            (self.book_dir / ".quarto", "Quarto cache")
+        potential_artifacts = [
+            (self.root_dir / "build", "Build directory"),
+            (self.book_dir / "index_files", "Book index files"),
+            (self.book_dir / ".quarto", "Quarto cache"),
+            (self.book_dir / "_quarto-html.yml.fast-build-backup", "HTML config backup"),
+            (self.book_dir / "_quarto-pdf.yml.fast-build-backup", "PDF config backup"),
         ]
         
-        for path, description in artifact_patterns:
+        for path, description in potential_artifacts:
             if path.exists():
-                artifacts_found.append((str(path), description))
-        
-        # Check for specific file patterns (generated build artifacts)
-        file_patterns = [
-            ("**/*.html", "HTML files", "book/contents"),
-            ("**/diagram-*.pdf", "Generated diagram PDFs", "book/contents"),  # TikZ generated diagrams
-            ("**/*_files/figure-*.pdf", "Generated figure PDFs", "book/contents"),  # Quarto figure outputs
-            ("**/*.aux", "LaTeX auxiliary files", ""),
-            ("**/*.log", "Log files", ""),
-            ("**/__pycache__", "Python cache", "")
-        ]
-        
-        for pattern, description, base_dir in file_patterns:
-            search_dir = self.root_dir / base_dir if base_dir else self.root_dir
-            if search_dir.exists():
-                matches = list(search_dir.glob(pattern))
-                if matches:
-                    artifacts_found.extend([(str(m), description) for m in matches[:5]])  # Limit to first 5
+                artifacts_found.append((path, description))
         
         if artifacts_found:
             if RICH_AVAILABLE:
                 console.print("[yellow]⚠️  Build artifacts detected:[/yellow]")
-                for artifact, desc in artifacts_found:
-                    console.print(f"[dim]  📄 {artifact} ({desc})[/dim]")
+                for path, description in artifacts_found:
+                    console.print(f"[yellow]  📄 {path} ({description})[/yellow]")
                 console.print("[blue]💡 Run './binder clean' to remove these artifacts[/blue]")
             else:
                 print("⚠️  Build artifacts detected:")
-                for artifact, desc in artifacts_found:
-                    print(f"  📄 {artifact} ({desc})")
+                for path, description in artifacts_found:
+                    print(f"  📄 {path} ({description})")
                 print("💡 Run './binder clean' to remove these artifacts")
             return False
         else:
             if RICH_AVAILABLE:
-                console.print("[green]✅ No build artifacts detected[/green]")
+                console.print("[green]✅ No build artifacts detected.[/green]")
             else:
-                print("✅ No build artifacts detected")
+                print("✅ No build artifacts detected.")
             return True
 
     def switch(self, format_type):
@@ -1034,12 +862,13 @@ Management:
 
 Examples:
   ./binder build intro        # Build introduction chapter (HTML)
-  ./binder build intro pdf    # Build introduction chapter (PDF)
+  ./binder b dl_primer pdf    # Build deep learning primer (PDF)
   ./binder preview ops        # Preview ops chapter
   ./binder build-full pdf     # Build complete PDF book
-  ./binder clean deep         # Deep clean (all caches, venv, etc.)
-  ./binder clean dry          # Dry run (show what would be cleaned)
   ./binder switch pdf         # Switch to PDF config
+  ./binder clean              # Clean artifacts and configs
+  ./binder check              # Check for build artifacts
+  ./binder status             # Show current status
             """)
             return
         
@@ -1060,28 +889,31 @@ Examples:
         full_table.add_row("build-full [format]", "Build complete book", "./binder build-full pdf")
         full_table.add_row("preview-full [format]", "Preview complete book", "./binder preview-full")
         
-        mgmt_table = Table(show_header=True, header_style="bold yellow", box=None)
-        mgmt_table.add_column("Command", style="yellow", width=22)
+        # Management Commands
+        mgmt_table = Table(show_header=True, header_style="bold blue", box=None)
+        mgmt_table.add_column("Command", style="green", width=22)
         mgmt_table.add_column("Description", style="white")
         mgmt_table.add_column("Example", style="dim")
         
-        mgmt_table.add_row("clean [deep] [dry]", "Clean configs & artifacts", "./binder clean deep")
+        mgmt_table.add_row("clean", "Clean configs & artifacts", "./binder clean")
         mgmt_table.add_row("check", "Check for build artifacts", "./binder check")
         mgmt_table.add_row("switch <format>", "Switch config", "./binder switch pdf")
         mgmt_table.add_row("status", "Show current status", "./binder status")
         mgmt_table.add_row("list", "List chapters", "./binder list")
         mgmt_table.add_row("help", "Show this help", "./binder help")
         
-        shortcuts_table = Table(show_header=True, header_style="bold cyan", box=None)
-        shortcuts_table.add_column("Shortcut", style="cyan", width=10)
+        console.print(mgmt_table)
+        
+        # Shortcuts
+        shortcuts_table = Table(show_header=True, header_style="bold blue", box=None)
+        shortcuts_table.add_column("Shortcut", style="magenta", width=10)
         shortcuts_table.add_column("Full Command", style="white")
         
         shortcuts_table.add_row("b", "build")
-        shortcuts_table.add_row("p", "preview")
+        shortcuts_table.add_row("p", "preview")  
         shortcuts_table.add_row("bf", "build-full")
         shortcuts_table.add_row("pf", "preview-full")
         shortcuts_table.add_row("c", "clean")
-        shortcuts_table.add_row("cd", "clean-deep")
         shortcuts_table.add_row("ch", "check")
         shortcuts_table.add_row("s", "switch")
         shortcuts_table.add_row("st", "status")
@@ -1095,18 +927,22 @@ Examples:
         console.print(Panel(mgmt_table, title="🔧 Management", border_style="yellow"))
         console.print(Panel(shortcuts_table, title="🚀 Shortcuts", border_style="cyan"))
         
+        # Pro Tips
+        console.print(Padding(Panel("", title="💡 Pro Tips", border_style="blue"), (1, 0)))
+        
         examples = Text()
         examples.append("🎯 Power User Examples:\n", style="bold magenta")
         examples.append("  ./binder b intro,ml_systems,opt ", style="cyan")
         examples.append("# Build multiple chapters\n", style="dim")
         examples.append("  ./binder b intro pdf ", style="cyan")
         examples.append("# Quick chapter PDF\n", style="dim")
-        examples.append("  ./binder cd          ", style="cyan") 
-        examples.append("# Deep clean all artifacts\n", style="dim")
+        examples.append("  ./binder c          ", style="cyan") 
+        examples.append("# Clean all artifacts\n", style="dim")
         examples.append("  ./binder ch          ", style="cyan")
         examples.append("# Check for build artifacts\n", style="dim")
         examples.append("  ./binder st          ", style="cyan")
         examples.append("# Quick status\n", style="dim")
+        examples.append("\n", style="dim")
         
         console.print(Panel(examples, title="💡 Pro Tips", border_style="magenta"))
 
@@ -1119,23 +955,25 @@ def main():
     
     command = sys.argv[1].lower()
     
-    # Handle shortcuts
-    shortcuts = {
+    # Enhanced command mapping with aliases
+    command_aliases = {
         'b': 'build',
-        'p': 'preview',
+        'p': 'preview', 
         'bf': 'build-full',
         'pf': 'preview-full',
         'c': 'clean',
-        'cd': 'clean-deep',
         'ch': 'check',
         's': 'switch',
         'st': 'status',
         'l': 'list',
         'h': 'help'
     }
-    
-    command = shortcuts.get(command, command)
-    
+
+    # Apply aliases
+    if command in command_aliases:
+        command = command_aliases[command]
+
+    # Handle commands
     try:
         if command == "build":
             if len(sys.argv) < 3:
@@ -1147,7 +985,7 @@ def main():
             chapter = sys.argv[2]
             format_type = sys.argv[3] if len(sys.argv) > 3 else "html"
             binder.build(chapter, format_type)
-            
+
         elif command == "preview":
             if len(sys.argv) < 3:
                 if RICH_AVAILABLE:
@@ -1157,7 +995,7 @@ def main():
                 return
             chapter = sys.argv[2]
             binder.preview(chapter)
-            
+
         elif command == "build-full":
             format_type = sys.argv[2] if len(sys.argv) > 2 else "html"
             if format_type not in ["html", "pdf"]:
@@ -1167,7 +1005,7 @@ def main():
                     print("❌ Format must be 'html' or 'pdf'")
                 return
             binder.build_full(format_type)
-            
+
         elif command == "preview-full":
             format_type = sys.argv[2] if len(sys.argv) > 2 else "html"
             if format_type not in ["html", "pdf"]:
@@ -1177,19 +1015,15 @@ def main():
                     print("❌ Format must be 'html' or 'pdf'")
                 return
             binder.preview_full(format_type)
-            
+
         elif command == "clean":
-            deep = "--deep" in sys.argv or "deep" in sys.argv
-            dry_run = "--dry-run" in sys.argv or "dry" in sys.argv
-            binder.clean(deep=deep, dry_run=dry_run)
-            
-        elif command == "clean-deep":
-            binder.clean(deep=True, dry_run=False)
-            
+            binder.clean()
+
         elif command == "check":
-            if not binder.check_artifacts():
-                sys.exit(1)  # Exit with error code when artifacts found
-            
+            success = binder.check_artifacts()
+            if not success:
+                sys.exit(1)
+
         elif command == "switch":
             if len(sys.argv) < 3:
                 if RICH_AVAILABLE:
@@ -1199,23 +1033,23 @@ def main():
                 return
             format_type = sys.argv[2]
             binder.switch(format_type)
-            
+
         elif command == "status":
             binder.show_status()
-            
+
         elif command == "list":
             binder.show_chapters()
-            
+
         elif command == "help":
             binder.show_help()
-            
+
         else:
             if RICH_AVAILABLE:
                 console.print(f"[red]❌ Unknown command: {command}[/red]")
-                console.print("[yellow]💡 Run './binder help' for usage[/yellow]")
+                console.print("[yellow]💡 Use './binder help' to see available commands[/yellow]")
             else:
                 print(f"❌ Unknown command: {command}")
-                print("💡 Run './binder help' for usage")
+                print("💡 Use './binder help' to see available commands")
                 
     except KeyboardInterrupt:
         if RICH_AVAILABLE:
