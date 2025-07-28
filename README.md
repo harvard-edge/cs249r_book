@@ -93,7 +93,7 @@ We've graduated this project from Harvard to enable global access and expand AI 
 - [💡 Teaching guides](https://mlsysbook.org)
 
 ### 🛠️ Contributors
-- [🤝 Contribution guide](contribute.md)
+- [🤝 Contribution guide](docs/contribute.md)
 - [⚡ Development setup](#development)
 - [💬 Join discussions](https://github.com/harvard-edge/cs249r_book/discussions)
 
@@ -116,6 +116,12 @@ git clone https://github.com/harvard-edge/cs249r_book.git
 cd cs249r_book
 make setup-hooks  # Setup automated quality controls
 make install      # Install dependencies
+
+# Recommended: Use the binder for development
+./binder preview intro    # Fast chapter development
+./binder help            # See all commands
+
+# Or use traditional Make commands
 make preview      # Start development server
 ```
 
@@ -145,7 +151,27 @@ All contributions benefit from automated quality assurance:
 
 ## 🛠️ Development
 
-### Quick Commands
+### Book Binder CLI (Recommended)
+
+The **Book Binder** is our lightning-fast development CLI for streamlined building and iteration:
+
+```bash
+# Fast chapter development
+./binder build intro              # Build single chapter  
+./binder build intro,ml_systems   # Build multiple chapters together
+./binder preview intro            # Build and preview chapter
+
+# Full book building
+./binder build-full html          # Build complete website
+./binder build-full pdf           # Build complete PDF
+
+# Management
+./binder clean                    # Clean artifacts
+./binder status                   # Show current status
+./binder help                     # Show all commands
+```
+
+### Make Commands (Traditional)
 ```bash
 # Building
 make build          # Build HTML version
@@ -164,13 +190,16 @@ make help           # Show all commands
 ### Project Structure
 ```
 MLSysBook/
+├── binder                   # ⚡ Fast development CLI (recommended)
 ├── book/                    # Main book content (Quarto)
 │   ├── contents/            # Chapter content
 │   │   ├── core/            # Core chapters
 │   │   ├── labs/            # Hands-on labs
 │   │   ├── frontmatter/     # Preface, acknowledgments
 │   │   └── parts/           # Book parts and sections
-│   ├── _quarto.yml          # Book configuration
+│   ├── _quarto-html.yml     # Website build configuration
+│   ├── _quarto-pdf.yml      # PDF build configuration  
+│   ├── _quarto.yml          # Active config (symlink)
 │   ├── index.qmd            # Main entry point
 │   └── assets/              # Images, styles, media
 ├── build/                   # Build artifacts (git-ignored)
@@ -189,18 +218,20 @@ MLSysBook/
 │   └── setup/               # Setup and configuration
 ├── config/                  # Build configuration
 │   ├── _extensions/         # Quarto extensions
-│   ├── lua/                 # Lua scripts
+│   ├── lua/                 # Lua filters and scripts
 │   └── tex/                 # LaTeX templates
 ├── assets/                  # Global assets (covers, icons)
 ├── docs/                    # Documentation
+│   ├── BINDER.md            # Binder CLI guide
 │   ├── DEVELOPMENT.md       # Development guide
 │   ├── MAINTENANCE_GUIDE.md # Daily workflow guide
 │   ├── BUILD.md             # Build instructions
 │   └── contribute.md        # Contribution guidelines
-└── Makefile                 # Development commands
+└── Makefile                 # Traditional development commands
 ```
 
 ### Documentation
+- [⚡ Binder CLI Guide](docs/BINDER.md) — Fast development with the Book Binder
 - [📋 Development Guide](docs/DEVELOPMENT.md) — Comprehensive setup and workflow
 - [🛠️ Maintenance Guide](docs/MAINTENANCE_GUIDE.md) — Daily tasks and troubleshooting  
 - [🔨 Build Instructions](docs/BUILD.md) — Detailed build process
