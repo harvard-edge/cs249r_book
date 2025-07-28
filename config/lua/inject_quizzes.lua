@@ -150,10 +150,7 @@ local function handle_meta(meta)
   end
 
   -- Get quiz configuration from global metadata
-  local quiz_config = {}
-  if meta["filter-metadata"] and meta["filter-metadata"]["quiz-config"] then
-    quiz_config = meta["filter-metadata"]["quiz-config"]
-  end
+  local quiz_config = meta["quiz-config"] or {}
   
   local file_pattern = quiz_config["file-pattern"] or "*_quizzes.json"
   local scan_directory = quiz_config["scan-directory"] or "contents/core"
@@ -178,13 +175,25 @@ local function handle_meta(meta)
     auto_discover_pdf = utils.stringify(auto_discover_pdf) ~= "false"
   end
 
-  -- Configuration loaded silently
+  io.stderr:write("🔍 Number of input files: " .. (PANDOC_STATE and PANDOC_STATE.input_files and #PANDOC_STATE.input_files or "unknown") .. "\n")
+  io.stderr:write("🔍 Is PDF build: " .. tostring(is_pdf_build) .. "\n")
+  io.stderr:write("🔍 Quiz metadata: " .. tostring(raw) .. "\n")
+  io.stderr:write("🔍 FORMAT: " .. tostring(FORMAT) .. "\n")
+  io.stderr:write("🔍 Current document file: " .. current_document_file .. "\n")
+  io.stderr:write("🔍 Quiz config - file pattern: " .. file_pattern .. "\n")
+  io.stderr:write("🔍 Quiz config - scan directory: " .. scan_directory .. "\n")
+  io.stderr:write("🔍 Quiz config - auto discover PDF: " .. tostring(auto_discover_pdf) .. "\n")
 
   if not raw then
     if is_pdf_build and auto_discover_pdf then
-      -- For PDF builds, auto-discover quiz files from the input files (silently)
+      -- For PDF builds, auto-discover quiz files from the input files
+      io.stderr:write("\n" .. string.rep("=", 80) .. "\n")
+      io.stderr:write("📄 [QUIZ] Processing PDF Book Document - Auto-discovering quiz files\n")
+      io.stderr:write(string.rep("=", 80) .. "\n")
+      
       local files = {}
       local total_sections_loaded = 0
+      local successful_files = 0
       
       -- Since Quarto combines files into a temporary document, we need to scan the directory directly
 
@@ -200,12 +209,16 @@ local function scan_for_quiz_files()
     command = string.format("find %s -name '%s' 2>/dev/null", scan_directory, "*_quizzes.json")
   end
 
+  io.stderr:write("🔍 Scanning with command: " .. command .. "\n")
+
   local pipe = io.popen(command)
   if pipe then
     for file in pipe:lines() do
       table.insert(quiz_files, file)
     end
     pipe:close()
+  else
+    io.stderr:write("❌ Failed to open pipe for scanning quiz files\n")
   end
 
   return quiz_files
@@ -214,7 +227,11 @@ end
       files = scan_for_quiz_files()
       
       if #files > 0 then
+        io.stderr:write("📁 Found " .. #files .. " quiz file(s) to process for this document\n\n")
+        
         for i, path in ipairs(files) do
+          io.stderr:write("📄 [" .. i .. "/" .. #files .. "] Loading quiz file: " .. path .. "\n")
+          
           local data = load_quiz_data(path)
           if data then
             local secs, sections_found = register_sections(data, path)
@@ -226,13 +243,39 @@ end
                 quiz_sections_by_file[path][k] = v
               end
               total_sections_loaded = total_sections_loaded + sections_found
+              successful_files = successful_files + 1
+              io.stderr:write("   ✅ Loaded " .. sections_found .. " quiz section(s)\n")
+            else
+              io.stderr:write("   ⚠️  No quiz sections found in file\n")
             end
+          else
+            io.stderr:write("   ❌ Failed to load file\n")
           end
+          io.stderr:write("\n")
         end
+        
+        io.stderr:write("📊 Quiz File Loading Summary for PDF Book:\n")
+        io.stderr:write("   • Files processed: " .. successful_files .. "/" .. #files .. " ✅\n")
+        io.stderr:write("   • Total quiz sections loaded: " .. total_sections_loaded .. " 📝\n")
+        io.stderr:write(string.rep("-", 80) .. "\n")
+      else
+        io.stderr:write("📁 No quiz files found in " .. scan_directory .. " directory\n")
+        io.stderr:write(string.rep("-", 80) .. "\n")
       end
+    else
+      -- For HTML builds, no quiz metadata means no quizzes needed
+      io.stderr:write("ℹ️  [QUIZ] No quiz metadata found for document: " .. current_document_file .. "\n")
     end
     return meta
   end
+
+  io.stderr:write("\n" .. string.rep("=", 80) .. "\n")
+  if is_pdf_build then
+    io.stderr:write("📄 [QUIZ] Processing PDF Book Document\n")
+  else
+    io.stderr:write("📄 [QUIZ] Processing HTML Document: " .. current_document_file .. "\n")
+  end
+  io.stderr:write(string.rep("=", 80) .. "\n")
 
   -- collect all files into this list
   local files = {}
@@ -249,10 +292,15 @@ end
     table.insert(files, p)
   end
 
-  -- load each file silently
+  io.stderr:write("📁 Found " .. #files .. " quiz file(s) to process for this document\n\n")
+
+  -- load each file individually with detailed reporting
   local total_sections_loaded = 0
+  local successful_files = 0
   
   for i, path in ipairs(files) do
+    io.stderr:write("📄 [" .. i .. "/" .. #files .. "] Loading quiz file: " .. path .. "\n")
+    
     local data = load_quiz_data(path)
     if data then
       local secs, sections_found = register_sections(data, path)
@@ -264,9 +312,25 @@ end
           quiz_sections_by_file[path][k] = v
         end
         total_sections_loaded = total_sections_loaded + sections_found
+        successful_files = successful_files + 1
+        io.stderr:write("   ✅ Loaded " .. sections_found .. " quiz section(s)\n")
+      else
+        io.stderr:write("   ⚠️  No quiz sections found in file\n")
       end
+    else
+      io.stderr:write("   ❌ Failed to load file\n")
     end
+    io.stderr:write("\n")
   end
+
+  if is_pdf_build then
+    io.stderr:write("📊 Quiz File Loading Summary for PDF Book:\n")
+  else
+    io.stderr:write("📊 Quiz File Loading Summary for " .. current_document_file .. ":\n")
+  end
+  io.stderr:write("   • Files processed: " .. successful_files .. "/" .. #files .. " ✅\n")
+  io.stderr:write("   • Total quiz sections loaded: " .. total_sections_loaded .. " 📝\n")
+  io.stderr:write(string.rep("-", 80) .. "\n")
 
   return meta
 end
