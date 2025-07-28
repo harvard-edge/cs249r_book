@@ -228,8 +228,30 @@ class BookBinder:
         """Comment out all .qmd files except index.qmd and target"""
         backup_path = config_file.with_suffix('.yml.fast-build-backup')
         
-        # Create backup
-        shutil.copy2(config_file, backup_path)
+        # Create bulletproof backup
+        try:
+            # Remove any existing backup first
+            if backup_path.exists():
+                backup_path.unlink()
+            
+            # Create fresh backup with metadata preservation
+            shutil.copy2(config_file, backup_path)
+            
+            # Verify backup was created successfully
+            if not backup_path.exists():
+                raise Exception(f"Failed to create backup at {backup_path}")
+                
+            if RICH_AVAILABLE:
+                console.print(f"[dim]    💾 Backup created: {backup_path.name}[/dim]")
+            else:
+                print(f"    💾 Backup created: {backup_path.name}")
+                
+        except Exception as e:
+            if RICH_AVAILABLE:
+                console.print(f"[red]❌ Failed to create backup: {e}[/red]")
+            else:
+                print(f"❌ Failed to create backup: {e}")
+            raise
         
         # Read file
         with open(config_file, 'r') as f:
@@ -258,22 +280,45 @@ class BookBinder:
         return commented_count, active_count, backup_path
     
     def restore_config(self, config_file, backup_path=None):
-        """Restore config from backup or uncomment lines"""
-        if backup_path and backup_path.exists():
-            # Restore from backup
-            shutil.move(backup_path, config_file)
-            return True
-        elif config_file.exists():
-            # Uncomment lines
-            with open(config_file, 'r') as f:
-                content = f.read()
-            
-            # Remove comment markers
-            content = re.sub(r'^# FAST_BUILD_COMMENTED: ', '', content, flags=re.MULTILINE)
-            
-            with open(config_file, 'w') as f:
-                f.write(content)
-            return True
+        """Restore config from backup or uncomment lines - bulletproof restoration"""
+        try:
+            if backup_path and backup_path.exists():
+                # Restore from backup (preferred method)
+                if RICH_AVAILABLE:
+                    console.print(f"[dim]    🔄 Restoring from backup: {backup_path.name}[/dim]")
+                else:
+                    print(f"    🔄 Restoring from backup: {backup_path.name}")
+                
+                # Ensure target is writable before attempting restore
+                if config_file.exists():
+                    config_file.chmod(0o644)
+                
+                shutil.move(backup_path, config_file)
+                return True
+                
+            elif config_file.exists():
+                # Fallback: uncomment lines in-place
+                if RICH_AVAILABLE:
+                    console.print(f"[dim]    🔄 Uncommenting lines in: {config_file.name}[/dim]")
+                else:
+                    print(f"    🔄 Uncommenting lines in: {config_file.name}")
+                
+                with open(config_file, 'r') as f:
+                    content = f.read()
+                
+                # Remove comment markers
+                content = re.sub(r'^# FAST_BUILD_COMMENTED: ', '', content, flags=re.MULTILINE)
+                
+                with open(config_file, 'w') as f:
+                    f.write(content)
+                return True
+        except Exception as e:
+            # Emergency fallback
+            if RICH_AVAILABLE:
+                console.print(f"[red]⚠️  Restore error: {e}[/red]")
+            else:
+                print(f"⚠️  Restore error: {e}")
+        
         return False
     
     def setup_symlink(self, format_type):
@@ -332,6 +377,22 @@ class BookBinder:
             
             commented_count, active_count, backup_path = self.comment_qmd_files(config_file, target_path)
             
+            # Setup signal handler to restore config on Ctrl+C
+            def signal_handler(signum, frame):
+                if RICH_AVAILABLE:
+                    console.print("\n[yellow]🛡️  Ctrl+C detected - restoring config and exiting...[/yellow]")
+                else:
+                    print("\n🛡️  Ctrl+C detected - restoring config and exiting...")
+                self.restore_config(config_file, backup_path)
+                if RICH_AVAILABLE:
+                    console.print("[green]✅ Config restored to pristine state[/green]")
+                else:
+                    print("✅ Config restored to pristine state")
+                sys.exit(0)
+            
+            signal.signal(signal.SIGINT, signal_handler)
+            signal.signal(signal.SIGTERM, signal_handler)
+            
             if RICH_AVAILABLE:
                 console.print(f"[dim]  📊 Navigation: {commented_count} hidden, {active_count} visible[/dim]")
             else:
@@ -373,13 +434,22 @@ class BookBinder:
             return success
             
         finally:
-            # Always restore config
+            # Always restore config (bulletproof cleanup)
             if RICH_AVAILABLE:
-                console.print("[yellow]  🔄 Restoring original config...[/yellow]")
+                console.print("[yellow]  🛡️  Ensuring pristine config restoration...[/yellow]")
             else:
-                print("  🔄 Restoring original config...")
+                print("  🛡️  Ensuring pristine config restoration...")
             
-            self.restore_config(config_file, backup_path)
+            if self.restore_config(config_file, backup_path):
+                if RICH_AVAILABLE:
+                    console.print("[green]  ✅ Config restored to pristine state[/green]")
+                else:
+                    print("  ✅ Config restored to pristine state")
+            else:
+                if RICH_AVAILABLE:
+                    console.print("[red]  ⚠️  Warning: Config restoration had issues[/red]")
+                else:
+                    print("  ⚠️  Warning: Config restoration had issues")
     
     def preview(self, chapter):
         """Start preview server for a chapter"""
@@ -422,10 +492,14 @@ class BookBinder:
             # Setup signal handler to restore config on exit
             def signal_handler(signum, frame):
                 if RICH_AVAILABLE:
-                    console.print("\n[yellow]🔄 Restoring config and exiting...[/yellow]")
+                    console.print("\n[yellow]🛡️  Ctrl+C detected - restoring config and exiting...[/yellow]")
                 else:
-                    print("\n🔄 Restoring config and exiting...")
+                    print("\n🛡️  Ctrl+C detected - restoring config and exiting...")
                 self.restore_config(config_file, backup_path)
+                if RICH_AVAILABLE:
+                    console.print("[green]✅ Config restored to pristine state[/green]")
+                else:
+                    print("✅ Config restored to pristine state")
                 sys.exit(0)
             
             signal.signal(signal.SIGINT, signal_handler)
