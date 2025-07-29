@@ -196,9 +196,13 @@ MLSysBook/
 │   │   ├── core/            # Core chapters
 │   │   ├── labs/            # Hands-on labs
 │   │   ├── frontmatter/     # Preface, acknowledgments
+│   │   ├── backmatter/      # References and resources
 │   │   └── parts/           # Book parts and sections
+│   ├── _extensions/         # Quarto extensions
+│   ├── data/                # Cross-reference and metadata files
 │   ├── _quarto-html.yml     # Website build configuration
-│   ├── _quarto-pdf.yml      # PDF build configuration  
+│   ├── _quarto-pdf.yml      # PDF build configuration
+│   ├── _quarto-epub.yml     # EPUB build configuration
 │   ├── _quarto.yml          # Active config (symlink)
 │   ├── index.qmd            # Main entry point
 │   └── assets/              # Images, styles, media
@@ -206,6 +210,13 @@ MLSysBook/
 │   ├── html/                # HTML website output
 │   ├── pdf/                 # PDF book output
 │   └── dist/                # Distribution files
+├── scripts/                 # Root-level development scripts
+│   ├── content/             # Content management tools
+│   ├── cross_refs/          # Cross-reference management
+│   ├── genai/               # AI-assisted content tools
+│   ├── maintenance/         # Maintenance scripts
+│   ├── testing/             # Test scripts
+│   └── utilities/           # General utilities
 ├── tools/                   # Development automation
 │   ├── scripts/             # Organized development scripts
 │   │   ├── build/           # Build and development tools
@@ -217,9 +228,12 @@ MLSysBook/
 │   ├── dependencies/        # Package requirements  
 │   └── setup/               # Setup and configuration
 ├── config/                  # Build configuration
-│   ├── _extensions/         # Quarto extensions
+│   ├── dev/                 # Development configurations
+│   ├── linting/             # Code quality configurations
+│   ├── quarto/              # Quarto publishing settings
 │   ├── lua/                 # Lua filters and scripts
 │   └── tex/                 # LaTeX templates
+├── locals/                  # Local development files
 ├── assets/                  # Global assets (covers, icons)
 ├── docs/                    # Documentation
 │   ├── BINDER.md            # Binder CLI guide
@@ -227,6 +241,8 @@ MLSysBook/
 │   ├── MAINTENANCE_GUIDE.md # Daily workflow guide
 │   ├── BUILD.md             # Build instructions
 │   └── contribute.md        # Contribution guidelines
+├── CHANGELOG.md             # Project changelog
+├── CITATION.bib             # Citation information
 └── Makefile                 # Traditional development commands
 ```
 
