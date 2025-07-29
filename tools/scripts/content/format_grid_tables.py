@@ -2,432 +2,526 @@
 """
 Grid Table Formatter for MLSysBook
 
-This script finds and reformats Pandoc grid tables in .qmd files with appropriate
-column alignment based on content type:
-- Left align: Text descriptions, names, use cases
-- Center align: Short categorical values (High/Low, bit-widths, etc.)
-- Right align: Numerical data and comparisons (2×, 4×, percentages)
+A robust tool for formatting Pandoc grid tables in .qmd files with intelligent
+content-based alignment. Suitable for use in pre-commit hooks and CI/CD pipelines.
+
+Usage:
+    python3 format_grid_tables.py -f file.qmd [--dry-run]
+    python3 format_grid_tables.py -d directory/ [--dry-run]
+    python3 format_grid_tables.py --check-all [--dry-run]
 """
 
 import re
-import os
 import argparse
+import sys
 from pathlib import Path
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional
+from dataclasses import dataclass
 
 
-class GridTableFormatter:
+@dataclass
+class TableInfo:
+    """Information about a detected table."""
+    start_pos: int
+    end_pos: int
+    content: str
+    file_path: Path
+    table_type: str
+    confidence: float
+
+
+class GridTableAnalyzer:
+    """Analyzes table content to determine optimal formatting."""
+    
     def __init__(self):
-        # Patterns to identify content types
+        # Enhanced patterns for content type detection
         self.numeric_patterns = [
-            r'^\d+[×x]\s*',  # 2×, 4×, etc.
-            r'^\d+\.\d+[×x]\s*',  # 2.5×, etc.
-            r'^\d+%$',  # percentages
-            r'^\d+(\.\d+)?$',  # pure numbers
-            r'^[\d.,]+\s*(ms|MB|GB|KB|seconds?|minutes?|hours?)$',  # measurements
-            r'^[\d.,]+\s*bit$',  # bit measurements
-            r'^\$[\d.,]+$',  # currency
-            r'^[\d.,]+\s*W$',  # watts
+            (r'^\d+[×x]\s*', 'multiplication'),  # 2×, 4×
+            (r'^\d+\.\d+[×x]\s*', 'decimal_multiplication'),  # 2.5×
+            (r'^\d+%$', 'percentage'),  # 50%
+            (r'^\d+(\.\d+)?$', 'pure_number'),  # 42, 3.14
+            (r'^[\d.,]+\s*(ms|MB|GB|KB|TB|bit|W|Hz|MHz|GHz)$', 'measurement'),
+            (r'^\$[\d.,]+$', 'currency'),  # $1,000
+            (r'^[\d.,]+\s*(seconds?|minutes?|hours?)$', 'time'),
+            (r'^Baseline\s*\(1×\)$', 'baseline'),  # Baseline (1×)
+            (r'^\d+–\d+×', 'range_multiplication'),  # 4–8×
         ]
         
         self.categorical_patterns = [
-            r'^(High|Low|Medium|Very High|Very Low|Minimal|Moderate|Extreme)$',
-            r'^(Yes|No|True|False|On|Off|Enabled|Disabled)$',
-            r'^(Fast|Slow|Faster|Slower|Fastest|Slowest)$',
-            r'^\d+-?bit$',  # 32-bit, 16-bit, etc.
-            r'^[A-Z]{2,6}$',  # Short acronyms like FP32, INT8
+            (r'^(High|Low|Medium|Very High|Very Low|Minimal|Moderate|Extreme)$', 'level'),
+            (r'^(Yes|No|True|False|On|Off|Enabled|Disabled)$', 'boolean'),
+            (r'^(Fast|Slow|Faster|Slower|Fastest|Slowest)$', 'speed'),
+            (r'^\d+-?bit$', 'bit_width'),  # 32-bit, 16-bit
+            (r'^[A-Z]{2,6}\d*$', 'acronym'),  # FP32, INT8, TPU
+            (r'^(CPU|GPU|TPU|NPU|FPGA)$', 'hardware'),
+            (r'^(Training|Inference|Both)$', 'usage_type'),
+        ]
+        
+        self.descriptive_patterns = [
+            (r'^[A-Z][a-z].*', 'description'),  # Starts with capital
+            (r'.*\s(learning|training|inference|optimization).*', 'ml_description'),
+            (r'.*\s(device|system|platform|framework).*', 'system_description'),
         ]
 
-    def detect_alignment(self, column_values: List[str]) -> str:
-        """
-        Detect appropriate alignment for a column based on its content.
-        Returns 'left', 'center', or 'right'
-        """
-        if not column_values:
-            return 'left'
+    def analyze_column_content(self, column_values: List[str]) -> Dict[str, any]:
+        """Analyze a column's content to determine its characteristics."""
+        non_empty = [v.strip() for v in column_values if v.strip()]
+        if not non_empty:
+            return {'type': 'empty', 'alignment': 'left', 'confidence': 0.0}
         
-        # Remove empty values and strip whitespace
-        non_empty_values = [v.strip() for v in column_values if v.strip()]
-        if not non_empty_values:
-            return 'left'
+        total = len(non_empty)
+        type_counts = {
+            'numeric': 0,
+            'categorical': 0,
+            'descriptive': 0
+        }
         
-        # Count matches for each type
-        numeric_matches = 0
-        categorical_matches = 0
+        # Count matches for each pattern type
+        for value in non_empty:
+            # Check numeric patterns
+            for pattern, subtype in self.numeric_patterns:
+                if re.match(pattern, value, re.IGNORECASE):
+                    type_counts['numeric'] += 1
+                    break
+            else:
+                # Check categorical patterns
+                for pattern, subtype in self.categorical_patterns:
+                    if re.match(pattern, value, re.IGNORECASE):
+                        type_counts['categorical'] += 1
+                        break
+                else:
+                    # Check descriptive patterns
+                    for pattern, subtype in self.descriptive_patterns:
+                        if re.match(pattern, value, re.IGNORECASE):
+                            type_counts['descriptive'] += 1
+                            break
+                    else:
+                        # Default to descriptive for unmatched content
+                        type_counts['descriptive'] += 1
         
-        for value in non_empty_values:
-            # Check for numeric patterns
-            if any(re.match(pattern, value, re.IGNORECASE) for pattern in self.numeric_patterns):
-                numeric_matches += 1
-            # Check for categorical patterns
-            elif any(re.match(pattern, value, re.IGNORECASE) for pattern in self.categorical_patterns):
-                categorical_matches += 1
+        # Determine primary type and confidence
+        max_type = max(type_counts, key=type_counts.get)
+        confidence = type_counts[max_type] / total
         
-        total_values = len(non_empty_values)
-        numeric_ratio = numeric_matches / total_values
-        categorical_ratio = categorical_matches / total_values
-        
-        # Decision logic
-        if numeric_ratio >= 0.6:  # 60% or more numeric -> right align
-            return 'right'
-        elif categorical_ratio >= 0.6:  # 60% or more categorical -> center align
-            return 'center'
+        # Determine alignment based on type and confidence
+        if max_type == 'numeric' and confidence >= 0.6:
+            alignment = 'right'
+        elif max_type == 'categorical' and confidence >= 0.6:
+            alignment = 'center'
+        elif max_type == 'categorical' and confidence >= 0.3:
+            # Check average length for borderline categorical
+            avg_length = sum(len(v) for v in non_empty) / total
+            alignment = 'center' if avg_length <= 10 else 'left'
         else:
-            # Check average length - short columns often categorical
-            avg_length = sum(len(v) for v in non_empty_values) / total_values
-            if avg_length <= 8 and categorical_ratio >= 0.3:
-                return 'center'
-            else:
-                return 'left'  # Default to left for descriptive text
+            alignment = 'left'
+        
+        return {
+            'type': max_type,
+            'alignment': alignment,
+            'confidence': confidence,
+            'type_counts': type_counts,
+            'avg_length': sum(len(v) for v in non_empty) / total
+        }
 
-    def parse_grid_table(self, table_text: str) -> Tuple[List[List[str]], List[str]]:
-        """
-        Parse a grid table and return the data and current alignments.
-        """
-        lines = table_text.strip().split('\n')
+    def classify_table(self, rows: List[List[str]]) -> str:
+        """Classify the overall table type based on content."""
+        if not rows:
+            return 'unknown'
         
-        # Find header separator line (contains =)
-        header_sep_idx = -1
-        for i, line in enumerate(lines):
-            if '=' in line and '+' in line:
-                header_sep_idx = i
-                break
+        # Look for common table patterns
+        header = rows[0] if rows else []
+        header_text = ' '.join(header).lower()
         
-        if header_sep_idx == -1:
-            raise ValueError("Could not find header separator in grid table")
-        
-        # Extract current alignments from header separator
-        header_sep = lines[header_sep_idx]
-        alignments = self.extract_alignments(header_sep)
-        
-        # Find all row separators (lines with + and -)
-        row_separators = []
-        for i, line in enumerate(lines):
-            if '+' in line and '-' in line:
-                row_separators.append(i)
-        
-        # Parse header row (between first separator and header separator)
-        rows = []
-        if len(row_separators) > 0:
-            # Header row
-            header_content = []
-            for line_idx in range(row_separators[0] + 1, header_sep_idx):
-                line = lines[line_idx].strip()
-                if line.startswith('|') and line.endswith('|'):
-                    header_content.append(line)
-            
-            if header_content:
-                header_cells = []
-                first_line_cells = [cell.strip() for cell in header_content[0].split('|')[1:-1]]
-                header_cells = first_line_cells[:]
-                
-                # Merge multi-line header content
-                for line in header_content[1:]:
-                    line_cells = [cell.strip() for cell in line.split('|')[1:-1]]
-                    for j, cell_content in enumerate(line_cells):
-                        if j < len(header_cells) and cell_content:
-                            if header_cells[j]:
-                                header_cells[j] += ' ' + cell_content
-                            else:
-                                header_cells[j] = cell_content
-                
-                if header_cells:
-                    rows.append(header_cells)
-        
-        # Parse data rows (between row separators, excluding header section)
-        for i in range(len(row_separators) - 1):
-            start_sep = row_separators[i]
-            end_sep = row_separators[i + 1]
-            
-            # Skip if this is the header section (before header separator)
-            if end_sep <= header_sep_idx:
-                continue
-                
-            # Collect content lines between separators
-            content_lines = []
-            for line_idx in range(start_sep + 1, end_sep):
-                line = lines[line_idx].strip()
-                if line.startswith('|') and line.endswith('|'):
-                    content_lines.append(line)
-            
-            if content_lines:
-                # Parse the cell content across multiple lines
-                row_cells = []
-                
-                # Split first line to get number of columns
-                first_line_cells = [cell.strip() for cell in content_lines[0].split('|')[1:-1]]
-                row_cells = first_line_cells[:]
-                
-                # Merge multi-line content
-                for line in content_lines[1:]:
-                    line_cells = [cell.strip() for cell in line.split('|')[1:-1]]
-                    for j, cell_content in enumerate(line_cells):
-                        if j < len(row_cells) and cell_content:
-                            if row_cells[j]:
-                                row_cells[j] += ' ' + cell_content
-                            else:
-                                row_cells[j] = cell_content
-                
-                if row_cells:
-                    rows.append(row_cells)
-        
-        return rows, alignments
+        if any(term in header_text for term in ['precision', 'format', 'bit']):
+            return 'precision_comparison'
+        elif any(term in header_text for term in ['model', 'architecture', 'network']):
+            return 'model_comparison'
+        elif any(term in header_text for term in ['performance', 'benchmark', 'latency']):
+            return 'performance_table'
+        elif any(term in header_text for term in ['technique', 'method', 'approach']):
+            return 'technique_comparison'
+        elif any(term in header_text for term in ['requirement', 'overhead', 'cost']):
+            return 'requirements_table'
+        else:
+            return 'general_table'
 
-    def extract_alignments(self, separator_line: str) -> List[str]:
-        """Extract current column alignments from separator line."""
-        # Split by + to get column parts
-        parts = separator_line.split('+')[1:-1]  # Remove first and last empty
-        alignments = []
-        
-        for part in parts:
-            if part.startswith(':') and part.endswith(':'):
-                alignments.append('center')
-            elif part.startswith(':'):
-                alignments.append('left')
-            elif part.endswith(':'):
-                alignments.append('right')
-            else:
-                alignments.append('left')  # Default
-        
-        return alignments
 
-    def create_alignment_string(self, alignment: str, width: int) -> str:
-        """Create alignment string for grid table separator."""
-        if alignment == 'center':
-            return ':' + '=' * (width - 2) + ':'
-        elif alignment == 'right':
-            return '=' * (width - 1) + ':'
-        else:  # left
-            return ':' + '=' * (width - 1)
-
-    def format_grid_table(self, table_text: str) -> str:
-        """
-        Reformat a grid table with improved alignment.
-        """
-        try:
-            rows, current_alignments = self.parse_grid_table(table_text)
-            
-            if not rows:
-                return table_text
-            
-            # Determine optimal alignments based on content
-            num_cols = len(rows[0])
-            new_alignments = []
-            
-            for col_idx in range(num_cols):
-                column_values = [row[col_idx] if col_idx < len(row) else '' for row in rows]
-                alignment = self.detect_alignment(column_values)
-                new_alignments.append(alignment)
-            
-            # Calculate column widths
-            col_widths = []
-            for col_idx in range(num_cols):
-                max_width = 0
-                for row in rows:
-                    if col_idx < len(row):
-                        max_width = max(max_width, len(row[col_idx].strip()))
-                col_widths.append(max(max_width + 2, 4))  # Minimum width of 4
-            
-            # Build the formatted table
-            result_lines = []
-            
-            # Top border
-            border_line = '+'
-            for width in col_widths:
-                border_line += '-' * width + '+'
-            result_lines.append(border_line)
-            
-            # Format each row
-            for row_idx, row in enumerate(rows):
-                # Content line
-                data_line = '|'
-                for col_idx, cell in enumerate(row):
-                    if col_idx < len(col_widths):
-                        cell_content = cell.strip()
-                        cell_width = col_widths[col_idx] - 2  # Account for spaces
-                        alignment = new_alignments[col_idx] if col_idx < len(new_alignments) else 'left'
-                        
-                        # Apply alignment
-                        if alignment == 'center':
-                            formatted_cell = f' {cell_content:^{cell_width}} '
-                        elif alignment == 'right':
-                            formatted_cell = f' {cell_content:>{cell_width}} '
-                        else:  # left
-                            formatted_cell = f' {cell_content:<{cell_width}} '
-                        
-                        data_line += formatted_cell + '|'
-                result_lines.append(data_line)
-                
-                # Add separator after header row (index 0)
-                if row_idx == 0:
-                    # Header separator with alignments
-                    sep_line = '+'
-                    for col_idx, width in enumerate(col_widths):
-                        if col_idx < len(new_alignments):
-                            alignment_str = self.create_alignment_string(new_alignments[col_idx], width)
-                            sep_line += alignment_str + '+'
-                        else:
-                            sep_line += ':' + '=' * (width - 1) + '+'
-                    result_lines.append(sep_line)
-                elif row_idx < len(rows) - 1:
-                    # Regular row separator
-                    result_lines.append(border_line)
-            
-            # Bottom border
-            result_lines.append(border_line)
-            
-            return '\n'.join(result_lines)
-            
-        except Exception as e:
-            print(f"Error formatting table: {e}")
-            return table_text
-
-    def find_grid_tables(self, content: str) -> List[Tuple[int, int, str]]:
-        """
-        Find all grid tables in content.
-        Returns list of (start_pos, end_pos, table_text) tuples.
-        """
+class GridTableFormatter:
+    """Formats grid tables with intelligent alignment."""
+    
+    def __init__(self):
+        self.analyzer = GridTableAnalyzer()
+    
+    def find_grid_tables(self, content: str, file_path: Path) -> List[TableInfo]:
+        """Find all grid tables in content using robust pattern matching."""
         tables = []
-        lines = content.split('\n')
         
+        # Split content into lines for analysis
+        lines = content.split('\n')
         i = 0
+        
         while i < len(lines):
             line = lines[i].strip()
             
             # Look for table start (line with + and -)
-            if line and '+' in line and '-' in line:
-                table_start = i
+            if self._is_table_border(line):
+                table_start_line = i
                 table_lines = [lines[i]]
                 i += 1
                 
-                # Collect all table lines
-                while i < len(lines):
+                # Collect table content
+                in_table = True
+                has_header_sep = False
+                
+                while i < len(lines) and in_table:
                     line = lines[i].strip()
+                    
                     if not line:
-                        # Empty line might be end of table, but check next line
-                        if i + 1 < len(lines) and lines[i + 1].strip():
-                            next_line = lines[i + 1].strip()
-                            if not ('+' in next_line or '|' in next_line):
-                                break
+                        # Empty line - check if table continues
+                        if i + 1 < len(lines) and self._is_table_line(lines[i + 1].strip()):
+                            table_lines.append(lines[i])
+                        else:
+                            in_table = False
+                            break
+                    elif self._is_table_line(line):
                         table_lines.append(lines[i])
-                    elif '+' in line or '|' in line:
-                        table_lines.append(lines[i])
+                        if '=' in line:
+                            has_header_sep = True
                     else:
+                        in_table = False
                         break
+                    
                     i += 1
                 
-                table_end = i
-                table_text = '\n'.join(table_lines)
-                
-                # Verify it's actually a grid table (has header separator)
-                if '=' in table_text and table_text.count('+') >= 4:
-                    start_pos = sum(len(lines[j]) + 1 for j in range(table_start))
-                    end_pos = sum(len(lines[j]) + 1 for j in range(table_end))
-                    tables.append((start_pos, end_pos, table_text))
+                # Validate as grid table
+                if has_header_sep and len(table_lines) >= 3:
+                    table_content = '\n'.join(table_lines)
+                    start_pos = sum(len(lines[j]) + 1 for j in range(table_start_line))
+                    end_pos = sum(len(lines[j]) + 1 for j in range(min(i, len(lines))))
+                    
+                    # Analyze table
+                    try:
+                        rows, _ = self._parse_table(table_content)
+                        table_type = self.analyzer.classify_table(rows)
+                        confidence = self._calculate_confidence(rows)
+                        
+                        tables.append(TableInfo(
+                            start_pos=start_pos,
+                            end_pos=end_pos,
+                            content=table_content,
+                            file_path=file_path,
+                            table_type=table_type,
+                            confidence=confidence
+                        ))
+                    except Exception as e:
+                        print(f"Warning: Could not parse table at line {table_start_line}: {e}")
                 
                 continue
             
             i += 1
         
         return tables
-
-    def process_file(self, file_path: Path, dry_run: bool = False) -> bool:
-        """
-        Process a single file and format its grid tables.
-        Returns True if any changes were made.
-        """
+    
+    def _is_table_border(self, line: str) -> bool:
+        """Check if line is a table border."""
+        return '+' in line and '-' in line and len(line) > 5
+    
+    def _is_table_line(self, line: str) -> bool:
+        """Check if line belongs to a table."""
+        return ('+' in line) or (line.startswith('|') and line.endswith('|'))
+    
+    def _parse_table(self, table_text: str) -> Tuple[List[List[str]], List[str]]:
+        """Parse table content into rows and extract current alignments."""
+        lines = [line.rstrip() for line in table_text.split('\n') if line.strip()]
+        
+        # Find header separator
+        header_sep_idx = -1
+        for i, line in enumerate(lines):
+            if '+' in line and '=' in line:
+                header_sep_idx = i
+                break
+        
+        if header_sep_idx == -1:
+            raise ValueError("No header separator found")
+        
+        # Extract alignments
+        alignments = self._extract_alignments(lines[header_sep_idx])
+        
+        # Extract data rows
+        data_lines = []
+        for line in lines:
+            if line.startswith('|') and line.endswith('|') and '=' not in line and '+' not in line:
+                data_lines.append(line)
+        
+        if not data_lines:
+            raise ValueError("No data rows found")
+        
+        # Parse cells
+        rows = []
+        for line in data_lines:
+            cells = [cell.strip() for cell in line[1:-1].split('|')]
+            if cells:
+                rows.append(cells)
+        
+        return rows, alignments
+    
+    def _extract_alignments(self, sep_line: str) -> List[str]:
+        """Extract current alignments from header separator."""
+        segments = sep_line.split('+')[1:-1]
+        alignments = []
+        
+        for segment in segments:
+            segment = segment.strip()
+            if segment.startswith(':') and segment.endswith(':'):
+                alignments.append('center')
+            elif segment.startswith(':'):
+                alignments.append('left')
+            elif segment.endswith(':'):
+                alignments.append('right')
+            else:
+                alignments.append('left')
+        
+        return alignments
+    
+    def _calculate_confidence(self, rows: List[List[str]]) -> float:
+        """Calculate confidence in table parsing."""
+        if not rows:
+            return 0.0
+        
+        # Check consistency
+        row_lengths = [len(row) for row in rows]
+        if len(set(row_lengths)) > 1:
+            return 0.5  # Inconsistent row lengths
+        
+        return 0.9  # High confidence for consistent tables
+    
+    def format_table(self, table_info: TableInfo) -> str:
+        """Format a table with optimal alignment."""
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
+            rows, current_alignments = self._parse_table(table_info.content)
             
-            tables = self.find_grid_tables(content)
-            if not tables:
-                return False
+            if not rows:
+                return table_info.content
             
-            print(f"Found {len(tables)} grid table(s) in {file_path}")
+            # Analyze each column
+            num_cols = len(rows[0]) if rows else 0
+            column_analyses = []
+            new_alignments = []
             
-            # Process tables in reverse order to maintain positions
-            modified_content = content
-            changes_made = False
+            for col_idx in range(num_cols):
+                column_values = [row[col_idx] if col_idx < len(row) else '' 
+                               for row in rows[1:]]  # Skip header for analysis
+                analysis = self.analyzer.analyze_column_content(column_values)
+                column_analyses.append(analysis)
+                new_alignments.append(analysis['alignment'])
             
-            for start_pos, end_pos, table_text in reversed(tables):
-                formatted_table = self.format_grid_table(table_text)
-                if formatted_table != table_text:
-                    if not dry_run:
-                        modified_content = (modified_content[:start_pos] + 
-                                          formatted_table + 
-                                          modified_content[end_pos:])
-                    changes_made = True
-                    print(f"  ✅ Formatted table at position {start_pos}")
-                else:
-                    print(f"  ℹ️  Table at position {start_pos} already properly formatted")
+            # Calculate optimal column widths
+            col_widths = []
+            for col_idx in range(num_cols):
+                max_width = 0
+                for row in rows:
+                    if col_idx < len(row):
+                        max_width = max(max_width, len(row[col_idx]))
+                col_widths.append(max(max_width + 2, 6))  # Minimum width
             
-            if changes_made and not dry_run:
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    f.write(modified_content)
-                print(f"✅ Updated {file_path}")
-            
-            return changes_made
+            # Generate formatted table
+            return self._build_formatted_table(rows, new_alignments, col_widths)
             
         except Exception as e:
-            print(f"❌ Error processing {file_path}: {e}")
-            return False
+            print(f"Error formatting table in {table_info.file_path}: {e}")
+            return table_info.content
+    
+    def _build_formatted_table(self, rows: List[List[str]], alignments: List[str], 
+                              col_widths: List[int]) -> str:
+        """Build the formatted table string."""
+        result = []
+        
+        # Top border
+        border = '+' + '+'.join('-' * w for w in col_widths) + '+'
+        result.append(border)
+        
+        # Process each row
+        for row_idx, row in enumerate(rows):
+            # Format row content
+            formatted_row = '|'
+            for col_idx, cell in enumerate(row):
+                if col_idx < len(col_widths):
+                    width = col_widths[col_idx] - 2
+                    alignment = alignments[col_idx] if col_idx < len(alignments) else 'left'
+                    
+                    if alignment == 'center':
+                        formatted_cell = f' {cell:^{width}} '
+                    elif alignment == 'right':
+                        formatted_cell = f' {cell:>{width}} '
+                    else:
+                        formatted_cell = f' {cell:<{width}} '
+                    
+                    formatted_row += formatted_cell + '|'
+            
+            result.append(formatted_row)
+            
+            # Add separator after header
+            if row_idx == 0:
+                sep = '+'
+                for col_idx, width in enumerate(col_widths):
+                    alignment = alignments[col_idx] if col_idx < len(alignments) else 'left'
+                    if alignment == 'center':
+                        sep += ':' + '=' * (width - 2) + ':+'
+                    elif alignment == 'right':
+                        sep += '=' * (width - 1) + ':+'
+                    else:
+                        sep += ':' + '=' * (width - 1) + '+'
+                result.append(sep)
+            elif row_idx < len(rows) - 1:
+                result.append(border)
+        
+        # Bottom border
+        result.append(border)
+        
+        return '\n'.join(result)
 
-    def process_directory(self, directory: Path, dry_run: bool = False) -> int:
-        """
-        Process all .qmd files in a directory recursively.
-        Returns the number of files that were modified.
-        """
-        modified_count = 0
+
+def process_file(file_path: Path, dry_run: bool = False, verbose: bool = False) -> bool:
+    """Process a single .qmd file."""
+    if not file_path.exists():
+        print(f"❌ File not found: {file_path}")
+        return False
+    
+    if file_path.suffix != '.qmd':
+        if verbose:
+            print(f"⏭️  Skipping non-qmd file: {file_path}")
+        return False
+    
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
         
-        for qmd_file in directory.rglob("*.qmd"):
-            if self.process_file(qmd_file, dry_run):
-                modified_count += 1
+        formatter = GridTableFormatter()
+        tables = formatter.find_grid_tables(content, file_path)
         
-        return modified_count
+        if not tables:
+            if verbose:
+                print(f"ℹ️  No tables found in {file_path}")
+            return False
+        
+        print(f"📋 Found {len(tables)} table(s) in {file_path}")
+        
+        # Process tables in reverse order to maintain positions
+        modified_content = content
+        changes_made = False
+        
+        for table_info in reversed(tables):
+            if verbose:
+                print(f"   📊 {table_info.table_type} (confidence: {table_info.confidence:.1f})")
+            
+            formatted_table = formatter.format_table(table_info)
+            if formatted_table != table_info.content:
+                if not dry_run:
+                    modified_content = (modified_content[:table_info.start_pos] + 
+                                      formatted_table + 
+                                      modified_content[table_info.end_pos:])
+                changes_made = True
+                print(f"   ✅ Formatted {table_info.table_type} table")
+            else:
+                if verbose:
+                    print(f"   ✨ Table already optimally formatted")
+        
+        if changes_made:
+            if not dry_run:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(modified_content)
+                print(f"💾 Updated {file_path}")
+            else:
+                print(f"🔍 Would update {file_path}")
+        
+        return changes_made
+        
+    except Exception as e:
+        print(f"❌ Error processing {file_path}: {e}")
+        return False
+
+
+def process_directory(directory: Path, dry_run: bool = False, verbose: bool = False) -> int:
+    """Process all .qmd files in a directory."""
+    if not directory.exists():
+        print(f"❌ Directory not found: {directory}")
+        return 0
+    
+    qmd_files = list(directory.rglob("*.qmd"))
+    if not qmd_files:
+        print(f"ℹ️  No .qmd files found in {directory}")
+        return 0
+    
+    print(f"📁 Processing {len(qmd_files)} .qmd files in {directory}")
+    
+    modified_count = 0
+    for qmd_file in sorted(qmd_files):
+        if process_file(qmd_file, dry_run, verbose):
+            modified_count += 1
+    
+    return modified_count
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Format grid tables in markdown files with appropriate column alignment"
+        description="Format grid tables in Quarto markdown files with intelligent alignment",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s -f book/contents/core/ml_systems.qmd --dry-run
+  %(prog)s -d book/contents/ --verbose
+  %(prog)s --check-all
+        """
     )
-    parser.add_argument(
-        "path",
-        type=Path,
-        help="Path to file or directory to process"
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Show what would be changed without making modifications"
-    )
+    
+    # Mutually exclusive group for input source
+    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument('-f', '--file', type=Path, 
+                           help='Process a single .qmd file')
+    input_group.add_argument('-d', '--directory', type=Path,
+                           help='Process all .qmd files in directory (recursive)')
+    input_group.add_argument('--check-all', action='store_true',
+                           help='Process all .qmd files in book/contents/')
+    
+    parser.add_argument('--dry-run', action='store_true',
+                       help='Show what would be changed without modifying files')
+    parser.add_argument('--verbose', action='store_true',
+                       help='Show detailed processing information')
+    parser.add_argument('--pre-commit', action='store_true',
+                       help='Run in pre-commit mode (exit 1 if changes needed)')
     
     args = parser.parse_args()
     
-    formatter = GridTableFormatter()
-    
-    if args.path.is_file():
-        if args.path.suffix == '.qmd':
-            changed = formatter.process_file(args.path, args.dry_run)
-            if args.dry_run:
-                print(f"\n🔍 Dry run complete. File {'would be' if changed else 'would not be'} modified.")
-            else:
-                print(f"\n✅ Processing complete. File {'was' if changed else 'was not'} modified.")
-        else:
-            print("❌ Please provide a .qmd file")
+    # Determine what to process
+    if args.file:
+        changed = process_file(args.file, args.dry_run, args.verbose)
+        total_files = 1 if args.file.exists() and args.file.suffix == '.qmd' else 0
+        modified_count = 1 if changed else 0
+    elif args.directory:
+        modified_count = process_directory(args.directory, args.dry_run, args.verbose)
+        total_files = len(list(args.directory.rglob("*.qmd"))) if args.directory.exists() else 0
+    elif args.check_all:
+        book_contents = Path('book/contents')
+        if not book_contents.exists():
+            print("❌ book/contents directory not found")
             return 1
-    elif args.path.is_dir():
-        modified_count = formatter.process_directory(args.path, args.dry_run)
-        if args.dry_run:
-            print(f"\n🔍 Dry run complete. {modified_count} file(s) would be modified.")
-        else:
-            print(f"\n✅ Processing complete. {modified_count} file(s) were modified.")
+        modified_count = process_directory(book_contents, args.dry_run, args.verbose)
+        total_files = len(list(book_contents.rglob("*.qmd")))
+    
+    # Summary
+    if args.dry_run:
+        print(f"\n🔍 Dry run complete: {modified_count}/{total_files} files would be modified")
     else:
-        print(f"❌ Path not found: {args.path}")
+        print(f"\n✅ Processing complete: {modified_count}/{total_files} files modified")
+    
+    # Pre-commit mode: exit with error if changes are needed
+    if args.pre_commit and modified_count > 0:
+        if args.dry_run:
+            print("💡 Run without --dry-run to format tables")
         return 1
     
     return 0
 
 
 if __name__ == "__main__":
-    exit(main()) 
+    sys.exit(main()) 
