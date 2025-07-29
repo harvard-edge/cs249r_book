@@ -309,3 +309,22 @@ Once everything is set up, you’ll be able to:
 - Contribute to the book like a pro 💪
 
 Let me know if you'd like this saved as `manual_setup.md` or included in your Quarto documentation!
+
+---
+
+## 🔧 Additional Troubleshooting
+
+**Icon files missing for foldbox callouts?**  
+If you see errors like `File 'icon_callout-quiz-question.pdf' not found`, the PNG icons need to be converted to PDF format for LaTeX rendering:
+
+```sh
+cd book/_extensions/ute/custom-numbered-blocks/style/icons
+convert icon_callout-quiz-question.png icon_callout-quiz-question.pdf
+convert icon_callout-quiz-answer.png icon_callout-quiz-answer.pdf
+convert icon_callout-chapter-connection.png icon_callout-chapter-connection.pdf
+convert icon_callout-resource-exercises.png icon_callout-resource-exercises.pdf
+convert Icon_callout-resource-slides.png icon_callout-resource-slides.pdf
+convert Icon_callout-resource-videos.png icon_callout-resource-videos.pdf
+```
+
+**Note:** This requires ImageMagick to be installed. On macOS: `brew install imagemagick`, on Ubuntu: `sudo apt-get install imagemagick`.
