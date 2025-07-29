@@ -31,6 +31,7 @@ class BookBinder:
         self.build_dir = self.root_dir / "build"
         self.html_config = self.book_dir / "_quarto-html.yml"
         self.pdf_config = self.book_dir / "_quarto-pdf.yml"
+        self.epub_config = self.book_dir / "_quarto-epub.yml"
         self.active_config = self.book_dir / "_quarto.yml"
         
     def show_banner(self):
@@ -91,6 +92,7 @@ class BookBinder:
         # Check for commented lines
         html_commented = 0
         pdf_commented = 0
+        epub_commented = 0
         
         try:
             if self.html_config.exists():
@@ -105,12 +107,20 @@ class BookBinder:
                     pdf_commented = sum(1 for line in f if "FAST_BUILD_COMMENTED" in line)
         except:
             pass
+
+        try:
+            if self.epub_config.exists():
+                with open(self.epub_config, 'r') as f:
+                    epub_commented = sum(1 for line in f if "FAST_BUILD_COMMENTED" in line)
+        except:
+            pass
         
         return {
             'active_config': active_config,
             'html_commented': html_commented,
             'pdf_commented': pdf_commented,
-            'is_clean': html_commented == 0 and pdf_commented == 0
+            'epub_commented': epub_commented,
+            'is_clean': html_commented == 0 and pdf_commented == 0 and epub_commented == 0
         }
     
     def show_status(self):
@@ -126,7 +136,7 @@ class BookBinder:
         if status['is_clean']:
             table.add_row("✅ State", "[green]Configs are clean[/green]")
         else:
-            table.add_row("⚠️  State", f"[yellow]{status['html_commented'] + status['pdf_commented']} commented lines[/yellow]")
+            table.add_row("⚠️  State", f"[yellow]{status['html_commented'] + status['pdf_commented'] + status['epub_commented']} commented lines[/yellow]")
         
         console.print(Panel(table, border_style="green"))
     
@@ -497,7 +507,14 @@ class BookBinder:
     
     def setup_symlink(self, format_type):
         """Setup _quarto.yml symlink"""
-        config_file = "_quarto-html.yml" if format_type == "html" else "_quarto-pdf.yml"
+        if format_type == "html":
+            config_file = "_quarto-html.yml"
+        elif format_type == "pdf":
+            config_file = "_quarto-pdf.yml"
+        elif format_type == "epub":
+            config_file = "_quarto-epub.yml"
+        else:
+            raise ValueError(f"Unknown format type: {format_type}")
         
         # Remove existing symlink/file
         if self.active_config.exists() or self.active_config.is_symlink():
@@ -540,9 +557,20 @@ class BookBinder:
             chapter_files.append(chapter_file)
         
         # Configure build settings
-        config_file = self.html_config if format_type == "html" else self.pdf_config
-        format_arg = "html" if format_type == "html" else "titlepage-pdf"
-        build_subdir = "html" if format_type == "html" else "pdf"
+        if format_type == "html":
+            config_file = self.html_config
+            format_arg = "html"
+            build_subdir = "html"
+        elif format_type == "pdf":
+            config_file = self.pdf_config
+            format_arg = "titlepage-pdf"
+            build_subdir = "pdf"
+        elif format_type == "epub":
+            config_file = self.epub_config
+            format_arg = "epub"
+            build_subdir = "epub"
+        else:
+            raise ValueError(f"Unknown format type: {format_type}")
         
         # Create build directory
         (self.build_dir / build_subdir).mkdir(parents=True, exist_ok=True)
@@ -623,9 +651,20 @@ class BookBinder:
         console.print(f"[dim]  ✅ Found: {chapter_file}[/dim]")
         
         # Setup configuration  
-        config_file = self.html_config if format_type == "html" else self.pdf_config
-        format_arg = "html" if format_type == "html" else "titlepage-pdf"
-        build_subdir = "html" if format_type == "html" else "pdf"
+        if format_type == "html":
+            config_file = self.html_config
+            format_arg = "html"
+            build_subdir = "html"
+        elif format_type == "pdf":
+            config_file = self.pdf_config
+            format_arg = "titlepage-pdf"
+            build_subdir = "pdf"
+        elif format_type == "epub":
+            config_file = self.epub_config
+            format_arg = "epub"
+            build_subdir = "epub"
+        else:
+            raise ValueError(f"Unknown format type: {format_type}")
         
         # Create build directory
         (self.build_dir / build_subdir).mkdir(parents=True, exist_ok=True)
@@ -758,6 +797,10 @@ class BookBinder:
         pdf_config = self.book_dir / "_quarto-pdf.yml"
         self.ensure_clean_config(pdf_config)
         
+        # Restore EPUB config  
+        epub_config = self.book_dir / "_quarto-epub.yml"
+        self.ensure_clean_config(epub_config)
+        
         # Show current symlink status
         symlink_path = self.book_dir / "_quarto.yml"
         if symlink_path.exists() and symlink_path.is_symlink():
@@ -802,6 +845,7 @@ class BookBinder:
             (self.book_dir / ".quarto", "Quarto cache"),
             (self.book_dir / "_quarto-html.yml.fast-build-backup", "HTML config backup"),
             (self.book_dir / "_quarto-pdf.yml.fast-build-backup", "PDF config backup"),
+            (self.book_dir / "_quarto-epub.yml.fast-build-backup", "EPUB config backup"),
         ]
         
         for path, description in potential_artifacts:
@@ -820,8 +864,8 @@ class BookBinder:
 
     def switch(self, format_type):
         """Switch configuration format"""
-        if format_type not in ["html", "pdf"]:
-            console.print("[red]❌ Format must be 'html' or 'pdf'[/red]")
+        if format_type not in ["html", "pdf", "epub"]:
+            console.print("[red]❌ Format must be 'html', 'pdf', or 'epub'[/red]")
             return False
         
         console.print(f"[blue]🔗 Switching to {format_type} config...[/blue]")
@@ -846,7 +890,16 @@ class BookBinder:
         
         # Setup config
         config_name = self.setup_symlink(format_type)
-        render_cmd = ["quarto", "render", "--to", "html" if format_type == "html" else "titlepage-pdf"]
+        if format_type == "html":
+            render_to = "html"
+        elif format_type == "pdf":
+            render_to = "titlepage-pdf"
+        elif format_type == "epub":
+            render_to = "epub"
+        else:
+            raise ValueError(f"Unknown format type: {format_type}")
+        
+        render_cmd = ["quarto", "render", "--to", render_to]
         
         console.print(f"[blue]  🔗 Using {config_name}[/blue]")
         
@@ -855,8 +908,8 @@ class BookBinder:
         console.print(f"[blue]  💻 Command: {cmd_str}[/blue]")
         
         success = self.run_command(
-            render_cmd + ["book/"],
-            cwd=self.root_dir,
+            render_cmd,
+            cwd=self.book_dir,
             description=f"Building full {format_type.upper()} book"
         )
         
@@ -898,7 +951,7 @@ class BookBinder:
         fast_table.add_column("Description", style="white")
         fast_table.add_column("Example", style="dim")
         
-        fast_table.add_row("build <chapter[,ch2,...]|*> <format>", "Build chapter(s) or all", "./binder build intro html")
+        fast_table.add_row("build <chapter[,ch2,...]|-> <format>", "Build chapter(s) or all", "./binder build intro html")
         fast_table.add_row("preview <chapter>", "Build and preview chapter", "./binder preview ops")
         
         full_table = Table(show_header=True, header_style="bold blue", box=None)
@@ -906,7 +959,7 @@ class BookBinder:
         full_table.add_column("Description", style="white")
         full_table.add_column("Example", style="dim")
         
-        full_table.add_row("build * <format>", "Build complete book", "./binder build * pdf")
+        full_table.add_row("build - <format>", "Build complete book", "./binder build - pdf")
         full_table.add_row("preview-full [format]", "Preview complete book", "./binder preview-full")
         
         # Management Commands
@@ -953,7 +1006,7 @@ class BookBinder:
         examples.append("🎯 Power User Examples:\n", style="bold magenta")
         examples.append("  ./binder b intro,ml_systems html ", style="cyan")
         examples.append("# Build multiple chapters\n", style="dim")
-        examples.append("  ./binder b * pdf ", style="cyan")
+        examples.append("  ./binder b - pdf ", style="cyan")
         examples.append("# Build all chapters as PDF\n", style="dim")
         examples.append("  ./binder c          ", style="cyan") 
         examples.append("# Clean all artifacts\n", style="dim")
@@ -995,16 +1048,16 @@ def main():
     try:
         if command == "build":
             if len(sys.argv) < 4:
-                console.print("[red]❌ Usage: ./binder build <chapter[,chapter2,...]|*> <format>[/red]")
-                console.print("[dim]Examples: ./binder build * html, ./binder build intro pdf[/dim]")
+                console.print("[red]❌ Usage: ./binder build <chapter[,chapter2,...]|all|-> <format>[/red]")
+                console.print("[dim]Examples: ./binder build - html, ./binder build intro pdf[/dim]")
                 return
             chapters = sys.argv[2]
             format_type = sys.argv[3]
-            if format_type not in ["html", "pdf"]:
-                console.print("[red]❌ Format must be 'html' or 'pdf'[/red]")
+            if format_type not in ["html", "pdf", "epub"]:
+                console.print("[red]❌ Format must be 'html', 'pdf', or 'epub'[/red]")
                 return
             
-            if chapters == "*":
+            if chapters == "-" or chapters == "all":
                 # Build all chapters
                 binder.build_full(format_type)
             else:
@@ -1020,15 +1073,15 @@ def main():
 
         elif command == "build-full":
             format_type = sys.argv[2] if len(sys.argv) > 2 else "html"
-            if format_type not in ["html", "pdf"]:
-                console.print("[red]❌ Format must be 'html' or 'pdf'[/red]")
+            if format_type not in ["html", "pdf", "epub"]:
+                console.print("[red]❌ Format must be 'html', 'pdf', or 'epub'[/red]")
                 return
             binder.build_full(format_type)
 
         elif command == "preview-full":
             format_type = sys.argv[2] if len(sys.argv) > 2 else "html"
-            if format_type not in ["html", "pdf"]:
-                console.print("[red]❌ Format must be 'html' or 'pdf'[/red]")
+            if format_type not in ["html", "pdf", "epub"]:
+                console.print("[red]❌ Format must be 'html', 'pdf', or 'epub'[/red]")
                 return
             binder.preview_full(format_type)
 
@@ -1042,7 +1095,7 @@ def main():
 
         elif command == "switch":
             if len(sys.argv) < 3:
-                console.print("[red]❌ Usage: ./binder switch <html|pdf>[/red]")
+                console.print("[red]❌ Usage: ./binder switch <html|pdf|epub>[/red]")
                 return
             format_type = sys.argv[2]
             binder.switch(format_type)
