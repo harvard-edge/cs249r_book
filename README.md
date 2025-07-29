@@ -277,8 +277,7 @@ This work is licensed under **Creative Commons Attribution–NonCommercial–Sha
 
 <div align="center">
 
-**Made for the global AI education community with ❤️**
+**Made with ❤️ for AI learners worldwide**
 
-*Empowering the next generation of AI systems engineers*
-
+Our goal is to educate 1 million AI systems engineers for the future at the edge of AI.
 </div>
