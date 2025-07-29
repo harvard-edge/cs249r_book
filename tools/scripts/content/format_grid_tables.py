@@ -203,9 +203,21 @@ class GridTableFormatter:
                     
                     # Analyze table
                     try:
-                        rows, _ = self._parse_table(table_content)
+                        rows, current_alignments = self._parse_table(table_content)
                         table_type = self.analyzer.classify_table(rows)
-                        confidence = self._calculate_confidence(rows)
+                        
+                        # Calculate confidence based on alignment analysis
+                        analyzer = GridTableAnalyzer()
+                        optimal_alignments = []
+                        for col_idx in range(len(rows[0])):
+                            column_values = [row[col_idx] for row in rows[1:] if col_idx < len(row)]
+                            if column_values:
+                                analysis = analyzer.analyze_column_content(column_values)
+                                optimal_alignments.append(analysis['alignment'])
+                            else:
+                                optimal_alignments.append('left')
+                        
+                        confidence = self._calculate_confidence(current_alignments, optimal_alignments)
                         
                         tables.append(TableInfo(
                             start_pos=start_pos,
@@ -362,102 +374,138 @@ class GridTableFormatter:
         
         return alignments
     
-    def _calculate_confidence(self, rows: List[List[str]]) -> float:
+    def _calculate_confidence(self, current_alignments: List[str], optimal_alignments: List[str]) -> float:
         """Calculate confidence in table parsing."""
-        if not rows:
+        if not current_alignments or not optimal_alignments:
             return 0.0
         
         # Check consistency
-        row_lengths = [len(row) for row in rows]
-        if len(set(row_lengths)) > 1:
-            return 0.5  # Inconsistent row lengths
+        if len(current_alignments) != len(optimal_alignments):
+            return 0.5  # Inconsistent alignment counts
         
-        return 0.9  # High confidence for consistent tables
+        # Count mismatches
+        mismatches = sum(1 for i in range(len(current_alignments)) if current_alignments[i] != optimal_alignments[i])
+        
+        # Calculate confidence based on mismatches
+        total_alignments = len(current_alignments)
+        confidence = (total_alignments - mismatches) / total_alignments
+        
+        return confidence
     
     def format_table(self, table_info: TableInfo) -> str:
-        """Format a table with optimal alignment."""
+        """Format a table with proper alignment and spacing."""
         try:
+            # Parse the table
             rows, current_alignments = self._parse_table(table_info.content)
             
-            if not rows:
+            # Analyze content for optimal alignment
+            analyzer = GridTableAnalyzer()
+            optimal_alignments = []
+            
+            for col_idx in range(len(rows[0])):
+                column_values = [row[col_idx] for row in rows[1:] if col_idx < len(row)]
+                if column_values:
+                    analysis = analyzer.analyze_column_content(column_values)
+                    optimal_alignments.append(analysis['alignment'])
+                else:
+                    optimal_alignments.append('left')
+            
+            # Check if reformatting is needed
+            needs_reformatting = self._calculate_confidence(current_alignments, optimal_alignments) < 0.8
+            
+            if needs_reformatting:
+                return self._build_formatted_table(rows, optimal_alignments)
+            else:
                 return table_info.content
-            
-            # Analyze each column
-            num_cols = len(rows[0]) if rows else 0
-            column_analyses = []
-            new_alignments = []
-            
-            for col_idx in range(num_cols):
-                column_values = [row[col_idx] if col_idx < len(row) else '' 
-                               for row in rows[1:]]  # Skip header for analysis
-                analysis = self.analyzer.analyze_column_content(column_values)
-                column_analyses.append(analysis)
-                new_alignments.append(analysis['alignment'])
-            
-            # Calculate optimal column widths
-            col_widths = []
-            for col_idx in range(num_cols):
-                max_width = 0
-                for row in rows:
-                    if col_idx < len(row):
-                        max_width = max(max_width, len(row[col_idx]))
-                col_widths.append(max(max_width + 2, 6))  # Minimum width
-            
-            # Generate formatted table
-            return self._build_formatted_table(rows, new_alignments, col_widths)
-            
+                
         except Exception as e:
-            print(f"Error formatting table in {table_info.file_path}: {e}")
+            if self.verbose:
+                print(f"Warning: Could not parse table at line {table_info.start_line}: {e}")
             return table_info.content
     
-    def _build_formatted_table(self, rows: List[List[str]], alignments: List[str], 
-                              col_widths: List[int]) -> str:
-        """Build the formatted table string."""
-        result = []
+    def _build_formatted_table(self, rows: List[List[str]], alignments: List[str]) -> str:
+        """Build a properly formatted table with correct spacing."""
+        if not rows:
+            return ""
         
-        # Top border
-        border = '+' + '+'.join('-' * w for w in col_widths) + '+'
-        result.append(border)
+        # Calculate column widths
+        col_widths = []
+        for col_idx in range(len(rows[0])):
+            max_width = max(len(str(row[col_idx])) for row in rows if col_idx < len(row))
+            col_widths.append(max_width)
         
-        # Process each row
-        for row_idx, row in enumerate(rows):
-            # Format row content
-            formatted_row = '|'
-            for col_idx, cell in enumerate(row):
-                if col_idx < len(col_widths):
-                    width = col_widths[col_idx] - 2
-                    alignment = alignments[col_idx] if col_idx < len(alignments) else 'left'
-                    
-                    if alignment == 'center':
-                        formatted_cell = f' {cell:^{width}} '
-                    elif alignment == 'right':
-                        formatted_cell = f' {cell:>{width}} '
-                    else:
-                        formatted_cell = f' {cell:<{width}} '
-                    
-                    formatted_row += formatted_cell + '|'
-            
-            result.append(formatted_row)
-            
-            # Add separator after header
-            if row_idx == 0:
-                sep = '+'
-                for col_idx, width in enumerate(col_widths):
-                    alignment = alignments[col_idx] if col_idx < len(alignments) else 'left'
-                    if alignment == 'center':
-                        sep += ':' + '=' * (width - 2) + ':+'
-                    elif alignment == 'right':
-                        sep += '=' * (width - 1) + ':+'
-                    else:
-                        sep += ':' + '=' * (width - 1) + '+'
-                result.append(sep)
-            elif row_idx < len(rows) - 1:
-                result.append(border)
+        # Build the formatted table
+        formatted_lines = []
         
-        # Bottom border
-        result.append(border)
+        # Add empty line before table
+        formatted_lines.append("")
         
-        return '\n'.join(result)
+        # Build header separator
+        header_sep = "+"
+        for i, width in enumerate(col_widths):
+            if i < len(alignments):
+                if alignments[i] == 'left':
+                    header_sep += ":" + "=" * (width + 2) + ":"
+                elif alignments[i] == 'center':
+                    header_sep += ":" + "=" * (width + 2) + ":"
+                else:  # right
+                    header_sep += ":" + "=" * (width + 2) + ":"
+            else:
+                header_sep += ":" + "=" * (width + 2) + ":"
+            header_sep += "+"
+        
+        # Build top border
+        top_border = "+"
+        for width in col_widths:
+            top_border += "-" * (width + 2) + "+"
+        
+        # Build header row
+        header_row = "|"
+        for i, cell in enumerate(rows[0]):
+            if i < len(alignments):
+                if alignments[i] == 'left':
+                    header_row += f" {cell:<{col_widths[i]}} |"
+                elif alignments[i] == 'center':
+                    header_row += f" {cell:^{col_widths[i]}} |"
+                else:  # right
+                    header_row += f" {cell:>{col_widths[i]}} |"
+            else:
+                header_row += f" {cell:<{col_widths[i]}} |"
+        
+        # Build data rows
+        data_rows = []
+        for row in rows[1:]:
+            data_row = "|"
+            for i, cell in enumerate(row):
+                if i < len(alignments):
+                    if alignments[i] == 'left':
+                        data_row += f" {cell:<{col_widths[i]}} |"
+                    elif alignments[i] == 'center':
+                        data_row += f" {cell:^{col_widths[i]}} |"
+                    else:  # right
+                        data_row += f" {cell:>{col_widths[i]}} |"
+                else:
+                    data_row += f" {cell:<{col_widths[i]}} |"
+            data_rows.append(data_row)
+        
+        # Build bottom border
+        bottom_border = "+"
+        for width in col_widths:
+            bottom_border += "-" * (width + 2) + "+"
+        
+        # Assemble the table
+        formatted_lines.append(top_border)
+        formatted_lines.append(header_row)
+        formatted_lines.append(header_sep)
+        for data_row in data_rows:
+            formatted_lines.append(data_row)
+            # Add row separator after each data row
+            formatted_lines.append(bottom_border)
+        
+        # Add empty line after table
+        formatted_lines.append("")
+        
+        return "\n".join(formatted_lines)
 
 
 def process_file(file_path: Path, dry_run: bool = False, verbose: bool = False) -> bool:
@@ -496,9 +544,30 @@ def process_file(file_path: Path, dry_run: bool = False, verbose: bool = False) 
             formatted_table = formatter.format_table(table_info)
             if formatted_table != table_info.content:
                 if not dry_run:
-                    modified_content = (modified_content[:table_info.start_pos] + 
-                                      formatted_table + 
-                                      modified_content[table_info.end_pos:])
+                    # Find the caption if it exists
+                    after_table = modified_content[table_info.end_pos:]
+                    caption_start = after_table.find(':')
+                    caption_end = after_table.find('\n', caption_start) if caption_start != -1 else -1
+                    
+                    if caption_start != -1 and caption_end != -1:
+                        # Extract caption and ensure proper spacing
+                        caption = after_table[caption_start:caption_end]
+                        after_caption = after_table[caption_end:]
+                        
+                        # Reconstruct with proper spacing
+                        modified_content = (
+                            modified_content[:table_info.start_pos] + 
+                            formatted_table + 
+                            caption + 
+                            "\n\n" +  # Two line breaks after caption
+                            after_caption.lstrip('\n')  # Remove extra newlines
+                        )
+                    else:
+                        # No caption, just replace table
+                        modified_content = (modified_content[:table_info.start_pos] + 
+                                          formatted_table + 
+                                          modified_content[table_info.end_pos:])
+                
                 changes_made = True
                 print(f"   ✅ Formatted {table_info.table_type} table")
             else:
