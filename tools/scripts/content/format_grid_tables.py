@@ -55,6 +55,8 @@ class GridTableAnalyzer:
             (r'^[A-Z]{2,6}\d*$', 'acronym'),  # FP32, INT8, TPU
             (r'^(CPU|GPU|TPU|NPU|FPGA)$', 'hardware'),
             (r'^(Training|Inference|Both)$', 'usage_type'),
+            (r'^(Active|Inactive|Ready|Pending|Failed|Success)$', 'status'),
+            (r'^(Small|Large|Tiny|Huge)$', 'size_category'),
         ]
         
         self.descriptive_patterns = [
@@ -247,23 +249,100 @@ class GridTableFormatter:
         # Extract alignments
         alignments = self._extract_alignments(lines[header_sep_idx])
         
-        # Extract data rows
-        data_lines = []
-        for line in lines:
-            if line.startswith('|') and line.endswith('|') and '=' not in line and '+' not in line:
-                data_lines.append(line)
+        # Find all border lines (lines with + and - or =)
+        border_lines = []
+        for i, line in enumerate(lines):
+            # Only lines that start and end with + are border lines
+            if line.startswith('+') and line.endswith('+') and ('-' in line or '=' in line):
+                border_lines.append(i)
         
-        if not data_lines:
+        if len(border_lines) < 2:
             raise ValueError("No data rows found")
         
-        # Parse cells
+        # Parse rows by looking between border lines
         rows = []
-        for line in data_lines:
-            cells = [cell.strip() for cell in line[1:-1].split('|')]
-            if cells:
-                rows.append(cells)
+        
+        # First, get header row (before header separator)
+        header_start = None
+        header_end = header_sep_idx
+        for i in range(len(border_lines)):
+            if border_lines[i] < header_sep_idx:
+                header_start = border_lines[i]
+            else:
+                break
+        
+        if header_start is not None:
+            header_content = []
+            for line_idx in range(header_start + 1, header_end):
+                line = lines[line_idx].strip()
+                if line.startswith('|') and line.endswith('|'):
+                    header_content.append(line)
+            
+            if header_content:
+                header_cells = self._merge_multiline_cells(header_content)
+                if header_cells:
+                    rows.append(header_cells)
+        
+        # Then get data rows (after header separator)
+        # Look for sections between borders that may contain multiple logical rows
+        for i in range(len(border_lines) - 1):
+            start_border = border_lines[i]
+            end_border = border_lines[i + 1]
+            
+            # Skip if this is before the header separator
+            if end_border <= header_sep_idx:
+                continue
+            
+            # Collect content lines between borders
+            content_lines = []
+            for line_idx in range(start_border + 1, end_border):
+                line = lines[line_idx].strip()
+                if line.startswith('|') and line.endswith('|'):
+                    content_lines.append(line)
+            
+            if content_lines:
+                # Check if this section contains multiple logical rows or one multi-line row
+                logical_rows = self._split_logical_rows(content_lines)
+                for logical_row_lines in logical_rows:
+                    merged_cells = self._merge_multiline_cells(logical_row_lines)
+                    if merged_cells:
+                        rows.append(merged_cells)
+        
+        if not rows:
+            raise ValueError("No data rows found")
         
         return rows, alignments
+    
+    def _split_logical_rows(self, content_lines: List[str]) -> List[List[str]]:
+        """Split content lines into logical rows."""
+        if not content_lines:
+            return []
+        
+        # For now, treat all content between borders as one logical row
+        # This handles the case where a single logical row spans multiple lines
+        # without intermediate row separators
+        return [content_lines]
+    
+    def _merge_multiline_cells(self, content_lines: List[str]) -> List[str]:
+        """Merge multi-line cell content into a single row."""
+        if not content_lines:
+            return []
+        
+        # Parse first line to get the number of columns
+        first_line_cells = [cell.strip() for cell in content_lines[0][1:-1].split('|')]
+        merged_cells = first_line_cells[:]
+        
+        # Merge content from subsequent lines
+        for line in content_lines[1:]:
+            line_cells = [cell.strip() for cell in line[1:-1].split('|')]
+            for j, cell_content in enumerate(line_cells):
+                if j < len(merged_cells) and cell_content:
+                    if merged_cells[j]:
+                        merged_cells[j] += ' ' + cell_content
+                    else:
+                        merged_cells[j] = cell_content
+        
+        return merged_cells
     
     def _extract_alignments(self, sep_line: str) -> List[str]:
         """Extract current alignments from header separator."""
