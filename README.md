@@ -122,7 +122,7 @@ make install      # Install dependencies
 ./binder help            # See all commands
 
 # Or use traditional Make commands
-make preview      # Start development server
+make preview        # Start development server
 ```
 
 ---
@@ -157,13 +157,13 @@ The **Book Binder** is our lightning-fast development CLI for streamlined buildi
 
 ```bash
 # Fast chapter development
-./binder build intro              # Build single chapter  
-./binder build intro,ml_systems   # Build multiple chapters together
-./binder preview intro            # Build and preview chapter
+./binder build intro html             # Build single chapter  
+./binder build intro,ml_systems html  # Build multiple chapters together
+./binder preview intro                # Build and preview chapter
 
 # Full book building
-./binder build-full html          # Build complete website
-./binder build-full pdf           # Build complete PDF
+./binder build * html                 # Build complete website
+./binder build * pdf                  # Build complete PDF
 
 # Management
 ./binder clean                    # Clean artifacts

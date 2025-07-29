@@ -6,7 +6,7 @@ The **Book Binder** is a self-contained, lightning-fast development CLI for the 
 
 ```bash
 # Build a single chapter
-./binder build intro
+./binder build intro html
 
 # Build multiple chapters together 
 ./binder build intro,ml_systems html
@@ -15,7 +15,7 @@ The **Book Binder** is a self-contained, lightning-fast development CLI for the 
 ./binder preview intro
 
 # Build the complete book
-./binder build-full pdf
+./binder build * pdf
 
 # Get help
 ./binder help
@@ -39,10 +39,10 @@ Fast builds focus on individual chapters with minimal overhead, perfect for deve
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `build <chapter[,ch2,...]> [format]` | Build one or more chapters | `./binder build intro,ml_systems html` |
+| `build <chapter[,ch2,...]> <format>` | Build one or more chapters | `./binder build intro,ml_systems html` |
 | `preview <chapter>` | Build and preview a chapter | `./binder preview ops` |
 
-**Supported formats**: `html` (default), `pdf`
+**Supported formats**: `html`, `pdf` (format is required)
 
 ### 📚 Full Book Commands
 
@@ -50,7 +50,7 @@ Full builds render the complete book with all chapters, parts, and cross-referen
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `build-full [format]` | Build complete book | `./binder build-full pdf` |
+| `build * <format>` | Build complete book | `./binder build * pdf` |
 | `preview-full` | Preview complete book | `./binder preview-full` |
 
 ### 🔧 Management Commands
@@ -72,7 +72,6 @@ All commands have single-letter shortcuts:
 |----------|---------|
 | `b` | `build` |
 | `p` | `preview` |
-| `bf` | `build-full` |
 | `pf` | `preview-full` |
 | `c` | `clean` |
 | `ch` | `check` |
@@ -167,7 +166,7 @@ Use `./binder switch <format>` to change the active configuration.
 ./binder build intro,ml_systems html
 
 # 4. Check full book before committing
-./binder build-full pdf
+./binder build * pdf
 ```
 
 ### Before Committing
@@ -180,8 +179,8 @@ Use `./binder switch <format>` to change the active configuration.
 ./binder check
 
 # Build full book to ensure everything works
-./binder build-full html
-./binder build-full pdf
+./binder build * html
+./binder build * pdf
 ```
 
 ## Troubleshooting
@@ -203,9 +202,9 @@ Use `./binder switch <format>` to change the active configuration.
 
 ### Performance Tips
 
-- Use fast builds (`./binder build chapter`) for development
-- Use unified builds (`./binder build ch1,ch2`) for multiple chapters
-- Only use full builds (`./binder build-full`) for final verification
+- Use fast builds (`./binder build chapter html`) for development
+- Use unified builds (`./binder build ch1,ch2 html`) for multiple chapters
+- Only use full builds (`./binder build * format`) for final verification
 - Preview mode auto-rebuilds on file changes
 
 ## Integration
