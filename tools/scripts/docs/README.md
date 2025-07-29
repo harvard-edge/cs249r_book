@@ -73,7 +73,7 @@ Cache is invalidated when `requirements.txt` changes, ensuring dependencies stay
 The project uses pre-commit hooks for code quality checks. The hooks run automatically on commit and include:
 
 - **Spell checking** with codespell
-- **YAML validation** for `_quarto.yml`
+- **YAML validation** for `_quarto-html.yml` and `_quarto-pdf.yml`
 - **Markdown formatting** and linting
 - **Bibliography formatting** with bibtex-tidy
 - **Custom Python scripts** for section ID management and unreferenced label detection

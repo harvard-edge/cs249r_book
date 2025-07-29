@@ -113,14 +113,14 @@ jobs:
           path: |
             ~/.cache/pip
             ~\AppData\Local\pip\Cache
-          key: python-pkgs-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+          key: python-pkgs-${{ runner.os }}-${{ hashFiles('tools/dependencies/requirements.txt') }}
           restore-keys: |
             python-pkgs-${{ runner.os }}-
 
       - name: 📦 Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
+          python -m pip install -r tools/dependencies/requirements.txt
 
       # Note: NLTK data is downloaded automatically by section_id_manager.py when needed
 
@@ -320,70 +320,106 @@ jobs:
           echo "Adding Ghostscript path: $binPath"
           echo "$binPath" | Out-File -Append -FilePath $env:GITHUB_PATH
 
-      - name: 🔨 Render Quarto Project (HTML)
+      - name: 🔨 Build HTML (copy config and render)
         if: inputs.format == 'html' || inputs.format == 'all'
-        uses: quarto-dev/quarto-actions/render@v2
-        with:
-            to: html
-            working-directory: book
-
-      # Build PDF after HTML to ensure all assets are available (esp. PDF)
-      - name: 🔨 Render Quarto Project (PDF)
+        shell: bash
+        run: |
+          echo "🚀 Setting up HTML configuration..."
+          cd book
+          cp _quarto-html.yml _quarto.yml
+          echo "✅ Configuration set to HTML"
+          
+          echo "🔨 Building HTML..."
+          quarto render --to html
+        
+      - name: 🔨 Build PDF (copy config and render)
         if: inputs.format == 'pdf' || inputs.format == 'all'
-        uses: quarto-dev/quarto-actions/render@v2
-        with:
-            to: titlepage-pdf
-            working-directory: book
+        shell: bash
+        run: |
+          echo "🚀 Setting up PDF configuration..."
+          cd book
+          cp _quarto-pdf.yml _quarto.yml
+          echo "✅ Configuration set to PDF"
+          
+          echo "🔨 Building PDF..."
+          quarto render --to titlepage-pdf
 
-      - name: 🔨 Render Quarto Project (EPUB)
+      - name: 🔨 Build EPUB (copy config and render)
         if: inputs.format == 'epub' || inputs.format == 'all'
-        uses: quarto-dev/quarto-actions/render@v2
-        with:
-            to: epub
-            working-directory: book     
+        shell: bash
+        run: |
+          echo "🚀 Setting up EPUB configuration..."
+          cd book
+          cp _quarto-epub.yml _quarto.yml
+          echo "✅ Configuration set to EPUB"
+          
+          echo "🔨 Building EPUB..."
+          quarto render --to epub     
       
       - name: 📋 Check Quarto Build Output
         shell: bash
         run: |
           echo "🔄 Checking Quarto build output..."
 
-          if [ -d "book/_book" ]; then
-            echo "✅ book/_book directory exists"
-            echo "📊 Files in book/_book directory:"
-            ls -la book/_book | head -n 20
-            echo "📊 Total files in book/_book:"
-            find book/_book -type f | wc -l
+          # HTML check
+          if [[ "${{ inputs.format }}" == "html" || "${{ inputs.format }}" == "all" ]]; then
+            if [ -d "build/html" ]; then
+              echo "✅ build/html directory exists"
+              echo "📊 Files in build/html directory:"
+              ls -la build/html | head -n 20
+              echo "📊 Total files in build/html:"
+              find build/html -type f | wc -l
+            else
+              echo "❌ build/html directory not found!"
+            fi
+          fi
 
-            # PDF check
-            if [[ "${{ inputs.format }}" == "pdf" || "${{ inputs.format }}" == "all" ]]; then
-              if [ -f "book/_book/Machine-Learning-Systems.pdf" ]; then
+          # PDF check
+          if [[ "${{ inputs.format }}" == "pdf" || "${{ inputs.format }}" == "all" ]]; then
+            if [ -d "build/pdf" ]; then
+              echo "✅ build/pdf directory exists"
+              echo "📊 Files in build/pdf directory:"
+              ls -la build/pdf | head -n 20
+              echo "📊 Total files in build/pdf:"
+              find build/pdf -type f | wc -l
+              
+              if [ -f "build/pdf/Machine-Learning-Systems.pdf" ]; then
                 echo "✅ PDF file exists"
                 echo "📊 PDF file size:"
-                du -h "book/_book/Machine-Learning-Systems.pdf"
+                du -h "build/pdf/Machine-Learning-Systems.pdf"
               else
                 echo "⚠️ PDF file not found!"
               fi
+            else
+              echo "❌ build/pdf directory not found!"
             fi
+          fi
 
-            # EPUB check
-            if [[ "${{ inputs.format }}" == "epub" || "${{ inputs.format }}" == "all" ]]; then
-              if [ -f "book/_book/Machine-Learning-Systems.epub" ]; then
+          # EPUB check
+          if [[ "${{ inputs.format }}" == "epub" || "${{ inputs.format }}" == "all" ]]; then
+            if [ -d "build/epub" ]; then
+              echo "✅ build/epub directory exists"
+              echo "📊 Files in build/epub directory:"
+              ls -la build/epub | head -n 20
+              echo "📊 Total files in build/epub:"
+              find build/epub -type f | wc -l
+              
+              if [ -f "build/epub/Machine-Learning-Systems.epub" ]; then
                 echo "✅ EPUB file exists"
                 echo "📊 EPUB file size:"
-                du -h "book/_book/Machine-Learning-Systems.epub"
+                du -h "build/epub/Machine-Learning-Systems.epub"
               else
                 echo "⚠️ EPUB file not found!"
               fi
+            else
+              echo "❌ build/epub directory not found!"
             fi
-
-          else
-            echo "❌ book/_book directory not found!"
           fi
 
       - name: 📉 Compress PDF with Ghostscript (Linux)
         if: runner.os == 'Linux' && (inputs.format == 'pdf' || inputs.format == 'all')
         run: |
-          if [ -f "book/_book/Machine-Learning-Systems.pdf" ]; then
+          if [ -f "build/pdf/Machine-Learning-Systems.pdf" ]; then
             gs \
               -sDEVICE=pdfwrite \
               -dCompatibilityLevel=1.4 \
@@ -391,11 +427,11 @@ jobs:
               -dNOPAUSE \
               -dQUIET \
               -dBATCH \
-              -sOutputFile="./book/_book/ebook.pdf" \
-              "./book/_book/Machine-Learning-Systems.pdf"
+              -sOutputFile="./build/pdf/ebook.pdf" \
+              "./build/pdf/Machine-Learning-Systems.pdf"
 
             # Replace original with compressed
-            mv ./book/_book/ebook.pdf ./book/_book/Machine-Learning-Systems.pdf
+            mv ./build/pdf/ebook.pdf ./build/pdf/Machine-Learning-Systems.pdf
           else
             echo "⚠️ PDF file not found for compression"
           fi
@@ -404,8 +440,8 @@ jobs:
         if: runner.os == 'Windows' && (inputs.format == 'pdf' || inputs.format == 'all')
         shell: pwsh
         run: |
-          $input = "./book/_book/Machine-Learning-Systems.pdf"
-          $output = "./book/_book/ebook.pdf"
+          $input = "./build/pdf/Machine-Learning-Systems.pdf"
+          $output = "./build/pdf/ebook.pdf"
 
           if (!(Test-Path $input)) {
             Write-Warning "⚠️ Input PDF not found! Skipping compression..."
@@ -427,12 +463,15 @@ jobs:
             Write-Warning "⚠️ Compression failed but continuing"
           }
           
-      - name: 📤 Upload _book directory as artifact
+      - name: 📤 Upload build artifacts
         if: github.event_name == 'pull_request' || inputs.deploy == false || inputs.format != 'html'
         uses: actions/upload-artifact@v4
         with:
-          name: _book-${{ inputs.os }}-${{ inputs.format }}
-          path: book/_book
+          name: build-${{ inputs.os }}-${{ inputs.format }}
+          path: |
+            build/html
+            build/pdf
+            build/epub
 
       - name: 🚀 Stage to Dev Site
         if: inputs.target == 'dev' && inputs.deploy == true && inputs.format == 'html' && runner.os == 'Linux'
@@ -455,7 +494,7 @@ jobs:
 
           echo "🧹 Cleaning existing docs/"
           rm -rf docs
-          cp -r "${GITHUB_WORKSPACE}/book/_book" docs
+          cp -r "${GITHUB_WORKSPACE}/build/html" docs
           rm -f docs/CNAME  # remove if present
 
           echo "🔍 Validating deployment content..."
@@ -475,16 +514,34 @@ jobs:
           echo "📊 Deployed to repository: harvard-edge/cs249r_book_dev"
           echo "📊 Target branch: main"
           echo "📊 Target directory: docs"
-          echo "📊 Source directory: book/_book"
+          echo "📊 Source directory: build/html"
           echo "✅ Deployment should be complete"
 
       # Deploy to GitHub Pages
       - name: 🚀 Deploy to GitHub Pages
-        if: inputs.target == 'main' && runner.os == 'Linux' && inputs.deploy == true
-        uses: quarto-dev/quarto-actions/publish@v2
-        with:
-          target: gh-pages
-          render: false
+        if: inputs.target == 'main' && runner.os == 'Linux' && inputs.deploy == true && inputs.format == 'html'
+        shell: bash
+        run: |
+          echo "🚀 Deploying to GitHub Pages..."
+          
+          # Clone gh-pages branch
+          git clone --depth=1 --branch=gh-pages https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git gh-pages-repo
+          
+          # Clear existing content
+          cd gh-pages-repo
+          rm -rf *
+          
+          # Copy new content
+          cp -r ../build/html/* .
+          
+          # Configure git
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          
+          # Commit and push
+          git add .
+          git commit -m "Deploy from commit ${GITHUB_SHA}" || echo "No changes to commit"
+          git push origin gh-pages
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -494,7 +551,7 @@ jobs:
         run: |
           echo "🔄 GitHub Pages deployment information:"
           echo "📊 Deployed to: gh-pages branch"
-          echo "📊 Source directory: book/_book"
+          echo "📊 Source directory: build/html"
           echo "✅ Deployment should be complete"
           echo "🌐 Site should be available at: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
 

@@ -300,8 +300,7 @@ local function insert_quizzes(doc)
   end
   
   -- Document has quizzes, show clean processing info
-  io.stderr:write("📝 [Quiz Filter] 🚀 Quiz Injection Filter\n")
-  io.stderr:write("📝 [Quiz Filter] 🔍 Document has quizzes - processing...\n")
+  io.stderr:write("📝 [Quiz Filter] 📚 Document has quizzes - processing...\n")
 
   local quizzes_injected = 0
 
