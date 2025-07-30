@@ -330,12 +330,17 @@ def generate_changelog(mode="incremental", verbose=False):
     run_git_command(["git", "fetch", "origin", "dev:refs/remotes/origin/dev"], verbose=verbose)
 
     def get_latest_gh_pages_commit():
-        output = run_git_command(["git", "log", "-1", "--pretty=format:%H %ad", "--date=iso", "origin/gh-pages"], verbose=verbose)
-        parts = output.split(" ", 1)
-        return (parts[0], parts[1]) if len(parts) == 2 else (None, None)
+        # Look for actual publication commits, not administrative ones
+        output = run_git_command(["git", "log", "--pretty=format:%H %ad", "--date=iso", "--grep=Built site for gh-pages", "origin/gh-pages"], verbose=verbose)
+        if output.strip():
+            first_line = output.split('\n')[0]
+            parts = first_line.split(" ", 1)
+            return (parts[0], parts[1]) if len(parts) == 2 else (None, None)
+        return (None, None)
 
     def get_all_gh_pages_commits():
-        output = run_git_command(["git", "log", "--pretty=format:%H %ad", "--date=iso", "origin/gh-pages"], verbose=verbose)
+        # Look for actual publication commits, not administrative ones
+        output = run_git_command(["git", "log", "--pretty=format:%H %ad", "--date=iso", "--grep=Built site for gh-pages", "origin/gh-pages"], verbose=verbose)
         commits = []
         for line in output.splitlines():
             parts = line.split(" ", 1)
