@@ -310,6 +310,7 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False):
             chapters.append(summary)
 
     # Determine if sections should be open or closed
+    # Only the latest entry should be open, all previous entries should be folded
     details_state = "open" if is_latest else ""
 
     # Add sections in order: Frontmatter, Chapters, Labs, Appendix
@@ -323,6 +324,16 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False):
         entry += f"<details {details_state}>\n<summary>**📚 Appendix**</summary>\n\n" + "\n".join(sort_by_chapter_order(appendix)) + "\n\n</details>\n"
 
     return entry
+
+def fold_existing_entries(content):
+    """Fold all existing details sections in the changelog content."""
+    import re
+    
+    # Pattern to match <details open> and replace with <details>
+    pattern = r'<details open>'
+    replacement = '<details>'
+    
+    return re.sub(pattern, replacement, content)
 
 def generate_changelog(mode="incremental", verbose=False):
     print("🔄 Fetching latest Git data...")
@@ -474,8 +485,9 @@ if __name__ == "__main__":
                 # For full mode, replace entire content (already includes year headers)
                 updated_content = new_entry.strip()
             else:
-                # For incremental, prepend to existing
-                updated_content = f"{new_entry.strip()}\n---\n\n{cleaned_existing}"
+                # For incremental, prepend to existing and fold all previous entries
+                folded_existing = fold_existing_entries(cleaned_existing)
+                updated_content = f"{new_entry.strip()}\n---\n\n{folded_existing}"
 
             with open(CHANGELOG_FILE, "w", encoding="utf-8") as f:
                 f.write(updated_content.strip() + "\n")

@@ -181,14 +181,14 @@ _No updates found._
 
 ### 📅 Jun 10, 2025
 
-<details open>
+<details>
 <summary>**📄 Frontmatter**</summary>
 
 - **SocratiqAI**: The 'socratiq.qmd' file in the AI section of the frontmatter contents has been updated with corrections to minor content errors and possibly some content updates or additions, as indicated by the 'Update_socratiq' commit message.
 
 </details>
 
-<details open>
+<details>
 <summary>**📖 Chapters**</summary>
 
 - **Chapter 1: Introduction**: The introduction chapter has been updated with improved text processing, the addition of missing footnotes, and refined language for better clarity and precision.
@@ -213,7 +213,7 @@ _No updates found._
 
 </details>
 
-<details open>
+<details>
 <summary>**🧑‍💻 Labs**</summary>
 
 - **Lab: Arduino Image Classification**: The updates to the Grove Vision AI V2 section of the machine learning systems textbook include improved documentation, the addition of an Image Classification Lab, and the introduction of a new lab specifically focused on Grove Vision AI v2.
