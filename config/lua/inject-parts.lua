@@ -6,15 +6,11 @@
 -- LaTeX commands based on the key name, creating a structured book hierarchy.
 --
 -- ROUTING LOGIC:
--- 1. Divisions (frontmatter, main_content, backmatter) → \division{title}
+-- 1. Divisions (frontmatter, main_content, backmatter, labs) → \division{title}
 --    - Clean centered styling with geometric background
 --    - No descriptions displayed
 --
--- 2. Unnumbered parts (labs) → \part*{title}
---    - Division-style background (via \titleformat{name=\part,numberless})
---    - Includes part description
---
--- 3. All other parts (foundations, principles, etc.) → \part{title}
+-- 2. All other parts (foundations, principles, etc.) → \part{title}
 --    - Roman numeral styling (via \titleformat{\part})
 --    - Includes part description
 --
@@ -27,7 +23,7 @@
 --
 -- EXAMPLE TRANSFORMATIONS:
 -- \part{key:foundations} → \part{Systems Foundations} + description
--- \part{key:labs} → \part*{Labs} + description  
+-- \part{key:labs} → \division{Labs} (no description)
 -- \part{key:frontmatter} → \division{Frontmatter} (no description)
 -- ===============================================================================
 
@@ -209,24 +205,15 @@ function RawBlock(el)
       
       -- ROUTING LOGIC: Transform based on key name
       
-      -- 1. DIVISIONS: Major book sections (frontmatter, main_content, backmatter)
-      if normalized_key == "frontmatter" or normalized_key == "main_content" or normalized_key == "backmatter" then
+      -- 1. DIVISIONS: Major book sections (frontmatter, main_content, backmatter, labs)
+      if normalized_key == "frontmatter" or normalized_key == "main_content" or normalized_key == "backmatter" or normalized_key == "labs" then
         part_cmd = "\\division{" .. formatted_title .. "}"
         log_info("🔄 Replacing key '" .. key .. "' with division: '" .. formatted_title .. "' (no description)")
         return {
           pandoc.RawBlock("latex", part_cmd)
         }
       
-      -- 2. UNNUMBERED PARTS: Special sections like "Labs"
-      elseif normalized_key == "labs" then
-        part_cmd = "\\part*{" .. formatted_title .. "}"
-        log_info("🔄 Replacing key '" .. key .. "' with unnumbered part: '" .. formatted_title .. "' + description")
-        return {
-          pandoc.RawBlock("latex", setpartsummary_cmd),
-          pandoc.RawBlock("latex", part_cmd)
-        }
-      
-      -- 3. NUMBERED PARTS: Main content sections (foundations, principles, etc.)
+      -- 2. NUMBERED PARTS: Main content sections (foundations, principles, etc.)
       else
         part_cmd = "\\part{" .. formatted_title .. "}"
         log_info("🔄 Replacing key '" .. key .. "' with numbered part: '" .. formatted_title .. "' + description")
