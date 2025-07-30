@@ -17,6 +17,10 @@ on:
           - 'minor' 
           - 'major'
         default: 'minor'
+      dev_commit:
+        description: 'Specific dev commit to publish (leave empty for latest)'
+        required: false
+        default: ''
       confirm:
         description: 'Type "PUBLISH" to confirm you want to go live'
         required: true
@@ -41,11 +45,28 @@ jobs:
 
       - name: 🔍 Check if dev branch tests passed
         run: |
-          echo "🔄 Checking latest dev branch build status..."
+          echo "🔄 Checking dev branch build status..."
           
-          # Get the latest dev branch commit
-          DEV_SHA=$(git rev-parse origin/dev)
-          echo "📊 Latest dev commit: $DEV_SHA"
+          # Determine which commit to use
+          if [ -n "${{ github.event.inputs.dev_commit }}" ]; then
+            DEV_SHA="${{ github.event.inputs.dev_commit }}"
+            echo "📌 Using specified commit: $DEV_SHA"
+            
+            # Validate the commit exists
+            if ! git cat-file -e "$DEV_SHA" 2>/dev/null; then
+              echo "❌ Commit $DEV_SHA does not exist!"
+              exit 1
+            fi
+            
+            # Check if commit is in dev branch
+            if ! git merge-base --is-ancestor "$DEV_SHA" origin/dev; then
+              echo "❌ Commit $DEV_SHA is not in dev branch history!"
+              exit 1
+            fi
+          else
+            DEV_SHA=$(git rev-parse origin/dev)
+            echo "📊 Using latest dev commit: $DEV_SHA"
+          fi
           
           # Check if there's a successful workflow run for this commit
           echo "🔄 Checking workflow runs for dev branch..."
@@ -133,13 +154,24 @@ jobs:
           git pull origin main
           
           echo "🔄 Merging dev into main..."
-          git merge origin/dev --no-ff -m "🚀 Release ${{ steps.version.outputs.new_version }}: ${{ github.event.inputs.description }}
+          
+          # Determine which commit to merge
+          if [ -n "${{ github.event.inputs.dev_commit }}" ]; then
+            MERGE_COMMIT="${{ github.event.inputs.dev_commit }}"
+            echo "📌 Merging specific commit: $MERGE_COMMIT"
+          else
+            MERGE_COMMIT="origin/dev"
+            echo "📊 Merging latest dev: $MERGE_COMMIT"
+          fi
+          
+          git merge "$MERGE_COMMIT" --no-ff -m "🚀 Release ${{ steps.version.outputs.new_version }}: ${{ github.event.inputs.description }}
 
           Merged dev branch to main for publication.
           
           Release Type: ${{ github.event.inputs.release_type }}
           Published by: ${{ github.actor }}
-          Dev Commit: $(git rev-parse origin/dev)
+          Dev Commit: ${MERGE_COMMIT}
+          Specific Commit: ${{ github.event.inputs.dev_commit || 'latest' }}
           Description: ${{ github.event.inputs.description }}"
           
           echo "✅ Merge completed successfully!"
@@ -239,6 +271,7 @@ jobs:
           echo "**Version Released:** ${{ steps.version.outputs.new_version }} (${{ steps.version.outputs.release_type }})" >> $GITHUB_STEP_SUMMARY
           echo "**What was published:** ${{ github.event.inputs.description }}" >> $GITHUB_STEP_SUMMARY
           echo "**Published by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Dev Commit:** ${{ github.event.inputs.dev_commit || 'latest' }}" >> $GITHUB_STEP_SUMMARY
           echo "**Published at:** $(date)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🔄 What happened:" >> $GITHUB_STEP_SUMMARY
