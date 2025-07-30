@@ -87,17 +87,12 @@
 - **PhD Survival Guide**: The appendix section "PhD Survival Guide" has been updated with new resources moved to the backmatter, section content considerations, changes to manager code reflected in section IDs, and updated section headers.
 
 </details>
----
 
-_No updates found._
----
-
-_No updates found._
 ---
 
 ### 📅 Jul 06, 2025
 
-<details open>
+<details>
 <summary>**📄 Frontmatter**</summary>
 
 - **Index**: The frontmatter index has been updated with new hashes that consider section content, section IDs have been revised due to changes in manager code, and section headers have been updated using a script.
@@ -107,7 +102,7 @@ _No updates found._
 
 </details>
 
-<details open>
+<details>
 <summary>**📖 Chapters**</summary>
 
 - **Foundations**: The updates to the "foundations.qmd" file include the implementation of PDF summaries for different parts of the book and the addition of a new section that outlines the organization of the book parts.
@@ -139,7 +134,7 @@ _No updates found._
 
 </details>
 
-<details open>
+<details>
 <summary>**🧑‍💻 Labs**</summary>
 
 - **Lab: Labs Overview**: The overview.qmd file in the labs section of the machine learning systems textbook has been updated with a new hash that takes into account the content of the sections, changes to section IDs due to modifications in the manager code, and updates to section headers using a script.
@@ -171,7 +166,7 @@ _No updates found._
 
 </details>
 
-<details open>
+<details>
 <summary>**📚 Appendix**</summary>
 
 - **PhD Survival Guide**: The appendix section "PhD Survival Guide" has been updated with new resources, section content, and headers, along with changes to section IDs in accordance with the updated manager code.
