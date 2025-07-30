@@ -175,18 +175,24 @@ function RawBlock(el)
       if part_type == "lab" then
         part_cmd = "\\lab{" .. formatted_title .. "}"
         log_info("🔄 Replacing key '" .. key .. "' with lab: '" .. formatted_title .. "' + description")
+        return {
+          pandoc.RawBlock("latex", setpartsummary_cmd),
+          pandoc.RawBlock("latex", part_cmd)
+        }
       elseif numbered then
         part_cmd = "\\numberedpart{" .. formatted_title .. "}"
         log_info("🔄 Replacing key '" .. key .. "' with numbered part: '" .. formatted_title .. "' + description")
+        return {
+          pandoc.RawBlock("latex", setpartsummary_cmd),
+          pandoc.RawBlock("latex", part_cmd)
+        }
       else
         part_cmd = "\\division{" .. formatted_title .. "}"
-        log_info("🔄 Replacing key '" .. key .. "' with division: '" .. formatted_title .. "' + description")
+        log_info("🔄 Replacing key '" .. key .. "' with division: '" .. formatted_title .. "' (no description)")
+        return {
+          pandoc.RawBlock("latex", part_cmd)
+        }
       end
-      
-      return {
-        pandoc.RawBlock("latex", setpartsummary_cmd),
-        pandoc.RawBlock("latex", part_cmd)
-      }
     else
       log_error("UNDEFINED KEY: '" .. key .. "' not found in part_summaries.yml")
       log_error("Available keys: frontmatter, foundations, principles, optimization, deployment, governance, futures, labs, arduino, xiao, grove, raspberry, shared")
