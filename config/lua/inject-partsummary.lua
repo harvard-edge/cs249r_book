@@ -45,28 +45,14 @@ local function to_roman(num)
   return result
 end
 
--- Part ordering for Roman numerals
-local part_order = {
-  "foundations", "principles", "optimization", "deployment",
-  "responsible", "futures", "arduino", "xiao", "grove", "raspberry", "shared"
+-- Part ordering for Roman numerals (numbered parts only)
+local numbered_part_order = {
+  "foundations", "principles", "optimization", "deployment", "governance", "futures"
 }
 
--- Parts that should be unnumbered
-local unnumbered_parts = { "frontmatter", "labs" }
-
--- Check if a part should be unnumbered
-local function is_unnumbered_part(key)
-  for _, unnumbered_key in ipairs(unnumbered_parts) do
-    if unnumbered_key == key then
-      return true
-    end
-  end
-  return false
-end
-
--- Get part number for a given key
+-- Get part number for a given key (numbered parts only)
 local function get_part_number(key)
-  for i, part_key in ipairs(part_order) do
+  for i, part_key in ipairs(numbered_part_order) do
     if part_key == key then
       return i
     end
@@ -75,7 +61,7 @@ local function get_part_number(key)
 end
 
 -- Helper function to format title with part number
-local function format_part_title(key, title)
+local function format_part_title(key, title, numbered)
   -- Always return just the clean title without any "Part X —" prefix
   -- The LaTeX template handles Roman numerals and "Part X" labels separately
   return title
@@ -98,6 +84,8 @@ local function read_summaries(path)
   local entries_loaded = 0
   local current_key = nil
   local current_title = nil
+  local current_type = nil
+  local current_numbered = nil
   local description_lines = {}
   local in_parts_section = false
   local in_description = false
@@ -110,17 +98,25 @@ local function read_summaries(path)
         local description = table.concat(description_lines, " "):gsub("^%s+", ""):gsub("%s+$", "")
         summaries[normalize(current_key)] = {
           title = current_title,
-          description = description
+          description = description,
+          type = current_type or "part",
+          numbered = current_numbered or false
         }
         entries_loaded = entries_loaded + 1
-        log_info("📝 Loaded: '" .. current_key .. "' → '" .. current_title .. "' + description")
+        log_info("📝 Loaded: '" .. current_key .. "' → '" .. current_title .. "' (type: " .. (current_type or "part") .. ", numbered: " .. tostring(current_numbered or false) .. ")")
       end
       current_key = line:match('%s*%-%s*key:%s*"([^"]+)"')
       current_title = nil
+      current_type = nil
+      current_numbered = nil
       description_lines = {}
       in_description = false
     elseif in_parts_section and current_key and line:match('%s*title:%s*"([^"]+)"') then
       current_title = line:match('%s*title:%s*"([^"]+)"')
+    elseif in_parts_section and current_key and line:match('%s*type:%s*"([^"]+)"') then
+      current_type = line:match('%s*type:%s*"([^"]+)"')
+    elseif in_parts_section and current_key and line:match('%s*numbered:%s*(true|false)') then
+      current_numbered = line:match('%s*numbered:%s*(true|false)') == "true"
     elseif in_parts_section and current_key and line:match('%s*description:%s*>?') then
       in_description = true
     elseif in_description and current_key then
@@ -141,10 +137,12 @@ local function read_summaries(path)
     local description = table.concat(description_lines, " "):gsub("^%s+", ""):gsub("%s+$", "")
     summaries[normalize(current_key)] = {
       title = current_title,
-      description = description
+      description = description,
+      type = current_type or "part",
+      numbered = current_numbered or false
     }
     entries_loaded = entries_loaded + 1
-    log_info("📝 Loaded: '" .. current_key .. "' → '" .. current_title .. "' + description")
+    log_info("📝 Loaded: '" .. current_key .. "' → '" .. current_title .. "' (type: " .. (current_type or "part") .. ", numbered: " .. tostring(current_numbered or false) .. ")")
   end
   
   log_success("Successfully loaded " .. entries_loaded .. " part summaries")
@@ -167,17 +165,29 @@ function RawBlock(el)
       local part_entry = summaries[normalized_key]
       local title = part_entry.title
       local description = part_entry.description
-      local formatted_title = format_part_title(normalized_key, title)
+      local part_type = part_entry.type or "part"
+      local numbered = part_entry.numbered or false
+      local formatted_title = format_part_title(normalized_key, title, numbered)
       
       local setpartsummary_cmd = "\\setpartsummary{" .. description .. "}"
       local part_cmd
       
-      if is_unnumbered_part(normalized_key) then
-        part_cmd = "\\part*{" .. formatted_title .. "}"
-        log_info("🔄 Replacing key '" .. key .. "' with unnumbered part: '" .. formatted_title .. "' + description")
+      if part_type == "lab" then
+        if numbered then
+          part_cmd = "\\lab{" .. formatted_title .. "}"
+          log_info("🔄 Replacing key '" .. key .. "' with numbered lab: '" .. formatted_title .. "' + description")
+        else
+          part_cmd = "\\lab*{" .. formatted_title .. "}"
+          log_info("🔄 Replacing key '" .. key .. "' with unnumbered lab: '" .. formatted_title .. "' + description")
+        end
       else
-        part_cmd = "\\part{" .. formatted_title .. "}"
-        log_info("🔄 Replacing key '" .. key .. "' with numbered part: '" .. formatted_title .. "' + description")
+        if numbered then
+          part_cmd = "\\part{" .. formatted_title .. "}"
+          log_info("🔄 Replacing key '" .. key .. "' with numbered part: '" .. formatted_title .. "' + description")
+        else
+          part_cmd = "\\part*{" .. formatted_title .. "}"
+          log_info("🔄 Replacing key '" .. key .. "' with unnumbered part: '" .. formatted_title .. "' + description")
+        end
       end
       
       return {
@@ -186,7 +196,7 @@ function RawBlock(el)
       }
     else
       log_error("UNDEFINED KEY: '" .. key .. "' not found in part_summaries.yml")
-      log_error("Available keys: frontmatter, foundations, principles, optimization, deployment, responsible, futures, labs, arduino, xiao, grove, raspberry, shared")
+      log_error("Available keys: frontmatter, foundations, principles, optimization, deployment, governance, futures, labs, arduino, xiao, grove, raspberry, shared")
       log_error("Build stopped to prevent incorrect part titles.")
       error("Part summary filter failed: undefined key '" .. key .. "' in \\part*{key:" .. key .. "}")
     end
