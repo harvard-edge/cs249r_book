@@ -5,8 +5,8 @@ end
 
 -- 🗝️ Extract key from LaTeX part command
 local function extract_key_from_latex(content)
-  -- Look for \part*{key:xxx} pattern in content
-  local key = content:match("\\part%*?%{key:([^}]+)%}")
+  -- Look for \part{key:xxx} pattern in content
+  local key = content:match("\\part%{key:([^}]+)%}")
   return key
 end
 
@@ -188,7 +188,7 @@ function RawBlock(el)
       log_error("UNDEFINED KEY: '" .. key .. "' not found in part_summaries.yml")
       log_error("Available keys: frontmatter, foundations, principles, optimization, deployment, governance, futures, labs, arduino, xiao, grove, raspberry, shared")
       log_error("Build stopped to prevent incorrect part titles.")
-      error("Part summary filter failed: undefined key '" .. key .. "' in \\part*{key:" .. key .. "}")
+      error("Part summary filter failed: undefined key '" .. key .. "' in \\part{key:" .. key .. "}")
     end
   end
   return nil
