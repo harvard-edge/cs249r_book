@@ -1,6 +1,6 @@
 ## 2025 Changes
 
-### 📅 Published on Jul 06, 2025
+### 📅 Jul 06, 2025
 
 <details open>
 <summary>**📄 Frontmatter**</summary>
@@ -84,7 +84,7 @@
 </details>
 ---
 
-### 📅 Published on Jun 10, 2025
+### 📅 Jun 10, 2025
 
 <details open>
 <summary>**📄 Frontmatter**</summary>
@@ -136,7 +136,7 @@
 </details>
 ---
 
-### 📅 Published on May 14, 2025
+### 📅 May 14, 2025
 
 <details >
 <summary>**📖 Chapters**</summary>
@@ -146,7 +146,7 @@
 </details>
 ---
 
-### 📅 Published on May 04, 2025
+### 📅 May 04, 2025
 
 <details >
 <summary>**📖 Chapters**</summary>
@@ -198,7 +198,7 @@
 </details>
 ---
 
-### 📅 Published on Mar 25, 2025
+### 📅 Mar 25, 2025
 
 <details >
 <summary>**📄 Frontmatter**</summary>
@@ -265,7 +265,7 @@
 </details>
 ---
 
-### 📅 Published on Mar 03, 2025
+### 📅 Mar 03, 2025
 
 <details >
 <summary>**📄 Frontmatter**</summary>
@@ -317,7 +317,7 @@
 </details>
 ---
 
-### 📅 Published on Feb 08, 2025
+### 📅 Feb 08, 2025
 
 <details >
 <summary>**📄 Frontmatter**</summary>
@@ -328,7 +328,7 @@
 </details>
 ---
 
-### 📅 Published on Feb 07, 2025
+### 📅 Feb 07, 2025
 
 <details >
 <summary>**📄 Frontmatter**</summary>
@@ -401,7 +401,7 @@
 </details>
 ---
 
-### 📅 Published on Feb 02, 2025
+### 📅 Feb 02, 2025
 
 <details >
 <summary>**📄 Frontmatter**</summary>
@@ -436,7 +436,7 @@
 </details>
 ---
 
-### 📅 Published on Jan 28, 2025
+### 📅 Jan 28, 2025
 
 <details >
 <summary>**📄 Frontmatter**</summary>
@@ -479,7 +479,7 @@
 </details>
 ---
 
-### 📅 Published on Jan 17, 2025
+### 📅 Jan 17, 2025
 
 <details >
 <summary>**📄 Frontmatter**</summary>
@@ -512,7 +512,7 @@
 </details>
 ---
 
-### 📅 Published on Jan 12, 2025
+### 📅 Jan 12, 2025
 
 <details >
 <summary>**📄 Frontmatter**</summary>
@@ -532,7 +532,7 @@
 </details>
 ---
 
-### 📅 Published on Jan 11, 2025
+### 📅 Jan 11, 2025
 
 <details >
 <summary>**📄 Frontmatter**</summary>
@@ -554,7 +554,7 @@
 </details>
 ---
 
-### 📅 Published on Jan 09, 2025
+### 📅 Jan 09, 2025
 
 <details >
 <summary>**📄 Frontmatter**</summary>
@@ -577,7 +577,7 @@
 </details>
 ---
 
-### 📅 Published on Jan 07, 2025
+### 📅 Jan 07, 2025
 
 <details >
 <summary>**📄 Frontmatter**</summary>
@@ -597,7 +597,7 @@
 </details>
 ---
 
-### 📅 Published on Jan 03, 2025
+### 📅 Jan 03, 2025
 
 <details >
 <summary>**📄 Frontmatter**</summary>
@@ -619,7 +619,7 @@
 </details>
 ---
 
-### 📅 Published on Jan 02, 2025
+### 📅 Jan 02, 2025
 
 <details >
 <summary>**📄 Frontmatter**</summary>
@@ -640,7 +640,7 @@
 
 ## 2024 Changes
 
-### 📅 Published on Nov 19, 2024
+### 📅 Nov 19, 2024
 
 <details >
 <summary>**📄 Frontmatter**</summary>
@@ -661,7 +661,7 @@
 </details>
 ---
 
-### 📅 Published on Nov 16, 2024
+### 📅 Nov 16, 2024
 
 <details >
 <summary>**📄 Frontmatter**</summary>
@@ -719,7 +719,7 @@
 </details>
 ---
 
-### 📅 Published on Sep 20, 2024
+### 📅 Sep 20, 2024
 
 <details >
 <summary>**📖 Chapters**</summary>
@@ -777,7 +777,7 @@
 </details>
 ---
 
-### 📅 Published on Sep 12, 2024
+### 📅 Sep 12, 2024
 
 <details >
 <summary>**📖 Chapters**</summary>
@@ -799,7 +799,7 @@
 </details>
 ---
 
-### 📅 Published on Sep 06, 2024
+### 📅 Sep 06, 2024
 
 <details >
 <summary>**📖 Chapters**</summary>
@@ -809,7 +809,7 @@
 </details>
 ---
 
-### 📅 Published on Sep 04, 2024
+### 📅 Sep 04, 2024
 
 <details >
 <summary>**📖 Chapters**</summary>
@@ -844,7 +844,7 @@
 </details>
 ---
 
-### 📅 Published on Sep 02, 2024
+### 📅 Sep 02, 2024
 
 <details >
 <summary>**📖 Chapters**</summary>
@@ -864,7 +864,7 @@
 </details>
 ---
 
-### 📅 Published on Aug 29, 2024
+### 📅 Aug 29, 2024
 
 <details >
 <summary>**📖 Chapters**</summary>
@@ -884,7 +884,7 @@
 </details>
 ---
 
-### 📅 Published on Aug 27, 2024
+### 📅 Aug 27, 2024
 
 <details >
 <summary>**📖 Chapters**</summary>
@@ -909,7 +909,7 @@
 </details>
 ---
 
-### 📅 Published on Aug 22, 2024
+### 📅 Aug 22, 2024
 
 <details >
 <summary>**📖 Chapters**</summary>
@@ -930,7 +930,7 @@
 </details>
 ---
 
-### 📅 Published on Aug 21, 2024
+### 📅 Aug 21, 2024
 
 <details >
 <summary>**📖 Chapters**</summary>
@@ -975,7 +975,7 @@
 </details>
 ---
 
-### 📅 Published on Aug 15, 2024
+### 📅 Aug 15, 2024
 
 <details >
 <summary>**📖 Chapters**</summary>
@@ -1012,7 +1012,7 @@
 </details>
 ---
 
-### 📅 Published on Aug 07, 2024
+### 📅 Aug 07, 2024
 
 <details >
 <summary>**🧑‍💻 Labs**</summary>
@@ -1035,7 +1035,7 @@
 </details>
 ---
 
-### 📅 Published on Aug 06, 2024
+### 📅 Aug 06, 2024
 
 <details >
 <summary>**📖 Chapters**</summary>
@@ -1085,7 +1085,7 @@
 </details>
 ---
 
-### 📅 Published on Jun 25, 2024
+### 📅 Jun 25, 2024
 
 <details >
 <summary>**📖 Chapters**</summary>
@@ -1095,7 +1095,7 @@
 </details>
 ---
 
-### 📅 Published on Jun 20, 2024
+### 📅 Jun 20, 2024
 
 <details >
 <summary>**📖 Chapters**</summary>
@@ -1112,7 +1112,7 @@
 </details>
 ---
 
-### 📅 Published on Jun 19, 2024
+### 📅 Jun 19, 2024
 
 <details >
 <summary>**📄 Frontmatter**</summary>
@@ -1191,7 +1191,7 @@
 </details>
 ---
 
-### 📅 Published on Jun 11, 2024
+### 📅 Jun 11, 2024
 
 <details >
 <summary>**📖 Chapters**</summary>
@@ -1218,7 +1218,7 @@
 </details>
 ---
 
-### 📅 Published on Jun 01, 2024
+### 📅 Jun 01, 2024
 
 <details >
 <summary>**📖 Chapters**</summary>
@@ -1246,7 +1246,7 @@
 </details>
 ---
 
-### 📅 Published on May 26, 2024
+### 📅 May 26, 2024
 
 <details >
 <summary>**📄 Frontmatter**</summary>
@@ -1296,7 +1296,7 @@
 </details>
 ---
 
-### 📅 Published on Mar 21, 2024
+### 📅 Mar 21, 2024
 
 <details >
 <summary>**📖 Chapters**</summary>
@@ -1322,7 +1322,7 @@
 </details>
 ---
 
-### 📅 Published on Mar 12, 2024
+### 📅 Mar 12, 2024
 
 <details >
 <summary>**📖 Chapters**</summary>
@@ -1355,7 +1355,7 @@
 </details>
 ---
 
-### 📅 Published on Feb 03, 2024
+### 📅 Feb 03, 2024
 
 <details >
 <summary>**📖 Chapters**</summary>
@@ -1372,7 +1372,7 @@
 </details>
 ---
 
-### 📅 Published on Feb 02, 2024
+### 📅 Feb 02, 2024
 
 <details >
 <summary>**📖 Chapters**</summary>
@@ -1397,7 +1397,7 @@
 
 ## 2023 Changes
 
-### 📅 Published on Dec 19, 2023
+### 📅 Dec 19, 2023
 
 <details >
 <summary>**📖 Chapters**</summary>
@@ -1407,7 +1407,7 @@
 </details>
 ---
 
-### 📅 Published on Dec 18, 2023
+### 📅 Dec 18, 2023
 
 <details >
 <summary>**📖 Chapters**</summary>
@@ -1420,7 +1420,7 @@
 </details>
 ---
 
-### 📅 Published on Dec 13, 2023
+### 📅 Dec 13, 2023
 
 <details >
 <summary>**📖 Chapters**</summary>
@@ -1434,7 +1434,7 @@
 </details>
 ---
 
-### 📅 Published on Dec 12, 2023
+### 📅 Dec 12, 2023
 
 <details >
 <summary>**📖 Chapters**</summary>
@@ -1465,7 +1465,7 @@
 </details>
 ---
 
-### 📅 Published on Dec 11, 2023
+### 📅 Dec 11, 2023
 
 <details >
 <summary>**📖 Chapters**</summary>
@@ -1506,7 +1506,7 @@
 </details>
 ---
 
-### 📅 Published on Dec 10, 2023
+### 📅 Dec 10, 2023
 
 <details >
 <summary>**📖 Chapters**</summary>
