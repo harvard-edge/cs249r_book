@@ -172,24 +172,27 @@ function RawBlock(el)
       local setpartsummary_cmd = "\\setpartsummary{" .. description .. "}"
       local part_cmd
       
-      if part_type == "lab" then
-        part_cmd = "\\lab{" .. formatted_title .. "}"
-        log_info("🔄 Replacing key '" .. key .. "' with lab: '" .. formatted_title .. "' + description")
-        return {
-          pandoc.RawBlock("latex", setpartsummary_cmd),
-          pandoc.RawBlock("latex", part_cmd)
-        }
-      elseif numbered then
-        part_cmd = "\\numberedpart{" .. formatted_title .. "}"
-        log_info("🔄 Replacing key '" .. key .. "' with numbered part: '" .. formatted_title .. "' + description")
-        return {
-          pandoc.RawBlock("latex", setpartsummary_cmd),
-          pandoc.RawBlock("latex", part_cmd)
-        }
-      else
+      -- Check if this is a division (frontmatter, main_content, backmatter)
+      if normalized_key == "frontmatter" or normalized_key == "main_content" or normalized_key == "backmatter" then
         part_cmd = "\\division{" .. formatted_title .. "}"
         log_info("🔄 Replacing key '" .. key .. "' with division: '" .. formatted_title .. "' (no description)")
         return {
+          pandoc.RawBlock("latex", part_cmd)
+        }
+      -- Check if this is an unnumbered part (labs)
+      elseif normalized_key == "labs" then
+        part_cmd = "\\part*{" .. formatted_title .. "}"
+        log_info("🔄 Replacing key '" .. key .. "' with unnumbered part: '" .. formatted_title .. "' + description")
+        return {
+          pandoc.RawBlock("latex", setpartsummary_cmd),
+          pandoc.RawBlock("latex", part_cmd)
+        }
+      -- All other parts are numbered (foundations, principles, etc.)
+      else
+        part_cmd = "\\part{" .. formatted_title .. "}"
+        log_info("🔄 Replacing key '" .. key .. "' with numbered part: '" .. formatted_title .. "' + description")
+        return {
+          pandoc.RawBlock("latex", setpartsummary_cmd),
           pandoc.RawBlock("latex", part_cmd)
         }
       end
