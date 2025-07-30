@@ -8,6 +8,15 @@ on:
         description: 'What are you publishing? (e.g., "Chapter 5 updates", "Bug fixes")'
         required: true
         default: ''
+      release_type:
+        description: 'Release type'
+        required: true
+        type: choice
+        options:
+          - 'patch'
+          - 'minor' 
+          - 'major'
+        default: 'minor'
       confirm:
         description: 'Type "PUBLISH" to confirm you want to go live'
         required: true
@@ -60,6 +69,59 @@ jobs:
           
           echo "✅ Dev branch tests passed! Safe to publish."
 
+      - name: 🏷️ Calculate Next Version
+        id: version
+        run: |
+          echo "🔄 Getting latest release version..."
+          
+          # Get latest release version, default to v0.0.0 if no releases exist
+          LATEST_VERSION=$(curl -s \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/latest" \
+            | jq -r '.tag_name // "v0.0.0"')
+            
+          echo "📊 Latest version: $LATEST_VERSION"
+          
+          # Remove 'v' prefix for calculation
+          VERSION_NUM=${LATEST_VERSION#v}
+          
+          # Split version into components
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION_NUM"
+          
+          # Handle empty or invalid versions
+          MAJOR=${MAJOR:-0}
+          MINOR=${MINOR:-0}
+          PATCH=${PATCH:-0}
+          
+          echo "📊 Current version components: $MAJOR.$MINOR.$PATCH"
+          
+          # Calculate new version based on release type
+          case "${{ github.event.inputs.release_type }}" in
+            "major")
+              NEW_MAJOR=$((MAJOR + 1))
+              NEW_MINOR=0
+              NEW_PATCH=0
+              ;;
+            "minor")
+              NEW_MAJOR=$MAJOR
+              NEW_MINOR=$((MINOR + 1))
+              NEW_PATCH=0
+              ;;
+            "patch")
+              NEW_MAJOR=$MAJOR
+              NEW_MINOR=$MINOR
+              NEW_PATCH=$((PATCH + 1))
+              ;;
+          esac
+          
+          NEW_VERSION="v$NEW_MAJOR.$NEW_MINOR.$NEW_PATCH"
+          echo "🎯 New version: $NEW_VERSION (${{ github.event.inputs.release_type }} release)"
+          
+          # Export for other steps
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "release_type=${{ github.event.inputs.release_type }}" >> $GITHUB_OUTPUT
+
       - name: 🔄 Merge dev to main
         run: |
           echo "🔄 Configuring git..."
@@ -71,20 +133,27 @@ jobs:
           git pull origin main
           
           echo "🔄 Merging dev into main..."
-          git merge origin/dev --no-ff -m "🚀 Publish Live: ${{ github.event.inputs.description }}
+          git merge origin/dev --no-ff -m "🚀 Release ${{ steps.version.outputs.new_version }}: ${{ github.event.inputs.description }}
 
           Merged dev branch to main for publication.
           
+          Release Type: ${{ github.event.inputs.release_type }}
           Published by: ${{ github.actor }}
-          Commit: $(git rev-parse origin/dev)
+          Dev Commit: $(git rev-parse origin/dev)
           Description: ${{ github.event.inputs.description }}"
           
           echo "✅ Merge completed successfully!"
 
+      - name: 🏷️ Create Release Tag
+        run: |
+          echo "🏷️ Creating release tag ${{ steps.version.outputs.new_version }}..."
+          git tag -a ${{ steps.version.outputs.new_version }} -m "Release ${{ steps.version.outputs.new_version }}: ${{ github.event.inputs.description }}"
+          echo "✅ Tag created successfully!"
+
       - name: 🚀 Push to main and trigger production deployment
         run: |
-          echo "🚀 Pushing to main branch..."
-          git push origin main
+          echo "🚀 Pushing to main branch with tags..."
+          git push origin main --tags
           
           echo "📊 Main branch updated! This will trigger:"
           echo "  ✅ Production build workflow"
@@ -93,24 +162,96 @@ jobs:
           echo ""
           echo "🌐 Your content will be live at: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
 
+      - name: ⏳ Wait for Production Build
+        run: |
+          echo "⏳ Waiting for production build to complete before creating release..."
+          sleep 30  # Give the build a moment to start
+          
+          # Wait for the build to complete
+          for i in {1..20}; do
+            BUILD_STATUS=$(curl -s \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ github.repository }}/actions/runs?branch=main&status=completed&per_page=5" \
+              | jq -r '.workflow_runs[] | select(.name == "📚 CI/CD Controller") | .conclusion' \
+              | head -1)
+            
+            if [ "$BUILD_STATUS" = "success" ]; then
+              echo "✅ Production build completed successfully!"
+              break
+            elif [ "$BUILD_STATUS" = "failure" ]; then
+              echo "❌ Production build failed!"
+              exit 1
+            else
+              echo "⏳ Build still in progress... (attempt $i/20)"
+              sleep 30
+            fi
+          done
+
+      - name: 📦 Create GitHub Release
+        run: |
+          echo "📦 Creating GitHub Release ${{ steps.version.outputs.new_version }}..."
+          
+          # Generate release notes
+          cat > release_notes.md << EOF
+          ## 📚 Release ${{ steps.version.outputs.new_version }}
+          
+          **${{ github.event.inputs.description }}**
+          
+          ### 📋 Release Information
+          - **Type**: ${{ steps.version.outputs.release_type }} release
+          - **Published by**: ${{ github.actor }}
+          - **Published at**: $(date)
+          
+          ### 📖 What's Included
+          - Updated web version at [mlsysbook.ai](https://mlsysbook.ai)
+          - PDF download available below
+          - All content as of commit $(git rev-parse HEAD)
+          
+          ### 🔗 Quick Links
+          - 🌐 [Read Online](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }})
+          - 📄 [Download PDF](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.new_version }}/Machine-Learning-Systems.pdf)
+          EOF
+          
+          # Create the release
+          RELEASE_RESPONSE=$(curl -s \
+            -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/releases" \
+            -d "{
+              \"tag_name\": \"${{ steps.version.outputs.new_version }}\",
+              \"name\": \"${{ steps.version.outputs.new_version }}: ${{ github.event.inputs.description }}\",
+              \"body\": \"$(cat release_notes.md | sed 's/"/\\"/g' | tr '\n' '\\n')\",
+              \"draft\": false,
+              \"prerelease\": false
+            }")
+          
+          RELEASE_ID=$(echo "$RELEASE_RESPONSE" | jq -r '.id')
+          echo "✅ Release created with ID: $RELEASE_ID"
+          echo "release_id=$RELEASE_ID" >> $GITHUB_ENV
+
       - name: 📋 Publication Summary
         run: |
           echo "## 📚 Publication Complete! 🎉" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version Released:** ${{ steps.version.outputs.new_version }} (${{ steps.version.outputs.release_type }})" >> $GITHUB_STEP_SUMMARY
           echo "**What was published:** ${{ github.event.inputs.description }}" >> $GITHUB_STEP_SUMMARY
           echo "**Published by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
           echo "**Published at:** $(date)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🔄 What happened:" >> $GITHUB_STEP_SUMMARY
           echo "1. ✅ Verified dev branch tests passed" >> $GITHUB_STEP_SUMMARY
-          echo "2. ✅ Merged dev → main branch" >> $GITHUB_STEP_SUMMARY
-          echo "3. ✅ Pushed to main (triggers production build)" >> $GITHUB_STEP_SUMMARY
-          echo "4. ✅ GitHub Pages will deploy automatically" >> $GITHUB_STEP_SUMMARY
+          echo "2. ✅ Calculated new version number" >> $GITHUB_STEP_SUMMARY
+          echo "3. ✅ Merged dev → main branch" >> $GITHUB_STEP_SUMMARY
+          echo "4. ✅ Created release tag ${{ steps.version.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "5. ✅ Pushed to main (triggered production build)" >> $GITHUB_STEP_SUMMARY
+          echo "6. ✅ Created GitHub Release" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🌐 Next Steps:" >> $GITHUB_STEP_SUMMARY
-          echo "- Monitor the production build in Actions tab" >> $GITHUB_STEP_SUMMARY
-          echo "- Site will be live in ~5-10 minutes" >> $GITHUB_STEP_SUMMARY
-          echo "- Check https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}" >> $GITHUB_STEP_SUMMARY
+          echo "### 🌐 Access Your Release:" >> $GITHUB_STEP_SUMMARY
+          echo "- 📖 [Live Site](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }})" >> $GITHUB_STEP_SUMMARY
+          echo "- 📦 [GitHub Release](https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.new_version }})" >> $GITHUB_STEP_SUMMARY
+          echo "- 📄 [Download PDF](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.new_version }}/Machine-Learning-Systems.pdf)" >> $GITHUB_STEP_SUMMARY
 
   fail-validation:
     name: '❌ Validation Failed'
