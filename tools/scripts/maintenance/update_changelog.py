@@ -11,7 +11,7 @@ from openai import OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 CHANGELOG_FILE = "CHANGELOG.md"
-QUARTO_YML_FILE = "_quarto.yml"
+QUARTO_YML_FILE = "book/config/_quarto-pdf.yml"  # Default to PDF config which has chapters structure
 GITHUB_REPO_URL = "https://github.com/harvard-edge/cs249r_book/"
 # Removed MAJOR_CHANGE_THRESHOLD since we're organizing by content type now
 OPENAI_DELAY = 1  # seconds between API calls
@@ -78,9 +78,10 @@ chapter_lookup = [
     ("contents/appendix/phd_survival_guide.qmd", "PhD Survival Guide", 300),
 ]
 
-def load_chapter_order():
+def load_chapter_order(quarto_file=None):
     global chapter_order
-    with open(QUARTO_YML_FILE, "r", encoding="utf-8") as f:
+    config_file = quarto_file or QUARTO_YML_FILE
+    with open(config_file, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
 
     def find_chapters(obj):
@@ -116,7 +117,7 @@ def load_chapter_order():
     chapters_section = find_chapters(data)
     chapter_order = extract_qmd_paths(chapters_section) if chapters_section else []
 
-    print(f"📚 Loaded {len(chapter_order)} chapters from _quarto.yml")
+    print(f"📚 Loaded {len(chapter_order)} chapters from {config_file}")
 
 def run_git_command(cmd, verbose=False, retries=3):
     for attempt in range(retries):
@@ -272,7 +273,7 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False):
         changes_by_file[file_path][1] += removed
 
     current_date = datetime.now().strftime('%b %d, %Y') if not end_date else format_friendly_date(end_date)
-    entry = f"### 📅 Published on {current_date}\n\n"
+    entry = f"### 📅 {current_date}\n\n"
 
     frontmatter, chapters, labs, appendix = [], [], [], []
 
@@ -427,6 +428,7 @@ if __name__ == "__main__":
     parser.add_argument("-f", "--full", action="store_true", help="Regenerate the entire changelog from scratch.")
     parser.add_argument("-t", "--test", action="store_true", help="Run without writing to file.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output.")
+    parser.add_argument("-q", "--quarto-config", type=str, help="Path to quarto config file (default: book/config/_quarto-pdf.yml)")
 
     args = parser.parse_args()
     mode = "incremental"
@@ -434,7 +436,7 @@ if __name__ == "__main__":
         mode = "full"
 
     try:
-        load_chapter_order()
+        load_chapter_order(args.quarto_config)
         print(f"🚀 Starting changelog generation in {mode} mode...")
         new_entry = generate_changelog(mode=mode, verbose=args.verbose)
 
