@@ -1,3 +1,36 @@
+-- ===============================================================================
+-- PART STYLING LUA FILTER
+-- ===============================================================================
+--
+-- This filter transforms \part{key:xxx} commands in QMD files into appropriate
+-- LaTeX commands based on the key name, creating a structured book hierarchy.
+--
+-- ROUTING LOGIC:
+-- 1. Divisions (frontmatter, main_content, backmatter) → \division{title}
+--    - Clean centered styling with geometric background
+--    - No descriptions displayed
+--
+-- 2. Unnumbered parts (labs) → \part*{title}
+--    - Division-style background (via \titleformat{name=\part,numberless})
+--    - Includes part description
+--
+-- 3. All other parts (foundations, principles, etc.) → \part{title}
+--    - Roman numeral styling (via \titleformat{\part})
+--    - Includes part description
+--
+-- USAGE IN QMD FILES:
+-- Simply use \part{key:foundations} and this filter will:
+-- 1. Look up the key in part_summaries.yml
+-- 2. Extract title and description
+-- 3. Generate appropriate LaTeX command
+-- 4. Include \setpartsummary{description} if needed
+--
+-- EXAMPLE TRANSFORMATIONS:
+-- \part{key:foundations} → \part{Systems Foundations} + description
+-- \part{key:labs} → \part*{Labs} + description  
+-- \part{key:frontmatter} → \division{Frontmatter} (no description)
+-- ===============================================================================
+
 -- 🔧 Normalize keys (lowercase, trim leading/trailing whitespace)
 local function normalize(str)
   return str:lower():gsub("^%s+", ""):gsub("%s+$", "")
@@ -153,7 +186,9 @@ end
 local has_part_summaries = false
 local summaries = {}
 
--- 🏁 Main function
+-- 🏁 Main transformation function
+-- This function intercepts \part{key:xxx} commands and transforms them
+-- into appropriate LaTeX commands based on the routing logic above
 function RawBlock(el)
   if not has_part_summaries then return nil end
   if el.format ~= "latex" then return nil end
@@ -172,14 +207,17 @@ function RawBlock(el)
       local setpartsummary_cmd = "\\setpartsummary{" .. description .. "}"
       local part_cmd
       
-      -- Check if this is a division (frontmatter, main_content, backmatter)
+      -- ROUTING LOGIC: Transform based on key name
+      
+      -- 1. DIVISIONS: Major book sections (frontmatter, main_content, backmatter)
       if normalized_key == "frontmatter" or normalized_key == "main_content" or normalized_key == "backmatter" then
         part_cmd = "\\division{" .. formatted_title .. "}"
         log_info("🔄 Replacing key '" .. key .. "' with division: '" .. formatted_title .. "' (no description)")
         return {
           pandoc.RawBlock("latex", part_cmd)
         }
-      -- Check if this is an unnumbered part (labs)
+      
+      -- 2. UNNUMBERED PARTS: Special sections like "Labs"
       elseif normalized_key == "labs" then
         part_cmd = "\\part*{" .. formatted_title .. "}"
         log_info("🔄 Replacing key '" .. key .. "' with unnumbered part: '" .. formatted_title .. "' + description")
@@ -187,7 +225,8 @@ function RawBlock(el)
           pandoc.RawBlock("latex", setpartsummary_cmd),
           pandoc.RawBlock("latex", part_cmd)
         }
-      -- All other parts are numbered (foundations, principles, etc.)
+      
+      -- 3. NUMBERED PARTS: Main content sections (foundations, principles, etc.)
       else
         part_cmd = "\\part{" .. formatted_title .. "}"
         log_info("🔄 Replacing key '" .. key .. "' with numbered part: '" .. formatted_title .. "' + description")
