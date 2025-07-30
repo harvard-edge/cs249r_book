@@ -1,0 +1,126 @@
+name: '📚 Publish Live'
+
+# Manual trigger only - big red button!
+on:
+  workflow_dispatch:
+    inputs:
+      description:
+        description: 'What are you publishing? (e.g., "Chapter 5 updates", "Bug fixes")'
+        required: true
+        default: ''
+      confirm:
+        description: 'Type "PUBLISH" to confirm you want to go live'
+        required: true
+        default: ''
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  validate-and-publish:
+    name: '🔍 Validate & Publish'
+    runs-on: ubuntu-latest
+    if: github.event.inputs.confirm == 'PUBLISH'
+    
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔍 Check if dev branch tests passed
+        run: |
+          echo "🔄 Checking latest dev branch build status..."
+          
+          # Get the latest dev branch commit
+          DEV_SHA=$(git rev-parse origin/dev)
+          echo "📊 Latest dev commit: $DEV_SHA"
+          
+          # Check if there's a successful workflow run for this commit
+          echo "🔄 Checking workflow runs for dev branch..."
+          
+          # Use GitHub API to check workflow status
+          WORKFLOW_STATUS=$(curl -s \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs?branch=dev&status=completed&per_page=10" \
+            | jq -r --arg sha "$DEV_SHA" '.workflow_runs[] | select(.head_sha == $sha and .name == "📚 CI/CD Controller") | .conclusion' \
+            | head -1)
+          
+          echo "📊 Workflow status for dev: $WORKFLOW_STATUS"
+          
+          if [ "$WORKFLOW_STATUS" != "success" ]; then
+            echo "❌ Dev branch tests have not passed! Latest status: $WORKFLOW_STATUS"
+            echo "🛑 Cannot publish until dev branch is green ✅"
+            echo "📋 Please ensure your dev branch builds are successful before publishing."
+            exit 1
+          fi
+          
+          echo "✅ Dev branch tests passed! Safe to publish."
+
+      - name: 🔄 Merge dev to main
+        run: |
+          echo "🔄 Configuring git..."
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          echo "🔄 Switching to main branch..."
+          git checkout main
+          git pull origin main
+          
+          echo "🔄 Merging dev into main..."
+          git merge origin/dev --no-ff -m "🚀 Publish Live: ${{ github.event.inputs.description }}
+
+          Merged dev branch to main for publication.
+          
+          Published by: ${{ github.actor }}
+          Commit: $(git rev-parse origin/dev)
+          Description: ${{ github.event.inputs.description }}"
+          
+          echo "✅ Merge completed successfully!"
+
+      - name: 🚀 Push to main and trigger production deployment
+        run: |
+          echo "🚀 Pushing to main branch..."
+          git push origin main
+          
+          echo "📊 Main branch updated! This will trigger:"
+          echo "  ✅ Production build workflow"
+          echo "  ✅ GitHub Pages deployment"
+          echo "  ✅ Live site update"
+          echo ""
+          echo "🌐 Your content will be live at: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+
+      - name: 📋 Publication Summary
+        run: |
+          echo "## 📚 Publication Complete! 🎉" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**What was published:** ${{ github.event.inputs.description }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Published by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Published at:** $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔄 What happened:" >> $GITHUB_STEP_SUMMARY
+          echo "1. ✅ Verified dev branch tests passed" >> $GITHUB_STEP_SUMMARY
+          echo "2. ✅ Merged dev → main branch" >> $GITHUB_STEP_SUMMARY
+          echo "3. ✅ Pushed to main (triggers production build)" >> $GITHUB_STEP_SUMMARY
+          echo "4. ✅ GitHub Pages will deploy automatically" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🌐 Next Steps:" >> $GITHUB_STEP_SUMMARY
+          echo "- Monitor the production build in Actions tab" >> $GITHUB_STEP_SUMMARY
+          echo "- Site will be live in ~5-10 minutes" >> $GITHUB_STEP_SUMMARY
+          echo "- Check https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}" >> $GITHUB_STEP_SUMMARY
+
+  fail-validation:
+    name: '❌ Validation Failed'
+    runs-on: ubuntu-latest
+    if: github.event.inputs.confirm != 'PUBLISH'
+    
+    steps:
+      - name: ❌ Invalid confirmation
+        run: |
+          echo "❌ Publication cancelled - invalid confirmation"
+          echo "🔒 You must type exactly 'PUBLISH' to confirm"
+          echo "📝 You entered: '${{ github.event.inputs.confirm }}'"
+          exit 1 
