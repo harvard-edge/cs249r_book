@@ -176,7 +176,7 @@ function RawBlock(el)
         part_cmd = "\\lab{" .. formatted_title .. "}"
         log_info("🔄 Replacing key '" .. key .. "' with lab: '" .. formatted_title .. "' + description")
       elseif numbered then
-        part_cmd = "\\part{" .. formatted_title .. "}"
+        part_cmd = "\\numberedpart{" .. formatted_title .. "}"
         log_info("🔄 Replacing key '" .. key .. "' with numbered part: '" .. formatted_title .. "' + description")
       else
         part_cmd = "\\division{" .. formatted_title .. "}"
