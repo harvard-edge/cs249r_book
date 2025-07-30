@@ -172,22 +172,12 @@ function RawBlock(el)
       local setpartsummary_cmd = "\\setpartsummary{" .. description .. "}"
       local part_cmd
       
-      if part_type == "lab" then
-        if numbered then
-          part_cmd = "\\lab{" .. formatted_title .. "}"
-          log_info("🔄 Replacing key '" .. key .. "' with numbered lab: '" .. formatted_title .. "' + description")
-        else
-          part_cmd = "\\lab*{" .. formatted_title .. "}"
-          log_info("🔄 Replacing key '" .. key .. "' with unnumbered lab: '" .. formatted_title .. "' + description")
-        end
+      if numbered then
+        part_cmd = "\\part{" .. formatted_title .. "}"
+        log_info("🔄 Replacing key '" .. key .. "' with numbered part: '" .. formatted_title .. "' + description")
       else
-        if numbered then
-          part_cmd = "\\part{" .. formatted_title .. "}"
-          log_info("🔄 Replacing key '" .. key .. "' with numbered part: '" .. formatted_title .. "' + description")
-        else
-          part_cmd = "\\part*{" .. formatted_title .. "}"
-          log_info("🔄 Replacing key '" .. key .. "' with unnumbered part: '" .. formatted_title .. "' + description")
-        end
+        part_cmd = "\\part*{" .. formatted_title .. "}"
+        log_info("🔄 Replacing key '" .. key .. "' with unnumbered part: '" .. formatted_title .. "' + description")
       end
       
       return {
