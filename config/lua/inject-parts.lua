@@ -6,11 +6,15 @@
 -- LaTeX commands based on the key name, creating a structured book hierarchy.
 --
 -- ROUTING LOGIC:
--- 1. Divisions (frontmatter, main_content, backmatter, labs, arduino, xiao, grove, raspberry, shared) → \division{title}
+-- 1. Book Divisions (frontmatter, main_content, backmatter, labs) → \division{title}
 --    - Clean centered styling with geometric background
 --    - No descriptions displayed
 --
--- 2. All other parts (foundations, principles, etc.) → \part{title}
+-- 2. Lab Platforms (arduino, xiao, grove, raspberry, shared) → \labdivision{title}
+--    - Circuit-style neural network design with nodes and connections
+--    - No descriptions displayed
+--
+-- 3. Numbered Parts (foundations, principles, etc.) → \part{title}
 --    - Roman numeral styling (via \titleformat{\part})
 --    - Includes part description
 --
@@ -23,9 +27,9 @@
 --
 -- EXAMPLE TRANSFORMATIONS:
 -- \part{key:foundations} → \part{Systems Foundations} + description
--- \part{key:labs} → \division{Labs} (no description)
--- \part{key:arduino} → \division{Arduino Labs} (no description)
--- \part{key:frontmatter} → \division{Frontmatter} (no description)
+-- \part{key:labs} → \division{Labs} (clean geometric style)
+-- \part{key:arduino} → \labdivision{Arduino Labs} (circuit-style neural network)
+-- \part{key:frontmatter} → \division{Frontmatter} (clean geometric style)
 -- ===============================================================================
 
 -- 🔧 Normalize keys (lowercase, trim leading/trailing whitespace)
@@ -206,17 +210,23 @@ function RawBlock(el)
       
       -- ROUTING LOGIC: Transform based on key name
       
-      -- 1. DIVISIONS: Major book sections and lab platforms
-      if normalized_key == "frontmatter" or normalized_key == "main_content" or normalized_key == "backmatter" or 
-         normalized_key == "labs" or normalized_key == "arduino" or normalized_key == "xiao" or 
-         normalized_key == "grove" or normalized_key == "raspberry" or normalized_key == "shared" then
+      -- 1. BOOK DIVISIONS: Major book structure sections
+      if normalized_key == "frontmatter" or normalized_key == "main_content" or normalized_key == "backmatter" or normalized_key == "labs" then
         part_cmd = "\\division{" .. formatted_title .. "}"
         log_info("🔄 Replacing key '" .. key .. "' with division: '" .. formatted_title .. "' (no description)")
         return {
           pandoc.RawBlock("latex", part_cmd)
         }
       
-      -- 2. NUMBERED PARTS: Main content sections (foundations, principles, etc.)
+      -- 2. LAB PLATFORMS: Circuit-style neural network design
+      elseif normalized_key == "arduino" or normalized_key == "xiao" or normalized_key == "grove" or normalized_key == "raspberry" or normalized_key == "shared" then
+        part_cmd = "\\labdivision{" .. formatted_title .. "}"
+        log_info("🔄 Replacing key '" .. key .. "' with lab division: '" .. formatted_title .. "' (circuit style, no description)")
+        return {
+          pandoc.RawBlock("latex", part_cmd)
+        }
+      
+      -- 3. NUMBERED PARTS: Main content sections (foundations, principles, etc.)
       else
         part_cmd = "\\part{" .. formatted_title .. "}"
         log_info("🔄 Replacing key '" .. key .. "' with numbered part: '" .. formatted_title .. "' + description")
