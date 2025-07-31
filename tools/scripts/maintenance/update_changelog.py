@@ -689,11 +689,26 @@ if __name__ == "__main__":
             # Prepend the new entry with correct year section
             if mode == "full":
                 # For full mode, replace entire content (already includes year headers)
-                updated_content = new_entry.strip()
+                disclaimer = """# Changelog
+
+> **Note:** This changelog is automatically generated from Git commit messages using AI and is generally accurate. However, please review individual entries for context and potential inaccuracies.
+
+"""
+                updated_content = disclaimer + new_entry.strip()
             else:
                 # For incremental, prepend to existing and fold all previous entries
                 folded_existing = fold_existing_entries(cleaned_existing)
-                updated_content = f"{new_entry.strip()}\n---\n\n{folded_existing}"
+                
+                # Check if existing content has the header/disclaimer
+                if not cleaned_existing.startswith("# Changelog"):
+                    disclaimer = """# Changelog
+
+> **Note:** This changelog is automatically generated from Git commit messages using AI and is generally accurate. However, please review individual entries for context and potential inaccuracies.
+
+"""
+                    updated_content = disclaimer + f"{new_entry.strip()}\n---\n\n{folded_existing}"
+                else:
+                    updated_content = f"{new_entry.strip()}\n---\n\n{folded_existing}"
 
             with open(CHANGELOG_FILE, "w", encoding="utf-8") as f:
                 f.write(updated_content.strip() + "\n")
