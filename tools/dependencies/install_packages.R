@@ -17,7 +17,9 @@ required_packages <- c(
   "reticulate", #
   "rsvg",       #
   "viridis",    #
-  "xml2"        # Required for XML/HTML processing
+  "xml2",       # Required for XML/HTML processing
+  "dplyr",      # Data manipulation (used in sustainable_ai.qmd)
+  "grid"        # Grid graphics (used in hw_acceleration.qmd)
 )
 
 install_if_missing <- function(pkg) {
