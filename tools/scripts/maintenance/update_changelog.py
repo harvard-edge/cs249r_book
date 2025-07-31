@@ -189,28 +189,60 @@ def get_changes_in_dev_since(date_start, date_end=None, verbose=False):
     cmd += ["origin/dev", "--", "contents/**/*.qmd"]
     return run_git_command(cmd, verbose=verbose)
 
+def is_minor_change(commit_message):
+    """Check if a commit message indicates a minor change that shouldn't be in changelog."""
+    minor_keywords = [
+        "typo", "format", "spacing", "whitespace", "indent", "style",
+        "grammar", "punctuation", "capitalization", "wording",
+        "fix", "minor", "cleanup", "tidy", "lint"
+    ]
+    
+    commit_lower = commit_message.lower()
+    return any(keyword in commit_lower for keyword in minor_keywords)
+
 def get_commit_messages_for_file(file_path, since, until=None, verbose=False):
     cmd = ["git", "log", "--pretty=format:%s", "--since", since]
     if until:
         cmd += ["--until", until]
     cmd += ["origin/dev", "--", file_path]
-    return run_git_command(cmd, verbose=verbose)
+    messages = run_git_command(cmd, verbose=verbose)
+    
+    # Filter out minor changes
+    meaningful_messages = []
+    for message in messages.splitlines():
+        if message.strip() and not is_minor_change(message.strip()):
+            meaningful_messages.append(message.strip())
+    
+    if verbose and len(meaningful_messages) < len(messages.splitlines()):
+        print(f"🔍 Filtered out {len(messages.splitlines()) - len(meaningful_messages)} minor commits")
+    
+    return "\n".join(meaningful_messages)
 
 def summarize_changes_with_openai(file_path, commit_messages, verbose=False, max_retries=3):
     chapter_title = extract_chapter_title(file_path)
     if verbose:
         print(f"🤖 Calling OpenAI for: {file_path} -- {chapter_title}")
 
-    prompt = f"""You're helping to generate a changelog for a machine learning systems textbook.
-The following file has been updated: {file_path}
+    prompt = f"""You're generating a changelog entry for a machine learning systems textbook chapter.
 
-Here are the commit messages:
+File: {file_path}
+Chapter: {chapter_title}
+
+Recent commit messages:
 {commit_messages}
 
-Summarize the meaningful content-level changes (new sections, rewrites, example additions, figure changes).
-Ignore formatting or typo-only changes.
+Write a SINGLE concise sentence summarizing the meaningful content changes. Focus on:
+- New sections or topics added
+- Major rewrites or clarifications  
+- New examples, figures, or diagrams
+- Important corrections or improvements
+- New lab exercises or hands-on content
 
-Only return the summary sentence (not the bullet or chapter title)."""
+AVOID generic phrases like "enhanced", "improved", "updated", "refined" unless specific.
+AVOID mentioning "resource sections" or "text processing" unless it's the main change.
+BE SPECIFIC about what was actually added/changed.
+
+Return ONLY the summary sentence (no bullet points, no chapter title)."""
 
     for attempt in range(max_retries):
         try:
@@ -220,9 +252,10 @@ Only return the summary sentence (not the bullet or chapter title)."""
             
             response = client.chat.completions.create(
                 model="gpt-4",
-                temperature=0.3,
+                temperature=0.2,  # Lower temperature for more consistent output
+                max_tokens=100,   # Limit length for conciseness
                 messages=[
-                    {"role": "system", "content": "You are a helpful assistant writing changelog summaries."},
+                    {"role": "system", "content": "You are a technical writer creating concise changelog entries. Be specific and avoid generic language."},
                     {"role": "user", "content": prompt}
                 ]
             )
@@ -232,13 +265,16 @@ Only return the summary sentence (not the bullet or chapter title)."""
             if not summary:
                 return f"- **{chapter_title}**: _(no meaningful changes detected)_"
 
-            clean_summary = summary.partition(":")[-1].strip()
-            if not clean_summary:
-                clean_summary = summary  # fallback if no colon was present
+            # Clean up common artifacts
+            summary = summary.replace("--- --- --- ---", "").strip()
+            
+            # Remove any trailing punctuation that might have been added
+            if summary.endswith("."):
+                summary = summary[:-1]
 
             # Add delay after successful call
             time.sleep(OPENAI_DELAY)
-            return f"- **{chapter_title}**: {clean_summary}"
+            return f"- **{chapter_title}**: {summary}"
 
         except Exception as e:
             print(f"⚠️ OpenAI attempt {attempt + 1} failed for {file_path}: {e}")
@@ -297,6 +333,13 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False):
             continue
             
         commit_msgs = get_commit_messages_for_file(file_path, start_date, end_date, verbose=verbose)
+        
+        # Skip if no meaningful commits
+        if not commit_msgs.strip():
+            if verbose:
+                print(f"⏭️ Skipping {file_path} - no meaningful changes")
+            continue
+            
         summary = summarize_changes_with_openai(file_path, commit_msgs, verbose=verbose)
         
         # Categorize by content type
