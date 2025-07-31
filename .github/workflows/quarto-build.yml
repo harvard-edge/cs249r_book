@@ -354,7 +354,8 @@ jobs:
           echo "✅ Configuration set to HTML"
           
           echo "🔨 Building HTML..."
-          quarto render --to html
+          # Enable verbose logging for debugging
+          QUARTO_LOG_LEVEL=DEBUG quarto render --to html
         
       - name: 🔨 Build PDF (copy config and render)
         if: inputs.format == 'pdf' || inputs.format == 'all'
@@ -367,7 +368,8 @@ jobs:
           echo "✅ Configuration set to PDF"
           
           echo "🔨 Building PDF..."
-          quarto render --to titlepage-pdf     
+          # Enable verbose logging for debugging
+          QUARTO_LOG_LEVEL=DEBUG quarto render --to titlepage-pdf
       
       - name: 📋 Check Quarto Build Output
         shell: bash
@@ -556,6 +558,149 @@ jobs:
           echo "✅ Deployment should be complete"
           echo "🌐 Site should be available at: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
 
+      - name: 📝 Collect Build Logs and System Info (Universal)
+        if: always()  # Always run, even if previous steps failed
+        shell: pwsh
+        run: |
+          Write-Output "🔄 Collecting comprehensive build logs and system information..."
+          
+          # Create logs directory structure
+          New-Item -Type Directory -Path "logs", "logs/system-info", "logs/build-output" -Force | Out-Null
+          
+          # === COLLECT ALL BUILD LOGS ===
+          Write-Output "📄 Searching for build logs in all directories..."
+          
+          # Find and copy all .log files from common locations
+          $logPaths = @("book", "build", "_book", ".", "_site")
+          foreach ($path in $logPaths) {
+            if (Test-Path $path) {
+              Write-Output "🔍 Searching in: $path"
+              Get-ChildItem -Path $path -Recurse -Include "*.log" -ErrorAction SilentlyContinue | ForEach-Object {
+                $relativePath = $_.FullName.Replace($PWD.Path, "").TrimStart("/\")
+                $sanitizedName = $relativePath -replace "[/\\:]", "_"
+                Write-Output "📄 Found log: $relativePath → logs/$sanitizedName"
+                Copy-Item $_.FullName "logs/$sanitizedName" -ErrorAction SilentlyContinue
+              }
+            }
+          }
+          
+          # Look for any output files that might contain build info
+          Get-ChildItem -Recurse -Include "*.out", "*.aux", "*.fls", "*.fdb_latexmk" -ErrorAction SilentlyContinue | ForEach-Object {
+            $relativePath = $_.FullName.Replace($PWD.Path, "").TrimStart("/\")
+            $sanitizedName = $relativePath -replace "[/\\:]", "_"
+            Copy-Item $_.FullName "logs/build-output/$sanitizedName" -ErrorAction SilentlyContinue
+          }
+          
+          # === SYSTEM ENVIRONMENT ===
+          Write-Output "🖥️ Collecting system environment..."
+          @"
+          === Build Environment Information ===
+          Date: $(Get-Date)
+          GitHub Workflow: ${{ github.workflow }}
+          GitHub Run ID: ${{ github.run_id }}
+          Runner OS: ${{ runner.os }}
+          Build Format: ${{ inputs.format }}
+          PowerShell Version: $($PSVersionTable.PSVersion)
+          Working Directory: $PWD
+          
+          "@ | Out-File "logs/system-info/environment.log" -Encoding UTF8
+          
+          # === SYSTEM RESOURCES ===
+          Write-Output "📊 Collecting system resources..."
+          if ($IsWindows -or $env:OS -eq "Windows_NT") {
+            @"
+          === System Resources (Windows) ===
+          "@ | Out-File "logs/system-info/resources.log" -Encoding UTF8
+            
+            # Windows system info
+            Get-ComputerInfo | Select-Object TotalPhysicalMemory, CsProcessors, WindowsVersion | Out-File "logs/system-info/resources.log" -Append -Encoding UTF8
+            Get-WmiObject -Class Win32_LogicalDisk | Select-Object DeviceID, Size, FreeSpace | Out-File "logs/system-info/resources.log" -Append -Encoding UTF8
+          } else {
+            @"
+          === System Resources (Linux) ===
+          "@ | Out-File "logs/system-info/resources.log" -Encoding UTF8
+            
+            # Linux system info
+            if (Get-Command free -ErrorAction SilentlyContinue) {
+              & free -h 2>&1 | Out-File "logs/system-info/resources.log" -Append -Encoding UTF8
+            }
+            if (Get-Command df -ErrorAction SilentlyContinue) {
+              & df -h 2>&1 | Out-File "logs/system-info/resources.log" -Append -Encoding UTF8
+            }
+          }
+          
+          # === GRAPHICS/PNG LIBRARIES ===
+          Write-Output "🖼️ Collecting graphics library information..."
+          @"
+          === Graphics Libraries Information ===
+          "@ | Out-File "logs/system-info/libraries.log" -Encoding UTF8
+          
+          if ($IsWindows -or $env:OS -eq "Windows_NT") {
+            # Windows DLL information
+            Get-ChildItem -Path $env:SystemRoot\System32 -Include "*png*", "*cairo*", "*freetype*" -ErrorAction SilentlyContinue | 
+              Select-Object Name, Length, LastWriteTime | Out-File "logs/system-info/libraries.log" -Append -Encoding UTF8
+          } else {
+            # Linux library information
+            if (Get-Command ldconfig -ErrorAction SilentlyContinue) {
+              & ldconfig -p 2>&1 | Select-String -Pattern "(png|cairo|freetype|graphite)" | Out-File "logs/system-info/libraries.log" -Append -Encoding UTF8
+            }
+            if (Get-Command pkg-config -ErrorAction SilentlyContinue) {
+              @("libpng", "cairo", "freetype2") | ForEach-Object {
+                "--- $_ ---" | Out-File "logs/system-info/libraries.log" -Append -Encoding UTF8
+                & pkg-config --exists $_ 2>&1; if ($LASTEXITCODE -eq 0) { & pkg-config --modversion $_ } else { "Not found" } | Out-File "logs/system-info/libraries.log" -Append -Encoding UTF8
+              }
+            }
+          }
+          
+          # === TEX DISTRIBUTION ===
+          Write-Output "📖 Collecting TeX distribution info..."
+          @"
+          === TeX Distribution Information ===
+          "@ | Out-File "logs/system-info/tex-info.log" -Encoding UTF8
+          
+          # Check for TeX executables
+          @("pdflatex", "lualatex", "xelatex", "tlmgr") | ForEach-Object {
+            "--- $_ ---" | Out-File "logs/system-info/tex-info.log" -Append -Encoding UTF8
+            if (Get-Command $_ -ErrorAction SilentlyContinue) {
+              & $_ --version 2>&1 | Select-Object -First 5 | Out-File "logs/system-info/tex-info.log" -Append -Encoding UTF8
+            } else {
+              "$_ not found" | Out-File "logs/system-info/tex-info.log" -Append -Encoding UTF8
+            }
+          }
+          
+          # === QUARTO INFORMATION ===
+          Write-Output "📚 Collecting Quarto information..."
+          @"
+          === Quarto Information ===
+          "@ | Out-File "logs/system-info/quarto-info.log" -Encoding UTF8
+          
+          if (Get-Command quarto -ErrorAction SilentlyContinue) {
+            & quarto --version 2>&1 | Out-File "logs/system-info/quarto-info.log" -Append -Encoding UTF8
+            "--- Quarto Check ---" | Out-File "logs/system-info/quarto-info.log" -Append -Encoding UTF8
+            & quarto check 2>&1 | Out-File "logs/system-info/quarto-info.log" -Append -Encoding UTF8
+          } else {
+            "Quarto not found" | Out-File "logs/system-info/quarto-info.log" -Append -Encoding UTF8
+          }
+          
+          # === SUMMARY ===
+          Write-Output "📊 Build log collection summary:"
+          Write-Output "📁 Log files collected:"
+          Get-ChildItem -Path "logs" -Recurse -File | ForEach-Object {
+            $size = if ($_.Length -gt 1MB) { "{0:N2} MB" -f ($_.Length / 1MB) } 
+                    elseif ($_.Length -gt 1KB) { "{0:N2} KB" -f ($_.Length / 1KB) } 
+                    else { "$($_.Length) bytes" }
+            Write-Output "  📄 $($_.FullName.Replace($PWD.Path, '.')) ($size)"
+          }
+
+      - name: 📤 Upload Build Logs (Always)
+        if: always()  # Upload logs even if build fails
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ inputs.os }}-${{ inputs.format }}-${{ github.run_id }}
+          path: logs/
+          retention-days: 30  # Keep logs for 30 days for debugging
+          if-no-files-found: warn
+
       - name: 📋 Build Summary
         shell: pwsh
         run: |
@@ -579,5 +724,9 @@ jobs:
             - TeX Live: $texLiveStatus
             - R Packages: ${{ steps.cache-r-packages.outputs.cache-hit == 'true' && '✅ Hit' || '❌ Miss' }}
             - Python Packages: ${{ steps.cache-python-packages.outputs.cache-hit == 'true' && '✅ Hit' || '❌ Miss' }}
+          📝 Debug Artifacts:
+            - Build logs available as artifact: build-logs-${{ inputs.os }}-${{ inputs.format }}-${{ github.run_id }}
+            - Includes: TeX logs, system info, library details, and comprehensive build output
+            - Retention: 30 days for debugging
           ⏰ Completed at: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
           "@ | Add-Content $env:GITHUB_STEP_SUMMARY 
