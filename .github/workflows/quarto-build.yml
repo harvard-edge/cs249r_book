@@ -101,8 +101,6 @@ jobs:
           echo "📍 Quarto installation location:"
           which quarto || where.exe quarto
 
-
-
       - name: 🐍 Set up Python
         uses: actions/setup-python@v5
         with:
@@ -119,6 +117,30 @@ jobs:
           restore-keys: |
             python-pkgs-${{ runner.os }}-
 
+      # Install Ghostscript before Python package verification
+      - name: 📦 Install Ghostscript (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y ghostscript
+
+      - name: 📦 Install Ghostscript (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Use winget if available, otherwise fallback to chocolatey
+          try {
+            winget install ArtifexSoftware.GhostScript --accept-source-agreements --accept-package-agreements
+            Write-Output "✅ Ghostscript installed via winget"
+          } catch {
+            Write-Output "🔄 winget not available, using chocolatey..."
+            choco install ghostscript -y
+          }
+          
+          # Add Ghostscript to PATH (both installation methods use the same path)
+          $gsPath = Get-ChildItem "C:\Program Files\gs" | Sort-Object Name -Descending | Select-Object -First 1
+          $binPath = Join-Path $gsPath.FullName "bin"
+          echo "Adding Ghostscript path: $binPath"
+          echo "$binPath" | Out-File -Append -FilePath $env:GITHUB_PATH
+
       - name: 📦 Install Python dependencies
         run: |
           python -m pip install --upgrade pip
@@ -130,7 +152,7 @@ jobs:
           import sys
           required_packages = [
               'jupyter', 'nltk', 'openai', 'groq', 'pybtex', 'PIL', 'yaml', 
-              'gradio', 'jsonschema', 'pypandoc', 'ghostscript', 'absl', 
+              'gradio', 'jsonschema', 'pypandoc', 'absl', 
               'pre_commit', 'requests', 'pandas', 'titlecase', 'rich',
               'sentence_transformers', 'faiss', 'sklearn', 'numpy', 'torch'
           ]
@@ -147,8 +169,6 @@ jobs:
           else:
               print('✅ All required Python packages installed successfully')
           "
-
-      # Note: NLTK data is downloaded automatically by section_id_manager.py when needed
 
       # Cache Linux system packages without hardcoded paths
       - name: 💾 Cache APT packages
@@ -340,30 +360,6 @@ jobs:
             cat("✅ All required R packages installed successfully\n")
           }
 
-      # Install before render cause we need it for rendering
-      - name: 📦 Install Ghostscript (Linux)
-        if: runner.os == 'Linux' && (inputs.format == 'pdf' || inputs.format == 'all')
-        run: sudo apt-get install -y ghostscript
-
-      - name: 📦 Install Ghostscript (Windows)
-        if: runner.os == 'Windows' && (inputs.format == 'pdf' || inputs.format == 'all')
-        shell: pwsh
-        run: |
-          # Use winget if available, otherwise fallback to chocolatey
-          try {
-            winget install ArtifexSoftware.GhostScript --accept-source-agreements --accept-package-agreements
-            Write-Output "✅ Ghostscript installed via winget"
-          } catch {
-            Write-Output "🔄 winget not available, using chocolatey..."
-            choco install ghostscript -y
-          }
-          
-          # Add Ghostscript to PATH (both installation methods use the same path)
-          $gsPath = Get-ChildItem "C:\Program Files\gs" | Sort-Object Name -Descending | Select-Object -First 1
-          $binPath = Join-Path $gsPath.FullName "bin"
-          echo "Adding Ghostscript path: $binPath"
-          echo "$binPath" | Out-File -Append -FilePath $env:GITHUB_PATH
-
       - name: 🔨 Build HTML (copy config and render)
         if: inputs.format == 'html' || inputs.format == 'all'
         shell: bash
@@ -388,9 +384,7 @@ jobs:
           echo "✅ Configuration set to PDF"
           
           echo "🔨 Building PDF..."
-          quarto render --to titlepage-pdf
-
-     
+          quarto render --to titlepage-pdf     
       
       - name: 📋 Check Quarto Build Output
         shell: bash
@@ -430,8 +424,6 @@ jobs:
               echo "❌ build/pdf directory not found!"
             fi
           fi
-
-
 
       - name: 📉 Compress PDF with Ghostscript (Linux)
         if: runner.os == 'Linux' && (inputs.format == 'pdf' || inputs.format == 'all')
