@@ -197,16 +197,7 @@ def get_changes_in_dev_since(date_start, date_end=None, verbose=False):
     cmd += ["origin/dev", "--", "contents/**/*.qmd"]
     return run_git_command(cmd, verbose=verbose)
 
-def is_minor_change(commit_message):
-    """Check if a commit message indicates a minor change that shouldn't be in changelog."""
-    minor_keywords = [
-        "typo", "format", "spacing", "whitespace", "indent", "style",
-        "grammar", "punctuation", "capitalization", "wording",
-        "fix", "minor", "cleanup", "tidy", "lint"
-    ]
-    
-    commit_lower = commit_message.lower()
-    return any(keyword in commit_lower for keyword in minor_keywords)
+
 
 def get_commit_messages_for_file(file_path, since, until=None, verbose=False):
     cmd = ["git", "log", "--pretty=format:%s", "--since", since]
@@ -215,14 +206,11 @@ def get_commit_messages_for_file(file_path, since, until=None, verbose=False):
     cmd += ["origin/dev", "--", file_path]
     messages = run_git_command(cmd, verbose=verbose)
     
-    # Filter out minor changes
+    # Return all commit messages - let AI determine importance
     meaningful_messages = []
     for message in messages.splitlines():
-        if message.strip() and not is_minor_change(message.strip()):
+        if message.strip():
             meaningful_messages.append(message.strip())
-    
-    if verbose and len(meaningful_messages) < len(messages.splitlines()):
-        print(f"🔍 Filtered out {len(messages.splitlines()) - len(meaningful_messages)} minor commits")
     
     return "\n".join(meaningful_messages)
 
