@@ -295,11 +295,12 @@ class ImageDownloader:
                 logger.warning(f"⚠️ Skipping update for failed download: {fig_id}")
         
         # Write updated content back to file if we made changes
-        if downloaded_count > 0 and new_content != content:
+        if new_content != content:
             try:
                 with open(qmd_file, 'w', encoding='utf-8') as f:
                     f.write(new_content)
-                logger.info(f"✅ Updated {qmd_file} with {downloaded_count} local image references")
+                total_updates = len(figure_images)  # Count all external images that were processed
+                logger.info(f"✅ Updated {qmd_file} with {total_updates} local image references ({downloaded_count} downloaded)")
             except Exception as e:
                 logger.error(f"❌ Failed to write updated content to {qmd_file}: {e}")
         
