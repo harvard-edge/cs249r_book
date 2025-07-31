@@ -17,6 +17,26 @@ on:
           - 'minor' 
           - 'major'
         default: 'minor'
+      previous_version:
+        description: 'Previous release version (auto-detected, but you can override if needed)'
+        required: false
+        default: ''
+      release_notes:
+        description: 'Brief summary of changes for release notes (key features, fixes, improvements)'
+        required: true
+        default: ''
+      breaking_changes:
+        description: 'Any breaking changes or important notes for users? (leave empty if none)'
+        required: false
+        default: ''
+      testing_performed:
+        description: 'What testing was performed? (e.g., "Local build test", "PDF generation", "Cross-references verified")'
+        required: true
+        default: ''
+      rollback_plan:
+        description: 'Rollback plan if issues arise? (e.g., "Revert to previous commit", "Hotfix branch ready")'
+        required: false
+        default: ''
       dev_commit:
         description: 'Specific dev commit to publish (leave empty for latest) - Use for publishing stable content while continuing work'
         required: false
@@ -95,14 +115,19 @@ jobs:
         run: |
           echo "🔄 Getting latest release version..."
           
-          # Get latest release version, default to v0.0.0 if no releases exist
-          LATEST_VERSION=$(curl -s \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${{ github.repository }}/releases/latest" \
-            | jq -r '.tag_name // "v0.0.0"')
-            
-          echo "📊 Latest version: $LATEST_VERSION"
+          # Use provided previous version or auto-detect
+          if [ -n "${{ github.event.inputs.previous_version }}" ]; then
+            LATEST_VERSION="${{ github.event.inputs.previous_version }}"
+            echo "📌 Using provided previous version: $LATEST_VERSION"
+          else
+            # Get latest release version, default to v0.0.0 if no releases exist
+            LATEST_VERSION=$(curl -s \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/latest" \
+              | jq -r '.tag_name // "v0.0.0"')
+            echo "📊 Auto-detected latest version: $LATEST_VERSION"
+          fi
           
           # Remove 'v' prefix for calculation
           VERSION_NUM=${LATEST_VERSION#v}
@@ -115,7 +140,7 @@ jobs:
           MINOR=${MINOR:-0}
           PATCH=${PATCH:-0}
           
-          echo "📊 Current version components: $MAJOR.$MINOR.$PATCH"
+          echo "📊 Previous version components: $MAJOR.$MINOR.$PATCH"
           
           # Calculate new version based on release type
           case "${{ github.event.inputs.release_type }}" in
@@ -138,10 +163,22 @@ jobs:
           
           NEW_VERSION="v$NEW_MAJOR.$NEW_MINOR.$NEW_PATCH"
           echo "🎯 New version: $NEW_VERSION (${{ github.event.inputs.release_type }} release)"
+          echo "📋 Release notes: ${{ github.event.inputs.release_notes }}"
+          
+          if [ -n "${{ github.event.inputs.breaking_changes }}" ]; then
+            echo "⚠️  Breaking changes: ${{ github.event.inputs.breaking_changes }}"
+          fi
+          
+          echo "🧪 Testing performed: ${{ github.event.inputs.testing_performed }}"
+          
+          if [ -n "${{ github.event.inputs.rollback_plan }}" ]; then
+            echo "🔄 Rollback plan: ${{ github.event.inputs.rollback_plan }}"
+          fi
           
           # Export for other steps
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
           echo "release_type=${{ github.event.inputs.release_type }}" >> $GITHUB_OUTPUT
+          echo "previous_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
 
       - name: 🔄 Merge dev to main
         run: |
@@ -233,6 +270,7 @@ jobs:
           
           ### 📋 Release Information
           - **Type**: ${{ steps.version.outputs.release_type }} release
+          - **Previous Version**: ${{ steps.version.outputs.previous_version }}
           - **Published by**: ${{ github.actor }}
           - **Published at**: $(date)
           
@@ -242,10 +280,28 @@ jobs:
           - All chapters, exercises, and lab materials as of commit $(git rev-parse HEAD)
           - Compatible with MIT Press publication standards
           
+          ### 📝 Release Notes
+          ${{ github.event.inputs.release_notes }}
+          
+          $(if [ -n "${{ github.event.inputs.breaking_changes }}" ]; then
+            echo "### ⚠️ Breaking Changes"
+            echo "${{ github.event.inputs.breaking_changes }}"
+            echo ""
+          fi)
+          
+          ### 🧪 Testing Performed
+          ${{ github.event.inputs.testing_performed }}
+          
+          $(if [ -n "${{ github.event.inputs.rollback_plan }}" ]; then
+            echo "### 🔄 Rollback Plan"
+            echo "${{ github.event.inputs.rollback_plan }}"
+            echo ""
+          fi)
+          
           ### 🔗 Quick Links
           - 🌐 [Read Online](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }})
-                     - 📄 [Download PDF](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.new_version }}/Machine-Learning-Systems.pdf)
-           - 📄 [Direct PDF Link](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/assets/Machine-Learning-Systems.pdf)
+          - 📄 [Download PDF](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.new_version }}/Machine-Learning-Systems.pdf)
+          - 📄 [Direct PDF Link](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/assets/Machine-Learning-Systems.pdf)
           EOF
           
           # Create the release
@@ -271,10 +327,17 @@ jobs:
           echo "## 📚 Textbook Publication Complete! 🎉" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Version Released:** ${{ steps.version.outputs.new_version }} (${{ steps.version.outputs.release_type }})" >> $GITHUB_STEP_SUMMARY
+          echo "**Previous Version:** ${{ steps.version.outputs.previous_version }}" >> $GITHUB_STEP_SUMMARY
           echo "**Content Published:** ${{ github.event.inputs.description }}" >> $GITHUB_STEP_SUMMARY
           echo "**Published by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
           echo "**Source Commit:** ${{ github.event.inputs.dev_commit || 'latest' }}" >> $GITHUB_STEP_SUMMARY
           echo "**Publication Time:** $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📝 Release Summary:" >> $GITHUB_STEP_SUMMARY
+          echo "${{ github.event.inputs.release_notes }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🧪 Testing:" >> $GITHUB_STEP_SUMMARY
+          echo "${{ github.event.inputs.testing_performed }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🔄 What happened:" >> $GITHUB_STEP_SUMMARY
           echo "1. ✅ Verified dev branch tests passed" >> $GITHUB_STEP_SUMMARY
