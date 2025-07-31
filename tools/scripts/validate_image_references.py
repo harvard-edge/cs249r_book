@@ -142,8 +142,32 @@ class ImageReferenceValidator:
                     print(f"❌ Missing image: {image_path}")
                     print(f"   📍 Expected at: {resolved_path}")
                     print(f"   📄 In file: {qmd_file}")
-            elif not quiet:
-                print(f"✅ Found: {image_path}")
+            else:
+                # Check for case sensitivity issues on case-insensitive filesystems
+                expected_name = Path(image_path).name
+                
+                # Find the actual filename on disk by scanning the directory
+                actual_name = None
+                try:
+                    parent_dir = resolved_path.parent
+                    if parent_dir.exists():
+                        for file_on_disk in parent_dir.iterdir():
+                            if file_on_disk.is_file() and file_on_disk.name.lower() == expected_name.lower():
+                                actual_name = file_on_disk.name
+                                break
+                except Exception:
+                    actual_name = expected_name  # Fallback
+                
+                if actual_name and actual_name != expected_name:
+                    # Case mismatch found
+                    missing_images.append((full_match, f"Case mismatch: expected '{expected_name}' but found '{actual_name}'"))
+                    if not quiet:
+                        print(f"⚠️ Case mismatch: {image_path}")
+                        print(f"   📄 Expected: {expected_name}")
+                        print(f"   💿 On disk: {actual_name}")
+                        print(f"   📍 This will break on case-sensitive systems (Linux)")
+                elif not quiet:
+                    print(f"✅ Found: {image_path}")
         
         return missing_images
     
