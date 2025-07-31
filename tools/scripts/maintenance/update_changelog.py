@@ -78,7 +78,7 @@ chapter_lookup = [
     ("contents/frontmatter/about/about.qmd", "About", 201),
     ("contents/frontmatter/changelog/changelog.qmd", "Changelog", 202),
     ("contents/frontmatter/acknowledgements/acknowledgements.qmd", "Acknowledgements", 203),
-    ("contents/frontmatter/ai/socratiq.qmd", "SocraticAI", 204),
+    ("contents/frontmatter/socratiq/socratiq.qmd", "SocratiQ", 204),
     
     # Appendix
     ("contents/appendix/phd_survival_guide.qmd", "PhD Survival Guide", 300),
@@ -177,16 +177,18 @@ def extract_chapter_title(file_path):
     else:
         return base.replace('_', ' ').replace('.qmd', '').title()
 
-def sort_by_chapter_order(updates):
-    def extract_path(update):
-        match = re.search(r'\*\*(.*?)\*\*', update)
+def sort_by_impact_level(updates):
+    def extract_impact_level(update):
+        # Extract impact bars from the start of each update
+        import re
+        match = re.search(r'`([█░]+)`', update)
         if match:
-            title = match.group(1)
-            for path in chapter_order:
-                if title.lower().replace(' ', '_') in path.lower():
-                    return chapter_order.index(path)
-        return float('inf')
-    return sorted(updates, key=extract_path)
+            bars = match.group(1)
+            # Count filled bars (█) - higher count = higher importance
+            filled_count = bars.count('█')
+            return -filled_count  # Negative for descending order (most important first)
+        return 0  # Default for entries without impact bars
+    return sorted(updates, key=extract_impact_level)
 
 def get_changes_in_dev_since(date_start, date_end=None, verbose=False):
     cmd = ["git", "log", "--numstat", "--since", date_start]
@@ -258,26 +260,53 @@ def summarize_changes_with_openai(file_path, commit_messages, verbose=False, max
     if verbose:
         print(f"🤖 Calling {'Ollama' if use_ollama else 'OpenAI'} for: {file_path} -- {chapter_title}")
 
-    prompt = f"""You're generating a changelog entry for a machine learning systems textbook chapter.
+    prompt = f"""You're writing a changelog entry for a machine learning textbook. Readers and instructors need to know what changed and how important it is.
 
 File: {file_path}
 Chapter: {chapter_title}
 
-Recent commit messages:
+Commit messages:
 {commit_messages}
 
-Write a SINGLE concise sentence summarizing the meaningful content changes. Focus on:
-- New sections or topics added
-- Major rewrites or clarifications  
-- New examples, figures, or diagrams
-- Important corrections or improvements
-- New lab exercises or hands-on content
+The output format will be: `[IMPACT]` **{chapter_title}**: [YOUR SUMMARY]
 
-AVOID generic phrases like "enhanced", "improved", "updated", "refined" unless specific.
-AVOID mentioning "resource sections" or "text processing" unless it's the main change.
-BE SPECIFIC about what was actually added/changed.
+Since the chapter title is already shown, DO NOT repeat it in your summary. Just state what changed directly.
 
-Return ONLY the summary sentence (no bullet points, no chapter title)."""
+First, analyze the commits and list the main changes. Then write ONE specific sentence about what changed.
+Finally, rate the importance (1-5 bars):
+- █████ Major: New chapters, sections, or significant rewrites
+- ████░ Large: Multiple examples, new concepts, substantial updates  
+- ███░░ Medium: New examples, clarifications, moderate changes
+- ██░░░ Small: Minor fixes, formatting, small corrections
+- █░░░░ Tiny: Typos, punctuation, very minor tweaks
+
+Format your response exactly like this:
+CHANGES: [list 2-3 main changes from commits]
+SUMMARY: [what changed - NO chapter name, just the changes]
+IMPACT: [█████, ████░, ███░░, ██░░░, or █░░░░]
+
+Example:
+CHANGES: Added transformer architecture section, New attention mechanism diagrams, Fixed backprop equations
+SUMMARY: Added transformer architecture section with attention mechanism diagrams and corrected backpropagation equations
+IMPACT: ████░
+
+BAD: "Chapter 10 has been updated with new content"
+GOOD: "Added transformer architecture section with attention mechanism diagrams"
+
+GOOD examples:
+- "Added lottery ticket hypothesis section with pruning examples"
+- "New GPU memory optimization diagrams and CUDA code samples" 
+- "Expanded federated learning coverage with privacy-preserving techniques"
+- "Fixed mathematical notation in backpropagation equations"
+
+BAD examples (don't use):
+- "The chapter has been revised to include..."
+- "Updated with new sections and examples..."
+- "Enhanced with improved clarity and..."
+- "Modified to add new content about..."
+
+Focus on WHAT was added/changed, not HOW it was changed. Use varied sentence structures.
+Return only the description (no chapter title, no bullet points)."""
 
     for attempt in range(max_retries):
         try:
@@ -304,17 +333,32 @@ Return ONLY the summary sentence (no bullet points, no chapter title)."""
             if not summary:
                 return f"- **{chapter_title}**: _(no meaningful changes detected)_"
 
-            # Clean up common artifacts
-            summary = summary.replace("--- --- --- ---", "").strip()
+            # Parse the new structured format
+            import re
+            summary_match = re.search(r'SUMMARY:\s*(.+?)(?:\nIMPACT:|$)', summary, re.DOTALL)
+            impact_match = re.search(r'IMPACT:\s*([█░]+)', summary)
             
-            # Remove any trailing punctuation that might have been added
-            if summary.endswith("."):
-                summary = summary[:-1]
-
-            # Add delay only for OpenAI after successful call
-            if not use_ollama:
-                time.sleep(OPENAI_DELAY)
-            return f"- **{chapter_title}**: {summary}"
+            if summary_match:
+                parsed_summary = summary_match.group(1).strip()
+                # Remove any trailing punctuation
+                if parsed_summary.endswith("."):
+                    parsed_summary = parsed_summary[:-1]
+                
+                impact_bars = impact_match.group(1) if impact_match else "███░░"  # default medium
+                
+                # Add delay only for OpenAI after successful call
+                if not use_ollama:
+                    time.sleep(OPENAI_DELAY)
+                return f"- `{impact_bars}` **{chapter_title}**: {parsed_summary}"
+            else:
+                # Fallback to old format if parsing fails
+                summary = summary.replace("--- --- --- ---", "").strip()
+                if summary.endswith("."):
+                    summary = summary[:-1]
+                
+                if not use_ollama:
+                    time.sleep(OPENAI_DELAY)
+                return f"- **{chapter_title}**: {summary}"
 
         except Exception as e:
             print(f"⚠️ {'Ollama' if use_ollama else 'OpenAI'} attempt {attempt + 1} failed for {file_path}: {e}")
@@ -323,7 +367,10 @@ Return ONLY the summary sentence (no bullet points, no chapter title)."""
 
 def format_friendly_date(date_str):
     try:
-        return datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z").strftime("%b %d, %Y")
+        # Parse the ISO datetime string
+        dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z")
+        # Format as "Month Day at Hour:Minute AM/PM" (no year since it's in section header)
+        return dt.strftime("%B %d at %I:%M %p")
     except:
         return date_str
 
@@ -351,7 +398,7 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False):
         changes_by_file[file_path][0] += added
         changes_by_file[file_path][1] += removed
 
-    current_date = datetime.now().strftime('%b %d, %Y') if not end_date else format_friendly_date(end_date)
+    current_date = datetime.now().strftime('%B %d at %I:%M %p') if not end_date else format_friendly_date(end_date)
     entry = f"### 📅 {current_date}\n\n"
 
     frontmatter, chapters, labs, appendix = [], [], [], []
@@ -416,13 +463,13 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False):
 
     # Add sections in order: Frontmatter, Chapters, Labs, Appendix
     if frontmatter:
-        entry += f"<details {details_state}>\n<summary>**📄 Frontmatter**</summary>\n\n" + "\n".join(sort_by_chapter_order(frontmatter)) + "\n\n</details>\n\n"
+        entry += f"<details {details_state}>\n<summary>**📄 Frontmatter**</summary>\n\n" + "\n".join(sort_by_impact_level(frontmatter)) + "\n\n</details>\n\n"
     if chapters:
-        entry += f"<details {details_state}>\n<summary>**📖 Chapters**</summary>\n\n" + "\n".join(sort_by_chapter_order(chapters)) + "\n\n</details>\n\n"
+        entry += f"<details {details_state}>\n<summary>**📖 Chapters**</summary>\n\n" + "\n".join(sort_by_impact_level(chapters)) + "\n\n</details>\n\n"
     if labs:
-        entry += f"<details {details_state}>\n<summary>**🧑‍💻 Labs**</summary>\n\n" + "\n".join(sort_by_chapter_order(labs)) + "\n\n</details>\n\n"
+        entry += f"<details {details_state}>\n<summary>**🧑‍💻 Labs**</summary>\n\n" + "\n".join(sort_by_impact_level(labs)) + "\n\n</details>\n\n"
     if appendix:
-        entry += f"<details {details_state}>\n<summary>**📚 Appendix**</summary>\n\n" + "\n".join(sort_by_chapter_order(appendix)) + "\n\n</details>\n"
+        entry += f"<details {details_state}>\n<summary>**📚 Appendix**</summary>\n\n" + "\n".join(sort_by_impact_level(appendix)) + "\n\n</details>\n"
 
     print("✅ Entry generation complete")
     return entry
