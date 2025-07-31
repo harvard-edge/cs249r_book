@@ -202,7 +202,7 @@ MLSysBook/
 │   ├── data/                # Cross-reference and metadata files
 │   ├── _quarto-html.yml     # Website build configuration
 │   ├── _quarto-pdf.yml      # PDF build configuration
-│   ├── _quarto-epub.yml     # EPUB build configuration
+
 │   ├── _quarto.yml          # Active config (symlink)
 │   ├── index.qmd            # Main entry point
 │   └── assets/              # Images, styles, media
