@@ -273,12 +273,12 @@ The output format will be: `[IMPACT]` **{chapter_title}**: [YOUR SUMMARY]
 Since the chapter title is already shown, DO NOT repeat it in your summary. Just state what changed directly.
 
 First, analyze the commits and list the main changes. Then write ONE specific sentence about what changed.
-Finally, rate the importance (1-5 bars):
-- █████ Major: New chapters, sections, or significant rewrites
-- ████░ Large: Multiple examples, new concepts, substantial updates  
-- ███░░ Medium: New examples, clarifications, moderate changes
-- ██░░░ Small: Minor fixes, formatting, small corrections
-- █░░░░ Tiny: Typos, punctuation, very minor tweaks
+Finally, rate the importance (1-5 bars). Be realistic about impact - most changes should be Small or Medium:
+- █████ Major: New chapters, sections, or significant rewrites (rare)
+- ████░ Large: Multiple examples, new concepts, substantial updates (uncommon)
+- ███░░ Medium: New examples, clarifications, moderate changes (common)
+- ██░░░ Small: Minor fixes, formatting, small corrections, single example additions (most common)
+- █░░░░ Tiny: Typos, punctuation, very minor tweaks (use this more often)
 
 Format your response exactly like this:
 CHANGES: [list 2-3 main changes from commits]
@@ -367,8 +367,12 @@ Return only the description (no chapter title, no bullet points)."""
 
 def format_friendly_date(date_str):
     try:
-        # Parse the ISO datetime string
-        dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z")
+        # Try ISO format first (with T separator)
+        if 'T' in date_str:
+            dt = datetime.fromisoformat(date_str)
+        else:
+            # Fallback to space-separated format
+            dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z")
         # Format as "Month Day at Hour:Minute AM/PM" (no year since it's in section header)
         return dt.strftime("%B %d at %I:%M %p")
     except:
@@ -470,6 +474,11 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False):
         entry += f"<details {details_state}>\n<summary>**🧑‍💻 Labs**</summary>\n\n" + "\n".join(sort_by_impact_level(labs)) + "\n\n</details>\n\n"
     if appendix:
         entry += f"<details {details_state}>\n<summary>**📚 Appendix**</summary>\n\n" + "\n".join(sort_by_impact_level(appendix)) + "\n\n</details>\n"
+
+    # If no content sections were added, return None (empty entry)
+    if not frontmatter and not chapters and not labs and not appendix:
+        print("  ⚠️ No meaningful content changes found - skipping entry")
+        return None
 
     print("✅ Entry generation complete")
     return entry
@@ -580,7 +589,7 @@ def generate_changelog(mode="incremental", verbose=False):
         # Build output with year headers, newest years first
         output_sections = []
         for year in sorted(entries_by_year.keys(), reverse=True):
-            year_header = f"## {year} Changes"
+            year_header = f"## {year}"
             year_entries = "\n\n".join(entries_by_year[year])
             output_sections.append(f"{year_header}\n\n{year_entries}")
         
@@ -588,54 +597,80 @@ def generate_changelog(mode="incremental", verbose=False):
         
     else:
         if verbose:
-            print("⚡ Running incremental update...")
+            print("⚡ Running update mode...")
         print(f"📅 Processing changes since: {format_friendly_date(latest_date) if latest_date else 'beginning'}")
         entry = generate_entry(latest_date, verbose=verbose, is_latest=True)
         if not entry:
             return "_No updates found._"
         
         current_year = datetime.now().year
-        year_header = f"## {current_year} Changes"
+        year_header = f"## {current_year}"
         return f"{year_header}\n\n{entry}"
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate changelog for ML systems book.")
-    parser.add_argument("-i", "--incremental", action="store_true", help="Add new entries since last gh-pages publish (default).")
     parser.add_argument("-f", "--full", action="store_true", help="Regenerate the entire changelog from scratch.")
+    parser.add_argument("-u", "--update", action="store_true", help="Add new entries since last gh-pages publish.")
     parser.add_argument("-t", "--test", action="store_true", help="Run without writing to file.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output.")
     parser.add_argument("-q", "--quarto-config", type=str, help="Path to quarto config file (default: book/config/_quarto-pdf.yml)")
-    parser.add_argument("-o", "--ollama", action="store_true", help="Use Ollama for summarization instead of OpenAI.")
+    parser.add_argument("--openai", action="store_true", help="Use OpenAI for summarization instead of Ollama (default).")
     parser.add_argument("-m", "--model", type=str, default="gemma2:9b", help="Ollama model to use (default: gemma2:9b). Popular options: gemma2:9b, gemma2:27b, llama3.1:8b, llama3.1:70b")
 
     args = parser.parse_args()
-    mode = "incremental"
-    if args.full:
+    
+    # Require either --full or --update to be specified
+    if args.full and args.update:
+        print("❌ Error: Cannot specify both --full and --update modes")
+        exit(1)
+    elif args.full:
         mode = "full"
+    elif args.update:
+        mode = "update"
+    else:
+        print("❌ Error: Must specify either --full or --update mode")
+        print("💡 Use --help for usage information")
+        exit(1)
 
     try:
         load_chapter_order(args.quarto_config)
+        
+        # Print configuration header
+        print("=" * 60)
+        print("📝 CHANGELOG GENERATION CONFIG")
+        print("=" * 60)
+        print(f"🎯 Mode: {mode.upper()}")
+        if args.openai:
+            print("🤖 AI Model: OpenAI GPT")
+        else:
+            print(f"🤖 AI Model: {args.model} (via Ollama)")
+        print(f"🔧 Test Mode: {'ON' if args.test else 'OFF'}")
+        print(f"📢 Verbose: {'ON' if args.verbose else 'OFF'}")
+        print(f"📋 Features: Impact bars, importance sorting, specific summaries")
+        print("=" * 60)
+        print()
+        
         print(f"🚀 Starting changelog generation in {mode} mode...")
 
-        if args.ollama:
-            print(f"🤖 Using Ollama for summarization with model: {args.model}")
-            use_ollama = True
-            # Test Ollama connection
-            test_response = call_ollama("Hello", model=args.model, verbose=False)
-            if test_response is None:
-                print("❌ Failed to connect to Ollama. Make sure it's running on localhost:11434")
-                print("💡 To install Gemini models in Ollama:")
-                print("   ollama pull gemma2:9b")
-                print("   ollama pull gemma2:27b")
-                exit(1)
-            print("✅ Ollama connection successful")
-        else:
+        if args.openai:
             print("🤖 Using OpenAI for summarization.")
             use_ollama = False
             # Initialize OpenAI client
             client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
             if not os.getenv("OPENAI_API_KEY"):
                 raise ValueError("OPENAI_API_KEY not set. Please set it in your environment variables.")
+        else:
+            print(f"🤖 Using Ollama for summarization with model: {args.model}")
+            use_ollama = True
+            # Test Ollama connection
+            test_response = call_ollama("Hello", model=args.model, verbose=False)
+            if test_response is None:
+                print("❌ Failed to connect to Ollama. Make sure it's running on localhost:11434")
+                print("💡 To install models in Ollama:")
+                print("   ollama pull gemma2:9b")
+                print("   ollama pull gemma2:27b")
+                exit(1)
+            print("✅ Ollama connection successful")
 
         new_entry = generate_changelog(mode=mode, verbose=args.verbose)
 
@@ -649,7 +684,7 @@ if __name__ == "__main__":
                     existing = f.read()
 
             current_year = datetime.now().year
-            year_header = f"## {current_year} Changes"
+            year_header = f"## {current_year}"
 
             # Remove first occurrence of the year header
             existing_lines = existing.splitlines()
