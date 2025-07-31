@@ -691,7 +691,7 @@ if __name__ == "__main__":
                 # For full mode, replace entire content (already includes year headers)
                 disclaimer = """# Changelog
 
-> **Note:** This changelog is automatically generated from Git commit messages using AI and is generally accurate. However, please review individual entries for context and potential inaccuracies.
+> **Note:** Automatically generated from Git commit messages. Generally accurate but may require review.
 
 """
                 updated_content = disclaimer + new_entry.strip()
@@ -703,7 +703,7 @@ if __name__ == "__main__":
                 if not cleaned_existing.startswith("# Changelog"):
                     disclaimer = """# Changelog
 
-> **Note:** This changelog is automatically generated from Git commit messages using AI and is generally accurate. However, please review individual entries for context and potential inaccuracies.
+> **Note:** Automatically generated from Git commit messages. Generally accurate but may require review.
 
 """
                     updated_content = disclaimer + f"{new_entry.strip()}\n---\n\n{folded_existing}"
