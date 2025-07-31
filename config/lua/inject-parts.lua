@@ -187,6 +187,121 @@ end
 local has_part_summaries = false
 local summaries = {}
 
+-- Validation function to check all keys in the document
+local function validate_all_keys()
+  if not has_part_summaries then return end
+  
+  local used_keys = {}
+  local invalid_keys = {}
+  
+  -- Collect all keys used in the document
+  for key, _ in pairs(summaries) do
+    used_keys[key] = true
+  end
+  
+  -- Check if any keys are missing from part_summaries.yml
+  for key, _ in pairs(used_keys) do
+    if not summaries[key] then
+      table.insert(invalid_keys, key)
+    end
+  end
+  
+  -- If there are invalid keys, report them all at once
+  if #invalid_keys > 0 then
+    log_error("❌ CRITICAL ERROR: Multiple undefined keys found:")
+    for _, key in ipairs(invalid_keys) do
+      log_error("   - '" .. key .. "' not found in part_summaries.yml")
+    end
+    log_error("🔍 Available keys: frontmatter, main_content, foundations, principles, optimization, deployment, trustworthy, futures, labs, arduino, xiao, grove, raspberry, shared, backmatter")
+    log_error("🛑 Build stopped - fix all undefined keys before proceeding")
+    error("Part summary filter failed: multiple undefined keys found. Please check your .qmd files and part_summaries.yml for consistency.")
+  end
+end
+
+-- Pre-scan function to validate all keys before processing
+local function prescan_document_keys(doc)
+  if not has_part_summaries then return end
+  
+  log_info("🔍 Pre-scanning document for part keys...")
+  
+  local found_keys = {}
+  local invalid_keys = {}
+  local key_locations = {}
+  
+  -- Scan all RawBlocks for \part{key:xxx} patterns
+  local function scan_blocks(blocks)
+    for i, block in ipairs(blocks) do
+      if block.t == "RawBlock" and block.format == "latex" then
+        local key = extract_key_from_latex(block.text)
+        if key then
+          local normalized_key = normalize(key)
+          found_keys[normalized_key] = true
+          
+          -- Check if key is valid
+          if not summaries[normalized_key] then
+            table.insert(invalid_keys, normalized_key)
+            key_locations[normalized_key] = i
+          end
+        end
+      end
+      
+      -- Recursively scan nested blocks
+      if block.content then
+        scan_blocks(block.content)
+      end
+    end
+  end
+  
+  -- Scan the document
+  scan_blocks(doc.blocks)
+  
+  -- Report findings
+  if next(found_keys) then
+    log_info("📋 Found keys in document:")
+    for key, _ in pairs(found_keys) do
+      if summaries[key] then
+        log_info("   ✅ '" .. key .. "' - valid")
+      else
+        log_error("   ❌ '" .. key .. "' - INVALID (location: block " .. (key_locations[key] or "unknown") .. ")")
+      end
+    end
+  else
+    log_info("📋 No part keys found in document")
+  end
+  
+  -- Report available keys for reference
+  log_info("📚 Available keys in part_summaries.yml:")
+  for key, _ in pairs(summaries) do
+    log_info("   - '" .. key .. "'")
+  end
+  
+  -- If there are invalid keys, stop the build
+  if #invalid_keys > 0 then
+    log_error("❌ CRITICAL ERROR: Invalid keys found during pre-scan:")
+    for _, key in ipairs(invalid_keys) do
+      log_error("   - '" .. key .. "' not found in part_summaries.yml")
+    end
+    log_error("🛑 Build stopped - fix all invalid keys before proceeding")
+    log_error("💡 Check your .qmd files for \\part{key:" .. table.concat(invalid_keys, "} or \\part{key:") .. "} commands")
+    error("Part summary filter failed: invalid keys found during pre-scan. Please check your .qmd files and part_summaries.yml for consistency.")
+  else
+    log_success("✅ Pre-scan validation passed - all keys are valid")
+  end
+end
+
+-- Debug function to help identify the source of problematic keys
+local function debug_key_source(key, el)
+  log_error("🔍 DEBUG: Key '" .. key .. "' found in RawBlock")
+  log_error("📍 RawBlock content: " .. (el.text or "nil"))
+  log_error("📍 RawBlock format: " .. (el.format or "nil"))
+  
+  -- Try to extract more context about where this key came from
+  if el.text then
+    local context = string.sub(el.text, 1, 200) -- First 200 chars for context
+    log_error("📍 Context: " .. context)
+  end
+end
+
 -- 🏁 Main transformation function
 -- This function intercepts \part{key:xxx} commands and transforms them
 -- into appropriate LaTeX commands based on the routing logic above
@@ -236,10 +351,25 @@ function RawBlock(el)
         }
       end
     else
-      log_error("UNDEFINED KEY: '" .. key .. "' not found in part_summaries.yml")
-      log_error("Available keys: frontmatter, foundations, principles, optimization, deployment, governance, futures, labs, arduino, xiao, grove, raspberry, shared")
-      log_error("Build stopped to prevent incorrect part titles.")
-      error("Part summary filter failed: undefined key '" .. key .. "' in \\part{key:" .. key .. "}")
+      -- Enhanced error reporting with more context
+      log_error("❌ CRITICAL ERROR: UNDEFINED KEY '" .. key .. "' not found in part_summaries.yml")
+      log_error("📍 Location: RawBlock processing")
+      
+      -- Add debug information to help identify the source
+      debug_key_source(key, el)
+      
+      log_error("🔍 Available keys: frontmatter, main_content, foundations, principles, optimization, deployment, trustworthy, futures, labs, arduino, xiao, grove, raspberry, shared, backmatter")
+      log_error("💡 Check your .qmd files for \\part{key:" .. key .. "} commands")
+      log_error("🛑 Build stopped to prevent incorrect part titles.")
+      
+      -- Force immediate exit with detailed error
+      local error_msg = string.format(
+        "Part summary filter failed: undefined key '%s' in \\part{key:%s}. " ..
+        "Available keys: frontmatter, main_content, foundations, principles, optimization, deployment, trustworthy, futures, labs, arduino, xiao, grove, raspberry, shared, backmatter. " ..
+        "Please check your .qmd files and part_summaries.yml for consistency.",
+        key, key
+      )
+      error(error_msg)
     end
   end
   return nil
@@ -257,9 +387,28 @@ function Meta(meta)
       if enabled and file_path ~= "" then
         log_info("🚀 Initializing Part Summary Filter")
         log_info("📂 Loading part summaries from: " .. file_path)
-        summaries = read_summaries(file_path)
-        has_part_summaries = true
-        log_success("Part Summary Filter activated for PDF format")
+        
+        -- Add error handling for file loading
+        local success, result = pcall(read_summaries, file_path)
+        if success then
+          summaries = result
+          -- Validate that summaries were loaded properly
+          if type(summaries) == "table" and next(summaries) then
+            has_part_summaries = true
+            log_success("Part Summary Filter activated for PDF format")
+          else
+            log_error("❌ CRITICAL ERROR: part_summaries.yml is empty or invalid")
+            log_error("📍 File path: " .. file_path)
+            log_error("🛑 Build stopped - part_summaries.yml must contain valid entries")
+            error("Part summary filter failed: part_summaries.yml is empty or contains no valid entries")
+          end
+        else
+          log_error("❌ CRITICAL ERROR: Failed to load part_summaries.yml")
+          log_error("📍 File path: " .. file_path)
+          log_error("🔍 Error: " .. tostring(result))
+          log_error("🛑 Build stopped - cannot proceed without part summaries")
+          error("Part summary filter failed: cannot load part_summaries.yml from " .. file_path .. ". Error: " .. tostring(result))
+        end
       else
         log_warning("Part Summary Filter disabled or no file specified")
       end
@@ -275,5 +424,12 @@ end
 -- Return the filter in the correct order
 return {
   { Meta = Meta },
+  { Pandoc = function(doc)
+    -- Run pre-scan validation if part summaries are enabled
+    if has_part_summaries then
+      prescan_document_keys(doc)
+    end
+    return doc
+  end },
   { RawBlock = RawBlock }
 }
