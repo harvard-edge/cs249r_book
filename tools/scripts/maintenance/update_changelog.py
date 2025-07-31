@@ -4,17 +4,23 @@ import os
 import argparse
 import yaml
 import time
+import requests
+import json
 from collections import defaultdict
 from datetime import datetime
 from openai import OpenAI
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# Initialize OpenAI client (will be None if not using OpenAI)
+client = None
+use_ollama = False  # Global flag to track which service to use
 
 CHANGELOG_FILE = "CHANGELOG.md"
 QUARTO_YML_FILE = "book/config/_quarto-pdf.yml"  # Default to PDF config which has chapters structure
 GITHUB_REPO_URL = "https://github.com/harvard-edge/cs249r_book/"
 # Removed MAJOR_CHANGE_THRESHOLD since we're organizing by content type now
 OPENAI_DELAY = 1  # seconds between API calls
+OLLAMA_DELAY = 0.5  # seconds between Ollama calls (faster since local)
+OLLAMA_URL = "http://localhost:11434/api/generate"  # Default Ollama API endpoint
 
 chapter_order = []
 
@@ -218,10 +224,39 @@ def get_commit_messages_for_file(file_path, since, until=None, verbose=False):
     
     return "\n".join(meaningful_messages)
 
-def summarize_changes_with_openai(file_path, commit_messages, verbose=False, max_retries=3):
+def call_ollama(prompt, model="llama3.1:8b", verbose=False):
+    """Call Ollama API for text generation."""
+    try:
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": 0.2,
+                "num_predict": 100
+            }
+        }
+        
+        if verbose:
+            print(f"🤖 Calling Ollama with model: {model}")
+            
+        response = requests.post(OLLAMA_URL, json=payload, timeout=30)
+        response.raise_for_status()
+        
+        result = response.json()
+        return result.get("response", "").strip()
+        
+    except requests.exceptions.RequestException as e:
+        print(f"⚠️ Ollama API error: {e}")
+        return None
+    except Exception as e:
+        print(f"⚠️ Ollama error: {e}")
+        return None
+
+def summarize_changes_with_openai(file_path, commit_messages, verbose=False, max_retries=3, use_ollama=False, ollama_model="llama3.1:8b"):
     chapter_title = extract_chapter_title(file_path)
     if verbose:
-        print(f"🤖 Calling OpenAI for: {file_path} -- {chapter_title}")
+        print(f"🤖 Calling {'Ollama' if use_ollama else 'OpenAI'} for: {file_path} -- {chapter_title}")
 
     prompt = f"""You're generating a changelog entry for a machine learning systems textbook chapter.
 
@@ -246,21 +281,25 @@ Return ONLY the summary sentence (no bullet points, no chapter title)."""
 
     for attempt in range(max_retries):
         try:
-            # Add delay to avoid rate limiting
-            if attempt > 0:
+            # Add delay only for OpenAI (rate limiting)
+            if not use_ollama and attempt > 0:
                 time.sleep(OPENAI_DELAY * (2 ** attempt))  # exponential backoff
             
-            response = client.chat.completions.create(
-                model="gpt-4",
-                temperature=0.2,  # Lower temperature for more consistent output
-                max_tokens=100,   # Limit length for conciseness
-                messages=[
-                    {"role": "system", "content": "You are a technical writer creating concise changelog entries. Be specific and avoid generic language."},
-                    {"role": "user", "content": prompt}
-                ]
-            )
-
-            summary = response.choices[0].message.content.strip()
+            if use_ollama:
+                summary = call_ollama(prompt, model=ollama_model, verbose=verbose)
+                if summary is None:
+                    raise Exception("Ollama call failed")
+            else:
+                response = client.chat.completions.create(
+                    model="gpt-4",
+                    temperature=0.2,  # Lower temperature for more consistent output
+                    max_tokens=100,   # Limit length for conciseness
+                    messages=[
+                        {"role": "system", "content": "You are a technical writer creating concise changelog entries. Be specific and avoid generic language."},
+                        {"role": "user", "content": prompt}
+                    ]
+                )
+                summary = response.choices[0].message.content.strip()
 
             if not summary:
                 return f"- **{chapter_title}**: _(no meaningful changes detected)_"
@@ -272,12 +311,13 @@ Return ONLY the summary sentence (no bullet points, no chapter title)."""
             if summary.endswith("."):
                 summary = summary[:-1]
 
-            # Add delay after successful call
-            time.sleep(OPENAI_DELAY)
+            # Add delay only for OpenAI after successful call
+            if not use_ollama:
+                time.sleep(OPENAI_DELAY)
             return f"- **{chapter_title}**: {summary}"
 
         except Exception as e:
-            print(f"⚠️ OpenAI attempt {attempt + 1} failed for {file_path}: {e}")
+            print(f"⚠️ {'Ollama' if use_ollama else 'OpenAI'} attempt {attempt + 1} failed for {file_path}: {e}")
             if attempt == max_retries - 1:
                 return f"- **{chapter_title}**: _(unable to summarize; see commits manually)_"
 
@@ -293,10 +333,13 @@ def normalized_path(path):
 def generate_entry(start_date, end_date=None, verbose=False, is_latest=False):
     if verbose:
         print(f"📁 Processing changes from {start_date} to {end_date or 'now'}")
+    print(f"🔍 Analyzing Git changes...")
     changes = get_changes_in_dev_since(start_date, end_date, verbose=verbose)
     if not changes.strip():
+        print("  ⚠️ No changes found in specified period")
         return None
 
+    print("📊 Categorizing changes by file...")
     changes_by_file = defaultdict(lambda: [0, 0])
     for line in changes.splitlines():
         parts = line.split("\t")
@@ -322,11 +365,15 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False):
     )
 
     total_files = len(ordered_files)
+    print(f"📝 Processing {total_files} changed files...")
+    
     for idx, file_path in enumerate(ordered_files, 1):
         added, removed = changes_by_file[file_path]
         total = added + removed
         if verbose:
             print(f"🔍 Summarizing {file_path} ({added}+ / {removed}-) [{idx}/{total_files}]")
+        else:
+            print(f"  📄 [{idx}/{total_files}] {os.path.basename(file_path)} ({added}+ {removed}-)")
         
         # Skip references
         if "references.qmd" in file_path:
@@ -340,7 +387,12 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False):
                 print(f"⏭️ Skipping {file_path} - no meaningful changes")
             continue
             
-        summary = summarize_changes_with_openai(file_path, commit_msgs, verbose=verbose)
+        print(f"    🤖 Generating summary...")
+        summary = summarize_changes_with_openai(file_path, commit_msgs, verbose=verbose, use_ollama=use_ollama, ollama_model=args.model)
+        
+        # Show the generated summary
+        summary_text = summary.replace(f"- **{extract_chapter_title(file_path)}**: ", "")
+        print(f"      📝 {summary_text}")
         
         # Categorize by content type
         if "contents/frontmatter/" in file_path:
@@ -352,9 +404,15 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False):
         else:
             chapters.append(summary)
 
+    print(f"📋 Organizing into sections...")
+    print(f"  📄 Frontmatter: {len(frontmatter)} entries")
+    print(f"  📖 Chapters: {len(chapters)} entries")
+    print(f"  🧑‍💻 Labs: {len(labs)} entries")
+    print(f"  📚 Appendix: {len(appendix)} entries")
+
     # Determine if sections should be open or closed
-    # Only the latest entry should be open, all previous entries should be folded
-    details_state = "open" if is_latest else ""
+    # All entries should be closed by default - let users choose what to explore
+    details_state = ""  # Always closed for better UX
 
     # Add sections in order: Frontmatter, Chapters, Labs, Appendix
     if frontmatter:
@@ -366,6 +424,7 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False):
     if appendix:
         entry += f"<details {details_state}>\n<summary>**📚 Appendix**</summary>\n\n" + "\n".join(sort_by_chapter_order(appendix)) + "\n\n</details>\n"
 
+    print("✅ Entry generation complete")
     return entry
 
 def fold_existing_entries(content):
@@ -379,27 +438,37 @@ def fold_existing_entries(content):
     return re.sub(pattern, replacement, content)
 
 def generate_changelog(mode="incremental", verbose=False):
-    print("🔄 Fetching latest Git data...")
+    print("🔄 Starting Git data fetch...")
+    print("  📦 Fetching gh-pages branch...")
     run_git_command(["git", "fetch", "origin", "gh-pages:refs/remotes/origin/gh-pages"], verbose=verbose)
+    print("  📦 Fetching dev branch...")
     run_git_command(["git", "fetch", "origin", "dev:refs/remotes/origin/dev"], verbose=verbose)
+    print("✅ Git data fetch complete")
 
     def get_latest_gh_pages_commit():
+        print("🔍 Looking for latest publication commit...")
         # Look for actual publication commits, not administrative ones
-        output = run_git_command(["git", "log", "--pretty=format:%H %ad", "--date=iso", "--grep=Built site for gh-pages", "origin/gh-pages"], verbose=verbose)
+        output = run_git_command(["git", "log", "--pretty=format:%H %aI", "--grep=Built site for gh-pages", "origin/gh-pages"], verbose=verbose)
         if output.strip():
             first_line = output.split('\n')[0]
             parts = first_line.split(" ", 1)
-            return (parts[0], parts[1]) if len(parts) == 2 else (None, None)
+            result = (parts[0], parts[1]) if len(parts) == 2 else (None, None)
+            if result[0]:
+                print(f"  📅 Found latest commit: {result[0][:8]} from {result[1]}")
+            return result
+        print("  ⚠️ No publication commits found")
         return (None, None)
 
     def get_all_gh_pages_commits():
+        print("🔍 Scanning all publication commits...")
         # Look for actual publication commits, not administrative ones
-        output = run_git_command(["git", "log", "--pretty=format:%H %ad", "--date=iso", "--grep=Built site for gh-pages", "origin/gh-pages"], verbose=verbose)
+        output = run_git_command(["git", "log", "--pretty=format:%H %aI", "--grep=Built site for gh-pages", "origin/gh-pages"], verbose=verbose)
         commits = []
         for line in output.splitlines():
             parts = line.split(" ", 1)
             if len(parts) == 2:
                 commits.append((parts[0], parts[1]))
+        print(f"  📊 Found {len(commits)} publication commits")
         return commits
 
     def extract_year_from_date(date_str):
@@ -473,6 +542,7 @@ def generate_changelog(mode="incremental", verbose=False):
     else:
         if verbose:
             print("⚡ Running incremental update...")
+        print(f"📅 Processing changes since: {format_friendly_date(latest_date) if latest_date else 'beginning'}")
         entry = generate_entry(latest_date, verbose=verbose, is_latest=True)
         if not entry:
             return "_No updates found._"
@@ -488,6 +558,8 @@ if __name__ == "__main__":
     parser.add_argument("-t", "--test", action="store_true", help="Run without writing to file.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output.")
     parser.add_argument("-q", "--quarto-config", type=str, help="Path to quarto config file (default: book/config/_quarto-pdf.yml)")
+    parser.add_argument("-o", "--ollama", action="store_true", help="Use Ollama for summarization instead of OpenAI.")
+    parser.add_argument("-m", "--model", type=str, default="gemma2:9b", help="Ollama model to use (default: gemma2:9b). Popular options: gemma2:9b, gemma2:27b, llama3.1:8b, llama3.1:70b")
 
     args = parser.parse_args()
     mode = "incremental"
@@ -497,6 +569,27 @@ if __name__ == "__main__":
     try:
         load_chapter_order(args.quarto_config)
         print(f"🚀 Starting changelog generation in {mode} mode...")
+
+        if args.ollama:
+            print(f"🤖 Using Ollama for summarization with model: {args.model}")
+            use_ollama = True
+            # Test Ollama connection
+            test_response = call_ollama("Hello", model=args.model, verbose=False)
+            if test_response is None:
+                print("❌ Failed to connect to Ollama. Make sure it's running on localhost:11434")
+                print("💡 To install Gemini models in Ollama:")
+                print("   ollama pull gemma2:9b")
+                print("   ollama pull gemma2:27b")
+                exit(1)
+            print("✅ Ollama connection successful")
+        else:
+            print("🤖 Using OpenAI for summarization.")
+            use_ollama = False
+            # Initialize OpenAI client
+            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            if not os.getenv("OPENAI_API_KEY"):
+                raise ValueError("OPENAI_API_KEY not set. Please set it in your environment variables.")
+
         new_entry = generate_changelog(mode=mode, verbose=args.verbose)
 
         if args.test:
