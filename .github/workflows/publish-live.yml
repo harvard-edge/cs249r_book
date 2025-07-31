@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       description:
-        description: 'What are you publishing? (e.g., "Add Chapter 12: Advanced Optimization", "Update AI Ethics section", "Fix notation in Chapter 3")'
+        description: 'What are you publishing? (brief description)'
         required: true
         default: ''
       release_type:
@@ -17,32 +17,12 @@ on:
           - 'minor' 
           - 'major'
         default: 'minor'
-      previous_version:
-        description: 'Previous release version (auto-detected, but you can override if needed)'
-        required: false
-        default: ''
-      release_notes:
-        description: 'Brief summary of changes for release notes (key features, fixes, improvements)'
-        required: true
-        default: ''
-      breaking_changes:
-        description: 'Any breaking changes or important notes for users? (leave empty if none)'
-        required: false
-        default: ''
-      testing_performed:
-        description: 'What testing was performed? (e.g., "Local build test", "PDF generation", "Cross-references verified")'
-        required: true
-        default: ''
-      rollback_plan:
-        description: 'Rollback plan if issues arise? (e.g., "Revert to previous commit", "Hotfix branch ready")'
-        required: false
-        default: ''
       dev_commit:
-        description: 'Specific dev commit to publish (leave empty for latest) - Use for publishing stable content while continuing work'
+        description: 'Specific dev commit to publish (leave empty for latest)'
         required: false
         default: ''
       confirm:
-        description: 'Type "PUBLISH" to confirm you want to go live'
+        description: 'Type "PUBLISH" to confirm'
         required: true
         default: ''
 
@@ -63,52 +43,48 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 🔍 Check if dev branch tests passed
+      - name: 🔍 Validate dev commit and tests
         run: |
-          echo "🔄 Checking dev branch build status..."
+          echo "🔍 Validating dev commit and test status..."
           
-          # Determine which commit to use
+          # Get the commit to validate
           if [ -n "${{ github.event.inputs.dev_commit }}" ]; then
-            DEV_SHA="${{ github.event.inputs.dev_commit }}"
-            echo "📌 Using specified commit: $DEV_SHA"
-            
-            # Validate the commit exists
-            if ! git cat-file -e "$DEV_SHA" 2>/dev/null; then
-              echo "❌ Commit $DEV_SHA does not exist!"
-              exit 1
-            fi
-            
-            # Check if commit is in dev branch
-            if ! git merge-base --is-ancestor "$DEV_SHA" origin/dev; then
-              echo "❌ Commit $DEV_SHA is not in dev branch history!"
-              exit 1
-            fi
+            COMMIT_SHA="${{ github.event.inputs.dev_commit }}"
+            echo "📌 Using specified commit: $COMMIT_SHA"
           else
-            DEV_SHA=$(git rev-parse origin/dev)
-            echo "📊 Using latest dev commit: $DEV_SHA"
+            COMMIT_SHA=$(git rev-parse origin/dev)
+            echo "📊 Using latest dev commit: $COMMIT_SHA"
           fi
           
-          # Check if there's a successful workflow run for this commit
-          echo "🔄 Checking workflow runs for dev branch..."
-          
-          # Use GitHub API to check workflow status
-          WORKFLOW_STATUS=$(curl -s \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/runs?branch=dev&status=completed&per_page=10" \
-            | jq -r --arg sha "$DEV_SHA" '.workflow_runs[] | select(.head_sha == $sha and .name == "📚 CI/CD Controller") | .conclusion' \
-            | head -1)
-          
-          echo "📊 Workflow status for dev: $WORKFLOW_STATUS"
-          
-          if [ "$WORKFLOW_STATUS" != "success" ]; then
-            echo "❌ Dev branch tests have not passed! Latest status: $WORKFLOW_STATUS"
-            echo "🛑 Cannot publish until dev branch is green ✅"
-            echo "📋 Please ensure your dev branch builds are successful before publishing."
+          # Verify commit exists and is from dev branch
+          if ! git cat-file -e "$COMMIT_SHA" 2>/dev/null; then
+            echo "❌ Commit $COMMIT_SHA does not exist!"
             exit 1
           fi
           
-          echo "✅ Dev branch tests passed! Safe to publish."
+          if ! git merge-base --is-ancestor "$COMMIT_SHA" origin/dev; then
+            echo "❌ Commit $COMMIT_SHA is not in dev branch!"
+            exit 1
+          fi
+          
+          echo "✅ Commit $COMMIT_SHA is valid and from dev branch"
+          
+          # Check if commit has successful workflow runs
+          echo "🔄 Checking if commit has passed tests..."
+          SUCCESSFUL_RUNS=$(curl -s \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs?branch=dev&status=completed&per_page=10" \
+            | jq -r --arg sha "$COMMIT_SHA" '.workflow_runs[] | select(.head_sha == $sha and .conclusion == "success") | .id' \
+            | wc -l)
+          
+          if [ "$SUCCESSFUL_RUNS" -eq 0 ]; then
+            echo "❌ Commit $COMMIT_SHA has no successful workflow runs!"
+            echo "🛑 Cannot publish until tests pass ✅"
+            exit 1
+          fi
+          
+          echo "✅ Commit $COMMIT_SHA has passed tests - safe to publish"
 
       - name: 🏷️ Calculate Next Version
         id: version
@@ -163,17 +139,7 @@ jobs:
           
           NEW_VERSION="v$NEW_MAJOR.$NEW_MINOR.$NEW_PATCH"
           echo "🎯 New version: $NEW_VERSION (${{ github.event.inputs.release_type }} release)"
-          echo "📋 Release notes: ${{ github.event.inputs.release_notes }}"
-          
-          if [ -n "${{ github.event.inputs.breaking_changes }}" ]; then
-            echo "⚠️  Breaking changes: ${{ github.event.inputs.breaking_changes }}"
-          fi
-          
-          echo "🧪 Testing performed: ${{ github.event.inputs.testing_performed }}"
-          
-          if [ -n "${{ github.event.inputs.rollback_plan }}" ]; then
-            echo "🔄 Rollback plan: ${{ github.event.inputs.rollback_plan }}"
-          fi
+          echo "📋 Description: ${{ github.event.inputs.description }}"
           
           # Export for other steps
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
@@ -260,7 +226,7 @@ jobs:
               -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
               -H "Accept: application/vnd.github.v3+json" \
               "https://api.github.com/repos/${{ github.repository }}/actions/runs?branch=main&status=completed&per_page=5" \
-              | jq -r '.workflow_runs[] | select(.name == "📚 CI/CD Controller") | .conclusion' \
+              | jq -r '.workflow_runs[] | select(.conclusion == "success") | .conclusion' \
               | head -1)
             
             if [ "$BUILD_STATUS" = "success" ]; then
@@ -297,23 +263,8 @@ jobs:
           - All chapters, exercises, and lab materials as of commit $(git rev-parse HEAD)
           - Compatible with MIT Press publication standards
           
-          ### 📝 Release Notes
-          ${{ github.event.inputs.release_notes }}
-          
-          $(if [ -n "${{ github.event.inputs.breaking_changes }}" ]; then
-            echo "### ⚠️ Breaking Changes"
-            echo "${{ github.event.inputs.breaking_changes }}"
-            echo ""
-          fi)
-          
-          ### 🧪 Testing Performed
-          ${{ github.event.inputs.testing_performed }}
-          
-          $(if [ -n "${{ github.event.inputs.rollback_plan }}" ]; then
-            echo "### 🔄 Rollback Plan"
-            echo "${{ github.event.inputs.rollback_plan }}"
-            echo ""
-          fi)
+          ### 📝 Changes
+          ${{ github.event.inputs.description }}
           
           ### 🔗 Quick Links
           - 🌐 [Read Online](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }})
@@ -350,11 +301,8 @@ jobs:
           echo "**Source Commit:** ${{ github.event.inputs.dev_commit || 'latest' }}" >> $GITHUB_STEP_SUMMARY
           echo "**Publication Time:** $(date)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📝 Release Summary:" >> $GITHUB_STEP_SUMMARY
-          echo "${{ github.event.inputs.release_notes }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🧪 Testing:" >> $GITHUB_STEP_SUMMARY
-          echo "${{ github.event.inputs.testing_performed }}" >> $GITHUB_STEP_SUMMARY
+          echo "### 📝 Changes:" >> $GITHUB_STEP_SUMMARY
+          echo "${{ github.event.inputs.description }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🔄 What happened:" >> $GITHUB_STEP_SUMMARY
           echo "1. ✅ Verified dev branch tests passed" >> $GITHUB_STEP_SUMMARY
