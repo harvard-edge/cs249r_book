@@ -1,6 +1,5 @@
 # Changelog
 
-::: {.callout-note}
 ## 📅 2025
 
 ### June 10
