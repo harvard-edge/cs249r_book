@@ -34,12 +34,27 @@ class BookBinder:
         self.active_config = self.book_dir / "_quarto.yml"
         
     def show_banner(self):
-        """Display beautiful banner"""
+        """Display beautiful banner with ASCII art"""
+        ascii_art = """
+    ┌─────────────────────────────┐
+    │ ○ ○ ○ ○  MLSYS BOOK BINDER  │
+    ├─────────────────────────────┤
+    │ > Introduction              │
+    │ > Deep Learning Primer     │
+    │ > Neural Networks          │
+    │ > Training & Optimization  │
+    │ > Deployment & MLOps       │
+    │ > Edge AI & Systems        │
+    │ > Conclusion               │
+    └─────────────────────────────┘
+        """
+        
         banner = Panel.fit(
-            "[bold blue]📚 Book Binder[/bold blue]\n"
-            "[dim]Self-contained lightning-fast MLSysBook development CLI[/dim]",
+            ascii_art,
+            title="[bold blue]📚 Book Binder[/bold blue]",
+            subtitle="[dim]⚡ I compile ML systems knowledge for the world[/dim]",
             border_style="blue",
-            padding=(1, 2)
+            padding=(0, 1)
         )
         console.print(banner)
     
@@ -958,6 +973,242 @@ class BookBinder:
             console.print(f"[red]❌ Preview failed: {e}[/red]")
             return False
     
+    def publish(self):
+        """Publish the book (build + deploy)"""
+        
+        # Show warning and confirmation
+        warning_panel = Panel(
+            "[bold red]⚠️  PUBLISHING WARNING ⚠️[/bold red]\n\n"
+            "[red]This will publish your book to the live website![/red]\n\n"
+            "📊 What will happen:\n"
+            "  • Build HTML and PDF versions\n"
+            "  • Copy PDF to assets directory\n"
+            "  • Commit changes to git\n"
+            "  • Push to main branch\n"
+            "  • Trigger GitHub Actions deployment\n"
+            "  • Make changes live at https://harvard-edge.github.io/cs249r_book\n\n"
+            "[yellow]Are you sure you want to publish?[/yellow]\n"
+            "[dim]Type 'PUBLISH' to confirm, or anything else to cancel[/dim]",
+            title="🚀 Publishing MLSysBook",
+            border_style="red",
+            padding=(1, 2)
+        )
+        console.print(warning_panel)
+        
+        # Get confirmation
+        try:
+            console.print("\n[bold blue]Confirmation:[/bold blue] ", end="")
+            confirmation = input().strip()
+            if confirmation != "PUBLISH":
+                console.print("[yellow]🛑 Publishing cancelled[/yellow]")
+                return False
+        except KeyboardInterrupt:
+            console.print("\n[yellow]🛑 Publishing cancelled[/yellow]")
+            return False
+        
+        console.print("[green]✅ Confirmed! Starting publication process...[/green]\n")
+        
+        # Pre-flight checks
+        console.print("[blue]🔍 Running pre-flight checks...[/blue]")
+        
+        # Check git status
+        try:
+            result = subprocess.run(['git', 'branch', '--show-current'], 
+                                  capture_output=True, text=True, cwd=self.root_dir)
+            current_branch = result.stdout.strip()
+            
+            if current_branch != "main":
+                console.print("[red]❌ You are not on the main branch. Please switch to main first.[/red]")
+                console.print(f"[dim]Current branch: {current_branch}[/dim]")
+                return False
+                
+            # Check for uncommitted changes
+            result = subprocess.run(['git', 'status', '--porcelain'], 
+                                  capture_output=True, text=True, cwd=self.root_dir)
+            if result.stdout.strip():
+                console.print("[red]❌ You have uncommitted changes. Please commit or stash them first.[/red]")
+                console.print("[dim]Run 'git status' to see changes[/dim]")
+                return False
+                
+            console.print("[green]✅ Git status check passed[/green]")
+            
+        except Exception as e:
+            console.print(f"[red]❌ Git check failed: {e}[/red]")
+            return False
+        
+        # Clean previous builds
+        console.print("[blue]🧹 Cleaning previous builds...[/blue]")
+        self.clean()
+        
+        # Build HTML version
+        console.print("[blue]📚 Building HTML version...[/blue]")
+        if not self.build_full("html"):
+            console.print("[red]❌ HTML build failed![/red]")
+            return False
+        console.print("[green]✅ HTML build completed[/green]")
+        
+        # Build PDF version
+        console.print("[blue]📄 Building PDF version...[/blue]")
+        if not self.build_full("pdf"):
+            console.print("[red]❌ PDF build failed![/red]")
+            return False
+        console.print("[green]✅ PDF build completed[/green]")
+        
+        # Check if PDF was created
+        pdf_path = self.build_dir / "pdf" / "Machine-Learning-Systems.pdf"
+        if not pdf_path.exists():
+            console.print(f"[red]❌ PDF not found at {pdf_path}[/red]")
+            return False
+        
+        # Copy PDF to assets
+        console.print("[blue]📦 Copying PDF to assets...[/blue]")
+        assets_dir = self.root_dir / "assets"
+        assets_dir.mkdir(exist_ok=True)
+        
+        import shutil
+        shutil.copy2(pdf_path, assets_dir / "Machine-Learning-Systems.pdf")
+        console.print("[green]✅ PDF copied to assets[/green]")
+        
+        # Commit and push
+        console.print("[blue]💾 Committing changes...[/blue]")
+        try:
+            subprocess.run(['git', 'add', 'assets/Machine-Learning-Systems.pdf'], 
+                         cwd=self.root_dir, check=True)
+            subprocess.run(['git', 'commit', '-m', '📄 Add PDF to assets for download'], 
+                         cwd=self.root_dir, check=True)
+            console.print("[green]✅ Changes committed[/green]")
+        except subprocess.CalledProcessError:
+            console.print("[yellow]⚠️ No changes to commit (PDF might already be up to date)[/yellow]")
+        
+        # Push to main
+        console.print("[blue]🚀 Pushing to main...[/blue]")
+        try:
+            subprocess.run(['git', 'push', 'origin', 'main'], 
+                         cwd=self.root_dir, check=True)
+            console.print("[green]✅ Successfully pushed to main[/green]")
+        except subprocess.CalledProcessError as e:
+            console.print(f"[red]❌ Push failed: {e}[/red]")
+            return False
+        
+        # Success summary
+        console.print("\n[green]🎉 Publication completed successfully![/green]")
+        console.print("\n[blue]📊 What happened:[/blue]")
+        console.print("  ✅ Built HTML version")
+        console.print("  ✅ Built PDF version") 
+        console.print("  ✅ Copied PDF to assets")
+        console.print("  ✅ Committed changes")
+        console.print("  ✅ Pushed to main")
+        console.print("\n[blue]🌐 Your book will be available at:[/blue]")
+        console.print("  📖 Web: https://harvard-edge.github.io/cs249r_book")
+        console.print("  📄 PDF: https://harvard-edge.github.io/cs249r_book/assets/Machine-Learning-Systems.pdf")
+        console.print("\n[blue]⏳ GitHub Actions will now:[/blue]")
+        console.print("  🔄 Run quality checks")
+        console.print("  🏗️ Build all formats")
+        console.print("  🚀 Deploy to GitHub Pages")
+        console.print("\n[blue]📈 Monitor: https://github.com/harvard-edge/cs249r_book/actions[/blue]")
+        
+        return True
+
+    def show_about(self):
+        """Display beautiful about screen with book binder theme"""
+        
+        # Create a book-themed layout
+        about_ascii = """
+    ┌─────────────────────────────┐
+    │ ○ ○ ○ ○  MLSYS BOOK BINDER  │
+    ├─────────────────────────────┤
+    │ > Introduction              │
+    │ > Deep Learning Primer      │
+    │ > Neural Networks           │
+    │ > Training & Optimization   │
+    │ > Deployment & MLOps        │
+    │ > Edge AI & Systems         │
+    │ > Conclusion                │
+    └─────────────────────────────┘
+        """
+        
+        about_panel = Panel(
+            about_ascii + "\n"
+            "[bold blue]📚 Book Binder[/bold blue]\n"
+            "[dim]Self-contained lightning-fast MLSysBook development CLI[/dim]\n\n"
+            "[bold green]Version:[/bold green] 1.0.0\n"
+            "[bold green]Author:[/bold green] Prof. Vijay Janapa Reddi\n"
+            "[bold green]Repository:[/bold green] https://github.com/harvard-edge/cs249r_book\n\n"
+            "[bold yellow]🎯 Purpose:[/bold yellow]\n"
+            "  • Bind chapters into beautiful books\n"
+            "  • Preview content before publication\n"
+            "  • Manage build configurations\n"
+            "  • Publish to the world\n\n"
+            "[bold cyan]🛠️ Built with:[/bold cyan]\n"
+            "  • Python 3.6+ (standard library only)\n"
+            "  • Rich (beautiful terminal output)\n"
+            "  • Quarto (academic publishing)\n"
+            "  • Git (version control)\n\n"
+            "[bold magenta]📖 Book Information:[/bold magenta]\n"
+            "  • Title: Machine Learning Systems\n"
+            "  • Subtitle: Principles and Practices of Engineering AI Systems\n"
+            "  • Author: Prof. Vijay Janapa Reddi\n"
+            "  • Publisher: MIT Press (2026)\n"
+            "  • License: CC BY-NC-SA 4.0\n\n"
+            "[bold blue]🌐 Live at:[/bold blue]\n"
+            "  • Web: https://mlsysbook.ai\n"
+            "  • PDF: https://mlsysbook.ai/pdf\n"
+            "  • Ecosystem: https://mlsysbook.org\n\n"
+            "[dim]Made with ❤️ for aspiring AI engineers worldwide[/dim]",
+            title="📚 About Book Binder",
+            border_style="blue",
+            padding=(1, 2)
+        )
+        
+        # Show system status
+        status_table = Table(show_header=True, header_style="bold green", box=None)
+        status_table.add_column("Component", style="cyan", width=20)
+        status_table.add_column("Status", style="white", width=15)
+        status_table.add_column("Details", style="dim")
+        
+        # Check various components
+        status_table.add_row("📁 Book Directory", "✅ Found", str(self.book_dir))
+        status_table.add_row("🔗 Active Config", "✅ Active", str(self.active_config))
+        status_table.add_row("📚 Chapters", "✅ Available", f"{len(self.find_chapters())} chapters")
+        status_table.add_row("🏗️ Build Directory", "✅ Ready", str(self.build_dir))
+        
+        # Check git status
+        try:
+            result = subprocess.run(['git', 'branch', '--show-current'], 
+                                  capture_output=True, text=True, cwd=self.root_dir)
+            current_branch = result.stdout.strip()
+            status_table.add_row("🌿 Git Branch", "✅ Active", current_branch)
+        except:
+            status_table.add_row("🌿 Git Branch", "❌ Error", "Could not determine")
+        
+        # Check for uncommitted changes
+        try:
+            result = subprocess.run(['git', 'status', '--porcelain'], 
+                                  capture_output=True, text=True, cwd=self.root_dir)
+            if result.stdout.strip():
+                status_table.add_row("📝 Git Status", "⚠️ Changes", "Uncommitted changes detected")
+            else:
+                status_table.add_row("📝 Git Status", "✅ Clean", "No uncommitted changes")
+        except:
+            status_table.add_row("📝 Git Status", "❌ Error", "Could not determine")
+        
+        # Display everything
+        self.show_banner()
+        console.print(about_panel)
+        console.print(Panel(status_table, title="🔧 System Status", border_style="green"))
+        
+        # Quick commands reminder
+        quick_commands = Table(show_header=True, header_style="bold blue", box=None)
+        quick_commands.add_column("Command", style="green", width=15)
+        quick_commands.add_column("Description", style="white")
+        
+        quick_commands.add_row("./binder list", "See all chapters")
+        quick_commands.add_row("./binder status", "Show current config")
+        quick_commands.add_row("./binder help", "Show all commands")
+        quick_commands.add_row("./binder about", "Show this information")
+        
+        console.print(Panel(quick_commands, title="🚀 Quick Commands", border_style="cyan"))
+
     def show_help(self):
         """Display beautiful help screen"""
         fast_table = Table(show_header=True, header_style="bold green", box=None)
@@ -975,6 +1226,7 @@ class BookBinder:
         
         full_table.add_row("build - <format>", "Build complete book", "./binder build - pdf")
         full_table.add_row("preview-full [format]", "Preview complete book", "./binder preview-full")
+        full_table.add_row("publish", "Build and publish book", "./binder publish")
         
         # Management Commands
         mgmt_table = Table(show_header=True, header_style="bold blue", box=None)
@@ -987,6 +1239,7 @@ class BookBinder:
         mgmt_table.add_row("switch <format>", "Switch config", "./binder switch pdf")
         mgmt_table.add_row("status", "Show current status", "./binder status")
         mgmt_table.add_row("list", "List chapters", "./binder list")
+        mgmt_table.add_row("about", "Show about information", "./binder about")
         mgmt_table.add_row("help", "Show this help", "./binder help")
         
         console.print(mgmt_table)
@@ -1004,6 +1257,7 @@ class BookBinder:
         shortcuts_table.add_row("s", "switch")
         shortcuts_table.add_row("st", "status")
         shortcuts_table.add_row("l", "list")
+        shortcuts_table.add_row("a", "about")
         shortcuts_table.add_row("h", "help")
         
         # Display everything
@@ -1125,6 +1379,13 @@ def main():
 
         elif command == "list":
             binder.show_chapters()
+
+        elif command == "publish":
+            binder.show_symlink_status()
+            binder.publish()
+
+        elif command == "about":
+            binder.show_about()
 
         elif command == "help":
             binder.show_help()
