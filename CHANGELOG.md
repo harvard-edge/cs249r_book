@@ -1,4 +1,115 @@
+# Changelog
+
+::: {.callout-note}
+Automatically generated from Git commit messages. Generally accurate but may require review.
+:::
+
 ## 📅 2025
+
+### 📅 August 01 at 02:57 PM
+
+<details >
+<summary>**📄 Frontmatter**</summary>
+
+- `███░░` **About**: The textbook now features a restructured repository, a cross-reference to Bloom's figure, added quizzes for self-assessment, and a fix for a bug related to the -repair command
+- `███░░` **Changelog**: The repository has been restructured to enhance organization and maintainability
+- `███░░` **SocratiQ**: The repository was restructured for better organization and maintainability, an AI-powered script was added to improve figure captions, and PDF part summaries were implemented
+- `██░░░` **Index**: The index was restructured and updated to reflect changes in section IDs and headers
+- `██░░░` **Foreword**: The repository has been restructured to enhance organization and maintainability
+- `██░░░` **Acknowledgements**: The repository was restructured for better organization and maintainability, a bug related to -repair followed by repair was fixed, and section IDs were updated for consistent linking
+
+</details>
+
+<details >
+<summary>**📖 Chapters**</summary>
+
+- `███░░` **Chapter 1: Introduction**: The introduction chapter now includes auto-generated self-check quizzes and has updated section headers
+- `███░░` **Chapter 2: ML Systems**: Quizzes were added to the ML Systems chapter, source citations were standardized across the text, and the script for inserting quizzes was improved
+- `███░░` **Chapter 3: DL Primer**: Quizzes were added to the DL Primer chapter, figure captions were updated for clarity and context, and new Tikz figures were added to chapters 3-6
+- `███░░` **Chapter 4: DNN Architectures**: New TikZ figures were added to chapters 3-6, figure captions were updated for clarity, and descriptions were enhanced with clarifications
+- `███░░` **Chapter 5: AI Workflow**: Quizzes were added to the chapter, quiz insertion logic was improved, and conclusion sections were renamed to summaries
+- `███░░` **Chapter 6: Data Engineering**: New Tikz figures were added to the chapter, descriptions and key concepts were enhanced for clarity, and quizzes were integrated
+- `███░░` **Chapter 8: AI Training**: Added new TikZ figures to the chapter and integrated quizzes. Renamed all "Conclusion" sections to "Summary"
+- `███░░` **Chapter 10: Model Optimizations**: Quizzes were added to the chapter, quiz insertion logic was improved, and figure captions were updated for clarity and context
+- `███░░` **Chapter 11: AI Acceleration**: Quizzes were added to the chapter, quiz insertion logic was improved, and section headers and IDs were updated for consistency
+- `███░░` **Chapter 12: Benchmarking AI**: Integrated quizzes into the chapter, updated figure and table captions for clarity, and restructured sections for better organization
+- `███░░` **Chapter 13: ML Operations**: The repository was restructured for better organization and maintainability, quizzes were added to the chapter, and the quiz insertion logic and answer extraction were improved
+- `███░░` **Chapter 14: On-Device Learning**: Quizzes were added to the chapter, quiz insertion logic was improved, and section headers and IDs were updated for consistency
+- `███░░` **Chapter 18: Robust AI**: Quizzes were added to the chapter, figure captions were updated for better context, and the quiz insertion process was improved
+- `███░░` **Chapter 15: Security & Privacy**: Integrated quizzes into the chapter, updated figure captions for clarity and context, and added section headers for better organization
+- `███░░` **Chapter 16: Responsible AI**: Quizzes were added to the chapter, quiz insertion logic was improved, and conclusion sections were renamed to summaries
+- `███░░` **Chapter 17: Sustainable AI**: Standardized source citations throughout the chapter, added quizzes, and improved the script for inserting and extracting quiz answers
+- `███░░` **Chapter 19: AI for Good**: Quizzes were added to the chapter, quiz insertion logic was improved, and section headers were updated
+- `███░░` **Chapter 20: Conclusion**: The repository was restructured for better organization and maintainability, quizzes are now inserted before parts, and "Conclusion" sections were renamed to "Summary"
+- `███░░` **PhD Survival Guide**: The repository was restructured for better organization and maintainability, quiz answers are now inserted before part blocks as needed, anchor links in the resources guide were updated, and resources were moved to the backmatter
+- `███░░` **Best Practices**: The repository has been restructured for better organization and now includes PDF summaries for each book part
+- `██░░░` **Chapter 7: AI Frameworks**: Added new TikZ figures to Chapters 7 and 8, removed resources sections from all chapters, and renamed "Conclusion" sections to "Summary"
+- `██░░░` **Chapter 9: Efficient AI**: Quizzes were added to the chapter and the script for inserting them was improved. Section IDs were updated to ensure consistent linking
+- `██░░░` **Chapter: Generative Ai**: The repository has been restructured to enhance organization and maintainability
+- `██░░░` **Design Principles**: The repository was restructured for better organization and PDF part summaries were implemented
+- `██░░░` **Foundations**: The repository was restructured for better organization and maintainability, and PDF part summaries were implemented
+- `██░░░` **Impact Outlook**: The repository was restructured for better organization and PDF part summaries were implemented
+
+</details>
+
+<details >
+<summary>**🧑‍💻 Labs**</summary>
+
+- `███░░` **Lab: Xiao Esp32S3**: The lab's repository was restructured for better organization, figure captions were corrected to adhere to style guidelines, a bug in the repair function was fixed, and the section generation script and section IDs were updated
+- `███░░` **Lab: XIAO Setup**: The repository has been restructured for better organization and maintainability, "Conclusion" sections have been renamed to "Summary", a bug in the -repair followed by repair sequence was fixed, and section IDs and headers were updated
+- `███░░` **Lab: Setup And No Code Apps**: The repository has been restructured for better organization and maintainability, "Conclusion" sections have been renamed to "Summary", a bug in the repair functionality was fixed, and section IDs were updated for consistent linking
+- `███░░` **Lab: Raspberry Pi Setup**: The repository was restructured for better organization, source citations were standardized, TOC formatting was customized, a bug in the repair script was fixed, section IDs were updated for consistent linking, and section headers were updated using a script
+- `███░░` **Lab: Pi Image Classification**: The repository was restructured for better organization, "Conclusion" sections were renamed to "Summary", a bug in the repair functionality was fixed, the section generation script was updated, and section IDs were revised for consistency
+- `███░░` **Lab: Pi Object Detection**: The repository has been restructured for better organization and maintainability, "Conclusion" sections have been renamed to "Summary", a bug in the repair functionality was fixed, the section generation script was updated, and section IDs were revised for consistency
+- `███░░` **Lab: Pi Large Language Models**: The repository has been restructured for better organization and maintainability, "Conclusion" sections have been renamed to "Summary", a bug in the -repair followed by repair function was fixed, and the section generation script and IDs were updated for consistent linking
+- `███░░` **Lab: Lab Setup**: The repository has been restructured for better organization and maintainability, quiz answers are now inserted before part blocks when needed, and "Conclusion" sections have been renamed to "Summary"
+- `██░░░` **Lab: Labs**: The repository has been restructured for improved organization and maintainability
+- `██░░░` **Lab: Nicla Vision**: The lab's repository was restructured for better organization, figure captions were corrected to adhere to the style guide, a bug in the repair function was fixed, and the section generation script and content consideration were updated
+- `██░░░` **Lab: Arduino Setup**: The repository has been restructured for better organization, "Conclusion" sections have been renamed to "Summary", and a bug in the -repair followed by repair sequence has been fixed
+- `██░░░` **Lab: Arduino Image Classification**: The repository was restructured for better organization and maintainability, "Conclusion" sections were renamed to "Summary", and a bug in the -repair followed by repair process was fixed
+- `██░░░` **Lab: Arduino Object Detection**: The lab's repository was restructured for better organization, "Conclusion" sections were renamed to "Summary", a bug in the repair functionality was fixed, section IDs were updated for consistent linking, and unnecessary blank lines were removed
+- `██░░░` **Lab: Arduino Keyword Spotting**: The repository has been restructured for better organization and maintainability, "Conclusion" sections have been renamed to "Summary", and a bug in the -repair followed by repair process was fixed
+- `██░░░` **Lab: Arduino Motion Classification**: The repository was restructured for better organization, quiz answers are now inserted before part blocks as needed, and section IDs and headers were updated
+- `██░░░` **Lab: XIAO Image Classification**: The repository has been restructured for better organization and maintainability, "Conclusion" sections have been renamed to "Summary", a bug in the repair functionality has been fixed, and section IDs have been updated for consistent linking
+- `██░░░` **Lab: XIAO Object Detection**: The repository has been restructured for better organization and maintainability, "Conclusion" sections have been renamed to "Summary", a bug in the -repair followed by repair function was fixed, and section IDs were updated for consistent linking
+- `██░░░` **Lab: XIAO Keyword Spotting**: The repository has been restructured for better organization and maintainability, "Conclusion" sections have been renamed to "Summary", and a bug in the -repair followed by repair sequence has been fixed
+- `██░░░` **Lab: XIAO Motion Classification**: The lab's repository structure was reorganized for better maintainability, section headers were updated, and a bug related to quiz answer placement before part blocks was fixed
+- `██░░░` **Lab: Grove Vision Ai V2**: The lab's repository was restructured, figure captions were corrected, a bug in the repair function was fixed, the section generation script was updated, and section headers were revised
+- `██░░░` **Lab: Arduino Image Classification**: The repository has been restructured for better organization, "Conclusion" sections have been renamed to "Summary", and section IDs have been updated for consistent linking
+- `██░░░` **Lab: Arduino Object Detection**: The repository has been restructured to improve organization and maintainability
+- `██░░░` **Lab: Raspi**: The repository was restructured for better organization, a bug in the repair script was fixed, and the section generation script and headers were updated
+- `██░░░` **Lab: Pi Vision Language Models**: The repository was restructured for better organization and maintainability, section IDs were updated for consistent linking, and a bug in the -repair followed by repair sequence was fixed
+- `██░░░` **Lab: Shared**: The repository was restructured for better organization and the shared labs heading was updated
+- `██░░░` **Lab: Kws Feature Eng**: The repository has been restructured for better organization and maintainability, "Conclusion" sections have been renamed to "Summary", a bug in the -repair followed by repair sequence was fixed, and section IDs were updated for consistent linking
+- `██░░░` **Lab: Dsp Spectral Features Block**: The repository was restructured for better organization and maintainability, section IDs were updated for consistent linking, and a bug in the -repair followed by repair sequence was fixed
+- `██░░░` **Lab: Labs Overview**: The repository was restructured for better organization and maintainability, section IDs were updated, and section headers were revised using a script
+
+</details>
+
+<details >
+<summary>**📚 Appendix**</summary>
+
+- `███░░` **PhD Survival Guide**: The PhD Survival Guide now includes updated content, revised section IDs, and moved resources to the backmatter
+
+</details>
+---
+
+## 📅 2025
+
+### August 01
+
+<details >
+<summary>**📦 Release 0.4.1**</summary>
+
+- `███░░` **Book Binder CLI**: Enhanced with interactive prompts, smart defaults, and improved UX
+- `███░░` **Publishing Workflow**: Streamlined publishing process with step-by-step wizard
+- `███░░` **Environment Setup**: Automated tool installation and configuration
+- `██░░░` **Documentation**: Updated README and docs to feature binder workflow
+- `█░░░░` **Bug Fixes**: Various improvements and refinements
+
+</details>
+
+
 
 ### June 10
 
