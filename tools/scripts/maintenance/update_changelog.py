@@ -361,8 +361,8 @@ def format_friendly_date(date_str):
         else:
             # Fallback to space-separated format
             dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z")
-        # Format as "Month Day at Hour:Minute AM/PM" (no year since it's in section header)
-        return dt.strftime("%B %d at %I:%M %p")
+        # Format as "Jan 28" (no year since it's in section header)
+        return dt.strftime("%b %d")
     except:
         return date_str
 
@@ -577,7 +577,7 @@ def generate_changelog(mode="incremental", verbose=False):
         # Build output with year headers, newest years first
         output_sections = []
         for year in sorted(entries_by_year.keys(), reverse=True):
-            year_header = f"## {year}"
+            year_header = f"## 📅 {year}"
             year_entries = "\n\n".join(entries_by_year[year])
             output_sections.append(f"{year_header}\n\n{year_entries}")
         
@@ -592,7 +592,7 @@ def generate_changelog(mode="incremental", verbose=False):
             return "_No updates found._"
         
         current_year = datetime.now().year
-        year_header = f"## {current_year}"
+        year_header = f"## 📅 {current_year}"
         return f"{year_header}\n\n{entry}"
 
 if __name__ == "__main__":
@@ -672,7 +672,7 @@ if __name__ == "__main__":
                     existing = f.read()
 
             current_year = datetime.now().year
-            year_header = f"## {current_year}"
+            year_header = f"## {current_year} Updates"
 
             # Remove first occurrence of the year header
             existing_lines = existing.splitlines()
