@@ -780,26 +780,34 @@ if __name__ == "__main__":
             current_year = datetime.now().year
             year_header = f"## {current_year} Updates"
 
-            # Remove first occurrence of the year header
-            existing_lines = existing.splitlines()
-            filtered_lines = []
-            found = False
-            for line in existing_lines:
-                if not found and line.strip() == year_header:
-                    found = True
-                    continue  # skip this one line only
-                filtered_lines.append(line)
-
-            cleaned_existing = "\n".join(filtered_lines).strip()
-
-            # Prepend the new entry with correct year section
+            # For update mode, insert new entry after the year header
             if mode == "full":
                 # For full mode, replace entire content (already includes year headers)
                 updated_content = new_entry.strip()
             else:
-                # For incremental, prepend to existing and fold all previous entries
-                folded_existing = fold_existing_entries(cleaned_existing)
-                updated_content = f"{new_entry.strip()}\n---\n\n{folded_existing}"
+                # For incremental, insert new entry after year header
+                existing_lines = existing.splitlines()
+                new_lines = []
+                inserted = False
+                
+                for line in existing_lines:
+                    new_lines.append(line)
+                    # Insert new entry right after the year header
+                    if not inserted and line.strip() == year_header:
+                        # Add the new entry (without year header since it's already in the file)
+                        new_entry_lines = new_entry.strip().splitlines()
+                        # Skip the first line (year header) since we're inserting after existing year header
+                        if new_entry_lines and new_entry_lines[0].strip() == year_header:
+                            new_entry_lines = new_entry_lines[1:]
+                        new_lines.extend(new_entry_lines)
+                        new_lines.append("")  # Add blank line
+                        inserted = True
+                
+                if not inserted:
+                    # If no year header found, prepend to beginning
+                    new_lines = new_entry.strip().splitlines() + [""] + existing_lines
+                
+                updated_content = "\n".join(new_lines)
 
             with open(CHANGELOG_FILE, "w", encoding="utf-8") as f:
                 f.write(updated_content.strip() + "\n")
