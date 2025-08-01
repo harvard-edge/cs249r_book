@@ -265,11 +265,11 @@ MLSysBook/
 
 ### Getting Started
 ```bash
+# Welcome and overview
+./binder helloworld
+
 # First time setup
 ./binder setup
-
-# Welcome and overview
-./binder hello
 
 # Quick preview
 ./binder preview intro
