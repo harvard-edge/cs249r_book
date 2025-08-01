@@ -9,7 +9,7 @@ The **Book Binder** is a self-contained, lightning-fast development CLI for the 
 ./binder setup
 
 # Welcome and overview
-./binder helloworld
+./binder hello
 
 # Build a single chapter
 ./binder build intro html
@@ -68,7 +68,7 @@ Full builds render the complete book with all chapters, parts, and cross-referen
 | Command | Description | Example |
 |---------|-------------|---------|
 | `setup` | Configure environment | `./binder setup` |
-| `helloworld` | Welcome and overview | `./binder helloworld` |
+| `hello` | Welcome and overview | `./binder hello` |
 | `clean` | Clean configs & artifacts | `./binder clean` |
 | `check` | Check for build artifacts | `./binder check` |
 | `switch <format>` | Switch active config | `./binder switch pdf` |
@@ -87,7 +87,7 @@ All commands have single-letter shortcuts:
 | `pf` | `preview-full` |
 | `pub` | `publish` |
 | `se` | `setup` |
-| `hw` | `helloworld` |
+| `he` | `hello` |
 | `c` | `clean` |
 | `ch` | `check` |
 | `s` | `switch` |

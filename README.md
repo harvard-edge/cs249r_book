@@ -266,7 +266,7 @@ MLSysBook/
 ### Getting Started
 ```bash
 # Welcome and overview
-./binder helloworld
+./binder hello
 
 # First time setup
 ./binder setup

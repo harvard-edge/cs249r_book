@@ -7,7 +7,7 @@ This guide covers the development workflow, automated cleanup system, and best p
 ```bash
 # First time setup
 ./binder setup      # Configure environment and tools
-./binder helloworld      # Welcome and overview
+./binder hello      # Welcome and overview
 
 # Daily development
 ./binder preview intro    # Preview a chapter
@@ -115,7 +115,7 @@ The `./binder setup` command provides a complete environment configuration:
 ./binder setup
 
 # Get welcome and overview
-./binder helloworld
+./binder hello
 ```
 
 ### Development Server
