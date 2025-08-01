@@ -959,131 +959,318 @@ class BookBinder:
             return False
     
     def publish(self):
-        """Publish the book (build + deploy)"""
+        """Publish the book (build + deploy) - Step by step process"""
         
-        # Show warning and confirmation
-        warning_panel = Panel(
-            "[bold red]⚠️  PUBLISHING WARNING ⚠️[/bold red]\n\n"
-            "[red]This will publish your book to the live website![/red]\n\n"
-            "📊 What will happen:\n"
-            "  • Build HTML and PDF versions\n"
-            "  • Copy PDF to assets directory\n"
-            "  • Commit changes to git\n"
-            "  • Push to main branch\n"
-            "  • Trigger GitHub Actions deployment\n"
-            "  • Make changes live at https://harvard-edge.github.io/cs249r_book\n\n"
-            "[yellow]Are you sure you want to publish?[/yellow]\n"
-            "[dim]Type 'PUBLISH' to confirm, or anything else to cancel[/dim]",
-            title="🚀 Publishing MLSysBook",
-            border_style="red",
-            padding=(1, 2)
-        )
-        console.print(warning_panel)
+        console.print("[bold blue]🚀 MLSysBook Publishing Wizard[/bold blue]")
+        console.print("[dim]I'll guide you through publishing step by step[/dim]\n")
         
-        # Get confirmation
-        try:
-            console.print("\n[bold blue]Confirmation:[/bold blue] ", end="")
-            confirmation = input().strip()
-            if confirmation != "PUBLISH":
-                console.print("[yellow]🛑 Publishing cancelled[/yellow]")
-                return False
-        except KeyboardInterrupt:
-            console.print("\n[yellow]🛑 Publishing cancelled[/yellow]")
+        # Step 1: Pre-flight validation
+        console.print("[blue]📋 Step 1: Pre-flight Validation[/blue]")
+        if not self._validate_publish_environment():
             return False
         
-        console.print("[green]✅ Confirmed! Starting publication process...[/green]\n")
+        # Step 2: Branch handling
+        console.print("\n[blue]📋 Step 2: Branch Management[/blue]")
+        if not self._handle_branch_setup():
+            return False
         
-        # Pre-flight checks
-        console.print("[blue]🔍 Running pre-flight checks...[/blue]")
+        # Step 3: Version and release planning
+        console.print("\n[blue]📋 Step 3: Version & Release Planning[/blue]")
+        release_info = self._plan_release()
+        if not release_info:
+            return False
         
-        # Check git status
+        # Step 4: Build process
+        console.print("\n[blue]📋 Step 4: Building Book[/blue]")
+        if not self._build_for_publication():
+            return False
+        
+        # Step 5: Release creation
+        if release_info['create_release']:
+            console.print("\n[blue]📋 Step 5: Creating Release[/blue]")
+            if not self._create_release(release_info):
+                return False
+        
+        # Step 6: Deployment
+        console.print("\n[blue]📋 Step 6: Deploying to Production[/blue]")
+        if not self._deploy_to_production():
+            return False
+        
+        # Success!
+        self._show_publish_success()
+        return True
+
+    def _validate_publish_environment(self):
+        """Step 1: Validate the publishing environment"""
+        try:
+            # Check git status
+            result = subprocess.run(['git', 'branch', '--show-current'], 
+                                  capture_output=True, text=True, cwd=self.root_dir)
+            current_branch = result.stdout.strip()
+            
+            if current_branch not in ["main", "dev"]:
+                console.print(f"[red]❌ Invalid branch: {current_branch}[/red]")
+                console.print("[yellow]Please switch to 'main' or 'dev' branch[/yellow]")
+                return False
+            
+            # Check for uncommitted changes
+            result = subprocess.run(['git', 'status', '--porcelain'], 
+                                  capture_output=True, text=True, cwd=self.root_dir)
+            if result.stdout.strip():
+                console.print("[red]❌ You have uncommitted changes[/red]")
+                console.print("[yellow]Please commit or stash your changes first[/yellow]")
+                return False
+            
+            # Check for required tools
+            tools_status = []
+            
+            # Check GitHub CLI
+            try:
+                subprocess.run(['gh', '--version'], capture_output=True, check=True)
+                tools_status.append(("GitHub CLI", "✅ Available"))
+            except:
+                tools_status.append(("GitHub CLI", "⚠️ Not found (releases will be manual)"))
+            
+            # Check Ollama
+            try:
+                subprocess.run(['ollama', '--version'], capture_output=True, check=True)
+                tools_status.append(("Ollama", "✅ Available"))
+            except:
+                tools_status.append(("Ollama", "⚠️ Not found (manual release notes)"))
+            
+            # Show status
+            status_table = Table(show_header=True, header_style="bold blue", box=None)
+            status_table.add_column("Component", style="cyan", width=20)
+            status_table.add_column("Status", style="white", width=30)
+            
+            status_table.add_row("Git Branch", f"✅ {current_branch}")
+            status_table.add_row("Git Status", "✅ Clean")
+            for tool, status in tools_status:
+                status_table.add_row(tool, status)
+            
+            console.print(status_table)
+            console.print("[green]✅ Environment validation passed[/green]")
+            return True
+            
+        except Exception as e:
+            console.print(f"[red]❌ Validation failed: {e}[/red]")
+            return False
+
+    def _handle_branch_setup(self):
+        """Step 2: Handle branch setup and merging"""
         try:
             result = subprocess.run(['git', 'branch', '--show-current'], 
                                   capture_output=True, text=True, cwd=self.root_dir)
             current_branch = result.stdout.strip()
             
-            if current_branch != "main":
-                console.print("[red]❌ You are not on the main branch. Please switch to main first.[/red]")
-                console.print(f"[dim]Current branch: {current_branch}[/dim]")
-                return False
+            if current_branch == "dev":
+                console.print("[yellow]⚠️ You're on dev branch[/yellow]")
+                console.print("[blue]Should I merge dev into main?[/blue]")
+                choice = input("[bold]Merge dev to main? (y/n): [/bold]").strip().lower()
                 
-            # Check for uncommitted changes
-            result = subprocess.run(['git', 'status', '--porcelain'], 
-                                  capture_output=True, text=True, cwd=self.root_dir)
-            if result.stdout.strip():
-                console.print("[red]❌ You have uncommitted changes. Please commit or stash them first.[/red]")
-                console.print("[dim]Run 'git status' to see changes[/dim]")
-                return False
+                if choice in ['y', 'yes']:
+                    console.print("[blue]🔄 Merging dev to main...[/blue]")
+                    subprocess.run(['git', 'checkout', 'main'], cwd=self.root_dir, check=True)
+                    subprocess.run(['git', 'merge', 'dev'], cwd=self.root_dir, check=True)
+                    console.print("[green]✅ Successfully merged dev to main[/green]")
+                    return True
+                else:
+                    console.print("[yellow]⚠️ Please switch to main branch manually[/yellow]")
+                    return False
+            else:
+                console.print("[green]✅ Already on main branch[/green]")
+                return True
                 
-            console.print("[green]✅ Git status check passed[/green]")
+        except Exception as e:
+            console.print(f"[red]❌ Branch setup failed: {e}[/red]")
+            return False
+
+    def _plan_release(self):
+        """Step 3: Plan version and release strategy"""
+        try:
+            # Get current version and suggest next
+            current_version = self._get_current_version()
+            suggested_patch = self._get_next_version()
+            
+            # Analyze recent changes to suggest version type
+            change_type = self._analyze_changes()
+            
+            console.print(f"[blue]Current version:[/blue] {current_version}")
+            console.print(f"[blue]Suggested version:[/blue] {suggested_patch}")
+            console.print(f"[blue]Change type:[/blue] {change_type}")
+            
+            # Ask about version type
+            console.print("\n[blue]📦 Version Strategy:[/blue]")
+            console.print("  • [dim]patch[/dim] - Bug fixes, minor updates (1.0.0 → 1.0.1)")
+            console.print("  • [dim]minor[/dim] - New features, chapters (1.0.0 → 1.1.0)")
+            console.print("  • [dim]major[/dim] - Breaking changes (1.0.0 → 2.0.0)")
+            
+            version_choice = input(f"[bold]Version type (patch/minor/major) [{change_type}]: [/bold]").strip().lower()
+            if not version_choice:
+                version_choice = change_type
+            
+            # Generate version based on choice
+            if version_choice == "major":
+                version = self._increment_major_version(current_version)
+            elif version_choice == "minor":
+                version = self._increment_minor_version(current_version)
+            else:
+                version = suggested_patch
+            
+            console.print(f"[green]✅ Selected version: {version}[/green]")
+            
+            # Ask about release creation
+            console.print("\n[blue]📦 Create GitHub release?[/blue]")
+            release_choice = input("[bold]Create release? (y/n): [/bold]").strip().lower()
+            create_release = release_choice in ['y', 'yes']
+            
+            # Ask about AI release notes
+            use_ai_notes = False
+            if create_release:
+                console.print("\n[blue]📝 Generate release notes with AI?[/blue]")
+                ai_choice = input("[bold]Use AI for release notes? (y/n): [/bold]").strip().lower()
+                use_ai_notes = ai_choice in ['y', 'yes']
+            
+            return {
+                'version': version,
+                'create_release': create_release,
+                'use_ai_notes': use_ai_notes,
+                'change_type': change_type
+            }
             
         except Exception as e:
-            console.print(f"[red]❌ Git check failed: {e}[/red]")
-            return False
-        
-        # Clean previous builds
-        console.print("[blue]🧹 Cleaning previous builds...[/blue]")
-        self.clean()
-        
-        # Build HTML version
-        console.print("[blue]📚 Building HTML version...[/blue]")
-        if not self.build_full("html"):
-            console.print("[red]❌ HTML build failed![/red]")
-            return False
-        console.print("[green]✅ HTML build completed[/green]")
-        
-        # Build PDF version
-        console.print("[blue]📄 Building PDF version...[/blue]")
-        if not self.build_full("pdf"):
-            console.print("[red]❌ PDF build failed![/red]")
-            return False
-        console.print("[green]✅ PDF build completed[/green]")
-        
-        # Check if PDF was created
-        pdf_path = self.build_dir / "pdf" / "Machine-Learning-Systems.pdf"
-        if not pdf_path.exists():
-            console.print(f"[red]❌ PDF not found at {pdf_path}[/red]")
-            return False
-        
-        # Copy PDF to assets
-        console.print("[blue]📦 Copying PDF to assets...[/blue]")
-        assets_dir = self.root_dir / "assets"
-        assets_dir.mkdir(exist_ok=True)
-        
-        import shutil
-        shutil.copy2(pdf_path, assets_dir / "Machine-Learning-Systems.pdf")
-        console.print("[green]✅ PDF copied to assets[/green]")
-        
-        # Commit and push
-        console.print("[blue]💾 Committing changes...[/blue]")
+            console.print(f"[red]❌ Release planning failed: {e}[/red]")
+            return None
+
+    def _build_for_publication(self):
+        """Step 4: Build both HTML and PDF for publication"""
         try:
+            # Clean previous builds
+            console.print("[blue]🧹 Cleaning previous builds...[/blue]")
+            self.clean()
+            
+            # Build PDF first (as requested)
+            console.print("[blue]📄 Building PDF version...[/blue]")
+            if not self.build_full("pdf"):
+                console.print("[red]❌ PDF build failed![/red]")
+                return False
+            console.print("[green]✅ PDF build completed[/green]")
+            
+            # Build HTML
+            console.print("[blue]📚 Building HTML version...[/blue]")
+            if not self.build_full("html"):
+                console.print("[red]❌ HTML build failed![/red]")
+                return False
+            console.print("[green]✅ HTML build completed[/green]")
+            
+            # Validate builds
+            pdf_path = self.build_dir / "pdf" / "Machine-Learning-Systems.pdf"
+            html_path = self.build_dir / "html" / "index.html"
+            
+            if not pdf_path.exists():
+                console.print(f"[red]❌ PDF not found at {pdf_path}[/red]")
+                return False
+            
+            if not html_path.exists():
+                console.print(f"[red]❌ HTML not found at {html_path}[/red]")
+                return False
+            
+            console.print("[green]✅ All builds validated successfully[/green]")
+            return True
+            
+        except Exception as e:
+            console.print(f"[red]❌ Build process failed: {e}[/red]")
+            return False
+
+    def _create_release(self, release_info):
+        """Step 5: Create GitHub release with version and notes"""
+        try:
+            version = release_info['version']
+            use_ai_notes = release_info['use_ai_notes']
+            tag_name = f"v{version}"
+            
+            console.print(f"[blue]📦 Creating release {tag_name}...[/blue]")
+            
+            # Generate release notes
+            if use_ai_notes:
+                console.print("[blue]🤖 Generating AI release notes...[/blue]")
+                release_notes = self._generate_ai_release_notes()
+            else:
+                console.print("[blue]📝 Generating manual release notes...[/blue]")
+                release_notes = self._generate_manual_release_notes()
+            
+            # Create and push tag
+            console.print("[blue]🏷️ Creating git tag...[/blue]")
+            subprocess.run(['git', 'tag', '-a', tag_name, '-m', f"Release {tag_name}"], 
+                         cwd=self.root_dir, check=True)
+            subprocess.run(['git', 'push', 'origin', tag_name], 
+                         cwd=self.root_dir, check=True)
+            
+            # Create GitHub release
+            console.print("[blue]🚀 Creating GitHub release...[/blue]")
+            release_cmd = [
+                'gh', 'release', 'create', tag_name,
+                '--title', f"Release {tag_name}",
+                '--notes', release_notes,
+                '--target', 'main'
+            ]
+            subprocess.run(release_cmd, cwd=self.root_dir, check=True)
+            
+            console.print(f"[green]✅ Successfully created release {tag_name}[/green]")
+            return True
+            
+        except subprocess.CalledProcessError as e:
+            console.print(f"[yellow]⚠️ Release creation failed: {e}[/yellow]")
+            console.print("[dim]You can create the release manually on GitHub[/dim]")
+            return False
+        except FileNotFoundError:
+            console.print("[yellow]⚠️ GitHub CLI (gh) not found[/yellow]")
+            console.print("[dim]You can create the release manually on GitHub[/dim]")
+            return False
+
+    def _deploy_to_production(self):
+        """Step 6: Deploy to production (commit, push, trigger CI/CD)"""
+        try:
+            # Copy PDF to assets
+            console.print("[blue]📦 Copying PDF to assets...[/blue]")
+            pdf_source = self.build_dir / "pdf" / "Machine-Learning-Systems.pdf"
+            pdf_dest = self.root_dir / "assets" / "Machine-Learning-Systems.pdf"
+            
+            import shutil
+            shutil.copy2(pdf_source, pdf_dest)
+            console.print("[green]✅ PDF copied to assets[/green]")
+            
+            # Commit changes
+            console.print("[blue]💾 Committing changes...[/blue]")
             subprocess.run(['git', 'add', 'assets/Machine-Learning-Systems.pdf'], 
                          cwd=self.root_dir, check=True)
             subprocess.run(['git', 'commit', '-m', '📄 Add PDF to assets for download'], 
                          cwd=self.root_dir, check=True)
             console.print("[green]✅ Changes committed[/green]")
-        except subprocess.CalledProcessError:
-            console.print("[yellow]⚠️ No changes to commit (PDF might already be up to date)[/yellow]")
-        
-        # Push to main
-        console.print("[blue]🚀 Pushing to main...[/blue]")
-        try:
+            
+            # Push to main
+            console.print("[blue]🚀 Pushing to main...[/blue]")
             subprocess.run(['git', 'push', 'origin', 'main'], 
                          cwd=self.root_dir, check=True)
             console.print("[green]✅ Successfully pushed to main[/green]")
-        except subprocess.CalledProcessError as e:
-            console.print(f"[red]❌ Push failed: {e}[/red]")
+            
+            return True
+            
+        except Exception as e:
+            console.print(f"[red]❌ Deployment failed: {e}[/red]")
             return False
-        
-        # Success summary
+
+    def _show_publish_success(self):
+        """Show success summary after publishing"""
         console.print("\n[green]🎉 Publication completed successfully![/green]")
         console.print("\n[blue]📊 What happened:[/blue]")
-        console.print("  ✅ Built HTML version")
-        console.print("  ✅ Built PDF version") 
-        console.print("  ✅ Copied PDF to assets")
-        console.print("  ✅ Committed changes")
-        console.print("  ✅ Pushed to main")
-        console.print("\n[blue]🌐 Your book will be available at:[/blue]")
+        console.print("  ✅ Validated environment")
+        console.print("  ✅ Managed branch setup")
+        console.print("  ✅ Planned release strategy")
+        console.print("  ✅ Built HTML and PDF versions")
+        console.print("  ✅ Created GitHub release")
+        console.print("  ✅ Deployed to production")
+        console.print("\n[blue]🌐 Your book is now available at:[/blue]")
         console.print("  📖 Web: https://harvard-edge.github.io/cs249r_book")
         console.print("  📄 PDF: https://harvard-edge.github.io/cs249r_book/assets/Machine-Learning-Systems.pdf")
         console.print("\n[blue]⏳ GitHub Actions will now:[/blue]")
@@ -1091,8 +1278,172 @@ class BookBinder:
         console.print("  🏗️ Build all formats")
         console.print("  🚀 Deploy to GitHub Pages")
         console.print("\n[blue]📈 Monitor: https://github.com/harvard-edge/cs249r_book/actions[/blue]")
-        
-        return True
+
+    def _get_current_version(self):
+        """Get current version from git tags"""
+        try:
+            result = subprocess.run(['git', 'tag', '--list', 'v*'], 
+                                  capture_output=True, text=True, cwd=self.root_dir)
+            tags = result.stdout.strip().split('\n') if result.stdout.strip() else []
+            
+            if not tags:
+                return "0.0.0"
+            
+            # Find the highest version
+            versions = [tag[1:] for tag in tags if tag.startswith('v')]
+            if not versions:
+                return "0.0.0"
+            
+            return max(versions, key=lambda v: [int(x) for x in v.split('.')])
+            
+        except Exception:
+            return "0.0.0"
+
+    def _analyze_changes(self):
+        """Analyze recent changes to suggest version type"""
+        try:
+            # Get recent commits
+            result = subprocess.run(['git', 'log', '--oneline', '--since=1.week.ago'], 
+                                  capture_output=True, text=True, cwd=self.root_dir)
+            commits = result.stdout.strip().split('\n') if result.stdout.strip() else []
+            
+            if not commits:
+                return "patch"
+            
+            # Analyze commit messages for keywords
+            major_keywords = ['breaking', 'major', 'v2', 'overhaul', 'rewrite']
+            minor_keywords = ['feature', 'new', 'chapter', 'add', 'enhance']
+            
+            commit_text = ' '.join(commits).lower()
+            
+            if any(keyword in commit_text for keyword in major_keywords):
+                return "major"
+            elif any(keyword in commit_text for keyword in minor_keywords):
+                return "minor"
+            else:
+                return "patch"
+                
+        except Exception:
+            return "patch"
+
+    def _increment_major_version(self, version):
+        """Increment major version (1.0.0 → 2.0.0)"""
+        try:
+            major, minor, patch = map(int, version.split('.'))
+            return f"{major + 1}.0.0"
+        except:
+            return "1.0.0"
+
+    def _increment_minor_version(self, version):
+        """Increment minor version (1.0.0 → 1.1.0)"""
+        try:
+            major, minor, patch = map(int, version.split('.'))
+            return f"{major}.{minor + 1}.0"
+        except:
+            return "1.0.0"
+
+    def _get_next_version(self):
+        """Get the next version number based on existing tags"""
+        try:
+            # Get all version tags
+            result = subprocess.run(['git', 'tag', '--list', 'v*'], 
+                                  capture_output=True, text=True, cwd=self.root_dir)
+            tags = result.stdout.strip().split('\n') if result.stdout.strip() else []
+            
+            # Parse version numbers
+            versions = []
+            for tag in tags:
+                if tag.startswith('v'):
+                    try:
+                        version = tag[1:]  # Remove 'v' prefix
+                        versions.append(version)
+                    except:
+                        continue
+            
+            if not versions:
+                return "1.0.0"
+            
+            # Find the highest version
+            latest = max(versions, key=lambda v: [int(x) for x in v.split('.')])
+            major, minor, patch = map(int, latest.split('.'))
+            
+            # Increment patch version
+            return f"{major}.{minor}.{patch + 1}"
+            
+        except Exception as e:
+            console.print(f"[yellow]⚠️ Could not determine version: {e}[/yellow]")
+            return "1.0.0"
+
+    def _generate_manual_release_notes(self):
+        """Generate manual release notes based on recent commits"""
+        try:
+            # Get recent commits since last tag
+            result = subprocess.run(['git', 'log', '--oneline', '--since=1.week.ago'], 
+                                  capture_output=True, text=True, cwd=self.root_dir)
+            commits = result.stdout.strip().split('\n') if result.stdout.strip() else []
+            
+            if not commits:
+                return "📚 Book update with latest content and improvements."
+            
+            # Format recent commits
+            notes = "## What's New\n\n"
+            for commit in commits[:10]:  # Last 10 commits
+                if commit.strip():
+                    notes += f"• {commit}\n"
+            
+            notes += "\n## 📖 Book Updates\n"
+            notes += "• Updated content and chapters\n"
+            notes += "• Improved formatting and layout\n"
+            notes += "• Enhanced PDF generation\n"
+            
+            return notes
+            
+        except Exception as e:
+            return f"📚 Book update with latest content and improvements.\n\nError generating notes: {e}"
+
+    def _generate_ai_release_notes(self):
+        """Generate AI-powered release notes using Ollama"""
+        try:
+            # Check if Ollama is available
+            subprocess.run(['ollama', '--version'], capture_output=True, check=True)
+            
+            # Get recent commits
+            result = subprocess.run(['git', 'log', '--oneline', '--since=1.week.ago'], 
+                                  capture_output=True, text=True, cwd=self.root_dir)
+            commits = result.stdout.strip().split('\n') if result.stdout.strip() else []
+            
+            if not commits:
+                return self._generate_manual_release_notes()
+            
+            # Create prompt for AI
+            prompt = f"""Generate professional release notes for a machine learning systems book based on these recent commits:
+
+{chr(10).join(commits[:15])}
+
+Please create:
+1. A brief summary of changes
+2. Key improvements and updates
+3. Technical details about the book content
+4. Professional tone suitable for academic publishing
+
+Format as markdown with clear sections."""
+
+            # Use Ollama to generate notes
+            ai_result = subprocess.run(['ollama', 'run', 'llama2', prompt], 
+                                     capture_output=True, text=True, cwd=self.root_dir)
+            
+            if ai_result.returncode == 0 and ai_result.stdout.strip():
+                return ai_result.stdout.strip()
+            else:
+                console.print("[yellow]⚠️ AI generation failed, using manual notes[/yellow]")
+                return self._generate_manual_release_notes()
+                
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            console.print("[yellow]⚠️ Ollama not available, using manual notes[/yellow]")
+            return self._generate_manual_release_notes()
+        except Exception as e:
+            console.print(f"[yellow]⚠️ AI generation error: {e}[/yellow]")
+            return self._generate_manual_release_notes()
 
     def show_about(self):
         """Display beautiful about screen with book binder theme"""
@@ -1182,17 +1533,17 @@ class BookBinder:
     def show_help(self):
         """Display beautiful help screen"""
         fast_table = Table(show_header=True, header_style="bold green", box=None)
-        fast_table.add_column("Command", style="green", width=22)
-        fast_table.add_column("Description", style="white")
-        fast_table.add_column("Example", style="dim")
+        fast_table.add_column("Command", style="green", width=35)
+        fast_table.add_column("Description", style="white", width=30)
+        fast_table.add_column("Example", style="dim", width=30)
         
         fast_table.add_row("build <chapter[,ch2,...]|-> <format>", "Build chapter(s) or all", "./binder build intro html")
         fast_table.add_row("preview <chapter>", "Build and preview chapter", "./binder preview ops")
         
         full_table = Table(show_header=True, header_style="bold blue", box=None)
-        full_table.add_column("Command", style="blue", width=22)
-        full_table.add_column("Description", style="white")
-        full_table.add_column("Example", style="dim")
+        full_table.add_column("Command", style="blue", width=35)
+        full_table.add_column("Description", style="white", width=30)
+        full_table.add_column("Example", style="dim", width=30)
         
         full_table.add_row("build - <format>", "Build complete book", "./binder build - pdf")
         full_table.add_row("preview-full [format]", "Preview complete book", "./binder preview-full")
@@ -1200,9 +1551,9 @@ class BookBinder:
         
         # Management Commands
         mgmt_table = Table(show_header=True, header_style="bold blue", box=None)
-        mgmt_table.add_column("Command", style="green", width=22)
-        mgmt_table.add_column("Description", style="white")
-        mgmt_table.add_column("Example", style="dim")
+        mgmt_table.add_column("Command", style="green", width=35)
+        mgmt_table.add_column("Description", style="white", width=30)
+        mgmt_table.add_column("Example", style="dim", width=30)
         
         mgmt_table.add_row("clean", "Clean configs & artifacts", "./binder clean")
         mgmt_table.add_row("check", "Check for build artifacts", "./binder check")
@@ -1238,8 +1589,6 @@ class BookBinder:
         console.print(Panel(shortcuts_table, title="🚀 Shortcuts", border_style="cyan"))
         
         # Pro Tips
-        console.print(Panel("", title="💡 Pro Tips", border_style="blue"))
-        
         examples = Text()
         examples.append("🎯 Power User Examples:\n", style="bold magenta")
         examples.append("  ./binder b intro,ml_systems html ", style="cyan")
