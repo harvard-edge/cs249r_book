@@ -577,7 +577,7 @@ def generate_changelog(mode="incremental", verbose=False):
         # Build output with year headers, newest years first
         output_sections = []
         for year in sorted(entries_by_year.keys(), reverse=True):
-            year_header = f"## 📅 {year}"
+            year_header = f"## {year}"
             year_entries = "\n\n".join(entries_by_year[year])
             output_sections.append(f"{year_header}\n\n{year_entries}")
         
@@ -592,7 +592,7 @@ def generate_changelog(mode="incremental", verbose=False):
             return "_No updates found._"
         
         current_year = datetime.now().year
-        year_header = f"## 📅 {current_year}"
+                    year_header = f"## {current_year}"
         return f"{year_header}\n\n{entry}"
 
 if __name__ == "__main__":
