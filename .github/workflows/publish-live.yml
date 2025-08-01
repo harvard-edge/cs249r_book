@@ -197,32 +197,85 @@ jobs:
       - name: ⏳ Wait for Production Build
         run: |
           echo "⏳ Waiting for production build to complete before creating release..."
+          echo "🔍 Looking for recent workflow runs on main branch..."
           sleep 30  # Give the build a moment to start
           
-          # Wait for the build to complete
-          for i in {1..20}; do
-            BUILD_STATUS=$(curl -s \
+          # Wait for the build to complete with better detection
+          for i in {1..240}; do
+            echo "🔍 Checking build status (attempt $i/240)..."
+            
+            # Get recent workflow runs
+            WORKFLOW_RESPONSE=$(curl -s \
               -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
               -H "Accept: application/vnd.github.v3+json" \
-              "https://api.github.com/repos/${{ github.repository }}/actions/runs?branch=main&status=completed&per_page=5" \
-              | jq -r '.workflow_runs[] | select(.conclusion == "success") | .conclusion' \
-              | head -1)
+              "https://api.github.com/repos/${{ github.repository }}/actions/runs?branch=main&per_page=10")
             
-            if [ "$BUILD_STATUS" = "success" ]; then
+            # Check for successful controller workflow runs
+            SUCCESSFUL_BUILD=$(echo "$WORKFLOW_RESPONSE" | jq -r '.workflow_runs[] | select(.name == "🎮 Controller" and .conclusion == "success") | .id' | head -1)
+            
+            if [ -n "$SUCCESSFUL_BUILD" ] && [ "$SUCCESSFUL_BUILD" != "null" ]; then
               echo "✅ Production build completed successfully!"
+              echo "📊 Build run ID: $SUCCESSFUL_BUILD"
+              echo "🔗 View build: https://github.com/${{ github.repository }}/actions/runs/$SUCCESSFUL_BUILD"
               break
-            elif [ "$BUILD_STATUS" = "failure" ]; then
-              echo "❌ Production build failed!"
-              exit 1
-            else
-              echo "⏳ Build still in progress... (attempt $i/20)"
-              sleep 30
             fi
+            
+            # Check for failed builds
+            FAILED_BUILD=$(echo "$WORKFLOW_RESPONSE" | jq -r '.workflow_runs[] | select(.name == "🎮 Controller" and .conclusion == "failure") | .id' | head -1)
+            if [ -n "$FAILED_BUILD" ] && [ "$FAILED_BUILD" != "null" ]; then
+              echo "❌ Production build failed!"
+              echo "🔗 View failed build: https://github.com/${{ github.repository }}/actions/runs/$FAILED_BUILD"
+              exit 1
+            fi
+            
+            # Check for running builds and show progress
+            RUNNING_BUILD=$(echo "$WORKFLOW_RESPONSE" | jq -r '.workflow_runs[] | select(.name == "🎮 Controller" and .status == "in_progress") | .id' | head -1)
+            if [ -n "$RUNNING_BUILD" ] && [ "$RUNNING_BUILD" != "null" ]; then
+              echo "🔄 Build is actively running (ID: $RUNNING_BUILD)"
+              echo "🔗 Monitor: https://github.com/${{ github.repository }}/actions/runs/$RUNNING_BUILD"
+            fi
+            
+            # Show current status with time elapsed
+            ELAPSED_MINUTES=$((i * 30 / 60))
+            ELAPSED_HOURS=$((ELAPSED_MINUTES / 60))
+            REMAINING_MINUTES=$((ELAPSED_MINUTES % 60))
+            
+            if [ $ELAPSED_HOURS -gt 0 ]; then
+              TIME_DISPLAY="${ELAPSED_HOURS}h ${REMAINING_MINUTES}m"
+            else
+              TIME_DISPLAY="${ELAPSED_MINUTES}m"
+            fi
+            
+            echo "⏳ Build still in progress... (attempt $i/240, ~${TIME_DISPLAY} elapsed)"
+            echo "📊 Recent workflow runs:"
+            echo "$WORKFLOW_RESPONSE" | jq -r '.workflow_runs[] | "  - \(.name): \(.conclusion // .status) (\(.created_at))"' | head -5
+            
+            # Show build progress indicators
+            if [ $i -eq 1 ]; then
+              echo "📋 Expected build timeline:"
+              echo "  0-15m: Initial setup and quality checks"
+              echo "  15-30m: Quarto build and PDF generation"
+              echo "  30-45m: PDF compression and processing"
+              echo "  45-60m: GitHub Pages deployment"
+              echo "  60-90m: Asset copying and finalization"
+              echo "  90m+: Extended processing (if needed)"
+            fi
+            
+            sleep 30
           done
+          
+          # If we get here, the build might still be running
+          echo "⚠️ Build may still be in progress after 2 hours"
+          echo "📊 Latest workflow status:"
+          echo "$WORKFLOW_RESPONSE" | jq -r '.workflow_runs[] | "  - \(.name): \(.conclusion // "in_progress")"' | head -3
 
       - name: 📦 Create GitHub Release
         run: |
           echo "📦 Creating GitHub Release ${{ steps.version.outputs.new_version }}..."
+          echo "📋 Release details:"
+          echo "  - Tag: ${{ steps.version.outputs.new_version }}"
+          echo "  - Name: ${{ steps.version.outputs.new_version }}: ${{ github.event.inputs.description }}"
+          echo "  - Repository: ${{ github.repository }}"
           
           # Generate release notes
           cat > release_notes.md << EOF
@@ -251,7 +304,11 @@ jobs:
           - 📄 [Direct PDF Link](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/assets/Machine-Learning-Systems.pdf)
           EOF
           
-          # Create the release
+          echo "📄 Generated release notes:"
+          cat release_notes.md
+          
+          # Create the release with better error handling
+          echo "🚀 Creating GitHub release..."
           RELEASE_RESPONSE=$(curl -s \
             -X POST \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
@@ -265,9 +322,25 @@ jobs:
               \"prerelease\": false
             }")
           
+          echo "📊 API Response:"
+          echo "$RELEASE_RESPONSE" | jq '.'
+          
           RELEASE_ID=$(echo "$RELEASE_RESPONSE" | jq -r '.id')
-          echo "✅ Release created with ID: $RELEASE_ID"
-          echo "release_id=$RELEASE_ID" >> $GITHUB_ENV
+          RELEASE_URL=$(echo "$RELEASE_RESPONSE" | jq -r '.html_url')
+          
+          if [ "$RELEASE_ID" != "null" ] && [ -n "$RELEASE_ID" ]; then
+            echo "✅ Release created successfully!"
+            echo "📊 Release ID: $RELEASE_ID"
+            echo "🔗 Release URL: $RELEASE_URL"
+            echo "release_id=$RELEASE_ID" >> $GITHUB_ENV
+            echo "release_url=$RELEASE_URL" >> $GITHUB_ENV
+          else
+            echo "❌ Failed to create release!"
+            echo "📊 Error details:"
+            echo "$RELEASE_RESPONSE" | jq -r '.message // "Unknown error"'
+            echo "$RELEASE_RESPONSE" | jq -r '.errors[]?.message // empty'
+            exit 1
+          fi
 
       - name: 📋 Publication Summary
         run: |
@@ -279,6 +352,8 @@ jobs:
           echo "**Published by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
           echo "**Source Commit:** ${{ github.event.inputs.dev_commit || 'latest' }}" >> $GITHUB_STEP_SUMMARY
           echo "**Publication Time:** $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "**Release ID:** ${{ env.release_id || 'N/A' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Release URL:** ${{ env.release_url || 'N/A' }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📝 Changes:" >> $GITHUB_STEP_SUMMARY
           echo "${{ github.event.inputs.description }}" >> $GITHUB_STEP_SUMMARY
@@ -289,7 +364,14 @@ jobs:
           echo "3. ✅ Merged dev → main branch" >> $GITHUB_STEP_SUMMARY
           echo "4. ✅ Created release tag ${{ steps.version.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY
           echo "5. ✅ Pushed to main (triggered production build)" >> $GITHUB_STEP_SUMMARY
-          echo "6. ✅ Created GitHub Release" >> $GITHUB_STEP_SUMMARY
+          echo "6. ✅ Waited for build completion (up to 2 hours)" >> $GITHUB_STEP_SUMMARY
+          echo "7. ✅ Created GitHub Release" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🏗️ Build Process:" >> $GITHUB_STEP_SUMMARY
+          echo "- 📚 **Controller Workflow**: Triggered by main branch push" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔨 **Build Jobs**: HTML + PDF generation on Linux/Windows" >> $GITHUB_STEP_SUMMARY
+          echo "- 📄 **PDF Processing**: Generated, compressed, and copied to assets/" >> $GITHUB_STEP_SUMMARY
+          echo "- 🌐 **Deployment**: GitHub Pages with PDF download available" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🌐 Access Your Published Textbook:" >> $GITHUB_STEP_SUMMARY
           echo "- 📖 [Interactive Web Textbook](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }})" >> $GITHUB_STEP_SUMMARY
@@ -297,6 +379,11 @@ jobs:
           echo "- 📄 [Download Complete PDF](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.new_version }}/Machine-Learning-Systems.pdf)" >> $GITHUB_STEP_SUMMARY
           echo "- 📄 [Direct PDF Access](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/assets/Machine-Learning-Systems.pdf)" >> $GITHUB_STEP_SUMMARY
           echo "- 🎓 [Share with Students](https://mlsysbook.ai)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Build Status:" >> $GITHUB_STEP_SUMMARY
+          echo "- 🎮 **Controller Workflow**: Should be running/completed" >> $GITHUB_STEP_SUMMARY
+          echo "- 📚 **Quarto Build**: HTML + PDF generation" >> $GITHUB_STEP_SUMMARY
+          echo "- 📄 **PDF Assets**: Available at `/assets/Machine-Learning-Systems.pdf`" >> $GITHUB_STEP_SUMMARY
 
   fail-validation:
     name: '❌ Validation Failed'
