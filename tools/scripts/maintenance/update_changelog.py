@@ -471,6 +471,51 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False):
     print("✅ Entry generation complete")
     return entry
 
+def generate_demo_entry():
+    """Generate a demo changelog entry with sample data."""
+    current_date = datetime.now().strftime('%B %d at %I:%M %p')
+    current_year = datetime.now().year
+    
+    demo_entry = f"""## {current_year} Updates
+
+### 📅 {current_date}
+
+<details>
+<summary>**📄 Frontmatter**</summary>
+
+- `███░░` **About**: Updated the book description and added new contributor information
+- `██░░░` **Acknowledgements**: Added new contributors and updated the contributor list
+
+</details>
+
+<details>
+<summary>**📖 Chapters**</summary>
+
+- `████░` **Chapter 3: DL Primer**: Added new diagrams explaining neural network architectures and improved explanations of backpropagation
+- `███░░` **Chapter 5: AI Workflow**: Enhanced the workflow diagram and added new examples for data preprocessing steps
+- `███░░` **Chapter 8: AI Training**: Updated training examples with new code snippets and improved explanations of gradient descent
+- `██░░░` **Chapter 1: Introduction**: Fixed several typos and improved the introduction to machine learning concepts
+- `██░░░` **Chapter 12: Benchmarking AI**: Added new benchmarking metrics and updated performance comparison tables
+
+</details>
+
+<details>
+<summary>**🧑‍💻 Labs**</summary>
+
+- `███░░` **Lab: Arduino Image Classification**: Updated the image classification code with improved accuracy and added new examples
+- `██░░░` **Lab: Raspberry Pi Setup**: Fixed setup instructions and added troubleshooting section for common issues
+
+</details>
+
+<details>
+<summary>**📚 Appendix**</summary>
+
+- `█░░░░` **PhD Survival Guide**: Added new resources for graduate students and updated links
+
+</details>
+"""
+    return demo_entry
+
 def fold_existing_entries(content):
     """Fold all existing details sections in the changelog content."""
     import re
@@ -600,12 +645,25 @@ if __name__ == "__main__":
     parser.add_argument("-f", "--full", action="store_true", help="Regenerate the entire changelog from scratch.")
     parser.add_argument("-u", "--update", action="store_true", help="Add new entries since last gh-pages publish.")
     parser.add_argument("-t", "--test", action="store_true", help="Run without writing to file.")
+    parser.add_argument("--demo", action="store_true", help="Generate a demo changelog entry with sample data.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output.")
     parser.add_argument("-q", "--quarto-config", type=str, help="Path to quarto config file (default: book/config/_quarto-pdf.yml)")
     parser.add_argument("--openai", action="store_true", help="Use OpenAI for summarization instead of Ollama (default).")
     parser.add_argument("-m", "--model", type=str, default="gemma2:9b", help="Ollama model to use (default: gemma2:9b). Popular options: gemma2:9b, gemma2:27b, llama3.1:8b, llama3.1:70b")
 
     args = parser.parse_args()
+    
+    # Handle demo mode first
+    if args.demo:
+        print("🎭 DEMO MODE - Generating sample changelog entry")
+        demo_entry = generate_demo_entry()
+        print("=" * 60)
+        print("📝 DEMO CHANGELOG ENTRY")
+        print("=" * 60)
+        print(demo_entry)
+        print("=" * 60)
+        print("✅ Demo entry generated successfully!")
+        exit(0)
     
     # Require either --full or --update to be specified
     if args.full and args.update:
@@ -618,6 +676,7 @@ if __name__ == "__main__":
     else:
         print("❌ Error: Must specify either --full or --update mode")
         print("💡 Use --help for usage information")
+        print("💡 Use --demo to see a sample changelog entry")
         exit(1)
 
     try:
