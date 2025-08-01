@@ -1658,42 +1658,24 @@ Format as markdown with clear sections."""
         console.print(welcome_panel)
         
         # Show current status
-        status_table = Table(show_header=True, header_style="bold green", box=None)
-        status_table.add_column("Component", style="cyan", width=20)
-        status_table.add_column("Status", style="white", width=15)
-        status_table.add_column("Details", style="dim")
+        status_table = self._create_status_table()
         
-        # Check environment
+        # Add environment info
         status_table.add_row("📁 Book Directory", "✅ Found", str(self.book_dir))
         status_table.add_row("🔗 Active Config", "✅ Active", str(self.active_config))
         status_table.add_row("📚 Chapters", "✅ Available", f"{len(self.find_chapters())} chapters")
         
-        # Check required tools
-        tools_status = []
+        # Add tool status
+        tools_to_check = [
+            ('Quarto', ['quarto', '--version']),
+            ('Python', ['python3', '--version']),
+            ('Git', ['git', '--version'])
+        ]
         
-        # Check Quarto
-        try:
-            subprocess.run(['quarto', '--version'], capture_output=True, check=True)
-            tools_status.append(("Quarto", "✅ Available"))
-        except:
-            tools_status.append(("Quarto", "❌ Not found"))
-        
-        # Check Python
-        try:
-            subprocess.run(['python3', '--version'], capture_output=True, check=True)
-            tools_status.append(("Python", "✅ Available"))
-        except:
-            tools_status.append(("Python", "❌ Not found"))
-        
-        # Check Git
-        try:
-            subprocess.run(['git', '--version'], capture_output=True, check=True)
-            tools_status.append(("Git", "✅ Available"))
-        except:
-            tools_status.append(("Git", "❌ Not found"))
-        
-        for tool, status in tools_status:
-            status_table.add_row(tool, status.split()[0], status.split()[1] if len(status.split()) > 1 else "")
+        for tool_name, cmd in tools_to_check:
+            available, version = self._check_tool_availability(tool_name, cmd)
+            status = "✅ Available" if available else "❌ Not found"
+            status_table.add_row(tool_name, status.split()[0], status.split()[1] if len(status.split()) > 1 else "")
         
         console.print(Panel(status_table, title="🔧 Environment Status", border_style="green"))
         
@@ -1744,6 +1726,25 @@ Format as markdown with clear sections."""
         console.print("\n[green]✅ Environment setup completed![/green]")
         console.print("[blue]💡 Try './binder preview intro' to test your setup[/blue]")
 
+    def _get_tools_to_check(self):
+        """Get list of tools to check/install"""
+        return [
+            ('Quarto', ['quarto', '--version'], "https://quarto.org/docs/get-started/"),
+            ('Python', ['python3', '--version'], "https://www.python.org/downloads/"),
+            ('Git', ['git', '--version'], "https://git-scm.com/downloads"),
+            ('GitHub CLI', ['gh', '--version'], "https://cli.github.com/"),
+            ('Ollama', ['ollama', '--version'], "https://ollama.ai/")
+        ]
+
+    def _check_tool_availability(self, tool_name, cmd):
+        """Check if a tool is available and return version"""
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            version = result.stdout.strip().split('\n')[0]
+            return True, version
+        except:
+            return False, "Not installed"
+
     def _check_environment(self):
         """Check current environment status"""
         console.print("[blue]🔍 Checking your environment...[/blue]")
@@ -1754,21 +1755,12 @@ Format as markdown with clear sections."""
         status_table.add_column("Version", style="dim")
         
         # Check various tools
-        tools_to_check = [
-            ('Quarto', ['quarto', '--version']),
-            ('Python', ['python3', '--version']),
-            ('Git', ['git', '--version']),
-            ('GitHub CLI', ['gh', '--version']),
-            ('Ollama', ['ollama', '--version'])
-        ]
+        tools_to_check = self._get_tools_to_check()
         
-        for tool_name, cmd in tools_to_check:
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-                version = result.stdout.strip().split('\n')[0]
-                status_table.add_row(tool_name, "✅ Available", version)
-            except:
-                status_table.add_row(tool_name, "❌ Missing", "Not installed")
+        for tool_name, cmd, _ in tools_to_check:
+            available, version = self._check_tool_availability(tool_name, cmd)
+            status = "✅ Available" if available else "❌ Missing"
+            status_table.add_row(tool_name, status, version)
         
         console.print(status_table)
 
@@ -1778,20 +1770,13 @@ Format as markdown with clear sections."""
         
         # Check what's missing and install automatically
         missing_tools = []
-        
-        tools_to_check = [
-            ('Quarto', ['quarto', '--version'], "https://quarto.org/docs/get-started/"),
-            ('Python', ['python3', '--version'], "https://www.python.org/downloads/"),
-            ('Git', ['git', '--version'], "https://git-scm.com/downloads"),
-            ('GitHub CLI', ['gh', '--version'], "https://cli.github.com/"),
-            ('Ollama', ['ollama', '--version'], "https://ollama.ai/")
-        ]
+        tools_to_check = self._get_tools_to_check()
         
         for tool_name, cmd, url in tools_to_check:
-            try:
-                subprocess.run(cmd, capture_output=True, check=True)
+            available, _ = self._check_tool_availability(tool_name, cmd)
+            if available:
                 console.print(f"[green]✅ {tool_name} already installed[/green]")
-            except:
+            else:
                 missing_tools.append((tool_name, url))
         
         if missing_tools:
@@ -1817,75 +1802,63 @@ Format as markdown with clear sections."""
             console.print(f"[blue]🔧 Installing {tool_name}...[/blue]")
             
             try:
-                if tool_name == "Quarto":
-                    self._install_quarto(system)
-                elif tool_name == "GitHub CLI":
-                    self._install_github_cli(system)
-                elif tool_name == "Ollama":
-                    self._install_ollama(system)
-                elif tool_name == "Git":
-                    self._install_git(system)
-                else:
-                    console.print(f"[yellow]⚠️ Please install {tool_name} manually: {url}[/yellow]")
-                    
+                self._install_tool(tool_name, system)
             except Exception as e:
                 console.print(f"[red]❌ Failed to install {tool_name}: {e}[/red]")
                 console.print(f"[yellow]💡 Please install manually: {url}[/yellow]")
 
-    def _install_quarto(self, system):
-        """Install Quarto based on system"""
-        if system == "darwin":  # macOS
-            console.print("[blue]📦 Installing Quarto via Homebrew...[/blue]")
-            subprocess.run(['brew', 'install', 'quarto'], check=True)
-            console.print("[green]✅ Quarto installed successfully[/green]")
-        elif system == "linux":
-            console.print("[blue]📦 Installing Quarto via apt...[/blue]")
-            subprocess.run(['sudo', 'apt-get', 'update'], check=True)
-            subprocess.run(['sudo', 'apt-get', 'install', '-y', 'quarto'], check=True)
-            console.print("[green]✅ Quarto installed successfully[/green]")
-        else:
-            raise Exception("Automatic Quarto installation not supported on this system")
+    def _get_installation_methods(self):
+        """Get installation methods for different tools"""
+        return {
+            'Quarto': {
+                'darwin': {'method': 'brew', 'package': 'quarto'},
+                'linux': {'method': 'apt', 'package': 'quarto'}
+            },
+            'GitHub CLI': {
+                'darwin': {'method': 'brew', 'package': 'gh'},
+                'linux': {'method': 'apt', 'package': 'gh'}
+            },
+            'Ollama': {
+                'darwin': {'method': 'brew', 'package': 'ollama'},
+                'linux': {'method': 'curl', 'url': 'https://ollama.ai/install.sh'}
+            },
+            'Git': {
+                'darwin': {'method': 'brew', 'package': 'git'},
+                'linux': {'method': 'apt', 'package': 'git'}
+            }
+        }
 
-    def _install_github_cli(self, system):
-        """Install GitHub CLI based on system"""
-        if system == "darwin":  # macOS
-            console.print("[blue]📦 Installing GitHub CLI via Homebrew...[/blue]")
-            subprocess.run(['brew', 'install', 'gh'], check=True)
-            console.print("[green]✅ GitHub CLI installed successfully[/green]")
-        elif system == "linux":
-            console.print("[blue]📦 Installing GitHub CLI via apt...[/blue]")
+    def _install_tool(self, tool_name, system):
+        """Install a tool using the appropriate method for the system"""
+        installation_methods = self._get_installation_methods()
+        
+        if tool_name not in installation_methods:
+            raise Exception(f"Automatic {tool_name} installation not supported")
+        
+        if system not in installation_methods[tool_name]:
+            raise Exception(f"Automatic {tool_name} installation not supported on this system")
+        
+        method_info = installation_methods[tool_name][system]
+        method = method_info['method']
+        
+        if method == 'brew':
+            package = method_info['package']
+            console.print(f"[blue]📦 Installing {tool_name} via Homebrew...[/blue]")
+            subprocess.run(['brew', 'install', package], check=True)
+            console.print(f"[green]✅ {tool_name} installed successfully[/green]")
+            
+        elif method == 'apt':
+            package = method_info['package']
+            console.print(f"[blue]📦 Installing {tool_name} via apt...[/blue]")
             subprocess.run(['sudo', 'apt-get', 'update'], check=True)
-            subprocess.run(['sudo', 'apt-get', 'install', '-y', 'gh'], check=True)
-            console.print("[green]✅ GitHub CLI installed successfully[/green]")
-        else:
-            raise Exception("Automatic GitHub CLI installation not supported on this system")
-
-    def _install_ollama(self, system):
-        """Install Ollama based on system"""
-        if system == "darwin":  # macOS
-            console.print("[blue]📦 Installing Ollama via Homebrew...[/blue]")
-            subprocess.run(['brew', 'install', 'ollama'], check=True)
-            console.print("[green]✅ Ollama installed successfully[/green]")
-        elif system == "linux":
-            console.print("[blue]📦 Installing Ollama via curl...[/blue]")
-            subprocess.run(['curl', '-fsSL', 'https://ollama.ai/install.sh', '|', 'sh'], shell=True, check=True)
-            console.print("[green]✅ Ollama installed successfully[/green]")
-        else:
-            raise Exception("Automatic Ollama installation not supported on this system")
-
-    def _install_git(self, system):
-        """Install Git based on system"""
-        if system == "darwin":  # macOS
-            console.print("[blue]📦 Installing Git via Homebrew...[/blue]")
-            subprocess.run(['brew', 'install', 'git'], check=True)
-            console.print("[green]✅ Git installed successfully[/green]")
-        elif system == "linux":
-            console.print("[blue]📦 Installing Git via apt...[/blue]")
-            subprocess.run(['sudo', 'apt-get', 'update'], check=True)
-            subprocess.run(['sudo', 'apt-get', 'install', '-y', 'git'], check=True)
-            console.print("[green]✅ Git installed successfully[/green]")
-        else:
-            raise Exception("Automatic Git installation not supported on this system")
+            subprocess.run(['sudo', 'apt-get', 'install', '-y', package], check=True)
+            console.print(f"[green]✅ {tool_name} installed successfully[/green]")
+            
+        elif method == 'curl':
+            url = method_info['url']
+            console.print(f"[blue]📦 Installing {tool_name} via curl...[/blue]")
+            subprocess.run(['curl', '-fsSL', url, '|', 'sh'], shell=True, check=True)
+            console.print(f"[green]✅ {tool_name} installed successfully[/green]")
 
     def _install_python_packages(self):
         """Install required Python packages"""
@@ -1972,27 +1945,43 @@ Format as markdown with clear sections."""
         
         return True
 
+    def _get_git_config(self, key):
+        """Get Git configuration value"""
+        try:
+            result = subprocess.run(['git', 'config', key], capture_output=True, text=True)
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except:
+            pass
+        return None
+
+    def _set_git_config(self, key, value):
+        """Set Git configuration value"""
+        try:
+            subprocess.run(['git', 'config', '--global', key, value], check=True)
+            console.print(f"[green]✅ Set Git {key}: {value}[/green]")
+            return True
+        except subprocess.CalledProcessError as e:
+            console.print(f"[red]❌ Failed to set Git {key}: {e}[/red]")
+            return False
+
+    def _get_user_input_with_default(self, prompt, current_value=None):
+        """Get user input with optional default value"""
+        if current_value:
+            console.print(f"[bold]{prompt} [{current_value}]: [/bold]", end="")
+            user_input = input().strip()
+            return user_input if user_input else current_value
+        else:
+            console.print(f"[bold]{prompt}: [/bold]", end="")
+            return input().strip()
+
     def _configure_git(self):
         """Configure Git settings interactively"""
         console.print("[blue]🔧 Configuring Git...[/blue]")
         
         # Check current Git configuration
-        current_name = None
-        current_email = None
-        
-        try:
-            result = subprocess.run(['git', 'config', 'user.name'], capture_output=True, text=True)
-            if result.returncode == 0:
-                current_name = result.stdout.strip()
-        except:
-            pass
-        
-        try:
-            result = subprocess.run(['git', 'config', 'user.email'], capture_output=True, text=True)
-            if result.returncode == 0:
-                current_email = result.stdout.strip()
-        except:
-            pass
+        current_name = self._get_git_config('user.name')
+        current_email = self._get_git_config('user.email')
         
         # Show current configuration
         if current_name and current_email:
@@ -2013,103 +2002,91 @@ Format as markdown with clear sections."""
         # Get user information
         console.print("\n[blue]📝 Please provide your information:[/blue]")
         
-        # Get name
-        if current_name:
-            console.print(f"[bold]Full name [{current_name}]: [/bold]", end="")
-            name_input = input().strip()
-            if not name_input:
-                name_input = current_name
-        else:
-            console.print("[bold]Full name: [/bold]", end="")
-            name_input = input().strip()
-        
-        # Get email
-        if current_email:
-            console.print(f"[bold]Email [{current_email}]: [/bold]", end="")
-            email_input = input().strip()
-            if not email_input:
-                email_input = current_email
-        else:
-            console.print("[bold]Email: [/bold]", end="")
-            email_input = input().strip()
-        
-        # Get GitHub username
-        console.print("[bold]GitHub username: [/bold]", end="")
-        github_username = input().strip()
+        name_input = self._get_user_input_with_default("Full name", current_name)
+        email_input = self._get_user_input_with_default("Email", current_email)
+        github_username = self._get_user_input_with_default("GitHub username")
         
         # Configure Git
-        try:
-            if name_input:
-                subprocess.run(['git', 'config', '--global', 'user.name', name_input], check=True)
-                console.print(f"[green]✅ Set Git user.name: {name_input}[/green]")
-            
-            if email_input:
-                subprocess.run(['git', 'config', '--global', 'user.email', email_input], check=True)
-                console.print(f"[green]✅ Set Git user.email: {email_input}[/green]")
-            
-            # Store GitHub username for future use
-            if github_username:
-                subprocess.run(['git', 'config', '--global', 'user.github', github_username], check=True)
-                console.print(f"[green]✅ Set GitHub username: {github_username}[/green]")
-            
+        success = True
+        if name_input:
+            success &= self._set_git_config('user.name', name_input)
+        
+        if email_input:
+            success &= self._set_git_config('user.email', email_input)
+        
+        if github_username:
+            success &= self._set_git_config('user.github', github_username)
+        
+        if success:
             console.print("[green]✅ Git configuration completed![/green]")
-            
-        except subprocess.CalledProcessError as e:
-            console.print(f"[red]❌ Failed to configure Git: {e}[/red]")
+        else:
             console.print("[yellow]💡 You can configure Git manually:[/yellow]")
             console.print("  git config --global user.name 'Your Name'")
             console.print("  git config --global user.email 'your.email@example.com'")
-        except Exception as e:
-            console.print(f"[red]❌ Git configuration error: {e}[/red]")
+
+    def _get_preferences_config(self):
+        """Get preferences configuration structure"""
+        return [
+            {
+                'key': 'binder.default-format',
+                'prompt': 'Default build format (html/pdf)',
+                'default': 'html',
+                'options': ['html', 'pdf'],
+                'description': '📚 Build Preferences:\n  • html - Web format (faster, interactive)\n  • pdf - Print format (slower, academic)'
+            },
+            {
+                'key': 'binder.auto-open',
+                'prompt': 'Auto-open browser after builds? (y/n)',
+                'default': 'y',
+                'options': ['y', 'n'],
+                'description': '🌐 Browser Preferences:'
+            },
+            {
+                'key': 'binder.ai-default',
+                'prompt': 'Use AI for release notes by default? (y/n)',
+                'default': 'y',
+                'options': ['y', 'n'],
+                'description': '🤖 AI Features:'
+            }
+        ]
 
     def _configure_preferences(self):
         """Configure user preferences and environment settings"""
         console.print("[blue]⚙️ Configuring preferences...[/blue]")
         
-        # Ask about default build format
-        console.print("\n[blue]📚 Build Preferences:[/blue]")
-        console.print("  • [dim]html[/dim] - Web format (faster, interactive)")
-        console.print("  • [dim]pdf[/dim] - Print format (slower, academic)")
+        preferences_config = self._get_preferences_config()
         
-        console.print("[bold]Default build format (html/pdf) [html]: [/bold]", end="")
-        default_format = input().strip().lower()
-        if not default_format or default_format not in ['html', 'pdf']:
-            default_format = 'html'
-        
-        # Store preference
-        try:
-            subprocess.run(['git', 'config', '--global', 'binder.default-format', default_format], check=True)
-            console.print(f"[green]✅ Set default format: {default_format}[/green]")
-        except:
-            console.print(f"[yellow]⚠️ Could not save format preference[/yellow]")
-        
-        # Ask about auto-open browser
-        console.print("\n[blue]🌐 Browser Preferences:[/blue]")
-        console.print("[bold]Auto-open browser after builds? (y/n) [y]: [/bold]", end="")
-        auto_open = input().strip().lower()
-        if not auto_open:
-            auto_open = 'y'
-        
-        auto_open_setting = 'true' if auto_open in ['y', 'yes'] else 'false'
-        try:
-            subprocess.run(['git', 'config', '--global', 'binder.auto-open', auto_open_setting], check=True)
-            console.print(f"[green]✅ Auto-open browser: {auto_open_setting}[/green]")
-        except:
-            console.print(f"[yellow]⚠️ Could not save browser preference[/yellow]")
-        
-        # Ask about AI features
-        console.print("\n[blue]🤖 AI Features:[/blue]")
-        console.print("[bold]Use AI for release notes by default? (y/n) [y]: [/bold]", end="")
-        ai_default = input().strip().lower()
-        if not ai_default:
-            ai_default = 'y'
-        
-        ai_setting = 'true' if ai_default in ['y', 'yes'] else 'false'
-        try:
-            subprocess.run(['git', 'config', '--global', 'binder.ai-default', ai_setting], check=True)
-            console.print(f"[green]✅ AI release notes: {ai_setting}[/green]")
-        except:
-            console.print(f"[yellow]⚠️ Could not save AI preference[/yellow]")
+        for pref in preferences_config:
+            console.print(f"\n[blue]{pref['description']}[/blue]")
+            
+            # Get current value
+            current_value = self._get_git_config(pref['key'])
+            if current_value:
+                default_display = current_value
+            else:
+                default_display = pref['default']
+            
+            # Get user input
+            user_input = self._get_user_input_with_default(
+                pref['prompt'], 
+                default_display
+            )
+            
+            # Validate input
+            if not user_input or user_input not in pref['options']:
+                user_input = pref['default']
+            
+            # Convert y/n to true/false for boolean settings
+            if pref['key'] in ['binder.auto-open', 'binder.ai-default']:
+                setting_value = 'true' if user_input in ['y', 'yes'] else 'false'
+            else:
+                setting_value = user_input
+            
+            # Store preference
+            if self._set_git_config(pref['key'], setting_value):
+                console.print(f"[green]✅ Set {pref['key']}: {setting_value}[/green]")
+            else:
+                console.print(f"[yellow]⚠️ Could not save {pref['key']} preference[/yellow]")
         
         console.print("[green]✅ Preferences configured![/green]")
 
@@ -2160,6 +2137,14 @@ Format as markdown with clear sections."""
             }
         
         return preferences
+
+    def _create_status_table(self):
+        """Create a standard status table"""
+        status_table = Table(show_header=True, header_style="bold green", box=None)
+        status_table.add_column("Component", style="cyan", width=20)
+        status_table.add_column("Status", style="white", width=15)
+        status_table.add_column("Details", style="dim")
+        return status_table
 
     def _test_setup(self):
         """Test the setup by building a simple chapter"""
