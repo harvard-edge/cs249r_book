@@ -148,9 +148,13 @@ The binder automatically manages Quarto configurations:
 
 - **`_quarto-html.yml`**: Website build configuration
 - **`_quarto-pdf.yml`**: Academic PDF build configuration  
-- **`_quarto.yml`**: Symlink to active configuration
+- **`_quarto.yml`**: **Symlink** to active configuration (currently → `config/_quarto-html.yml`)
 
-Use `./binder switch <format>` to change the active configuration.
+**Important**: The `_quarto.yml` file is a symlink that points to the active configuration. This allows the binder to quickly switch between HTML and PDF build modes without copying files.
+
+**Quarto Executable**: The system quarto executable (`/Applications/quarto/bin/quarto`) is NOT a symlink - it's a regular executable file.
+
+Use `./binder switch <format>` to change the active configuration symlink.
 
 ## Development Workflow
 
@@ -199,6 +203,11 @@ Use `./binder switch <format>` to change the active configuration.
 **"Config not clean"** 
 - The binder detected a previous fast build configuration
 - Run `./binder clean` to restore normal configuration
+
+**"Symlink issues"**
+- If `_quarto.yml` is not a symlink: `ln -sf config/_quarto-html.yml book/_quarto.yml`
+- Check current symlink target: `ls -la book/_quarto.yml`
+- The symlink should point to either `config/_quarto-html.yml` or `config/_quarto-pdf.yml`
 
 ### Performance Tips
 

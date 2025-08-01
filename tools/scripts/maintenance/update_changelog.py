@@ -4,17 +4,23 @@ import os
 import argparse
 import yaml
 import time
+import requests
+import json
 from collections import defaultdict
 from datetime import datetime
 from openai import OpenAI
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# Initialize OpenAI client (will be None if not using OpenAI)
+client = None
+use_ollama = False  # Global flag to track which service to use
 
 CHANGELOG_FILE = "CHANGELOG.md"
 QUARTO_YML_FILE = "book/config/_quarto-pdf.yml"  # Default to PDF config which has chapters structure
 GITHUB_REPO_URL = "https://github.com/harvard-edge/cs249r_book/"
 # Removed MAJOR_CHANGE_THRESHOLD since we're organizing by content type now
 OPENAI_DELAY = 1  # seconds between API calls
+OLLAMA_DELAY = 0.5  # seconds between Ollama calls (faster since local)
+OLLAMA_URL = "http://localhost:11434/api/generate"  # Default Ollama API endpoint
 
 chapter_order = []
 
@@ -72,7 +78,7 @@ chapter_lookup = [
     ("contents/frontmatter/about/about.qmd", "About", 201),
     ("contents/frontmatter/changelog/changelog.qmd", "Changelog", 202),
     ("contents/frontmatter/acknowledgements/acknowledgements.qmd", "Acknowledgements", 203),
-    ("contents/frontmatter/ai/socratiq.qmd", "SocraticAI", 204),
+    ("contents/frontmatter/socratiq/socratiq.qmd", "SocratiQ", 204),
     
     # Appendix
     ("contents/appendix/phd_survival_guide.qmd", "PhD Survival Guide", 300),
@@ -171,16 +177,18 @@ def extract_chapter_title(file_path):
     else:
         return base.replace('_', ' ').replace('.qmd', '').title()
 
-def sort_by_chapter_order(updates):
-    def extract_path(update):
-        match = re.search(r'\*\*(.*?)\*\*', update)
+def sort_by_impact_level(updates):
+    def extract_impact_level(update):
+        # Extract impact bars from the start of each update
+        import re
+        match = re.search(r'`([█░]+)`', update)
         if match:
-            title = match.group(1)
-            for path in chapter_order:
-                if title.lower().replace(' ', '_') in path.lower():
-                    return chapter_order.index(path)
-        return float('inf')
-    return sorted(updates, key=extract_path)
+            bars = match.group(1)
+            # Count filled bars (█) - higher count = higher importance
+            filled_count = bars.count('█')
+            return -filled_count  # Negative for descending order (most important first)
+        return 0  # Default for entries without impact bars
+    return sorted(updates, key=extract_impact_level)
 
 def get_changes_in_dev_since(date_start, date_end=None, verbose=False):
     cmd = ["git", "log", "--numstat", "--since", date_start]
@@ -189,65 +197,172 @@ def get_changes_in_dev_since(date_start, date_end=None, verbose=False):
     cmd += ["origin/dev", "--", "contents/**/*.qmd"]
     return run_git_command(cmd, verbose=verbose)
 
+
+
 def get_commit_messages_for_file(file_path, since, until=None, verbose=False):
     cmd = ["git", "log", "--pretty=format:%s", "--since", since]
     if until:
         cmd += ["--until", until]
     cmd += ["origin/dev", "--", file_path]
-    return run_git_command(cmd, verbose=verbose)
+    messages = run_git_command(cmd, verbose=verbose)
+    
+    # Return all commit messages - let AI determine importance
+    meaningful_messages = []
+    for message in messages.splitlines():
+        if message.strip():
+            meaningful_messages.append(message.strip())
+    
+    return "\n".join(meaningful_messages)
 
-def summarize_changes_with_openai(file_path, commit_messages, verbose=False, max_retries=3):
+def call_ollama(prompt, model="llama3.1:8b", verbose=False):
+    """Call Ollama API for text generation."""
+    try:
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": 0.2,
+                "num_predict": 100
+            }
+        }
+        
+        if verbose:
+            print(f"🤖 Calling Ollama with model: {model}")
+            
+        response = requests.post(OLLAMA_URL, json=payload, timeout=30)
+        response.raise_for_status()
+        
+        result = response.json()
+        return result.get("response", "").strip()
+        
+    except requests.exceptions.RequestException as e:
+        print(f"⚠️ Ollama API error: {e}")
+        return None
+    except Exception as e:
+        print(f"⚠️ Ollama error: {e}")
+        return None
+
+def summarize_changes_with_openai(file_path, commit_messages, verbose=False, max_retries=3, use_ollama=False, ollama_model="llama3.1:8b"):
     chapter_title = extract_chapter_title(file_path)
     if verbose:
-        print(f"🤖 Calling OpenAI for: {file_path} -- {chapter_title}")
+        print(f"🤖 Calling {'Ollama' if use_ollama else 'OpenAI'} for: {file_path} -- {chapter_title}")
 
-    prompt = f"""You're helping to generate a changelog for a machine learning systems textbook.
-The following file has been updated: {file_path}
+    prompt = f"""You're writing a changelog entry for a machine learning textbook. Readers and instructors need to know what changed and how important it is.
 
-Here are the commit messages:
+File: {file_path}
+Chapter: {chapter_title}
+
+Commit messages:
 {commit_messages}
 
-Summarize the meaningful content-level changes (new sections, rewrites, example additions, figure changes).
-Ignore formatting or typo-only changes.
+The output format will be: `[IMPACT]` **{chapter_title}**: [YOUR SUMMARY]
 
-Only return the summary sentence (not the bullet or chapter title)."""
+Since the chapter title is already shown, DO NOT repeat it in your summary. Just state what changed directly.
+
+First, analyze the commits and list the main changes. Then write ONE specific sentence about what changed.
+Finally, rate the importance (1-5 bars). Be realistic about impact - most changes should be Small or Medium:
+- █████ Major: New chapters, sections, or significant rewrites (rare)
+- ████░ Large: Multiple examples, new concepts, substantial updates (uncommon)
+- ███░░ Medium: New examples, clarifications, moderate changes (common)
+- ██░░░ Small: Minor fixes, formatting, small corrections, single example additions (most common)
+- █░░░░ Tiny: Typos, punctuation, very minor tweaks (use this more often)
+
+Format your response exactly like this:
+CHANGES: [list 2-3 main changes from commits]
+SUMMARY: [what changed - NO chapter name, just the changes]
+IMPACT: [█████, ████░, ███░░, ██░░░, or █░░░░]
+
+Example:
+CHANGES: Added transformer architecture section, New attention mechanism diagrams, Fixed backprop equations
+SUMMARY: Added transformer architecture section with attention mechanism diagrams and corrected backpropagation equations
+IMPACT: ████░
+
+BAD: "Chapter 10 has been updated with new content"
+GOOD: "Added transformer architecture section with attention mechanism diagrams"
+
+GOOD examples:
+- "Added lottery ticket hypothesis section with pruning examples"
+- "New GPU memory optimization diagrams and CUDA code samples" 
+- "Expanded federated learning coverage with privacy-preserving techniques"
+- "Fixed mathematical notation in backpropagation equations"
+
+BAD examples (don't use):
+- "The chapter has been revised to include..."
+- "Updated with new sections and examples..."
+- "Enhanced with improved clarity and..."
+- "Modified to add new content about..."
+
+Focus on WHAT was added/changed, not HOW it was changed. Use varied sentence structures.
+Return only the description (no chapter title, no bullet points)."""
 
     for attempt in range(max_retries):
         try:
-            # Add delay to avoid rate limiting
-            if attempt > 0:
+            # Add delay only for OpenAI (rate limiting)
+            if not use_ollama and attempt > 0:
                 time.sleep(OPENAI_DELAY * (2 ** attempt))  # exponential backoff
             
-            response = client.chat.completions.create(
-                model="gpt-4",
-                temperature=0.3,
-                messages=[
-                    {"role": "system", "content": "You are a helpful assistant writing changelog summaries."},
-                    {"role": "user", "content": prompt}
-                ]
-            )
-
-            summary = response.choices[0].message.content.strip()
+            if use_ollama:
+                summary = call_ollama(prompt, model=ollama_model, verbose=verbose)
+                if summary is None:
+                    raise Exception("Ollama call failed")
+            else:
+                response = client.chat.completions.create(
+                    model="gpt-4",
+                    temperature=0.2,  # Lower temperature for more consistent output
+                    max_tokens=100,   # Limit length for conciseness
+                    messages=[
+                        {"role": "system", "content": "You are a technical writer creating concise changelog entries. Be specific and avoid generic language."},
+                        {"role": "user", "content": prompt}
+                    ]
+                )
+                summary = response.choices[0].message.content.strip()
 
             if not summary:
                 return f"- **{chapter_title}**: _(no meaningful changes detected)_"
 
-            clean_summary = summary.partition(":")[-1].strip()
-            if not clean_summary:
-                clean_summary = summary  # fallback if no colon was present
-
-            # Add delay after successful call
-            time.sleep(OPENAI_DELAY)
-            return f"- **{chapter_title}**: {clean_summary}"
+            # Parse the new structured format
+            import re
+            summary_match = re.search(r'SUMMARY:\s*(.+?)(?:\nIMPACT:|$)', summary, re.DOTALL)
+            impact_match = re.search(r'IMPACT:\s*([█░]+)', summary)
+            
+            if summary_match:
+                parsed_summary = summary_match.group(1).strip()
+                # Remove any trailing punctuation
+                if parsed_summary.endswith("."):
+                    parsed_summary = parsed_summary[:-1]
+                
+                impact_bars = impact_match.group(1) if impact_match else "███░░"  # default medium
+                
+                # Add delay only for OpenAI after successful call
+                if not use_ollama:
+                    time.sleep(OPENAI_DELAY)
+                return f"- `{impact_bars}` **{chapter_title}**: {parsed_summary}"
+            else:
+                # Fallback to old format if parsing fails
+                summary = summary.replace("--- --- --- ---", "").strip()
+                if summary.endswith("."):
+                    summary = summary[:-1]
+                
+                if not use_ollama:
+                    time.sleep(OPENAI_DELAY)
+                return f"- **{chapter_title}**: {summary}"
 
         except Exception as e:
-            print(f"⚠️ OpenAI attempt {attempt + 1} failed for {file_path}: {e}")
+            print(f"⚠️ {'Ollama' if use_ollama else 'OpenAI'} attempt {attempt + 1} failed for {file_path}: {e}")
             if attempt == max_retries - 1:
                 return f"- **{chapter_title}**: _(unable to summarize; see commits manually)_"
 
 def format_friendly_date(date_str):
     try:
-        return datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z").strftime("%b %d, %Y")
+        # Try ISO format first (with T separator)
+        if 'T' in date_str:
+            dt = datetime.fromisoformat(date_str)
+        else:
+            # Fallback to space-separated format
+            dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z")
+        # Format as "Jan 28" (no year since it's in section header)
+        return dt.strftime("%b %d")
     except:
         return date_str
 
@@ -257,10 +372,13 @@ def normalized_path(path):
 def generate_entry(start_date, end_date=None, verbose=False, is_latest=False):
     if verbose:
         print(f"📁 Processing changes from {start_date} to {end_date or 'now'}")
+    print(f"🔍 Analyzing Git changes...")
     changes = get_changes_in_dev_since(start_date, end_date, verbose=verbose)
     if not changes.strip():
+        print("  ⚠️ No changes found in specified period")
         return None
 
+    print("📊 Categorizing changes by file...")
     changes_by_file = defaultdict(lambda: [0, 0])
     for line in changes.splitlines():
         parts = line.split("\t")
@@ -272,7 +390,7 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False):
         changes_by_file[file_path][0] += added
         changes_by_file[file_path][1] += removed
 
-    current_date = datetime.now().strftime('%b %d, %Y') if not end_date else format_friendly_date(end_date)
+    current_date = datetime.now().strftime('%B %d at %I:%M %p') if not end_date else format_friendly_date(end_date)
     entry = f"### 📅 {current_date}\n\n"
 
     frontmatter, chapters, labs, appendix = [], [], [], []
@@ -286,18 +404,34 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False):
     )
 
     total_files = len(ordered_files)
+    print(f"📝 Processing {total_files} changed files...")
+    
     for idx, file_path in enumerate(ordered_files, 1):
         added, removed = changes_by_file[file_path]
         total = added + removed
         if verbose:
             print(f"🔍 Summarizing {file_path} ({added}+ / {removed}-) [{idx}/{total_files}]")
+        else:
+            print(f"  📄 [{idx}/{total_files}] {os.path.basename(file_path)} ({added}+ {removed}-)")
         
         # Skip references
         if "references.qmd" in file_path:
             continue
             
         commit_msgs = get_commit_messages_for_file(file_path, start_date, end_date, verbose=verbose)
-        summary = summarize_changes_with_openai(file_path, commit_msgs, verbose=verbose)
+        
+        # Skip if no meaningful commits
+        if not commit_msgs.strip():
+            if verbose:
+                print(f"⏭️ Skipping {file_path} - no meaningful changes")
+            continue
+            
+        print(f"    🤖 Generating summary...")
+        summary = summarize_changes_with_openai(file_path, commit_msgs, verbose=verbose, use_ollama=use_ollama, ollama_model=args.model)
+        
+        # Show the generated summary
+        summary_text = summary.replace(f"- **{extract_chapter_title(file_path)}**: ", "")
+        print(f"      📝 {summary_text}")
         
         # Categorize by content type
         if "contents/frontmatter/" in file_path:
@@ -309,20 +443,32 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False):
         else:
             chapters.append(summary)
 
+    print(f"📋 Organizing into sections...")
+    print(f"  📄 Frontmatter: {len(frontmatter)} entries")
+    print(f"  📖 Chapters: {len(chapters)} entries")
+    print(f"  🧑‍💻 Labs: {len(labs)} entries")
+    print(f"  📚 Appendix: {len(appendix)} entries")
+
     # Determine if sections should be open or closed
-    # Only the latest entry should be open, all previous entries should be folded
-    details_state = "open" if is_latest else ""
+    # All entries should be closed by default - let users choose what to explore
+    details_state = ""  # Always closed for better UX
 
     # Add sections in order: Frontmatter, Chapters, Labs, Appendix
     if frontmatter:
-        entry += f"<details {details_state}>\n<summary>**📄 Frontmatter**</summary>\n\n" + "\n".join(sort_by_chapter_order(frontmatter)) + "\n\n</details>\n\n"
+        entry += f"<details {details_state}>\n<summary>**📄 Frontmatter**</summary>\n\n" + "\n".join(sort_by_impact_level(frontmatter)) + "\n\n</details>\n\n"
     if chapters:
-        entry += f"<details {details_state}>\n<summary>**📖 Chapters**</summary>\n\n" + "\n".join(sort_by_chapter_order(chapters)) + "\n\n</details>\n\n"
+        entry += f"<details {details_state}>\n<summary>**📖 Chapters**</summary>\n\n" + "\n".join(sort_by_impact_level(chapters)) + "\n\n</details>\n\n"
     if labs:
-        entry += f"<details {details_state}>\n<summary>**🧑‍💻 Labs**</summary>\n\n" + "\n".join(sort_by_chapter_order(labs)) + "\n\n</details>\n\n"
+        entry += f"<details {details_state}>\n<summary>**🧑‍💻 Labs**</summary>\n\n" + "\n".join(sort_by_impact_level(labs)) + "\n\n</details>\n\n"
     if appendix:
-        entry += f"<details {details_state}>\n<summary>**📚 Appendix**</summary>\n\n" + "\n".join(sort_by_chapter_order(appendix)) + "\n\n</details>\n"
+        entry += f"<details {details_state}>\n<summary>**📚 Appendix**</summary>\n\n" + "\n".join(sort_by_impact_level(appendix)) + "\n\n</details>\n"
 
+    # If no content sections were added, return None (empty entry)
+    if not frontmatter and not chapters and not labs and not appendix:
+        print("  ⚠️ No meaningful content changes found - skipping entry")
+        return None
+
+    print("✅ Entry generation complete")
     return entry
 
 def fold_existing_entries(content):
@@ -336,27 +482,37 @@ def fold_existing_entries(content):
     return re.sub(pattern, replacement, content)
 
 def generate_changelog(mode="incremental", verbose=False):
-    print("🔄 Fetching latest Git data...")
+    print("🔄 Starting Git data fetch...")
+    print("  📦 Fetching gh-pages branch...")
     run_git_command(["git", "fetch", "origin", "gh-pages:refs/remotes/origin/gh-pages"], verbose=verbose)
+    print("  📦 Fetching dev branch...")
     run_git_command(["git", "fetch", "origin", "dev:refs/remotes/origin/dev"], verbose=verbose)
+    print("✅ Git data fetch complete")
 
     def get_latest_gh_pages_commit():
+        print("🔍 Looking for latest publication commit...")
         # Look for actual publication commits, not administrative ones
-        output = run_git_command(["git", "log", "--pretty=format:%H %ad", "--date=iso", "--grep=Built site for gh-pages", "origin/gh-pages"], verbose=verbose)
+        output = run_git_command(["git", "log", "--pretty=format:%H %aI", "--grep=Built site for gh-pages", "origin/gh-pages"], verbose=verbose)
         if output.strip():
             first_line = output.split('\n')[0]
             parts = first_line.split(" ", 1)
-            return (parts[0], parts[1]) if len(parts) == 2 else (None, None)
+            result = (parts[0], parts[1]) if len(parts) == 2 else (None, None)
+            if result[0]:
+                print(f"  📅 Found latest commit: {result[0][:8]} from {result[1]}")
+            return result
+        print("  ⚠️ No publication commits found")
         return (None, None)
 
     def get_all_gh_pages_commits():
+        print("🔍 Scanning all publication commits...")
         # Look for actual publication commits, not administrative ones
-        output = run_git_command(["git", "log", "--pretty=format:%H %ad", "--date=iso", "--grep=Built site for gh-pages", "origin/gh-pages"], verbose=verbose)
+        output = run_git_command(["git", "log", "--pretty=format:%H %aI", "--grep=Built site for gh-pages", "origin/gh-pages"], verbose=verbose)
         commits = []
         for line in output.splitlines():
             parts = line.split(" ", 1)
             if len(parts) == 2:
                 commits.append((parts[0], parts[1]))
+        print(f"  📊 Found {len(commits)} publication commits")
         return commits
 
     def extract_year_from_date(date_str):
@@ -421,7 +577,7 @@ def generate_changelog(mode="incremental", verbose=False):
         # Build output with year headers, newest years first
         output_sections = []
         for year in sorted(entries_by_year.keys(), reverse=True):
-            year_header = f"## {year} Changes"
+            year_header = f"## 📅 {year}"
             year_entries = "\n\n".join(entries_by_year[year])
             output_sections.append(f"{year_header}\n\n{year_entries}")
         
@@ -429,31 +585,81 @@ def generate_changelog(mode="incremental", verbose=False):
         
     else:
         if verbose:
-            print("⚡ Running incremental update...")
+            print("⚡ Running update mode...")
+        print(f"📅 Processing changes since: {format_friendly_date(latest_date) if latest_date else 'beginning'}")
         entry = generate_entry(latest_date, verbose=verbose, is_latest=True)
         if not entry:
             return "_No updates found._"
         
         current_year = datetime.now().year
-        year_header = f"## {current_year} Changes"
+        year_header = f"## 📅 {current_year}"
         return f"{year_header}\n\n{entry}"
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate changelog for ML systems book.")
-    parser.add_argument("-i", "--incremental", action="store_true", help="Add new entries since last gh-pages publish (default).")
     parser.add_argument("-f", "--full", action="store_true", help="Regenerate the entire changelog from scratch.")
+    parser.add_argument("-u", "--update", action="store_true", help="Add new entries since last gh-pages publish.")
     parser.add_argument("-t", "--test", action="store_true", help="Run without writing to file.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output.")
     parser.add_argument("-q", "--quarto-config", type=str, help="Path to quarto config file (default: book/config/_quarto-pdf.yml)")
+    parser.add_argument("--openai", action="store_true", help="Use OpenAI for summarization instead of Ollama (default).")
+    parser.add_argument("-m", "--model", type=str, default="gemma2:9b", help="Ollama model to use (default: gemma2:9b). Popular options: gemma2:9b, gemma2:27b, llama3.1:8b, llama3.1:70b")
 
     args = parser.parse_args()
-    mode = "incremental"
-    if args.full:
+    
+    # Require either --full or --update to be specified
+    if args.full and args.update:
+        print("❌ Error: Cannot specify both --full and --update modes")
+        exit(1)
+    elif args.full:
         mode = "full"
+    elif args.update:
+        mode = "update"
+    else:
+        print("❌ Error: Must specify either --full or --update mode")
+        print("💡 Use --help for usage information")
+        exit(1)
 
     try:
         load_chapter_order(args.quarto_config)
+        
+        # Print configuration header
+        print("=" * 60)
+        print("📝 CHANGELOG GENERATION CONFIG")
+        print("=" * 60)
+        print(f"🎯 Mode: {mode.upper()}")
+        if args.openai:
+            print("🤖 AI Model: OpenAI GPT")
+        else:
+            print(f"🤖 AI Model: {args.model} (via Ollama)")
+        print(f"🔧 Test Mode: {'ON' if args.test else 'OFF'}")
+        print(f"📢 Verbose: {'ON' if args.verbose else 'OFF'}")
+        print(f"📋 Features: Impact bars, importance sorting, specific summaries")
+        print("=" * 60)
+        print()
+        
         print(f"🚀 Starting changelog generation in {mode} mode...")
+
+        if args.openai:
+            print("🤖 Using OpenAI for summarization.")
+            use_ollama = False
+            # Initialize OpenAI client
+            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            if not os.getenv("OPENAI_API_KEY"):
+                raise ValueError("OPENAI_API_KEY not set. Please set it in your environment variables.")
+        else:
+            print(f"🤖 Using Ollama for summarization with model: {args.model}")
+            use_ollama = True
+            # Test Ollama connection
+            test_response = call_ollama("Hello", model=args.model, verbose=False)
+            if test_response is None:
+                print("❌ Failed to connect to Ollama. Make sure it's running on localhost:11434")
+                print("💡 To install models in Ollama:")
+                print("   ollama pull gemma2:9b")
+                print("   ollama pull gemma2:27b")
+                exit(1)
+            print("✅ Ollama connection successful")
+
         new_entry = generate_changelog(mode=mode, verbose=args.verbose)
 
         if args.test:
@@ -466,7 +672,7 @@ if __name__ == "__main__":
                     existing = f.read()
 
             current_year = datetime.now().year
-            year_header = f"## {current_year} Changes"
+            year_header = f"## {current_year} Updates"
 
             # Remove first occurrence of the year header
             existing_lines = existing.splitlines()
@@ -483,11 +689,30 @@ if __name__ == "__main__":
             # Prepend the new entry with correct year section
             if mode == "full":
                 # For full mode, replace entire content (already includes year headers)
-                updated_content = new_entry.strip()
+                disclaimer = """# Changelog
+
+::: {.callout-note}
+Automatically generated from Git commit messages. Generally accurate but may require review.
+:::
+
+"""
+                updated_content = disclaimer + new_entry.strip()
             else:
                 # For incremental, prepend to existing and fold all previous entries
                 folded_existing = fold_existing_entries(cleaned_existing)
-                updated_content = f"{new_entry.strip()}\n---\n\n{folded_existing}"
+                
+                # Check if existing content has the header/disclaimer
+                if not cleaned_existing.startswith("# Changelog"):
+                    disclaimer = """# Changelog
+
+::: {.callout-note}
+Automatically generated from Git commit messages. Generally accurate but may require review.
+:::
+
+"""
+                    updated_content = disclaimer + f"{new_entry.strip()}\n---\n\n{folded_existing}"
+                else:
+                    updated_content = f"{new_entry.strip()}\n---\n\n{folded_existing}"
 
             with open(CHANGELOG_FILE, "w", encoding="utf-8") as f:
                 f.write(updated_content.strip() + "\n")
