@@ -263,6 +263,18 @@ MLSysBook/
 # Then copy PDF to assets and push to main
 ```
 
+### Getting Started
+```bash
+# First time setup
+./binder setup
+
+# Welcome and overview
+./binder hello
+
+# Quick preview
+./binder preview intro
+```
+
 ---
 
 ## 📋 Citation & License

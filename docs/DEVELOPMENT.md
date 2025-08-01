@@ -6,12 +6,13 @@ This guide covers the development workflow, automated cleanup system, and best p
 
 ```bash
 # First time setup
-make setup-hooks    # Setup automated cleanup hooks
-make install        # Install dependencies
+./binder setup      # Configure environment and tools
+./binder hello      # Welcome and overview
 
 # Daily development
-make clean build    # Clean and build
-make preview        # Start development server
+./binder preview intro    # Preview a chapter
+./binder build - html     # Build complete book
+./binder publish          # Publish to the world
 ```
 
 ## 🧹 Automated Cleanup System
@@ -92,6 +93,31 @@ make build-all                 # All formats
 ./binder publish
 ```
 
+### Environment Setup
+
+The `./binder setup` command provides a complete environment configuration:
+
+**What it does:**
+1. **Checks environment** - Verifies all required tools and versions
+2. **Installs dependencies** - Auto-installs missing tools (Quarto, GitHub CLI, Ollama)
+3. **Configures Git** - Sets up user name, email, and GitHub username
+4. **Sets preferences** - Configures build format and browser behavior
+5. **Tests setup** - Builds a test chapter to verify everything works
+
+**Features:**
+- 🛠️ **Automatic tool installation** (Homebrew, apt, pip)
+- 👤 **Interactive Git configuration**
+- ⚙️ **User preference setup**
+- 🧪 **Built-in testing** to verify setup
+
+```bash
+# Run setup
+./binder setup
+
+# Get welcome and overview
+./binder hello
+```
+
 ### Development Server
 
 ```bash
@@ -111,10 +137,24 @@ cd book && quarto preview
 
 ## 🚀 Publishing
 
-### Quick Publish
+The `./binder publish` command provides a complete publishing workflow:
+
+**Step-by-step process:**
+1. **Environment validation** - Checks Git status, tools, and dependencies
+2. **Branch management** - Merges `dev` to `main` with confirmation
+3. **Release planning** - Suggests version bump based on changes
+4. **Build process** - PDF first, then HTML (ensures PDF availability)
+5. **Release creation** - Git tag, AI-generated release notes, GitHub release
+6. **Deployment** - Copies PDF to assets, commits, pushes to production
+
+**Features:**
+- 🤖 **AI-powered release notes** (requires Ollama)
+- 📊 **Smart version suggestions** (patch/minor/major)
+- 🛡️ **Safety checks** and confirmations
+- 🎯 **Step-by-step wizard** with clear progress
 
 ```bash
-# One command to publish everything
+# One-command publishing
 ./binder publish
 ```
 

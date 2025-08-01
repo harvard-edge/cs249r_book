@@ -4,7 +4,30 @@ Welcome! 👋 If you’re here, you’re probably trying to **build the Machine 
 
 This guide will walk you through **how to get set up manually**, especially if you're not using GitHub Actions or Docker. We'll cover what tools you need, why you need them, and how to test everything is working.
 
+## 🚀 Quick Start (Recommended)
+
+For most users, the easiest way is using our **Book Binder CLI**:
+
+```bash
+# First time setup
+./binder setup
+
+# Welcome and overview
+./binder hello
+
+# Quick preview
+./binder preview intro
+
+# Build everything
+./binder build - html
+./binder build - pdf
+```
+
+The `binder` tool automatically handles all dependencies, configuration, and build processes for you!
+
 ---
+
+## 🔧 Manual Setup (Advanced)
 
 ## 📚 What Are We Trying to Build?
 
