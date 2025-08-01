@@ -52,6 +52,7 @@ Full builds render the complete book with all chapters, parts, and cross-referen
 |---------|-------------|---------|
 | `build * <format>` | Build complete book | `./binder build * pdf` |
 | `preview-full` | Preview complete book | `./binder preview-full` |
+| `publish` | Build and publish book | `./binder publish` |
 
 ### 🔧 Management Commands
 
@@ -73,6 +74,7 @@ All commands have single-letter shortcuts:
 | `b` | `build` |
 | `p` | `preview` |
 | `pf` | `preview-full` |
+| `pub` | `publish` |
 | `c` | `clean` |
 | `ch` | `check` |
 | `s` | `switch` |
@@ -98,6 +100,47 @@ Use `./binder list` to see all available chapters.
 |--------|-----------------|-------------|
 | HTML | `build/html/` | Website format with navigation |
 | PDF | `build/pdf/` | Academic book format |
+
+## 🚀 Publishing
+
+The `publish` command handles the complete publication workflow:
+
+```bash
+# Publish the book (build + deploy)
+./binder publish
+```
+
+### What `publish` does:
+
+1. **🔍 Pre-flight checks** - Verifies git status and branch
+2. **🧹 Cleans** - Removes previous builds
+3. **📚 Builds HTML** - Creates web version
+4. **📄 Builds PDF** - Creates downloadable version
+5. **📦 Copies PDF** - Moves PDF to assets directory
+6. **💾 Commits** - Adds PDF to git
+7. **🚀 Pushes** - Triggers GitHub Actions deployment
+
+### Publishing Workflow:
+
+```bash
+# Development workflow
+./binder preview intro          # Preview a chapter
+./binder build - html          # Build complete HTML
+./binder build - pdf           # Build complete PDF
+./binder publish               # Publish to the world
+```
+
+### After Publishing:
+
+- **🌐 Web version**: Available at https://harvard-edge.github.io/cs249r_book
+- **📄 PDF download**: Available at https://harvard-edge.github.io/cs249r_book/assets/Machine-Learning-Systems.pdf
+- **📈 GitHub Actions**: Monitors build progress at https://github.com/harvard-edge/cs249r_book/actions
+
+### Requirements:
+
+- Must be on `main` branch
+- No uncommitted changes
+- Git repository properly configured
 
 ## Advanced Features
 

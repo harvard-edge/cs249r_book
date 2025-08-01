@@ -253,6 +253,16 @@ MLSysBook/
 - [🔨 Build Instructions](docs/BUILD.md) — Detailed build process
 - [🤝 Contribution Guidelines](docs/contribute.md) — How to contribute effectively
 
+### Publishing
+```bash
+# Quick publish (recommended)
+./binder publish
+
+# Manual steps
+./binder build - html && ./binder build - pdf
+# Then copy PDF to assets and push to main
+```
+
 ---
 
 ## 📋 Citation & License

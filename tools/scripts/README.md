@@ -140,7 +140,7 @@ Tools for AI-powered content generation and enhancement.
 Advanced cross-reference management and validation tools.
 
 ### Publishing (`quarto_publish/`)
-Scripts for publishing and deployment workflows.
+Scripts for publishing and deployment workflows. **Note**: The main publishing workflow is now handled by `./binder publish`.
 
 ### AI Menu (`ai_menu/`)
 AI-powered menu and interface tools.
@@ -192,6 +192,9 @@ python maintenance/update_changelog.py
 
 # Final cleanup
 ./build/clean.sh
+
+# Publish (using binder)
+./binder publish
 ```
 
 ## 📋 Script Categories Summary

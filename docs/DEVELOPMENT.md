@@ -68,17 +68,28 @@ git commit --no-verify -m "Emergency commit"
 ### Build Commands
 
 ```bash
-# HTML version (fast, for development)
-make build
-cd book && quarto render --to html
+# Using binder (recommended)
+./binder build - html          # Build HTML version
+./binder build - pdf           # Build PDF version
+./binder publish               # Build and publish
 
-# PDF version (slower, for publication)
-make build-pdf
-cd book && quarto render --to titlepage-pdf
+# Using make (legacy)
+make build                     # HTML version
+make build-pdf                 # PDF version
+make build-all                 # All formats
+```
 
-# All formats
-make build-all
-cd book && quarto render
+### Development Workflow
+
+```bash
+# Preview a chapter (fastest)
+./binder preview intro
+
+# Build complete book
+./binder build - html
+
+# Publish to the world
+./binder publish
 ```
 
 ### Development Server
@@ -97,6 +108,54 @@ cd book && quarto preview
 - **PDF**: `build/pdf/` (PDF output directory)
 - **PDF**: `book/index.pdf` (in book directory)
 - **Artifacts**: Automatically cleaned by git hooks
+
+## 🚀 Publishing
+
+### Quick Publish
+
+```bash
+# One command to publish everything
+./binder publish
+```
+
+### Manual Publishing Steps
+
+If you prefer to do it step by step:
+
+```bash
+# 1. Ensure you're on main branch
+git checkout main
+git merge dev
+
+# 2. Build both formats
+./binder build - html
+./binder build - pdf
+
+# 3. Copy PDF to assets
+cp build/pdf/Machine-Learning-Systems.pdf assets/
+
+# 4. Commit and push
+git add assets/Machine-Learning-Systems.pdf
+git commit -m "Add PDF to assets"
+git push origin main
+```
+
+### Publishing Requirements
+
+- ✅ Must be on `main` branch
+- ✅ No uncommitted changes
+- ✅ All builds successful
+- ✅ Git repository properly configured
+
+### After Publishing
+
+The GitHub Actions workflow will:
+- 🔄 Run quality checks
+- 🏗️ Build all formats (Linux + Windows)
+- 🚀 Deploy to GitHub Pages
+- 📦 Create release assets
+
+**Monitor progress**: https://github.com/harvard-edge/cs249r_book/actions
 
 ## 🔍 Project Health Checks
 
