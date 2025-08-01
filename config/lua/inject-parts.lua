@@ -328,16 +328,22 @@ function RawBlock(el)
       -- 1. BOOK DIVISIONS: Major book structure sections
       if normalized_key == "frontmatter" or normalized_key == "main_content" or normalized_key == "backmatter" or normalized_key == "labs" then
         part_cmd = "\\division{" .. formatted_title .. "}"
-        log_info("🔄 Replacing key '" .. key .. "' with division: '" .. formatted_title .. "' (no description)")
+        local toc_cmd = "\\addtocontents{toc}{\\par\\addvspace{12pt}\\noindent\\hfil\\bfseries\\color{crimson}" .. formatted_title .. "\\hfil\\par\\addvspace{6pt}}"
+        local line_cmd = "\\addtocontents{toc}{\\par\\noindent\\hfil{\\color{crimson}\\rule{0.6\\textwidth}{0.5pt}}\\hfil\\par\\addvspace{6pt}}"
+        log_info("🔄 Replacing key '" .. key .. "' with division: '" .. formatted_title .. "' (with TOC entry + crimson line)")
         return {
+          pandoc.RawBlock("latex", toc_cmd),
+          pandoc.RawBlock("latex", line_cmd),
           pandoc.RawBlock("latex", part_cmd)
         }
       
       -- 2. LAB PLATFORMS: Circuit-style neural network design
       elseif normalized_key == "arduino" or normalized_key == "xiao" or normalized_key == "grove" or normalized_key == "raspberry" or normalized_key == "shared" then
         part_cmd = "\\labdivision{" .. formatted_title .. "}"
-        log_info("🔄 Replacing key '" .. key .. "' with lab division: '" .. formatted_title .. "' (circuit style, no description)")
+        local toc_cmd = "\\addcontentsline{toc}{part}{" .. formatted_title .. "}"
+        log_info("🔄 Replacing key '" .. key .. "' with lab division: '" .. formatted_title .. "' (circuit style, with TOC entry)")
         return {
+          pandoc.RawBlock("latex", toc_cmd),
           pandoc.RawBlock("latex", part_cmd)
         }
       
