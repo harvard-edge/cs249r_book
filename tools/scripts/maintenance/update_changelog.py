@@ -637,7 +637,7 @@ def generate_changelog(mode="incremental", verbose=False):
             return "_No updates found._"
         
         current_year = datetime.now().year
-                    year_header = f"## {current_year} Updates"
+        year_header = f"## {current_year} Updates"
         return f"{year_header}\n\n{entry}"
 
 if __name__ == "__main__":
