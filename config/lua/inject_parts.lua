@@ -79,19 +79,23 @@ local function to_roman(num)
   return result
 end
 
--- Part ordering for Roman numerals (numbered parts only)
-local numbered_part_order = {
-  "foundations", "principles", "optimization", "deployment", "governance", "futures"
-}
+-- Dynamic part numbering system
+local current_division = nil
+local part_counter = 0
 
--- Get part number for a given key (numbered parts only)
-local function get_part_number(key)
-  for i, part_key in ipairs(numbered_part_order) do
-    if part_key == key then
-      return i
-    end
+-- Reset counter when new division is encountered
+local function reset_part_counter(division)
+  if current_division ~= division then
+    current_division = division
+    part_counter = 0
+    log_info("🔄 New division encountered: '" .. division .. "' - resetting part counter to 0")
   end
-  return nil
+end
+
+-- Get next part number for current division
+local function get_next_part_number()
+  part_counter = part_counter + 1
+  return part_counter
 end
 
 -- Helper function to format title with part number
@@ -323,10 +327,10 @@ function RawBlock(el)
       local setpartsummary_cmd = "\\setpartsummary{" .. description .. "}"
       local part_cmd
       
-      -- ROUTING LOGIC: Transform based on key name
+      -- ROUTING LOGIC: Transform based on type field from YAML
       
       -- 1. BOOK DIVISIONS: Major book structure sections
-      if normalized_key == "frontmatter" or normalized_key == "main_content" or normalized_key == "backmatter" or normalized_key == "labs" then
+      if part_type == "division" then
         part_cmd = "\\division{" .. formatted_title .. "}"
         local toc_cmd = "\\addtocontents{toc}{\\par\\addvspace{12pt}\\noindent\\hfil\\bfseries\\color{crimson}" .. formatted_title .. "\\color{black}\\hfil\\par\\addvspace{6pt}}"
         local line_cmd = "\\addtocontents{toc}{\\par\\noindent\\hfil{\\color{crimson}\\rule{0.6\\textwidth}{0.5pt}}\\hfil\\par\\addvspace{6pt}}"
@@ -338,7 +342,7 @@ function RawBlock(el)
         }
       
       -- 2. LAB PLATFORMS: Circuit-style neural network design
-      elseif normalized_key == "arduino" or normalized_key == "xiao" or normalized_key == "grove" or normalized_key == "raspberry" or normalized_key == "shared" then
+      elseif part_type == "lab" then
         part_cmd = "\\labdivision{" .. formatted_title .. "}"
         local toc_cmd = "\\addtocontents{toc}{\\par\\addvspace{12pt}\\noindent\\hfil\\bfseries\\color{crimson}" .. formatted_title .. "\\color{black}\\hfil\\par\\addvspace{6pt}}"
         log_info("🔄 Replacing key '" .. key .. "' with lab division: '" .. formatted_title .. "' (circuit style, clean TOC entry)")
@@ -347,18 +351,18 @@ function RawBlock(el)
           pandoc.RawBlock("latex", part_cmd)
         }
       
-      -- 3. NUMBERED PARTS: Main content sections (foundations, principles, etc.)
-      else
-        -- Get part number and convert to Roman numeral
-        local part_number = get_part_number(normalized_key)
-        local roman_numeral = ""
-        if part_number then
-          roman_numeral = to_roman(part_number)
-        end
+      -- 3. NUMBERED PARTS: Main content sections (type: "part")
+      elseif part_type == "part" then
+        -- Reset counter if we're in a new division
+        reset_part_counter(part_entry.division or "mainmatter")
+        
+        -- Get next part number and convert to Roman numeral
+        local part_number = get_next_part_number()
+        local roman_numeral = to_roman(part_number)
         
         part_cmd = "\\numberedpart{" .. formatted_title .. "}"  -- Use custom command instead
         local toc_cmd = "\\addtocontents{toc}{\\par\\addvspace{12pt}\\noindent\\hfil\\bfseries\\color{crimson}Part~" .. roman_numeral .. "~" .. formatted_title .. "\\color{black}\\hfil\\par\\addvspace{6pt}}"
-        log_info("🔄 Replacing key '" .. key .. "' with numbered part: '" .. formatted_title .. "' (Part " .. roman_numeral .. ", non-clickable)")
+        log_info("🔄 Replacing key '" .. key .. "' with numbered part: '" .. formatted_title .. "' (Part " .. roman_numeral .. ", division: " .. (part_entry.division or "mainmatter") .. ")")
         return {
           pandoc.RawBlock("latex", setpartsummary_cmd),
           pandoc.RawBlock("latex", toc_cmd),
