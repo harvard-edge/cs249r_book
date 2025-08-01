@@ -349,10 +349,19 @@ function RawBlock(el)
       
       -- 3. NUMBERED PARTS: Main content sections (foundations, principles, etc.)
       else
-        part_cmd = "\\part{" .. formatted_title .. "}"
-        log_info("🔄 Replacing key '" .. key .. "' with numbered part: '" .. formatted_title .. "' + description")
+        -- Get part number and convert to Roman numeral
+        local part_number = get_part_number(normalized_key)
+        local roman_numeral = ""
+        if part_number then
+          roman_numeral = to_roman(part_number)
+        end
+        
+        part_cmd = "\\numberedpart{" .. formatted_title .. "}"  -- Use custom command instead
+        local toc_cmd = "\\addtocontents{toc}{\\par\\addvspace{12pt}\\noindent\\hfil\\bfseries\\color{crimson}Part~" .. roman_numeral .. "~" .. formatted_title .. "\\color{black}\\hfil\\par\\addvspace{6pt}}"
+        log_info("🔄 Replacing key '" .. key .. "' with numbered part: '" .. formatted_title .. "' (Part " .. roman_numeral .. ", non-clickable)")
         return {
           pandoc.RawBlock("latex", setpartsummary_cmd),
+          pandoc.RawBlock("latex", toc_cmd),
           pandoc.RawBlock("latex", part_cmd)
         }
       end
