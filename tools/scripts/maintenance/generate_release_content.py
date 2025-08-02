@@ -381,8 +381,8 @@ def format_friendly_date(date_str):
         else:
             # Fallback to space-separated format
             dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z")
-        # Format as "Jan 28 at 02:36 PM" (include time)
-        return dt.strftime("%b %d at %I:%M %p")
+        # Format as "August 01 at 04:54 PM" (full month name, include time)
+        return dt.strftime("%B %d at %I:%M %p")
     except:
         return date_str
 
