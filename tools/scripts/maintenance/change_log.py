@@ -282,7 +282,20 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False, ai
     total_files = len(ordered_files)
     print(f"📝 Processing {total_files} changed files...")
     
-    for idx, file_path in enumerate(ordered_files, 1):
+    # Filter for only content files (qmd files in book content directories)
+    content_files = []
+    for file_path in ordered_files:
+        # Only include .qmd files in book content directories
+        if (file_path.endswith('.qmd') and 
+            ('book/contents/' in file_path or 
+             'contents/' in file_path or
+             file_path.startswith('contents/'))):
+            content_files.append(file_path)
+    
+    total_files = len(content_files)
+    print(f"📝 Processing {total_files} content files (filtered from {len(ordered_files)} total files)...")
+    
+    for idx, file_path in enumerate(content_files, 1):
         added, removed = changes_by_file[file_path]
         total = added + removed
         if verbose:
