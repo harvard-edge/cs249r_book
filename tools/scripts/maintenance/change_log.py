@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Generate changelog entries with AI-powered summaries.
+Generate changelog entries with exact behavior from original unified script.
 
 This script generates changelog entries by analyzing Git changes since the last
-publication. It can generate simple change counts or AI-powered summaries.
+publication, matching the exact behavior of the original changelog-releasenotes.py.
 """
 
 import argparse
@@ -14,9 +14,75 @@ from datetime import datetime
 from collections import defaultdict
 import yaml
 
-# Global variables
+# =============================================================================
+# GLOBAL CONFIGURATION
+# =============================================================================
+CHANGELOG_FILE = "CHANGELOG.md"
+
+# Lab structure from quarto config
+LAB_STRUCTURE = None
+
+# Updated to match your actual file structure
+chapter_lookup = [
+    # MAIN chapters
+    ("contents/core/introduction/introduction.qmd", "Introduction", 1),
+    ("contents/core/ml_systems/ml_systems.qmd", "ML Systems", 2),
+    ("contents/core/dl_primer/dl_primer.qmd", "DL Primer", 3),
+    ("contents/core/dnn_architectures/dnn_architectures.qmd", "DNN Architectures", 4),
+    ("contents/core/workflow/workflow.qmd", "AI Workflow", 5),
+    ("contents/core/data_engineering/data_engineering.qmd", "Data Engineering", 6),
+    ("contents/core/frameworks/frameworks.qmd", "AI Frameworks", 7),
+    ("contents/core/training/training.qmd", "AI Training", 8),
+    ("contents/core/efficient_ai/efficient_ai.qmd", "Efficient AI", 9),
+    ("contents/core/optimizations/optimizations.qmd", "Model Optimizations", 10),
+    ("contents/core/hw_acceleration/hw_acceleration.qmd", "AI Acceleration", 11),
+    ("contents/core/benchmarking/benchmarking.qmd", "Benchmarking AI", 12),
+    ("contents/core/ops/ops.qmd", "ML Operations", 13),
+    ("contents/core/ondevice_learning/ondevice_learning.qmd", "On-Device Learning", 14),
+    ("contents/core/privacy_security/privacy_security.qmd", "Security & Privacy", 15),
+    ("contents/core/responsible_ai/responsible_ai.qmd", "Responsible AI", 16),
+    ("contents/core/sustainable_ai/sustainable_ai.qmd", "Sustainable AI", 17),
+    ("contents/core/robust_ai/robust_ai.qmd", "Robust AI", 18),
+    ("contents/core/ai_for_good/ai_for_good.qmd", "AI for Good", 19),
+    ("contents/core/conclusion/conclusion.qmd", "Conclusion", 20),
+    
+    # LAB sections
+    ("contents/labs/overview.qmd", "Labs Overview", 100),
+    ("contents/labs/getting_started.qmd", "Lab Setup", 101),
+    
+    # Arduino Nicla Vision Labs
+    ("contents/labs/arduino/nicla_vision/setup/setup.qmd", "Arduino Setup", 102),
+    ("contents/labs/arduino/nicla_vision/image_classification/image_classification.qmd", "Arduino Image Classification", 103),
+    ("contents/labs/arduino/nicla_vision/object_detection/object_detection.qmd", "Arduino Object Detection", 104),
+    ("contents/labs/arduino/nicla_vision/kws/kws.qmd", "Arduino Keyword Spotting", 105),
+    ("contents/labs/arduino/nicla_vision/motion_classification/motion_classification.qmd", "Arduino Motion Classification", 106),
+    
+    # Seeed XIAO ESP32S3 Labs
+    ("contents/labs/seeed/xiao_esp32s3/setup/setup.qmd", "XIAO Setup", 107),
+    ("contents/labs/seeed/xiao_esp32s3/image_classification/image_classification.qmd", "XIAO Image Classification", 108),
+    ("contents/labs/seeed/xiao_esp32s3/object_detection/object_detection.qmd", "XIAO Object Detection", 109),
+    ("contents/labs/seeed/xiao_esp32s3/kws/kws.qmd", "XIAO Keyword Spotting", 110),
+    ("contents/labs/seeed/xiao_esp32s3/motion_classification/motion_classification.qmd", "XIAO Motion Classification", 111),
+    
+    # Raspberry Pi Labs
+    ("contents/labs/raspi/setup/setup.qmd", "Raspberry Pi Setup", 112),
+    ("contents/labs/raspi/image_classification/image_classification.qmd", "Pi Image Classification", 113),
+    ("contents/labs/raspi/object_detection/object_detection.qmd", "Pi Object Detection", 114),
+    ("contents/labs/raspi/llm/llm.qmd", "Pi Large Language Models", 115),
+    ("contents/labs/raspi/vlm/vlm.qmd", "Pi Vision Language Models", 116),
+    
+    # Frontmatter
+    ("contents/frontmatter/foreword.qmd", "Foreword", 200),
+    ("contents/frontmatter/about/about.qmd", "About", 201),
+    ("contents/frontmatter/changelog/changelog.qmd", "Changelog", 202),
+    ("contents/frontmatter/acknowledgements/acknowledgements.qmd", "Acknowledgements", 203),
+    ("contents/frontmatter/socratiq/socratiq.qmd", "SocratiQ", 204),
+    
+    # Appendix
+    ("contents/appendix/phd_survival_guide.qmd", "PhD Survival Guide", 300),
+]
+
 chapter_order = []
-LAB_STRUCTURE = None # Added for lab organization
 
 def load_lab_structure(quarto_file="book/config/_quarto-html.yml"):
     """Load lab structure from quarto HTML config file."""
@@ -98,6 +164,7 @@ def get_lab_group_for_file(file_path):
             # Convert group file path to normalized format
             group_file_normalized = group_file.replace('book/', '')
             
+            # Check if the file matches this group
             if normalized_path == group_file_normalized:
                 return group_name
     
@@ -156,47 +223,6 @@ def organize_labs_by_structure(lab_entries):
     
     return organized_labs
 
-def extract_chapter_title_from_file(file_path):
-    """Extract chapter title from the actual file content by reading the first header."""
-    try:
-        if not os.path.exists(file_path):
-            return None
-        
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        # Look for the first header (starts with #)
-        lines = content.split('\n')
-        for line in lines:
-            line = line.strip()
-            if line.startswith('# '):
-                # Extract title from # Title format
-                title = line[2:].strip()
-                return title
-            elif line.startswith('## '):
-                # Extract title from ## Title format
-                title = line[3:].strip()
-                return title
-        
-        # If no header found, fall back to filename
-        basename = os.path.basename(file_path)
-        if basename.endswith('.qmd'):
-            title = basename[:-4]  # Remove .qmd extension
-        else:
-            title = basename
-        
-        return title.replace('_', ' ').title()
-        
-    except Exception as e:
-        print(f"⚠️ Error reading file {file_path}: {e}")
-        # Fall back to filename
-        basename = os.path.basename(file_path)
-        if basename.endswith('.qmd'):
-            title = basename[:-4]
-        else:
-            title = basename
-        return title.replace('_', ' ').title()
-
 def load_chapter_order(quarto_file=None):
     """Load chapter order from quarto config file."""
     global chapter_order
@@ -213,180 +239,100 @@ def load_chapter_order(quarto_file=None):
             config = yaml.safe_load(f)
         
         def find_chapters(obj):
-            chapters = []
             if isinstance(obj, dict):
                 for key, value in obj.items():
-                    if key == 'contents':
-                        chapters.extend(extract_qmd_paths(value))
-                    else:
-                        chapters.extend(find_chapters(value))
+                    if key == "chapters":
+                        return value
+                    result = find_chapters(value)
+                    if result:
+                        return result
             elif isinstance(obj, list):
                 for item in obj:
-                    chapters.extend(find_chapters(item))
-            return chapters
-        
+                    result = find_chapters(item)
+                    if result:
+                        return result
+            return None
+
         def extract_qmd_paths(items):
             paths = []
             for item in items:
-                if isinstance(item, dict):
-                    if 'href' in item:
-                        href = item['href']
-                        if href.endswith('.qmd'):
-                            paths.append(href)
-                    if 'contents' in item:
-                        paths.extend(extract_qmd_paths(item['contents']))
+                if isinstance(item, str) and item.endswith(".qmd"):
+                    paths.append(item)
+                elif isinstance(item, dict):
+                    if "chapters" in item:
+                        paths.extend(extract_qmd_paths(item["chapters"]))
+                    elif "part" in item and isinstance(item["part"], str):
+                        if item["part"].endswith(".qmd"):
+                            paths.append(item["part"])
+                        if "chapters" in item:
+                            paths.extend(extract_qmd_paths(item["chapters"]))
             return paths
+
+        chapters_section = find_chapters(config)
+        chapter_order = extract_qmd_paths(chapters_section) if chapters_section else []
         
-        chapter_order = find_chapters(config)
         print(f"📚 Loaded {len(chapter_order)} chapters from {quarto_file}")
         
     except Exception as e:
         print(f"❌ Error loading chapter order: {e}")
         chapter_order = []
 
-def call_ollama(prompt, model="gemma2:9b", url="http://localhost:11434"):
-    """Call Ollama API to generate AI summaries."""
-    try:
-        import requests
-        import json
-        
-        payload = {
-            "model": model,
-            "prompt": prompt,
-            "stream": False
-        }
-        
-        response = requests.post(f"{url}/api/generate", json=payload, timeout=30)
-        if response.status_code == 200:
-            result = response.json()
-            return result.get('response', '').strip()
-        else:
-            print(f"⚠️ Ollama API error: {response.status_code}")
-            return None
-    except Exception as e:
-        print(f"⚠️ Error calling Ollama: {e}")
-        return None
-
-def generate_ai_summary(chapter_title, commit_messages, file_path, verbose=False):
-    """Generate AI summary for a file based on commit messages."""
-    if not commit_messages.strip():
-        return f"Updated content with minor changes"
-    
-    # Create a prompt for AI summary
-    prompt = f"""Based on these Git commit messages for {chapter_title} ({file_path}), generate a brief, informative summary of what was updated. Focus on the most important changes and improvements.
-
-Commit messages:
-{commit_messages}
-
-Generate a concise summary (1-2 sentences) that describes the key updates:"""
-    
-    if verbose:
-        print(f"🤖 Generating AI summary for {chapter_title}...")
-    
-    ai_summary = call_ollama(prompt)
-    
-    if ai_summary:
-        return ai_summary
-    else:
-        # Fallback to simple summary
-        commit_count = len([msg for msg in commit_messages.split('\n') if msg.strip()])
-        return f"Updated content with {commit_count} changes"
-
 def run_git_command(cmd, verbose=False, retries=3):
     """Run a git command and return the output."""
     import subprocess
     
     for attempt in range(retries):
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            if verbose:
-                print(f"  🔧 {' '.join(cmd)}")
-            return result.stdout
-        except subprocess.CalledProcessError as e:
-            if verbose:
-                print(f"  ❌ {' '.join(cmd)} failed: {e}")
-            if attempt == retries - 1:
-                print(f"❌ Git command failed after {retries} attempts: {' '.join(cmd)}")
-                return ""
-            continue
-    return ""
+        if verbose:
+            print(f"📦 Running: {' '.join(cmd)} (attempt {attempt + 1})")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            return result.stdout.strip()
+        
+        if attempt < retries - 1:
+            print(f"⚠️ Git command failed, retrying in 2s: {result.stderr}")
+            import time
+            time.sleep(2)
+        else:
+            raise RuntimeError(f"Git command failed after {retries} attempts: {' '.join(cmd)}\n{result.stderr}")
 
 def extract_chapter_title(file_path):
-    """Extract chapter title from file content or path."""
-    # First try to extract from actual file content
-    title_from_file = extract_chapter_title_from_file(file_path)
-    if title_from_file:
-        return title_from_file
-    
-    # Fallback to path-based extraction
+    """Extract chapter title from file path using lookup table."""
     # Try exact path match first
-    normalized_file_path = normalized_path(file_path)
-    for chapter_path in chapter_order:
-        if normalized_file_path.endswith(normalized_path(chapter_path)):
-            # Extract title from the chapter path
-            basename = os.path.basename(chapter_path)
-            if basename.endswith('.qmd'):
-                title = basename[:-4]  # Remove .qmd extension
+    for fname, title, number in chapter_lookup:
+        if fname == file_path:
+            if number <= 20:
+                return f"Chapter {number}: {title}"
+            elif number <= 199:
+                return f"Lab: {title}"
+            elif number <= 299:
+                return title  # Frontmatter - just use title
             else:
-                title = basename
-            
-            # Convert to title case and handle special cases
-            title = title.replace('_', ' ').title()
-            
-            # Add chapter number if available
-            for i, ch in enumerate(chapter_order, 1):
-                if normalized_file_path.endswith(normalized_path(ch)):
-                    if "introduction" in title.lower():
-                        return f"Chapter 1: Introduction"
-                    elif "ml_systems" in title.lower():
-                        return f"Chapter 2: ML Systems"
-                    elif "dl_primer" in title.lower():
-                        return f"Chapter 3: DL Primer"
-                    elif "dnn_architectures" in title.lower():
-                        return f"Chapter 4: DNN Architectures"
-                    elif "workflow" in title.lower():
-                        return f"Chapter 5: AI Workflow"
-                    elif "data_engineering" in title.lower():
-                        return f"Chapter 6: Data Engineering"
-                    elif "frameworks" in title.lower():
-                        return f"Chapter 7: AI Frameworks"
-                    elif "training" in title.lower():
-                        return f"Chapter 8: AI Training"
-                    elif "efficient_ai" in title.lower():
-                        return f"Chapter 9: Efficient AI"
-                    elif "optimizations" in title.lower():
-                        return f"Chapter 10: Model Optimizations"
-                    elif "hw_acceleration" in title.lower():
-                        return f"Chapter 11: AI Acceleration"
-                    elif "benchmarking" in title.lower():
-                        return f"Chapter 12: Benchmarking AI"
-                    elif "ops" in title.lower():
-                        return f"Chapter 13: ML Operations"
-                    elif "ondevice_learning" in title.lower():
-                        return f"Chapter 14: On-Device Learning"
-                    elif "privacy_security" in title.lower():
-                        return f"Chapter 15: Security & Privacy"
-                    elif "responsible_ai" in title.lower():
-                        return f"Chapter 16: Responsible AI"
-                    elif "sustainable_ai" in title.lower():
-                        return f"Chapter 17: Sustainable AI"
-                    elif "robust_ai" in title.lower():
-                        return f"Chapter 18: Robust AI"
-                    elif "ai_for_good" in title.lower():
-                        return f"Chapter 19: AI for Good"
-                    elif "conclusion" in title.lower():
-                        return f"Chapter 20: Conclusion"
-                    else:
-                        return f"Chapter {i}: {title}"
+                return title  # Appendix - just use title
     
-    # Final fallback: extract from file path
-    basename = os.path.basename(file_path)
-    if basename.endswith('.qmd'):
-        title = basename[:-4]
+    # Fallback: try basename matching for backwards compatibility
+    base = os.path.basename(file_path)
+    for fname, title, number in chapter_lookup:
+        if os.path.basename(fname) == base:
+            if number <= 20:
+                return f"Chapter {number}: {title}"
+            elif number <= 199:
+                return f"Lab: {title}"
+            elif number <= 299:
+                return title
+            else:
+                return title
+    
+    # Final fallback: generate from path
+    if "contents/core/" in file_path:
+        return f"Chapter: {base.replace('_', ' ').replace('.qmd', '').title()}"
+    elif "contents/labs/" in file_path:
+        return f"Lab: {base.replace('_', ' ').replace('.qmd', '').title()}"
+    elif "contents/frontmatter/" in file_path:
+        return base.replace('_', ' ').replace('.qmd', '').title()
+    elif "contents/appendix/" in file_path:
+        return base.replace('_', ' ').replace('.qmd', '').title()
     else:
-        title = basename
-    
-    return title.replace('_', ' ').title()
+        return base.replace('_', ' ').replace('.qmd', '').title()
 
 def sort_by_impact_level(updates):
     """Sort updates by impact level (number of changes)."""
@@ -399,29 +345,38 @@ def sort_by_impact_level(updates):
 
 def get_changes_in_dev_since(date_start, date_end=None, verbose=False):
     """Get all changes in dev branch since a specific date."""
-    cmd = ["git", "log", "--pretty=format:", "--numstat", f"--since={date_start}"]
+    cmd = ["git", "log", "--numstat", "--since", date_start]
     if date_end:
-        cmd.append(f"--until={date_end}")
-    cmd.extend(["origin/dev", "--"])
+        cmd += ["--until", date_end]
+    cmd += ["origin/dev", "--", "contents/**/*.qmd"]
     return run_git_command(cmd, verbose=verbose)
 
 def get_commit_messages_for_file(file_path, since, until=None, verbose=False):
     """Get commit messages for a specific file since a date."""
-    cmd = ["git", "log", "--pretty=format:%s", f"--since={since}"]
+    cmd = ["git", "log", "--pretty=format:%s", "--since", since]
     if until:
-        cmd.append(f"--until={until}")
-    cmd.extend(["origin/dev", "--", file_path])
-    return run_git_command(cmd, verbose=verbose)
+        cmd += ["--until", until]
+    cmd += ["origin/dev", "--", file_path]
+    messages = run_git_command(cmd, verbose=verbose)
+    
+    # Return all commit messages - let AI determine importance
+    meaningful_messages = []
+    for message in messages.splitlines():
+        if message.strip():
+            meaningful_messages.append(message.strip())
+    
+    return "\n".join(meaningful_messages)
 
 def format_friendly_date(date_str):
     """Format date string to friendly format."""
     try:
-        # Try ISO format first (2023-09-16T22:16:31-04:00)
+        # Try ISO format first (with T separator)
         if 'T' in date_str:
             dt = datetime.fromisoformat(date_str)
         else:
             # Fallback to space-separated format
             dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z")
+        # Format as "January 28 at 02:36 PM" (full month name)
         return dt.strftime("%B %d at %I:%M %p")
     except:
         return date_str
@@ -430,7 +385,7 @@ def normalized_path(path):
     """Normalize path for comparison."""
     return os.path.normpath(path).lower()
 
-def generate_entry(start_date, end_date=None, verbose=False, is_latest=False, ai_mode=False, ollama_url="http://localhost:11434", ollama_model="gemma2:9b"):
+def generate_entry(start_date, end_date=None, verbose=False, is_latest=False):
     """Generate a changelog entry for the specified time period."""
     if verbose:
         print(f"📁 Processing changes from {start_date} to {end_date or 'now'}")
@@ -468,20 +423,7 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False, ai
     total_files = len(ordered_files)
     print(f"📝 Processing {total_files} changed files...")
     
-    # Filter for only content files (qmd files in book content directories)
-    content_files = []
-    for file_path in ordered_files:
-        # Only include .qmd files in book content directories
-        if (file_path.endswith('.qmd') and 
-            ('book/contents/' in file_path or 
-             'contents/' in file_path or
-             file_path.startswith('contents/'))):
-            content_files.append(file_path)
-    
-    total_files = len(content_files)
-    print(f"📝 Processing {total_files} content files (filtered from {len(ordered_files)} total files)...")
-    
-    for idx, file_path in enumerate(content_files, 1):
+    for idx, file_path in enumerate(ordered_files, 1):
         added, removed = changes_by_file[file_path]
         total = added + removed
         if verbose:
@@ -502,19 +444,13 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False, ai
             continue
             
         print(f"    📝 Generating summary...")
-        
-        # Generate summary based on AI mode
+        # Create simple summary based on file path and commit count
         chapter_title = extract_chapter_title(file_path)
-        if ai_mode:
-            summary_text = generate_ai_summary(chapter_title, commit_msgs, file_path, verbose=verbose)
-            summary = f"- **{chapter_title}**: {summary_text}"
-        else:
-            # Create simple summary based on file path and commit count
-            commit_count = len([msg for msg in commit_msgs.split('\n') if msg.strip()])
-            summary_text = f"Updated content with {commit_count} changes"
-            summary = f"- **{chapter_title}**: {summary_text}"
+        commit_count = len([msg for msg in commit_msgs.split('\n') if msg.strip()])
+        summary = f"- **{chapter_title}**: Updated content with {commit_count} changes"
         
         # Show the generated summary
+        summary_text = summary.replace(f"- **{chapter_title}**: ", "")
         print(f"      📝 {summary_text}")
         
         # Categorize by content type
@@ -534,6 +470,7 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False, ai
     print(f"  📚 Appendix: {len(appendix)} entries")
 
     # Determine if sections should be open or closed
+    # All entries should be closed by default - let users choose what to explore
     details_state = ""  # Always closed for better UX
 
     # Add sections in order: Frontmatter, Chapters, Labs, Appendix
@@ -556,7 +493,7 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False, ai
     print("✅ Entry generation complete")
     return entry
 
-def generate_changelog(mode="incremental", verbose=False, ai_mode=False, ollama_url="http://localhost:11434", ollama_model="gemma2:9b"):
+def generate_changelog(mode="incremental", verbose=False):
     """Generate changelog entries."""
     print("🔄 Starting Git data fetch...")
     print("  📦 Fetching gh-pages branch...")
@@ -634,15 +571,33 @@ def generate_changelog(mode="incremental", verbose=False, ai_mode=False, ollama_
         # Group entries by year
         entries_by_year = defaultdict(list)
         
-        for date_key in unique_dates:
-            # Get the latest commit for this date
-            latest_commit_for_date = commits_by_date[date_key][0]
-            entry = generate_entry(latest_commit_for_date[1], verbose=verbose, ai_mode=ai_mode, ollama_url=ollama_url, ollama_model=ollama_model)
+        for i in range(len(unique_dates) - 1):
+            current_date_key = unique_dates[i]
+            previous_date_key = unique_dates[i + 1]
+            
+            # Get the latest commit from current date for the "published on" date
+            current_commits = commits_by_date[current_date_key]
+            latest_current = max(current_commits, key=lambda x: x[1])  # latest timestamp
+            
+            # Get the earliest commit from previous date as the "since" date
+            previous_commits = commits_by_date[previous_date_key]
+            earliest_previous = min(previous_commits, key=lambda x: x[1])  # earliest timestamp
+            
+            current_date = latest_current[1]
+            previous_date = earliest_previous[1]
+            
+            # Extract year from current_date (the publication date)
+            pub_year = extract_year_from_date(current_date)
+            
+            print(f"📅 Processing period {i+1}/{len(unique_dates)-1}: {format_friendly_date(previous_date)} → {format_friendly_date(current_date)} [{pub_year}]")
+            entry = generate_entry(previous_date, current_date, verbose=verbose, is_latest=(i==0))
             if entry:
-                year = extract_year_from_date(latest_commit_for_date[1])
-                entries_by_year[year].append(entry)
+                entries_by_year[pub_year].append(entry)
         
-        # Build output with year headers
+        if not entries_by_year:
+            return "_No updates found._"
+        
+        # Build output with year headers, newest years first
         output_sections = []
         for year in sorted(entries_by_year.keys(), reverse=True):
             year_header = f"## {year} Updates"
@@ -655,7 +610,7 @@ def generate_changelog(mode="incremental", verbose=False, ai_mode=False, ollama_
         if verbose:
             print("⚡ Running update mode...")
         print(f"📅 Processing changes since: {format_friendly_date(latest_date) if latest_date else 'beginning'}")
-        entry = generate_entry(latest_date, verbose=verbose, is_latest=True, ai_mode=ai_mode, ollama_url=ollama_url, ollama_model=ollama_model)
+        entry = generate_entry(latest_date, verbose=verbose, is_latest=True)
         if not entry:
             return "_No updates found._"
         
@@ -668,7 +623,7 @@ def generate_changelog(mode="incremental", verbose=False, ai_mode=False, ollama_
         return f"{year_header}\n\n{entry}"
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Generate changelog entries with AI-powered summaries.")
+    parser = argparse.ArgumentParser(description="Generate changelog entries with exact behavior from original unified script.")
     
     # Changelog mode arguments
     parser.add_argument("--full", action="store_true", help="Regenerate the entire changelog from scratch.")
@@ -678,79 +633,91 @@ if __name__ == "__main__":
     parser.add_argument("-t", "--test", action="store_true", help="Run without writing to file.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output.")
     parser.add_argument("-q", "--quarto-config", type=str, help="Path to quarto config file (default: book/config/_quarto-pdf.yml)")
-    
-    # AI options
-    parser.add_argument("--ai-mode", action="store_true", help="Enable AI-generated summaries instead of simple change counts.")
-    parser.add_argument("--ollama-url", default="http://localhost:11434", help="Ollama API URL for AI summaries.")
-    parser.add_argument("--ollama-model", default="gemma2:9b", help="Ollama model to use for AI summaries.")
 
     args = parser.parse_args()
     
-    # Load configuration
+    # Require either --full or --incremental to be specified
+    if args.full and args.incremental:
+        print("❌ Error: Cannot specify both --full and --incremental modes")
+        exit(1)
+    elif args.full:
+        mode = "full"
+    elif args.incremental:
+        mode = "update"  # Keep internal name as "update" for compatibility
+    else:
+        print("❌ Error: Must specify either --full or --incremental")
+        print("💡 Use --help for usage information")
+        exit(1)
+
     try:
         load_chapter_order(args.quarto_config)
-        load_lab_structure("book/config/_quarto-html.yml") # Load lab structure from HTML config
+        # Load lab structure from HTML config (not PDF config)
+        load_lab_structure("book/config/_quarto-html.yml")
         
         # Print configuration header
         print("=" * 60)
         print("📝 CHANGELOG GENERATION CONFIG")
         print("=" * 60)
-        print(f"🎯 Mode: {'FULL' if args.full else 'UPDATE'}")
+        print(f"🎯 Mode: {mode.upper()}")
         print(f"🔧 Test Mode: {'ON' if args.test else 'OFF'}")
         print(f"📢 Verbose: {'ON' if args.verbose else 'OFF'}")
-        print(f"🤖 AI Mode: {'ON' if args.ai_mode else 'OFF'}")
-        if args.ai_mode:
-            print(f"🤖 AI Model: {args.ollama_model}")
-            print(f"🤖 AI URL: {args.ollama_url}")
         print(f"📋 Features: Impact bars, importance sorting, specific summaries")
         print("=" * 60)
         print()
         
-        print("🚀 Starting changelog generation...")
-        
-        # Determine mode
-        mode = "full" if args.full else "incremental"
-        
-        # Generate changelog
-        new_entry = generate_changelog(mode=mode, verbose=args.verbose, ai_mode=args.ai_mode, ollama_url=args.ollama_url, ollama_model=args.ollama_model)
-        
+        print(f"🚀 Starting changelog generation in {mode} mode...")
+
+        new_entry = generate_changelog(mode=mode, verbose=args.verbose)
+
         if args.test:
-            # Display the generated content for test mode
-            print("🧪 TEST MODE - Generated changelog entry:")
-            print("=" * 60)
+            print("🧪 TEST OUTPUT ONLY:\n")
             print(new_entry)
-            print("=" * 60)
-            print(f"📊 Content length: {len(new_entry)} characters")
         else:
-            # Write to CHANGELOG.md
-            if new_entry and new_entry != "_No updates found._":
-                # Read existing changelog
-                changelog_file = "CHANGELOG.md"
-                existing_content = ""
-                if os.path.exists(changelog_file):
-                    with open(changelog_file, 'r', encoding='utf-8') as f:
-                        existing_content = f.read()
-                
-                # Insert new entry at the top
-                if existing_content.strip():
-                    updated_content = new_entry + "\n\n---\n\n" + existing_content
-                else:
-                    updated_content = new_entry
-                
-                # Write back to file
-                with open(changelog_file, 'w', encoding='utf-8') as f:
-                    f.write(updated_content)
-                
-                print(f"✅ Changelog updated: {changelog_file}")
-                print(f"📊 File size: {len(updated_content)} characters")
+            existing = ""
+            if os.path.exists(CHANGELOG_FILE):
+                with open(CHANGELOG_FILE, "r", encoding="utf-8") as f:
+                    existing = f.read()
+
+            current_year = datetime.now().year
+            year_header = f"## {current_year} Updates"
+
+            # For update mode, insert new entry after the year header
+            if mode == "full":
+                # For full mode, replace entire content (already includes year headers)
+                updated_content = new_entry.strip()
             else:
-                print("ℹ️ No changes to add to changelog")
-        
+                # For incremental, insert new entry after year header
+                existing_lines = existing.splitlines()
+                new_lines = []
+                inserted = False
+                
+                for line in existing_lines:
+                    new_lines.append(line)
+                    # Insert new entry right after the year header
+                    if not inserted and line.strip() == year_header:
+                        # Add the new entry (without year header since it's already in the file)
+                        new_entry_lines = new_entry.strip().splitlines()
+                        # Skip the first line (year header) since we're inserting after existing year header
+                        if new_entry_lines and new_entry_lines[0].strip() == year_header:
+                            new_entry_lines = new_entry_lines[1:]
+                        new_lines.extend(new_entry_lines)
+                        new_lines.append("")  # Add blank line
+                        inserted = True
+                
+                if not inserted:
+                    # If no year header found, prepend to beginning
+                    new_lines = new_entry.strip().splitlines() + [""] + existing_lines
+                
+                updated_content = "\n".join(new_lines)
+
+            with open(CHANGELOG_FILE, "w", encoding="utf-8") as f:
+                f.write(updated_content.strip() + "\n")
+
+            print(f"\n✅ Changelog written to {CHANGELOG_FILE}")
+            
     except KeyboardInterrupt:
-        print("\n⚠️ Process interrupted by user")
-        sys.exit(1)
+        print(f"\n⚠️ Process interrupted by user")
     except Exception as e:
         print(f"❌ Error: {e}")
         import traceback
-        traceback.print_exc()
-        sys.exit(1) 
+        traceback.print_exc() 
