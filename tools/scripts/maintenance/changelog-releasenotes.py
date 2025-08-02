@@ -533,7 +533,55 @@ def format_friendly_date(date_str):
 def normalized_path(path):
     return os.path.normpath(path).lower()
 
-def generate_entry(start_date, end_date=None, verbose=False, is_latest=False):
+def call_ollama(prompt, model="gemma2:9b", url="http://localhost:11434"):
+    """Call Ollama API to generate AI summaries."""
+    try:
+        import requests
+        import json
+        
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "stream": False
+        }
+        
+        response = requests.post(f"{url}/api/generate", json=payload, timeout=30)
+        if response.status_code == 200:
+            result = response.json()
+            return result.get('response', '').strip()
+        else:
+            print(f"⚠️ Ollama API error: {response.status_code}")
+            return None
+    except Exception as e:
+        print(f"⚠️ Error calling Ollama: {e}")
+        return None
+
+def generate_ai_summary(chapter_title, commit_messages, file_path, verbose=False):
+    """Generate AI summary for a file based on commit messages."""
+    if not commit_messages.strip():
+        return f"Updated content with minor changes"
+    
+    # Create a prompt for AI summary
+    prompt = f"""Based on these Git commit messages for {chapter_title} ({file_path}), generate a brief, informative summary of what was updated. Focus on the most important changes and improvements.
+
+Commit messages:
+{commit_messages}
+
+Generate a concise summary (1-2 sentences) that describes the key updates:"""
+    
+    if verbose:
+        print(f"🤖 Generating AI summary for {chapter_title}...")
+    
+    ai_summary = call_ollama(prompt)
+    
+    if ai_summary:
+        return ai_summary
+    else:
+        # Fallback to simple summary
+        commit_count = len([msg for msg in commit_messages.split('\n') if msg.strip()])
+        return f"Updated content with {commit_count} changes"
+
+def generate_entry(start_date, end_date=None, verbose=False, is_latest=False, ai_mode=False, ollama_url="http://localhost:11434", ollama_model="gemma2:9b"):
     if verbose:
         print(f"📁 Processing changes from {start_date} to {end_date or 'now'}")
     print(f"🔍 Analyzing Git changes...")
@@ -591,13 +639,19 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False):
             continue
             
         print(f"    📝 Generating summary...")
-        # Create simple summary based on file path and commit count
+        
+        # Generate summary based on AI mode
         chapter_title = extract_chapter_title(file_path)
-        commit_count = len([msg for msg in commit_msgs.split('\n') if msg.strip()])
-        summary = f"- **{chapter_title}**: Updated content with {commit_count} changes"
+        if ai_mode:
+            summary_text = generate_ai_summary(chapter_title, commit_msgs, file_path, verbose=verbose)
+            summary = f"- **{chapter_title}**: {summary_text}"
+        else:
+            # Create simple summary based on file path and commit count
+            commit_count = len([msg for msg in commit_msgs.split('\n') if msg.strip()])
+            summary_text = f"Updated content with {commit_count} changes"
+            summary = f"- **{chapter_title}**: {summary_text}"
         
         # Show the generated summary
-        summary_text = summary.replace(f"- **{chapter_title}**: ", "")
         print(f"      📝 {summary_text}")
         
         # Categorize by content type
@@ -742,7 +796,7 @@ def fold_existing_entries(content):
     
     return re.sub(pattern, replacement, content)
 
-def generate_changelog(mode="incremental", verbose=False):
+def generate_changelog(mode="incremental", verbose=False, ai_mode=False, ollama_url="http://localhost:11434", ollama_model="gemma2:9b"):
     print("🔄 Starting Git data fetch...")
     print("  📦 Fetching gh-pages branch...")
     run_git_command(["git", "fetch", "origin", "gh-pages:refs/remotes/origin/gh-pages"], verbose=verbose)
@@ -858,7 +912,7 @@ def generate_changelog(mode="incremental", verbose=False):
         if verbose:
             print("⚡ Running update mode...")
         print(f"📅 Processing changes since: {format_friendly_date(latest_date) if latest_date else 'beginning'}")
-        entry = generate_entry(latest_date, verbose=verbose, is_latest=True)
+        entry = generate_entry(latest_date, verbose=verbose, is_latest=True, ai_mode=ai_mode, ollama_url=ollama_url, ollama_model=ollama_model)
         if not entry:
             return "_No updates found._"
         
@@ -886,6 +940,9 @@ if __name__ == "__main__":
     parser.add_argument("--demo", action="store_true", help="Generate a demo changelog entry with sample data.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output.")
     parser.add_argument("-q", "--quarto-config", type=str, help="Path to quarto config file (default: book/config/_quarto-pdf.yml)")
+    parser.add_argument("--ai-mode", action="store_true", help="Enable AI-generated summaries instead of simple change counts.")
+    parser.add_argument("--ollama-url", default="http://localhost:11434", help="Ollama API URL for AI summaries.")
+    parser.add_argument("--ollama-model", default="gemma2:9b", help="Ollama model to use for AI summaries.")
 
     
     # Release notes arguments
@@ -984,7 +1041,7 @@ if __name__ == "__main__":
 
 
 
-        new_entry = generate_changelog(mode=mode, verbose=args.verbose)
+        new_entry = generate_changelog(mode=mode, verbose=args.verbose, ai_mode=args.ai_mode, ollama_url=args.ollama_url, ollama_model=args.ollama_model)
 
         if args.test:
             print("🧪 TEST OUTPUT ONLY:\n")
