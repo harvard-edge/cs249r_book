@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 Integrated Image Analyzer for MLSysBook
-Combines image validation, size analysis, and compression recommendations.
-Integrates with existing maintenance scripts for comprehensive image management.
+Simple, size-based image analysis and compression recommendations.
 """
 
 import os
@@ -26,63 +25,26 @@ from rich import print as rprint
 
 console = Console()
 
-# Textbook image guidelines (from analyze_image_sizes.py)
-TEXTBOOK_GUIDELINES = {
+# Simple size-based guidelines
+SIZE_GUIDELINES = {
     'large': {
-        'threshold': 2.0,  # MB
-        'recommendation': 'Compress immediately - too large for web/PDF',
-        'target_size': '800x600',
+        'threshold': 1.0,  # MB
+        'recommendation': 'Compress - too large for textbook',
         'priority': 'high'
     },
     'medium': {
-        'threshold': 1.0,  # MB
+        'threshold': 0.5,  # MB
         'recommendation': 'Consider compression for better performance',
-        'target_size': '1000x750',
         'priority': 'medium'
     },
     'small': {
-        'threshold': 0.5,  # MB
-        'recommendation': 'Size is acceptable for textbook use',
-        'target_size': '1200x900',
+        'threshold': 0.0,  # MB
+        'recommendation': 'Size is acceptable',
         'priority': 'low'
     }
 }
 
-# Image type categorization (from analyze_image_sizes.py)
-IMAGE_TYPES = {
-    'diagrams': {
-        'keywords': ['diagram', 'chart', 'graph', 'flow', 'architecture', 'boat'],
-        'target_size': '800x600',
-        'max_size': 0.5,  # MB
-        'description': 'Technical diagrams and charts'
-    },
-    'screenshots': {
-        'keywords': ['screenshot', 'screen', 'ui', 'interface', 'terminal', 'cli'],
-        'target_size': '1000x750',
-        'max_size': 0.8,  # MB
-        'description': 'UI screenshots and terminal outputs'
-    },
-    'lab_setup': {
-        'keywords': ['setup', 'kit', 'board', 'hardware', 'assembled', 'mounted'],
-        'target_size': '1200x900',
-        'max_size': 1.2,  # MB
-        'description': 'Lab setup and hardware photos'
-    },
-    'results': {
-        'keywords': ['result', 'output', 'inference', 'prediction', 'detection'],
-        'target_size': '1000x750',
-        'max_size': 0.8,  # MB
-        'description': 'Model outputs and results'
-    },
-    'general': {
-        'keywords': [],
-        'target_size': '1000x750',
-        'max_size': 1.0,  # MB
-        'description': 'General textbook images'
-    }
-}
-
-# Valid extensions (from check_images.py)
+# Valid extensions
 VALID_EXTENSIONS = {
     '.png': 'PNG',
     '.jpg': 'JPEG',
@@ -115,30 +77,17 @@ class IntegratedImageAnalyzer:
         """Get file size in MB."""
         return os.path.getsize(file_path) / (1024 * 1024)
     
-    def categorize_image(self, filename: str) -> Tuple[str, Dict]:
-        """Categorize image based on filename keywords."""
-        filename_lower = filename.lower()
-        
-        for category, config in IMAGE_TYPES.items():
-            if category == 'general':
-                continue
-            for keyword in config['keywords']:
-                if keyword in filename_lower:
-                    return category, config
-        
-        return 'general', IMAGE_TYPES['general']
-    
     def get_size_category(self, size_mb: float) -> str:
         """Get size category based on MB."""
-        if size_mb > TEXTBOOK_GUIDELINES['large']['threshold']:
+        if size_mb > SIZE_GUIDELINES['large']['threshold']:
             return 'large'
-        elif size_mb > TEXTBOOK_GUIDELINES['medium']['threshold']:
+        elif size_mb > SIZE_GUIDELINES['medium']['threshold']:
             return 'medium'
         else:
             return 'small'
     
     def validate_image_format(self, file_path: str) -> Tuple[bool, str]:
-        """Validate image format (from check_images.py)"""
+        """Validate image format"""
         try:
             from PIL import Image
             with Image.open(file_path) as img:
@@ -166,7 +115,7 @@ class IntegratedImageAnalyzer:
     def analyze_images(self, directory: str = 'book/contents', 
                       validate_formats: bool = True,
                       show_recommendations: bool = True) -> Dict:
-        """Comprehensive image analysis with validation and recommendations."""
+        """Simple image analysis based on size only."""
         console.print('🔍 Analyzing textbook images...\n')
         
         image_files = self.find_all_images(directory)
@@ -182,7 +131,6 @@ class IntegratedImageAnalyzer:
             'large': [],
             'medium': [],
             'small': [],
-            'invalid': [],
             'total_size': 0,
             'recommendations': [],
             'validation_errors': []
@@ -203,7 +151,6 @@ class IntegratedImageAnalyzer:
                 analysis_results['total_size'] += size_mb
                 
                 filename = os.path.basename(image_path)
-                category, config = self.categorize_image(filename)
                 size_category = self.get_size_category(size_mb)
                 
                 # Validate format if requested
@@ -221,13 +168,10 @@ class IntegratedImageAnalyzer:
                     'path': image_path,
                     'filename': filename,
                     'size_mb': size_mb,
-                    'category': category,
                     'size_category': size_category,
-                    'target_size': config['target_size'],
-                    'max_size': config['max_size'],
                     'is_valid': is_valid,
                     'validation_msg': validation_msg,
-                    'needs_compression': size_mb > config['max_size']
+                    'needs_compression': size_mb > SIZE_GUIDELINES['large']['threshold']
                 }
                 
                 analysis_results[size_category].append(result)
@@ -243,7 +187,7 @@ class IntegratedImageAnalyzer:
         return analysis_results
     
     def display_analysis_results(self, results: Dict, show_recommendations: bool = True):
-        """Display comprehensive analysis results."""
+        """Display simple analysis results."""
         console.print('📊 IMAGE ANALYSIS RESULTS')
         console.print('=' * 50)
         
@@ -255,7 +199,7 @@ class IntegratedImageAnalyzer:
                 for img in images:
                     status = '⚠️ NEEDS COMPRESSION' if img['needs_compression'] else '✅ OK'
                     valid_status = '✅' if img['is_valid'] else '❌'
-                    console.print(f'  {status} {valid_status} {img["filename"]} ({img["size_mb"]:.1f}MB) - {img["category"]}')
+                    console.print(f'  {status} {valid_status} {img["filename"]} ({img["size_mb"]:.1f}MB)')
         
         # Validation errors
         if results['validation_errors']:
@@ -276,37 +220,32 @@ class IntegratedImageAnalyzer:
             self.display_compression_recommendations(results['recommendations'])
     
     def display_compression_recommendations(self, recommendations: List[Dict]):
-        """Display compression recommendations with action options."""
+        """Display simple compression recommendations."""
         console.print(f'\n🎯 COMPRESSION RECOMMENDATIONS ({len(recommendations)} images):')
         console.print('=' * 50)
         
         # Group by priority
-        high_priority = [r for r in recommendations if r['size_mb'] > 2.0]
-        medium_priority = [r for r in recommendations if 1.0 < r['size_mb'] <= 2.0]
-        low_priority = [r for r in recommendations if r['size_mb'] <= 1.0]
+        high_priority = [r for r in recommendations if r['size_mb'] > 1.0]
+        medium_priority = [r for r in recommendations if 0.5 < r['size_mb'] <= 1.0]
         
         if high_priority:
-            console.print(f'\n🔴 HIGH PRIORITY ({len(high_priority)} images):')
-            for img in high_priority[:5]:  # Show top 5
-                console.print(f'  📸 {img["filename"]} ({img["size_mb"]:.1f}MB → {img["target_size"]})')
-            if len(high_priority) > 5:
-                console.print(f'  ... and {len(high_priority) - 5} more')
+            console.print(f'\n🔴 HIGH PRIORITY ({len(high_priority)} images > 1MB):')
+            for img in high_priority[:10]:  # Show top 10
+                console.print(f'  📸 {img["filename"]} ({img["size_mb"]:.1f}MB)')
+            if len(high_priority) > 10:
+                console.print(f'  ... and {len(high_priority) - 10} more')
         
         if medium_priority:
-            console.print(f'\n🟡 MEDIUM PRIORITY ({len(medium_priority)} images):')
-            for img in medium_priority[:3]:  # Show top 3
-                console.print(f'  📸 {img["filename"]} ({img["size_mb"]:.1f}MB → {img["target_size"]})')
-            if len(medium_priority) > 3:
-                console.print(f'  ... and {len(medium_priority) - 3} more')
-        
-        if low_priority:
-            console.print(f'\n🟢 LOW PRIORITY ({len(low_priority)} images):')
-            console.print(f'  {len(low_priority)} images under 1MB')
+            console.print(f'\n🟡 MEDIUM PRIORITY ({len(medium_priority)} images 0.5-1MB):')
+            for img in medium_priority[:5]:  # Show top 5
+                console.print(f'  📸 {img["filename"]} ({img["size_mb"]:.1f}MB)')
+            if len(medium_priority) > 5:
+                console.print(f'  ... and {len(medium_priority) - 5} more')
         
         # Action options
         console.print(f'\n🚀 ACTION OPTIONS:')
         console.print('=' * 50)
-        console.print('1. Compress high priority images only')
+        console.print('1. Compress high priority images only (>1MB)')
         console.print('2. Compress all recommended images')
         console.print('3. Generate compression commands')
         console.print('4. Run validation fixes only')
@@ -321,9 +260,7 @@ class IntegratedImageAnalyzer:
         
         # Filter by priority
         if priority == 'high':
-            images_to_compress = [r for r in recommendations if r['size_mb'] > 2.0]
-        elif priority == 'medium':
-            images_to_compress = [r for r in recommendations if 1.0 < r['size_mb'] <= 2.0]
+            images_to_compress = [r for r in recommendations if r['size_mb'] > 1.0]
         else:
             images_to_compress = recommendations
         
@@ -366,7 +303,7 @@ class IntegratedImageAnalyzer:
         return '\n'.join(commands)
     
     def fix_validation_errors(self, validation_errors: List[Dict]) -> List[str]:
-        """Fix image validation errors using check_images.py functionality."""
+        """Fix image validation errors."""
         if not validation_errors:
             console.print('✅ No validation errors to fix')
             return []
@@ -376,23 +313,21 @@ class IntegratedImageAnalyzer:
         fixed_files = []
         for error in validation_errors:
             console.print(f'Processing: {os.path.basename(error["path"])}')
-            # This would integrate with check_images.py fix functionality
-            # For now, just report the errors
             console.print(f'  Error: {error["error"]}')
         
         return fixed_files
 
 def main():
-    """Main function with integrated CLI."""
+    """Main function with simplified CLI."""
     parser = argparse.ArgumentParser(
-        description='Integrated Image Analyzer for MLSysBook',
+        description='Simple Image Analyzer for MLSysBook',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   # Full analysis with recommendations
   python3 integrated_image_analyzer.py --analyze
 
-  # Analyze and compress high priority images
+  # Analyze and compress large images (>1MB)
   python3 integrated_image_analyzer.py --analyze --compress --priority high
 
   # Generate compression commands only
@@ -404,12 +339,12 @@ Examples:
     )
     
     parser.add_argument('--analyze', action='store_true',
-                       help='Perform comprehensive image analysis')
+                       help='Perform image analysis')
     parser.add_argument('--validate', action='store_true',
                        help='Validate image formats only')
     parser.add_argument('--compress', action='store_true',
                        help='Compress recommended images')
-    parser.add_argument('--priority', choices=['high', 'medium', 'all'],
+    parser.add_argument('--priority', choices=['high', 'all'],
                        default='all', help='Compression priority')
     parser.add_argument('--generate-commands', action='store_true',
                        help='Generate compression commands for manual execution')
