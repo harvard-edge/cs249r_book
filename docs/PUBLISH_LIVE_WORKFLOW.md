@@ -29,9 +29,14 @@ The publish-live workflow is designed to handle the publication of your Machine 
 
 ### 4. PDF Handling (NEW)
 - 📄 Downloads PDF from build artifacts
-- 📦 Creates GitHub Release
+- 📦 Creates GitHub Release (DRAFT)
 - 📄 Uploads PDF to Release Assets
 - ✅ PDF is available for download but NOT in git
+
+### 5. Manual Release Notes (NEW)
+- 📝 Creates draft release for manual editing
+- 🔧 Provides release notes generator script
+- ✏️ Allows custom release notes on GitHub website
 
 ## 📄 PDF Management Strategy
 
@@ -79,6 +84,33 @@ This will check:
 - ✅ PDF is NOT tracked by git
 - ✅ PDF is in .gitignore
 - ✅ Git status is clean
+
+## 📝 Release Notes Management
+
+### Automatic vs Manual Release Notes
+
+The workflow now creates **draft releases** that you can edit manually on GitHub. This gives you full control over release notes.
+
+### Generate Release Notes Script
+
+Use the release notes generator for comprehensive analysis:
+
+```bash
+python tools/scripts/generate_release_notes.py v1.2.0 "Add new chapter on TinyML" v1.1.0
+```
+
+This script analyzes:
+- 📊 Git commits since last release
+- 📁 Changed files and directories
+- 📖 Content updates and improvements
+- 🔧 Technical changes and infrastructure updates
+
+### Manual Release Notes Workflow
+
+1. **Run publish-live workflow** → Creates draft release
+2. **Generate release notes** → Use the script above
+3. **Edit on GitHub** → Go to the draft release and edit
+4. **Publish release** → Click "Publish release" when ready
 
 ## 📋 Usage Instructions
 
