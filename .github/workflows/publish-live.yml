@@ -12,6 +12,23 @@ env:
   OLLAMA_RETRIES: "3"                      # Number of retries for Ollama calls
   BUILD_TIMEOUT: "3600"                    # Timeout for build operations (1 hour)
 
+# =============================================================================
+# ARTIFACT STRUCTURE DOCUMENTATION
+# =============================================================================
+# The 🎮 Controller workflow creates the following artifacts:
+# 
+# build-ubuntu-latest-html: Contains build/html/ (web version)
+# build-ubuntu-latest-pdf:  Contains build/pdf/Machine-Learning-Systems.pdf
+# build-windows-latest-html: Contains build/html/ (web version)  
+# build-windows-latest-pdf: Contains build/pdf/Machine-Learning-Systems.pdf
+#
+# This workflow specifically looks for build-ubuntu-latest-pdf to get the Linux-built PDF
+# for consistency and reliability. The PDF is compressed with Ghostscript for optimal size.
+#
+# Expected file structure in build-ubuntu-latest-pdf artifact:
+# build/pdf/Machine-Learning-Systems.pdf
+# =============================================================================
+
 # Available AI Models (uncomment to use different models):
 # - gemma2:9b      (fast, good quality - recommended)
 # - gemma2:27b     (better quality, slower)
@@ -45,21 +62,29 @@ on:
         description: 'Type "PUBLISH" to confirm'
         required: true
         default: ''
-      ai_model:
-        description: 'AI model for release notes (default: gemma2:9b)'
-        required: false
-        default: 'gemma2:9b'
+      ai_generated_notes:
+        description: 'Generate AI release notes?'
+        required: true
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+        default: 'true'
 
 permissions:
   contents: write
   actions: read
 
 jobs:
-  validate-and-publish:
-    name: '🔍 Validate & Publish'
+  validate-inputs:
+    name: '🔍 Validate Inputs'
     runs-on: ubuntu-latest
-    timeout-minutes: 60  # ⏰ Set job timeout to 1 hour
+    timeout-minutes: 10
     if: github.event.inputs.confirm == 'PUBLISH'
+    outputs:
+      new_version: ${{ steps.version.outputs.new_version }}
+      previous_version: ${{ steps.version.outputs.previous_version }}
+      release_type: ${{ steps.version.outputs.release_type }}
     
     steps:
       - name: 📥 Checkout repository
@@ -150,6 +175,20 @@ jobs:
           echo "release_type=${{ github.event.inputs.release_type }}" >> $GITHUB_OUTPUT
           echo "previous_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
 
+  merge-to-main:
+    name: '🔄 Merge to Main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: validate-inputs
+    if: github.event.inputs.confirm == 'PUBLISH'
+    
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: 🔄 Merge dev to main
         run: |
           echo "🔄 Configuring git..."
@@ -188,7 +227,7 @@ jobs:
             echo "📊 Merging latest dev: $MERGE_COMMIT"
           fi
           
-          git merge "$MERGE_COMMIT" --no-ff -m "🚀 Release ${{ steps.version.outputs.new_version }}: ${{ github.event.inputs.description }}
+          git merge "$MERGE_COMMIT" --no-ff -m "🚀 Release ${{ needs.validate-inputs.outputs.new_version }}: ${{ github.event.inputs.description }}
 
           Merged dev branch to main for publication.
           
@@ -202,8 +241,8 @@ jobs:
 
       - name: 🏷️ Create Release Tag
         run: |
-          echo "🏷️ Creating release tag ${{ steps.version.outputs.new_version }}..."
-          git tag -a ${{ steps.version.outputs.new_version }} -m "Release ${{ steps.version.outputs.new_version }}: ${{ github.event.inputs.description }}"
+          echo "🏷️ Creating release tag ${{ needs.validate-inputs.outputs.new_version }}..."
+          git tag -a ${{ needs.validate-inputs.outputs.new_version }} -m "Release ${{ needs.validate-inputs.outputs.new_version }}: ${{ github.event.inputs.description }}"
           echo "✅ Tag created successfully!"
 
       - name: 🚀 Push to main and trigger production deployment
@@ -219,21 +258,29 @@ jobs:
           echo "🌐 Your textbook will be live at: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
           echo "📚 Students can access the updated content immediately"
 
-      - name: ⏳ Wait for Production Build
+  monitor-build:
+    name: '⏳ Monitor Production Build'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    needs: merge-to-main
+    if: github.event.inputs.confirm == 'PUBLISH'
+    
+    steps:
+      - name: ⏳ Wait for Production Build (Real-time Monitoring)
         run: |
-          echo "⏳ Waiting for production build to complete before creating release..."
-          echo "🔍 Looking for recent workflow runs on main branch..."
+          echo "⏳ Waiting for production build to complete (max 1 hour)..."
+          echo "🔍 Monitoring 🎮 Controller workflow in real-time..."
           sleep 30  # Give the build a moment to start
           
-          # Wait for the build to complete with better detection
-          for i in {1..240}; do
-            echo "🔍 Checking build status (attempt $i/240)..."
+          # Wait for the build to complete with improved real-time monitoring
+          for i in {1..120}; do  # 120 attempts × 30 seconds = 1 hour
+            echo "🔍 Checking build status (attempt $i/120)..."
             
-            # Get recent workflow runs
+            # Get real-time workflow status
             WORKFLOW_RESPONSE=$(curl -s \
               -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
               -H "Accept: application/vnd.github.v3+json" \
-              "https://api.github.com/repos/${{ github.repository }}/actions/runs?branch=main&per_page=10")
+              "https://api.github.com/repos/${{ github.repository }}/actions/runs?branch=main&per_page=5")
             
             # Check for successful controller workflow runs
             SUCCESSFUL_BUILD=$(echo "$WORKFLOW_RESPONSE" | jq -r '.workflow_runs[] | select(.name == "🎮 Controller" and .conclusion == "success") | .id' | head -1)
@@ -253,11 +300,33 @@ jobs:
               exit 1
             fi
             
-            # Check for running builds and show progress
+            # Get detailed status of running builds
             RUNNING_BUILD=$(echo "$WORKFLOW_RESPONSE" | jq -r '.workflow_runs[] | select(.name == "🎮 Controller" and .status == "in_progress") | .id' | head -1)
             if [ -n "$RUNNING_BUILD" ] && [ "$RUNNING_BUILD" != "null" ]; then
+              # Get detailed build status
+              BUILD_STATUS=$(curl -s \
+                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                -H "Accept: application/vnd.github.v3+json" \
+                "https://api.github.com/repos/${{ github.repository }}/actions/runs/$RUNNING_BUILD")
+              
+              BUILD_NAME=$(echo "$BUILD_STATUS" | jq -r '.name')
+              BUILD_STATUS_DETAIL=$(echo "$BUILD_STATUS" | jq -r '.status')
+              BUILD_CONCLUSION=$(echo "$BUILD_STATUS" | jq -r '.conclusion // "in_progress"')
+              BUILD_CREATED=$(echo "$BUILD_STATUS" | jq -r '.created_at')
+              BUILD_UPDATED=$(echo "$BUILD_STATUS" | jq -r '.updated_at')
+              
               echo "🔄 Build is actively running (ID: $RUNNING_BUILD)"
+              echo "📊 Build details: $BUILD_NAME - $BUILD_STATUS_DETAIL"
               echo "🔗 Monitor: https://github.com/${{ github.repository }}/actions/runs/$RUNNING_BUILD"
+              
+              # Show current jobs status
+              JOBS_RESPONSE=$(curl -s \
+                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                -H "Accept: application/vnd.github.v3+json" \
+                "https://api.github.com/repos/${{ github.repository }}/actions/runs/$RUNNING_BUILD/jobs")
+              
+              echo "📋 Current jobs:"
+              echo "$JOBS_RESPONSE" | jq -r '.jobs[] | "  - \(.name): \(.status) (\(.conclusion // "running"))"' | head -3
             fi
             
             # Show current status with time elapsed
@@ -271,19 +340,16 @@ jobs:
               TIME_DISPLAY="${ELAPSED_MINUTES}m"
             fi
             
-            echo "⏳ Build still in progress... (attempt $i/240, ~${TIME_DISPLAY} elapsed)"
-            echo "📊 Recent workflow runs:"
-            echo "$WORKFLOW_RESPONSE" | jq -r '.workflow_runs[] | "  - \(.name): \(.conclusion // .status) (\(.created_at))"' | head -5
+            echo "⏳ Build still in progress... (attempt $i/120, ~${TIME_DISPLAY} elapsed)"
             
             # Show build progress indicators with heartbeat-style updates
             if [ $i -eq 1 ]; then
-              echo "📋 Expected build timeline:"
-              echo "  0-15m: Initial setup and quality checks"
-              echo "  15-30m: Quarto build and PDF generation"
-              echo "  30-45m: PDF compression and processing"
-              echo "  45-60m: GitHub Pages deployment"
-              echo "  60-90m: Asset copying and finalization"
-              echo "  90m+: Extended processing (if needed)"
+              echo "📋 Expected build timeline (Linux only):"
+              echo "  0-10m: Initial setup and quality checks"
+              echo "  10-25m: Quarto build (HTML + PDF generation)"
+              echo "  25-35m: PDF compression and processing"
+              echo "  35-45m: GitHub Pages deployment"
+              echo "  45-60m: Asset copying and finalization"
             fi
             
             # Show heartbeat-style progress every 4th attempt (every 2 minutes)
@@ -300,13 +366,24 @@ jobs:
           done
           
           # If we get here, the build might still be running
-          echo "⚠️ Build may still be in progress after 2 hours"
+          echo "⚠️ Build may still be in progress after 1 hour"
           echo "📊 Latest workflow status:"
           echo "$WORKFLOW_RESPONSE" | jq -r '.workflow_runs[] | "  - \(.name): \(.conclusion // "in_progress")"' | head -3
 
+  download-pdf:
+    name: '📄 Download PDF'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: monitor-build
+    if: github.event.inputs.confirm == 'PUBLISH'
+    
+    steps:
       - name: 📄 Download Built PDF from Artifacts
         run: |
           echo "📄 Downloading built PDF from artifacts..."
+          echo "🔍 Looking for Linux PDF build artifacts..."
+          echo "📋 Expected artifact: build-ubuntu-latest-pdf"
+          echo "📋 Expected file: build/pdf/Machine-Learning-Systems.pdf"
           
           # Download the latest successful build artifacts
           LATEST_BUILD=$(curl -s \
@@ -328,35 +405,53 @@ jobs:
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/${{ github.repository }}/actions/runs/$LATEST_BUILD/artifacts")
           
-          # Find the PDF artifact
-          PDF_ARTIFACT=$(echo "$ARTIFACTS_RESPONSE" | jq -r '.artifacts[] | select(.name | contains("pdf")) | .id' | head -1)
+          echo "📊 Available artifacts:"
+          echo "$ARTIFACTS_RESPONSE" | jq -r '.artifacts[] | "  - \(.name) (ID: \(.id))"'
           
-          if [ "$PDF_ARTIFACT" = "null" ] || [ -z "$PDF_ARTIFACT" ]; then
-            echo "❌ No PDF artifact found in build $LATEST_BUILD"
-            echo "📊 Available artifacts:"
-            echo "$ARTIFACTS_RESPONSE" | jq -r '.artifacts[] | "  - \(.name) (ID: \(.id))"'
-            exit 1
+          # Find the Linux PDF artifact specifically
+          LINUX_PDF_ARTIFACT=$(echo "$ARTIFACTS_RESPONSE" | jq -r '.artifacts[] | select(.name == "build-ubuntu-latest-pdf") | .id' | head -1)
+          
+          if [ "$LINUX_PDF_ARTIFACT" = "null" ] || [ -z "$LINUX_PDF_ARTIFACT" ]; then
+            echo "❌ Linux PDF artifact 'build-ubuntu-latest-pdf' not found!"
+            echo "🔍 Looking for any PDF artifact as fallback..."
+            
+            # Fallback: look for any PDF artifact
+            PDF_ARTIFACT=$(echo "$ARTIFACTS_RESPONSE" | jq -r '.artifacts[] | select(.name | contains("pdf")) | .id' | head -1)
+            
+            if [ "$PDF_ARTIFACT" = "null" ] || [ -z "$PDF_ARTIFACT" ]; then
+              echo "❌ No PDF artifact found in build $LATEST_BUILD"
+              exit 1
+            fi
+            
+            echo "⚠️ Using fallback PDF artifact: $PDF_ARTIFACT"
+            LINUX_PDF_ARTIFACT=$PDF_ARTIFACT
+          else
+            echo "✅ Found Linux PDF artifact: build-ubuntu-latest-pdf (ID: $LINUX_PDF_ARTIFACT)"
           fi
           
-          echo "📄 Found PDF artifact: $PDF_ARTIFACT"
-          
           # Download the artifact
+          echo "📥 Downloading PDF artifact..."
           curl -L \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/runs/$LATEST_BUILD/artifacts/$PDF_ARTIFACT/zip" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs/$LATEST_BUILD/artifacts/$LINUX_PDF_ARTIFACT/zip" \
             -o pdf-artifact.zip
           
           # Extract the PDF
+          echo "📦 Extracting PDF artifact..."
           unzip -q pdf-artifact.zip
           
-          # Find the PDF file
+          # Find the PDF file in the expected location
           PDF_FILE=$(find . -name "Machine-Learning-Systems.pdf" -type f | head -1)
           
           if [ -z "$PDF_FILE" ] || [ ! -f "$PDF_FILE" ]; then
             echo "❌ PDF file not found in extracted artifacts!"
-            echo "📊 Extracted files:"
-            find . -type f | head -20
+            echo "📊 Extracted files and directories:"
+            find . -type f -o -type d | head -20
+            echo "📊 Looking in build/pdf directory..."
+            if [ -d "build/pdf" ]; then
+              ls -la build/pdf/
+            fi
             exit 1
           fi
           
@@ -366,95 +461,183 @@ jobs:
           # Copy to a standard location
           cp "$PDF_FILE" "Machine-Learning-Systems.pdf"
           echo "✅ PDF ready for release: Machine-Learning-Systems.pdf"
+          
+          # Upload PDF as artifact for next jobs
+          echo "📤 Uploading PDF as artifact..."
+          echo "Machine-Learning-Systems.pdf" > pdf-files.txt
 
-      - name: 📝 Generate AI Release Notes
+      - name: 📤 Upload PDF Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pdf-artifact
+          path: Machine-Learning-Systems.pdf
+          retention-days: 1
+
+  generate-release-notes:
+    name: '📝 Generate Release Notes'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [validate-inputs, download-pdf]
+    if: github.event.inputs.confirm == 'PUBLISH'
+    
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📄 Download PDF from previous job
+        uses: actions/download-artifact@v4
+        with:
+          name: pdf-artifact
+          path: ./
+
+      - name: 📝 Generate Release Notes
         run: |
-          echo "📝 Generating AI-powered release notes..."
+          echo "📝 Generating release notes..."
           
-          # Install Python dependencies
-          python -m pip install --upgrade pip
-          python -m pip install requests
+          # Check if AI generation is enabled
+          # Generate changelog first (this will be used for release notes)
+          echo "📝 Generating changelog entries..."
+          python tools/scripts/maintenance/change_log.py \
+            --incremental \
+            --verbose
           
-          # Install Ollama
-          echo "🤖 Installing Ollama..."
-          curl -fsSL https://ollama.ai/install.sh | sh
+          # Keep changelog for debugging
+          echo "📋 Changelog generated - keeping for debugging"
+          ls -la CHANGELOG.md
           
-          # Start Ollama service
-          echo "🚀 Starting Ollama service..."
-          ollama serve &
-          sleep 10  # Wait for service to start
-          
-          # Pull the model (configurable via workflow input)
-          MODEL="${{ github.event.inputs.ai_model || 'gemma2:9b' }}"
-          echo "📦 Pulling AI model: $MODEL"
-          ollama pull $MODEL
-          
-          # Test Ollama connection
-          echo "🧪 Testing Ollama connection..."
-          if ollama list | grep -q "$MODEL"; then
-            echo "✅ Ollama model ready: $MODEL"
+          if [ "${{ github.event.inputs.ai_generated_notes }}" = "true" ]; then
+            echo "🤖 AI generation enabled - attempting AI-powered release notes..."
+            
+            # Install Python dependencies
+            python -m pip install --upgrade pip
+            python -m pip install requests
+            
+            # Install Ollama
+            echo "🤖 Installing Ollama..."
+            curl -fsSL https://ollama.ai/install.sh | sh
+            
+            # Start Ollama service
+            echo "🚀 Starting Ollama service..."
+            ollama serve &
+            sleep 10  # Wait for service to start
+            
+            # Pull the default model
+            MODEL="${{ env.DEFAULT_AI_MODEL }}"
+            echo "📦 Pulling AI model: $MODEL"
+            ollama pull $MODEL
+            
+            # Test Ollama connection
+            echo "🧪 Testing Ollama connection..."
+            if ollama list | grep -q "$MODEL"; then
+              echo "✅ Ollama model ready: $MODEL"
+            else
+              echo "❌ Failed to pull model: $MODEL, trying fallback..."
+              MODEL="${{ env.FALLBACK_AI_MODEL }}"
+              ollama pull $MODEL
+              if ! ollama list | grep -q "$MODEL"; then
+                echo "❌ Fallback model also failed, using manual notes"
+                AI_GENERATION_FAILED=true
+              fi
+            fi
+            
+            # Generate release notes using AI if available
+            if [ "$AI_GENERATION_FAILED" != "true" ]; then
+              echo "📝 Generating release notes with AI..."
+              python tools/scripts/maintenance/release_notes.py \
+                --version ${{ needs.validate-inputs.outputs.new_version }} \
+                --previous-version ${{ needs.validate-inputs.outputs.previous_version }} \
+                --description "${{ github.event.inputs.description }}" \
+                --verbose
+              
+              # Check if AI release notes were generated
+              if [ -f "release_notes_v${{ needs.validate-inputs.outputs.new_version }}.md" ]; then
+                echo "✅ AI release notes generated successfully"
+                echo "📄 Release notes file details:"
+                ls -la "release_notes_v${{ needs.validate-inputs.outputs.new_version }}.md"
+                echo "📝 Release notes content:"
+                cat "release_notes_v${{ needs.validate-inputs.outputs.new_version }}.md"
+              else
+                echo "⚠️ AI release notes generation failed, using manual template"
+                AI_GENERATION_FAILED=true
+              fi
+            fi
           else
-            echo "❌ Failed to pull model: $MODEL"
-            exit 1
+            echo "📝 AI generation disabled - using manual template"
+            AI_GENERATION_FAILED=true
           fi
           
-          # Generate release notes using your existing AI system
-          echo "📝 Generating release notes with AI..."
-                          python tools/scripts/maintenance/generate_release_content.py \
-                  --release-notes \
-                  --version ${{ steps.version.outputs.new_version }} \
-                  --previous-version ${{ steps.version.outputs.previous_version }} \
-                  --description "${{ github.event.inputs.description }}" \
-                  --model $MODEL \
-                  --verbose
-          
-          # Check if release notes were generated
-          if [ -f "release_notes_${{ steps.version.outputs.new_version }}.md" ]; then
-            echo "✅ AI release notes generated successfully"
-            cat "release_notes_${{ steps.version.outputs.new_version }}.md"
-          else
-            echo "⚠️ AI release notes generation failed, using template"
-            # Fallback to basic release notes template
-            cat > "release_notes_${{ steps.version.outputs.new_version }}.md" << EOF
-          ## 📚 Release ${{ steps.version.outputs.new_version }}
-          
-          **${{ github.event.inputs.description }}**
-          
-          ### 📋 Release Information
-          - **Type**: ${{ steps.version.outputs.release_type }} release
-          - **Previous Version**: ${{ steps.version.outputs.previous_version }}
-          - **Published by**: ${{ github.actor }}
-          - **Published at**: $(date)
-          
-          ### 📖 What's Included
-          - Updated interactive web version at [mlsysbook.ai](https://mlsysbook.ai)
-          - Complete PDF textbook available for download
-          - All chapters, exercises, and lab materials as of commit $(git rev-parse HEAD)
-          - Compatible with MIT Press publication standards
-          
-          ### 📝 Changes
-          ${{ github.event.inputs.description }}
-          
-          ### 🔗 Quick Links
-          - 🌐 [Read Online](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }})
-          - 📄 [Download PDF](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.new_version }}/Machine-Learning-Systems.pdf)
-          - 📄 [Direct PDF Link](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/assets/Machine-Learning-Systems.pdf)
-          
-          ---
-          *Note: AI analysis was unavailable, using template release notes*
-          EOF
+          # Create manual release notes if AI failed or disabled
+          if [ "$AI_GENERATION_FAILED" = "true" ]; then
+            echo "📝 Creating manual release notes template..."
+            python tools/scripts/maintenance/release_notes.py \
+              --version ${{ needs.validate-inputs.outputs.new_version }} \
+              --previous-version ${{ needs.validate-inputs.outputs.previous_version }} \
+              --description "${{ github.event.inputs.description }}" \
+              --verbose
+            
+            # Show manual release notes details
+            if [ -f "release_notes_v${{ needs.validate-inputs.outputs.new_version }}.md" ]; then
+              echo "✅ Manual release notes generated successfully"
+              echo "📄 Release notes file details:"
+              ls -la "release_notes_v${{ needs.validate-inputs.outputs.new_version }}.md"
+              echo "📝 Release notes content:"
+              cat "release_notes_v${{ needs.validate-inputs.outputs.new_version }}.md"
+            else
+              echo "❌ Failed to generate manual release notes"
+            fi
           fi
+
+      - name: 📤 Upload Release Notes Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release_notes_v${{ needs.validate-inputs.outputs.new_version }}.md
+          retention-days: 1
+
+      - name: 📤 Upload Changelog Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: changelog
+          path: CHANGELOG.md
+          retention-days: 7
+
+  create-release:
+    name: '📦 Create GitHub Release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [validate-inputs, generate-release-notes]
+    if: github.event.inputs.confirm == 'PUBLISH'
+    
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📄 Download PDF from previous job
+        uses: actions/download-artifact@v4
+        with:
+          name: pdf-artifact
+          path: ./
+
+      - name: 📝 Download release notes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: ./
 
       - name: 📦 Create GitHub Release with PDF
         run: |
-          echo "📦 Creating GitHub Release ${{ steps.version.outputs.new_version }}..."
+          echo "📦 Creating GitHub Release ${{ needs.validate-inputs.outputs.new_version }}..."
           echo "📋 Release details:"
-          echo "  - Tag: ${{ steps.version.outputs.new_version }}"
-          echo "  - Name: ${{ steps.version.outputs.new_version }}: ${{ github.event.inputs.description }}"
+          echo "  - Tag: ${{ needs.validate-inputs.outputs.new_version }}"
+          echo "  - Name: ${{ needs.validate-inputs.outputs.new_version }}: ${{ github.event.inputs.description }}"
           echo "  - Repository: ${{ github.repository }}"
           
           # Use the AI-generated release notes
-          RELEASE_NOTES_FILE="release_notes_${{ steps.version.outputs.new_version }}.md"
+          RELEASE_NOTES_FILE="release_notes_${{ needs.validate-inputs.outputs.new_version }}.md"
           
           if [ -f "$RELEASE_NOTES_FILE" ]; then
             echo "📄 Using AI-generated release notes:"
@@ -472,8 +655,8 @@ jobs:
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/${{ github.repository }}/releases" \
             -d "{
-              \"tag_name\": \"${{ steps.version.outputs.new_version }}\",
-              \"name\": \"${{ steps.version.outputs.new_version }}: ${{ github.event.inputs.description }}\",
+              \"tag_name\": \"${{ needs.validate-inputs.outputs.new_version }}\",
+              \"name\": \"${{ needs.validate-inputs.outputs.new_version }}: ${{ github.event.inputs.description }}\",
               \"body\": \"$(cat $RELEASE_NOTES_FILE | sed 's/"/\\"/g' | tr '\n' '\\n')\",
               \"draft\": true,
               \"prerelease\": false
@@ -528,7 +711,7 @@ jobs:
           if [ "$UPLOAD_ID" != "null" ] && [ -n "$UPLOAD_ID" ]; then
             echo "✅ PDF uploaded successfully to release!"
             echo "📊 Asset ID: $UPLOAD_ID"
-            echo "🔗 Download URL: https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.new_version }}/Machine-Learning-Systems.pdf"
+            echo "🔗 Download URL: https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/Machine-Learning-Systems.pdf"
           else
             echo "❌ Failed to upload PDF to release!"
             echo "📊 Error details:"
@@ -536,12 +719,20 @@ jobs:
             exit 1
           fi
 
+  summary:
+    name: '📋 Publication Summary'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [validate-inputs, create-release]
+    if: github.event.inputs.confirm == 'PUBLISH'
+    
+    steps:
       - name: 📋 Publication Summary
         run: |
           echo "## 📚 Textbook Publication Complete! 🎉" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version Released:** ${{ steps.version.outputs.new_version }} (${{ steps.version.outputs.release_type }})" >> $GITHUB_STEP_SUMMARY
-          echo "**Previous Version:** ${{ steps.version.outputs.previous_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Version Released:** ${{ needs.validate-inputs.outputs.new_version }} (${{ needs.validate-inputs.outputs.release_type }})" >> $GITHUB_STEP_SUMMARY
+          echo "**Previous Version:** ${{ needs.validate-inputs.outputs.previous_version }}" >> $GITHUB_STEP_SUMMARY
           echo "**Content Published:** ${{ github.event.inputs.description }}" >> $GITHUB_STEP_SUMMARY
           echo "**Published by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
           echo "**Source Commit:** ${{ github.event.inputs.dev_commit || 'latest' }}" >> $GITHUB_STEP_SUMMARY
@@ -556,21 +747,22 @@ jobs:
           echo "1. ✅ Verified dev branch tests passed" >> $GITHUB_STEP_SUMMARY
           echo "2. ✅ Calculated new version number" >> $GITHUB_STEP_SUMMARY
           echo "3. ✅ Merged dev → main branch" >> $GITHUB_STEP_SUMMARY
-          echo "4. ✅ Created release tag ${{ steps.version.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "4. ✅ Created release tag ${{ needs.validate-inputs.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY
           echo "5. ✅ Pushed to main (triggered production build)" >> $GITHUB_STEP_SUMMARY
-          echo "6. ✅ Waited for build completion (up to 2 hours)" >> $GITHUB_STEP_SUMMARY
+          echo "6. ✅ Waited for build completion (up to 1 hour)" >> $GITHUB_STEP_SUMMARY
           echo "7. ✅ Created GitHub Release (DRAFT - edit manually)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🏗️ Build Process:" >> $GITHUB_STEP_SUMMARY
           echo "- 📚 **Controller Workflow**: Triggered by main branch push" >> $GITHUB_STEP_SUMMARY
-          echo "- 🔨 **Build Jobs**: HTML + PDF generation on Linux/Windows" >> $GITHUB_STEP_SUMMARY
-          echo "- 📄 **PDF Processing**: Generated, compressed, and copied to assets/" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔨 **Build Jobs**: HTML + PDF generation on Linux only" >> $GITHUB_STEP_SUMMARY
+          echo "- 📄 **PDF Processing**: Generated, compressed with Ghostscript, stored in build/pdf/" >> $GITHUB_STEP_SUMMARY
+          echo "- 📦 **Artifacts**: build-ubuntu-latest-pdf contains Machine-Learning-Systems.pdf" >> $GITHUB_STEP_SUMMARY
           echo "- 🌐 **Deployment**: GitHub Pages with PDF download available" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🌐 Access Your Published Textbook:" >> $GITHUB_STEP_SUMMARY
           echo "- 📖 [Interactive Web Textbook](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }})" >> $GITHUB_STEP_SUMMARY
-          echo "- 📦 [Version Release Notes](https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.new_version }})" >> $GITHUB_STEP_SUMMARY
-          echo "- 📄 [Download Complete PDF](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.new_version }}/Machine-Learning-Systems.pdf)" >> $GITHUB_STEP_SUMMARY
+          echo "- 📦 [Version Release Notes](https://github.com/${{ github.repository }}/releases/tag/${{ needs.validate-inputs.outputs.new_version }})" >> $GITHUB_STEP_SUMMARY
+          echo "- 📄 [Download Complete PDF](https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/Machine-Learning-Systems.pdf)" >> $GITHUB_STEP_SUMMARY
           echo "- 📄 [Direct PDF Access](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/assets/Machine-Learning-Systems.pdf)" >> $GITHUB_STEP_SUMMARY
           echo "- 🎓 [Share with Students](https://mlsysbook.ai)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
