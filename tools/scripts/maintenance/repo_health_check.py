@@ -337,15 +337,11 @@ class RepoHealthChecker:
         if not Confirm.ask("Continue with BFG cleanup? This will rewrite git history."):
             return False
         
-        # Create file list for BFG
-        file_list_path = self.repo_path / "bfg_files_to_delete.txt"
-        with open(file_list_path, 'w') as f:
-            for pattern in file_patterns:
-                f.write(f"{pattern}\n")
+        # No need to create file list - using direct patterns
         
         try:
-            # Run BFG
-            cmd = ["bfg", "--delete-files", "bfg_files_to_delete.txt"]
+            # Run BFG with correct syntax
+            cmd = ["bfg", "-D", "*.pdf", "-D", "*.epub"]
             success, output = self.run_git_command(cmd, capture_output=False)
             
             if success:
@@ -363,8 +359,7 @@ class RepoHealthChecker:
             console.print(f"[red]❌ Error during BFG cleanup: {e}[/red]")
             return False
         finally:
-            if file_list_path.exists():
-                file_list_path.unlink()
+            pass  # No file to clean up
     
     def display_health_report(self, stats: Dict, large_files: List[Dict], 
                             history_files: List[Dict], duplicates: List[Dict]):
