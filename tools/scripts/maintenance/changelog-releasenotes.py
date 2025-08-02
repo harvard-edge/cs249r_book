@@ -86,9 +86,8 @@ def generate_release_notes_from_changelog(version, previous_version, description
 - **Build Platform**: Linux (HTML + PDF)
 
 ### 🔗 Quick Links
-- 🌐 [Read Online](https://mlsysbook.ai)
-- 📄 [Download PDF](https://github.com/harvard-edge/cs249r_book/releases/download/{version}/Machine-Learning-Systems.pdf)
-- 📄 [Direct PDF Access](https://mlsysbook.ai/pdf)
+- 🌐 [Web](https://mlsysbook.ai)
+- 📄 [PDF](https://mlsysbook.ai/pdf)
 
 ### 📖 Detailed Changes
 For a complete list of all changes, improvements, and updates, see the [detailed changelog](https://mlsysbook.ai/changelog.html).
@@ -153,9 +152,8 @@ def generate_release_notes(version, previous_version, description, verbose=False
 - **Build Platform**: Linux (HTML + PDF)
 
 ### 🔗 Quick Links
-- 🌐 [Read Online](https://mlsysbook.ai)
-- 📄 [Download PDF](https://github.com/harvard-edge/cs249r_book/releases/download/{version}/Machine-Learning-Systems.pdf)
-- 📄 [Direct PDF Access](https://mlsysbook.ai/pdf)
+- 🌐 [Web](https://mlsysbook.ai)
+- 📄 [PDF](https://mlsysbook.ai/pdf)
 
 ### 📖 Detailed Changes
 For a complete list of all changes, improvements, and updates, see the [detailed changelog](https://mlsysbook.ai/changelog.html).
