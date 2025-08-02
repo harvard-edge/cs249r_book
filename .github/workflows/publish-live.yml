@@ -332,16 +332,30 @@ jobs:
           cp "$PDF_FILE" "Machine-Learning-Systems.pdf"
           echo "✅ PDF ready for release: Machine-Learning-Systems.pdf"
 
-      - name: 📦 Create GitHub Release with PDF
+      - name: 📝 Generate AI Release Notes
         run: |
-          echo "📦 Creating GitHub Release ${{ steps.version.outputs.new_version }}..."
-          echo "📋 Release details:"
-          echo "  - Tag: ${{ steps.version.outputs.new_version }}"
-          echo "  - Name: ${{ steps.version.outputs.new_version }}: ${{ github.event.inputs.description }}"
-          echo "  - Repository: ${{ github.repository }}"
+          echo "📝 Generating AI-powered release notes..."
           
-          # Generate release notes
-          cat > release_notes.md << EOF
+          # Install Python dependencies if needed
+          python -m pip install --upgrade pip
+          python -m pip install openai requests
+          
+          # Generate release notes using your existing AI system
+          python tools/scripts/maintenance/update_changelog.py \
+            --release-notes \
+            --version ${{ steps.version.outputs.new_version }} \
+            --previous-version ${{ steps.version.outputs.previous_version }} \
+            --description "${{ github.event.inputs.description }}" \
+            --verbose
+          
+          # Check if release notes were generated
+          if [ -f "release_notes_${{ steps.version.outputs.new_version }}.md" ]; then
+            echo "✅ AI release notes generated successfully"
+            cat "release_notes_${{ steps.version.outputs.new_version }}.md"
+          else
+            echo "⚠️ AI release notes generation failed, using fallback"
+            # Fallback to basic release notes
+            cat > "release_notes_${{ steps.version.outputs.new_version }}.md" << EOF
           ## 📚 Release ${{ steps.version.outputs.new_version }}
           
           **${{ github.event.inputs.description }}**
@@ -366,9 +380,26 @@ jobs:
           - 📄 [Download PDF](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.new_version }}/Machine-Learning-Systems.pdf)
           - 📄 [Direct PDF Link](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/assets/Machine-Learning-Systems.pdf)
           EOF
+          fi
+
+      - name: 📦 Create GitHub Release with PDF
+        run: |
+          echo "📦 Creating GitHub Release ${{ steps.version.outputs.new_version }}..."
+          echo "📋 Release details:"
+          echo "  - Tag: ${{ steps.version.outputs.new_version }}"
+          echo "  - Name: ${{ steps.version.outputs.new_version }}: ${{ github.event.inputs.description }}"
+          echo "  - Repository: ${{ github.repository }}"
           
-          echo "📄 Generated release notes:"
-          cat release_notes.md
+          # Use the AI-generated release notes
+          RELEASE_NOTES_FILE="release_notes_${{ steps.version.outputs.new_version }}.md"
+          
+          if [ -f "$RELEASE_NOTES_FILE" ]; then
+            echo "📄 Using AI-generated release notes:"
+            cat "$RELEASE_NOTES_FILE"
+          else
+            echo "❌ Release notes file not found!"
+            exit 1
+          fi
           
           # Create the release as a DRAFT for manual editing
           echo "🚀 Creating GitHub release as DRAFT..."
@@ -380,7 +411,7 @@ jobs:
             -d "{
               \"tag_name\": \"${{ steps.version.outputs.new_version }}\",
               \"name\": \"${{ steps.version.outputs.new_version }}: ${{ github.event.inputs.description }}\",
-              \"body\": \"## 📚 Release ${{ steps.version.outputs.new_version }}\n\n**${{ github.event.inputs.description }}**\n\n### 📋 Release Information\n- **Type**: ${{ steps.version.outputs.release_type }} release\n- **Previous Version**: ${{ steps.version.outputs.previous_version }}\n- **Published by**: ${{ github.actor }}\n- **Published at**: $(date)\n\n### 📝 Changes\n${{ github.event.inputs.description }}\n\n### 🔗 Quick Links\n- 🌐 [Read Online](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }})\n- 📄 [Download PDF](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.new_version }}/Machine-Learning-Systems.pdf)\n- 📄 [Direct PDF Link](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/assets/Machine-Learning-Systems.pdf)\n\n---\n\n**⚠️ This is a draft release. Please edit the release notes manually and then publish.**\",
+              \"body\": \"$(cat $RELEASE_NOTES_FILE | sed 's/"/\\"/g' | tr '\n' '\\n')\",
               \"draft\": true,
               \"prerelease\": false
             }")

@@ -563,6 +563,63 @@ def generate_demo_entry():
 """
     return demo_entry
 
+def generate_release_notes_for_version(version, previous_version, description, verbose=False):
+    """Generate release notes using your existing AI analysis"""
+    
+    print(f"📝 Generating release notes for {version}...")
+    print(f"📋 Description: {description}")
+    print(f"🔄 Previous version: {previous_version}")
+    
+    # Get the latest gh-pages commit date as the "since" date
+    latest_commit, latest_date = get_latest_gh_pages_commit()
+    
+    if not latest_date:
+        print("❌ No previous release found!")
+        return None
+    
+    print(f"📅 Analyzing changes since: {format_friendly_date(latest_date)}")
+    
+    # Use your existing AI-powered analysis
+    entry = generate_entry(latest_date, verbose=verbose, is_latest=True)
+    
+    if not entry:
+        print("⚠️ No meaningful changes found")
+        return None
+    
+    # Format as release notes instead of changelog
+    release_notes = f"""## 📚 Release {version}
+
+**{description}**
+
+### 📋 Release Information
+- **Type**: Release
+- **Previous Version**: {previous_version}
+- **Generated**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+- **Changes**: Since {format_friendly_date(latest_date)}
+
+### 📝 What's New
+
+{entry}
+
+### 🔗 Quick Links
+- 🌐 [Read Online](https://mlsysbook.ai)
+- 📄 [Download PDF](https://mlsysbook.ai/pdf)
+- 🧪 [Labs & Exercises](https://mlsysbook.ai/labs)
+- 📚 [GitHub Repository](https://github.com/harvard-edge/cs249r_book)
+
+### 📊 Technical Details
+- **Build System**: Quarto with custom extensions
+- **Deployment**: GitHub Pages + Netlify
+- **PDF Generation**: LaTeX with compression
+- **Content**: Markdown with interactive elements
+
+---
+*Generated with AI analysis of changes since last release*
+"""
+    
+    print("✅ Release notes generated successfully")
+    return release_notes
+
 def fold_existing_entries(content):
     """Fold all existing details sections in the changelog content."""
     import re
@@ -697,6 +754,10 @@ if __name__ == "__main__":
     parser.add_argument("-q", "--quarto-config", type=str, help="Path to quarto config file (default: book/config/_quarto-pdf.yml)")
     parser.add_argument("--openai", action="store_true", help="Use OpenAI for summarization instead of Ollama (default).")
     parser.add_argument("-m", "--model", type=str, default="gemma2:9b", help="Ollama model to use (default: gemma2:9b). Popular options: gemma2:9b, gemma2:27b, llama3.1:8b, llama3.1:70b")
+    parser.add_argument("--release-notes", action="store_true", help="Generate release notes instead of changelog entry.")
+    parser.add_argument("--version", type=str, help="Version for release notes (required with --release-notes).")
+    parser.add_argument("--previous-version", type=str, help="Previous version for release notes (required with --release-notes).")
+    parser.add_argument("--description", type=str, help="Release description (required with --release-notes).")
 
     args = parser.parse_args()
     
@@ -712,19 +773,29 @@ if __name__ == "__main__":
         print("✅ Demo entry generated successfully!")
         exit(0)
     
-    # Require either --full or --update to be specified
-    if args.full and args.update:
-        print("❌ Error: Cannot specify both --full and --update modes")
-        exit(1)
-    elif args.full:
-        mode = "full"
-    elif args.update:
-        mode = "update"
+    # Handle release notes mode
+    if args.release_notes:
+        if not args.version or not args.previous_version or not args.description:
+            print("❌ Error: --release-notes requires --version, --previous-version, and --description")
+            print("💡 Example: --release-notes --version v1.2.0 --previous-version v1.1.0 --description 'Add new chapter'")
+            exit(1)
+        
+        print("📝 RELEASE NOTES MODE")
+        mode = "release_notes"
     else:
-        print("❌ Error: Must specify either --full or --update mode")
-        print("💡 Use --help for usage information")
-        print("💡 Use --demo to see a sample changelog entry")
-        exit(1)
+        # Require either --full or --update to be specified
+        if args.full and args.update:
+            print("❌ Error: Cannot specify both --full and --update modes")
+            exit(1)
+        elif args.full:
+            mode = "full"
+        elif args.update:
+            mode = "update"
+        else:
+            print("❌ Error: Must specify either --full, --update, or --release-notes mode")
+            print("💡 Use --help for usage information")
+            print("💡 Use --demo to see a sample changelog entry")
+            exit(1)
 
     try:
         load_chapter_order(args.quarto_config)
@@ -766,7 +837,17 @@ if __name__ == "__main__":
                 exit(1)
             print("✅ Ollama connection successful")
 
-        new_entry = generate_changelog(mode=mode, verbose=args.verbose)
+        if mode == "release_notes":
+            # Generate release notes
+            new_entry = generate_release_notes_for_version(
+                args.version, 
+                args.previous_version, 
+                args.description, 
+                verbose=args.verbose
+            )
+        else:
+            # Generate changelog entry
+            new_entry = generate_changelog(mode=mode, verbose=args.verbose)
 
         if args.test:
             print("🧪 TEST OUTPUT ONLY:\n")
@@ -809,10 +890,18 @@ if __name__ == "__main__":
                 
                 updated_content = "\n".join(new_lines)
 
-            with open(CHANGELOG_FILE, "w", encoding="utf-8") as f:
-                f.write(updated_content.strip() + "\n")
-
-            print(f"\n✅ Changelog written to {CHANGELOG_FILE}")
+            if mode == "release_notes":
+                # Save release notes to a file for the workflow to use
+                release_notes_file = f"release_notes_{args.version}.md"
+                with open(release_notes_file, "w", encoding="utf-8") as f:
+                    f.write(new_entry.strip() + "\n")
+                print(f"\n✅ Release notes written to {release_notes_file}")
+                print("📋 Next step: Use this file in your GitHub workflow")
+            else:
+                # Save changelog entry
+                with open(CHANGELOG_FILE, "w", encoding="utf-8") as f:
+                    f.write(updated_content.strip() + "\n")
+                print(f"\n✅ Changelog written to {CHANGELOG_FILE}")
             
     except KeyboardInterrupt:
         print(f"\n⚠️ Process interrupted by user")
