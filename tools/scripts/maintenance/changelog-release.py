@@ -10,6 +10,12 @@ from collections import defaultdict
 from datetime import datetime
 from openai import OpenAI
 
+# =============================================================================
+# GLOBAL CONFIGURATION
+# =============================================================================
+CHANGELOG_FILE = "CHANGELOG.md"
+RELEASE_NOTES_FILE = "release_notes_v{version}.md"
+
 # Initialize OpenAI client (will be None if not using OpenAI)
 client = None
 use_ollama = False  # Global flag to track which service to use
@@ -67,12 +73,11 @@ def generate_release_notes_from_changelog(version, previous_version, description
         print(f"📋 Description: {description}")
         print(f"📋 Changelog entry length: {len(changelog_entry)} characters")
     
-    # For testing - skip AI generation and just return a simple template
-    if verbose:
+    # Generate AI-powered release notes if not in test mode
+    if verbose:  # In test mode, skip AI generation
         print("🧪 TEST MODE - Skipping AI generation for faster debugging")
-    
-    # Create a simple template without AI generation
-    release_notes = f"""## 📚 Release {version}
+        # Create a simple template without AI generation (test mode)
+        release_notes = f"""## 📚 Release {version}
 
 ### 🎯 Key Updates
 - Repository restructuring for better organization
@@ -102,30 +107,52 @@ For a complete list of all changes, improvements, and updates, see the [detailed
 ---
 *Test mode - AI generation disabled for faster debugging*
 """
-    
-    return release_notes
-    
-    if verbose:
-        print("📝 Sending prompt to AI...")
-    
-    # Get AI response
-    ai_response = call_ollama(prompt, model, verbose=verbose)
-    
-    if not ai_response:
-        print("❌ Failed to get AI response")
-        return None
-    
-    if verbose:
-        print("✅ Received AI response")
-        print("📄 Generated content:")
-        print("-" * 50)
-        print(ai_response)
-        print("-" * 50)
-    
-    # Create the final release notes
-    release_notes = f"""## 📚 Release {version}
+    else:  # Not in test mode, use AI
+        try:
+            # Create prompt for AI
+            prompt = f"""You are an expert technical writer creating release notes for a Machine Learning Systems textbook.
 
-{ai_response}
+CONTEXT:
+- Version: {version}
+- Previous Version: {previous_version}
+- Description: {description}
+- Changelog Entry: {changelog_entry}
+
+TASK:
+Create professional, engaging release notes that:
+1. Summarize the key changes from the changelog
+2. Highlight the most important updates
+3. Use clear, technical language
+4. Include all standard release note sections
+5. Make it easy for readers to understand what's new
+
+FORMAT:
+- Use markdown formatting
+- Include emojis for visual appeal
+- Structure with clear sections
+- Keep it concise but informative
+
+Generate the complete release notes:"""
+
+            # Call AI
+            if use_ollama:
+                ai_summary = call_ollama(prompt, model=model, verbose=verbose)
+            else:
+                # Use OpenAI if available
+                if client is None:
+                    raise ValueError("OpenAI client not initialized")
+                response = client.chat.completions.create(
+                    model="gpt-4",
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=1000,
+                    temperature=0.7
+                )
+                ai_summary = response.choices[0].message.content
+            
+            # Create the final release notes with AI summary
+            release_notes = f"""## 📚 Release {version}
+
+{ai_summary}
 
 ### 📋 Release Information
 - **Type**: Release
@@ -150,19 +177,63 @@ For a complete list of all changes, improvements, and updates, see the [detailed
 ---
 *AI-generated release notes using {model} based on detailed changelog analysis*
 """
+        except Exception as e:
+            print(f"⚠️ AI generation failed: {e}, using fallback template")
+            # Create fallback template
+            release_notes = f"""## 📚 Release {version}
+
+### 🎯 Key Updates
+- Repository restructuring for better organization
+- Enhanced learning with integrated quizzes
+- Improved content clarity and navigation
+
+### 📋 Release Information
+- **Type**: Release
+- **Previous Version**: {previous_version}
+- **Published at**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+- **Build Platform**: Linux (HTML + PDF)
+
+### 🔗 Quick Links
+- 🌐 [Read Online](https://harvard-edge.github.io/cs249r_book)
+- 📄 [Download PDF](https://github.com/harvard-edge/cs249r_book/releases/download/{version}/Machine-Learning-Systems.pdf)
+- 📄 [Direct PDF Access](https://harvard-edge.github.io/cs249r_book/assets/Machine-Learning-Systems.pdf)
+
+### 📖 Detailed Changes
+For a complete list of all changes, improvements, and updates, see the [detailed changelog](https://harvard-edge.github.io/cs249r_book/changelog.html).
+
+### 🏗️ Build Information
+- **Platform**: Linux
+- **Outputs**: HTML + PDF
+- **Deployment**: GitHub Pages
+- **PDF Generation**: Quarto with LaTeX
+
+---
+*Fallback template - AI generation failed*
+"""
     
     return release_notes
 
 
-def generate_release_notes(version, previous_version, description, model="gemma2:9b", verbose=False):
-    """Generate AI-powered release notes."""
+def generate_release_notes(version, previous_version, description, model="gemma2:9b", verbose=False, use_openai=False):
+    """Generate AI-powered release notes and save to file."""
     
-    # First, try to extract changelog data
-    changelog_entry = extract_latest_changelog_section()
+    print(f"📝 Generating release notes for version {version}...")
+    
+    # Set AI model selection
+    global use_ollama
+    use_ollama = not use_openai
+    
+    # First, ensure we have a changelog
+    if not os.path.exists(CHANGELOG_FILE):
+        print(f"📝 Changelog not found, generating incremental changelog...")
+        generate_changelog(mode="incremental", verbose=verbose)
+    
+    # Try to extract changelog data
+    changelog_entry = extract_latest_changelog_section(CHANGELOG_FILE)
     
     if changelog_entry:
         print("📝 Using changelog data for release notes generation...")
-        return generate_release_notes_from_changelog(
+        release_notes = generate_release_notes_from_changelog(
             version=version,
             previous_version=previous_version,
             description=description,
@@ -200,6 +271,9 @@ def generate_release_notes(version, previous_version, description, model="gemma2
 - 📄 [Download PDF](https://github.com/harvard-edge/cs249r_book/releases/download/{version}/Machine-Learning-Systems.pdf)
 - 📄 [Direct PDF Access](https://harvard-edge.github.io/cs249r_book/assets/Machine-Learning-Systems.pdf)
 
+### 📖 Detailed Changes
+For a complete list of all changes, improvements, and updates, see the [detailed changelog](https://harvard-edge.github.io/cs249r_book/changelog.html).
+
 ### 🏗️ Build Information
 - **Platform**: Linux
 - **Outputs**: HTML + PDF
@@ -209,10 +283,15 @@ def generate_release_notes(version, previous_version, description, model="gemma2
 ---
 *Test mode - AI generation disabled for faster debugging*
 """
-        
-        return release_notes
+    
+    # Save release notes to file
+    filename = RELEASE_NOTES_FILE.format(version=version)
+    with open(filename, 'w', encoding='utf-8') as f:
+        f.write(release_notes)
+    
+    print(f"✅ Release notes saved to: {filename}")
+    return filename
 
-CHANGELOG_FILE = "CHANGELOG.md"
 QUARTO_YML_FILE = "book/config/_quarto-pdf.yml"  # Default to PDF config which has chapters structure
 GITHUB_REPO_URL = "https://github.com/harvard-edge/cs249r_book/"
 # Removed MAJOR_CHANGE_THRESHOLD since we're organizing by content type now
@@ -568,15 +647,15 @@ def normalized_path(path):
     return os.path.normpath(path).lower()
 
 def generate_entry(start_date, end_date=None, verbose=False, is_latest=False):
-    # if verbose:
-    #     print(f"📁 Processing changes from {start_date} to {end_date or 'now'}")
-    # print(f"🔍 Analyzing Git changes...")
+    if verbose:
+        print(f"📁 Processing changes from {start_date} to {end_date or 'now'}")
+    print(f"🔍 Analyzing Git changes...")
     changes = get_changes_in_dev_since(start_date, end_date, verbose=verbose)
     if not changes.strip():
-        # print("  ⚠️ No changes found in specified period")
+        print("  ⚠️ No changes found in specified period")
         return None
 
-    # print("📊 Categorizing changes by file...")
+    print("📊 Categorizing changes by file...")
     changes_by_file = defaultdict(lambda: [0, 0])
     for line in changes.splitlines():
         parts = line.split("\t")
@@ -602,15 +681,15 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False):
     )
 
     total_files = len(ordered_files)
-    # print(f"📝 Processing {total_files} changed files...")
+    print(f"📝 Processing {total_files} changed files...")
     
     for idx, file_path in enumerate(ordered_files, 1):
         added, removed = changes_by_file[file_path]
         total = added + removed
-        # if verbose:
-        #     print(f"🔍 Summarizing {file_path} ({added}+ / {removed}-) [{idx}/{total_files}]")
-        # else:
-        #     print(f"  📄 [{idx}/{total_files}] {os.path.basename(file_path)} ({added}+ {removed}-)")
+        if verbose:
+            print(f"🔍 Summarizing {file_path} ({added}+ / {removed}-) [{idx}/{total_files}]")
+        else:
+            print(f"  📄 [{idx}/{total_files}] {os.path.basename(file_path)} ({added}+ {removed}-)")
         
         # Skip references
         if "references.qmd" in file_path:
@@ -620,16 +699,16 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False):
         
         # Skip if no meaningful commits
         if not commit_msgs.strip():
-            # if verbose:
-            #     print(f"⏭️ Skipping {file_path} - no meaningful changes")
+            if verbose:
+                print(f"⏭️ Skipping {file_path} - no meaningful changes")
             continue
             
-        # Skip AI processing for speed - just show headers
-        chapter_title = extract_chapter_title(file_path)
-        print(f"📄 {chapter_title}")
+        print(f"    🤖 Generating summary...")
+        summary = summarize_changes_with_openai(file_path, commit_msgs, verbose=verbose, use_ollama=use_ollama, ollama_model=args.model)
         
-        # Create a simple summary without AI
-        summary = f"- `███░░` **{chapter_title}**: Updated content"
+        # Show the generated summary
+        summary_text = summary.replace(f"- **{extract_chapter_title(file_path)}**: ", "")
+        print(f"      📝 {summary_text}")
         
         # Categorize by content type
         if "contents/frontmatter/" in file_path:
@@ -641,11 +720,11 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False):
         else:
             chapters.append(summary)
 
-    # print(f"📋 Organizing into sections...")
-    # print(f"  📄 Frontmatter: {len(frontmatter)} entries")
-    # print(f"  📖 Chapters: {len(chapters)} entries")
-    # print(f"  🧑‍💻 Labs: {len(labs)} entries")
-    # print(f"  📚 Appendix: {len(appendix)} entries")
+    print(f"📋 Organizing into sections...")
+    print(f"  📄 Frontmatter: {len(frontmatter)} entries")
+    print(f"  📖 Chapters: {len(chapters)} entries")
+    print(f"  🧑‍💻 Labs: {len(labs)} entries")
+    print(f"  📚 Appendix: {len(appendix)} entries")
 
     # Determine if sections should be open or closed
     # All entries should be closed by default - let users choose what to explore
@@ -666,7 +745,7 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False):
         print("  ⚠️ No meaningful content changes found - skipping entry")
         return None
 
-    # print("✅ Entry generation complete")
+    print("✅ Entry generation complete")
     return entry
 
 def generate_demo_entry():
@@ -772,15 +851,15 @@ def fold_existing_entries(content):
     return re.sub(pattern, replacement, content)
 
 def generate_changelog(mode="incremental", verbose=False):
-    # print("🔄 Starting Git data fetch...")
-    # print("  📦 Fetching gh-pages branch...")
+    print("🔄 Starting Git data fetch...")
+    print("  📦 Fetching gh-pages branch...")
     run_git_command(["git", "fetch", "origin", "gh-pages:refs/remotes/origin/gh-pages"], verbose=verbose)
-    # print("  📦 Fetching dev branch...")
+    print("  📦 Fetching dev branch...")
     run_git_command(["git", "fetch", "origin", "dev:refs/remotes/origin/dev"], verbose=verbose)
-    # print("✅ Git data fetch complete")
+    print("✅ Git data fetch complete")
 
     def get_latest_gh_pages_commit():
-        # print("🔍 Looking for latest publication commit...")
+        print("🔍 Looking for latest publication commit...")
         # Look for actual publication commits, not administrative ones
         output = run_git_command(["git", "log", "--pretty=format:%H %aI", "--grep=Built site for gh-pages", "origin/gh-pages"], verbose=verbose)
         if output.strip():
@@ -788,10 +867,9 @@ def generate_changelog(mode="incremental", verbose=False):
             parts = first_line.split(" ", 1)
             result = (parts[0], parts[1]) if len(parts) == 2 else (None, None)
             if result[0]:
-                # print(f"  📅 Found latest commit: {result[0][:8]} from {result[1]}")
-                pass
+                print(f"  📅 Found latest commit: {result[0][:8]} from {result[1]}")
             return result
-        # print("  ⚠️ No publication commits found")
+        print("  ⚠️ No publication commits found")
         return (None, None)
 
     def get_all_gh_pages_commits():
@@ -887,7 +965,7 @@ def generate_changelog(mode="incremental", verbose=False):
     else:
         if verbose:
             print("⚡ Running update mode...")
-        # print(f"📅 Processing changes since: {format_friendly_date(latest_date) if latest_date else 'beginning'}")
+        print(f"📅 Processing changes since: {format_friendly_date(latest_date) if latest_date else 'beginning'}")
         entry = generate_entry(latest_date, verbose=verbose, is_latest=True)
         if not entry:
             return "_No updates found._"
@@ -946,26 +1024,31 @@ if __name__ == "__main__":
             exit(1)
         
         print("📝 Generating release notes...")
-        release_notes = generate_release_notes(
+        filename = generate_release_notes(
             version=args.version,
             previous_version=args.previous_version,
             description=args.description,
             model=args.model,
-            verbose=args.verbose
+            verbose=args.verbose,
+            use_openai=args.openai
         )
         
-        if release_notes:
-            filename = f"release_notes_{args.version}.md"
-            if not args.test:
-                with open(filename, 'w', encoding='utf-8') as f:
-                    f.write(release_notes)
-                print(f"✅ Release notes written to: {filename}")
-            else:
+        if filename and os.path.exists(filename):
+            if args.test:
+                # Read and display the content for test mode
+                with open(filename, 'r', encoding='utf-8') as f:
+                    content = f.read()
                 print("🧪 TEST MODE - Release notes content:")
                 print("=" * 60)
-                print(release_notes)
+                print(content)
                 print("=" * 60)
-            print(f"📊 File size: {len(release_notes)} characters")
+                print(f"📊 File size: {len(content)} characters")
+                # Clean up test file
+                os.remove(filename)
+                print("🧹 Test file cleaned up")
+            else:
+                print(f"✅ Release notes saved to: {filename}")
+                print(f"📊 File size: {os.path.getsize(filename)} bytes")
         else:
             print("❌ Failed to generate release notes")
             exit(1)
@@ -996,31 +1079,31 @@ if __name__ == "__main__":
         load_chapter_order(args.quarto_config)
         
         # Print configuration header
-        # print("=" * 60)
-        # print("📝 CHANGELOG GENERATION CONFIG")
-        # print("=" * 60)
-        # print(f"🎯 Mode: {mode.upper()}")
-        # if args.openai:
-        #     print("🤖 AI Model: OpenAI GPT")
-        # else:
-        #     print(f"🤖 AI Model: {args.model} (via Ollama)")
-        # print(f"🔧 Test Mode: {'ON' if args.test else 'OFF'}")
-        # print(f"📢 Verbose: {'ON' if args.verbose else 'OFF'}")
-        # print(f"📋 Features: Impact bars, importance sorting, specific summaries")
-        # print("=" * 60)
-        # print()
+        print("=" * 60)
+        print("📝 CHANGELOG GENERATION CONFIG")
+        print("=" * 60)
+        print(f"🎯 Mode: {mode.upper()}")
+        if args.openai:
+            print("🤖 AI Model: OpenAI GPT")
+        else:
+            print(f"🤖 AI Model: {args.model} (via Ollama)")
+        print(f"🔧 Test Mode: {'ON' if args.test else 'OFF'}")
+        print(f"📢 Verbose: {'ON' if args.verbose else 'OFF'}")
+        print(f"📋 Features: Impact bars, importance sorting, specific summaries")
+        print("=" * 60)
+        print()
         
-        # print(f"🚀 Starting changelog generation in {mode} mode...")
+        print(f"🚀 Starting changelog generation in {mode} mode...")
 
         if args.openai:
-            # print("🤖 Using OpenAI for summarization.")
+            print("🤖 Using OpenAI for summarization.")
             use_ollama = False
             # Initialize OpenAI client
             client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
             if not os.getenv("OPENAI_API_KEY"):
                 raise ValueError("OPENAI_API_KEY not set. Please set it in your environment variables.")
         else:
-            # print(f"🤖 Using Ollama for summarization with model: {args.model}")
+            print(f"🤖 Using Ollama for summarization with model: {args.model}")
             use_ollama = True
             # Test Ollama connection
             test_response = call_ollama("Hello", model=args.model, verbose=False)
@@ -1030,7 +1113,7 @@ if __name__ == "__main__":
                 print("   ollama pull gemma2:9b")
                 print("   ollama pull gemma2:27b")
                 exit(1)
-            # print("✅ Ollama connection successful")
+            print("✅ Ollama connection successful")
 
         new_entry = generate_changelog(mode=mode, verbose=args.verbose)
 
