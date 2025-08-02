@@ -86,12 +86,12 @@ def generate_release_notes_from_changelog(version, previous_version, description
 - **Build Platform**: Linux (HTML + PDF)
 
 ### 🔗 Quick Links
-- 🌐 [Read Online](https://harvard-edge.github.io/cs249r_book)
+- 🌐 [Read Online](https://mlsysbook.ai)
 - 📄 [Download PDF](https://github.com/harvard-edge/cs249r_book/releases/download/{version}/Machine-Learning-Systems.pdf)
-- 📄 [Direct PDF Access](https://harvard-edge.github.io/cs249r_book/assets/Machine-Learning-Systems.pdf)
+- 📄 [Direct PDF Access](https://mlsysbook.ai/pdf)
 
 ### 📖 Detailed Changes
-For a complete list of all changes, improvements, and updates, see the [detailed changelog](https://harvard-edge.github.io/cs249r_book/changelog.html).
+For a complete list of all changes, improvements, and updates, see the [detailed changelog](https://mlsysbook.ai/changelog.html).
 
 ### 🏗️ Build Information
 - **Platform**: Linux
@@ -153,12 +153,12 @@ def generate_release_notes(version, previous_version, description, verbose=False
 - **Build Platform**: Linux (HTML + PDF)
 
 ### 🔗 Quick Links
-- 🌐 [Read Online](https://harvard-edge.github.io/cs249r_book)
+- 🌐 [Read Online](https://mlsysbook.ai)
 - 📄 [Download PDF](https://github.com/harvard-edge/cs249r_book/releases/download/{version}/Machine-Learning-Systems.pdf)
-- 📄 [Direct PDF Access](https://harvard-edge.github.io/cs249r_book/assets/Machine-Learning-Systems.pdf)
+- 📄 [Direct PDF Access](https://mlsysbook.ai/pdf)
 
 ### 📖 Detailed Changes
-For a complete list of all changes, improvements, and updates, see the [detailed changelog](https://harvard-edge.github.io/cs249r_book/changelog.html).
+For a complete list of all changes, improvements, and updates, see the [detailed changelog](https://mlsysbook.ai/changelog.html).
 
 ### 🏗️ Build Information
 - **Platform**: Linux
