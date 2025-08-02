@@ -109,10 +109,10 @@ def generate_release_notes(version, previous_version, description, verbose=False
         print(f"📝 Changelog not found, generating incremental changelog...")
         # Import and call the changelog generation
         import subprocess
-        result = subprocess.run([
-            "python3", "tools/scripts/maintenance/change_log.py", 
-            "--incremental", "--verbose" if verbose else ""
-        ], capture_output=True, text=True)
+        cmd = ["python3", "tools/scripts/maintenance/change_log.py", "--incremental"]
+        if verbose:
+            cmd.append("--verbose")
+        result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             print(f"⚠️ Failed to generate changelog: {result.stderr}")
     
