@@ -114,7 +114,7 @@ This analyzes:
 
 ### AI Model Configuration
 
-The workflow uses Ollama with configurable AI models:
+The workflow uses Ollama (local AI) with configurable models:
 
 - **Default**: `gemma2:9b` (fast, good quality)
 - **Alternative**: `gemma2:27b` (better quality, slower)
@@ -124,6 +124,8 @@ You can specify the model in the workflow inputs:
 - Go to GitHub Actions → "🚀 Publish Live"
 - Set "AI model" field to your preferred model
 - Leave empty for default (`gemma2:9b`)
+
+**No API keys required** - all AI processing happens locally via Ollama.
 
 ### Manual Release Notes Workflow
 

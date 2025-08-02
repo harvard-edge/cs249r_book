@@ -8,11 +8,8 @@ import requests
 import json
 from collections import defaultdict
 from datetime import datetime
-from openai import OpenAI
-
-# Initialize OpenAI client (will be None if not using OpenAI)
-client = None
-use_ollama = False  # Global flag to track which service to use
+# Initialize Ollama as default
+use_ollama = True  # Global flag to track which service to use
 
 CHANGELOG_FILE = "CHANGELOG.md"
 QUARTO_YML_FILE = "book/config/_quarto-pdf.yml"  # Default to PDF config which has chapters structure
@@ -752,7 +749,6 @@ if __name__ == "__main__":
     parser.add_argument("--demo", action="store_true", help="Generate a demo changelog entry with sample data.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output.")
     parser.add_argument("-q", "--quarto-config", type=str, help="Path to quarto config file (default: book/config/_quarto-pdf.yml)")
-    parser.add_argument("--openai", action="store_true", help="Use OpenAI for summarization instead of Ollama (default).")
     parser.add_argument("-m", "--model", type=str, default="gemma2:9b", help="Ollama model to use (default: gemma2:9b). Popular options: gemma2:9b, gemma2:27b, llama3.1:8b, llama3.1:70b")
     parser.add_argument("--release-notes", action="store_true", help="Generate release notes instead of changelog entry.")
     parser.add_argument("--version", type=str, help="Version for release notes (required with --release-notes).")
@@ -805,10 +801,7 @@ if __name__ == "__main__":
         print("📝 CHANGELOG GENERATION CONFIG")
         print("=" * 60)
         print(f"🎯 Mode: {mode.upper()}")
-        if args.openai:
-            print("🤖 AI Model: OpenAI GPT")
-        else:
-            print(f"🤖 AI Model: {args.model} (via Ollama)")
+        print(f"🤖 AI Model: {args.model} (via Ollama)")
         print(f"🔧 Test Mode: {'ON' if args.test else 'OFF'}")
         print(f"📢 Verbose: {'ON' if args.verbose else 'OFF'}")
         print(f"📋 Features: Impact bars, importance sorting, specific summaries")
@@ -817,25 +810,17 @@ if __name__ == "__main__":
         
         print(f"🚀 Starting changelog generation in {mode} mode...")
 
-        if args.openai:
-            print("🤖 Using OpenAI for summarization.")
-            use_ollama = False
-            # Initialize OpenAI client
-            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-            if not os.getenv("OPENAI_API_KEY"):
-                raise ValueError("OPENAI_API_KEY not set. Please set it in your environment variables.")
-        else:
-            print(f"🤖 Using Ollama for summarization with model: {args.model}")
-            use_ollama = True
-            # Test Ollama connection
-            test_response = call_ollama("Hello", model=args.model, verbose=False)
-            if test_response is None:
-                print("❌ Failed to connect to Ollama. Make sure it's running on localhost:11434")
-                print("💡 To install models in Ollama:")
-                print("   ollama pull gemma2:9b")
-                print("   ollama pull gemma2:27b")
-                exit(1)
-            print("✅ Ollama connection successful")
+        print(f"🤖 Using Ollama for summarization with model: {args.model}")
+        use_ollama = True
+        # Test Ollama connection
+        test_response = call_ollama("Hello", model=args.model, verbose=False)
+        if test_response is None:
+            print("❌ Failed to connect to Ollama. Make sure it's running on localhost:11434")
+            print("💡 To install models in Ollama:")
+            print("   ollama pull gemma2:9b")
+            print("   ollama pull gemma2:27b")
+            exit(1)
+        print("✅ Ollama connection successful")
 
         if mode == "release_notes":
             # Generate release notes
