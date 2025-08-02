@@ -683,7 +683,7 @@ if __name__ == "__main__":
     parser.add_argument("--incremental", action="store_true", help="Add new entries since last gh-pages publish.")
     
     # General options
-    parser.add_argument("-t", "--test", action="store_true", help="Run without writing to file.")
+    parser.add_argument("--dry-run", action="store_true", help="Show output without writing to file.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output.")
     parser.add_argument("-q", "--quarto-config", type=str, help="Path to quarto config file (default: book/config/_quarto-pdf.yml)")
     parser.add_argument("-o", "--output", type=str, default="CHANGELOG.md", help="Output file path for changelog (default: CHANGELOG.md)")
@@ -718,7 +718,7 @@ if __name__ == "__main__":
         print("📝 CHANGELOG GENERATION CONFIG")
         print("=" * 60)
         print(f"🎯 Mode: {mode.upper()}")
-        print(f"🔧 Test Mode: {'ON' if args.test else 'OFF'}")
+        print(f"🔧 Dry Run Mode: {'ON' if args.dry_run else 'OFF'}")
         print(f"📢 Verbose: {'ON' if args.verbose else 'OFF'}")
         print(f"📄 Output File: {args.output}")
         print(f"🤖 AI Mode: {'ON' if args.ai_mode else 'OFF'}")
@@ -733,8 +733,8 @@ if __name__ == "__main__":
 
         new_entry = generate_changelog(mode=mode, verbose=args.verbose, ai_mode=args.ai_mode, ollama_url=args.ollama_url, ollama_model=args.ollama_model)
 
-        if args.test:
-            print("🧪 TEST OUTPUT ONLY:\n")
+        if args.dry_run:
+            print("🧪 DRY RUN OUTPUT ONLY:\n")
             print(new_entry)
         else:
             existing = ""
