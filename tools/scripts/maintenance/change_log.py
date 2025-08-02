@@ -16,6 +16,186 @@ import yaml
 
 # Global variables
 chapter_order = []
+LAB_STRUCTURE = None # Added for lab organization
+
+def load_lab_structure(quarto_file="book/config/_quarto-html.yml"):
+    """Load lab structure from quarto HTML config file."""
+    global LAB_STRUCTURE
+    
+    if not os.path.exists(quarto_file):
+        print(f"⚠️ Quarto config file not found: {quarto_file}")
+        return None
+    
+    try:
+        with open(quarto_file, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+        
+        # Extract lab sections from the sidebar structure
+        lab_sections = {}
+        
+        if 'website' in config and 'sidebar' in config['website']:
+            for i, section in enumerate(config['website']['sidebar']):
+                if isinstance(section, dict):
+                    # Look for lab-related sections
+                    section_id = section.get('id', '')
+                    section_title = section.get('section', '')
+                    
+                    # Check if this is a lab section or contains lab sections
+                    if any(keyword in section_id.lower() for keyword in ['arduino', 'seeed', 'grove', 'raspberry', 'shared', 'labs']):
+                        lab_sections[section_title] = []
+                        
+                        # Extract file paths from contents
+                        if 'contents' in section:
+                            for item in section['contents']:
+                                if isinstance(item, dict) and 'href' in item:
+                                    file_path = item['href']
+                                    # Convert to the actual file path format used in git
+                                    if file_path.startswith('contents/'):
+                                        file_path = f"book/{file_path}"
+                                    lab_sections[section_title].append(file_path)
+                    
+                    # Also check if this section contains nested lab sections
+                    elif 'contents' in section:
+                        for item in section['contents']:
+                            if isinstance(item, dict):
+                                item_id = item.get('id', '')
+                                item_title = item.get('section', '')
+                                
+                                # Check if this nested item is a lab section
+                                if any(keyword in item_id.lower() for keyword in ['arduino', 'seeed', 'grove', 'raspberry', 'shared', 'labs']):
+                                    lab_sections[item_title] = []
+                                    
+                                    # Extract file paths from nested contents
+                                    if 'contents' in item:
+                                        for nested_item in item['contents']:
+                                            if isinstance(nested_item, dict) and 'href' in nested_item:
+                                                file_path = nested_item['href']
+                                                # Convert to the actual file path format used in git
+                                                if file_path.startswith('contents/'):
+                                                    file_path = f"book/{file_path}"
+                                                lab_sections[item_title].append(file_path)
+        
+        LAB_STRUCTURE = lab_sections
+        print(f"✅ Loaded lab structure with {len(lab_sections)} groups")
+        return lab_sections
+        
+    except Exception as e:
+        print(f"❌ Error loading lab structure: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+def get_lab_group_for_file(file_path):
+    """Determine which lab group a file belongs to based on the structure."""
+    if not LAB_STRUCTURE:
+        return None
+    
+    # Normalize the file path for comparison
+    normalized_path = file_path.replace('book/', '')
+    
+    for group_name, files in LAB_STRUCTURE.items():
+        for group_file in files:
+            # Convert group file path to normalized format
+            group_file_normalized = group_file.replace('book/', '')
+            
+            if normalized_path == group_file_normalized:
+                return group_name
+    
+    return None
+
+def organize_labs_by_structure(lab_entries):
+    """Organize lab entries according to the structure from quarto config."""
+    if not LAB_STRUCTURE:
+        # Fallback to flat list if no structure loaded
+        return lab_entries
+    
+    # Group lab entries by their hardware platform
+    lab_groups = defaultdict(list)
+    
+    for entry in lab_entries:
+        # Extract file path from the entry (assuming format: "**Title**: Updated content...")
+        # We need to match this with the actual file paths
+        # For now, we'll use a simple heuristic based on the title
+        if "Arduino" in entry or "nicla" in entry.lower():
+            lab_groups["Arduino"].append(entry)
+        elif "Seeed" in entry or "xiao" in entry.lower():
+            lab_groups["Seeed XIAO ESP32S3"].append(entry)
+        elif "Grove" in entry or "grove" in entry.lower():
+            lab_groups["Grove Vision"].append(entry)
+        elif "Raspberry" in entry or "raspi" in entry.lower() or "pi " in entry.lower():
+            lab_groups["Raspberry Pi"].append(entry)
+        elif "Shared" in entry or "shared" in entry.lower() or "kws_feature" in entry.lower() or "dsp_spectral" in entry.lower():
+            lab_groups["Shared"].append(entry)
+        elif "Hands-on" in entry or "labs" in entry.lower():
+            lab_groups["Hands-on Labs"].append(entry)
+        else:
+            # Default to a general labs group
+            lab_groups["Other Labs"].append(entry)
+    
+    # Sort each group by impact level and build the organized output
+    organized_labs = []
+    
+    # Use the order from the quarto config
+    for group_name in LAB_STRUCTURE.keys():
+        if group_name in lab_groups:
+            sorted_entries = sort_by_impact_level(lab_groups[group_name])
+            if sorted_entries:
+                # Calculate total changes for this group
+                total_changes = sum(int(re.search(r'(\d+) changes', entry).group(1)) 
+                                  for entry in sorted_entries 
+                                  if re.search(r'(\d+) changes', entry))
+                
+                organized_labs.append(f"- **{group_name}**: Updated content with {total_changes} changes")
+                for entry in sorted_entries:
+                    # Extract just the title and changes, remove the group prefix
+                    title_match = re.search(r'\*\*(.*?)\*\*: Updated content with (\d+) changes', entry)
+                    if title_match:
+                        title = title_match.group(1)
+                        changes = title_match.group(2)
+                        organized_labs.append(f"  - {title}: Updated content with {changes} changes")
+    
+    return organized_labs
+
+def extract_chapter_title_from_file(file_path):
+    """Extract chapter title from the actual file content by reading the first header."""
+    try:
+        if not os.path.exists(file_path):
+            return None
+        
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Look for the first header (starts with #)
+        lines = content.split('\n')
+        for line in lines:
+            line = line.strip()
+            if line.startswith('# '):
+                # Extract title from # Title format
+                title = line[2:].strip()
+                return title
+            elif line.startswith('## '):
+                # Extract title from ## Title format
+                title = line[3:].strip()
+                return title
+        
+        # If no header found, fall back to filename
+        basename = os.path.basename(file_path)
+        if basename.endswith('.qmd'):
+            title = basename[:-4]  # Remove .qmd extension
+        else:
+            title = basename
+        
+        return title.replace('_', ' ').title()
+        
+    except Exception as e:
+        print(f"⚠️ Error reading file {file_path}: {e}")
+        # Fall back to filename
+        basename = os.path.basename(file_path)
+        if basename.endswith('.qmd'):
+            title = basename[:-4]
+        else:
+            title = basename
+        return title.replace('_', ' ').title()
 
 def load_chapter_order(quarto_file=None):
     """Load chapter order from quarto config file."""
@@ -132,7 +312,13 @@ def run_git_command(cmd, verbose=False, retries=3):
     return ""
 
 def extract_chapter_title(file_path):
-    """Extract chapter title from file path."""
+    """Extract chapter title from file content or path."""
+    # First try to extract from actual file content
+    title_from_file = extract_chapter_title_from_file(file_path)
+    if title_from_file:
+        return title_from_file
+    
+    # Fallback to path-based extraction
     # Try exact path match first
     normalized_file_path = normalized_path(file_path)
     for chapter_path in chapter_order:
@@ -193,7 +379,7 @@ def extract_chapter_title(file_path):
                     else:
                         return f"Chapter {i}: {title}"
     
-    # Fallback: extract from file path
+    # Final fallback: extract from file path
     basename = os.path.basename(file_path)
     if basename.endswith('.qmd'):
         title = basename[:-4]
@@ -356,7 +542,9 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False, ai
     if chapters:
         entry += f"<details {details_state}>\n<summary>**📖 Chapters**</summary>\n\n" + "\n".join(sort_by_impact_level(chapters)) + "\n\n</details>\n\n"
     if labs:
-        entry += f"<details {details_state}>\n<summary>**🧑‍💻 Labs**</summary>\n\n" + "\n".join(sort_by_impact_level(labs)) + "\n\n</details>\n\n"
+        # Organize labs according to the structure from quarto config
+        organized_labs = organize_labs_by_structure(labs)
+        entry += f"<details {details_state}>\n<summary>**🧑‍💻 Labs**</summary>\n\n" + "\n".join(organized_labs) + "\n\n</details>\n\n"
     if appendix:
         entry += f"<details {details_state}>\n<summary>**📚 Appendix**</summary>\n\n" + "\n".join(sort_by_impact_level(appendix)) + "\n\n</details>\n"
 
@@ -501,6 +689,7 @@ if __name__ == "__main__":
     # Load configuration
     try:
         load_chapter_order(args.quarto_config)
+        load_lab_structure("book/config/_quarto-html.yml") # Load lab structure from HTML config
         
         # Print configuration header
         print("=" * 60)
