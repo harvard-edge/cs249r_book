@@ -75,12 +75,11 @@ else
     echo "✅ PDF copied to assets/Machine-Learning-Systems.pdf"
 fi
 
-# Step 6: Commit the PDF to assets
-echo "💾 Committing PDF to assets..."
-git add assets/Machine-Learning-Systems.pdf
-git commit -m "📄 Add PDF to assets for download" || {
-    echo "⚠️ No changes to commit (PDF might already be up to date)"
-}
+# Step 6: Note about PDF handling
+echo "📄 PDF handling:"
+echo "  ✅ PDF copied to assets/Machine-Learning-Systems.pdf"
+echo "  📝 PDF will be available for download but not committed to git"
+echo "  🔗 PDF will be uploaded to GitHub Release assets during publish-live workflow"
 
 # Step 7: Push to main (this triggers GitHub Actions)
 echo "🚀 Pushing to main branch..."

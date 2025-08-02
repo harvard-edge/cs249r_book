@@ -269,7 +269,70 @@ jobs:
           echo "📊 Latest workflow status:"
           echo "$WORKFLOW_RESPONSE" | jq -r '.workflow_runs[] | "  - \(.name): \(.conclusion // "in_progress")"' | head -3
 
-      - name: 📦 Create GitHub Release
+      - name: 📄 Download Built PDF from Artifacts
+        run: |
+          echo "📄 Downloading built PDF from artifacts..."
+          
+          # Download the latest successful build artifacts
+          LATEST_BUILD=$(curl -s \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs?branch=main&status=success&per_page=1" \
+            | jq -r '.workflow_runs[0].id')
+          
+          if [ "$LATEST_BUILD" = "null" ] || [ -z "$LATEST_BUILD" ]; then
+            echo "❌ No successful builds found!"
+            exit 1
+          fi
+          
+          echo "📊 Found latest successful build: $LATEST_BUILD"
+          
+          # Download artifacts from the latest build
+          ARTIFACTS_RESPONSE=$(curl -s \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs/$LATEST_BUILD/artifacts")
+          
+          # Find the PDF artifact
+          PDF_ARTIFACT=$(echo "$ARTIFACTS_RESPONSE" | jq -r '.artifacts[] | select(.name | contains("pdf")) | .id' | head -1)
+          
+          if [ "$PDF_ARTIFACT" = "null" ] || [ -z "$PDF_ARTIFACT" ]; then
+            echo "❌ No PDF artifact found in build $LATEST_BUILD"
+            echo "📊 Available artifacts:"
+            echo "$ARTIFACTS_RESPONSE" | jq -r '.artifacts[] | "  - \(.name) (ID: \(.id))"'
+            exit 1
+          fi
+          
+          echo "📄 Found PDF artifact: $PDF_ARTIFACT"
+          
+          # Download the artifact
+          curl -L \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs/$LATEST_BUILD/artifacts/$PDF_ARTIFACT/zip" \
+            -o pdf-artifact.zip
+          
+          # Extract the PDF
+          unzip -q pdf-artifact.zip
+          
+          # Find the PDF file
+          PDF_FILE=$(find . -name "Machine-Learning-Systems.pdf" -type f | head -1)
+          
+          if [ -z "$PDF_FILE" ] || [ ! -f "$PDF_FILE" ]; then
+            echo "❌ PDF file not found in extracted artifacts!"
+            echo "📊 Extracted files:"
+            find . -type f | head -20
+            exit 1
+          fi
+          
+          echo "✅ PDF found: $PDF_FILE"
+          echo "📊 PDF size: $(du -h "$PDF_FILE" | cut -f1)"
+          
+          # Copy to a standard location
+          cp "$PDF_FILE" "Machine-Learning-Systems.pdf"
+          echo "✅ PDF ready for release: Machine-Learning-Systems.pdf"
+
+      - name: 📦 Create GitHub Release with PDF
         run: |
           echo "📦 Creating GitHub Release ${{ steps.version.outputs.new_version }}..."
           echo "📋 Release details:"
@@ -339,6 +402,42 @@ jobs:
             echo "📊 Error details:"
             echo "$RELEASE_RESPONSE" | jq -r '.message // "Unknown error"'
             echo "$RELEASE_RESPONSE" | jq -r '.errors[]?.message // empty'
+            exit 1
+          fi
+
+      - name: 📄 Upload PDF to Release Assets
+        run: |
+          echo "📄 Uploading PDF to release assets..."
+          
+          if [ ! -f "Machine-Learning-Systems.pdf" ]; then
+            echo "❌ PDF file not found!"
+            exit 1
+          fi
+          
+          echo "📊 PDF size: $(du -h Machine-Learning-Systems.pdf | cut -f1)"
+          
+          # Upload the PDF to the release
+          UPLOAD_RESPONSE=$(curl -s \
+            -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Content-Type: application/pdf" \
+            --data-binary @Machine-Learning-Systems.pdf \
+            "https://uploads.github.com/repos/${{ github.repository }}/releases/${{ env.release_id }}/assets?name=Machine-Learning-Systems.pdf")
+          
+          echo "📊 Upload Response:"
+          echo "$UPLOAD_RESPONSE" | jq '.'
+          
+          UPLOAD_ID=$(echo "$UPLOAD_RESPONSE" | jq -r '.id')
+          
+          if [ "$UPLOAD_ID" != "null" ] && [ -n "$UPLOAD_ID" ]; then
+            echo "✅ PDF uploaded successfully to release!"
+            echo "📊 Asset ID: $UPLOAD_ID"
+            echo "🔗 Download URL: https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.new_version }}/Machine-Learning-Systems.pdf"
+          else
+            echo "❌ Failed to upload PDF to release!"
+            echo "📊 Error details:"
+            echo "$UPLOAD_RESPONSE" | jq -r '.message // "Unknown error"'
             exit 1
           fi
 
