@@ -261,7 +261,7 @@ if __name__ == "__main__":
     parser.add_argument("--description", type=str, required=True, help="Release description for release notes.")
     
     # Options
-    parser.add_argument("-t", "--test", action="store_true", help="Run without writing to file.")
+    parser.add_argument("--dry-run", action="store_true", help="Show output without writing to file.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output.")
     parser.add_argument("--changelog-file", default="CHANGELOG.md", help="Path to changelog file.")
     
@@ -281,7 +281,7 @@ if __name__ == "__main__":
         print(f"🎯 Version: {args.version}")
         print(f"📋 Previous: {args.previous_version}")
         print(f"📢 Description: {args.description}")
-        print(f"🔧 Test Mode: {'ON' if args.test else 'OFF'}")
+        print(f"🔧 Dry Run Mode: {'ON' if args.dry_run else 'OFF'}")
         print(f"📢 Verbose: {'ON' if args.verbose else 'OFF'}")
         print(f"📄 Changelog File: {args.changelog_file}")
         print(f"🤖 AI Mode: {'ON' if args.ai_mode else 'OFF'}")
@@ -310,18 +310,18 @@ if __name__ == "__main__":
         )
         
         if filename and os.path.exists(filename):
-            if args.test:
-                # Read and display the content for test mode
+            if args.dry_run:
+                # Read and display the content for dry run mode
                 with open(filename, 'r', encoding='utf-8') as f:
                     content = f.read()
-                print("🧪 TEST MODE - Release notes content:")
+                print("🧪 DRY RUN - Release notes content:")
                 print("=" * 60)
                 print(content)
                 print("=" * 60)
                 print(f"📊 File size: {len(content)} characters")
-                # Clean up test file
+                # Clean up dry run file
                 os.remove(filename)
-                print("🧹 Test file cleaned up")
+                print("🧹 Dry run file cleaned up")
             else:
                 print(f"✅ Release notes saved to: {filename}")
                 print(f"📊 File size: {os.path.getsize(filename)} bytes")
