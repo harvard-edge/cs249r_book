@@ -10,6 +10,8 @@ import argparse
 import os
 import sys
 import re
+import requests
+import json
 from datetime import datetime
 
 # =============================================================================
@@ -59,7 +61,53 @@ def extract_latest_changelog_section(changelog_file="CHANGELOG.md"):
         print(f"❌ Error reading changelog: {e}")
         return None
 
-def generate_release_notes_from_changelog(version, previous_version, description, changelog_entry, verbose=False):
+def call_ollama(prompt, model="gemma2:9b", url="http://localhost:11434"):
+    """Call Ollama API to generate AI summaries."""
+    try:
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "stream": False
+        }
+        
+        response = requests.post(f"{url}/api/generate", json=payload, timeout=30)
+        if response.status_code == 200:
+            result = response.json()
+            return result.get('response', '').strip()
+        else:
+            print(f"⚠️ Ollama API error: {response.status_code}")
+            return None
+    except Exception as e:
+        print(f"⚠️ Error calling Ollama: {e}")
+        return None
+
+def generate_ai_release_summary(changelog_content, version, description, model="gemma2:9b", url="http://localhost:11434"):
+    """Generate AI summary of changelog content for release notes."""
+    prompt = f"""As a professor addressing students and faculty, provide a concise, professional summary of the changes in version {version}.
+
+Version: {version}
+Description: {description}
+
+Changelog Content:
+{changelog_content}
+
+Write a clear, academic-style summary that:
+1. Highlights the most significant updates and their educational value
+2. Emphasizes improvements to learning outcomes and practical applications
+3. Maintains a professional tone suitable for academic communication
+4. Focuses on content quality and pedagogical enhancements
+
+Keep it concise but comprehensive, as if explaining to colleagues and students what has been improved in this release:"""
+    
+    ai_summary = call_ollama(prompt, model, url)
+    
+    if ai_summary:
+        return ai_summary
+    else:
+        # Fallback to simple summary
+        return f"This release includes various improvements and updates to the Machine Learning Systems textbook."
+
+def generate_release_notes_from_changelog(version, previous_version, description, changelog_entry, verbose=False, ai_mode=False, ollama_model="gemma2:9b", ollama_url="http://localhost:11434"):
     """Generate release notes using changelog data."""
     
     if verbose:
@@ -68,14 +116,29 @@ def generate_release_notes_from_changelog(version, previous_version, description
         print(f"📋 Previous: {previous_version}")
         print(f"📋 Description: {description}")
         print(f"📋 Changelog entry length: {len(changelog_entry)} characters")
+        print(f"🤖 AI Mode: {'ON' if ai_mode else 'OFF'}")
+    
+    # Generate AI summary if enabled
+    if ai_mode and changelog_entry:
+        print("🤖 Generating AI-powered release summary...")
+        ai_summary = generate_ai_release_summary(changelog_entry, version, description, ollama_model, ollama_url)
+        if ai_summary:
+            key_updates = ai_summary
+        else:
+            key_updates = "- Repository restructuring for better organization\n- Enhanced learning with integrated quizzes\n- Improved content clarity and navigation"
+    else:
+        key_updates = "- Repository restructuring for better organization\n- Enhanced learning with integrated quizzes\n- Improved content clarity and navigation"
+    
+    # Add changelog content to release notes (only in non-AI mode)
+    changelog_section = ""
+    if not ai_mode and changelog_entry:
+        changelog_section = f"\n### 📋 Detailed Changelog\n\n```markdown\n{changelog_entry}\n```"
     
     # Create release notes template
     release_notes = f"""## 📚 Release {version}
 
 ### 🎯 Key Updates
-- Repository restructuring for better organization
-- Enhanced learning with integrated quizzes
-- Improved content clarity and navigation
+{key_updates}
 
 ### 📋 Release Information
 - **Type**: Release
@@ -88,7 +151,7 @@ def generate_release_notes_from_changelog(version, previous_version, description
 - 📄 [PDF](https://mlsysbook.ai/pdf)
 
 ### 📖 Detailed Changes
-For a complete list of all changes, improvements, and updates, see the [detailed changelog](https://www.mlsysbook.ai/contents/frontmatter/changelog/changelog).
+For a complete list of all changes, improvements, and updates, see the [detailed changelog](https://www.mlsysbook.ai/contents/frontmatter/changelog/changelog).{changelog_section}
 
 ### 🏗️ Build Information
 - **Platform**: Linux
@@ -99,7 +162,7 @@ For a complete list of all changes, improvements, and updates, see the [detailed
     
     return release_notes
 
-def generate_release_notes(version, previous_version, description, verbose=False):
+def generate_release_notes(version, previous_version, description, verbose=False, ai_mode=False, ollama_model="gemma2:9b", ollama_url="http://localhost:11434", changelog_input=None):
     """Generate release notes and save to file."""
     
     print(f"📝 Generating release notes for version {version}...")
@@ -116,8 +179,17 @@ def generate_release_notes(version, previous_version, description, verbose=False
         if result.returncode != 0:
             print(f"⚠️ Failed to generate changelog: {result.stderr}")
     
-    # Try to extract changelog data
-    changelog_entry = extract_latest_changelog_section(CHANGELOG_FILE)
+    # Determine changelog source and processing method
+    if changelog_input:
+        # Use provided changelog file directly
+        print(f"📄 Using direct changelog input: {changelog_input}")
+        changelog_entry = extract_latest_changelog_section(changelog_input)
+        if not changelog_entry:
+            print(f"❌ Could not extract from {changelog_input}, falling back to default")
+            changelog_entry = extract_latest_changelog_section(CHANGELOG_FILE)
+    else:
+        # Use default CHANGELOG.md
+        changelog_entry = extract_latest_changelog_section(CHANGELOG_FILE)
     
     if changelog_entry:
         print("📝 Using changelog data for release notes generation...")
@@ -126,7 +198,10 @@ def generate_release_notes(version, previous_version, description, verbose=False
             previous_version=previous_version,
             description=description,
             changelog_entry=changelog_entry,
-            verbose=verbose
+            verbose=verbose,
+            ai_mode=ai_mode,
+            ollama_model=ollama_model,
+            ollama_url=ollama_url
         )
     else:
         print("⚠️ No changelog data found, using basic generation...")
@@ -189,6 +264,12 @@ if __name__ == "__main__":
     parser.add_argument("-t", "--test", action="store_true", help="Run without writing to file.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output.")
     parser.add_argument("--changelog-file", default="CHANGELOG.md", help="Path to changelog file.")
+    
+    # AI options
+    parser.add_argument("--ai-mode", action="store_true", help="Enable AI-generated summaries from changelog.")
+    parser.add_argument("--changelog-input", type=str, help="Path to changelog file to use directly (if not provided, uses AI to process default CHANGELOG.md).")
+    parser.add_argument("--ollama-url", default="http://localhost:11434", help="Ollama API URL for AI summaries.")
+    parser.add_argument("--ollama-model", default="gemma2:9b", help="Ollama model to use for AI summaries.")
 
     args = parser.parse_args()
     
@@ -203,6 +284,14 @@ if __name__ == "__main__":
         print(f"🔧 Test Mode: {'ON' if args.test else 'OFF'}")
         print(f"📢 Verbose: {'ON' if args.verbose else 'OFF'}")
         print(f"📄 Changelog File: {args.changelog_file}")
+        print(f"🤖 AI Mode: {'ON' if args.ai_mode else 'OFF'}")
+        if args.ai_mode:
+            print(f"🤖 AI Model: {args.ollama_model}")
+            print(f"🤖 AI URL: {args.ollama_url}")
+            if args.changelog_input:
+                print(f"📄 Direct Changelog Input: {args.changelog_input}")
+            else:
+                print(f"📄 AI Processing: Latest from {args.changelog_file}")
         print("=" * 60)
         print()
         
@@ -213,7 +302,11 @@ if __name__ == "__main__":
             version=args.version,
             previous_version=args.previous_version,
             description=args.description,
-            verbose=args.verbose
+            verbose=args.verbose,
+            ai_mode=args.ai_mode,
+            ollama_model=args.ollama_model,
+            ollama_url=args.ollama_url,
+            changelog_input=args.changelog_input
         )
         
         if filename and os.path.exists(filename):
