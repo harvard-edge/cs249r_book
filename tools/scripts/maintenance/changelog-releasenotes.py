@@ -90,7 +90,7 @@ def generate_release_notes_from_changelog(version, previous_version, description
 - 📄 [PDF](https://mlsysbook.ai/pdf)
 
 ### 📖 Detailed Changes
-For a complete list of all changes, improvements, and updates, see the [detailed changelog](https://mlsysbook.ai/changelog.html).
+For a complete list of all changes, improvements, and updates, see the [detailed changelog](https://www.mlsysbook.ai/contents/frontmatter/changelog/changelog).
 
 ### 🏗️ Build Information
 - **Platform**: Linux
@@ -156,7 +156,7 @@ def generate_release_notes(version, previous_version, description, verbose=False
 - 📄 [PDF](https://mlsysbook.ai/pdf)
 
 ### 📖 Detailed Changes
-For a complete list of all changes, improvements, and updates, see the [detailed changelog](https://mlsysbook.ai/changelog.html).
+For a complete list of all changes, improvements, and updates, see the [detailed changelog](https://www.mlsysbook.ai/contents/frontmatter/changelog/changelog).
 
 ### 🏗️ Build Information
 - **Platform**: Linux
