@@ -97,7 +97,7 @@ The workflow automatically generates AI-powered release notes using your existin
 
 ```bash
 # Manual usage (for testing)
-python tools/scripts/maintenance/update_changelog.py \
+python tools/scripts/maintenance/generate_release_content.py \
   --release-notes \
   --version v1.2.0 \
   --previous-version v1.1.0 \

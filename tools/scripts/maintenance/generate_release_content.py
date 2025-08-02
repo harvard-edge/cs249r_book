@@ -1,3 +1,26 @@
+#!/usr/bin/env python3
+"""
+Generate changelog entries and release notes using AI analysis.
+
+This script analyzes git commits to generate:
+1. Changelog entries for the CHANGELOG.md file
+2. Release notes for GitHub releases
+
+Features:
+- AI-powered commit analysis using Ollama
+- Categorization of changes (features, fixes, docs, etc.)
+- Impact assessment and importance ranking
+- Customizable AI models
+- Support for both changelog and release notes modes
+
+Usage:
+  # Generate changelog entry
+  python generate_release_content.py --changelog
+
+  # Generate release notes
+  python generate_release_content.py --release-notes --version v1.2.0 --previous-version v1.1.0 --description "New features"
+"""
+
 import subprocess
 import re
 import os
