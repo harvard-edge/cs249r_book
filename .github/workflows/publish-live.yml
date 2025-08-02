@@ -25,6 +25,10 @@ on:
         description: 'Type "PUBLISH" to confirm'
         required: true
         default: ''
+      ai_model:
+        description: 'AI model for release notes (default: gemma2:9b)'
+        required: false
+        default: 'gemma2:9b'
 
 permissions:
   contents: write
@@ -336,16 +340,41 @@ jobs:
         run: |
           echo "📝 Generating AI-powered release notes..."
           
-          # Install Python dependencies if needed
+          # Install Python dependencies
           python -m pip install --upgrade pip
           python -m pip install openai requests
           
+          # Install Ollama
+          echo "🤖 Installing Ollama..."
+          curl -fsSL https://ollama.ai/install.sh | sh
+          
+          # Start Ollama service
+          echo "🚀 Starting Ollama service..."
+          ollama serve &
+          sleep 10  # Wait for service to start
+          
+          # Pull the model (configurable via workflow input)
+          MODEL="${{ github.event.inputs.ai_model || 'gemma2:9b' }}"
+          echo "📦 Pulling AI model: $MODEL"
+          ollama pull $MODEL
+          
+          # Test Ollama connection
+          echo "🧪 Testing Ollama connection..."
+          if ollama list | grep -q "$MODEL"; then
+            echo "✅ Ollama model ready: $MODEL"
+          else
+            echo "❌ Failed to pull model: $MODEL"
+            exit 1
+          fi
+          
           # Generate release notes using your existing AI system
+          echo "📝 Generating release notes with AI..."
           python tools/scripts/maintenance/update_changelog.py \
             --release-notes \
             --version ${{ steps.version.outputs.new_version }} \
             --previous-version ${{ steps.version.outputs.previous_version }} \
             --description "${{ github.event.inputs.description }}" \
+            --model $MODEL \
             --verbose
           
           # Check if release notes were generated
@@ -353,9 +382,20 @@ jobs:
             echo "✅ AI release notes generated successfully"
             cat "release_notes_${{ steps.version.outputs.new_version }}.md"
           else
-            echo "⚠️ AI release notes generation failed, using fallback"
-            # Fallback to basic release notes
-            cat > "release_notes_${{ steps.version.outputs.new_version }}.md" << EOF
+            echo "⚠️ AI release notes generation failed, trying fallback..."
+            
+            # Try without AI (basic analysis)
+            echo "🔄 Attempting basic release notes generation..."
+            python tools/scripts/maintenance/update_changelog.py \
+              --release-notes \
+              --version ${{ steps.version.outputs.new_version }} \
+              --previous-version ${{ steps.version.outputs.previous_version }} \
+              --description "${{ github.event.inputs.description }}" \
+              --openai \
+              --verbose || {
+              echo "⚠️ Basic generation also failed, using template"
+              # Fallback to basic release notes template
+              cat > "release_notes_${{ steps.version.outputs.new_version }}.md" << EOF
           ## 📚 Release ${{ steps.version.outputs.new_version }}
           
           **${{ github.event.inputs.description }}**
@@ -379,7 +419,11 @@ jobs:
           - 🌐 [Read Online](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }})
           - 📄 [Download PDF](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.new_version }}/Machine-Learning-Systems.pdf)
           - 📄 [Direct PDF Link](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/assets/Machine-Learning-Systems.pdf)
+          
+          ---
+          *Note: AI analysis was unavailable, using template release notes*
           EOF
+            }
           fi
 
       - name: 📦 Create GitHub Release with PDF

@@ -93,24 +93,44 @@ The workflow now creates **draft releases** that you can edit manually on GitHub
 
 ### Generate Release Notes Script
 
-Use the release notes generator for comprehensive analysis:
+The workflow automatically generates AI-powered release notes using your existing changelog system:
 
 ```bash
-python tools/scripts/generate_release_notes.py v1.2.0 "Add new chapter on TinyML" v1.1.0
+# Manual usage (for testing)
+python tools/scripts/maintenance/update_changelog.py \
+  --release-notes \
+  --version v1.2.0 \
+  --previous-version v1.1.0 \
+  --description "Add new chapter on TinyML" \
+  --model gemma2:9b
 ```
 
-This script analyzes:
+This analyzes:
 - 📊 Git commits since last release
 - 📁 Changed files and directories
 - 📖 Content updates and improvements
 - 🔧 Technical changes and infrastructure updates
+- 🎯 Impact assessment with visual bars
+
+### AI Model Configuration
+
+The workflow uses Ollama with configurable AI models:
+
+- **Default**: `gemma2:9b` (fast, good quality)
+- **Alternative**: `gemma2:27b` (better quality, slower)
+- **Other options**: `llama3.1:8b`, `llama3.1:70b`
+
+You can specify the model in the workflow inputs:
+- Go to GitHub Actions → "🚀 Publish Live"
+- Set "AI model" field to your preferred model
+- Leave empty for default (`gemma2:9b`)
 
 ### Manual Release Notes Workflow
 
-1. **Run publish-live workflow** → Creates draft release
-2. **Generate release notes** → Use the script above
-3. **Edit on GitHub** → Go to the draft release and edit
-4. **Publish release** → Click "Publish release" when ready
+1. **Run publish-live workflow** → Creates draft release with AI notes
+2. **AI analyzes changes** → Uses your existing changelog system
+3. **Edit on GitHub** → Go to the draft release and edit if needed
+4. **Publish when ready** → Click "Publish release" when satisfied
 
 ## 📋 Usage Instructions
 
