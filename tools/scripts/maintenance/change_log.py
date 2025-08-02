@@ -686,6 +686,7 @@ if __name__ == "__main__":
     parser.add_argument("-t", "--test", action="store_true", help="Run without writing to file.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output.")
     parser.add_argument("-q", "--quarto-config", type=str, help="Path to quarto config file (default: book/config/_quarto-pdf.yml)")
+    parser.add_argument("-o", "--output", type=str, default="CHANGELOG.md", help="Output file path for changelog (default: CHANGELOG.md)")
     
     # AI options
     parser.add_argument("--ai-mode", action="store_true", help="Enable AI-generated summaries instead of simple change counts.")
@@ -719,6 +720,7 @@ if __name__ == "__main__":
         print(f"🎯 Mode: {mode.upper()}")
         print(f"🔧 Test Mode: {'ON' if args.test else 'OFF'}")
         print(f"📢 Verbose: {'ON' if args.verbose else 'OFF'}")
+        print(f"📄 Output File: {args.output}")
         print(f"🤖 AI Mode: {'ON' if args.ai_mode else 'OFF'}")
         if args.ai_mode:
             print(f"🤖 AI Model: {args.ollama_model}")
@@ -736,8 +738,8 @@ if __name__ == "__main__":
             print(new_entry)
         else:
             existing = ""
-            if os.path.exists(CHANGELOG_FILE):
-                with open(CHANGELOG_FILE, "r", encoding="utf-8") as f:
+            if os.path.exists(args.output):
+                with open(args.output, "r", encoding="utf-8") as f:
                     existing = f.read()
 
             current_year = datetime.now().year
@@ -772,10 +774,10 @@ if __name__ == "__main__":
                 
                 updated_content = "\n".join(new_lines)
 
-            with open(CHANGELOG_FILE, "w", encoding="utf-8") as f:
+            with open(args.output, "w", encoding="utf-8") as f:
                 f.write(updated_content.strip() + "\n")
 
-            print(f"\n✅ Changelog written to {CHANGELOG_FILE}")
+            print(f"\n✅ Changelog written to {args.output}")
             
     except KeyboardInterrupt:
         print(f"\n⚠️ Process interrupted by user")
