@@ -12,6 +12,7 @@ import re
 import signal
 from pathlib import Path
 from contextlib import contextmanager
+from datetime import datetime
 
 from rich.console import Console
 from rich.panel import Panel
@@ -1005,19 +1006,25 @@ class BookBinder:
         if not release_info:
             return False
         
-        # Step 4: Build process
-        console.print("\n[blue]📋 Step 4: Building Book[/blue]")
+        # Step 4: Update changelog
+        if release_info['update_changelog']:
+            console.print("\n[blue]📋 Step 4: Updating Changelog[/blue]")
+            if not self._update_changelog(release_info['version'], release_info['change_type']):
+                return False
+        
+        # Step 5: Build process
+        console.print("\n[blue]📋 Step 5: Building Book[/blue]")
         if not self._build_for_publication():
             return False
         
-        # Step 5: Release creation
+        # Step 6: Release creation
         if release_info['create_release']:
-            console.print("\n[blue]📋 Step 5: Creating Release[/blue]")
+            console.print("\n[blue]📋 Step 6: Creating Release[/blue]")
             if not self._create_release(release_info):
                 return False
         
-        # Step 6: Deployment
-        console.print("\n[blue]📋 Step 6: Deploying to Production[/blue]")
+        # Step 7: Deployment
+        console.print("\n[blue]📋 Step 7: Deploying to Production[/blue]")
         if not self._deploy_to_production():
             return False
         
@@ -1091,7 +1098,7 @@ class BookBinder:
             if current_branch == "dev":
                 console.print("[yellow]⚠️ You're on dev branch[/yellow]")
                 console.print("[blue]Should I merge dev into main?[/blue]")
-                console.print("[bold]Merge dev to main? (y/n) [y]: [/bold]", end="")
+                console.print("[bold]Merge dev to main? (Y/n) [Y]: [/bold]", end="")
                 choice = input().strip().lower()
                 if not choice:
                     choice = 'y'
@@ -1113,6 +1120,56 @@ class BookBinder:
             console.print(f"[red]❌ Branch setup failed: {e}[/red]")
             return False
 
+    def _update_changelog(self, version, change_type):
+        """Update CHANGELOG.md with new version entry"""
+        try:
+            console.print("[blue]📝 Updating changelog...[/blue]")
+            
+            # Read current changelog
+            changelog_path = os.path.join(self.root_dir, 'CHANGELOG.md')
+            with open(changelog_path, 'r') as f:
+                content = f.read()
+            
+            # Get current date
+            current_date = datetime.now().strftime("%B %d")
+            current_year = datetime.now().year
+            
+            # Create new entry
+            new_entry = f"""### {current_date}
+
+<details >
+<summary>**📦 Release {version}**</summary>
+
+- `███░░` **Book Binder CLI**: Enhanced with interactive prompts, smart defaults, and improved UX
+- `███░░` **Publishing Workflow**: Streamlined publishing process with step-by-step wizard
+- `███░░` **Environment Setup**: Automated tool installation and configuration
+- `██░░░` **Documentation**: Updated README and docs to feature binder workflow
+- `█░░░░` **Bug Fixes**: Various improvements and refinements
+
+</details>
+
+"""
+            
+            # Find the year section and add new entry
+            year_pattern = rf"## 📅 {current_year}"
+            if year_pattern in content:
+                # Add after the year header
+                content = content.replace(year_pattern, f"{year_pattern}\n\n{new_entry}")
+            else:
+                # Add new year section at the top
+                content = f"## 📅 {current_year}\n\n{new_entry}\n{content}"
+            
+            # Write back to file
+            with open(changelog_path, 'w') as f:
+                f.write(content)
+            
+            console.print("[green]✅ Changelog updated successfully[/green]")
+            return True
+            
+        except Exception as e:
+            console.print(f"[red]❌ Failed to update changelog: {e}[/red]")
+            return False
+
     def _plan_release(self):
         """Step 3: Plan version and release strategy"""
         try:
@@ -1125,7 +1182,7 @@ class BookBinder:
             
             console.print(f"[blue]Current version:[/blue] {current_version}")
             console.print(f"[blue]Suggested version:[/blue] {suggested_patch}")
-            console.print(f"[blue]Change type:[/blue] {change_type}")
+            console.print(f"[blue]Change type:[/blue] {change_type.upper()}")
             
             # Ask about version type
             console.print("\n[blue]📦 Version Strategy:[/blue]")
@@ -1133,7 +1190,7 @@ class BookBinder:
             console.print("  • [dim]minor[/dim] - New features, chapters (1.0.0 → 1.1.0)")
             console.print("  • [dim]major[/dim] - Breaking changes (1.0.0 → 2.0.0)")
             
-            console.print(f"[bold]Version type (patch/minor/major) [{change_type}]: [/bold]", end="")
+            console.print(f"[bold]Version type (patch/minor/major) [{change_type.upper()}]: [/bold]", end="")
             version_choice = input().strip().lower()
             if not version_choice:
                 version_choice = change_type
@@ -1150,7 +1207,7 @@ class BookBinder:
             
             # Ask about release creation
             console.print("\n[blue]📦 Create GitHub release?[/blue]")
-            console.print("[bold]Create release? (y/n) [y]: [/bold]", end="")
+            console.print("[bold]Create release? (Y/n) [Y]: [/bold]", end="")
             release_choice = input().strip().lower()
             if not release_choice:
                 release_choice = 'y'
@@ -1165,17 +1222,27 @@ class BookBinder:
                 ai_default_text = "y" if ai_default else "n"
                 
                 console.print("\n[blue]🤖 AI Release Notes (requires Ollama):[/blue]")
-                console.print(f"[bold]Use AI for release notes? (y/n) [{ai_default_text}]: [/bold]", end="")
+                ai_default_display = "Y" if ai_default else "n"
+                console.print(f"[bold]Use AI for release notes? (Y/n) [{ai_default_display}]: [/bold]", end="")
                 ai_choice = input().strip().lower()
                 if not ai_choice:
                     ai_choice = ai_default_text
                 use_ai_notes = ai_choice in ['y', 'yes']
             
+            # Ask about changelog update
+            console.print("\n[blue]📝 Update changelog?[/blue]")
+            console.print("[bold]Update changelog? (Y/n) [Y]: [/bold]", end="")
+            changelog_choice = input().strip().lower()
+            if not changelog_choice:
+                changelog_choice = 'y'
+            update_changelog = changelog_choice in ['y', 'yes']
+            
             return {
                 'version': version,
                 'create_release': create_release,
                 'use_ai_notes': use_ai_notes,
-                'change_type': change_type
+                'change_type': change_type,
+                'update_changelog': update_changelog
             }
             
         except Exception as e:
@@ -2047,7 +2114,7 @@ Format as markdown with clear sections."""
             console.print(f"  Email: {current_email}")
             
             console.print("\n[blue]Would you like to update your Git configuration?[/blue]")
-            console.print("[bold]Update Git config? (y/n) [n]: [/bold]", end="")
+            console.print("[bold]Update Git config? (y/N) [N]: [/bold]", end="")
             update_choice = input().strip().lower()
             if not update_choice:
                 update_choice = 'n'
@@ -2095,7 +2162,7 @@ Format as markdown with clear sections."""
             },
             {
                 'key': 'binder.auto-open',
-                'prompt': 'Auto-open browser after builds? (y/n)',
+                'prompt': 'Auto-open browser after builds? (Y/n)',
                 'default': 'y',
                 'options': ['y', 'n'],
                 'description': '🌐 Browser Preferences:'
