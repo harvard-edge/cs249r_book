@@ -53,4 +53,43 @@ document.addEventListener('DOMContentLoaded', function() {
       });
     }, delay);
   });
+
+  // Handle navbar active states
+  function setNavbarActiveState() {
+    const currentUrl = window.location.href;
+    const currentPath = window.location.pathname;
+    const navbarLinks = document.querySelectorAll('.navbar-nav .nav-link');
+    
+    navbarLinks.forEach(link => {
+      // Remove existing active classes
+      link.classList.remove('active');
+      link.removeAttribute('aria-current');
+      
+      const href = link.getAttribute('href');
+      if (href && !href.includes('mlsysbook.ai')) { // Skip external PDF link
+        let linkUrl = href;
+        
+        // If it's a relative path, make it absolute for comparison
+        if (!href.startsWith('http')) {
+          linkUrl = window.location.origin + '/' + href.replace(/^\//, '');
+        }
+        
+        // Convert .qmd to .html for comparison since that's what gets rendered
+        linkUrl = linkUrl.replace(/\.qmd$/, '.html');
+        
+        // Check for exact match
+        if (currentUrl === linkUrl || currentPath === new URL(linkUrl).pathname) {
+          link.classList.add('active');
+          link.setAttribute('aria-current', 'page');
+          console.log('Setting active:', link.textContent.trim(), 'Current:', currentUrl, 'Link:', linkUrl);
+        }
+      }
+    });
+  }
+
+  // Set initial active state
+  setNavbarActiveState();
+  
+  // Also check after a brief delay in case page is still loading
+  setTimeout(setNavbarActiveState, 500);
 });
