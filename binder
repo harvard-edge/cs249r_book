@@ -970,6 +970,14 @@ class BookBinder:
     def publish(self):
         """Publish the book (build + deploy) - Step by step process"""
         
+        # Check if command-line arguments are provided for GitHub Actions trigger
+        if len(sys.argv) > 2:
+            return self._publish_trigger_mode()
+        else:
+            return self._publish_interactive_mode()
+    
+    def _publish_interactive_mode(self):
+        """Interactive publishing wizard"""
         # Create prominent warning banner
         warning_panel = Panel(
             "[bold red]🚀 PUBLISHING WORKFLOW[/bold red]\n\n"
@@ -1031,6 +1039,153 @@ class BookBinder:
         # Success!
         self._show_publish_success()
         return True
+    
+    def _publish_trigger_mode(self):
+        """Command-line trigger mode for GitHub Actions workflow"""
+        # Parse command line arguments
+        description = sys.argv[2]
+        commit_hash = sys.argv[3] if len(sys.argv) > 3 else None
+        
+        # Parse additional options
+        release_type = "minor"
+        ai_notes = True
+        skip_confirm = False
+        
+        i = 4
+        while i < len(sys.argv):
+            arg = sys.argv[i]
+            if arg == "--type" and i + 1 < len(sys.argv):
+                release_type = sys.argv[i + 1]
+                i += 2
+            elif arg == "--no-ai":
+                ai_notes = False
+                i += 1
+            elif arg == "--yes":
+                skip_confirm = True
+                i += 1
+            else:
+                i += 1
+        
+        # Validate inputs
+        if not description:
+            console.print("[red]❌ Description is required[/red]")
+            console.print("[dim]Usage: ./binder publish 'Description' [commit-hash] [options][/dim]")
+            console.print("[dim]Examples:[/dim]")
+            console.print("  ./binder publish 'Add new chapter' abc123def")
+            console.print("  ./binder publish 'Bug fixes' def456ghi --type patch --no-ai")
+            return False
+        
+        if release_type not in ["patch", "minor", "major"]:
+            console.print(f"[red]❌ Invalid release type: {release_type}. Must be patch, minor, or major[/red]")
+            return False
+        
+        # Check GitHub CLI
+        try:
+            subprocess.run(['gh', '--version'], capture_output=True, check=True)
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            console.print("[red]❌ GitHub CLI (gh) is not installed[/red]")
+            console.print("[yellow]Install it with: brew install gh[/yellow]")
+            console.print("[yellow]Then authenticate with: gh auth login[/yellow]")
+            return False
+        
+        # Check authentication
+        try:
+            subprocess.run(['gh', 'auth', 'status'], capture_output=True, check=True)
+        except subprocess.CalledProcessError:
+            console.print("[red]❌ Not authenticated with GitHub CLI[/red]")
+            console.print("[yellow]Run: gh auth login[/yellow]")
+            return False
+        
+        # Check current branch
+        try:
+            result = subprocess.run(['git', 'branch', '--show-current'], 
+                                  capture_output=True, text=True, cwd=self.root_dir)
+            current_branch = result.stdout.strip()
+            
+            if current_branch not in ["main", "dev"]:
+                console.print(f"[red]❌ Must be on main or dev branch. Current branch: {current_branch}[/red]")
+                return False
+        except Exception as e:
+            console.print(f"[red]❌ Failed to check git branch: {e}[/red]")
+            return False
+        
+        # Check if commit exists (if provided)
+        if commit_hash:
+            try:
+                subprocess.run(['git', 'rev-parse', '--verify', commit_hash], 
+                              capture_output=True, check=True, cwd=self.root_dir)
+            except subprocess.CalledProcessError:
+                console.print(f"[red]❌ Commit {commit_hash} does not exist[/red]")
+                return False
+        
+        # Show summary
+        console.print("\n[bold blue]🚀 MLSysBook Publish Trigger[/bold blue]")
+        console.print("=" * 50)
+        console.print(f"Description: {description}")
+        console.print(f"Release Type: {release_type}")
+        if commit_hash:
+            console.print(f"Dev Commit: {commit_hash}")
+        else:
+            console.print("Dev Commit: (will use latest dev commit)")
+        console.print(f"AI Notes: {ai_notes}")
+        console.print(f"Current Branch: {current_branch}")
+        console.print()
+        
+        # Final confirmation
+        if not skip_confirm:
+            console.print("[yellow]⚠️ This will trigger the GitHub Actions publish-live workflow[/yellow]")
+            console.print("This action will:")
+            console.print("  • Validate the dev commit")
+            console.print("  • Calculate next version number")
+            console.print("  • Merge dev → main branch")
+            console.print("  • Create release tag")
+            console.print("  • Build HTML and PDF versions")
+            console.print("  • Create GitHub release")
+            console.print("  • Deploy to production")
+            console.print()
+            console.print("[bold]Type 'PUBLISH' to confirm: [/bold]", end="")
+            confirmation = input().strip()
+            if confirmation != "PUBLISH":
+                console.print("[red]❌ Confirmation failed. Exiting.[/red]")
+                return False
+        
+        # Trigger the workflow
+        console.print("[blue]📋 Triggering GitHub Actions publish-live workflow...[/blue]")
+        
+        try:
+            cmd = [
+                'gh', 'workflow', 'run', '🚀 Publish Live',
+                '--field', f'description={description}',
+                '--field', f'release_type={release_type}',
+                '--field', 'confirm=PUBLISH',
+                '--field', f'ai_generated_notes={str(ai_notes).lower()}'
+            ]
+            
+            # Add dev_commit field if provided
+            if commit_hash:
+                cmd.extend(['--field', f'dev_commit={commit_hash}'])
+            
+            subprocess.run(cmd, cwd=self.root_dir, check=True)
+            
+            console.print("[green]✅ Successfully triggered publish-live workflow![/green]")
+            console.print()
+            console.print("[blue]📊 Monitor progress:[/blue]")
+            console.print("  https://github.com/harvard-edge/cs249r_book/actions")
+            console.print()
+            console.print("[blue]🌐 Your book will be available at:[/blue]")
+            console.print("  https://harvard-edge.github.io/cs249r_book")
+            console.print()
+            console.print("[blue]📄 PDF will be available at:[/blue]")
+            console.print("  https://harvard-edge.github.io/cs249r_book/assets/Machine-Learning-Systems.pdf")
+            
+            return True
+            
+        except subprocess.CalledProcessError as e:
+            console.print(f"[red]❌ Failed to trigger workflow: {e}[/red]")
+            return False
+        except Exception as e:
+            console.print(f"[red]❌ Unexpected error: {e}[/red]")
+            return False
 
     def _validate_publish_environment(self):
         """Step 1: Validate the publishing environment"""
@@ -1386,6 +1541,8 @@ class BookBinder:
         console.print("  🚀 Deploy to GitHub Pages")
         console.print("\n[blue]📈 Monitor: https://github.com/harvard-edge/cs249r_book/actions[/blue]")
 
+
+
     def _get_current_version(self):
         """Get current version from git tags"""
         try:
@@ -1654,7 +1811,7 @@ Format as markdown with clear sections."""
         
         full_table.add_row("build - <format>", "Build complete book", "./binder build - pdf")
         full_table.add_row("preview-full [format]", "Preview complete book", "./binder preview-full")
-        full_table.add_row("publish", "Build and publish book", "./binder publish")
+        full_table.add_row("publish [desc] [commit]", "Build and publish book", "./binder publish 'Add chapter' abc123")
         
         # Management Commands
         mgmt_table = Table(show_header=True, header_style="bold blue", box=None)
