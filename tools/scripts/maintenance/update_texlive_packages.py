@@ -467,6 +467,18 @@ def main():
             if not args.quiet:
                 logger.info(f"   ❌ {package} → not found")
     
+    # Add essential collections that are commonly needed
+    essential_collections = {
+        "collection-fontsrecommended",  # Base 35 PostScript fonts, Latin Modern, Times, etc.
+    }
+    
+    # Add essential collections to our set
+    if not args.quiet and essential_collections - collections:
+        logger.info("➕ Adding essential collections automatically:")
+        for collection in sorted(essential_collections - collections):
+            logger.info(f"   • {collection}")
+    collections.update(essential_collections)
+    
     # Generate output
     if not args.dry_run:
         with open(args.output, "w", encoding="utf-8") as f:
