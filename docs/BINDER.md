@@ -85,6 +85,7 @@ All commands have single-letter shortcuts:
 | `b` | `build` |
 | `p` | `preview` |
 | `pf` | `preview-full` |
+| `pt` | `publish-trigger` |
 | `pub` | `publish` |
 | `se` | `setup` |
 | `he` | `hello` |
@@ -116,14 +117,18 @@ Use `./binder list` to see all available chapters.
 
 ## 🚀 Publishing
 
-The `publish` command handles the complete publication workflow:
+The `publish` command provides two modes based on how you call it:
+
+### 1. Interactive Mode (Default)
+
+When called without arguments, `publish` runs the interactive wizard:
 
 ```bash
-# Publish the book (build + deploy)
+# Interactive publishing wizard
 ./binder publish
 ```
 
-### What `publish` does:
+**What interactive mode does:**
 
 1. **🔍 Pre-flight checks** - Verifies git status and branch
 2. **🧹 Cleans** - Removes previous builds
@@ -132,6 +137,35 @@ The `publish` command handles the complete publication workflow:
 5. **📦 Copies PDF** - Moves PDF to assets directory
 6. **💾 Commits** - Adds PDF to git
 7. **🚀 Pushes** - Triggers GitHub Actions deployment
+
+### 2. Command-Line Trigger Mode
+
+When called with arguments, `publish` triggers the GitHub Actions workflow directly:
+
+```bash
+# Trigger GitHub Actions workflow
+./binder publish "Description" [COMMIT_HASH]
+
+# With options
+./binder publish "Add new chapter" abc123def --type patch --no-ai
+```
+
+**What command-line mode does:**
+
+1. **🔍 Validates environment** - Checks GitHub CLI, authentication, branch
+2. **✅ Validates commit** - Ensures the dev commit exists (if provided)
+3. **🚀 Triggers workflow** - Uses GitHub CLI to trigger the publish-live workflow
+4. **📊 Provides feedback** - Shows monitoring links and next steps
+
+**Options:**
+- `--type patch|minor|major` - Release type (default: minor)
+- `--no-ai` - Disable AI release notes
+- `--yes` - Skip confirmation prompts
+
+**Requirements:**
+- GitHub CLI installed and authenticated (`gh auth login`)
+- Must be on main or dev branch
+- Dev commit must exist (if provided)
 
 ### Publishing Workflow:
 
