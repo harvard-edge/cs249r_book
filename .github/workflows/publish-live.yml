@@ -282,67 +282,69 @@ jobs:
     if: github.event.inputs.confirm == 'PUBLISH'
     
     steps:
-      - name: ⏳ Wait for Production Build (Real-time Monitoring)
+      - name: ⏳ Wait for Production Build (Commit Status Monitoring)
         run: |
           echo "⏳ Waiting for production build to complete (max 1 hour)..."
-          echo "🔍 Monitoring 🎮 Controller workflow in real-time..."
+          echo "🔍 Monitoring commit status checks in real-time..."
+          
+          # Get the latest commit SHA from main branch
+          COMMIT_SHA=$(curl -s \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/commits/main" \
+            | jq -r '.sha')
+          
+          echo "📌 Monitoring commit: $COMMIT_SHA"
+          echo "🎯 Required status checks: ci/quarto-build-ubuntu-latest-html, ci/quarto-build-ubuntu-latest-pdf"
+          
           sleep 30  # Give the build a moment to start
           
-          # Wait for the build to complete with improved real-time monitoring
+          # Wait for all required status checks to complete
           for i in {1..120}; do  # 120 attempts × 30 seconds = 1 hour
-            echo "🔍 Checking build status (attempt $i/120)..."
+            echo "🔍 Checking commit status (attempt $i/120)..."
             
-            # Get real-time workflow status
-            WORKFLOW_RESPONSE=$(curl -s \
+            # Get commit status
+            STATUS_RESPONSE=$(curl -s \
               -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
               -H "Accept: application/vnd.github.v3+json" \
-              "https://api.github.com/repos/${{ github.repository }}/actions/runs?branch=main&per_page=5")
+              "https://api.github.com/repos/${{ github.repository }}/commits/$COMMIT_SHA/status")
             
-            # Check for successful controller workflow runs
-            SUCCESSFUL_BUILD=$(echo "$WORKFLOW_RESPONSE" | jq -r '.workflow_runs[] | select(.name == "🎮 Controller" and .conclusion == "success") | .id' | head -1)
+            # Check overall status
+            OVERALL_STATE=$(echo "$STATUS_RESPONSE" | jq -r '.state')
+            TOTAL_COUNT=$(echo "$STATUS_RESPONSE" | jq -r '.total_count')
             
-            if [ -n "$SUCCESSFUL_BUILD" ] && [ "$SUCCESSFUL_BUILD" != "null" ]; then
-              echo "✅ Production build completed successfully!"
-              echo "📊 Build run ID: $SUCCESSFUL_BUILD"
-              echo "🔗 View build: https://github.com/${{ github.repository }}/actions/runs/$SUCCESSFUL_BUILD"
+            echo "📊 Overall status: $OVERALL_STATE ($TOTAL_COUNT checks)"
+            
+            # Get individual status checks
+            STATUSES=$(echo "$STATUS_RESPONSE" | jq -r '.statuses')
+            
+            # Check for our specific quarto-build status checks
+            HTML_STATUS=$(echo "$STATUSES" | jq -r '.[] | select(.context == "ci/quarto-build-ubuntu-latest-html") | .state' | head -1)
+            PDF_STATUS=$(echo "$STATUSES" | jq -r '.[] | select(.context == "ci/quarto-build-ubuntu-latest-pdf") | .state' | head -1)
+            
+            echo "📋 Build status checks:"
+            echo "  - HTML Build (Linux): ${HTML_STATUS:-pending}"
+            echo "  - PDF Build (Linux): ${PDF_STATUS:-pending}"
+            
+            # Show detailed status for each check
+            echo "$STATUSES" | jq -r '.[] | select(.context | startswith("ci/quarto-build")) | "  - \(.context): \(.state) - \(.description)"' | head -4
+            
+            # Check if all required builds are successful
+            if [ "$HTML_STATUS" = "success" ] && [ "$PDF_STATUS" = "success" ]; then
+              echo "✅ All production builds completed successfully!"
+              echo "📊 HTML Build: ✅ Success"
+              echo "📊 PDF Build: ✅ Success"
+              echo "🔗 View commit status: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
               break
             fi
             
-            # Check for failed builds
-            FAILED_BUILD=$(echo "$WORKFLOW_RESPONSE" | jq -r '.workflow_runs[] | select(.name == "🎮 Controller" and .conclusion == "failure") | .id' | head -1)
-            if [ -n "$FAILED_BUILD" ] && [ "$FAILED_BUILD" != "null" ]; then
+            # Check for any failures
+            if [ "$HTML_STATUS" = "failure" ] || [ "$PDF_STATUS" = "failure" ]; then
               echo "❌ Production build failed!"
-              echo "🔗 View failed build: https://github.com/${{ github.repository }}/actions/runs/$FAILED_BUILD"
+              echo "📊 HTML Build: ${HTML_STATUS:-pending}"
+              echo "📊 PDF Build: ${PDF_STATUS:-pending}"
+              echo "🔗 View commit status: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
               exit 1
-            fi
-            
-            # Get detailed status of running builds
-            RUNNING_BUILD=$(echo "$WORKFLOW_RESPONSE" | jq -r '.workflow_runs[] | select(.name == "🎮 Controller" and .status == "in_progress") | .id' | head -1)
-            if [ -n "$RUNNING_BUILD" ] && [ "$RUNNING_BUILD" != "null" ]; then
-              # Get detailed build status
-              BUILD_STATUS=$(curl -s \
-                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                -H "Accept: application/vnd.github.v3+json" \
-                "https://api.github.com/repos/${{ github.repository }}/actions/runs/$RUNNING_BUILD")
-              
-              BUILD_NAME=$(echo "$BUILD_STATUS" | jq -r '.name')
-              BUILD_STATUS_DETAIL=$(echo "$BUILD_STATUS" | jq -r '.status')
-              BUILD_CONCLUSION=$(echo "$BUILD_STATUS" | jq -r '.conclusion // "in_progress"')
-              BUILD_CREATED=$(echo "$BUILD_STATUS" | jq -r '.created_at')
-              BUILD_UPDATED=$(echo "$BUILD_STATUS" | jq -r '.updated_at')
-              
-              echo "🔄 Build is actively running (ID: $RUNNING_BUILD)"
-              echo "📊 Build details: $BUILD_NAME - $BUILD_STATUS_DETAIL"
-              echo "🔗 Monitor: https://github.com/${{ github.repository }}/actions/runs/$RUNNING_BUILD"
-              
-              # Show current jobs status
-              JOBS_RESPONSE=$(curl -s \
-                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                -H "Accept: application/vnd.github.v3+json" \
-                "https://api.github.com/repos/${{ github.repository }}/actions/runs/$RUNNING_BUILD/jobs")
-              
-              echo "📋 Current jobs:"
-              echo "$JOBS_RESPONSE" | jq -r '.jobs[] | "  - \(.name): \(.status) (\(.conclusion // "running"))"' | head -3
             fi
             
             # Show current status with time elapsed
@@ -371,20 +373,23 @@ jobs:
             # Show heartbeat-style progress every 4th attempt (every 2 minutes)
             if [ $((i % 4)) -eq 0 ]; then
               echo "💓 Build heartbeat: $(date)"
-              echo "📊 Current build status: Active and running"
+              echo "📊 Current build status: Monitoring commit checks"
               echo "⏰ Time elapsed: ${TIME_DISPLAY}"
-              echo "📈 Progress: Still in build phase"
-              echo "🔗 Monitor: https://github.com/${{ github.repository }}/actions/runs/$RUNNING_BUILD"
+              echo "📈 HTML: ${HTML_STATUS:-pending} | PDF: ${PDF_STATUS:-pending}"
+              echo "🔗 Monitor: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
               echo "---"
             fi
             
             sleep 30
           done
           
-          # If we get here, the build might still be running
-          echo "⚠️ Build may still be in progress after 1 hour"
-          echo "📊 Latest workflow status:"
-          echo "$WORKFLOW_RESPONSE" | jq -r '.workflow_runs[] | "  - \(.name): \(.conclusion // "in_progress")"' | head -3
+          # If we get here, check final status
+          if [ "$HTML_STATUS" != "success" ] || [ "$PDF_STATUS" != "success" ]; then
+            echo "⚠️ Build may still be in progress or failed after 1 hour"
+            echo "📊 Final status: HTML=$HTML_STATUS, PDF=$PDF_STATUS"
+            echo "🔗 Check status: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
+            exit 1
+          fi
 
   download-pdf:
     name: '📄 Download PDF'

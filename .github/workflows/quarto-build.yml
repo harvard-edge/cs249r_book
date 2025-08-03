@@ -70,6 +70,20 @@ jobs:
       LC_ALL: en_US.UTF-8
 
     steps:
+      - name: 🚦 Set Initial Build Status
+        shell: bash
+        run: |
+          echo "🚦 Setting initial build status to pending..."
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"pending\",
+              \"description\": \"Quarto build started (${{ inputs.os }}, ${{ inputs.format }})\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+
       - name: 🔍 Validate inputs
         shell: pwsh
         run: |
@@ -404,6 +418,18 @@ jobs:
           
           echo "🔨 Building HTML..."
           echo "⏰ HTML build started at: $(date)"
+          
+          # Update status to building
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"pending\",
+              \"description\": \"Building HTML content (${{ inputs.os }})\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+          
           # Enable verbose logging for debugging
           quarto render --to html
           echo "✅ HTML build completed at: $(date)"
@@ -422,6 +448,18 @@ jobs:
           echo "⏰ PDF build started at: $(date)"
           echo "📊 This is typically the longest step (can take 30-45 minutes)"
           echo "💓 Heartbeat will continue showing progress..."
+          
+          # Update status to building PDF
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"pending\",
+              \"description\": \"Building PDF content (${{ inputs.os }}) - this takes 30-45min\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+          
           # Enable verbose logging for debugging
           quarto render --to titlepage-pdf
           echo "✅ PDF build completed at: $(date)"
@@ -594,6 +632,17 @@ jobs:
         shell: bash
         run: |
           echo "🚀 Deploying to GitHub Pages..."
+          
+          # Update status to deploying
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"pending\",
+              \"description\": \"Deploying to GitHub Pages (${{ inputs.os }})\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
           
           # Clone gh-pages branch
           git clone --depth=1 --branch=gh-pages https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git gh-pages-repo
@@ -824,4 +873,35 @@ jobs:
             - Includes: TeX logs, system info, library details, and comprehensive build output
             - Retention: 30 days for debugging
           ⏰ Completed at: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-          "@ | Add-Content $env:GITHUB_STEP_SUMMARY 
+          "@ | Add-Content $env:GITHUB_STEP_SUMMARY
+
+      - name: 🎯 Set Final Build Status
+        if: always()
+        shell: bash
+        run: |
+          echo "🎯 Setting final build status..."
+          
+          # Determine the final status based on job status
+          if [ "${{ job.status }}" = "success" ]; then
+            STATE="success"
+            DESCRIPTION="Build completed successfully (${{ inputs.os }}, ${{ inputs.format }})"
+          else
+            STATE="failure"
+            DESCRIPTION="Build failed (${{ inputs.os }}, ${{ inputs.format }})"
+          fi
+          
+          echo "📊 Final status: $STATE"
+          echo "📝 Description: $DESCRIPTION"
+          
+          # Set the final commit status
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"$STATE\",
+              \"description\": \"$DESCRIPTION\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+          
+          echo "✅ Commit status updated successfully" 
