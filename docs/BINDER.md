@@ -5,6 +5,12 @@ The **Book Binder** is a self-contained, lightning-fast development CLI for the 
 ## Quick Start
 
 ```bash
+# First time setup
+./binder setup
+
+# Welcome and overview
+./binder hello
+
 # Build a single chapter
 ./binder build intro html
 
@@ -16,6 +22,9 @@ The **Book Binder** is a self-contained, lightning-fast development CLI for the 
 
 # Build the complete book
 ./binder build * pdf
+
+# Publish the book
+./binder publish
 
 # Get help
 ./binder help
@@ -58,6 +67,8 @@ Full builds render the complete book with all chapters, parts, and cross-referen
 
 | Command | Description | Example |
 |---------|-------------|---------|
+| `setup` | Configure environment | `./binder setup` |
+| `hello` | Welcome and overview | `./binder hello` |
 | `clean` | Clean configs & artifacts | `./binder clean` |
 | `check` | Check for build artifacts | `./binder check` |
 | `switch <format>` | Switch active config | `./binder switch pdf` |
@@ -74,7 +85,10 @@ All commands have single-letter shortcuts:
 | `b` | `build` |
 | `p` | `preview` |
 | `pf` | `preview-full` |
+| `pt` | `publish-trigger` |
 | `pub` | `publish` |
+| `se` | `setup` |
+| `he` | `hello` |
 | `c` | `clean` |
 | `ch` | `check` |
 | `s` | `switch` |
@@ -103,14 +117,18 @@ Use `./binder list` to see all available chapters.
 
 ## 🚀 Publishing
 
-The `publish` command handles the complete publication workflow:
+The `publish` command provides two modes based on how you call it:
+
+### 1. Interactive Mode (Default)
+
+When called without arguments, `publish` runs the interactive wizard:
 
 ```bash
-# Publish the book (build + deploy)
+# Interactive publishing wizard
 ./binder publish
 ```
 
-### What `publish` does:
+**What interactive mode does:**
 
 1. **🔍 Pre-flight checks** - Verifies git status and branch
 2. **🧹 Cleans** - Removes previous builds
@@ -119,6 +137,35 @@ The `publish` command handles the complete publication workflow:
 5. **📦 Copies PDF** - Moves PDF to assets directory
 6. **💾 Commits** - Adds PDF to git
 7. **🚀 Pushes** - Triggers GitHub Actions deployment
+
+### 2. Command-Line Trigger Mode
+
+When called with arguments, `publish` triggers the GitHub Actions workflow directly:
+
+```bash
+# Trigger GitHub Actions workflow
+./binder publish "Description" [COMMIT_HASH]
+
+# With options
+./binder publish "Add new chapter" abc123def --type patch --no-ai
+```
+
+**What command-line mode does:**
+
+1. **🔍 Validates environment** - Checks GitHub CLI, authentication, branch
+2. **✅ Validates commit** - Ensures the dev commit exists (if provided)
+3. **🚀 Triggers workflow** - Uses GitHub CLI to trigger the publish-live workflow
+4. **📊 Provides feedback** - Shows monitoring links and next steps
+
+**Options:**
+- `--type patch|minor|major` - Release type (default: minor)
+- `--no-ai` - Disable AI release notes
+- `--yes` - Skip confirmation prompts
+
+**Requirements:**
+- GitHub CLI installed and authenticated (`gh auth login`)
+- Must be on main or dev branch
+- Dev commit must exist (if provided)
 
 ### Publishing Workflow:
 
@@ -259,14 +306,28 @@ Use `./binder switch <format>` to change the active configuration symlink.
 - Only use full builds (`./binder build * format`) for final verification
 - Preview mode auto-rebuilds on file changes
 
-## Integration
+## 🚀 Publishing
 
-The binder integrates with:
+The `publish` command provides a complete publishing workflow:
 
-- **Quarto**: Primary rendering engine
-- **GitHub Actions**: Automated builds and publishing
-- **Pre-commit hooks**: Artifact detection and cleanup
-- **VS Code**: Can be used as build tasks
+```bash
+# One-command publishing
+./binder publish
+```
+
+**What it does:**
+1. **Validates environment** - Checks Git status, tools, and dependencies
+2. **Manages branches** - Merges `dev` to `main` with confirmation
+3. **Plans release** - Suggests version bump (patch/minor/major)
+4. **Builds everything** - PDF first, then HTML (ensures PDF is available)
+5. **Creates release** - Git tag, AI-generated release notes, GitHub release
+6. **Deploys** - Copies PDF to assets, commits, pushes to production
+
+**Features:**
+- 🤖 **AI-powered release notes** (requires Ollama)
+- 📊 **Smart version suggestions** based on changes
+- 🛡️ **Safety checks** and confirmations
+- 🎯 **Step-by-step wizard** with clear progress
 
 For more details, see:
 - [BUILD.md](BUILD.md) - Complete build instructions

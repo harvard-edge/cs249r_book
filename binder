@@ -12,6 +12,7 @@ import re
 import signal
 from pathlib import Path
 from contextlib import contextmanager
+from datetime import datetime
 
 from rich.console import Console
 from rich.panel import Panel
@@ -715,9 +716,17 @@ class BookBinder:
             if success:
                 console.print(f"[green]  ✅ Fast build complete: build/{build_subdir}/[/green]")
                 
-                # Automatically open the output file if HTML and requested
-                if format_type == "html" and output and open_browser:
+                            # Automatically open the output file if HTML and requested
+            if format_type == "html" and output and open_browser:
+                # Check user preference for auto-open
+                preferences = self.get_user_preferences()
+                auto_open = preferences.get('auto_open', True)
+                
+                if auto_open:
                     self.open_output_file(output)
+                else:
+                    console.print(f"[blue]📄 Output ready: {output}[/blue]")
+                    console.print("[dim]💡 Set auto-open preference with './binder setup'[/dim]")
             else:
                 console.print("[red]  ❌ Build failed[/red]")
             
@@ -959,131 +968,569 @@ class BookBinder:
             return False
     
     def publish(self):
-        """Publish the book (build + deploy)"""
+        """Publish the book (build + deploy) - Step by step process"""
         
-        # Show warning and confirmation
+        # Check if command-line arguments are provided for GitHub Actions trigger
+        if len(sys.argv) > 2:
+            return self._publish_trigger_mode()
+        else:
+            return self._publish_interactive_mode()
+    
+    def _publish_interactive_mode(self):
+        """Interactive publishing wizard"""
+        # Create prominent warning banner
         warning_panel = Panel(
-            "[bold red]⚠️  PUBLISHING WARNING ⚠️[/bold red]\n\n"
-            "[red]This will publish your book to the live website![/red]\n\n"
-            "📊 What will happen:\n"
+            "[bold red]🚀 PUBLISHING WORKFLOW[/bold red]\n\n"
+            "[red]This will publish the book to production![/red]\n\n"
+            "[yellow]⚠️  This action will:[/yellow]\n"
+            "  • Merge dev → main branch\n"
             "  • Build HTML and PDF versions\n"
-            "  • Copy PDF to assets directory\n"
-            "  • Commit changes to git\n"
-            "  • Push to main branch\n"
-            "  • Trigger GitHub Actions deployment\n"
-            "  • Make changes live at https://harvard-edge.github.io/cs249r_book\n\n"
-            "[yellow]Are you sure you want to publish?[/yellow]\n"
-            "[dim]Type 'PUBLISH' to confirm, or anything else to cancel[/dim]",
-            title="🚀 Publishing MLSysBook",
+            "  • Create a GitHub release\n"
+            "  • Deploy to production\n"
+            "  • Update the live website",
+            title="[bold red]⚠️  PRODUCTION DEPLOYMENT[/bold red]",
             border_style="red",
             padding=(1, 2)
         )
         console.print(warning_panel)
+        console.print()
         
-        # Get confirmation
-        try:
-            console.print("\n[bold blue]Confirmation:[/bold blue] ", end="")
-            confirmation = input().strip()
-            if confirmation != "PUBLISH":
-                console.print("[yellow]🛑 Publishing cancelled[/yellow]")
-                return False
-        except KeyboardInterrupt:
-            console.print("\n[yellow]🛑 Publishing cancelled[/yellow]")
+        console.print("[bold blue]🚀 MLSysBook Publishing Wizard[/bold blue]")
+        console.print("[dim]I'll guide you through publishing step by step[/dim]\n")
+        
+        # Step 1: Pre-flight validation
+        console.print("[blue]📋 Step 1: Pre-flight Validation[/blue]")
+        if not self._validate_publish_environment():
             return False
         
-        console.print("[green]✅ Confirmed! Starting publication process...[/green]\n")
+        # Step 2: Branch handling
+        console.print("\n[blue]📋 Step 2: Branch Management[/blue]")
+        if not self._handle_branch_setup():
+            return False
         
-        # Pre-flight checks
-        console.print("[blue]🔍 Running pre-flight checks...[/blue]")
+        # Step 3: Version and release planning
+        console.print("\n[blue]📋 Step 3: Version & Release Planning[/blue]")
+        release_info = self._plan_release()
+        if not release_info:
+            return False
         
-        # Check git status
+        # Step 4: Update changelog
+        if release_info['update_changelog']:
+            console.print("\n[blue]📋 Step 4: Updating Changelog[/blue]")
+            if not self._update_changelog(release_info['version'], release_info['change_type']):
+                return False
+        
+        # Step 5: Build process
+        console.print("\n[blue]📋 Step 5: Building Book[/blue]")
+        if not self._build_for_publication():
+            return False
+        
+        # Step 6: Release creation
+        if release_info['create_release']:
+            console.print("\n[blue]📋 Step 6: Creating Release[/blue]")
+            if not self._create_release(release_info):
+                return False
+        
+        # Step 7: Deployment
+        console.print("\n[blue]📋 Step 7: Deploying to Production[/blue]")
+        if not self._deploy_to_production():
+            return False
+        
+        # Success!
+        self._show_publish_success()
+        return True
+    
+    def _publish_trigger_mode(self):
+        """Command-line trigger mode for GitHub Actions workflow"""
+        # Parse command line arguments
+        description = sys.argv[2]
+        commit_hash = sys.argv[3] if len(sys.argv) > 3 else None
+        
+        # Parse additional options
+        release_type = "minor"
+        ai_notes = True
+        skip_confirm = False
+        
+        i = 4
+        while i < len(sys.argv):
+            arg = sys.argv[i]
+            if arg == "--type" and i + 1 < len(sys.argv):
+                release_type = sys.argv[i + 1]
+                i += 2
+            elif arg == "--no-ai":
+                ai_notes = False
+                i += 1
+            elif arg == "--yes":
+                skip_confirm = True
+                i += 1
+            else:
+                i += 1
+        
+        # Validate inputs
+        if not description:
+            console.print("[red]❌ Description is required[/red]")
+            console.print("[dim]Usage: ./binder publish 'Description' [commit-hash] [options][/dim]")
+            console.print("[dim]Examples:[/dim]")
+            console.print("  ./binder publish 'Add new chapter' abc123def")
+            console.print("  ./binder publish 'Bug fixes' def456ghi --type patch --no-ai")
+            return False
+        
+        if release_type not in ["patch", "minor", "major"]:
+            console.print(f"[red]❌ Invalid release type: {release_type}. Must be patch, minor, or major[/red]")
+            return False
+        
+        # Check GitHub CLI
+        try:
+            subprocess.run(['gh', '--version'], capture_output=True, check=True)
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            console.print("[red]❌ GitHub CLI (gh) is not installed[/red]")
+            console.print("[yellow]Install it with: brew install gh[/yellow]")
+            console.print("[yellow]Then authenticate with: gh auth login[/yellow]")
+            return False
+        
+        # Check authentication
+        try:
+            subprocess.run(['gh', 'auth', 'status'], capture_output=True, check=True)
+        except subprocess.CalledProcessError:
+            console.print("[red]❌ Not authenticated with GitHub CLI[/red]")
+            console.print("[yellow]Run: gh auth login[/yellow]")
+            return False
+        
+        # Check current branch
         try:
             result = subprocess.run(['git', 'branch', '--show-current'], 
                                   capture_output=True, text=True, cwd=self.root_dir)
             current_branch = result.stdout.strip()
             
-            if current_branch != "main":
-                console.print("[red]❌ You are not on the main branch. Please switch to main first.[/red]")
-                console.print(f"[dim]Current branch: {current_branch}[/dim]")
+            if current_branch not in ["main", "dev"]:
+                console.print(f"[red]❌ Must be on main or dev branch. Current branch: {current_branch}[/red]")
                 return False
-                
+        except Exception as e:
+            console.print(f"[red]❌ Failed to check git branch: {e}[/red]")
+            return False
+        
+        # Check if commit exists (if provided)
+        if commit_hash:
+            try:
+                subprocess.run(['git', 'rev-parse', '--verify', commit_hash], 
+                              capture_output=True, check=True, cwd=self.root_dir)
+            except subprocess.CalledProcessError:
+                console.print(f"[red]❌ Commit {commit_hash} does not exist[/red]")
+                return False
+        
+        # Show summary
+        console.print("\n[bold blue]🚀 MLSysBook Publish Trigger[/bold blue]")
+        console.print("=" * 50)
+        console.print(f"Description: {description}")
+        console.print(f"Release Type: {release_type}")
+        if commit_hash:
+            console.print(f"Dev Commit: {commit_hash}")
+        else:
+            console.print("Dev Commit: (will use latest dev commit)")
+        console.print(f"AI Notes: {ai_notes}")
+        console.print(f"Current Branch: {current_branch}")
+        console.print()
+        
+        # Final confirmation
+        if not skip_confirm:
+            console.print("[yellow]⚠️ This will trigger the GitHub Actions publish-live workflow[/yellow]")
+            console.print("This action will:")
+            console.print("  • Validate the dev commit")
+            console.print("  • Calculate next version number")
+            console.print("  • Merge dev → main branch")
+            console.print("  • Create release tag")
+            console.print("  • Build HTML and PDF versions")
+            console.print("  • Create GitHub release")
+            console.print("  • Deploy to production")
+            console.print()
+            console.print("[bold]Type 'PUBLISH' to confirm: [/bold]", end="")
+            confirmation = input().strip()
+            if confirmation != "PUBLISH":
+                console.print("[red]❌ Confirmation failed. Exiting.[/red]")
+                return False
+        
+        # Trigger the workflow
+        console.print("[blue]📋 Triggering GitHub Actions publish-live workflow...[/blue]")
+        
+        try:
+            cmd = [
+                'gh', 'workflow', 'run', '🚀 Publish Live',
+                '--field', f'description={description}',
+                '--field', f'release_type={release_type}',
+                '--field', 'confirm=PUBLISH',
+                '--field', f'ai_generated_notes={str(ai_notes).lower()}'
+            ]
+            
+            # Add dev_commit field if provided
+            if commit_hash:
+                cmd.extend(['--field', f'dev_commit={commit_hash}'])
+            
+            subprocess.run(cmd, cwd=self.root_dir, check=True)
+            
+            console.print("[green]✅ Successfully triggered publish-live workflow![/green]")
+            console.print()
+            console.print("[blue]📊 Monitor progress:[/blue]")
+            console.print("  https://github.com/harvard-edge/cs249r_book/actions")
+            console.print()
+            console.print("[blue]🌐 Your book will be available at:[/blue]")
+            console.print("  https://harvard-edge.github.io/cs249r_book")
+            console.print()
+            console.print("[blue]📄 PDF will be available at:[/blue]")
+            console.print("  https://harvard-edge.github.io/cs249r_book/assets/Machine-Learning-Systems.pdf")
+            
+            return True
+            
+        except subprocess.CalledProcessError as e:
+            console.print(f"[red]❌ Failed to trigger workflow: {e}[/red]")
+            return False
+        except Exception as e:
+            console.print(f"[red]❌ Unexpected error: {e}[/red]")
+            return False
+
+    def _validate_publish_environment(self):
+        """Step 1: Validate the publishing environment"""
+        try:
+            # Check git status
+            result = subprocess.run(['git', 'branch', '--show-current'], 
+                                  capture_output=True, text=True, cwd=self.root_dir)
+            current_branch = result.stdout.strip()
+            
+            if current_branch not in ["main", "dev"]:
+                console.print(f"[red]❌ Invalid branch: {current_branch}[/red]")
+                console.print("[yellow]Please switch to 'main' or 'dev' branch[/yellow]")
+                return False
+            
             # Check for uncommitted changes
             result = subprocess.run(['git', 'status', '--porcelain'], 
                                   capture_output=True, text=True, cwd=self.root_dir)
             if result.stdout.strip():
-                console.print("[red]❌ You have uncommitted changes. Please commit or stash them first.[/red]")
-                console.print("[dim]Run 'git status' to see changes[/dim]")
+                console.print("[red]❌ You have uncommitted changes[/red]")
+                console.print("[yellow]Please commit or stash your changes first[/yellow]")
                 return False
-                
-            console.print("[green]✅ Git status check passed[/green]")
+            
+            # Check for required tools
+            tools_status = []
+            
+            # Check GitHub CLI
+            try:
+                subprocess.run(['gh', '--version'], capture_output=True, check=True)
+                tools_status.append(("GitHub CLI", "✅ Available"))
+            except:
+                tools_status.append(("GitHub CLI", "⚠️ Not found (releases will be manual)"))
+            
+            # Check Ollama
+            try:
+                subprocess.run(['ollama', '--version'], capture_output=True, check=True)
+                tools_status.append(("Ollama", "✅ Available"))
+            except:
+                tools_status.append(("Ollama", "⚠️ Not found (manual release notes)"))
+            
+            # Show status
+            status_table = Table(show_header=True, header_style="bold blue", box=None)
+            status_table.add_column("Component", style="cyan", width=20)
+            status_table.add_column("Status", style="white", width=30)
+            
+            status_table.add_row("Git Branch", f"✅ {current_branch}")
+            status_table.add_row("Git Status", "✅ Clean")
+            for tool, status in tools_status:
+                status_table.add_row(tool, status)
+            
+            console.print(status_table)
+            console.print("[green]✅ Environment validation passed[/green]")
+            return True
             
         except Exception as e:
-            console.print(f"[red]❌ Git check failed: {e}[/red]")
+            console.print(f"[red]❌ Validation failed: {e}[/red]")
             return False
-        
-        # Clean previous builds
-        console.print("[blue]🧹 Cleaning previous builds...[/blue]")
-        self.clean()
-        
-        # Build HTML version
-        console.print("[blue]📚 Building HTML version...[/blue]")
-        if not self.build_full("html"):
-            console.print("[red]❌ HTML build failed![/red]")
-            return False
-        console.print("[green]✅ HTML build completed[/green]")
-        
-        # Build PDF version
-        console.print("[blue]📄 Building PDF version...[/blue]")
-        if not self.build_full("pdf"):
-            console.print("[red]❌ PDF build failed![/red]")
-            return False
-        console.print("[green]✅ PDF build completed[/green]")
-        
-        # Check if PDF was created
-        pdf_path = self.build_dir / "pdf" / "Machine-Learning-Systems.pdf"
-        if not pdf_path.exists():
-            console.print(f"[red]❌ PDF not found at {pdf_path}[/red]")
-            return False
-        
-        # Copy PDF to assets
-        console.print("[blue]📦 Copying PDF to assets...[/blue]")
-        assets_dir = self.root_dir / "assets"
-        assets_dir.mkdir(exist_ok=True)
-        
-        import shutil
-        shutil.copy2(pdf_path, assets_dir / "Machine-Learning-Systems.pdf")
-        console.print("[green]✅ PDF copied to assets[/green]")
-        
-        # Commit and push
-        console.print("[blue]💾 Committing changes...[/blue]")
+
+    def _handle_branch_setup(self):
+        """Step 2: Handle branch setup and merging"""
         try:
-            subprocess.run(['git', 'add', 'assets/Machine-Learning-Systems.pdf'], 
-                         cwd=self.root_dir, check=True)
-            subprocess.run(['git', 'commit', '-m', '📄 Add PDF to assets for download'], 
-                         cwd=self.root_dir, check=True)
-            console.print("[green]✅ Changes committed[/green]")
-        except subprocess.CalledProcessError:
-            console.print("[yellow]⚠️ No changes to commit (PDF might already be up to date)[/yellow]")
-        
-        # Push to main
-        console.print("[blue]🚀 Pushing to main...[/blue]")
+            result = subprocess.run(['git', 'branch', '--show-current'], 
+                                  capture_output=True, text=True, cwd=self.root_dir)
+            current_branch = result.stdout.strip()
+            
+            if current_branch == "dev":
+                console.print("[yellow]⚠️ You're on dev branch[/yellow]")
+                console.print("[blue]Should I merge dev into main?[/blue]")
+                console.print("[bold]Merge dev to main? (Y/n) [Y]: [/bold]", end="")
+                choice = input().strip().lower()
+                if not choice:
+                    choice = 'y'
+                
+                if choice in ['y', 'yes']:
+                    console.print("[blue]🔄 Merging dev to main...[/blue]")
+                    subprocess.run(['git', 'checkout', 'main'], cwd=self.root_dir, check=True)
+                    subprocess.run(['git', 'merge', 'dev'], cwd=self.root_dir, check=True)
+                    console.print("[green]✅ Successfully merged dev to main[/green]")
+                    return True
+                else:
+                    console.print("[yellow]⚠️ Please switch to main branch manually[/yellow]")
+                    return False
+            else:
+                console.print("[green]✅ Already on main branch[/green]")
+                return True
+                
+        except Exception as e:
+            console.print(f"[red]❌ Branch setup failed: {e}[/red]")
+            return False
+
+    def _update_changelog(self, version, change_type):
+        """Update CHANGELOG.md with new version entry"""
         try:
+            console.print("[blue]📝 Updating changelog...[/blue]")
+            
+            # Read current changelog
+            changelog_path = os.path.join(self.root_dir, 'CHANGELOG.md')
+            with open(changelog_path, 'r') as f:
+                content = f.read()
+            
+            # Get current date
+            current_date = datetime.now().strftime("%B %d")
+            current_year = datetime.now().year
+            
+            # Create new entry
+            new_entry = f"""### {current_date}
+
+<details >
+<summary>**📦 Release {version}**</summary>
+
+- `███░░` **Book Binder CLI**: Enhanced with interactive prompts, smart defaults, and improved UX
+- `███░░` **Publishing Workflow**: Streamlined publishing process with step-by-step wizard
+- `███░░` **Environment Setup**: Automated tool installation and configuration
+- `██░░░` **Documentation**: Updated README and docs to feature binder workflow
+- `█░░░░` **Bug Fixes**: Various improvements and refinements
+
+</details>
+
+"""
+            
+            # Find the year section and add new entry
+            year_pattern = rf"## 📅 {current_year}"
+            if year_pattern in content:
+                # Add after the year header
+                content = content.replace(year_pattern, f"{year_pattern}\n\n{new_entry}")
+            else:
+                # Add new year section at the top
+                content = f"## 📅 {current_year}\n\n{new_entry}\n{content}"
+            
+            # Write back to file
+            with open(changelog_path, 'w') as f:
+                f.write(content)
+            
+            console.print("[green]✅ Changelog updated successfully[/green]")
+            return True
+            
+        except Exception as e:
+            console.print(f"[red]❌ Failed to update changelog: {e}[/red]")
+            return False
+
+    def _plan_release(self):
+        """Step 3: Plan version and release strategy"""
+        try:
+            # Get current version and suggest next
+            current_version = self._get_current_version()
+            suggested_patch = self._get_next_version()
+            
+            # Analyze recent changes to suggest version type
+            change_type = self._analyze_changes()
+            
+            console.print(f"[blue]Current version:[/blue] {current_version}")
+            console.print(f"[blue]Suggested version:[/blue] {suggested_patch}")
+            console.print(f"[blue]Change type:[/blue] {change_type.upper()}")
+            
+            # Ask about version type
+            console.print("\n[blue]📦 Version Strategy:[/blue]")
+            console.print("  • [dim]patch[/dim] - Bug fixes, minor updates (1.0.0 → 1.0.1)")
+            console.print("  • [dim]minor[/dim] - New features, chapters (1.0.0 → 1.1.0)")
+            console.print("  • [dim]major[/dim] - Breaking changes (1.0.0 → 2.0.0)")
+            
+            console.print(f"[bold]Version type (patch/minor/major) [{change_type.upper()}]: [/bold]", end="")
+            version_choice = input().strip().lower()
+            if not version_choice:
+                version_choice = change_type
+            
+            # Generate version based on choice
+            if version_choice == "major":
+                version = self._increment_major_version(current_version)
+            elif version_choice == "minor":
+                version = self._increment_minor_version(current_version)
+            else:
+                version = suggested_patch
+            
+            console.print(f"[green]✅ Selected version: {version}[/green]")
+            
+            # Ask about release creation
+            console.print("\n[blue]📦 Create GitHub release?[/blue]")
+            console.print("[bold]Create release? (Y/n) [Y]: [/bold]", end="")
+            release_choice = input().strip().lower()
+            if not release_choice:
+                release_choice = 'y'
+            create_release = release_choice in ['y', 'yes']
+            
+            # Ask about AI release notes (only for publishing)
+            use_ai_notes = False
+            if create_release:
+                # Get user preference for AI
+                preferences = self.get_user_preferences()
+                ai_default = preferences.get('ai_default', True)
+                ai_default_text = "y" if ai_default else "n"
+                
+                console.print("\n[blue]🤖 AI Release Notes (requires Ollama):[/blue]")
+                ai_default_display = "Y" if ai_default else "n"
+                console.print(f"[bold]Use AI for release notes? (Y/n) [{ai_default_display}]: [/bold]", end="")
+                ai_choice = input().strip().lower()
+                if not ai_choice:
+                    ai_choice = ai_default_text
+                use_ai_notes = ai_choice in ['y', 'yes']
+            
+            # Ask about changelog update
+            console.print("\n[blue]📝 Update changelog?[/blue]")
+            console.print("[bold]Update changelog? (Y/n) [Y]: [/bold]", end="")
+            changelog_choice = input().strip().lower()
+            if not changelog_choice:
+                changelog_choice = 'y'
+            update_changelog = changelog_choice in ['y', 'yes']
+            
+            return {
+                'version': version,
+                'create_release': create_release,
+                'use_ai_notes': use_ai_notes,
+                'change_type': change_type,
+                'update_changelog': update_changelog
+            }
+            
+        except Exception as e:
+            console.print(f"[red]❌ Release planning failed: {e}[/red]")
+            return None
+
+    def _build_for_publication(self):
+        """Step 4: Build both HTML and PDF for publication"""
+        try:
+            # Clean previous builds
+            console.print("[blue]🧹 Cleaning previous builds...[/blue]")
+            self.clean()
+            
+            # Build PDF first (as requested)
+            console.print("[blue]📄 Building PDF version...[/blue]")
+            if not self.build_full("pdf"):
+                console.print("[red]❌ PDF build failed![/red]")
+                return False
+            console.print("[green]✅ PDF build completed[/green]")
+            
+            # Build HTML
+            console.print("[blue]📚 Building HTML version...[/blue]")
+            if not self.build_full("html"):
+                console.print("[red]❌ HTML build failed![/red]")
+                return False
+            console.print("[green]✅ HTML build completed[/green]")
+            
+            # Validate builds
+            pdf_path = self.build_dir / "pdf" / "Machine-Learning-Systems.pdf"
+            html_path = self.build_dir / "html" / "index.html"
+            
+            if not pdf_path.exists():
+                console.print(f"[red]❌ PDF not found at {pdf_path}[/red]")
+                return False
+            
+            if not html_path.exists():
+                console.print(f"[red]❌ HTML not found at {html_path}[/red]")
+                return False
+            
+            console.print("[green]✅ All builds validated successfully[/green]")
+            return True
+            
+        except Exception as e:
+            console.print(f"[red]❌ Build process failed: {e}[/red]")
+            return False
+
+    def _create_release(self, release_info):
+        """Step 5: Create GitHub release with version and notes"""
+        try:
+            version = release_info['version']
+            use_ai_notes = release_info['use_ai_notes']
+            tag_name = f"v{version}"
+            
+            console.print(f"[blue]📦 Creating release {tag_name}...[/blue]")
+            
+            # Generate release notes
+            if use_ai_notes:
+                console.print("[blue]🤖 Generating AI release notes...[/blue]")
+                release_notes = self._generate_ai_release_notes()
+            else:
+                console.print("[blue]📝 Generating manual release notes...[/blue]")
+                release_notes = self._generate_manual_release_notes()
+            
+            # Create and push tag
+            console.print("[blue]🏷️ Creating git tag...[/blue]")
+            subprocess.run(['git', 'tag', '-a', tag_name, '-m', f"Release {tag_name}"], 
+                         cwd=self.root_dir, check=True)
+            subprocess.run(['git', 'push', 'origin', tag_name], 
+                         cwd=self.root_dir, check=True)
+            
+            # Create GitHub release
+            console.print("[blue]🚀 Creating GitHub release...[/blue]")
+            release_cmd = [
+                'gh', 'release', 'create', tag_name,
+                '--title', f"Release {tag_name}",
+                '--notes', release_notes,
+                '--target', 'main'
+            ]
+            subprocess.run(release_cmd, cwd=self.root_dir, check=True)
+            
+            console.print(f"[green]✅ Successfully created release {tag_name}[/green]")
+            return True
+            
+        except subprocess.CalledProcessError as e:
+            console.print(f"[yellow]⚠️ Release creation failed: {e}[/yellow]")
+            console.print("[dim]You can create the release manually on GitHub[/dim]")
+            return False
+        except FileNotFoundError:
+            console.print("[yellow]⚠️ GitHub CLI (gh) not found[/yellow]")
+            console.print("[dim]You can create the release manually on GitHub[/dim]")
+            return False
+
+    def _deploy_to_production(self):
+        """Step 6: Deploy to production (commit, push, trigger CI/CD)"""
+        try:
+            # Copy PDF to assets
+            console.print("[blue]📦 Copying PDF to assets...[/blue]")
+            pdf_source = self.build_dir / "pdf" / "Machine-Learning-Systems.pdf"
+            pdf_dest = self.root_dir / "assets" / "Machine-Learning-Systems.pdf"
+            
+            import shutil
+            shutil.copy2(pdf_source, pdf_dest)
+            console.print("[green]✅ PDF copied to assets[/green]")
+            
+            # Note about PDF handling (not committing to git)
+            console.print("[blue]📄 PDF handling:[/blue]")
+            console.print("  ✅ PDF copied to assets/Machine-Learning-Systems.pdf")
+            console.print("  📝 PDF will be available for download but not committed to git")
+            console.print("  🔗 PDF will be uploaded to GitHub Release assets during publish-live workflow")
+            
+            # Push to main
+            console.print("[blue]🚀 Pushing to main...[/blue]")
             subprocess.run(['git', 'push', 'origin', 'main'], 
                          cwd=self.root_dir, check=True)
             console.print("[green]✅ Successfully pushed to main[/green]")
-        except subprocess.CalledProcessError as e:
-            console.print(f"[red]❌ Push failed: {e}[/red]")
+            
+            return True
+            
+        except Exception as e:
+            console.print(f"[red]❌ Deployment failed: {e}[/red]")
             return False
-        
-        # Success summary
+
+    def _show_publish_success(self):
+        """Show success summary after publishing"""
         console.print("\n[green]🎉 Publication completed successfully![/green]")
         console.print("\n[blue]📊 What happened:[/blue]")
-        console.print("  ✅ Built HTML version")
-        console.print("  ✅ Built PDF version") 
-        console.print("  ✅ Copied PDF to assets")
-        console.print("  ✅ Committed changes")
-        console.print("  ✅ Pushed to main")
-        console.print("\n[blue]🌐 Your book will be available at:[/blue]")
+        console.print("  ✅ Validated environment")
+        console.print("  ✅ Managed branch setup")
+        console.print("  ✅ Planned release strategy")
+        console.print("  ✅ Built HTML and PDF versions")
+        console.print("  ✅ Created GitHub release")
+        console.print("  ✅ Deployed to production")
+        console.print("\n[blue]🌐 Your book is now available at:[/blue]")
         console.print("  📖 Web: https://harvard-edge.github.io/cs249r_book")
         console.print("  📄 PDF: https://harvard-edge.github.io/cs249r_book/assets/Machine-Learning-Systems.pdf")
         console.print("\n[blue]⏳ GitHub Actions will now:[/blue]")
@@ -1091,8 +1538,174 @@ class BookBinder:
         console.print("  🏗️ Build all formats")
         console.print("  🚀 Deploy to GitHub Pages")
         console.print("\n[blue]📈 Monitor: https://github.com/harvard-edge/cs249r_book/actions[/blue]")
-        
-        return True
+
+
+
+    def _get_current_version(self):
+        """Get current version from git tags"""
+        try:
+            result = subprocess.run(['git', 'tag', '--list', 'v*'], 
+                                  capture_output=True, text=True, cwd=self.root_dir)
+            tags = result.stdout.strip().split('\n') if result.stdout.strip() else []
+            
+            if not tags:
+                return "0.0.0"
+            
+            # Find the highest version
+            versions = [tag[1:] for tag in tags if tag.startswith('v')]
+            if not versions:
+                return "0.0.0"
+            
+            return max(versions, key=lambda v: [int(x) for x in v.split('.')])
+            
+        except Exception:
+            return "0.0.0"
+
+    def _analyze_changes(self):
+        """Analyze recent changes to suggest version type"""
+        try:
+            # Get recent commits
+            result = subprocess.run(['git', 'log', '--oneline', '--since=1.week.ago'], 
+                                  capture_output=True, text=True, cwd=self.root_dir)
+            commits = result.stdout.strip().split('\n') if result.stdout.strip() else []
+            
+            if not commits:
+                return "patch"
+            
+            # Analyze commit messages for keywords
+            major_keywords = ['breaking', 'major', 'v2', 'overhaul', 'rewrite']
+            minor_keywords = ['feature', 'new', 'chapter', 'add', 'enhance']
+            
+            commit_text = ' '.join(commits).lower()
+            
+            if any(keyword in commit_text for keyword in major_keywords):
+                return "major"
+            elif any(keyword in commit_text for keyword in minor_keywords):
+                return "minor"
+            else:
+                return "patch"
+                
+        except Exception:
+            return "patch"
+
+    def _increment_major_version(self, version):
+        """Increment major version (1.0.0 → 2.0.0)"""
+        try:
+            major, minor, patch = map(int, version.split('.'))
+            return f"{major + 1}.0.0"
+        except:
+            return "1.0.0"
+
+    def _increment_minor_version(self, version):
+        """Increment minor version (1.0.0 → 1.1.0)"""
+        try:
+            major, minor, patch = map(int, version.split('.'))
+            return f"{major}.{minor + 1}.0"
+        except:
+            return "1.0.0"
+
+    def _get_next_version(self):
+        """Get the next version number based on existing tags"""
+        try:
+            # Get all version tags
+            result = subprocess.run(['git', 'tag', '--list', 'v*'], 
+                                  capture_output=True, text=True, cwd=self.root_dir)
+            tags = result.stdout.strip().split('\n') if result.stdout.strip() else []
+            
+            # Parse version numbers
+            versions = []
+            for tag in tags:
+                if tag.startswith('v'):
+                    try:
+                        version = tag[1:]  # Remove 'v' prefix
+                        versions.append(version)
+                    except:
+                        continue
+            
+            if not versions:
+                return "1.0.0"
+            
+            # Find the highest version
+            latest = max(versions, key=lambda v: [int(x) for x in v.split('.')])
+            major, minor, patch = map(int, latest.split('.'))
+            
+            # Increment patch version
+            return f"{major}.{minor}.{patch + 1}"
+            
+        except Exception as e:
+            console.print(f"[yellow]⚠️ Could not determine version: {e}[/yellow]")
+            return "1.0.0"
+
+    def _generate_manual_release_notes(self):
+        """Generate manual release notes based on recent commits"""
+        try:
+            # Get recent commits since last tag
+            result = subprocess.run(['git', 'log', '--oneline', '--since=1.week.ago'], 
+                                  capture_output=True, text=True, cwd=self.root_dir)
+            commits = result.stdout.strip().split('\n') if result.stdout.strip() else []
+            
+            if not commits:
+                return "📚 Book update with latest content and improvements."
+            
+            # Format recent commits
+            notes = "## What's New\n\n"
+            for commit in commits[:10]:  # Last 10 commits
+                if commit.strip():
+                    notes += f"• {commit}\n"
+            
+            notes += "\n## 📖 Book Updates\n"
+            notes += "• Updated content and chapters\n"
+            notes += "• Improved formatting and layout\n"
+            notes += "• Enhanced PDF generation\n"
+            
+            return notes
+            
+        except Exception as e:
+            return f"📚 Book update with latest content and improvements.\n\nError generating notes: {e}"
+
+    def _generate_ai_release_notes(self):
+        """Generate AI-powered release notes using Ollama"""
+        try:
+            # Check if Ollama is available
+            subprocess.run(['ollama', '--version'], capture_output=True, check=True)
+            
+            # Get recent commits
+            result = subprocess.run(['git', 'log', '--oneline', '--since=1.week.ago'], 
+                                  capture_output=True, text=True, cwd=self.root_dir)
+            commits = result.stdout.strip().split('\n') if result.stdout.strip() else []
+            
+            if not commits:
+                return self._generate_manual_release_notes()
+            
+            # Create prompt for AI
+            prompt = f"""Generate professional release notes for a machine learning systems book based on these recent commits:
+
+{chr(10).join(commits[:15])}
+
+Please create:
+1. A brief summary of changes
+2. Key improvements and updates
+3. Technical details about the book content
+4. Professional tone suitable for academic publishing
+
+Format as markdown with clear sections."""
+
+            # Use Ollama to generate notes
+            ai_result = subprocess.run(['ollama', 'run', 'llama2', prompt], 
+                                     capture_output=True, text=True, cwd=self.root_dir)
+            
+            if ai_result.returncode == 0 and ai_result.stdout.strip():
+                return ai_result.stdout.strip()
+            else:
+                console.print("[yellow]⚠️ AI generation failed, using manual notes[/yellow]")
+                return self._generate_manual_release_notes()
+                
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            console.print("[yellow]⚠️ Ollama not available, using manual notes[/yellow]")
+            return self._generate_manual_release_notes()
+        except Exception as e:
+            console.print(f"[yellow]⚠️ AI generation error: {e}[/yellow]")
+            return self._generate_manual_release_notes()
 
     def show_about(self):
         """Display beautiful about screen with book binder theme"""
@@ -1182,33 +1795,35 @@ class BookBinder:
     def show_help(self):
         """Display beautiful help screen"""
         fast_table = Table(show_header=True, header_style="bold green", box=None)
-        fast_table.add_column("Command", style="green", width=22)
-        fast_table.add_column("Description", style="white")
-        fast_table.add_column("Example", style="dim")
+        fast_table.add_column("Command", style="green", width=35)
+        fast_table.add_column("Description", style="white", width=30)
+        fast_table.add_column("Example", style="dim", width=30)
         
         fast_table.add_row("build <chapter[,ch2,...]|-> <format>", "Build chapter(s) or all", "./binder build intro html")
         fast_table.add_row("preview <chapter>", "Build and preview chapter", "./binder preview ops")
         
         full_table = Table(show_header=True, header_style="bold blue", box=None)
-        full_table.add_column("Command", style="blue", width=22)
-        full_table.add_column("Description", style="white")
-        full_table.add_column("Example", style="dim")
+        full_table.add_column("Command", style="blue", width=35)
+        full_table.add_column("Description", style="white", width=30)
+        full_table.add_column("Example", style="dim", width=30)
         
         full_table.add_row("build - <format>", "Build complete book", "./binder build - pdf")
         full_table.add_row("preview-full [format]", "Preview complete book", "./binder preview-full")
-        full_table.add_row("publish", "Build and publish book", "./binder publish")
+        full_table.add_row("publish [desc] [commit]", "Build and publish book", "./binder publish 'Add chapter' abc123")
         
         # Management Commands
         mgmt_table = Table(show_header=True, header_style="bold blue", box=None)
-        mgmt_table.add_column("Command", style="green", width=22)
-        mgmt_table.add_column("Description", style="white")
-        mgmt_table.add_column("Example", style="dim")
+        mgmt_table.add_column("Command", style="green", width=35)
+        mgmt_table.add_column("Description", style="white", width=30)
+        mgmt_table.add_column("Example", style="dim", width=30)
         
         mgmt_table.add_row("clean", "Clean configs & artifacts", "./binder clean")
         mgmt_table.add_row("check", "Check for build artifacts", "./binder check")
         mgmt_table.add_row("switch <format>", "Switch config", "./binder switch pdf")
         mgmt_table.add_row("status", "Show current status", "./binder status")
         mgmt_table.add_row("list", "List chapters", "./binder list")
+        mgmt_table.add_row("hello", "Show welcome message", "./binder hello")
+        mgmt_table.add_row("setup", "Setup environment", "./binder setup")
         mgmt_table.add_row("about", "Show about information", "./binder about")
         mgmt_table.add_row("help", "Show this help", "./binder help")
         
@@ -1227,6 +1842,8 @@ class BookBinder:
         shortcuts_table.add_row("s", "switch")
         shortcuts_table.add_row("st", "status")
         shortcuts_table.add_row("l", "list")
+        shortcuts_table.add_row("he", "hello")
+        shortcuts_table.add_row("se", "setup")
         shortcuts_table.add_row("a", "about")
         shortcuts_table.add_row("h", "help")
         
@@ -1238,8 +1855,6 @@ class BookBinder:
         console.print(Panel(shortcuts_table, title="🚀 Shortcuts", border_style="cyan"))
         
         # Pro Tips
-        console.print(Panel("", title="💡 Pro Tips", border_style="blue"))
-        
         examples = Text()
         examples.append("🎯 Power User Examples:\n", style="bold magenta")
         examples.append("  ./binder b intro,ml_systems html ", style="cyan")
@@ -1255,6 +1870,571 @@ class BookBinder:
         examples.append("\n", style="dim")
         
         console.print(Panel(examples, title="💡 Pro Tips", border_style="magenta"))
+
+    def show_hello(self):
+        """Display welcome message and getting started guide"""
+        welcome_panel = Panel(
+            "[bold blue]🎉 Welcome to MLSysBook![/bold blue]\n\n"
+            "[green]I'm your Book Binder - I help you build and publish the Machine Learning Systems book.[/green]\n\n"
+            "[bold yellow]📚 What I can do:[/bold yellow]\n"
+            "  • Build individual chapters or the entire book\n"
+            "  • Preview content in your browser\n"
+            "  • Publish to the world with smart versioning\n"
+            "  • Manage build configurations\n"
+            "  • Clean up artifacts automatically\n\n"
+            "[bold cyan]🚀 Getting Started:[/bold cyan]\n"
+            "  1. Run './binder setup' to configure your environment\n"
+            "  2. Try './binder list' to see available chapters\n"
+            "  3. Use './binder preview intro' to preview a chapter\n"
+            "  4. Run './binder help' for all commands\n\n"
+            "[bold magenta]💡 Quick Examples:[/bold magenta]\n"
+            "  ./binder preview intro     # Preview introduction chapter\n"
+            "  ./binder build - html      # Build complete HTML book\n"
+            "  ./binder build - pdf       # Build complete PDF book\n"
+            "  ./binder publish           # Publish to the world\n\n"
+            "[dim]Made with ❤️ for aspiring AI engineers worldwide[/dim]",
+            title="👋 Hello from Book Binder",
+            border_style="blue",
+            padding=(1, 2)
+        )
+        
+        console.print(welcome_panel)
+        
+        # Show current status
+        status_table = self._create_status_table()
+        
+        # Add environment info
+        status_table.add_row("📁 Book Directory", "✅ Found", str(self.book_dir))
+        status_table.add_row("🔗 Active Config", "✅ Active", str(self.active_config))
+        status_table.add_row("📚 Chapters", "✅ Available", f"{len(self.find_chapters())} chapters")
+        
+        # Add tool status
+        tools_to_check = [
+            ('Quarto', ['quarto', '--version']),
+            ('Python', ['python3', '--version']),
+            ('Git', ['git', '--version'])
+        ]
+        
+        for tool_name, cmd in tools_to_check:
+            available, version = self._check_tool_availability(tool_name, cmd)
+            status = "✅ Available" if available else "❌ Not found"
+            status_table.add_row(tool_name, status.split()[0], status.split()[1] if len(status.split()) > 1 else "")
+        
+        console.print(Panel(status_table, title="🔧 Environment Status", border_style="green"))
+        
+        # Next steps
+        next_steps = Table(show_header=True, header_style="bold blue", box=None)
+        next_steps.add_column("Step", style="cyan", width=10)
+        next_steps.add_column("Command", style="green", width=25)
+        next_steps.add_column("Description", style="white")
+        
+        next_steps.add_row("1", "./binder setup", "Configure your environment")
+        next_steps.add_row("2", "./binder list", "See available chapters")
+        next_steps.add_row("3", "./binder preview intro", "Preview a chapter")
+        next_steps.add_row("4", "./binder help", "Learn all commands")
+        
+        console.print(Panel(next_steps, title="🎯 Next Steps", border_style="cyan"))
+
+    def setup_environment(self):
+        """Setup the development environment"""
+        console.print("[bold blue]🔧 MLSysBook Environment Setup[/bold blue]")
+        console.print("[dim]I'll help you configure everything you need[/dim]\n")
+        
+        # Step 1: Check current environment
+        step1_panel = Panel(
+            "[bold blue]🔍 Checking your environment...[/bold blue]",
+            title="📋 Step 1: Environment Check",
+            border_style="blue",
+            padding=(0, 1)
+        )
+        console.print(step1_panel)
+        self._check_environment()
+        
+        # Step 2: System dependencies
+        step2_panel = Panel(
+            "[bold blue]🔧 Checking system dependencies...[/bold blue]",
+            title="📋 Step 2: System Dependencies",
+            border_style="blue",
+            padding=(0, 1)
+        )
+        console.print(step2_panel)
+        if not self._check_system_dependencies():
+            console.print("[red]❌ System dependency check failed[/red]")
+            return
+        
+        # Step 3: Install/configure tools
+        step3_panel = Panel(
+            "[bold blue]📦 Installing tools and packages...[/bold blue]",
+            title="📋 Step 3: Tool Installation",
+            border_style="blue",
+            padding=(0, 1)
+        )
+        console.print(step3_panel)
+        self._install_tools()
+        
+        # Step 4: Configure Git
+        step4_panel = Panel(
+            "[bold blue]🔧 Configuring Git...[/bold blue]",
+            title="📋 Step 4: Git Configuration",
+            border_style="blue",
+            padding=(0, 1)
+        )
+        console.print(step4_panel)
+        self._configure_git()
+        
+        # Step 5: Environment preferences
+        step5_panel = Panel(
+            "[bold blue]⚙️ Configuring preferences...[/bold blue]",
+            title="📋 Step 5: Environment Preferences",
+            border_style="blue",
+            padding=(0, 1)
+        )
+        console.print(step5_panel)
+        self._configure_preferences()
+        
+        # Step 6: Test setup
+        step6_panel = Panel(
+            "[bold blue]🧪 Testing setup...[/bold blue]",
+            title="📋 Step 6: Test Setup",
+            border_style="blue",
+            padding=(0, 1)
+        )
+        console.print(step6_panel)
+        self._test_setup()
+        
+        console.print("\n[green]✅ Environment setup completed![/green]")
+        console.print("[blue]💡 Try './binder preview intro' to test your setup[/blue]")
+
+    def _get_tools_to_check(self):
+        """Get list of tools to check/install"""
+        return [
+            ('Quarto', ['quarto', '--version'], "https://quarto.org/docs/get-started/"),
+            ('Python', ['python3', '--version'], "https://www.python.org/downloads/"),
+            ('Git', ['git', '--version'], "https://git-scm.com/downloads"),
+            ('GitHub CLI', ['gh', '--version'], "https://cli.github.com/"),
+            ('Ollama', ['ollama', '--version'], "https://ollama.ai/")
+        ]
+
+    def _check_tool_availability(self, tool_name, cmd):
+        """Check if a tool is available and return version"""
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            version = result.stdout.strip().split('\n')[0]
+            return True, version
+        except:
+            return False, "Not installed"
+
+    def _check_environment(self):
+        """Check current environment status"""
+        console.print("[blue]🔍 Checking your environment...[/blue]")
+        
+        status_table = Table(show_header=True, header_style="bold blue", box=None)
+        status_table.add_column("Tool", style="cyan", width=15)
+        status_table.add_column("Status", style="white", width=15)
+        status_table.add_column("Version", style="dim")
+        
+        # Check various tools
+        tools_to_check = self._get_tools_to_check()
+        
+        for tool_name, cmd, _ in tools_to_check:
+            available, version = self._check_tool_availability(tool_name, cmd)
+            status = "✅ Available" if available else "❌ Missing"
+            status_table.add_row(tool_name, status, version)
+        
+        console.print(status_table)
+
+    def _install_tools(self):
+        """Install missing tools and packages"""
+        console.print("[blue]📦 Installing tools and packages...[/blue]")
+        
+        # Check what's missing and install automatically
+        missing_tools = []
+        tools_to_check = self._get_tools_to_check()
+        
+        for tool_name, cmd, url in tools_to_check:
+            available, _ = self._check_tool_availability(tool_name, cmd)
+            if available:
+                console.print(f"[green]✅ {tool_name} already installed[/green]")
+            else:
+                missing_tools.append((tool_name, url))
+        
+        if missing_tools:
+            console.print("[yellow]⚠️ Missing tools detected:[/yellow]")
+            for tool_name, url in missing_tools:
+                console.print(f"  • {tool_name}: {url}")
+            
+            console.print("\n[blue]🔧 Attempting automatic installation...[/blue]")
+            self._auto_install_tools(missing_tools)
+        else:
+            console.print("[green]✅ All required tools are available[/green]")
+        
+        # Install Python packages
+        console.print("\n[blue]📦 Installing Python packages...[/blue]")
+        self._install_python_packages()
+
+    def _auto_install_tools(self, missing_tools):
+        """Attempt to automatically install missing tools"""
+        import platform
+        system = platform.system().lower()
+        
+        for tool_name, url in missing_tools:
+            console.print(f"[blue]🔧 Installing {tool_name}...[/blue]")
+            
+            try:
+                self._install_tool(tool_name, system)
+            except Exception as e:
+                console.print(f"[red]❌ Failed to install {tool_name}: {e}[/red]")
+                console.print(f"[yellow]💡 Please install manually: {url}[/yellow]")
+
+    def _get_installation_methods(self):
+        """Get installation methods for different tools"""
+        return {
+            'Quarto': {
+                'darwin': {'method': 'brew', 'package': 'quarto'},
+                'linux': {'method': 'apt', 'package': 'quarto'}
+            },
+            'GitHub CLI': {
+                'darwin': {'method': 'brew', 'package': 'gh'},
+                'linux': {'method': 'apt', 'package': 'gh'}
+            },
+            'Ollama': {
+                'darwin': {'method': 'brew', 'package': 'ollama'},
+                'linux': {'method': 'curl', 'url': 'https://ollama.ai/install.sh'}
+            },
+            'Git': {
+                'darwin': {'method': 'brew', 'package': 'git'},
+                'linux': {'method': 'apt', 'package': 'git'}
+            }
+        }
+
+    def _install_tool(self, tool_name, system):
+        """Install a tool using the appropriate method for the system"""
+        installation_methods = self._get_installation_methods()
+        
+        if tool_name not in installation_methods:
+            raise Exception(f"Automatic {tool_name} installation not supported")
+        
+        if system not in installation_methods[tool_name]:
+            raise Exception(f"Automatic {tool_name} installation not supported on this system")
+        
+        method_info = installation_methods[tool_name][system]
+        method = method_info['method']
+        
+        if method == 'brew':
+            package = method_info['package']
+            console.print(f"[blue]📦 Installing {tool_name} via Homebrew...[/blue]")
+            subprocess.run(['brew', 'install', package], check=True)
+            console.print(f"[green]✅ {tool_name} installed successfully[/green]")
+            
+        elif method == 'apt':
+            package = method_info['package']
+            console.print(f"[blue]📦 Installing {tool_name} via apt...[/blue]")
+            subprocess.run(['sudo', 'apt-get', 'update'], check=True)
+            subprocess.run(['sudo', 'apt-get', 'install', '-y', package], check=True)
+            console.print(f"[green]✅ {tool_name} installed successfully[/green]")
+            
+        elif method == 'curl':
+            url = method_info['url']
+            console.print(f"[blue]📦 Installing {tool_name} via curl...[/blue]")
+            subprocess.run(['curl', '-fsSL', url, '|', 'sh'], shell=True, check=True)
+            console.print(f"[green]✅ {tool_name} installed successfully[/green]")
+
+    def _install_python_packages(self):
+        """Install required Python packages"""
+        console.print("[blue]🐍 Installing Python packages...[/blue]")
+        
+        # Check if pip is available
+        try:
+            subprocess.run(['pip3', '--version'], capture_output=True, check=True)
+        except:
+            console.print("[red]❌ pip3 not found. Please install Python and pip first.[/red]")
+            return
+        
+        # List of required packages (only external packages)
+        required_packages = [
+            'rich',  # For beautiful terminal output
+        ]
+        
+        # Check what's already installed
+        installed_packages = []
+        try:
+            result = subprocess.run(['pip3', 'list'], capture_output=True, text=True, check=True)
+            installed_lines = result.stdout.split('\n')
+            for line in installed_lines:
+                if line.strip():
+                    package_name = line.split()[0].lower()
+                    installed_packages.append(package_name)
+        except:
+            console.print("[yellow]⚠️ Could not check installed packages[/yellow]")
+        
+        # Check built-in modules
+        builtin_modules = ['pathlib', 'subprocess', 'os', 'sys', 'shutil', 'signal']
+        for module in builtin_modules:
+            try:
+                __import__(module)
+                console.print(f"[green]✅ {module} (built-in) available[/green]")
+            except ImportError:
+                console.print(f"[red]❌ {module} (built-in) not available[/red]")
+        
+        # Install missing packages
+        for package in required_packages:
+            if package.lower() in installed_packages:
+                console.print(f"[green]✅ {package} already installed[/green]")
+            else:
+                try:
+                    console.print(f"[blue]📦 Installing {package}...[/blue]")
+                    subprocess.run(['pip3', 'install', package], check=True)
+                    console.print(f"[green]✅ {package} installed successfully[/green]")
+                except Exception as e:
+                    console.print(f"[red]❌ Failed to install {package}: {e}[/red]")
+        
+        console.print("[green]✅ Python packages installation completed[/green]")
+
+    def _check_system_dependencies(self):
+        """Check and install system dependencies"""
+        import platform
+        system = platform.system().lower()
+        
+        console.print("[blue]🔧 Checking system dependencies...[/blue]")
+        
+        if system == "darwin":  # macOS
+            # Check for Homebrew
+            try:
+                subprocess.run(['brew', '--version'], capture_output=True, check=True)
+                console.print("[green]✅ Homebrew already installed[/green]")
+            except:
+                console.print("[blue]📦 Installing Homebrew...[/blue]")
+                try:
+                    install_cmd = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+                    subprocess.run(install_cmd, shell=True, check=True)
+                    console.print("[green]✅ Homebrew installed successfully[/green]")
+                except Exception as e:
+                    console.print(f"[red]❌ Failed to install Homebrew: {e}[/red]")
+                    console.print("[yellow]💡 Please install Homebrew manually: https://brew.sh[/yellow]")
+                    return False
+        
+        elif system == "linux":
+            # Check for apt (Ubuntu/Debian)
+            try:
+                subprocess.run(['apt-get', '--version'], capture_output=True, check=True)
+                console.print("[green]✅ apt package manager available[/green]")
+            except:
+                console.print("[yellow]⚠️ apt not found. Please install package manager manually.[/yellow]")
+                return False
+        
+        return True
+
+    def _get_git_config(self, key):
+        """Get Git configuration value"""
+        try:
+            result = subprocess.run(['git', 'config', key], capture_output=True, text=True)
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except:
+            pass
+        return None
+
+    def _set_git_config(self, key, value):
+        """Set Git configuration value"""
+        try:
+            subprocess.run(['git', 'config', '--global', key, value], check=True)
+            console.print(f"[green]✅ Set Git {key}: {value}[/green]")
+            return True
+        except subprocess.CalledProcessError as e:
+            console.print(f"[red]❌ Failed to set Git {key}: {e}[/red]")
+            return False
+
+    def _get_user_input_with_default(self, prompt, current_value=None):
+        """Get user input with optional default value"""
+        if current_value:
+            console.print(f"[bold]{prompt} [{current_value}]: [/bold]", end="")
+            user_input = input().strip()
+            return user_input if user_input else current_value
+        else:
+            console.print(f"[bold]{prompt}: [/bold]", end="")
+            return input().strip()
+
+    def _configure_git(self):
+        """Configure Git settings interactively"""
+        console.print("[blue]🔧 Configuring Git...[/blue]")
+        
+        # Check current Git configuration
+        current_name = self._get_git_config('user.name')
+        current_email = self._get_git_config('user.email')
+        
+        # Show current configuration
+        if current_name and current_email:
+            console.print(f"[green]✅ Current Git configuration:[/green]")
+            console.print(f"  Name: {current_name}")
+            console.print(f"  Email: {current_email}")
+            
+            console.print("\n[blue]Would you like to update your Git configuration?[/blue]")
+            console.print("[bold]Update Git config? (y/N) [N]: [/bold]", end="")
+            update_choice = input().strip().lower()
+            if not update_choice:
+                update_choice = 'n'
+            
+            if update_choice not in ['y', 'yes']:
+                console.print("[green]✅ Keeping current Git configuration[/green]")
+                return
+        else:
+            console.print("[yellow]⚠️ Git configuration incomplete[/yellow]")
+        
+        # Get user information
+        console.print("\n[blue]📝 Please provide your information:[/blue]")
+        
+        name_input = self._get_user_input_with_default("Full name", current_name)
+        email_input = self._get_user_input_with_default("Email", current_email)
+        github_username = self._get_user_input_with_default("GitHub username")
+        
+        # Configure Git
+        success = True
+        if name_input:
+            success &= self._set_git_config('user.name', name_input)
+        
+        if email_input:
+            success &= self._set_git_config('user.email', email_input)
+        
+        if github_username:
+            success &= self._set_git_config('user.github', github_username)
+        
+        if success:
+            console.print("[green]✅ Git configuration completed![/green]")
+        else:
+            console.print("[yellow]💡 You can configure Git manually:[/yellow]")
+            console.print("  git config --global user.name 'Your Name'")
+            console.print("  git config --global user.email 'your.email@example.com'")
+
+    def _get_preferences_config(self):
+        """Get preferences configuration structure"""
+        return [
+            {
+                'key': 'binder.default-format',
+                'prompt': 'Default build format (html/pdf)',
+                'default': 'html',
+                'options': ['html', 'pdf'],
+                'description': '📚 Build Preferences:\n  • html - Web format (faster, interactive)\n  • pdf - Print format (slower, academic)'
+            },
+            {
+                'key': 'binder.auto-open',
+                'prompt': 'Auto-open browser after builds? (Y/n)',
+                'default': 'y',
+                'options': ['y', 'n'],
+                'description': '🌐 Browser Preferences:'
+            }
+        ]
+
+    def _configure_preferences(self):
+        """Configure user preferences and environment settings"""
+        console.print("[blue]⚙️ Configuring preferences...[/blue]")
+        
+        preferences_config = self._get_preferences_config()
+        
+        for pref in preferences_config:
+            console.print(f"\n[blue]{pref['description']}[/blue]")
+            
+            # Get current value
+            current_value = self._get_git_config(pref['key'])
+            if current_value:
+                default_display = current_value
+            else:
+                default_display = pref['default']
+            
+            # Get user input
+            user_input = self._get_user_input_with_default(
+                pref['prompt'], 
+                default_display
+            )
+            
+            # Validate input
+            if not user_input or user_input not in pref['options']:
+                user_input = pref['default']
+            
+            # Convert y/n to true/false for boolean settings
+            if pref['key'] in ['binder.auto-open', 'binder.ai-default']:
+                setting_value = 'true' if user_input in ['y', 'yes'] else 'false'
+            else:
+                setting_value = user_input
+            
+            # Store preference
+            if self._set_git_config(pref['key'], setting_value):
+                console.print(f"[green]✅ Set {pref['key']}: {setting_value}[/green]")
+            else:
+                console.print(f"[yellow]⚠️ Could not save {pref['key']} preference[/yellow]")
+        
+        console.print("[green]✅ Preferences configured![/green]")
+
+    def get_user_preferences(self):
+        """Get user preferences from Git config"""
+        preferences = {}
+        
+        try:
+            # Get default format
+            result = subprocess.run(['git', 'config', '--global', 'binder.default-format'], 
+                                  capture_output=True, text=True)
+            if result.returncode == 0:
+                preferences['default_format'] = result.stdout.strip()
+            else:
+                preferences['default_format'] = 'html'
+            
+            # Get auto-open setting
+            result = subprocess.run(['git', 'config', '--global', 'binder.auto-open'], 
+                                  capture_output=True, text=True)
+            if result.returncode == 0:
+                preferences['auto_open'] = result.stdout.strip() == 'true'
+            else:
+                preferences['auto_open'] = True
+            
+            # Get AI default setting (only used in publish flow)
+            result = subprocess.run(['git', 'config', '--global', 'binder.ai-default'], 
+                                  capture_output=True, text=True)
+            if result.returncode == 0:
+                preferences['ai_default'] = result.stdout.strip() == 'true'
+            else:
+                # Default to True for AI features (only used in publish)
+                preferences['ai_default'] = True
+            
+            # Get GitHub username
+            result = subprocess.run(['git', 'config', '--global', 'user.github'], 
+                                  capture_output=True, text=True)
+            if result.returncode == 0:
+                preferences['github_username'] = result.stdout.strip()
+            else:
+                preferences['github_username'] = None
+                
+        except Exception:
+            # Return defaults if anything fails
+            preferences = {
+                'default_format': 'html',
+                'auto_open': True,
+                'ai_default': True,
+                'github_username': None
+            }
+        
+        return preferences
+
+    def _create_status_table(self):
+        """Create a standard status table"""
+        status_table = Table(show_header=True, header_style="bold green", box=None)
+        status_table.add_column("Component", style="cyan", width=20)
+        status_table.add_column("Status", style="white", width=15)
+        status_table.add_column("Details", style="dim")
+        return status_table
+
+    def _test_setup(self):
+        """Test the setup by building a simple chapter"""
+        console.print("[blue]🧪 Testing setup...[/blue]")
+        
+        # Try to build a simple chapter
+        try:
+            console.print("[blue]📚 Testing chapter build...[/blue]")
+            success = self.build("intro", "html")
+            if success:
+                console.print("[green]✅ Build test successful![/green]")
+            else:
+                console.print("[yellow]⚠️ Build test failed - check your Quarto installation[/yellow]")
+        except Exception as e:
+            console.print(f"[red]❌ Test failed: {e}[/red]")
 
 def main():
     binder = BookBinder()
@@ -1275,6 +2455,8 @@ def main():
         's': 'switch',
         'st': 'status',
         'l': 'list',
+        'he': 'hello',
+        'se': 'setup',
         'h': 'help'
     }
 
@@ -1359,6 +2541,12 @@ def main():
 
         elif command == "help":
             binder.show_help()
+
+        elif command == "hello":
+            binder.show_hello()
+
+        elif command == "setup":
+            binder.setup_environment()
 
         else:
             console.print(f"[red]❌ Unknown command: {command}[/red]")

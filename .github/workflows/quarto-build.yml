@@ -58,7 +58,7 @@ permissions:
 jobs:
   build:
     runs-on: ${{ inputs.os }}
-    timeout-minutes: 120  # ⏰ Set job timeout to 60 minutes
+    timeout-minutes: 60   # ⏰ Set job timeout to 1 hour (3600 seconds)
     environment:
       name: ${{ inputs.environment }}
     env:
@@ -362,6 +362,36 @@ jobs:
             cat("✅ All required R packages installed successfully\n")
           }
 
+      - name: 💓 Start Build Heartbeat
+        shell: bash
+        run: |
+          echo "💓 Starting build heartbeat system..."
+          echo "⏰ Build started at: $(date)"
+          echo "📊 Build configuration:"
+          echo "   - Format: ${{ inputs.format }}"
+          echo "   - OS: ${{ inputs.os }}"
+          echo "   - Environment: ${{ inputs.environment }}"
+          echo "   - Timeout: 60 minutes"
+          echo "💓 Heartbeat will show progress every 5 minutes"
+          
+          # Start background heartbeat process
+          (
+            while true; do
+              sleep 300  # 5 minutes
+              echo "💓 Build heartbeat: $(date) - Still building..."
+              echo "📊 Current memory usage:"
+              free -h || echo "Memory info not available"
+              echo "📊 Current disk usage:"
+              df -h . || echo "Disk info not available"
+              echo "📊 Active processes:"
+              ps aux | grep -E "(quarto|R|python)" | head -5 || echo "Process info not available"
+              echo "---"
+            done
+          ) &
+          HEARTBEAT_PID=$!
+          echo $HEARTBEAT_PID > /tmp/heartbeat.pid
+          echo "✅ Heartbeat started (PID: $HEARTBEAT_PID)"
+
       - name: 🔨 Build HTML (copy config and render)
         if: inputs.format == 'html' || inputs.format == 'all'
         shell: bash
@@ -373,8 +403,10 @@ jobs:
           echo "✅ Configuration set to HTML"
           
           echo "🔨 Building HTML..."
+          echo "⏰ HTML build started at: $(date)"
           # Enable verbose logging for debugging
           quarto render --to html
+          echo "✅ HTML build completed at: $(date)"
         
       - name: 🔨 Build PDF (copy config and render)
         if: inputs.format == 'pdf' || inputs.format == 'all'
@@ -387,9 +419,31 @@ jobs:
           echo "✅ Configuration set to PDF"
           
           echo "🔨 Building PDF..."
+          echo "⏰ PDF build started at: $(date)"
+          echo "📊 This is typically the longest step (can take 30-45 minutes)"
+          echo "💓 Heartbeat will continue showing progress..."
           # Enable verbose logging for debugging
           quarto render --to titlepage-pdf
+          echo "✅ PDF build completed at: $(date)"
       
+      - name: 💓 Stop Build Heartbeat
+        shell: bash
+        run: |
+          echo "💓 Stopping build heartbeat..."
+          if [ -f /tmp/heartbeat.pid ]; then
+            HEARTBEAT_PID=$(cat /tmp/heartbeat.pid)
+            if kill -0 $HEARTBEAT_PID 2>/dev/null; then
+              kill $HEARTBEAT_PID
+              echo "✅ Heartbeat stopped (PID: $HEARTBEAT_PID)"
+            else
+              echo "⚠️ Heartbeat process already stopped"
+            fi
+            rm -f /tmp/heartbeat.pid
+          else
+            echo "⚠️ No heartbeat PID file found"
+          fi
+          echo "⏰ Total build time: $(date)"
+
       - name: 📋 Check Quarto Build Output
         shell: bash
         run: |
@@ -551,12 +605,13 @@ jobs:
           # Copy new content
           cp -r ../build/html/* .
           
-          # Copy PDF if it exists (for download)
+          # Copy PDF if it exists (for download) - but don't commit it to git
           if [ -f "../build/pdf/Machine-Learning-Systems.pdf" ]; then
-            echo "📄 Adding PDF to deployment..."
+            echo "📄 Adding PDF to deployment for download access..."
             mkdir -p assets
             cp "../build/pdf/Machine-Learning-Systems.pdf" assets/
             echo "✅ PDF added: assets/Machine-Learning-Systems.pdf"
+            echo "📝 Note: PDF will be available for download but not tracked in git"
           else
             echo "⚠️ PDF not found in build/pdf/"
           fi
@@ -565,8 +620,13 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           
-          # Commit and push
+          # Add all files EXCEPT the PDF
           git add .
+          
+          # Remove PDF from git tracking (if it was added)
+          git rm --cached assets/Machine-Learning-Systems.pdf 2>/dev/null || true
+          
+          # Commit and push (PDF will be available for download but not in git)
           git commit -m "Deploy from commit ${GITHUB_SHA}" || echo "No changes to commit"
           git push origin gh-pages
         env:

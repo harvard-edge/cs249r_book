@@ -255,12 +255,31 @@ MLSysBook/
 
 ### Publishing
 ```bash
-# Quick publish (recommended)
+# Command-line trigger (recommended)
+./binder publish "Description" COMMIT_HASH
+
+# Interactive wizard
 ./binder publish
 
 # Manual steps
 ./binder build - html && ./binder build - pdf
 # Then copy PDF to assets and push to main
+```
+
+**Publishing Options:**
+- **`./binder publish`** — Unified command with interactive and command-line modes
+- **Web Interface** — Manual trigger via GitHub Actions UI
+
+### Getting Started
+```bash
+# Welcome and overview
+./binder hello
+
+# First time setup
+./binder setup
+
+# Quick preview
+./binder preview intro
 ```
 
 ---

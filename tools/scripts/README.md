@@ -70,15 +70,15 @@ python content/manage_section_ids.py
 
 System maintenance, updates, and changelog management:
 
-- **`update_changelog.py`** - Update project changelog
+- **`generate_release_content.py`** - Generate changelog entries and release notes
 - **`fix_changelog.py`** - Fix changelog formatting issues
 - **`update_texlive_packages.py`** - Update LaTeX package dependencies
 - **`cleanup_old_runs.sh`** - Clean up old build runs
 
 ### Usage Examples
 ```bash
-# Update changelog
-python maintenance/update_changelog.py
+# Generate changelog entry or release notes
+python maintenance/generate_release_content.py
 
 # Update LaTeX packages
 python maintenance/update_texlive_packages.py
@@ -203,7 +203,7 @@ python maintenance/update_changelog.py
 |----------|---------|-------|-------------|
 | **build** | Development & building | 3 | `clean.sh`, `generate_stats.py` |
 | **content** | Content management | 11 | `manage_section_ids.py`, `improve_figure_captions.py` |
-| **maintenance** | System maintenance | 4 | `update_changelog.py`, `update_texlive_packages.py` |
+| **maintenance** | System maintenance | 4 | `generate_release_content.py`, `update_texlive_packages.py` |
 | **testing** | Testing & validation | 2 | `run_tests.py`, `test_section_ids.py` |
 | **utilities** | General utilities | 6 | `check_sources.py`, `check_ascii.py` |
 | **docs** | Documentation | 3 | Various `.md` files |

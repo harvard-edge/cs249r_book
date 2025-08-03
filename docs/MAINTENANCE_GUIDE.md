@@ -92,7 +92,7 @@ python tools/scripts/utilities/check_images.py
 # Deep clean and update
 make clean-deep         # Full cleanup
 make build-all          # Test all formats
-python tools/scripts/maintenance/update_changelog.py
+python tools/scripts/maintenance/generate_release_content.py
 ```
 
 ---
@@ -277,7 +277,7 @@ python tools/scripts/content/fix_bibliography.py
 - **`check_images.py`** - Image validation and optimization
 
 ### **🔧 Maintenance Tools (`tools/scripts/maintenance/`)**
-- **`update_changelog.py`** - Automated changelog management
+- **`generate_release_content.py`** - Automated changelog and release notes generation
 - **`cleanup_old_runs.sh`** - Remove old build artifacts
 
 ---
