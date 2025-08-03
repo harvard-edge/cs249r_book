@@ -1,45 +1,35 @@
 // Auto-collapse sections marked with auto-collapse: true
 document.addEventListener('DOMContentLoaded', function() {
-  setTimeout(() => {
-    console.log('=== AUTO-COLLAPSING SECTIONS ===');
-    
-    // Sections with auto-collapse: true in config
-    const autoCollapseSectionIds = [
-      'labs-overview',
-      'arduino', 
-      'seeed-xiao',
-      'grove-vision',
-      'raspberry-pi',
-      'shared-labs',
-      'resources'
-    ];
-    
-    // Try to find sections that should be auto-collapsed
-    autoCollapseSectionIds.forEach(sectionId => {
-      // Look for elements with this ID or related to this section
-      const possibleElements = [
-        document.getElementById(sectionId),
-        document.querySelector(`[data-bs-target="#${sectionId}"]`),
-        document.querySelector(`[href="#${sectionId}"]`)
-      ].filter(Boolean);
+  // Try multiple times with different delays in case DOM is still loading
+  [1000, 2000, 3000].forEach(delay => {
+    setTimeout(() => {
+      // Find all collapse toggle buttons in sidebar
+      const allToggleButtons = document.querySelectorAll('.sidebar-navigation a[data-bs-toggle="collapse"]');
       
-      possibleElements.forEach(element => {
-        // Find the toggle button associated with this section
-        let toggleButton = null;
+      allToggleButtons.forEach(button => {
+        const target = button.getAttribute('data-bs-target');
+        const menuText = button.querySelector('.menu-text')?.textContent?.trim();
         
-        if (element.hasAttribute('data-bs-toggle')) {
-          toggleButton = element;
-        } else {
-          toggleButton = element.querySelector('a[data-bs-toggle="collapse"]') ||
-                       element.closest('li').querySelector('a[data-bs-toggle="collapse"]');
-        }
+        // Check if this is a section we want to auto-collapse
+        const shouldCollapse = [
+          'Hands-on Labs',
+          'Arduino', 
+          'Seeed XIAO ESP32S3',
+          'Grove Vision',
+          'Raspberry Pi',
+          'Shared',
+          'Resources'
+        ].includes(menuText);
         
-        if (toggleButton) {
-          const sectionName = toggleButton.querySelector('.menu-text')?.textContent?.trim() || sectionId;
-          console.log(`Auto-collapsing: ${sectionName}`);
-          toggleButton.click();
+        if (shouldCollapse) {
+          const targetElement = document.querySelector(target);
+          // Only click if the section is currently expanded
+          if (targetElement && !targetElement.classList.contains('collapse') || 
+              targetElement?.classList.contains('show')) {
+            button.click();
+          }
         }
       });
-    });
-  }, 1000);
+    }, delay);
+  });
 });
