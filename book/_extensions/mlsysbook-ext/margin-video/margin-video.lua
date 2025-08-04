@@ -133,23 +133,45 @@ return {
       return pandoc.RawBlock("html", html_output)
     elseif FORMAT:match("pdf") or FORMAT:match("latex") then
       log_info("Generating PDF output...")
-      -- PDF: QR code and margin note
+      -- PDF: QR code and margin note with brand-aligned styling
       local pdf_output = [[
 \marginnote{\centering\\\vspace*{5mm}%
-  \parbox{30mm}{\centering\footnotesize%
-    \textbf{Watch on YouTube}\\
-    ]] .. title .. [[\\
-    ]] .. (author ~= "" and author .. "\\\\[1mm]" or "") .. [[
-  }
-  \begingroup
-    \hypersetup{urlcolor=black}
-    \qrcode[height=15mm]{]] .. url .. [[}
-  \endgroup
-\\[1mm]
-  \parbox{25mm}{\centering\footnotesize%
-    Scan with your phone\\
-    to watch the video
-  }
+  \begin{tcolorbox}[
+    enhanced,
+    colback=white,
+    colframe=callout-resource-videos-color2,
+    boxrule=0.5pt,
+    arc=1.5pt,
+    width=32mm,
+    left=0mm,
+    right=0mm,
+    top=0mm,
+    bottom=1mm,
+    before skip=0pt,
+    after skip=0pt,
+    attach boxed title to top*={xshift=0pt},
+    boxed title style={
+      colback=callout-resource-videos-color1,
+      colframe=callout-resource-videos-color2,
+      arc=1.5pt,
+      rounded corners=north,
+      sharp corners=south,
+      boxrule=0.5pt,
+      top=2mm,
+      bottom=2mm
+    },
+    title=\centering\footnotesize\textbf{📹 Watch on YouTube}
+  ]
+    \centering\footnotesize%
+    \textbf{]] .. title .. [[}\\
+    ]] .. (author ~= "" and "\\textcolor{black!60}{" .. author .. "}\\\\[2mm]" or "[2mm]") .. [[
+    \begingroup
+      \hypersetup{urlcolor=black}
+      \qrcode[height=14mm]{]] .. url .. [[}
+    \endgroup
+    \\[2mm]
+    \textcolor{black!60}{\tiny Scan with your phone\\to watch the video}
+  \end{tcolorbox}
 }
 
 \faTv{} \href{]] .. url .. [[}{Watch on YouTube}
