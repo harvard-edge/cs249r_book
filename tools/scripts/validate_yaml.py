@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Cross-platform GitHub Actions workflow validator
+Cross-platform YAML file validator
 Works on macOS, Linux, and Windows
+Validates all YAML files in the project
 """
 
 import subprocess
@@ -58,62 +59,69 @@ def validate_workflow(workflow_path):
         print("❌ yamllint not found. Run: pip install yamllint")
         return False
 
-def validate_all_workflows():
-    """Validate all workflow files"""
-    workflows_dir = Path('.github/workflows')
+def validate_all_yaml_files():
+    """Validate all YAML files in the project"""
+    print("🔍 Validating all YAML files...")
     
-    if not workflows_dir.exists():
-        print("❌ .github/workflows directory not found")
-        return False
+    # Find all YAML files in the project
+    yaml_files = []
     
-    workflow_files = list(workflows_dir.glob('*.yml')) + list(workflows_dir.glob('*.yaml'))
+    # Common directories to check
+    search_dirs = [
+        '.github/workflows',
+        'book',
+        'config',
+        'tools',
+        '.',
+    ]
     
-    if not workflow_files:
-        print("❌ No workflow files found in .github/workflows/")
-        return False
+    # Exclude patterns
+    exclude_patterns = [
+        '**/node_modules/**',
+        '**/.git/**',
+        '**/_site/**',
+        '**/_book/**',
+        '**/.venv/**',
+        '**/__pycache__/**',
+        '**/*.pyc',
+    ]
     
-    print(f"🔍 Found {len(workflow_files)} workflow files")
+    for search_dir in search_dirs:
+        if Path(search_dir).exists():
+            # Find all .yml and .yaml files
+            yaml_files.extend(Path(search_dir).glob('**/*.yml'))
+            yaml_files.extend(Path(search_dir).glob('**/*.yaml'))
     
-    all_valid = True
-    for workflow_file in workflow_files:
-        if not validate_workflow(str(workflow_file)):
-            all_valid = False
+    # Filter out excluded files and remove duplicates
+    filtered_files = []
+    seen_files = set()
+    for yaml_file in yaml_files:
+        file_path = str(yaml_file)
+        # Skip if already seen
+        if file_path in seen_files:
+            continue
+        # Skip if matches exclude patterns
+        if any(pattern.replace('**', '').replace('*', '') in file_path for pattern in exclude_patterns):
+            continue
+        filtered_files.append(yaml_file)
+        seen_files.add(file_path)
     
-    return all_valid
-
-def validate_quarto_files():
-    """Validate Quarto YAML files"""
-    print("\n📚 Validating Quarto YAML files...")
-    
-    # Find all Quarto YAML files
-    quarto_files = []
-    
-    # Check for _quarto.yml files
-    quarto_files.extend(Path('.').glob('**/_quarto.yml'))
-    quarto_files.extend(Path('.').glob('**/_quarto.yaml'))
-    
-    # Check for config files
-    config_dir = Path('book/config')
-    if config_dir.exists():
-        quarto_files.extend(config_dir.glob('*.yml'))
-        quarto_files.extend(config_dir.glob('*.yaml'))
-    
-    if not quarto_files:
-        print("⚠️ No Quarto YAML files found")
+    if not filtered_files:
+        print("⚠️ No YAML files found")
         return True
     
-    print(f"🔍 Found {len(quarto_files)} Quarto YAML files")
+    print(f"🔍 Found {len(filtered_files)} YAML files to validate")
     
     all_valid = True
-    for quarto_file in quarto_files:
-        if not validate_workflow(str(quarto_file)):
+    for yaml_file in filtered_files:
+        if not validate_workflow(str(yaml_file)):
             all_valid = False
     
     return all_valid
 
 def main():
     """Main validation function"""
-    print("🚀 GitHub Actions Workflow Validator")
+    print("🚀 YAML File Validator")
     print("=" * 40)
     
     # Check if yamllint is available
@@ -123,13 +131,10 @@ def main():
             print("❌ Please install yamllint manually: pip install yamllint")
             sys.exit(1)
     
-    # Validate workflows
-    workflows_valid = validate_all_workflows()
+    # Validate all YAML files
+    all_valid = validate_all_yaml_files()
     
-    # Validate Quarto files
-    quarto_valid = validate_quarto_files()
-    
-    if workflows_valid and quarto_valid:
+    if all_valid:
         print("\n🎉 All YAML files are valid!")
         sys.exit(0)
     else:
