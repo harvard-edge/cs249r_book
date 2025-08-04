@@ -49,8 +49,8 @@ on:
     inputs:
       description:
         description: 'What are you publishing? (brief description)'
-        required: true
-        default: ''
+        required: false
+        default: 'Content updates and improvements'
       release_type:
         description: 'Release type'
         required: true
@@ -59,13 +59,13 @@ on:
           - 'patch'
           - 'minor' 
           - 'major'
-        default: 'minor'
+        default: 'patch'
       dev_commit:
-        description: 'Specific dev commit to publish (required)'
-        required: true
+        description: 'Specific dev commit to publish (optional - uses latest if empty)'
+        required: false
         default: ''
       confirm:
-        description: 'Type "PUBLISH" to confirm'
+        description: 'Type "PUBLISH" to confirm (safety check)'
         required: true
         default: ''
       ai_generated_notes:
@@ -75,7 +75,7 @@ on:
         options:
           - 'yes'
           - 'no'
-        default: 'no'
+        default: 'yes'
 
 permissions:
   contents: write
@@ -249,21 +249,27 @@ jobs:
           
           # Get the commit to validate and trim whitespace
           COMMIT_SHA=$(echo "${{ github.event.inputs.dev_commit }}" | xargs)
-          echo "📌 Using specified commit: $COMMIT_SHA"
           
-          # Verify commit exists and is from dev branch
-          if ! git cat-file -e "$COMMIT_SHA" 2>/dev/null; then
-            echo "❌ Commit $COMMIT_SHA does not exist!"
-            exit 1
+          if [ -n "$COMMIT_SHA" ]; then
+            echo "📌 Using specified commit: $COMMIT_SHA"
+            
+            # Verify commit exists and is from dev branch
+            if ! git cat-file -e "$COMMIT_SHA" 2>/dev/null; then
+              echo "❌ Commit $COMMIT_SHA does not exist!"
+              exit 1
+            fi
+            
+            if ! git merge-base --is-ancestor "$COMMIT_SHA" origin/dev; then
+              echo "❌ Commit $COMMIT_SHA is not in dev branch!"
+              exit 1
+            fi
+            
+            echo "✅ Commit $COMMIT_SHA is valid and from dev branch"
+          else
+            echo "📌 Using latest dev commit (no specific commit specified)"
           fi
           
-          if ! git merge-base --is-ancestor "$COMMIT_SHA" origin/dev; then
-            echo "❌ Commit $COMMIT_SHA is not in dev branch!"
-            exit 1
-          fi
-          
-          echo "✅ Commit $COMMIT_SHA is valid and from dev branch"
-          echo "✅ Ready to publish (workflow validation skipped)"
+          echo "✅ Ready to publish"
 
       - name: 🏷️ Calculate Next Version
         id: version
@@ -553,6 +559,28 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: 🔍 Check for workflow file changes
+        run: |
+          echo "🔍 Checking if workflow files will be modified in merge..."
+          
+          # Check if workflow files are in the dev branch changes
+          if git diff --name-only origin/main..origin/dev | grep -q "\.github/workflows/"; then
+            echo "⚠️  Workflow files detected in dev branch!"
+            echo "📋 This will cause permission issues with publish-live workflow."
+            echo "💡 Please manually merge workflow changes first:"
+            echo "   1. Create PR for workflow changes"
+            echo "   2. Review and merge to main"
+            echo "   3. Then run publish-live for content only"
+            echo ""
+            echo "🔍 Workflow files in dev branch:"
+            git diff --name-only origin/main..origin/dev | grep "\.github/workflows/"
+            echo ""
+            echo "❌ Stopping to prevent permission issues"
+            exit 1
+          else
+            echo "✅ No workflow files detected - safe to proceed"
+          fi
+
       - name: 🔄 Merge dev to main
         run: |
           echo "🔄 Configuring git..."
@@ -588,7 +616,7 @@ jobs:
             echo "📌 Merging specific commit: $MERGE_COMMIT"
           else
             MERGE_COMMIT="origin/dev"
-            echo "📊 Merging latest dev: $MERGE_COMMIT"
+            echo "📊 Merging latest dev commit"
           fi
           
           git merge "$MERGE_COMMIT" --no-ff -m "🚀 Release ${{ needs.validate-inputs.outputs.new_version }}: ${{ github.event.inputs.description }}
@@ -598,7 +626,7 @@ jobs:
           Release Type: ${{ github.event.inputs.release_type }}
           Published by: ${{ github.actor }}
           Dev Commit: ${MERGE_COMMIT}
-          Specific Commit: ${{ github.event.inputs.dev_commit || 'latest' }}
+          Specific Commit: ${{ github.event.inputs.dev_commit || 'latest dev' }}
           Description: ${{ github.event.inputs.description }}"
           
           echo "✅ Merge completed successfully!"
