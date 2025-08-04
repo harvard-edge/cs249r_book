@@ -59,6 +59,20 @@ insertPreamble = function(doc, classDefs, fmt)
   local ispdf = quarto.doc.is_format("pdf")
   local StyleCSSTeX = {}
   
+  -- Set icon path from filter-metadata configuration if available
+  local meta = doc.meta
+  local filterMetadata = meta["filter-metadata"]
+  if filterMetadata and filterMetadata["mlsysbook-ext/custom-numbered-blocks"] then
+    local config = filterMetadata["mlsysbook-ext/custom-numbered-blocks"]
+    if config["icon-path"] then
+      local iconPath = str(config["icon-path"])
+      local iconFormat = str(config["icon-format"] or "pdf")
+      -- Define the commands before including foldbox.tex
+      quarto.doc.include_text("in-header", "\\newcommand{\\fbxIconPath}{" .. iconPath .. "}")
+      quarto.doc.include_text("in-header", "\\newcommand{\\fbxIconFormat}{" .. iconFormat .. "}")
+    end
+  end
+  
   -- if fmt==nil then pout("=== NIX ======= Format   ") else
   -- pout("============== Format :   "..str(fmt)) end
   -- make css or preamble tex for colors

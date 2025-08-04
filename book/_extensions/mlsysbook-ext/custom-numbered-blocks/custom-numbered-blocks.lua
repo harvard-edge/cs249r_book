@@ -703,21 +703,7 @@ end
 insertStylesPandoc = function(doc)
   -- if stylez.extractStyleFromYaml then stylez.extractStyleFromYaml() end
   if stylez.insertPreamble and (quarto.doc.is_format("html") or quarto.doc.is_format("pdf"))
-    then 
-      -- Set icon path from filter-metadata configuration if available
-      local meta = doc.meta
-      local filterMetadata = meta["filter-metadata"]
-      if filterMetadata and filterMetadata["mlsysbook-ext/custom-numbered-blocks"] then
-        local config = filterMetadata["mlsysbook-ext/custom-numbered-blocks"]
-        if config["icon-path"] then
-          local iconPath = str(config["icon-path"])
-          local iconFormat = str(config["icon-format"] or "pdf")
-          quarto.doc.include_text("in-header", "\\renewcommand{\\fbxIconPath}{" .. iconPath .. "}")
-          quarto.doc.include_text("in-header", "\\renewcommand{\\fbxIconFormat}{" .. iconFormat .. "}")
-        end
-      end
-      stylez.insertPreamble(doc, fbx.classDefaults, fmt) 
-    end
+    then stylez.insertPreamble(doc, fbx.classDefaults, fmt) end
   return(doc)
 end;
 
