@@ -151,7 +151,7 @@ return {
     after skip=0pt,
     attach boxed title to top*={xshift=0pt},
     boxed title style={
-      colback=callout-resource-videos-color2,
+      colback=callout-resource-videos-color1,
       colframe=callout-resource-videos-color2,
       arc=1.5pt,
       rounded corners=north,
@@ -162,8 +162,9 @@ return {
       left=1mm,
       right=1mm,
     },
-    title=\centering\footnotesize\color{white}\textbf{\raisebox{-0.3mm}{\includegraphics[width=2mm]{assets/images/icons/callouts/icon_callout-resource-videos.pdf}}\hspace{1mm}Video Resource}
+    title=\centering\footnotesize\color{callout-resource-videos-color2}\textbf{\raisebox{-0.3mm}{\includegraphics[width=2mm]{assets/images/icons/callouts/icon_callout-resource-videos.pdf}}\hspace{1mm}Video Resource}
   ]
+    \vspace{2mm}
     \centering\footnotesize%
     \textbf{]] .. title .. [[}\\
     ]] .. (author ~= "" and "\\textcolor{black!60}{" .. author .. "}\\\\[2mm]" or "[2mm]") .. [[
