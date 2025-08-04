@@ -138,7 +138,7 @@ return {
 \marginnote{\centering\\\vspace*{5mm}%
   \begin{tcolorbox}[
     enhanced,
-    colback=white,
+    colback=callout-resource-videos-color1,
     colframe=callout-resource-videos-color2,
     boxrule=0.5pt,
     arc=1.5pt,
@@ -159,13 +159,14 @@ return {
       boxrule=0.5pt,
       top=2mm,
       bottom=2mm,
+      left=4mm,
       overlay={
-        \node [outer sep=0em, white,draw=none,anchor=center,
+        \node [outer sep=0em, white,draw=none,anchor=west,
           rectangle,fill=none,inner sep=0pt]
-          at ([xshift=-8mm]frame.center) {\includegraphics[width=3mm]{assets/images/icons/callouts/icon_callout-resource-videos.pdf}};
+          at ([xshift=2mm]frame.west) {\includegraphics[width=3mm]{assets/images/icons/callouts/icon_callout-resource-videos.pdf}};
       },
     },
-    title=\centering\footnotesize\color{white}\textbf{\hspace{3mm}Video Resource}
+    title=\raggedright\footnotesize\color{white}\textbf{\hspace{4mm}Video Resource}
   ]
     \centering\footnotesize%
     \textbf{]] .. title .. [[}\\
