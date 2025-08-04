@@ -157,12 +157,12 @@ return {
       rounded corners=north,
       sharp corners=south,
       boxrule=0.5pt,
-      top=0.5mm,
-      bottom=0.5mm,
+      top=1mm,
+      bottom=1mm,
       left=1mm,
       right=1mm,
     },
-    title=\centering\scriptsize\color{white}\textbf{\raisebox{-0.3mm}{\includegraphics[width=2mm]{assets/images/icons/callouts/icon_callout-resource-videos.pdf}}\hspace{1mm}Video Resource}
+    title=\centering\footnotesize\color{white}\textbf{\raisebox{-0.3mm}{\includegraphics[width=2mm]{assets/images/icons/callouts/icon_callout-resource-videos.pdf}}\hspace{1mm}Video Resource}
   ]
     \centering\footnotesize%
     \textbf{]] .. title .. [[}\\
@@ -172,7 +172,7 @@ return {
       \qrcode[height=14mm]{]] .. url .. [[}
     \endgroup
     \\[2mm]
-    \textcolor{black!60}{\tiny Scan with your phone\\to watch the video}
+    \textcolor{black!60}{\scriptsize Scan with your phone\\to watch the video}
   \end{tcolorbox}
 }
 ]]
