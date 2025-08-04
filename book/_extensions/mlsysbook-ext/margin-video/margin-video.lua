@@ -131,7 +131,7 @@ return {
 ]]
       log_success("HTML output generated successfully")
       return pandoc.RawBlock("html", html_output)
-    elseif FORMAT:match("pdf") then
+    elseif FORMAT:match("pdf") or FORMAT:match("latex") then
       log_info("Generating PDF output...")
       -- PDF: QR code and margin note
       local pdf_output = [[
@@ -151,7 +151,7 @@ return {
     to watch the video
   }
 }
-    \faTv{} [Watch on YouTube](]] .. url .. [[)
+\faTv{} \href{]] .. url .. [[}{Watch on YouTube}
 ]]
       log_success("PDF output generated successfully")
       return pandoc.RawBlock("latex", pdf_output)
