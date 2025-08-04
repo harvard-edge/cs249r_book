@@ -197,7 +197,7 @@ end
 
 local function Meta_initClassDefaults (meta) 
   -- do we want to prefix fbx numbers with section numbers?
-  local cunumbl = meta["custom-numbered-blocks"]
+  local cunumbl = meta["mlsysbook/custom-numbered-blocks"]
   fbx.knownclasses = {}
   fbx.lists = {}
   --[[ TODO later
@@ -275,7 +275,7 @@ local function Meta_initClassDefaults (meta)
 end
  
 local initMeta = function(m)
-  if m["custom-numbered-blocks"] then
+  if m["mlsysbook/custom-numbered-blocks"] then
     Meta_findChapterNumber(m)
     Meta_initClassDefaults(m)
   else
