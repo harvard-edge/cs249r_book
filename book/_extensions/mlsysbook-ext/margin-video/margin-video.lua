@@ -139,7 +139,7 @@ return {
   \parbox{30mm}{\centering\footnotesize%
     \textbf{Watch on YouTube}\\
     ]] .. title .. [[\\
-    ]] .. (author ~= "" and author .. "\\[1mm]" or "") .. [[
+    ]] .. (author ~= "" and author .. "\\\\[1mm]" or "") .. [[
   }
   \begingroup
     \hypersetup{urlcolor=black}
@@ -151,6 +151,7 @@ return {
     to watch the video
   }
 }
+
 \faTv{} \href{]] .. url .. [[}{Watch on YouTube}
 ]]
       log_success("PDF output generated successfully")
