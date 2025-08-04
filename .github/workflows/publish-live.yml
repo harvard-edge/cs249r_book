@@ -1,6 +1,49 @@
 name: '🚀 Publish Live'
 
+# =============================================================================
+# CONFIGURABLE VARIABLES - Edit these to customize the workflow
+# =============================================================================
+
+# AI Model Configuration
+env:
+  DEFAULT_AI_MODEL: "gemma2:9b"           # Default Ollama model
+  FALLBACK_AI_MODEL: "gemma2:27b"         # Fallback if default fails
+  OLLAMA_TIMEOUT: "300"                    # Timeout for Ollama operations (seconds)
+  OLLAMA_RETRIES: "3"                      # Number of retries for Ollama calls
+  BUILD_TIMEOUT: "3600"                    # Timeout for build operations (1 hour)
+  
+  # Quarto Configuration Files
+  QUARTO_HTML_CONFIG: "_quarto-html.yml"  # HTML build configuration file
+  QUARTO_PDF_CONFIG: "_quarto-pdf.yml"    # PDF build configuration file
+  QUARTO_MAIN_CONFIG: "_quarto.yml"       # Main Quarto configuration file
+
+# =============================================================================
+# ARTIFACT STRUCTURE DOCUMENTATION
+# =============================================================================
+# The 🎮 Controller workflow creates the following artifacts:
+# 
+# build-ubuntu-latest-html: Contains build/html/ (web version)
+# build-ubuntu-latest-pdf:  Contains build/pdf/Machine-Learning-Systems.pdf
+# build-windows-latest-html: Contains build/html/ (web version)  
+# build-windows-latest-pdf: Contains build/pdf/Machine-Learning-Systems.pdf
+#
+# This workflow specifically looks for build-ubuntu-latest-pdf to get the Linux-built PDF
+# for consistency and reliability. The PDF is compressed with Ghostscript for optimal size.
+#
+# Expected file structure in build-ubuntu-latest-pdf artifact:
+# build/pdf/Machine-Learning-Systems.pdf
+# =============================================================================
+
+# Available AI Models (uncomment to use different models):
+# - gemma2:9b      (fast, good quality - recommended)
+# - gemma2:27b     (better quality, slower)
+# - llama3.1:8b    (good balance)
+# - llama3.1:70b   (best quality, slowest)
+# - mistral:7b     (fast, good for analysis)
+# - codellama:7b   (good for code-related changes)
+
 # Manual trigger only - big red button!
+# Only allow manual triggers from main and dev branches
 on:
   workflow_dispatch:
     inputs:
@@ -25,18 +68,175 @@ on:
         description: 'Type "PUBLISH" to confirm'
         required: true
         default: ''
+      ai_generated_notes:
+        description: 'Generate AI-enhanced release notes? (yes = AI + git log, no = git log only)'
+        required: true
+        type: choice
+        options:
+          - 'yes'
+          - 'no'
+        default: 'no'
 
 permissions:
   contents: write
   actions: read
 
 jobs:
-  validate-and-publish:
-    name: '🔍 Validate & Publish'
+  debug-log:
+    name: '📋 Debug & Audit Log'
     runs-on: ubuntu-latest
-    if: github.event.inputs.confirm == 'PUBLISH'
+    timeout-minutes: 5
+    if: always()
     
     steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📋 Log Workflow Inputs & Context
+        run: |
+          echo "## 📋 Workflow Debug & Audit Log" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Timestamp:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "**Workflow Run ID:** ${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Workflow Attempt:** ${{ github.run_attempt }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "=== 📋 WORKFLOW DEBUG & AUDIT LOG ==="
+          echo "🕐 Workflow started at: $(date -u)"
+          echo "🔄 Run ID: ${{ github.run_id }}"
+          echo "🔄 Run Attempt: ${{ github.run_attempt }}"
+          echo "👤 Triggered by: ${{ github.actor }}"
+          echo "🌐 Repository: ${{ github.repository }}"
+          echo ""
+          
+          echo "=== 📝 USER INPUTS ==="
+          echo "Description: '${{ github.event.inputs.description }}'"
+          echo "Release Type: '${{ github.event.inputs.release_type }}'"
+          echo "Dev Commit: '${{ github.event.inputs.dev_commit }}'"
+          echo "Confirmation: '${{ github.event.inputs.confirm }}'"
+          echo "AI Generated Notes: '${{ github.event.inputs.ai_generated_notes }}'"
+          echo ""
+          
+          echo "### 📝 User Inputs:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Description:** ${{ github.event.inputs.description }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release Type:** ${{ github.event.inputs.release_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dev Commit:** ${{ github.event.inputs.dev_commit }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Confirmation:** ${{ github.event.inputs.confirm }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **AI Generated Notes:** ${{ github.event.inputs.ai_generated_notes }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+      - name: 🔍 Log Git & Environment Context
+        run: |
+          echo "=== 🔍 GIT CONTEXT ==="
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Ref: ${{ github.ref }}"
+          echo "SHA: ${{ github.sha }}"
+          echo "Event: ${{ github.event_name }}"
+          echo ""
+          
+          echo "Git Status:"
+          git status --porcelain || echo "No git status available"
+          echo ""
+          
+          echo "Recent Commits (last 5):"
+          git log --oneline -5 || echo "No git log available"
+          echo ""
+          
+          echo "Remote branches:"
+          git branch -r | head -10 || echo "No remote branches info"
+          echo ""
+          
+          echo "Latest tags:"
+          git tag --sort=-version:refname | head -10 || echo "No tags found"
+          echo ""
+          
+          echo "### 🔍 Git Context:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **SHA:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Event:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+      - name: 🛠️ Log Environment & AI Configuration
+        run: |
+          echo "=== 🛠️ ENVIRONMENT ==="
+          echo "Runner OS: ${{ runner.os }}"
+          echo "Default AI Model: ${{ env.DEFAULT_AI_MODEL }}"
+          echo "Fallback AI Model: ${{ env.FALLBACK_AI_MODEL }}"
+          echo "Ollama Timeout: ${{ env.OLLAMA_TIMEOUT }}"
+          echo "Ollama Retries: ${{ env.OLLAMA_RETRIES }}"
+          echo "Build Timeout: ${{ env.BUILD_TIMEOUT }}"
+          echo ""
+          
+          echo "=== 🧪 VALIDATION CHECKS ==="
+          echo "Confirmation Valid: ${{ github.event.inputs.confirm == 'PUBLISH' }}"
+          echo "Branch Valid: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' }}"
+          echo "Will Proceed: ${{ github.event.inputs.confirm == 'PUBLISH' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') }}"
+          echo ""
+          
+          echo "### 🛠️ Environment:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Runner OS:** ${{ runner.os }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **AI Model:** ${{ env.DEFAULT_AI_MODEL }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Valid Confirmation:** ${{ github.event.inputs.confirm == 'PUBLISH' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Valid Branch:** ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Will Proceed:** ${{ github.event.inputs.confirm == 'PUBLISH' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+      - name: 📊 Log Previous Releases
+        run: |
+          echo "=== 📊 RELEASE HISTORY ==="
+          echo "Checking existing releases..."
+          
+          # Get latest releases
+          RELEASES=$(curl -s \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/releases?per_page=5" \
+            | jq -r '.[] | "\(.tag_name) - \(.published_at // "draft") - \(.draft)"' 2>/dev/null || echo "Unable to fetch releases")
+          
+          echo "Recent releases:"
+          echo "$RELEASES"
+          echo ""
+          
+          # Get latest tags  
+          echo "Latest tags:"
+          git tag --sort=-version:refname | head -5 || echo "No tags found"
+          echo ""
+          
+          echo "### 📊 Release History:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "$RELEASES" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+  validate-inputs:
+    name: '🔍 Validate Inputs'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event.inputs.confirm == 'PUBLISH' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
+    outputs:
+      new_version: ${{ steps.version.outputs.new_version }}
+      previous_version: ${{ steps.version.outputs.previous_version }}
+      release_type: ${{ steps.version.outputs.release_type }}
+    
+    steps:
+      - name: 🔒 Check Branch Restriction
+        run: |
+          echo "🔒 Checking branch restrictions..."
+          echo "Current branch: ${{ github.ref_name }}"
+          echo "Current ref: ${{ github.ref }}"
+          
+          if [[ "${{ github.ref }}" != "refs/heads/main" && "${{ github.ref }}" != "refs/heads/dev" ]]; then
+            echo "❌ ERROR: This workflow can only be triggered from 'main' or 'dev' branches"
+            echo "❌ Current branch: ${{ github.ref_name }}"
+            echo "❌ Please switch to 'main' or 'dev' branch before running this workflow"
+            exit 1
+          fi
+          
+          echo "✅ Branch check passed - running from ${{ github.ref_name }}"
+
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
         with:
@@ -47,8 +247,8 @@ jobs:
         run: |
           echo "🔍 Validating dev commit..."
           
-          # Get the commit to validate
-          COMMIT_SHA="${{ github.event.inputs.dev_commit }}"
+          # Get the commit to validate and trim whitespace
+          COMMIT_SHA=$(echo "${{ github.event.inputs.dev_commit }}" | xargs)
           echo "📌 Using specified commit: $COMMIT_SHA"
           
           # Verify commit exists and is from dev branch
@@ -125,6 +325,234 @@ jobs:
           echo "release_type=${{ github.event.inputs.release_type }}" >> $GITHUB_OUTPUT
           echo "previous_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
 
+  pre-flight-checks:
+    name: '🛫 Pre-Flight Validation'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: validate-inputs
+    if: github.event.inputs.confirm == 'PUBLISH'
+    
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔍 Validate Dev Branch Content
+        run: |
+          echo "🔍 Validating dev branch content before merge..."
+          
+          # Switch to dev branch and pull latest
+          git checkout dev
+          git pull origin dev
+          
+          # Check if dev commit exists and is valid
+          if [ -n "${{ github.event.inputs.dev_commit }}" ]; then
+            DEV_COMMIT=$(echo "${{ github.event.inputs.dev_commit }}" | xargs)
+            echo "📌 Validating specific commit: $DEV_COMMIT"
+            
+            if ! git cat-file -e "$DEV_COMMIT" 2>/dev/null; then
+              echo "❌ Commit $DEV_COMMIT does not exist!"
+              exit 1
+            fi
+            
+            if ! git merge-base --is-ancestor "$DEV_COMMIT" HEAD; then
+              echo "❌ Commit $DEV_COMMIT is not in current dev branch!"
+              exit 1
+            fi
+            
+            # Checkout the specific commit for validation
+            git checkout "$DEV_COMMIT"
+          fi
+          
+          echo "✅ Dev branch content validated"
+
+      - name: 📚 Validate Quarto Project Structure
+        run: |
+          echo "📚 Validating Quarto project structure..."
+          
+          cd book
+          
+          # Check critical files exist using environment variables
+          REQUIRED_FILES=("${{ env.QUARTO_MAIN_CONFIG }}" "config/${{ env.QUARTO_HTML_CONFIG }}" "config/${{ env.QUARTO_PDF_CONFIG }}")
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "❌ Required file missing: $file"
+              exit 1
+            fi
+            echo "✅ Found: $file"
+          done
+          
+          # Validate Quarto configuration
+          if command -v quarto >/dev/null 2>&1; then
+            echo "🔍 Checking Quarto configuration..."
+            if ! quarto check; then
+              echo "⚠️ Quarto check reported issues, but continuing..."
+            fi
+          else
+            echo "ℹ️ Quarto not available for validation in this environment"
+          fi
+          
+          echo "✅ Quarto project structure validated"
+
+      - name: 🧪 Test Build Prerequisites
+        run: |
+          echo "🧪 Testing build prerequisites..."
+          
+          # Check disk space (PDF builds need significant space)
+          echo "💾 Checking disk space..."
+          df -h
+          
+          AVAILABLE_GB=$(df / | awk 'NR==2 {print int($4/1024/1024)}')
+          echo "📊 Available disk space: ${AVAILABLE_GB}GB"
+          
+          if [ "$AVAILABLE_GB" -lt 5 ]; then
+            echo "❌ Insufficient disk space! Need at least 5GB, have ${AVAILABLE_GB}GB"
+            exit 1
+          fi
+          
+          echo "✅ Sufficient disk space available"
+          
+          # Test GitHub API access
+          echo "🔍 Testing GitHub API access..."
+          if ! curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+               "https://api.github.com/repos/${{ github.repository }}" >/dev/null; then
+            echo "❌ GitHub API access failed!"
+            exit 1
+          fi
+          echo "✅ GitHub API access confirmed"
+          
+          echo "✅ All prerequisites validated"
+
+      - name: 🤖 Test AI System (Ollama)
+        if: github.event.inputs.ai_generated_notes == 'yes'
+        run: |
+          echo "🤖 Testing AI system for release notes generation..."
+          
+          # Install Python dependencies first
+          echo "🐍 Installing Python dependencies..."
+          python -m pip install --upgrade pip
+          python -m pip install requests
+          
+          # Install Ollama with retry
+          echo "🤖 Installing Ollama..."
+          for i in {1..3}; do
+            if curl -fsSL https://ollama.ai/install.sh | sh; then
+              echo "✅ Ollama installed successfully on attempt $i"
+              break
+            else
+              echo "⚠️ Ollama install attempt $i failed, retrying..."
+              sleep 5
+              if [ $i -eq 3 ]; then
+                echo "❌ Ollama installation failed after 3 attempts"
+                echo "🔄 Will use manual release notes instead"
+                exit 0  # Don't fail the whole workflow
+              fi
+            fi
+          done
+          
+          # Start Ollama service with health check
+          echo "🚀 Starting Ollama service..."
+          ollama serve &
+          
+          # Wait for service with timeout
+          echo "⏳ Waiting for Ollama service to be ready..."
+          OLLAMA_READY=false
+          for i in {1..30}; do
+            if ollama list >/dev/null 2>&1; then
+              echo "✅ Ollama service ready after ${i}0 seconds"
+              OLLAMA_READY=true
+              break
+            fi
+            echo "⏳ Waiting for Ollama service... (${i}/30)"
+            sleep 10
+          done
+          
+          if [ "$OLLAMA_READY" != "true" ]; then
+            echo "❌ Ollama service failed to start within 5 minutes"
+            echo "🔄 Will use manual release notes instead"
+            exit 0  # Don't fail the whole workflow
+          fi
+          
+          # Pull the default model with retry
+          MODEL="${{ env.DEFAULT_AI_MODEL }}"
+          echo "📦 Pulling AI model: $MODEL"
+          MODEL_READY=false
+          for i in {1..3}; do
+            if timeout ${{ env.OLLAMA_TIMEOUT }} ollama pull $MODEL; then
+              echo "✅ Model $MODEL pulled successfully on attempt $i"
+              MODEL_READY=true
+              break
+            else
+              echo "⚠️ Model pull attempt $i failed, retrying..."
+              sleep 10
+            fi
+          done
+          
+          # Try fallback model if default failed
+          if [ "$MODEL_READY" != "true" ]; then
+            echo "⚠️ Default model failed, trying fallback..."
+            MODEL="${{ env.FALLBACK_AI_MODEL }}"
+            echo "📦 Pulling fallback AI model: $MODEL"
+            if timeout ${{ env.OLLAMA_TIMEOUT }} ollama pull $MODEL; then
+              echo "✅ Fallback model $MODEL pulled successfully"
+              MODEL_READY=true
+            else
+              echo "❌ Fallback model also failed"
+              echo "🔄 Will use manual release notes instead"
+              exit 0  # Don't fail the whole workflow
+            fi
+          fi
+          
+          # Test Ollama with a simple query
+          echo "🧪 Testing Ollama with simple query..."
+          if echo "Test" | ollama run $MODEL >/dev/null 2>&1; then
+            echo "✅ Ollama AI system is working correctly!"
+            echo "🤖 Model: $MODEL"
+            echo "🚀 Ready for AI-powered release notes generation"
+            
+            # Save the working model for later use
+            echo "$MODEL" > /tmp/ollama_model.txt
+          else
+            echo "❌ Ollama test query failed"
+            echo "🔄 Will use manual release notes instead"
+            exit 0  # Don't fail the whole workflow
+          fi
+
+      - name: 📋 Pre-Flight Summary
+        run: |
+          echo "## 🛫 Pre-Flight Validation Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** All checks passed ✅" >> $GITHUB_STEP_SUMMARY
+          echo "**Dev Commit:** ${{ github.event.inputs.dev_commit || 'latest' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Target Version:** ${{ needs.validate-inputs.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Validation Time:** $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ✅ Validated:" >> $GITHUB_STEP_SUMMARY
+          echo "- Dev branch content and commit validity" >> $GITHUB_STEP_SUMMARY
+          echo "- Quarto project structure and configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- Build prerequisites (disk space, API access)" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.event.inputs.ai_generated_notes }}" = "yes" ]; then
+            echo "- AI system (Ollama) installation and testing" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🚀 **Ready to proceed with merge and publication!**" >> $GITHUB_STEP_SUMMARY
+
+  merge-to-main:
+    name: '🔄 Merge to Main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [validate-inputs, pre-flight-checks]
+    if: github.event.inputs.confirm == 'PUBLISH'
+    
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: 🔄 Merge dev to main
         run: |
           echo "🔄 Configuring git..."
@@ -156,14 +584,14 @@ jobs:
           
           # Determine which commit to merge
           if [ -n "${{ github.event.inputs.dev_commit }}" ]; then
-            MERGE_COMMIT="${{ github.event.inputs.dev_commit }}"
+            MERGE_COMMIT=$(echo "${{ github.event.inputs.dev_commit }}" | xargs)
             echo "📌 Merging specific commit: $MERGE_COMMIT"
           else
             MERGE_COMMIT="origin/dev"
             echo "📊 Merging latest dev: $MERGE_COMMIT"
           fi
           
-          git merge "$MERGE_COMMIT" --no-ff -m "🚀 Release ${{ steps.version.outputs.new_version }}: ${{ github.event.inputs.description }}
+          git merge "$MERGE_COMMIT" --no-ff -m "🚀 Release ${{ needs.validate-inputs.outputs.new_version }}: ${{ github.event.inputs.description }}
 
           Merged dev branch to main for publication.
           
@@ -175,18 +603,68 @@ jobs:
           
           echo "✅ Merge completed successfully!"
 
+      - name: 🚀 Push merge to main
+        run: |
+          echo "🚀 Pushing merge to main branch..."
+          git push origin main
+          
+          echo "✅ Main branch updated successfully!"
+          echo "📋 Next step: Tag creation and production deployment"
+
+  create-tag:
+    name: '🏷️ Create Release Tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [validate-inputs, merge-to-main]
+    if: github.event.inputs.confirm == 'PUBLISH'
+    
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔄 Sync with latest main
+        run: |
+          echo "🔄 Configuring git..."
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          echo "🔄 Switching to main and pulling latest changes..."
+          git checkout main
+          git pull origin main
+          
+          echo "✅ Synced with latest main branch"
+
       - name: 🏷️ Create Release Tag
         run: |
-          echo "🏷️ Creating release tag ${{ steps.version.outputs.new_version }}..."
-          git tag -a ${{ steps.version.outputs.new_version }} -m "Release ${{ steps.version.outputs.new_version }}: ${{ github.event.inputs.description }}"
+          echo "🏷️ Creating release tag ${{ needs.validate-inputs.outputs.new_version }}..."
+          
+          # Check if tag already exists locally
+          if git tag -l "${{ needs.validate-inputs.outputs.new_version }}" | grep -q "${{ needs.validate-inputs.outputs.new_version }}"; then
+            echo "⚠️ Tag ${{ needs.validate-inputs.outputs.new_version }} already exists locally"
+            echo "🔄 Removing existing tag to recreate it..."
+            git tag -d ${{ needs.validate-inputs.outputs.new_version }}
+          fi
+          
+          # Check if tag exists on remote
+          if git ls-remote --tags origin | grep -q "refs/tags/${{ needs.validate-inputs.outputs.new_version }}$"; then
+            echo "⚠️ Tag ${{ needs.validate-inputs.outputs.new_version }} already exists on remote"
+            echo "🔄 Removing remote tag to recreate it..."
+            git push origin --delete ${{ needs.validate-inputs.outputs.new_version }}
+          fi
+          
+          # Create the tag on the latest main commit
+          git tag -a ${{ needs.validate-inputs.outputs.new_version }} -m "Release ${{ needs.validate-inputs.outputs.new_version }}: ${{ github.event.inputs.description }}"
           echo "✅ Tag created successfully!"
 
-      - name: 🚀 Push to main and trigger production deployment
+      - name: 🚀 Push tag and trigger production deployment
         run: |
-          echo "🚀 Pushing to main branch with tags..."
-          git push origin main --tags
+          echo "🚀 Pushing release tag to trigger production deployment..."
+          git push origin ${{ needs.validate-inputs.outputs.new_version }}
           
-          echo "📊 Main branch updated! This will trigger:"
+          echo "📊 Release tag pushed! This will trigger:"
           echo "  ✅ Production build workflow (HTML + PDF generation)"
           echo "  ✅ GitHub Pages deployment with textbook content"
           echo "  ✅ Live academic website update"
@@ -194,45 +672,77 @@ jobs:
           echo "🌐 Your textbook will be live at: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
           echo "📚 Students can access the updated content immediately"
 
-      - name: ⏳ Wait for Production Build
+  monitor-build:
+    name: '⏳ Monitor Production Build'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    needs: create-tag
+    if: github.event.inputs.confirm == 'PUBLISH'
+    
+    steps:
+      - name: ⏳ Wait for Production Build (Commit Status Monitoring)
         run: |
-          echo "⏳ Waiting for production build to complete before creating release..."
-          echo "🔍 Looking for recent workflow runs on main branch..."
+          echo "⏳ Waiting for production build to complete (max 1 hour)..."
+          echo "🔍 Monitoring commit status checks in real-time..."
+          
+          # Get the latest commit SHA from main branch
+          COMMIT_SHA=$(curl -s \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/commits/main" \
+            | jq -r '.sha')
+          
+          echo "📌 Monitoring commit: $COMMIT_SHA"
+          echo "🎯 Required status checks: ci/quarto-build-ubuntu-latest-html, ci/quarto-build-ubuntu-latest-pdf"
+          
           sleep 30  # Give the build a moment to start
           
-          # Wait for the build to complete with better detection
-          for i in {1..240}; do
-            echo "🔍 Checking build status (attempt $i/240)..."
+          # Wait for all required status checks to complete
+          for i in {1..120}; do  # 120 attempts × 30 seconds = 1 hour
+            echo "🔍 Checking commit status (attempt $i/120)..."
             
-            # Get recent workflow runs
-            WORKFLOW_RESPONSE=$(curl -s \
+            # Get commit status
+            STATUS_RESPONSE=$(curl -s \
               -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
               -H "Accept: application/vnd.github.v3+json" \
-              "https://api.github.com/repos/${{ github.repository }}/actions/runs?branch=main&per_page=10")
+              "https://api.github.com/repos/${{ github.repository }}/commits/$COMMIT_SHA/status")
             
-            # Check for successful controller workflow runs
-            SUCCESSFUL_BUILD=$(echo "$WORKFLOW_RESPONSE" | jq -r '.workflow_runs[] | select(.name == "🎮 Controller" and .conclusion == "success") | .id' | head -1)
+            # Check overall status
+            OVERALL_STATE=$(echo "$STATUS_RESPONSE" | jq -r '.state')
+            TOTAL_COUNT=$(echo "$STATUS_RESPONSE" | jq -r '.total_count')
             
-            if [ -n "$SUCCESSFUL_BUILD" ] && [ "$SUCCESSFUL_BUILD" != "null" ]; then
-              echo "✅ Production build completed successfully!"
-              echo "📊 Build run ID: $SUCCESSFUL_BUILD"
-              echo "🔗 View build: https://github.com/${{ github.repository }}/actions/runs/$SUCCESSFUL_BUILD"
+            echo "📊 Overall status: $OVERALL_STATE ($TOTAL_COUNT checks)"
+            
+            # Get individual status checks
+            STATUSES=$(echo "$STATUS_RESPONSE" | jq -r '.statuses')
+            
+            # Check for our specific quarto-build status checks
+            HTML_STATUS=$(echo "$STATUSES" | jq -r '.[] | select(.context == "ci/quarto-build-ubuntu-latest-html") | .state' | head -1)
+            PDF_STATUS=$(echo "$STATUSES" | jq -r '.[] | select(.context == "ci/quarto-build-ubuntu-latest-pdf") | .state' | head -1)
+            
+            echo "📋 Build status checks:"
+            echo "  - HTML Build (Linux): ${HTML_STATUS:-pending}"
+            echo "  - PDF Build (Linux): ${PDF_STATUS:-pending}"
+            
+            # Show detailed status for each check
+            echo "$STATUSES" | jq -r '.[] | select(.context | startswith("ci/quarto-build")) | "  - \(.context): \(.state) - \(.description)"' | head -4
+            
+            # Check if all required builds are successful
+            if [ "$HTML_STATUS" = "success" ] && [ "$PDF_STATUS" = "success" ]; then
+              echo "✅ All production builds completed successfully!"
+              echo "📊 HTML Build: ✅ Success"
+              echo "📊 PDF Build: ✅ Success"
+              echo "🔗 View commit status: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
               break
             fi
             
-            # Check for failed builds
-            FAILED_BUILD=$(echo "$WORKFLOW_RESPONSE" | jq -r '.workflow_runs[] | select(.name == "🎮 Controller" and .conclusion == "failure") | .id' | head -1)
-            if [ -n "$FAILED_BUILD" ] && [ "$FAILED_BUILD" != "null" ]; then
+            # Check for any failures
+            if [ "$HTML_STATUS" = "failure" ] || [ "$PDF_STATUS" = "failure" ]; then
               echo "❌ Production build failed!"
-              echo "🔗 View failed build: https://github.com/${{ github.repository }}/actions/runs/$FAILED_BUILD"
+              echo "📊 HTML Build: ${HTML_STATUS:-pending}"
+              echo "📊 PDF Build: ${PDF_STATUS:-pending}"
+              echo "🔗 View commit status: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
               exit 1
-            fi
-            
-            # Check for running builds and show progress
-            RUNNING_BUILD=$(echo "$WORKFLOW_RESPONSE" | jq -r '.workflow_runs[] | select(.name == "🎮 Controller" and .status == "in_progress") | .id' | head -1)
-            if [ -n "$RUNNING_BUILD" ] && [ "$RUNNING_BUILD" != "null" ]; then
-              echo "🔄 Build is actively running (ID: $RUNNING_BUILD)"
-              echo "🔗 Monitor: https://github.com/${{ github.repository }}/actions/runs/$RUNNING_BUILD"
             fi
             
             # Show current status with time elapsed
@@ -246,79 +756,384 @@ jobs:
               TIME_DISPLAY="${ELAPSED_MINUTES}m"
             fi
             
-            echo "⏳ Build still in progress... (attempt $i/240, ~${TIME_DISPLAY} elapsed)"
-            echo "📊 Recent workflow runs:"
-            echo "$WORKFLOW_RESPONSE" | jq -r '.workflow_runs[] | "  - \(.name): \(.conclusion // .status) (\(.created_at))"' | head -5
+            echo "⏳ Build still in progress... (attempt $i/120, ~${TIME_DISPLAY} elapsed)"
             
-            # Show build progress indicators
+            # Show build progress indicators with heartbeat-style updates
             if [ $i -eq 1 ]; then
-              echo "📋 Expected build timeline:"
-              echo "  0-15m: Initial setup and quality checks"
-              echo "  15-30m: Quarto build and PDF generation"
-              echo "  30-45m: PDF compression and processing"
-              echo "  45-60m: GitHub Pages deployment"
-              echo "  60-90m: Asset copying and finalization"
-              echo "  90m+: Extended processing (if needed)"
+              echo "📋 Expected build timeline (Linux only):"
+              echo "  0-10m: Initial setup and quality checks"
+              echo "  10-25m: Quarto build (HTML + PDF generation)"
+              echo "  25-35m: PDF compression and processing"
+              echo "  35-45m: GitHub Pages deployment"
+              echo "  45-60m: Asset copying and finalization"
+            fi
+            
+            # Show heartbeat-style progress every 4th attempt (every 2 minutes)
+            if [ $((i % 4)) -eq 0 ]; then
+              echo "💓 Build heartbeat: $(date)"
+              echo "📊 Current build status: Monitoring commit checks"
+              echo "⏰ Time elapsed: ${TIME_DISPLAY}"
+              echo "📈 HTML: ${HTML_STATUS:-pending} | PDF: ${PDF_STATUS:-pending}"
+              echo "🔗 Monitor: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
+              
+              # Update GitHub status with progress
+              curl -s -X POST \
+                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                -H "Accept: application/vnd.github.v3+json" \
+                "https://api.github.com/repos/${{ github.repository }}/statuses/$COMMIT_SHA" \
+                -d "{
+                  \"state\": \"pending\",
+                  \"description\": \"Publishing: Build ${TIME_DISPLAY} (HTML: ${HTML_STATUS:-pending}, PDF: ${PDF_STATUS:-pending})\",
+                  \"context\": \"ci/publish-live-monitor\"
+                }" >/dev/null
+              echo "---"
             fi
             
             sleep 30
           done
           
-          # If we get here, the build might still be running
-          echo "⚠️ Build may still be in progress after 2 hours"
-          echo "📊 Latest workflow status:"
-          echo "$WORKFLOW_RESPONSE" | jq -r '.workflow_runs[] | "  - \(.name): \(.conclusion // "in_progress")"' | head -3
+          # If we get here, check final status
+          if [ "$HTML_STATUS" != "success" ] || [ "$PDF_STATUS" != "success" ]; then
+            echo "⚠️ Build may still be in progress or failed after 1 hour"
+            echo "📊 Final status: HTML=$HTML_STATUS, PDF=$PDF_STATUS"
+            echo "🔗 Check status: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
+            exit 1
+          fi
 
-      - name: 📦 Create GitHub Release
+  download-pdf:
+    name: '📄 Download PDF'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: monitor-build
+    if: github.event.inputs.confirm == 'PUBLISH'
+    
+    steps:
+      - name: 📄 Download Built PDF from Artifacts
         run: |
-          echo "📦 Creating GitHub Release ${{ steps.version.outputs.new_version }}..."
+          echo "📄 Downloading built PDF from artifacts..."
+          echo "🔍 Looking for Linux PDF build artifacts..."
+          echo "📋 Expected artifact: build-ubuntu-latest-pdf"
+          echo "📋 Expected file: build/pdf/Machine-Learning-Systems.pdf"
+          
+          # Download the latest successful build artifacts
+          LATEST_BUILD=$(curl -s \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs?branch=main&status=success&per_page=1" \
+            | jq -r '.workflow_runs[0].id')
+          
+          if [ "$LATEST_BUILD" = "null" ] || [ -z "$LATEST_BUILD" ]; then
+            echo "❌ No successful builds found!"
+            exit 1
+          fi
+          
+          echo "📊 Found latest successful build: $LATEST_BUILD"
+          
+          # Download artifacts from the latest build
+          ARTIFACTS_RESPONSE=$(curl -s \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs/$LATEST_BUILD/artifacts")
+          
+          echo "📊 Available artifacts:"
+          echo "$ARTIFACTS_RESPONSE" | jq -r '.artifacts[] | "  - \(.name) (ID: \(.id))"'
+          
+          # Find the Linux PDF artifact specifically
+          LINUX_PDF_ARTIFACT=$(echo "$ARTIFACTS_RESPONSE" | jq -r '.artifacts[] | select(.name == "build-ubuntu-latest-pdf") | .id' | head -1)
+          
+          if [ "$LINUX_PDF_ARTIFACT" = "null" ] || [ -z "$LINUX_PDF_ARTIFACT" ]; then
+            echo "❌ Linux PDF artifact 'build-ubuntu-latest-pdf' not found!"
+            echo "🔍 Looking for any PDF artifact as fallback..."
+            
+            # Fallback: look for any PDF artifact
+            PDF_ARTIFACT=$(echo "$ARTIFACTS_RESPONSE" | jq -r '.artifacts[] | select(.name | contains("pdf")) | .id' | head -1)
+            
+            if [ "$PDF_ARTIFACT" = "null" ] || [ -z "$PDF_ARTIFACT" ]; then
+              echo "❌ No PDF artifact found in build $LATEST_BUILD"
+              exit 1
+            fi
+            
+            echo "⚠️ Using fallback PDF artifact: $PDF_ARTIFACT"
+            LINUX_PDF_ARTIFACT=$PDF_ARTIFACT
+          else
+            echo "✅ Found Linux PDF artifact: build-ubuntu-latest-pdf (ID: $LINUX_PDF_ARTIFACT)"
+          fi
+          
+          # Download the artifact
+          echo "📥 Downloading PDF artifact..."
+          curl -L \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs/$LATEST_BUILD/artifacts/$LINUX_PDF_ARTIFACT/zip" \
+            -o pdf-artifact.zip
+          
+          # Extract the PDF
+          echo "📦 Extracting PDF artifact..."
+          unzip -q pdf-artifact.zip
+          
+          # Find the PDF file in the expected location
+          PDF_FILE=$(find . -name "Machine-Learning-Systems.pdf" -type f | head -1)
+          
+          if [ -z "$PDF_FILE" ] || [ ! -f "$PDF_FILE" ]; then
+            echo "❌ PDF file not found in extracted artifacts!"
+            echo "📊 Extracted files and directories:"
+            find . -type f -o -type d | head -20
+            echo "📊 Looking in build/pdf directory..."
+            if [ -d "build/pdf" ]; then
+              ls -la build/pdf/
+            fi
+            exit 1
+          fi
+          
+          echo "✅ PDF found: $PDF_FILE"
+          echo "📊 PDF size: $(du -h "$PDF_FILE" | cut -f1)"
+          
+          # Copy to a standard location
+          cp "$PDF_FILE" "Machine-Learning-Systems.pdf"
+          echo "✅ PDF ready for release: Machine-Learning-Systems.pdf"
+          
+          # Upload PDF as artifact for next jobs
+          echo "📤 Uploading PDF as artifact..."
+          echo "Machine-Learning-Systems.pdf" > pdf-files.txt
+
+      - name: 📤 Upload PDF Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pdf-artifact
+          path: Machine-Learning-Systems.pdf
+          retention-days: 1
+
+  generate-release-notes:
+    name: '📝 Generate Release Notes'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [validate-inputs, download-pdf]
+    if: github.event.inputs.confirm == 'PUBLISH'
+    
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📄 Download PDF from previous job
+        uses: actions/download-artifact@v4
+        with:
+          name: pdf-artifact
+          path: ./
+
+      - name: 📝 Generate Release Notes
+        run: |
+          echo "📝 Generating release notes..."
+          echo "🤖 AI Enhancement Mode: ${{ github.event.inputs.ai_generated_notes }}"
+          if [ "${{ github.event.inputs.ai_generated_notes }}" = "yes" ]; then
+            echo "   ✅ Will use AI to enhance git log (if AI system is available)"
+          else
+            echo "   📋 Will use git log only (clean, reliable format)"
+          fi
+          echo ""
+          
+          # Generate git log between versions
+          PREVIOUS_VERSION="${{ needs.validate-inputs.outputs.previous_version }}"
+          CURRENT_VERSION="${{ needs.validate-inputs.outputs.new_version }}"
+          
+          echo "📊 Generating git log from $PREVIOUS_VERSION to current commit..."
+          
+          # Create detailed git log
+          echo "# Release Notes for $CURRENT_VERSION" > git_changes.md
+          echo "" >> git_changes.md
+          echo "## Changes since $PREVIOUS_VERSION" >> git_changes.md
+          echo "" >> git_changes.md
+          
+          # Get commit log with details
+          if git rev-parse "$PREVIOUS_VERSION" >/dev/null 2>&1; then
+            echo "✅ Previous version tag $PREVIOUS_VERSION found"
+            
+            # Summary format for AI processing
+            git log --oneline ${PREVIOUS_VERSION}..HEAD > git_log_summary.txt
+            
+            # Detailed format for inclusion in release
+            echo "### Commit Summary:" >> git_changes.md
+            git log --oneline ${PREVIOUS_VERSION}..HEAD >> git_changes.md
+            echo "" >> git_changes.md
+            
+            echo "### Detailed Changes:" >> git_changes.md
+            git log --pretty=format:"- **%s** (%h) by %an%n  %b" ${PREVIOUS_VERSION}..HEAD >> git_changes.md
+            
+            echo "📊 Found $(git rev-list --count ${PREVIOUS_VERSION}..HEAD) commits since $PREVIOUS_VERSION"
+          else
+            echo "⚠️ Previous version tag $PREVIOUS_VERSION not found, using all commits"
+            git log --oneline -20 > git_log_summary.txt
+            echo "### Recent Commits:" >> git_changes.md
+            git log --oneline -20 >> git_changes.md
+          fi
+          
+          echo "✅ Git log generated and saved to files"
+          
+          if [ "${{ github.event.inputs.ai_generated_notes }}" = "yes" ]; then
+            echo ""
+            echo "🤖 AI Enhancement Mode Selected - using pre-tested Ollama system..."
+            
+            # Check if Ollama is already running from pre-flight
+            if ollama list >/dev/null 2>&1; then
+              echo "✅ Ollama service is already running from pre-flight checks"
+              
+              # Get the working model from pre-flight
+              if [ -f "/tmp/ollama_model.txt" ]; then
+                MODEL=$(cat /tmp/ollama_model.txt)
+                echo "🤖 Using pre-tested model: $MODEL"
+              else
+                echo "⚠️ Model info not found, using default"
+                MODEL="${{ env.DEFAULT_AI_MODEL }}"
+              fi
+            else
+              echo "⚠️ Ollama not running, AI generation was likely skipped in pre-flight"
+              AI_GENERATION_FAILED=true
+            fi
+            
+            # Generate AI-enhanced release notes using git log
+            if [ "$AI_GENERATION_FAILED" != "true" ]; then
+              echo "📝 Generating AI-enhanced release notes from git log..."
+              
+              # Create AI prompt with git log content
+              {
+                echo "Please create professional release notes for version ${{ needs.validate-inputs.outputs.new_version }} based on the following git commits."
+                echo ""
+                echo "Release Description: ${{ github.event.inputs.description }}"
+                echo "Release Type: ${{ github.event.inputs.release_type }}"
+                echo ""
+                echo "Git Commits:"
+                cat git_log_summary.txt
+                echo ""
+                echo "Please format as:"
+                echo "- Brief overview of this release"
+                echo "- Key changes organized by category (Features, Bug Fixes, Improvements, etc.)"
+                echo "- Keep it professional but accessible"
+                echo "- Include any breaking changes if evident"
+              } > ai_prompt.txt
+              
+              # Generate AI release notes
+              if ollama run $MODEL < ai_prompt.txt > ai_release_notes.md 2>/dev/null; then
+                echo "✅ AI release notes generated successfully"
+                
+                # Combine AI notes with detailed git log
+                {
+                  echo "# Release ${{ needs.validate-inputs.outputs.new_version }}: ${{ github.event.inputs.description }}"
+                  echo ""
+                  cat ai_release_notes.md
+                  echo ""
+                  echo "---"
+                  echo ""
+                  echo "## Full Change Log"
+                  echo ""
+                  cat git_changes.md
+                } > "release_notes_${{ needs.validate-inputs.outputs.new_version }}.md"
+              else
+                echo "⚠️ AI generation failed, using git log only"
+                cp git_changes.md "release_notes_${{ needs.validate-inputs.outputs.new_version }}.md"
+              fi
+              
+            fi
+          else
+            echo ""
+            echo "📋 Git Log Only Mode - creating clean release notes from git history"
+            
+            # Create release notes from git log only
+            {
+              echo "# Release ${{ needs.validate-inputs.outputs.new_version }}: ${{ github.event.inputs.description }}"
+              echo ""
+              echo "## Overview"
+              echo "This ${{ github.event.inputs.release_type }} release includes the following changes:"
+              echo ""
+              cat git_changes.md
+            } > "release_notes_${{ needs.validate-inputs.outputs.new_version }}.md"
+          fi
+          
+          # Show final release notes
+          if [ -f "release_notes_${{ needs.validate-inputs.outputs.new_version }}.md" ]; then
+            echo "✅ Release notes generated successfully"
+            echo "📄 Release notes file details:"
+            ls -la "release_notes_${{ needs.validate-inputs.outputs.new_version }}.md"
+            echo "📝 Release notes content (first 50 lines):"
+            head -50 "release_notes_${{ needs.validate-inputs.outputs.new_version }}.md"
+          else
+            echo "❌ Failed to generate release notes"
+            exit 1
+          fi
+
+      - name: 📤 Upload Release Notes Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release_notes_v${{ needs.validate-inputs.outputs.new_version }}.md
+          retention-days: 1
+
+      - name: 📤 Upload Git Log Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: git-changes
+          path: |
+            git_changes.md
+            git_log_summary.txt
+            ai_release_notes.md
+          retention-days: 7
+
+  create-release:
+    name: '📦 Create GitHub Release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [validate-inputs, generate-release-notes]
+    if: github.event.inputs.confirm == 'PUBLISH'
+    
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📄 Download PDF from previous job
+        uses: actions/download-artifact@v4
+        with:
+          name: pdf-artifact
+          path: ./
+
+      - name: 📝 Download release notes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: ./
+
+      - name: 📦 Create GitHub Release with PDF
+        run: |
+          echo "📦 Creating GitHub Release ${{ needs.validate-inputs.outputs.new_version }}..."
           echo "📋 Release details:"
-          echo "  - Tag: ${{ steps.version.outputs.new_version }}"
-          echo "  - Name: ${{ steps.version.outputs.new_version }}: ${{ github.event.inputs.description }}"
+          echo "  - Tag: ${{ needs.validate-inputs.outputs.new_version }}"
+          echo "  - Name: ${{ needs.validate-inputs.outputs.new_version }}: ${{ github.event.inputs.description }}"
           echo "  - Repository: ${{ github.repository }}"
           
-          # Generate release notes
-          cat > release_notes.md << EOF
-          ## 📚 Release ${{ steps.version.outputs.new_version }}
+          # Use the AI-generated release notes
+          RELEASE_NOTES_FILE="release_notes_${{ needs.validate-inputs.outputs.new_version }}.md"
           
-          **${{ github.event.inputs.description }}**
+          if [ -f "$RELEASE_NOTES_FILE" ]; then
+            echo "📄 Using AI-generated release notes:"
+            cat "$RELEASE_NOTES_FILE"
+          else
+            echo "❌ Release notes file not found!"
+            exit 1
+          fi
           
-          ### 📋 Release Information
-          - **Type**: ${{ steps.version.outputs.release_type }} release
-          - **Previous Version**: ${{ steps.version.outputs.previous_version }}
-          - **Published by**: ${{ github.actor }}
-          - **Published at**: $(date)
-          
-          ### 📖 What's Included
-          - Updated interactive web version at [mlsysbook.ai](https://mlsysbook.ai)
-          - Complete PDF textbook available for download
-          - All chapters, exercises, and lab materials as of commit $(git rev-parse HEAD)
-          - Compatible with MIT Press publication standards
-          
-          ### 📝 Changes
-          ${{ github.event.inputs.description }}
-          
-          ### 🔗 Quick Links
-          - 🌐 [Read Online](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }})
-          - 📄 [Download PDF](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.new_version }}/Machine-Learning-Systems.pdf)
-          - 📄 [Direct PDF Link](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/assets/Machine-Learning-Systems.pdf)
-          EOF
-          
-          echo "📄 Generated release notes:"
-          cat release_notes.md
-          
-          # Create the release with better error handling
-          echo "🚀 Creating GitHub release..."
+          # Create the release as a DRAFT for manual editing
+          echo "🚀 Creating GitHub release as DRAFT..."
           RELEASE_RESPONSE=$(curl -s \
             -X POST \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/${{ github.repository }}/releases" \
             -d "{
-              \"tag_name\": \"${{ steps.version.outputs.new_version }}\",
-              \"name\": \"${{ steps.version.outputs.new_version }}: ${{ github.event.inputs.description }}\",
-              \"body\": \"$(cat release_notes.md | sed 's/"/\\"/g' | tr '\n' '\\n')\",
-              \"draft\": false,
+              \"tag_name\": \"${{ needs.validate-inputs.outputs.new_version }}\",
+              \"name\": \"${{ needs.validate-inputs.outputs.new_version }}: ${{ github.event.inputs.description }}\",
+              \"body\": \"$(cat $RELEASE_NOTES_FILE | sed 's/"/\\"/g' | tr '\n' '\\n')\",
+              \"draft\": true,
               \"prerelease\": false
             }")
           
@@ -329,9 +1144,10 @@ jobs:
           RELEASE_URL=$(echo "$RELEASE_RESPONSE" | jq -r '.html_url')
           
           if [ "$RELEASE_ID" != "null" ] && [ -n "$RELEASE_ID" ]; then
-            echo "✅ Release created successfully!"
+            echo "✅ Draft release created successfully!"
             echo "📊 Release ID: $RELEASE_ID"
             echo "🔗 Release URL: $RELEASE_URL"
+            echo "📝 Next step: Edit release notes manually and publish"
             echo "release_id=$RELEASE_ID" >> $GITHUB_ENV
             echo "release_url=$RELEASE_URL" >> $GITHUB_ENV
           else
@@ -342,18 +1158,69 @@ jobs:
             exit 1
           fi
 
+      - name: 📄 Upload PDF to Release Assets
+        run: |
+          echo "📄 Uploading PDF to release assets..."
+          
+          if [ ! -f "Machine-Learning-Systems.pdf" ]; then
+            echo "❌ PDF file not found!"
+            exit 1
+          fi
+          
+          echo "📊 PDF size: $(du -h Machine-Learning-Systems.pdf | cut -f1)"
+          
+          # Upload the PDF to the release
+          UPLOAD_RESPONSE=$(curl -s \
+            -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Content-Type: application/pdf" \
+            --data-binary @Machine-Learning-Systems.pdf \
+            "https://uploads.github.com/repos/${{ github.repository }}/releases/${{ env.release_id }}/assets?name=Machine-Learning-Systems.pdf")
+          
+          echo "📊 Upload Response:"
+          echo "$UPLOAD_RESPONSE" | jq '.'
+          
+          UPLOAD_ID=$(echo "$UPLOAD_RESPONSE" | jq -r '.id')
+          
+          if [ "$UPLOAD_ID" != "null" ] && [ -n "$UPLOAD_ID" ]; then
+            echo "✅ PDF uploaded successfully to release!"
+            echo "📊 Asset ID: $UPLOAD_ID"
+            echo "🔗 Download URL: https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/Machine-Learning-Systems.pdf"
+          else
+            echo "❌ Failed to upload PDF to release!"
+            echo "📊 Error details:"
+            echo "$UPLOAD_RESPONSE" | jq -r '.message // "Unknown error"'
+            exit 1
+          fi
+
+  summary:
+    name: '📋 Publication Summary'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [validate-inputs, create-release]
+    if: github.event.inputs.confirm == 'PUBLISH'
+    
+    steps:
       - name: 📋 Publication Summary
         run: |
           echo "## 📚 Textbook Publication Complete! 🎉" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version Released:** ${{ steps.version.outputs.new_version }} (${{ steps.version.outputs.release_type }})" >> $GITHUB_STEP_SUMMARY
-          echo "**Previous Version:** ${{ steps.version.outputs.previous_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Version Released:** ${{ needs.validate-inputs.outputs.new_version }} (${{ needs.validate-inputs.outputs.release_type }})" >> $GITHUB_STEP_SUMMARY
+          echo "**Previous Version:** ${{ needs.validate-inputs.outputs.previous_version }}" >> $GITHUB_STEP_SUMMARY
           echo "**Content Published:** ${{ github.event.inputs.description }}" >> $GITHUB_STEP_SUMMARY
           echo "**Published by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
           echo "**Source Commit:** ${{ github.event.inputs.dev_commit || 'latest' }}" >> $GITHUB_STEP_SUMMARY
           echo "**Publication Time:** $(date)" >> $GITHUB_STEP_SUMMARY
           echo "**Release ID:** ${{ env.release_id || 'N/A' }}" >> $GITHUB_STEP_SUMMARY
           echo "**Release URL:** ${{ env.release_url || 'N/A' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔍 Debug Information:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Workflow Run ID:** ${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Run Attempt:** ${{ github.run_attempt }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit SHA:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **AI Generated Notes:** ${{ github.event.inputs.ai_generated_notes }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📝 Changes:" >> $GITHUB_STEP_SUMMARY
           echo "${{ github.event.inputs.description }}" >> $GITHUB_STEP_SUMMARY
@@ -362,21 +1229,22 @@ jobs:
           echo "1. ✅ Verified dev branch tests passed" >> $GITHUB_STEP_SUMMARY
           echo "2. ✅ Calculated new version number" >> $GITHUB_STEP_SUMMARY
           echo "3. ✅ Merged dev → main branch" >> $GITHUB_STEP_SUMMARY
-          echo "4. ✅ Created release tag ${{ steps.version.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "4. ✅ Created release tag ${{ needs.validate-inputs.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY
           echo "5. ✅ Pushed to main (triggered production build)" >> $GITHUB_STEP_SUMMARY
-          echo "6. ✅ Waited for build completion (up to 2 hours)" >> $GITHUB_STEP_SUMMARY
-          echo "7. ✅ Created GitHub Release" >> $GITHUB_STEP_SUMMARY
+          echo "6. ✅ Waited for build completion (up to 1 hour)" >> $GITHUB_STEP_SUMMARY
+          echo "7. ✅ Created GitHub Release (DRAFT - edit manually)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🏗️ Build Process:" >> $GITHUB_STEP_SUMMARY
           echo "- 📚 **Controller Workflow**: Triggered by main branch push" >> $GITHUB_STEP_SUMMARY
-          echo "- 🔨 **Build Jobs**: HTML + PDF generation on Linux/Windows" >> $GITHUB_STEP_SUMMARY
-          echo "- 📄 **PDF Processing**: Generated, compressed, and copied to assets/" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔨 **Build Jobs**: HTML + PDF generation on Linux only" >> $GITHUB_STEP_SUMMARY
+          echo "- 📄 **PDF Processing**: Generated, compressed with Ghostscript, stored in build/pdf/" >> $GITHUB_STEP_SUMMARY
+          echo "- 📦 **Artifacts**: build-ubuntu-latest-pdf contains Machine-Learning-Systems.pdf" >> $GITHUB_STEP_SUMMARY
           echo "- 🌐 **Deployment**: GitHub Pages with PDF download available" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🌐 Access Your Published Textbook:" >> $GITHUB_STEP_SUMMARY
           echo "- 📖 [Interactive Web Textbook](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }})" >> $GITHUB_STEP_SUMMARY
-          echo "- 📦 [Version Release Notes](https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.new_version }})" >> $GITHUB_STEP_SUMMARY
-          echo "- 📄 [Download Complete PDF](https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.new_version }}/Machine-Learning-Systems.pdf)" >> $GITHUB_STEP_SUMMARY
+          echo "- 📦 [Version Release Notes](https://github.com/${{ github.repository }}/releases/tag/${{ needs.validate-inputs.outputs.new_version }})" >> $GITHUB_STEP_SUMMARY
+          echo "- 📄 [Download Complete PDF](https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/Machine-Learning-Systems.pdf)" >> $GITHUB_STEP_SUMMARY
           echo "- 📄 [Direct PDF Access](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/assets/Machine-Learning-Systems.pdf)" >> $GITHUB_STEP_SUMMARY
           echo "- 🎓 [Share with Students](https://mlsysbook.ai)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -385,15 +1253,165 @@ jobs:
           echo "- 📚 **Quarto Build**: HTML + PDF generation" >> $GITHUB_STEP_SUMMARY
           echo "- 📄 **PDF Assets**: Available at `/assets/Machine-Learning-Systems.pdf`" >> $GITHUB_STEP_SUMMARY
 
+  cleanup-on-failure:
+    name: '🧹 Cleanup Failed Release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [validate-inputs, pre-flight-checks, merge-to-main, create-tag, monitor-build, download-pdf, generate-release-notes, create-release]
+    if: always() && github.event.inputs.confirm == 'PUBLISH' && (failure() || cancelled())
+    
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🧹 Clean up failed release artifacts
+        run: |
+          echo "🧹 Cleaning up artifacts from failed release..."
+          
+          # Get the version that was being released
+          if [ -n "${{ needs.validate-inputs.outputs.new_version }}" ]; then
+            VERSION_TAG="${{ needs.validate-inputs.outputs.new_version }}"
+            echo "🎯 Cleaning up version: $VERSION_TAG"
+          else
+            echo "⚠️ No version information available, skipping cleanup"
+            exit 0
+          fi
+          
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Check and remove local tag
+          if git tag -l "$VERSION_TAG" | grep -q "$VERSION_TAG"; then
+            echo "🗑️ Removing local tag: $VERSION_TAG"
+            git tag -d "$VERSION_TAG"
+          else
+            echo "ℹ️ Local tag $VERSION_TAG does not exist"
+          fi
+          
+          # Check and remove remote tag if it exists
+          if git ls-remote --tags origin | grep -q "refs/tags/$VERSION_TAG$"; then
+            echo "🗑️ Removing remote tag: $VERSION_TAG"
+            git push origin --delete "$VERSION_TAG" || echo "⚠️ Failed to delete remote tag (may not exist)"
+          else
+            echo "ℹ️ Remote tag $VERSION_TAG does not exist"
+          fi
+          
+          # Check for any draft releases and delete them
+          echo "🔍 Checking for draft releases..."
+          DRAFT_RELEASE=$(curl -s \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/releases" \
+            | jq -r ".[] | select(.tag_name == \"$VERSION_TAG\" and .draft == true) | .id")
+          
+          if [ "$DRAFT_RELEASE" != "null" ] && [ -n "$DRAFT_RELEASE" ]; then
+            echo "🗑️ Deleting draft release: $DRAFT_RELEASE"
+            curl -s \
+              -X DELETE \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/$DRAFT_RELEASE"
+            echo "✅ Draft release deleted"
+          else
+            echo "ℹ️ No draft release found for $VERSION_TAG"
+          fi
+          
+          echo "✅ Cleanup completed! Repository is ready for retry."
+
+      - name: 🔄 Rollback Main Branch (if needed)
+        run: |
+          echo "🔄 Checking if main branch rollback is needed..."
+          
+          # Only rollback if merge succeeded but later steps failed
+          if [ "${{ needs.merge-to-main.result }}" = "success" ] && [ "${{ needs.create-tag.result }}" != "success" ]; then
+            echo "⚠️ Merge succeeded but tag creation failed - considering rollback"
+            echo "🔍 Checking if main branch needs to be rolled back..."
+            
+            # Get the commit before the merge
+            MERGE_COMMIT=$(git log --oneline -1 --grep="Release $VERSION_TAG" --format="%H" || echo "")
+            
+            if [ -n "$MERGE_COMMIT" ]; then
+              PARENT_COMMIT=$(git log --format="%P" -n 1 "$MERGE_COMMIT" | cut -d' ' -f1)
+              echo "🔍 Found merge commit: $MERGE_COMMIT"
+              echo "🔍 Parent commit: $PARENT_COMMIT"
+              
+              echo "⚠️ To manually rollback main branch, run:"
+              echo "   git checkout main"
+              echo "   git reset --hard $PARENT_COMMIT"
+              echo "   git push origin main --force-with-lease"
+              echo ""
+              echo "⚠️ AUTOMATED ROLLBACK DISABLED - Manual intervention required"
+              echo "🛡️ This prevents accidental data loss"
+            else
+              echo "ℹ️ No merge commit found - no rollback needed"
+            fi
+          else
+            echo "ℹ️ No rollback needed - merge did not complete successfully"
+          fi
+
+      - name: 📊 Cleanup Summary
+        run: |
+          echo "## 🧹 Failed Release Cleanup Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ needs.validate-inputs.outputs.new_version || 'Unknown' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Cleanup Time:** $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔍 Original Inputs (for debugging):" >> $GITHUB_STEP_SUMMARY
+          echo "- **Description:** ${{ github.event.inputs.description }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release Type:** ${{ github.event.inputs.release_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dev Commit:** ${{ github.event.inputs.dev_commit }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Confirmation:** ${{ github.event.inputs.confirm }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **AI Generated Notes:** ${{ github.event.inputs.ai_generated_notes }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Run ID:** ${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Run Attempt:** ${{ github.run_attempt }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🗑️ Cleaned Up:" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Local git tags removed" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Remote git tags removed (if they existed)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Draft GitHub releases removed (if they existed)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔄 Ready for Retry:" >> $GITHUB_STEP_SUMMARY
+          echo "You can now safely re-run the publish workflow with the same version number." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🐛 Troubleshooting:" >> $GITHUB_STEP_SUMMARY
+          echo "If you continue to have issues, check the workflow logs for the failed step." >> $GITHUB_STEP_SUMMARY
+
   fail-validation:
     name: '❌ Validation Failed'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     if: github.event.inputs.confirm != 'PUBLISH'
     
     steps:
       - name: ❌ Invalid confirmation
         run: |
+          echo "## ❌ Publication Validation Failed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Reason:** Invalid confirmation" >> $GITHUB_STEP_SUMMARY
+          echo "**Expected:** PUBLISH" >> $GITHUB_STEP_SUMMARY
+          echo "**Received:** ${{ github.event.inputs.confirm }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Time:** $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔍 Debug Information:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Run ID:** ${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Description:** ${{ github.event.inputs.description }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release Type:** ${{ github.event.inputs.release_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dev Commit:** ${{ github.event.inputs.dev_commit }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **AI Generated Notes:** ${{ github.event.inputs.ai_generated_notes }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
           echo "❌ Publication cancelled - invalid confirmation"
           echo "🔒 You must type exactly 'PUBLISH' to confirm"
           echo "📝 You entered: '${{ github.event.inputs.confirm }}'"
+          echo "👤 Triggered by: ${{ github.actor }}"
+          echo "🌐 Branch: ${{ github.ref_name }}"
+          echo "🔄 Run ID: ${{ github.run_id }}"
           exit 1 

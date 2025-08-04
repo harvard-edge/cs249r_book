@@ -58,7 +58,7 @@ permissions:
 jobs:
   build:
     runs-on: ${{ inputs.os }}
-    timeout-minutes: 120  # ⏰ Set job timeout to 60 minutes
+    timeout-minutes: 60   # ⏰ Set job timeout to 1 hour (3600 seconds)
     environment:
       name: ${{ inputs.environment }}
     env:
@@ -70,6 +70,20 @@ jobs:
       LC_ALL: en_US.UTF-8
 
     steps:
+      - name: 🚦 Set Initial Build Status
+        shell: bash
+        run: |
+          echo "🚦 Setting initial build status to pending..."
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"pending\",
+              \"description\": \"Quarto build started (${{ inputs.os }}, ${{ inputs.format }})\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+
       - name: 🔍 Validate inputs
         shell: pwsh
         run: |
@@ -84,8 +98,9 @@ jobs:
           Write-Output "👉 Environment: ${{ inputs.environment }}"
           Write-Output "👉 Format: ${{ inputs.format }}"
           Write-Output "👉 Deploy: ${{ inputs.deploy }}"
+          Write-Output "👉 TeX Live: Always installed for all formats (consistent environment)"
           
-          $valid_formats = @("html", "pdf", "all")
+          $valid_formats = @("html", "pdf", "epub", "all")
           if ("${{ inputs.format }}" -notin $valid_formats) {
             Write-Error "❌ Format must be one of: $($valid_formats -join ', ')"
             exit 1
@@ -275,14 +290,70 @@ jobs:
           # Verify Inkscape installation
           inkscape --version
 
-      # Install TeX Live packages (Cross-platform)
+      # Install TeX Live packages (Cross-platform) - ALWAYS install for consistency
+      # Required for TikZ diagrams in HTML (PDF->SVG), PDF output, and potential future needs
       - name: 📦 Install TeX Live packages
-        if: (inputs.format == 'pdf' || inputs.format == 'epub' || inputs.format == 'all')
         uses: zauguin/install-texlive@v4
         with:
           package_file: tools/dependencies/tl_packages
           texlive_version: 2025
           cache_version: 1
+          
+      - name: 🔍 Verify TeX Live Installation
+        shell: bash
+        run: |
+          echo "🔄 Verifying TeX Live installation (installed for all builds)..."
+          echo "📊 Current format: ${{ inputs.format }}"
+          echo "📊 Philosophy: All builds get same environment, only build targets differ"
+          
+          # Check LaTeX engines
+          echo "📊 Checking LaTeX engines:"
+          which lualatex || echo "❌ lualatex not found"
+          which pdflatex || echo "❌ pdflatex not found"
+          lualatex --version | head -2 || echo "❌ lualatex version failed"
+          
+          # Check if required packages are available
+          echo "📊 Checking core LaTeX and TikZ packages:"
+          kpsewhich pgf.sty && echo "✅ PGF package found" || echo "❌ PGF package missing"
+          kpsewhich pgfplots.sty && echo "✅ PGFPlots package found" || echo "❌ PGFPlots package missing"
+          kpsewhich xcolor.sty && echo "✅ XColor package found" || echo "❌ XColor package missing"
+          kpsewhich amsmath.sty && echo "✅ AMSMath package found" || echo "❌ AMSMath package missing"
+          kpsewhich standalone.cls && echo "✅ Standalone class found" || echo "❌ Standalone class missing"
+          
+          echo "📊 Checking font packages:"
+          kpsewhich phvr7t.tfm && echo "✅ Helvetica font found" || echo "❌ Helvetica font missing"
+          kpsewhich t1phv.fd && echo "✅ Helvetica font descriptor found" || echo "❌ Helvetica font descriptor missing"
+          
+          # Test TikZ compilation
+          echo "🧪 Testing TikZ compilation..."
+          cat > test_tikz.tex << 'EOF'
+          \documentclass{standalone}
+          \usepackage{tikz}
+          \usepackage{pgfplots}
+          \usepackage{amsmath}
+          \usepackage{amssymb}
+          \usepackage{xcolor}
+          \usepackage[T1]{fontenc}
+          \usetikzlibrary{positioning}
+          \usetikzlibrary{calc}
+          \begin{document}
+          \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+          \node[draw, fill=blue!20] at (0,0) {TikZ Test};
+          \node[draw, fill=red!20] at (2,0) {Success};
+          \draw[->] (0.8,0) -- (1.2,0);
+          \end{tikzpicture}
+          \end{document}
+          EOF
+          
+          if lualatex -interaction=nonstopmode test_tikz.tex; then
+            echo "✅ TikZ compilation successful"
+            ls -la test_tikz.pdf
+          else
+            echo "❌ TikZ compilation failed"
+            cat test_tikz.log | tail -20 || echo "No log file found"
+          fi
+          
+          rm -f test_tikz.*
          
       - name: 📊 Setup R
         uses: r-lib/actions/setup-r@v2
@@ -362,6 +433,36 @@ jobs:
             cat("✅ All required R packages installed successfully\n")
           }
 
+      - name: 💓 Start Build Heartbeat
+        shell: bash
+        run: |
+          echo "💓 Starting build heartbeat system..."
+          echo "⏰ Build started at: $(date)"
+          echo "📊 Build configuration:"
+          echo "   - Format: ${{ inputs.format }}"
+          echo "   - OS: ${{ inputs.os }}"
+          echo "   - Environment: ${{ inputs.environment }}"
+          echo "   - Timeout: 60 minutes"
+          echo "💓 Heartbeat will show progress every 5 minutes"
+          
+          # Start background heartbeat process
+          (
+            while true; do
+              sleep 300  # 5 minutes
+              echo "💓 Build heartbeat: $(date) - Still building..."
+              echo "📊 Current memory usage:"
+              free -h || echo "Memory info not available"
+              echo "📊 Current disk usage:"
+              df -h . || echo "Disk info not available"
+              echo "📊 Active processes:"
+              ps aux | grep -E "(quarto|R|python)" | head -5 || echo "Process info not available"
+              echo "---"
+            done
+          ) &
+          HEARTBEAT_PID=$!
+          echo $HEARTBEAT_PID > /tmp/heartbeat.pid
+          echo "✅ Heartbeat started (PID: $HEARTBEAT_PID)"
+
       - name: 🔨 Build HTML (copy config and render)
         if: inputs.format == 'html' || inputs.format == 'all'
         shell: bash
@@ -373,8 +474,22 @@ jobs:
           echo "✅ Configuration set to HTML"
           
           echo "🔨 Building HTML..."
+          echo "⏰ HTML build started at: $(date)"
+          
+          # Update status to building
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"pending\",
+              \"description\": \"Building HTML content (${{ inputs.os }})\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+          
           # Enable verbose logging for debugging
           quarto render --to html
+          echo "✅ HTML build completed at: $(date)"
         
       - name: 🔨 Build PDF (copy config and render)
         if: inputs.format == 'pdf' || inputs.format == 'all'
@@ -387,9 +502,43 @@ jobs:
           echo "✅ Configuration set to PDF"
           
           echo "🔨 Building PDF..."
+          echo "⏰ PDF build started at: $(date)"
+          echo "📊 This is typically the longest step (can take 30-45 minutes)"
+          echo "💓 Heartbeat will continue showing progress..."
+          
+          # Update status to building PDF
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"pending\",
+              \"description\": \"Building PDF content (${{ inputs.os }}) - this takes 30-45min\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+          
           # Enable verbose logging for debugging
           quarto render --to titlepage-pdf
+          echo "✅ PDF build completed at: $(date)"
       
+      - name: 💓 Stop Build Heartbeat
+        shell: bash
+        run: |
+          echo "💓 Stopping build heartbeat..."
+          if [ -f /tmp/heartbeat.pid ]; then
+            HEARTBEAT_PID=$(cat /tmp/heartbeat.pid)
+            if kill -0 $HEARTBEAT_PID 2>/dev/null; then
+              kill $HEARTBEAT_PID
+              echo "✅ Heartbeat stopped (PID: $HEARTBEAT_PID)"
+            else
+              echo "⚠️ Heartbeat process already stopped"
+            fi
+            rm -f /tmp/heartbeat.pid
+          else
+            echo "⚠️ No heartbeat PID file found"
+          fi
+          echo "⏰ Total build time: $(date)"
+
       - name: 📋 Check Quarto Build Output
         shell: bash
         run: |
@@ -541,6 +690,17 @@ jobs:
         run: |
           echo "🚀 Deploying to GitHub Pages..."
           
+          # Update status to deploying
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"pending\",
+              \"description\": \"Deploying to GitHub Pages (${{ inputs.os }})\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+          
           # Clone gh-pages branch
           git clone --depth=1 --branch=gh-pages https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git gh-pages-repo
           
@@ -551,12 +711,13 @@ jobs:
           # Copy new content
           cp -r ../build/html/* .
           
-          # Copy PDF if it exists (for download)
+          # Copy PDF if it exists (for download) - but don't commit it to git
           if [ -f "../build/pdf/Machine-Learning-Systems.pdf" ]; then
-            echo "📄 Adding PDF to deployment..."
+            echo "📄 Adding PDF to deployment for download access..."
             mkdir -p assets
             cp "../build/pdf/Machine-Learning-Systems.pdf" assets/
             echo "✅ PDF added: assets/Machine-Learning-Systems.pdf"
+            echo "📝 Note: PDF will be available for download but not tracked in git"
           else
             echo "⚠️ PDF not found in build/pdf/"
           fi
@@ -565,8 +726,13 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           
-          # Commit and push
+          # Add all files EXCEPT the PDF
           git add .
+          
+          # Remove PDF from git tracking (if it was added)
+          git rm --cached assets/Machine-Learning-Systems.pdf 2>/dev/null || true
+          
+          # Commit and push (PDF will be available for download but not in git)
           git commit -m "Deploy from commit ${GITHUB_SHA}" || echo "No changes to commit"
           git push origin gh-pages
         env:
@@ -739,12 +905,8 @@ jobs:
           $OutputEncoding = [System.Text.Encoding]::UTF8
           [Console]::InputEncoding = [System.Text.Encoding]::UTF8
           
-          # Create a variable for the TeX Live status
-          $texLiveStatus = if ("${{ inputs.format }}" -eq "pdf" -or "${{ inputs.format }}" -eq "all") {
-            "Installed via zauguin/install-texlive@v4 (Cross-platform)"
-          } else {
-            "Skipped (not needed for HTML only)"
-          }
+          # TeX Live is now always installed for consistent environment across all builds
+          $texLiveStatus = "✅ Always installed (zauguin/install-texlive@v4)"
           
           @"
           ## 📊 Build Status Summary
@@ -764,4 +926,35 @@ jobs:
             - Includes: TeX logs, system info, library details, and comprehensive build output
             - Retention: 30 days for debugging
           ⏰ Completed at: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-          "@ | Add-Content $env:GITHUB_STEP_SUMMARY 
+          "@ | Add-Content $env:GITHUB_STEP_SUMMARY
+
+      - name: 🎯 Set Final Build Status
+        if: always()
+        shell: bash
+        run: |
+          echo "🎯 Setting final build status..."
+          
+          # Determine the final status based on job status
+          if [ "${{ job.status }}" = "success" ]; then
+            STATE="success"
+            DESCRIPTION="Build completed successfully (${{ inputs.os }}, ${{ inputs.format }})"
+          else
+            STATE="failure"
+            DESCRIPTION="Build failed (${{ inputs.os }}, ${{ inputs.format }})"
+          fi
+          
+          echo "📊 Final status: $STATE"
+          echo "📝 Description: $DESCRIPTION"
+          
+          # Set the final commit status
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"$STATE\",
+              \"description\": \"$DESCRIPTION\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+          
+          echo "✅ Commit status updated successfully" 
