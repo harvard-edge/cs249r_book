@@ -1,0 +1,112 @@
+-- Video insertion shortcode for MLSysBook
+-- Usage: {{< margin-video "URL" "Title" "Author" >}}
+
+return {
+  ['margin-video'] = function(args, kwargs, meta)
+    -- Validate arguments
+    if not args[1] then
+      error("ERROR: margin-video requires at least a URL argument.\nUsage: {{< margin-video \"URL\" \"Title\" \"Author\" >}}")
+    end
+    
+    local url = pandoc.utils.stringify(args[1]) or ""
+    local title = pandoc.utils.stringify(args[2]) or "Video"
+    local author = pandoc.utils.stringify(args[3]) or ""
+    
+    -- Optional configuration via kwargs
+    local aspect_ratio = pandoc.utils.stringify(kwargs["aspect-ratio"]) or "16/9"
+    local autoplay = pandoc.utils.stringify(kwargs["autoplay"]) == "true"
+    local start_time = pandoc.utils.stringify(kwargs["start"]) or nil
+    
+    -- Validate URL is not empty
+    if url == "" then
+      error("ERROR: margin-video URL cannot be empty.\nUsage: {{< margin-video \"URL\" \"Title\" \"Author\" >}}")
+    end
+
+    -- Check if it's a YouTube URL with better validation
+    if not (string.match(url, "youtube%.com") or string.match(url, "youtu%.be")) then
+      error("ERROR: margin-video currently only supports YouTube URLs.\nGot: " .. url .. "\nSupported formats:\n  - https://www.youtube.com/watch?v=VIDEO_ID\n  - https://youtu.be/VIDEO_ID")
+    end
+
+    -- Extract YouTube video ID (handles various URL formats and parameters)
+    local video_id = nil
+    
+    -- Handle youtube.com/watch?v=ID format (with optional additional parameters)
+    video_id = string.match(url, "youtube%.com/watch%?.*v=([%w_-]+)")
+    
+    -- Handle youtu.be/ID format (with optional parameters)
+    if not video_id then
+      video_id = string.match(url, "youtu%.be/([%w_-]+)")
+    end
+    
+    -- Handle youtube.com/embed/ID format
+    if not video_id then
+      video_id = string.match(url, "youtube%.com/embed/([%w_-]+)")
+    end
+
+    if not video_id then
+      error("ERROR: Could not extract YouTube video ID from URL: " .. url .. "\nPlease check the URL format is correct.")
+    end
+
+    if FORMAT:match("html") then
+      -- HTML: Margin video with auto-numbering
+      local caption = title
+      if author ~= "" then
+        caption = caption .. " - " .. author
+      end
+      
+      -- Build iframe URL with optional parameters
+      local iframe_url = "https://www.youtube.com/embed/" .. video_id
+      local url_params = {}
+      
+      if autoplay then
+        table.insert(url_params, "autoplay=1")
+      end
+      
+      if start_time then
+        table.insert(url_params, "start=" .. start_time)
+      end
+      
+      if #url_params > 0 then
+        iframe_url = iframe_url .. "?" .. table.concat(url_params, "&")
+      end
+      
+      local html_output = [[
+<div class="column-margin">
+  <div class="margin-video">
+    <iframe src="]] .. iframe_url .. [["
+            style="width:100%; aspect-ratio: ]] .. aspect_ratio .. [[; border:0;"
+            allowfullscreen>
+    </iframe>
+  </div>
+  <p><em>]] .. caption .. [[</em></p>
+</div>
+]]
+      return pandoc.RawBlock("html", html_output)
+    elseif FORMAT:match("pdf") then
+      -- PDF: QR code and margin note
+      local pdf_output = [[
+\marginnote{\centering\\\vspace*{5mm}%
+  \parbox{30mm}{\centering\footnotesize%
+    \textbf{Watch on YouTube}\\
+    ]] .. title .. [[\\
+    ]] .. (author ~= "" and author .. "\\[1mm]" or "") .. [[
+  }
+  \begingroup
+    \hypersetup{urlcolor=black}
+    \qrcode[height=15mm]{]] .. url .. [[}
+  \endgroup
+\\[1mm]
+  \parbox{25mm}{\centering\footnotesize%
+    Scan with your phone\\
+    to watch the video
+  }
+}
+\faTv{} [Watch on YouTube](]] .. url .. [[)
+]]
+      return pandoc.RawBlock("latex", pdf_output)
+    else
+      -- Fallback for other formats (e.g., just a link)
+      return pandoc.Link(pandoc.Str(title), url)
+    end
+  end
+}
