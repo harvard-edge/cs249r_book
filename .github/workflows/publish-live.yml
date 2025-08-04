@@ -255,18 +255,68 @@ jobs:
           
           echo "✅ Merge completed successfully!"
 
+      - name: 🚀 Push merge to main
+        run: |
+          echo "🚀 Pushing merge to main branch..."
+          git push origin main
+          
+          echo "✅ Main branch updated successfully!"
+          echo "📋 Next step: Tag creation and production deployment"
+
+  create-tag:
+    name: '🏷️ Create Release Tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [validate-inputs, merge-to-main]
+    if: github.event.inputs.confirm == 'PUBLISH'
+    
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔄 Sync with latest main
+        run: |
+          echo "🔄 Configuring git..."
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          echo "🔄 Switching to main and pulling latest changes..."
+          git checkout main
+          git pull origin main
+          
+          echo "✅ Synced with latest main branch"
+
       - name: 🏷️ Create Release Tag
         run: |
           echo "🏷️ Creating release tag ${{ needs.validate-inputs.outputs.new_version }}..."
+          
+          # Check if tag already exists locally
+          if git tag -l "${{ needs.validate-inputs.outputs.new_version }}" | grep -q "${{ needs.validate-inputs.outputs.new_version }}"; then
+            echo "⚠️ Tag ${{ needs.validate-inputs.outputs.new_version }} already exists locally"
+            echo "🔄 Removing existing tag to recreate it..."
+            git tag -d ${{ needs.validate-inputs.outputs.new_version }}
+          fi
+          
+          # Check if tag exists on remote
+          if git ls-remote --tags origin | grep -q "refs/tags/${{ needs.validate-inputs.outputs.new_version }}$"; then
+            echo "⚠️ Tag ${{ needs.validate-inputs.outputs.new_version }} already exists on remote"
+            echo "🔄 Removing remote tag to recreate it..."
+            git push origin --delete ${{ needs.validate-inputs.outputs.new_version }}
+          fi
+          
+          # Create the tag on the latest main commit
           git tag -a ${{ needs.validate-inputs.outputs.new_version }} -m "Release ${{ needs.validate-inputs.outputs.new_version }}: ${{ github.event.inputs.description }}"
           echo "✅ Tag created successfully!"
 
-      - name: 🚀 Push to main and trigger production deployment
+      - name: 🚀 Push tag and trigger production deployment
         run: |
-          echo "🚀 Pushing to main branch with tags..."
-          git push origin main --tags
+          echo "🚀 Pushing release tag to trigger production deployment..."
+          git push origin ${{ needs.validate-inputs.outputs.new_version }}
           
-          echo "📊 Main branch updated! This will trigger:"
+          echo "📊 Release tag pushed! This will trigger:"
           echo "  ✅ Production build workflow (HTML + PDF generation)"
           echo "  ✅ GitHub Pages deployment with textbook content"
           echo "  ✅ Live academic website update"
@@ -278,7 +328,7 @@ jobs:
     name: '⏳ Monitor Production Build'
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    needs: merge-to-main
+    needs: create-tag
     if: github.event.inputs.confirm == 'PUBLISH'
     
     steps:
@@ -791,6 +841,93 @@ jobs:
           echo "- 🎮 **Controller Workflow**: Should be running/completed" >> $GITHUB_STEP_SUMMARY
           echo "- 📚 **Quarto Build**: HTML + PDF generation" >> $GITHUB_STEP_SUMMARY
           echo "- 📄 **PDF Assets**: Available at `/assets/Machine-Learning-Systems.pdf`" >> $GITHUB_STEP_SUMMARY
+
+  cleanup-on-failure:
+    name: '🧹 Cleanup Failed Release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [validate-inputs, merge-to-main, create-tag, monitor-build, download-pdf, generate-release-notes, create-release]
+    if: always() && github.event.inputs.confirm == 'PUBLISH' && (failure() || cancelled())
+    
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🧹 Clean up failed release artifacts
+        run: |
+          echo "🧹 Cleaning up artifacts from failed release..."
+          
+          # Get the version that was being released
+          if [ -n "${{ needs.validate-inputs.outputs.new_version }}" ]; then
+            VERSION_TAG="${{ needs.validate-inputs.outputs.new_version }}"
+            echo "🎯 Cleaning up version: $VERSION_TAG"
+          else
+            echo "⚠️ No version information available, skipping cleanup"
+            exit 0
+          fi
+          
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Check and remove local tag
+          if git tag -l "$VERSION_TAG" | grep -q "$VERSION_TAG"; then
+            echo "🗑️ Removing local tag: $VERSION_TAG"
+            git tag -d "$VERSION_TAG"
+          else
+            echo "ℹ️ Local tag $VERSION_TAG does not exist"
+          fi
+          
+          # Check and remove remote tag if it exists
+          if git ls-remote --tags origin | grep -q "refs/tags/$VERSION_TAG$"; then
+            echo "🗑️ Removing remote tag: $VERSION_TAG"
+            git push origin --delete "$VERSION_TAG" || echo "⚠️ Failed to delete remote tag (may not exist)"
+          else
+            echo "ℹ️ Remote tag $VERSION_TAG does not exist"
+          fi
+          
+          # Check for any draft releases and delete them
+          echo "🔍 Checking for draft releases..."
+          DRAFT_RELEASE=$(curl -s \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/releases" \
+            | jq -r ".[] | select(.tag_name == \"$VERSION_TAG\" and .draft == true) | .id")
+          
+          if [ "$DRAFT_RELEASE" != "null" ] && [ -n "$DRAFT_RELEASE" ]; then
+            echo "🗑️ Deleting draft release: $DRAFT_RELEASE"
+            curl -s \
+              -X DELETE \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/$DRAFT_RELEASE"
+            echo "✅ Draft release deleted"
+          else
+            echo "ℹ️ No draft release found for $VERSION_TAG"
+          fi
+          
+          echo "✅ Cleanup completed! Repository is ready for retry."
+
+      - name: 📊 Cleanup Summary
+        run: |
+          echo "## 🧹 Failed Release Cleanup Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ needs.validate-inputs.outputs.new_version || 'Unknown' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Cleanup Time:** $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🗑️ Cleaned Up:" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Local git tags removed" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Remote git tags removed (if they existed)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Draft GitHub releases removed (if they existed)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔄 Ready for Retry:" >> $GITHUB_STEP_SUMMARY
+          echo "You can now safely re-run the publish workflow with the same version number." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🐛 Troubleshooting:" >> $GITHUB_STEP_SUMMARY
+          echo "If you continue to have issues, check the workflow logs for the failed step." >> $GITHUB_STEP_SUMMARY
 
   fail-validation:
     name: '❌ Validation Failed'
