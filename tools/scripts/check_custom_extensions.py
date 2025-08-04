@@ -15,19 +15,19 @@ def main():
     print("MLSysBook Custom Extension Protection Check")
     print("=" * 50)
     
-    # Define expected custom extensions in mlsysbook namespace
+    # Define expected custom extensions in mlsysbook-ext namespace
     protected_extensions = {
-        "mlsysbook/custom-numbered-blocks": {
+        "mlsysbook-ext/custom-numbered-blocks": {
             "type": "moved",
             "original": "ute/custom-numbered-blocks",
             "description": "Custom numbered blocks with MLSysBook styling"
         },
-        "mlsysbook/titlepage": {
+        "mlsysbook-ext/titlepage": {
             "type": "moved", 
             "original": "nmfs-opensci/titlepage",
             "description": "Custom titlepage with MLSysBook branding"
         },
-        "mlsysbook/margin-video": {
+        "mlsysbook-ext/margin-video": {
             "type": "custom",
             "original": None,
             "description": "Custom margin video extension for YouTube embedding"
@@ -41,7 +41,7 @@ def main():
         print(f"❌ Extensions directory not found: {extensions_dir}")
         sys.exit(1)
     
-    print("🔒 Checking custom extension protection via mlsysbook/ namespace...")
+    print("🔒 Checking custom extension protection via mlsysbook-ext/ namespace...")
     
     # Check each protected extension
     all_protected = True
@@ -60,7 +60,10 @@ def main():
     old_naming = [
         "ute-mlsysbook-custom/custom-numbered-blocks",
         "nmfs-opensci-mlsysbook-custom/titlepage",
-        "margin-video-mlsysbook"
+        "margin-video-mlsysbook",
+        "mlsysbook/custom-numbered-blocks",
+        "mlsysbook/titlepage",
+        "mlsysbook/margin-video"
     ]
     
     found_old = []
@@ -68,7 +71,7 @@ def main():
         if (extensions_dir / old_path).exists():
             found_old.append(old_path)
             print(f"⚠️  Warning: Found old naming scheme: {old_path}")
-            print(f"   Consider migrating to mlsysbook/ namespace")
+            print(f"   Consider migrating to mlsysbook-ext/ namespace")
     
     print()
     
@@ -86,8 +89,8 @@ def main():
         if not all_protected:
             print("  - Some custom extensions are missing")
         if found_old:
-            print("  - Old naming scheme detected")
-            print("  - Consider migrating to mlsysbook/ namespace")
+                    print("  - Old naming scheme detected")
+        print("  - Consider migrating to mlsysbook-ext/ namespace")
         sys.exit(1)
 
 if __name__ == "__main__":

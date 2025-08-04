@@ -1,10 +1,10 @@
-# 🛡️ CUSTOM EXTENSIONS - PROTECTED BY MLSYSBOOK NAMESPACE
+# 🛡️ CUSTOM EXTENSIONS - PROTECTED BY MLSYSBOOK-EXT NAMESPACE
 
 This directory contains extensions that have been **heavily customized** for the MLSysBook project. 
 
-## ✅ **PROTECTION STRATEGY: MLSYSBOOK NAMESPACE**
+## ✅ **PROTECTION STRATEGY: MLSYSBOOK-EXT NAMESPACE**
 
-Our custom extensions are **protected by organizing them under the `mlsysbook/` directory** - a namespace that cannot be accidentally overwritten by `quarto add` commands.
+Our custom extensions are **protected by organizing them under the `mlsysbook-ext/` directory** - a namespace that cannot be accidentally overwritten by `quarto add` commands.
 
 ## 📋 **Custom Extensions Inventory**
 
@@ -12,32 +12,32 @@ Our custom extensions are **protected by organizing them under the `mlsysbook/` 
 - `pandoc-ext/diagram` - Standard Pandoc extension
 - `quarto-ext/lightbox` - Standard Quarto extension  
 
-### 🛡️ **PROTECTED** (Custom Extensions in MLSysBook Namespace)
+### 🛡️ **PROTECTED** (Custom Extensions in MLSysBook-Ext Namespace)
 
-#### `mlsysbook/custom-numbered-blocks` 
+#### `mlsysbook-ext/custom-numbered-blocks` 
 - **Status**: Heavily modified for MLSysBook
-- **Protection**: `mlsysbook/` namespace prevents any accidental overwrites
+- **Protection**: `mlsysbook-ext/` namespace prevents any accidental overwrites
 - **Customizations**: 
   - Modified CSS styling
   - Custom block types
   - Enhanced PDF rendering
   - MLSysBook-specific configurations
 - **Original**: `ute/custom-numbered-blocks` (https://github.com/ute/quarto-numbered-blocks)
-- **Last Updated**: Reorganized into mlsysbook namespace
+- **Last Updated**: Reorganized into mlsysbook-ext namespace
 
-#### `mlsysbook/titlepage`
+#### `mlsysbook-ext/titlepage`
 - **Status**: Customized for MLSysBook  
-- **Protection**: `mlsysbook/` namespace prevents any accidental overwrites
+- **Protection**: `mlsysbook-ext/` namespace prevents any accidental overwrites
 - **Customizations**:
   - Custom fonts and styling
   - Modified template partials
   - MLSysBook branding integration
 - **Original**: `nmfs-opensci/titlepage` (https://github.com/nmfs-opensci/quarto_titlepages)
-- **Last Updated**: Reorganized into mlsysbook namespace
+- **Last Updated**: Reorganized into mlsysbook-ext namespace
 
-#### `mlsysbook/margin-video` 
+#### `mlsysbook-ext/margin-video` 
 - **Status**: 100% Custom Extension
-- **Protection**: `mlsysbook/` namespace (no external equivalent exists)
+- **Protection**: `mlsysbook-ext/` namespace (no external equivalent exists)
 - **Purpose**: YouTube video embedding as margin notes with auto-numbering
 - **Features**:
   - HTML: Responsive iframe in margin with CSS auto-numbering
@@ -48,14 +48,14 @@ Our custom extensions are **protected by organizing them under the `mlsysbook/` 
 ## 🔒 **How Protection Works**
 
 **Namespace Strategy**: 
-All our custom extensions live in `mlsysbook/` directory.
+All our custom extensions live in `mlsysbook-ext/` directory.
 
 When someone runs `quarto add ute/custom-numbered-blocks`, it will:
-- ✅ **NOT** affect our `mlsysbook/custom-numbered-blocks` directory
+- ✅ **NOT** affect our `mlsysbook-ext/custom-numbered-blocks` directory
 - ✅ Create a new `ute/custom-numbered-blocks` directory 
 - ✅ Leave our customizations completely intact
 
-**No conflicts possible** - the `mlsysbook/` namespace is exclusive to this project!
+**No conflicts possible** - the `mlsysbook-ext/` namespace is exclusive to this project!
 
 ## 🚀 **Safe Update Procedures**
 
@@ -69,17 +69,17 @@ quarto add quarto-ext/lightbox --update
 ### For Custom Extensions:
 ```bash
 # All these are SAFE - they create separate directories:
-quarto add ute/custom-numbered-blocks     # Creates ute/ (separate from mlsysbook/)
-quarto add nmfs-opensci/titlepage         # Creates nmfs-opensci/ (separate from mlsysbook/)
+quarto add ute/custom-numbered-blocks     # Creates ute/ (separate from mlsysbook-ext/)
+quarto add nmfs-opensci/titlepage         # Creates nmfs-opensci/ (separate from mlsysbook-ext/)
 
-# Our customizations remain in mlsysbook/ untouched
+# Our customizations remain in mlsysbook-ext/ untouched
 ```
 
 ## 📝 **Adding New Extensions**
 
 When adding new extensions:
 1. **Standard extensions**: Install normally (`quarto add`)
-2. **Custom extensions**: Place in `mlsysbook/` directory
+2. **Custom extensions**: Place in `mlsysbook-ext/` directory
 3. Document here whether they're standard or custom
 4. Update this inventory
 5. Commit changes to git
@@ -87,7 +87,7 @@ When adding new extensions:
 ## 🆘 **Recovery Procedures**
 
 If an extension is accidentally overwritten:
-1. `git checkout HEAD -- book/_extensions/mlsysbook/EXTENSION_NAME/`
+1. `git checkout HEAD -- book/_extensions/mlsysbook-ext/EXTENSION_NAME/`
 2. Review git history for any recent custom changes
 3. Test thoroughly before committing
 
