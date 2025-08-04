@@ -69,13 +69,13 @@ on:
         required: true
         default: ''
       ai_generated_notes:
-        description: 'Generate AI release notes?'
+        description: 'Generate AI-enhanced release notes? (yes = AI + git log, no = git log only)'
         required: true
         type: choice
         options:
-          - 'true'
-          - 'false'
-        default: 'true'
+          - 'yes'
+          - 'no'
+        default: 'no'
 
 permissions:
   contents: write
@@ -426,7 +426,7 @@ jobs:
           echo "✅ All prerequisites validated"
 
       - name: 🤖 Test AI System (Ollama)
-        if: github.event.inputs.ai_generated_notes == 'true'
+        if: github.event.inputs.ai_generated_notes == 'yes'
         run: |
           echo "🤖 Testing AI system for release notes generation..."
           
@@ -533,7 +533,7 @@ jobs:
           echo "- Dev branch content and commit validity" >> $GITHUB_STEP_SUMMARY
           echo "- Quarto project structure and configuration" >> $GITHUB_STEP_SUMMARY
           echo "- Build prerequisites (disk space, API access)" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ github.event.inputs.ai_generated_notes }}" = "true" ]; then
+          if [ "${{ github.event.inputs.ai_generated_notes }}" = "yes" ]; then
             echo "- AI system (Ollama) installation and testing" >> $GITHUB_STEP_SUMMARY
           fi
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -925,20 +925,54 @@ jobs:
       - name: 📝 Generate Release Notes
         run: |
           echo "📝 Generating release notes..."
+          echo "🤖 AI Enhancement Mode: ${{ github.event.inputs.ai_generated_notes }}"
+          if [ "${{ github.event.inputs.ai_generated_notes }}" = "yes" ]; then
+            echo "   ✅ Will use AI to enhance git log (if AI system is available)"
+          else
+            echo "   📋 Will use git log only (clean, reliable format)"
+          fi
+          echo ""
           
-          # Check if AI generation is enabled
-          # Generate changelog first (this will be used for release notes)
-          echo "📝 Generating changelog entries..."
-          python tools/scripts/maintenance/change_log.py \
-            --incremental \
-            --verbose
+          # Generate git log between versions
+          PREVIOUS_VERSION="${{ needs.validate-inputs.outputs.previous_version }}"
+          CURRENT_VERSION="${{ needs.validate-inputs.outputs.new_version }}"
           
-          # Keep changelog for debugging
-          echo "📋 Changelog generated - keeping for debugging"
-          ls -la CHANGELOG.md
+          echo "📊 Generating git log from $PREVIOUS_VERSION to current commit..."
           
-          if [ "${{ github.event.inputs.ai_generated_notes }}" = "true" ]; then
-            echo "🤖 AI generation enabled - using pre-tested Ollama system..."
+          # Create detailed git log
+          echo "# Release Notes for $CURRENT_VERSION" > git_changes.md
+          echo "" >> git_changes.md
+          echo "## Changes since $PREVIOUS_VERSION" >> git_changes.md
+          echo "" >> git_changes.md
+          
+          # Get commit log with details
+          if git rev-parse "$PREVIOUS_VERSION" >/dev/null 2>&1; then
+            echo "✅ Previous version tag $PREVIOUS_VERSION found"
+            
+            # Summary format for AI processing
+            git log --oneline ${PREVIOUS_VERSION}..HEAD > git_log_summary.txt
+            
+            # Detailed format for inclusion in release
+            echo "### Commit Summary:" >> git_changes.md
+            git log --oneline ${PREVIOUS_VERSION}..HEAD >> git_changes.md
+            echo "" >> git_changes.md
+            
+            echo "### Detailed Changes:" >> git_changes.md
+            git log --pretty=format:"- **%s** (%h) by %an%n  %b" ${PREVIOUS_VERSION}..HEAD >> git_changes.md
+            
+            echo "📊 Found $(git rev-list --count ${PREVIOUS_VERSION}..HEAD) commits since $PREVIOUS_VERSION"
+          else
+            echo "⚠️ Previous version tag $PREVIOUS_VERSION not found, using all commits"
+            git log --oneline -20 > git_log_summary.txt
+            echo "### Recent Commits:" >> git_changes.md
+            git log --oneline -20 >> git_changes.md
+          fi
+          
+          echo "✅ Git log generated and saved to files"
+          
+          if [ "${{ github.event.inputs.ai_generated_notes }}" = "yes" ]; then
+            echo ""
+            echo "🤖 AI Enhancement Mode Selected - using pre-tested Ollama system..."
             
             # Check if Ollama is already running from pre-flight
             if ollama list >/dev/null 2>&1; then
@@ -957,51 +991,74 @@ jobs:
               AI_GENERATION_FAILED=true
             fi
             
-            # Generate release notes using AI if available
+            # Generate AI-enhanced release notes using git log
             if [ "$AI_GENERATION_FAILED" != "true" ]; then
-              echo "📝 Generating release notes with AI..."
-              python tools/scripts/maintenance/release_notes.py \
-                --version ${{ needs.validate-inputs.outputs.new_version }} \
-                --previous-version ${{ needs.validate-inputs.outputs.previous_version }} \
-                --description "${{ github.event.inputs.description }}" \
-                --verbose
+              echo "📝 Generating AI-enhanced release notes from git log..."
               
-              # Check if AI release notes were generated
-              if [ -f "release_notes_v${{ needs.validate-inputs.outputs.new_version }}.md" ]; then
+              # Create AI prompt with git log content
+              cat > ai_prompt.txt << EOF
+Please create professional release notes for version ${{ needs.validate-inputs.outputs.new_version }} based on the following git commits.
+
+Release Description: ${{ github.event.inputs.description }}
+Release Type: ${{ github.event.inputs.release_type }}
+
+Git Commits:
+$(cat git_log_summary.txt)
+
+Please format as:
+- Brief overview of this release
+- Key changes organized by category (Features, Bug Fixes, Improvements, etc.)
+- Keep it professional but accessible
+- Include any breaking changes if evident
+EOF
+              
+              # Generate AI release notes
+              if ollama run $MODEL < ai_prompt.txt > ai_release_notes.md 2>/dev/null; then
                 echo "✅ AI release notes generated successfully"
-                echo "📄 Release notes file details:"
-                ls -la "release_notes_v${{ needs.validate-inputs.outputs.new_version }}.md"
-                echo "📝 Release notes content:"
-                cat "release_notes_v${{ needs.validate-inputs.outputs.new_version }}.md"
+                
+                # Combine AI notes with detailed git log
+                cat > "release_notes_${{ needs.validate-inputs.outputs.new_version }}.md" << EOF
+# Release ${{ needs.validate-inputs.outputs.new_version }}: ${{ github.event.inputs.description }}
+
+$(cat ai_release_notes.md)
+
+---
+
+## Full Change Log
+
+$(cat git_changes.md)
+EOF
               else
-                echo "⚠️ AI release notes generation failed, using manual template"
-                AI_GENERATION_FAILED=true
+                echo "⚠️ AI generation failed, using git log only"
+                cp git_changes.md "release_notes_${{ needs.validate-inputs.outputs.new_version }}.md"
               fi
+              
             fi
           else
-            echo "📝 AI generation disabled - using manual template"
-            AI_GENERATION_FAILED=true
+            echo ""
+            echo "📋 Git Log Only Mode - creating clean release notes from git history"
+            
+            # Create release notes from git log only
+            cat > "release_notes_${{ needs.validate-inputs.outputs.new_version }}.md" << EOF
+# Release ${{ needs.validate-inputs.outputs.new_version }}: ${{ github.event.inputs.description }}
+
+## Overview
+This ${{ github.event.inputs.release_type }} release includes the following changes:
+
+$(cat git_changes.md)
+EOF
           fi
           
-          # Create manual release notes if AI failed or disabled
-          if [ "$AI_GENERATION_FAILED" = "true" ]; then
-            echo "📝 Creating manual release notes template..."
-            python tools/scripts/maintenance/release_notes.py \
-              --version ${{ needs.validate-inputs.outputs.new_version }} \
-              --previous-version ${{ needs.validate-inputs.outputs.previous_version }} \
-              --description "${{ github.event.inputs.description }}" \
-              --verbose
-            
-            # Show manual release notes details
-            if [ -f "release_notes_v${{ needs.validate-inputs.outputs.new_version }}.md" ]; then
-              echo "✅ Manual release notes generated successfully"
-              echo "📄 Release notes file details:"
-              ls -la "release_notes_v${{ needs.validate-inputs.outputs.new_version }}.md"
-              echo "📝 Release notes content:"
-              cat "release_notes_v${{ needs.validate-inputs.outputs.new_version }}.md"
-            else
-              echo "❌ Failed to generate manual release notes"
-            fi
+          # Show final release notes
+          if [ -f "release_notes_${{ needs.validate-inputs.outputs.new_version }}.md" ]; then
+            echo "✅ Release notes generated successfully"
+            echo "📄 Release notes file details:"
+            ls -la "release_notes_${{ needs.validate-inputs.outputs.new_version }}.md"
+            echo "📝 Release notes content (first 50 lines):"
+            head -50 "release_notes_${{ needs.validate-inputs.outputs.new_version }}.md"
+          else
+            echo "❌ Failed to generate release notes"
+            exit 1
           fi
 
       - name: 📤 Upload Release Notes Artifact
@@ -1011,11 +1068,14 @@ jobs:
           path: release_notes_v${{ needs.validate-inputs.outputs.new_version }}.md
           retention-days: 1
 
-      - name: 📤 Upload Changelog Artifact
+      - name: 📤 Upload Git Log Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: changelog
-          path: CHANGELOG.md
+          name: git-changes
+          path: |
+            git_changes.md
+            git_log_summary.txt
+            ai_release_notes.md
           retention-days: 7
 
   create-release:
