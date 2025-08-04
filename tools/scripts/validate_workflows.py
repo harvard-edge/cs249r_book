@@ -92,19 +92,12 @@ def validate_all_yaml_files():
             yaml_files.extend(Path(search_dir).glob('**/*.yml'))
             yaml_files.extend(Path(search_dir).glob('**/*.yaml'))
     
-    # Filter out excluded files and remove duplicates
+    # Filter out excluded files
     filtered_files = []
-    seen_files = set()
     for yaml_file in yaml_files:
         file_path = str(yaml_file)
-        # Skip if already seen
-        if file_path in seen_files:
-            continue
-        # Skip if matches exclude patterns
-        if any(pattern.replace('**', '').replace('*', '') in file_path for pattern in exclude_patterns):
-            continue
-        filtered_files.append(yaml_file)
-        seen_files.add(file_path)
+        if not any(pattern.replace('**', '').replace('*', '') in file_path for pattern in exclude_patterns):
+            filtered_files.append(yaml_file)
     
     if not filtered_files:
         print("⚠️ No YAML files found")
