@@ -138,7 +138,7 @@ return {
 \marginnote{\centering\\\vspace*{5mm}%
   \begin{tcolorbox}[
     enhanced,
-    colback=callout-resource-videos-color1,
+    colback=white,
     colframe=callout-resource-videos-color2,
     boxrule=0.5pt,
     arc=1.5pt,
@@ -164,7 +164,7 @@ return {
     },
     title=\centering\footnotesize\color{callout-resource-videos-color2}\textbf{\raisebox{-0.3mm}{\includegraphics[width=2mm]{assets/images/icons/callouts/icon_callout-resource-videos.pdf}}\hspace{1mm}Video Resource}
   ]
-    \vspace{2mm}
+    \vspace{1.5mm}
     \centering\footnotesize%
     \textbf{]] .. title .. [[}\\
     ]] .. (author ~= "" and "\\textcolor{black!60}{" .. author .. "}\\\\[2mm]" or "[2mm]") .. [[
