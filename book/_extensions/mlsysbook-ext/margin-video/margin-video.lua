@@ -157,16 +157,12 @@ return {
       rounded corners=north,
       sharp corners=south,
       boxrule=0.5pt,
-      top=1mm,
-      bottom=1mm,
-      left=2mm,
-      overlay={
-        \node [outer sep=0em, white,draw=none,anchor=west,
-          rectangle,fill=none,inner sep=0pt]
-          at ([xshift=1mm]frame.west) {\includegraphics[width=2.5mm]{assets/images/icons/callouts/icon_callout-resource-videos.pdf}};
-      },
+      top=0.5mm,
+      bottom=0.5mm,
+      left=1mm,
+      right=1mm,
     },
-    title=\raggedright\scriptsize\color{white}\textbf{\hspace{2.5mm}Video Resource}
+    title=\centering\scriptsize\color{white}\textbf{\raisebox{-0.3mm}{\includegraphics[width=2mm]{assets/images/icons/callouts/icon_callout-resource-videos.pdf}}\hspace{1mm}Video Resource}
   ]
     \centering\footnotesize%
     \textbf{]] .. title .. [[}\\
