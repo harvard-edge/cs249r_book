@@ -99,14 +99,20 @@ document.addEventListener('DOMContentLoaded', function() {
     const quizCallouts = document.querySelectorAll('.callout-quiz-question, .callout-quiz-answer');
     
     quizCallouts.forEach(callout => {
-      const caption = callout.querySelector('.callout-caption');
-      if (caption) {
-        const originalText = caption.textContent;
+      // Try multiple selectors to find the text element
+      const textElement = callout.querySelector('summary strong') || 
+                         callout.querySelector('summary') || 
+                         callout.querySelector('.callout-caption') ||
+                         callout.querySelector('.callout-title');
+      
+      if (textElement) {
+        const originalText = textElement.textContent;
         // Match pattern like "Self-Check: Question 1.3" and extract just the number after the dot
         const match = originalText.match(/^(.*?)\s+(\d+)\.(\d+)(.*)$/);
         if (match) {
           const [, prefix, chapterNum, questionNum, suffix] = match;
-          caption.textContent = `${prefix} ${questionNum}${suffix}`;
+          textElement.textContent = `${prefix} ${questionNum}${suffix}`;
+          console.log(`Fixed quiz numbering: "${originalText}" → "${textElement.textContent}"`);
         }
       }
     });
