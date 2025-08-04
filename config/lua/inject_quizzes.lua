@@ -123,20 +123,8 @@ local function process_quiz_questions(questions, section_id)
       table.insert(al, '<a href="#' .. qid .. '" class="answer-label">← Back to Questions</a>')
     end
 
-  -- Use different class names for HTML vs PDF to control numbering
-  local question_class, answer_class
-  if FORMAT == "latex" then
-    -- PDF: Keep chapter numbering (e.g., "Self-Check: Question 1.3")
-    question_class = "callout-quiz-question"
-    answer_class = "callout-quiz-answer"
-  else
-    -- HTML: Use classes without chapter numbering (e.g., "Self-Check: Question 3")
-    question_class = "callout-quiz-question-html"
-    answer_class = "callout-quiz-answer-html"
-  end
-
-  return create_quiz_div(qid, question_class, table.concat(ql, "\n\n")),
-         create_quiz_div(aid, answer_class,   table.concat(al, "\n\n"))
+  return create_quiz_div(qid, "callout-quiz-question", table.concat(ql, "\n\n")),
+         create_quiz_div(aid, "callout-quiz-answer",   table.concat(al, "\n\n"))
 end
 
 -- 5) Meta phase: read one or more paths from meta.quiz
