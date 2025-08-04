@@ -173,8 +173,6 @@ return {
     \textcolor{black!60}{\tiny Scan with your phone\\to watch the video}
   \end{tcolorbox}
 }
-
-\faTv{} \href{]] .. url .. [[}{Watch on YouTube}
 ]]
       log_success("PDF output generated successfully")
       return pandoc.RawBlock("latex", pdf_output)
