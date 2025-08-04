@@ -92,4 +92,38 @@ document.addEventListener('DOMContentLoaded', function() {
   
   // Also check after a brief delay in case page is still loading
   setTimeout(setNavbarActiveState, 500);
+  
+  // Fix quiz numbering: Remove chapter numbers from quiz callouts (HTML only)
+  // Transform "Self-Check: Question 1.3" to "Self-Check: Question 3"
+  function fixQuizNumbering() {
+    const quizCallouts = document.querySelectorAll('.callout-quiz-question, .callout-quiz-answer');
+    
+    quizCallouts.forEach(callout => {
+      const caption = callout.querySelector('.callout-caption');
+      if (caption) {
+        const originalText = caption.textContent;
+        // Match pattern like "Self-Check: Question 1.3" and extract just the number after the dot
+        const match = originalText.match(/^(.*?)\s+(\d+)\.(\d+)(.*)$/);
+        if (match) {
+          const [, prefix, chapterNum, questionNum, suffix] = match;
+          caption.textContent = `${prefix} ${questionNum}${suffix}`;
+        }
+      }
+    });
+  }
+  
+  // Run quiz numbering fix with multiple delays to ensure DOM is ready
+  [100, 500, 1000, 2000].forEach(delay => {
+    setTimeout(fixQuizNumbering, delay);
+  });
+  
+  // Also run on any dynamic content loads
+  const observer = new MutationObserver(() => {
+    setTimeout(fixQuizNumbering, 100);
+  });
+  
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
 });
