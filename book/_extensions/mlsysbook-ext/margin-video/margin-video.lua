@@ -139,7 +139,7 @@ return {
   \begin{tcolorbox}[
     enhanced,
     colback=white,
-    colframe=callout-resource-videos-color2,
+    colframe=callout-chapter-connection-color2,
     boxrule=0.5pt,
     arc=1.5pt,
     width=32mm,
@@ -151,16 +151,21 @@ return {
     after skip=0pt,
     attach boxed title to top*={xshift=0pt},
     boxed title style={
-      colback=callout-resource-videos-color1,
-      colframe=callout-resource-videos-color2,
+      colback=callout-chapter-connection-color2,
+      colframe=callout-chapter-connection-color2,
       arc=1.5pt,
       rounded corners=north,
       sharp corners=south,
       boxrule=0.5pt,
       top=2mm,
-      bottom=2mm
+      bottom=2mm,
+      overlay={
+        \node [left,outer sep=0em, white,draw=none,anchor=west,
+          rectangle,fill=none,inner sep=0pt]
+          at ([xshift=2mm]frame.west) {\includegraphics[width=3mm]{assets/images/icons/callouts/icon_callout-resource-videos.pdf}};
+      },
     },
-    title=\centering\footnotesize\textbf{📹 Watch on YouTube}
+    title=\centering\footnotesize\color{white}\textbf{Video Resource}
   ]
     \centering\footnotesize%
     \textbf{]] .. title .. [[}\\
