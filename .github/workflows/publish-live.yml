@@ -11,6 +11,9 @@ env:
   OLLAMA_TIMEOUT: "300"                    # Timeout for Ollama operations (seconds)
   OLLAMA_RETRIES: "3"                      # Number of retries for Ollama calls
   BUILD_TIMEOUT: "3600"                    # Timeout for build operations (1 hour)
+  COMMIT_STATUS_TIMEOUT: "180"             # Number of attempts to check commit status (180 × 60s = 3 hours)
+  COMMIT_STATUS_INTERVAL: "60"             # Seconds between status checks (1 minute)
+  JOB_TIMEOUT_MULTIPLIER: "1.25"          # Job timeout = (COMMIT_STATUS_TIMEOUT × COMMIT_STATUS_INTERVAL × MULTIPLIER) / 60 minutes
   
   # Quarto Configuration Files
   QUARTO_HTML_CONFIG: "_quarto-html.yml"  # HTML build configuration file
@@ -703,14 +706,14 @@ jobs:
   monitor-build:
     name: '⏳ Monitor Production Build'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: ${{ (env.COMMIT_STATUS_TIMEOUT * env.COMMIT_STATUS_INTERVAL * env.JOB_TIMEOUT_MULTIPLIER / 60) }}
     needs: create-tag
     if: github.event.inputs.confirm == 'PUBLISH'
     
     steps:
       - name: ⏳ Wait for Production Build (Commit Status Monitoring)
         run: |
-          echo "⏳ Waiting for production build to complete (max 1 hour)..."
+          echo "⏳ Waiting for production build to complete (max ${{ (env.COMMIT_STATUS_TIMEOUT * env.COMMIT_STATUS_INTERVAL * env.JOB_TIMEOUT_MULTIPLIER / 60) }} minutes)..."
           echo "🔍 Monitoring commit status checks in real-time..."
           
           # Get the latest commit SHA from main branch
@@ -723,11 +726,55 @@ jobs:
           echo "📌 Monitoring commit: $COMMIT_SHA"
           echo "🎯 Required status checks: ci/quarto-build-ubuntu-latest-html, ci/quarto-build-ubuntu-latest-pdf"
           
+          # Check if quarto-build workflow is running
+          echo "🔍 Checking for quarto-build workflow runs..."
+          WORKFLOW_RUNS=$(curl -s \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs?head_sha=$COMMIT_SHA&per_page=10")
+          
+          echo "📊 Workflow runs for this commit:"
+          echo "$WORKFLOW_RUNS" | jq -r '.workflow_runs[] | "  - \(.name): \(.status) (\(.conclusion)) - \(.created_at)"' | head -5
+          
+          # Find quarto-build workflow runs
+          QUARTO_BUILD_RUNS=$(echo "$WORKFLOW_RUNS" | jq -r '.workflow_runs[] | select(.name == "📚 Quarto Build") | .id' | head -2)
+          
+          if [ -n "$QUARTO_BUILD_RUNS" ]; then
+            echo "🔍 Found quarto-build workflow runs: $QUARTO_BUILD_RUNS"
+            
+            # Get the latest quarto-build run
+            LATEST_QUARTO_RUN=$(echo "$QUARTO_BUILD_RUNS" | head -1)
+            echo "📊 Latest quarto-build run ID: $LATEST_QUARTO_RUN"
+            
+            # Get workflow run details
+            RUN_DETAILS=$(curl -s \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ github.repository }}/actions/runs/$LATEST_QUARTO_RUN")
+            
+            RUN_STATUS=$(echo "$RUN_DETAILS" | jq -r '.status')
+            RUN_CONCLUSION=$(echo "$RUN_DETAILS" | jq -r '.conclusion')
+            RUN_CREATED=$(echo "$RUN_DETAILS" | jq -r '.created_at')
+            
+            echo "📋 Quarto-build status: $RUN_STATUS ($RUN_CONCLUSION) - Started: $RUN_CREATED"
+            
+            # Get jobs from the workflow run
+            JOBS_RESPONSE=$(curl -s \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ github.repository }}/actions/runs/$LATEST_QUARTO_RUN/jobs")
+            
+            echo "📋 Quarto-build jobs:"
+            echo "$JOBS_RESPONSE" | jq -r '.jobs[] | "  - \(.name): \(.status) (\(.conclusion)) - \(.started_at)"' | head -5
+          else
+            echo "⚠️ No quarto-build workflow runs found for this commit"
+          fi
+          
           sleep 30  # Give the build a moment to start
           
           # Wait for all required status checks to complete
-          for i in {1..120}; do  # 120 attempts × 30 seconds = 1 hour
-            echo "🔍 Checking commit status (attempt $i/120)..."
+          for i in $(seq 1 ${{ env.COMMIT_STATUS_TIMEOUT }}); do  # ${{ env.COMMIT_STATUS_TIMEOUT }} attempts × 30 seconds = 2 hours
+            echo "🔍 Checking commit status (attempt $i/${{ env.COMMIT_STATUS_TIMEOUT }})..."
             
             # Get commit status
             STATUS_RESPONSE=$(curl -s \
@@ -744,15 +791,20 @@ jobs:
             # Get individual status checks
             STATUSES=$(echo "$STATUS_RESPONSE" | jq -r '.statuses')
             
+            # Show ALL available status checks for debugging
+            echo "🔍 All available status checks:"
+            echo "$STATUSES" | jq -r '.[] | "  - \(.context): \(.state) - \(.description)"' | head -10
+            
             # Check for our specific quarto-build status checks
             HTML_STATUS=$(echo "$STATUSES" | jq -r '.[] | select(.context == "ci/quarto-build-ubuntu-latest-html") | .state' | head -1)
             PDF_STATUS=$(echo "$STATUSES" | jq -r '.[] | select(.context == "ci/quarto-build-ubuntu-latest-pdf") | .state' | head -1)
             
-            echo "📋 Build status checks:"
+            echo "📋 Expected build status checks:"
             echo "  - HTML Build (Linux): ${HTML_STATUS:-pending}"
             echo "  - PDF Build (Linux): ${PDF_STATUS:-pending}"
             
-            # Show detailed status for each check
+            # Show detailed status for quarto-build checks specifically
+            echo "📋 Quarto build status checks:"
             echo "$STATUSES" | jq -r '.[] | select(.context | startswith("ci/quarto-build")) | "  - \(.context): \(.state) - \(.description)"' | head -4
             
             # Check if all required builds are successful
@@ -774,7 +826,7 @@ jobs:
             fi
             
             # Show current status with time elapsed
-            ELAPSED_MINUTES=$((i * 30 / 60))
+            ELAPSED_MINUTES=$((i * ${{ env.COMMIT_STATUS_INTERVAL }} / 60))
             ELAPSED_HOURS=$((ELAPSED_MINUTES / 60))
             REMAINING_MINUTES=$((ELAPSED_MINUTES % 60))
             
@@ -784,7 +836,7 @@ jobs:
               TIME_DISPLAY="${ELAPSED_MINUTES}m"
             fi
             
-            echo "⏳ Build still in progress... (attempt $i/120, ~${TIME_DISPLAY} elapsed)"
+            echo "⏳ Build still in progress... (attempt $i/${{ env.COMMIT_STATUS_TIMEOUT }}, ~${TIME_DISPLAY} elapsed)"
             
             # Show build progress indicators with heartbeat-style updates
             if [ $i -eq 1 ]; then
@@ -804,6 +856,38 @@ jobs:
               echo "📈 HTML: ${HTML_STATUS:-pending} | PDF: ${PDF_STATUS:-pending}"
               echo "🔗 Monitor: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
               
+              # Show quarto-build logs if available
+              if [ -n "$LATEST_QUARTO_RUN" ]; then
+                echo "📋 Latest quarto-build logs:"
+                
+                # Get the latest job from the workflow run
+                LATEST_JOB=$(curl -s \
+                  -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                  -H "Accept: application/vnd.github.v3+json" \
+                  "https://api.github.com/repos/${{ github.repository }}/actions/runs/$LATEST_QUARTO_RUN/jobs" \
+                  | jq -r '.jobs[0].id')
+                
+                if [ "$LATEST_JOB" != "null" ] && [ -n "$LATEST_JOB" ]; then
+                  echo "🔍 Fetching logs from job: $LATEST_JOB"
+                  
+                  # Get the latest step from the job
+                  LATEST_STEP=$(curl -s \
+                    -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                    -H "Accept: application/vnd.github.v3+json" \
+                    "https://api.github.com/repos/${{ github.repository }}/actions/runs/$LATEST_QUARTO_RUN/jobs/$LATEST_JOB/logs" \
+                    | grep -o 'step_[0-9]*' | tail -1)
+                  
+                  if [ -n "$LATEST_STEP" ]; then
+                    echo "📝 Latest step logs ($LATEST_STEP):"
+                    curl -s \
+                      -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                      -H "Accept: application/vnd.github.v3+json" \
+                      "https://api.github.com/repos/${{ github.repository }}/actions/runs/$LATEST_QUARTO_RUN/jobs/$LATEST_JOB/logs" \
+                      | grep -A 10 "$LATEST_STEP" | tail -5
+                  fi
+                fi
+              fi
+              
               # Update GitHub status with progress
               curl -s -X POST \
                 -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
@@ -817,7 +901,7 @@ jobs:
               echo "---"
             fi
             
-            sleep 30
+            sleep ${{ env.COMMIT_STATUS_INTERVAL }}
           done
           
           # If we get here, check final status
@@ -1285,7 +1369,7 @@ jobs:
     name: '🧹 Cleanup Failed Release'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [validate-inputs, pre-flight-checks, merge-to-main, create-tag, monitor-build, download-pdf, generate-release-notes, create-release]
+    needs: [validate-inputs]
     if: always() && github.event.inputs.confirm == 'PUBLISH' && (failure() || cancelled())
     
     steps:
@@ -1298,6 +1382,104 @@ jobs:
       - name: 🧹 Clean up failed release artifacts
         run: |
           echo "🧹 Cleaning up artifacts from failed release..."
+          
+          # Get the version that was being released
+          if [ -n "${{ needs.validate-inputs.outputs.new_version }}" ]; then
+            VERSION_TAG="${{ needs.validate-inputs.outputs.new_version }}"
+            echo "🎯 Cleaning up version: $VERSION_TAG"
+          else
+            echo "⚠️ No version information available, skipping cleanup"
+            exit 0
+          fi
+          
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Check and remove local tag
+          if git tag -l "$VERSION_TAG" | grep -q "$VERSION_TAG"; then
+            echo "🗑️ Removing local tag: $VERSION_TAG"
+            git tag -d "$VERSION_TAG"
+          else
+            echo "ℹ️ Local tag $VERSION_TAG does not exist"
+          fi
+          
+          # Check and remove remote tag if it exists
+          if git ls-remote --tags origin | grep -q "refs/tags/$VERSION_TAG$"; then
+            echo "🗑️ Removing remote tag: $VERSION_TAG"
+            git push origin --delete "$VERSION_TAG" || echo "⚠️ Failed to delete remote tag (may not exist)"
+          else
+            echo "ℹ️ Remote tag $VERSION_TAG does not exist"
+          fi
+          
+          # Check for any draft releases and delete them
+          echo "🔍 Checking for draft releases..."
+          DRAFT_RELEASE=$(curl -s \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/releases" \
+            | jq -r ".[] | select(.tag_name == \"$VERSION_TAG\" and .draft == true) | .id")
+          
+          if [ "$DRAFT_RELEASE" != "null" ] && [ -n "$DRAFT_RELEASE" ]; then
+            echo "🗑️ Deleting draft release: $DRAFT_RELEASE"
+            curl -s \
+              -X DELETE \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/$DRAFT_RELEASE"
+            echo "✅ Draft release deleted"
+          else
+            echo "ℹ️ No draft release found for $VERSION_TAG"
+          fi
+          
+          echo "✅ Cleanup completed! Repository is ready for retry."
+
+      - name: 📊 Cleanup Summary
+        run: |
+          echo "## 🧹 Failed Release Cleanup Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ needs.validate-inputs.outputs.new_version || 'Unknown' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Cleanup Time:** $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔍 Original Inputs (for debugging):" >> $GITHUB_STEP_SUMMARY
+          echo "- **Description:** ${{ github.event.inputs.description }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release Type:** ${{ github.event.inputs.release_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dev Commit:** ${{ github.event.inputs.dev_commit }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Confirmation:** ${{ github.event.inputs.confirm }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **AI Generated Notes:** ${{ github.event.inputs.ai_generated_notes }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Run ID:** ${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Run Attempt:** ${{ github.run_attempt }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🗑️ Cleaned Up:" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Local git tags removed" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Remote git tags removed (if they existed)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Draft GitHub releases removed (if they existed)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔄 Ready for Retry:" >> $GITHUB_STEP_SUMMARY
+          echo "You can now safely re-run the publish workflow with the same version number." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🐛 Troubleshooting:" >> $GITHUB_STEP_SUMMARY
+          echo "If you continue to have issues, check the workflow logs for the failed step." >> $GITHUB_STEP_SUMMARY
+
+  cleanup-on-timeout:
+    name: '⏰ Cleanup Timed Out Release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [validate-inputs, monitor-build]
+    if: always() && github.event.inputs.confirm == 'PUBLISH' && (needs.monitor-build.result == 'failure' || needs.monitor-build.result == 'timeout')
+    
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🧹 Clean up timed out release artifacts
+        run: |
+          echo "⏰ Cleaning up artifacts from timed out release..."
           
           # Get the version that was being released
           if [ -n "${{ needs.validate-inputs.outputs.new_version }}" ]; then
