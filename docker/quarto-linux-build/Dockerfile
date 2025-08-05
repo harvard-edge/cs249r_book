@@ -221,9 +221,33 @@ COPY tools/dependencies/requirements.txt /tmp/
 COPY tools/dependencies/install_packages.R /tmp/
 COPY docker/quarto-linux-build/verify_r_packages.R /tmp/
 
-# Install Python packages
-RUN pip3 install --upgrade pip && \
-    pip3 install -r /tmp/requirements.txt
+# === PHASE 12: PYTHON PACKAGES ===
+RUN echo "🚀 === STARTING PYTHON PACKAGE INSTALLATION ===" && \
+    echo "⏰ Estimated time: 1-2 minutes" && \
+    start_time=$(date +%s) && \
+    \
+    echo "🔄 Upgrading pip..." && \
+    pip3 install --upgrade pip && \
+    \
+    echo "📊 Analyzing requirements.txt..." && \
+    package_count=$(grep -v '^#' /tmp/requirements.txt | grep -v '^$' | wc -l) && \
+    echo "📦 Found $package_count Python packages to install" && \
+    \
+    echo "🔄 Installing Python packages with space optimization..." && \
+    pip3 install --no-cache-dir -r /tmp/requirements.txt && \
+    \
+    echo "🧹 Cleaning Python installation caches..." && \
+    pip3 cache purge && \
+    find /usr -name "*.pyc" -delete && \
+    find /usr -name "__pycache__" -type d -exec rm -rf {} + || true && \
+    \
+    echo "📊 Installed Python packages:" && \
+    pip3 list | head -10 && \
+    echo "📊 Total packages: $(pip3 list | wc -l)" && \
+    \
+    end_time=$(date +%s) && \
+    duration=$((end_time - start_time)) && \
+    echo "✅ === PYTHON PACKAGES COMPLETE === (${duration}s)"
 
 # Install R packages (using same process as successful workflow)
 RUN R --slave -e " \
@@ -263,8 +287,43 @@ RUN R --slave -e " \
 RUN echo "🔍 Verifying R package installation..." && \
     Rscript /tmp/verify_r_packages.R
 
-# Clean up
-RUN rm -rf /tmp/requirements.txt /tmp/install_packages.R /tmp/verify_r_packages.R /tmp/tl_packages
+# === PHASE 15: AGGRESSIVE CLEANUP ===
+RUN echo "🚀 === STARTING COMPREHENSIVE CLEANUP ===" && \
+    echo "📊 Disk space before cleanup: $(df -h / | tail -1 | awk '{print $4}')" && \
+    start_time=$(date +%s) && \
+    \
+    echo "🧹 Removing temporary files..." && \
+    rm -rf /tmp/* && \
+    rm -rf /var/tmp/* && \
+    \
+    echo "🧹 Cleaning package caches..." && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* && \
+    rm -rf /var/cache/apt/* && \
+    \
+    echo "🧹 Cleaning Python caches..." && \
+    find /usr -name "*.pyc" -delete && \
+    find /usr -name "__pycache__" -type d -exec rm -rf {} + || true && \
+    pip3 cache purge || true && \
+    \
+    echo "🧹 Cleaning R temporary files..." && \
+    rm -rf /tmp/Rtmp* || true && \
+    rm -rf /var/lib/R/site-library/*/help || true && \
+    \
+    echo "🧹 Cleaning TeX Live caches and docs..." && \
+    rm -rf /usr/local/texlive/*/texmf-var/luatex-cache/* || true && \
+    rm -rf /usr/local/texlive/*/texmf-var/web2c/* || true && \
+    \
+    echo "🧹 Removing unnecessary system files..." && \
+    rm -rf /usr/share/doc/* && \
+    rm -rf /usr/share/man/* && \
+    rm -rf /usr/share/info/* && \
+    rm -rf /var/log/* && \
+    \
+    end_time=$(date +%s) && \
+    duration=$((end_time - start_time)) && \
+    echo "✅ === COMPREHENSIVE CLEANUP COMPLETE === (${duration}s)" && \
+    echo "📊 Final disk space: $(df -h / | tail -1 | awk '{print $4}')"
 
 # Set working directory
 WORKDIR /workspace
