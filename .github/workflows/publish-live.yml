@@ -649,74 +649,13 @@ jobs:
           git push origin main
           
           echo "✅ Main branch updated successfully!"
-          echo "📋 Next step: Tag creation and production deployment"
-
-  create-tag:
-    name: '🏷️ Create Release Tag'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: [validate-inputs, merge-to-main]
-    if: github.event.inputs.confirm == 'PUBLISH'
-    
-    steps:
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: 🔄 Sync with latest main
-        run: |
-          echo "🔄 Configuring git..."
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          echo "🔄 Switching to main and pulling latest changes..."
-          git checkout main
-          git pull origin main
-          
-          echo "✅ Synced with latest main branch"
-
-      - name: 🏷️ Create Release Tag
-        run: |
-          echo "🏷️ Creating release tag ${{ needs.validate-inputs.outputs.new_version }}..."
-          
-          # Check if tag already exists locally
-          if git tag -l "${{ needs.validate-inputs.outputs.new_version }}" | grep -q "${{ needs.validate-inputs.outputs.new_version }}"; then
-            echo "⚠️ Tag ${{ needs.validate-inputs.outputs.new_version }} already exists locally"
-            echo "🔄 Removing existing tag to recreate it..."
-            git tag -d ${{ needs.validate-inputs.outputs.new_version }}
-          fi
-          
-          # Check if tag exists on remote
-          if git ls-remote --tags origin | grep -q "refs/tags/${{ needs.validate-inputs.outputs.new_version }}$"; then
-            echo "⚠️ Tag ${{ needs.validate-inputs.outputs.new_version }} already exists on remote"
-            echo "🔄 Removing remote tag to recreate it..."
-            git push origin --delete ${{ needs.validate-inputs.outputs.new_version }}
-          fi
-          
-          # Create the tag on the latest main commit
-          git tag -a ${{ needs.validate-inputs.outputs.new_version }} -m "Release ${{ needs.validate-inputs.outputs.new_version }}: ${{ github.event.inputs.description }}"
-          echo "✅ Tag created successfully!"
-
-      - name: 🚀 Push tag and trigger production deployment
-        run: |
-          echo "🚀 Pushing release tag to trigger production deployment..."
-          git push origin ${{ needs.validate-inputs.outputs.new_version }}
-          
-          echo "📊 Release tag pushed! This will trigger:"
-          echo "  ✅ Production build workflow (HTML + PDF generation)"
-          echo "  ✅ GitHub Pages deployment with textbook content"
-          echo "  ✅ Live academic website update"
-          echo ""
-          echo "🌐 Your textbook will be live at: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
-          echo "📚 Students can access the updated content immediately"
+          echo "📋 Next step: Monitor production build, then create release tag"
 
   monitor-build:
     name: '⏳ Monitor Production Build'
     runs-on: ubuntu-latest
     timeout-minutes: 180
-    needs: create-tag
+    needs: merge-to-main
     if: github.event.inputs.confirm == 'PUBLISH'
     
     steps:
@@ -825,9 +764,21 @@ jobs:
               break
             fi
             
-            # Check for any failures
+            # Check for any failures, cancellations, or errors
             if [ "$HTML_STATUS" = "failure" ] || [ "$PDF_STATUS" = "failure" ]; then
               echo "❌ Production build failed!"
+              echo "📊 HTML Build: ${HTML_STATUS:-pending}"
+              echo "📊 PDF Build: ${PDF_STATUS:-pending}"
+              echo "🔗 View commit status: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
+              exit 1
+            elif [ "$HTML_STATUS" = "cancelled" ] || [ "$PDF_STATUS" = "cancelled" ]; then
+              echo "🚫 Production build was cancelled!"
+              echo "📊 HTML Build: ${HTML_STATUS:-pending}"
+              echo "📊 PDF Build: ${PDF_STATUS:-pending}"
+              echo "🔗 View commit status: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
+              exit 1
+            elif [ "$HTML_STATUS" = "error" ] || [ "$PDF_STATUS" = "error" ]; then
+              echo "⚠️ Production build encountered an error!"
               echo "📊 HTML Build: ${HTML_STATUS:-pending}"
               echo "📊 PDF Build: ${PDF_STATUS:-pending}"
               echo "🔗 View commit status: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
@@ -913,19 +864,90 @@ jobs:
             sleep ${{ github.event.inputs.commit_status_interval }}
           done
           
-          # If we get here, check final status
+          # If we get here, check final status after timeout
           if [ "$HTML_STATUS" != "success" ] || [ "$PDF_STATUS" != "success" ]; then
-            echo "⚠️ Build may still be in progress or failed after 3 hours"
+            echo "⏰ Build monitoring timed out after 3 hours"
             echo "📊 Final status: HTML=$HTML_STATUS, PDF=$PDF_STATUS"
+            
+            # Provide specific guidance based on final state
+            if [ "$HTML_STATUS" = "cancelled" ] || [ "$PDF_STATUS" = "cancelled" ]; then
+              echo "🚫 Build was cancelled - no release will be created"
+            elif [ "$HTML_STATUS" = "failure" ] || [ "$PDF_STATUS" = "failure" ]; then
+              echo "❌ Build failed - check logs for errors"
+            elif [ "$HTML_STATUS" = "error" ] || [ "$PDF_STATUS" = "error" ]; then
+              echo "⚠️ Build encountered an error - check GitHub Actions logs"
+            else
+              echo "⏳ Build may still be running - check manually"
+            fi
+            
             echo "🔗 Check status: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
             exit 1
           fi
+
+  create-tag:
+    name: '🏷️ Create Release Tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [validate-inputs, monitor-build]
+    if: github.event.inputs.confirm == 'PUBLISH'
+    
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔄 Sync with latest main
+        run: |
+          echo "🔄 Configuring git..."
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          echo "🔄 Switching to main and pulling latest changes..."
+          git checkout main
+          git pull origin main
+          
+          echo "✅ Synced with latest main branch"
+
+      - name: 🏷️ Create Release Tag
+        run: |
+          echo "🏷️ Creating release tag ${{ needs.validate-inputs.outputs.new_version }}..."
+          echo "✅ Build completed successfully - safe to create release tag"
+          
+          # Check if tag already exists locally
+          if git tag -l "${{ needs.validate-inputs.outputs.new_version }}" | grep -q "${{ needs.validate-inputs.outputs.new_version }}"; then
+            echo "⚠️ Tag ${{ needs.validate-inputs.outputs.new_version }} already exists locally"
+            echo "🔄 Removing existing tag to recreate it..."
+            git tag -d ${{ needs.validate-inputs.outputs.new_version }}
+          fi
+          
+          # Check if tag exists on remote
+          if git ls-remote --tags origin | grep -q "refs/tags/${{ needs.validate-inputs.outputs.new_version }}$"; then
+            echo "⚠️ Tag ${{ needs.validate-inputs.outputs.new_version }} already exists on remote"
+            echo "🔄 Removing remote tag to recreate it..."
+            git push origin --delete ${{ needs.validate-inputs.outputs.new_version }}
+          fi
+          
+          # Create the tag on the latest main commit
+          git tag -a ${{ needs.validate-inputs.outputs.new_version }} -m "Release ${{ needs.validate-inputs.outputs.new_version }}: ${{ github.event.inputs.description }}"
+          echo "✅ Tag created successfully!"
+
+      - name: 🚀 Push tag for release tracking
+        run: |
+          echo "🚀 Pushing release tag for version tracking..."
+          git push origin ${{ needs.validate-inputs.outputs.new_version }}
+          
+          echo "✅ Release tag pushed successfully!"
+          echo "🏷️ Tag: ${{ needs.validate-inputs.outputs.new_version }}"
+          echo "📋 Description: ${{ github.event.inputs.description }}"
+          echo "📊 This tag marks a successful build and tested release"
 
   download-pdf:
     name: '📄 Download PDF'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: monitor-build
+    needs: create-tag
     if: github.event.inputs.confirm == 'PUBLISH'
     
     steps:
@@ -1350,9 +1372,9 @@ jobs:
           echo "1. ✅ Verified dev branch tests passed" >> $GITHUB_STEP_SUMMARY
           echo "2. ✅ Calculated new version number" >> $GITHUB_STEP_SUMMARY
           echo "3. ✅ Merged dev → main branch" >> $GITHUB_STEP_SUMMARY
-          echo "4. ✅ Created release tag ${{ needs.validate-inputs.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY
-          echo "5. ✅ Pushed to main (triggered production build)" >> $GITHUB_STEP_SUMMARY
-          echo "6. ✅ Waited for build completion (up to 3 hours)" >> $GITHUB_STEP_SUMMARY
+          echo "4. ✅ Pushed to main (triggered production build)" >> $GITHUB_STEP_SUMMARY
+          echo "5. ✅ Waited for build completion (up to 3 hours)" >> $GITHUB_STEP_SUMMARY
+          echo "6. ✅ Created release tag ${{ needs.validate-inputs.outputs.new_version }} (after successful build)" >> $GITHUB_STEP_SUMMARY
           echo "7. ✅ Created GitHub Release (DRAFT - edit manually)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🏗️ Build Process:" >> $GITHUB_STEP_SUMMARY
