@@ -56,18 +56,108 @@ RUN apt-get update && apt-get install -y \
     fc-cache -fv && \
     rm -rf /var/lib/apt/lists/*
 
+# Test Inkscape SVG to PDF conversion (same as your workflow)
+RUN echo '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><circle cx="50" cy="50" r="40" fill="red"/></svg>' > test.svg && \
+    inkscape --export-type=pdf --export-filename=test.pdf test.svg && \
+    if [ -f test.pdf ]; then \
+        echo "✅ Inkscape SVG to PDF conversion successful!"; \
+        ls -lh test.pdf; \
+    else \
+        echo "❌ Inkscape SVG to PDF conversion failed."; \
+        exit 1; \
+    fi && \
+    rm -f test.svg test.pdf
+
 # Install Ghostscript
 RUN apt-get update && apt-get install -y ghostscript && rm -rf /var/lib/apt/lists/*
 
-# Install TeX Live (full distribution for consistency)
+# Install TeX Live using your specific package list
 RUN apt-get update && apt-get install -y \
-    texlive-full \
+    texlive \
+    texlive-latex-base \
+    texlive-latex-recommended \
     texlive-latex-extra \
     texlive-fonts-recommended \
     texlive-fonts-extra \
+    texlive-fontutils \
     texlive-luatex \
-    texlive-pictures && \
-    rm -rf /var/lib/apt/lists/*
+    texlive-pictures \
+    texlive-pstricks \
+    texlive-science \
+    texlive-bibtex-extra \
+    texlive-extra-utils \
+    texlive-lang-english \
+    texlive-lang-other \
+    texlive-publishers \
+    texlive-generic-extra \
+    texlive-generic-recommended \
+    texlive-plain-extra \
+    texlive-plain-generic \
+    texlive-science \
+    texlive-math-extra \
+    texlive-math-science \
+    texlive-metapost \
+    texlive-music \
+    texlive-omega \
+    texlive-other-extra \
+    texlive-other-recommended \
+    texlive-pictures \
+    texlive-plain-extra \
+    texlive-plain-generic \
+    texlive-publishers \
+    texlive-science \
+    texlive-xetex \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install specific TeX Live packages from your tl_packages file
+COPY tools/dependencies/tl_packages /tmp/
+RUN tlmgr update --self && \
+    tlmgr install $(cat /tmp/tl_packages | grep -v '^#' | grep -v '^$' | tr '\n' ' ') && \
+    rm -f /tmp/tl_packages
+
+# Verify TeX Live installation (same as your workflow)
+RUN echo "🔄 Verifying TeX Live installation..." && \
+    echo "📊 Checking LaTeX engines:" && \
+    which lualatex && echo "✅ lualatex found" && \
+    which pdflatex && echo "✅ pdflatex found" && \
+    lualatex --version | head -2 && \
+    echo "📊 Checking core LaTeX and TikZ packages:" && \
+    kpsewhich pgf.sty && echo "✅ PGF package found" && \
+    kpsewhich pgfplots.sty && echo "✅ PGFPlots package found" && \
+    kpsewhich xcolor.sty && echo "✅ XColor package found" && \
+    kpsewhich amsmath.sty && echo "✅ AMSMath package found" && \
+    kpsewhich standalone.cls && echo "✅ Standalone class found" && \
+    echo "📊 Checking font packages:" && \
+    kpsewhich phvr7t.tfm && echo "✅ Helvetica font found" && \
+    kpsewhich t1phv.fd && echo "✅ Helvetica font descriptor found" && \
+    echo "🧪 Testing TikZ compilation..." && \
+    cat > test_tikz.tex << 'EOF' && \
+\documentclass{standalone} && \
+\usepackage{tikz} && \
+\usepackage{pgfplots} && \
+\usepackage{amsmath} && \
+\usepackage{amssymb} && \
+\usepackage{xcolor} && \
+\usepackage[T1]{fontenc} && \
+\usetikzlibrary{positioning} && \
+\usetikzlibrary{calc} && \
+\begin{document} && \
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}] && \
+\node[draw, fill=blue!20] at (0,0) {TikZ Test}; && \
+\node[draw, fill=red!20] at (2,0) {Success}; && \
+\draw[->] (0.8,0) -- (1.2,0); && \
+\end{tikzpicture} && \
+\end{document} && \
+EOF && \
+    if lualatex -interaction=nonstopmode test_tikz.tex; then && \
+        echo "✅ TikZ compilation successful" && \
+        ls -la test_tikz.pdf; && \
+    else && \
+        echo "❌ TikZ compilation failed" && \
+        cat test_tikz.log | tail -20; && \
+        exit 1; && \
+    fi && \
+    rm -f test_tikz.*
 
 # Install R
 RUN apt-get update && apt-get install -y \
@@ -101,6 +191,19 @@ RUN pip3 install --upgrade pip && \
 
 # Install R packages
 RUN Rscript /tmp/install_packages.R
+
+# Verify R package installation (same as your workflow)
+RUN echo "🔍 Verifying R package installation..." && \
+    required_r_packages="ggplot2 ggrepel knitr rmarkdown tidyverse reshape2 reticulate rsvg viridis xml2 dplyr grid" && \
+    for pkg in $required_r_packages; do && \
+        if Rscript -e "requireNamespace('$pkg', quietly = TRUE)" 2>/dev/null; then && \
+            echo "✅ $pkg package found"; && \
+        else && \
+            echo "❌ $pkg package missing"; && \
+            exit 1; && \
+        fi; && \
+    done && \
+    echo "✅ All required R packages installed successfully"
 
 # Clean up
 RUN rm -rf /tmp/requirements.txt /tmp/install_packages.R
