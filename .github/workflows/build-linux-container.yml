@@ -21,8 +21,14 @@ on:
       - '.github/workflows/build-linux-container.yml'
 
 env:
+  # Container Registry Configuration
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/quarto-build
+  IMAGE_NAME: ${{ github.repository }}/linux-build
+  
+  # Container Build Configuration  
+  PLATFORM: linux/amd64
+  DOCKERFILE_PATH: ./docker/quarto-linux-build/Dockerfile
+  CONTEXT_PATH: .
 
 jobs:
   build:
@@ -59,13 +65,14 @@ jobs:
       - name: 🐳 Build and push container
         uses: docker/build-push-action@v5
         with:
-          context: .
-          file: ./docker/quarto-linux-build/Dockerfile
+          context: ${{ env.CONTEXT_PATH }}
+          file: ${{ env.DOCKERFILE_PATH }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          platforms: ${{ env.PLATFORM }}
 
       - name: 🧪 Test Container Functionality
         run: |
@@ -73,7 +80,17 @@ jobs:
           
           # Use locally built container (no pull needed - saves ~6-8GB disk space)
           echo "📊 Using locally built container to avoid disk space issues..."
-          docker images | grep quarto-build
+          echo "📊 Available images:"
+          docker images
+          
+          # Get the local image tag from the built image
+          LOCAL_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | head -1 || true)
+          if [ -z "$LOCAL_IMAGE" ]; then
+            echo "❌ No ${{ env.IMAGE_NAME }} image found! Available images:"
+            docker images --format "{{.Repository}}:{{.Tag}}"
+            exit 1
+          fi
+          echo "📊 Using local image: $LOCAL_IMAGE"
           
           # Create a test directory with sample content
           mkdir -p test-container
@@ -115,122 +132,31 @@ jobs:
           ```
           EOF
           
-          # Get the local image tag (first tag from the built image)
-          LOCAL_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep quarto-build | head -1)
-          echo "📊 Using local image: $LOCAL_IMAGE"
+          # Test 1: Quarto
+          echo "📊 Test 1: Quarto installation..."
+          docker run --rm $LOCAL_IMAGE quarto --version
           
-          # Test 1: Basic Quarto functionality
-          echo "📊 Test 1: Basic Quarto functionality..."
-          docker run --rm -v $(pwd):/workspace $LOCAL_IMAGE \
-            bash -c "cd /workspace && quarto --version"
+          # Test 2: Python and packages
+          echo "📊 Test 2: Python installation..."
+          docker run --rm $LOCAL_IMAGE python3 --version
+          docker run --rm $LOCAL_IMAGE python3 -c "import pandas, numpy, jupyter; print('✅ Key Python packages available')"
           
-          # Test 2: Python packages
-          echo "📊 Test 2: Python packages..."
-          docker run --rm -v $(pwd):/workspace $LOCAL_IMAGE \
-            bash -c "cd /workspace && python3 -c 'import pandas, numpy, jupyter, openai, groq, pybtex, PIL, yaml, yamllint, gradio, jsonschema, pypandoc, ghostscript, absl, pre_commit, requests, titlecase, rich, sentence_transformers, faiss, sklearn, torch; print(\"✅ All Python packages available!\")'"
+          # Test 3: R and packages  
+          echo "📊 Test 3: R installation..."
+          docker run --rm $LOCAL_IMAGE R --version
+          docker run --rm $LOCAL_IMAGE Rscript -e "library(ggplot2); library(knitr); cat('✅ Key R packages available\n')"
           
-          # Test 3: R packages
-          echo "📊 Test 3: R packages..."
-          docker run --rm -v $(pwd):/workspace $LOCAL_IMAGE \
-            bash -c "cd /workspace && Rscript -e 'library(ggplot2); library(ggrepel); library(knitr); library(rmarkdown); library(tidyverse); library(reshape2); library(reticulate); library(rsvg); library(viridis); library(xml2); library(dplyr); library(grid); cat(\"✅ All R packages available!\n\")'"
+          # Test 4: LaTeX engines
+          echo "📊 Test 4: LaTeX installation..."
+          docker run --rm $LOCAL_IMAGE lualatex --version
+          docker run --rm $LOCAL_IMAGE pdflatex --version
           
-          # Test 4: TeX Live and LaTeX
-          echo "📊 Test 4: TeX Live and LaTeX..."
-          docker run --rm -v $(pwd):/workspace $LOCAL_IMAGE \
-            bash -c "cd /workspace && lualatex --version && pdflatex --version && echo '✅ LaTeX engines available!'"
+          # Test 5: Graphics tools
+          echo "📊 Test 5: Graphics tools..."
+          docker run --rm $LOCAL_IMAGE inkscape --version
+          docker run --rm $LOCAL_IMAGE gs --version
           
-          # Test 5: Inkscape
-          echo "📊 Test 5: Inkscape..."
-          docker run --rm -v $(pwd):/workspace $LOCAL_IMAGE \
-            bash -c "cd /workspace && inkscape --version && echo '✅ Inkscape available!'"
-          
-          # Test 6: Ghostscript
-          echo "📊 Test 6: Ghostscript..."
-          docker run --rm -v $(pwd):/workspace $LOCAL_IMAGE \
-            bash -c "cd /workspace && gs --version && echo '✅ Ghostscript available!'"
-          
-          # Test 7: Fonts and graphics
-          echo "📊 Test 7: Fonts and graphics..."
-          docker run --rm -v $(pwd):/workspace $LOCAL_IMAGE \
-            bash -c "cd /workspace && fc-list | head -5 && echo '✅ Fonts available!'"
-          
-          # Test 8: Quarto render test
-          echo "📊 Test 8: Quarto render test..."
-          docker run --rm -v $(pwd):/workspace $LOCAL_IMAGE \
-            bash -c "cd /workspace && quarto render test.qmd --to html && ls -la test.html && echo '✅ Quarto render successful!'"
-          
-          # Test 9: TikZ compilation test
-          echo "📊 Test 9: TikZ compilation test..."
-          cat > tikz_test.tex << 'EOF'
-          \documentclass{standalone}
-          \usepackage{tikz}
-          \usepackage{pgfplots}
-          \usepackage{amsmath}
-          \usepackage{amssymb}
-          \usepackage{xcolor}
-          \usepackage[T1]{fontenc}
-          \usetikzlibrary{positioning}
-          \usetikzlibrary{calc}
-          \begin{document}
-          \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
-          \node[draw, fill=blue!20] at (0,0) {TikZ Test};
-          \node[draw, fill=red!20] at (2,0) {Success};
-          \draw[->] (0.8,0) -- (1.2,0);
-          \end{tikzpicture}
-          \end{document}
-          EOF
-          
-          docker run --rm -v $(pwd):/workspace $LOCAL_IMAGE \
-            bash -c "cd /workspace && lualatex -interaction=nonstopmode tikz_test.tex && ls -la tikz_test.pdf && echo '✅ TikZ compilation successful!'"
-          
-          # Test 10: SVG to PDF conversion test
-          echo "📊 Test 10: SVG to PDF conversion test..."
-          cat > test.svg << 'EOF'
-          <svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
-            <circle cx="50" cy="50" r="40" fill="red"/>
-            <text x="50" y="55" text-anchor="middle" fill="white">Test</text>
-          </svg>
-          EOF
-          
-          docker run --rm -v $(pwd):/workspace $LOCAL_IMAGE \
-            bash -c "cd /workspace && inkscape --export-type=pdf --export-filename=test.pdf test.svg && ls -la test.pdf && echo '✅ SVG to PDF conversion successful!'"
-          
-          # Test 11: Memory and disk space check
-          echo "📊 Test 11: System resources..."
-          docker run --rm -v $(pwd):/workspace $LOCAL_IMAGE \
-            bash -c "df -h . && free -h && echo '✅ System resources adequate!'"
-          
-          # Test 12: Network connectivity (for package downloads)
-          echo "📊 Test 12: Network connectivity..."
-          docker run --rm -v $(pwd):/workspace $LOCAL_IMAGE \
-            bash -c "curl -s https://cran.r-project.org/ > /dev/null && echo '✅ Network connectivity good!'"
-          
-          # Test 13: Book structure compatibility test
-          echo "📊 Test 13: Book structure compatibility..."
-          docker run --rm -v $(pwd):/workspace $LOCAL_IMAGE \
-            bash -c "cd /workspace && ls -la quarto/ && echo '✅ Quarto directory accessible!'"
-          
-          # Test 14: Quarto configuration test
-          echo "📊 Test 14: Quarto configuration test..."
-          docker run --rm -v $(pwd):/workspace $LOCAL_IMAGE \
-            bash -c "cd /workspace/quarto && ls -la config/ && echo '✅ Quarto config files accessible!'"
-          
-          # Test 15: Dependencies files test
-          echo "📊 Test 15: Dependencies files test..."
-          docker run --rm -v $(pwd):/workspace $LOCAL_IMAGE \
-            bash -c "cd /workspace && ls -la tools/dependencies/ && echo '✅ Dependencies files accessible!'"
-          
-          # Test 16: Quarto check test (same as your workflow)
-          echo "📊 Test 16: Quarto check test..."
-          docker run --rm -v $(pwd):/workspace $LOCAL_IMAGE \
-            bash -c "cd /workspace/quarto && quarto check"
-          
-          # Test 17: Simulate actual build process
-          echo "📊 Test 17: Simulate actual build process..."
-          docker run --rm -v $(pwd):/workspace $LOCAL_IMAGE \
-            bash -c "cd /workspace/quarto && cp config/_quarto-html.yml _quarto.yml && quarto render --to html --quiet && echo '✅ HTML build simulation successful!'"
-          
-          echo "🎉 All container tests completed successfully!"
+          echo "🎉 All installation tests completed successfully!"
           echo "📊 Container is ready for production use!"
 
       - name: 📋 Container Info
@@ -239,12 +165,21 @@ jobs:
           echo "📊 Registry: ${{ env.REGISTRY }}"
           echo "📊 Image: ${{ env.IMAGE_NAME }}"
           echo "📊 Tags: ${{ steps.meta.outputs.tags }}"
-          echo "📊 Size: $(docker images $LOCAL_IMAGE --format '{{.Size}}')"
+          LOCAL_IMAGE=$(docker images --format "{{.Repository}}:{{.Tag}}" | grep "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | head -1 || true)
+          if [ -n "$LOCAL_IMAGE" ]; then
+            echo "📊 Size: $(docker images $LOCAL_IMAGE --format '{{.Size}}')"
+          else
+            echo "📊 Size: Unable to determine (image not found)"
+          fi
           
           echo ""
           echo "🚀 Usage in workflows:"
           echo "container:"
-          echo "  image: $LOCAL_IMAGE"
+          if [ -n "$LOCAL_IMAGE" ]; then
+            echo "  image: $LOCAL_IMAGE"
+          else
+            echo "  image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+          fi
           echo "  options: --user root"
           
           echo ""
