@@ -13,20 +13,20 @@ RUN curl -fSLo PowerShell.msi https://github.com/PowerShell/PowerShell/releases/
 RUN pwsh -Command "Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))"
 
 # Set environment variables to match workflow
-ENV R_LIBS_USER=C:\r-lib
+ENV R_LIBS_USER=C:/r-lib
 ENV QUARTO_LOG_LEVEL=INFO
 ENV PYTHONIOENCODING=utf-8
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 
 # Copy dependency files needed for installations
-COPY tools/dependencies/requirements.txt C:\temp\requirements.txt
-COPY tools/dependencies/install_packages.R C:\temp\install_packages.R
-COPY tools/dependencies/tl_packages C:\temp\tl_packages
-COPY docker/quarto-build-windows/verify_r_packages.R C:\temp\verify_r_packages.R
+COPY tools/dependencies/requirements.txt C:/temp/requirements.txt
+COPY tools/dependencies/install_packages.R C:/temp/install_packages.R  
+COPY tools/dependencies/tl_packages C:/temp/tl_packages
+COPY docker/quarto-build-windows/verify_r_packages.R C:/temp/verify_r_packages.R
 
 # Create R library directory
-RUN mkdir C:\r-lib
+RUN mkdir C:/r-lib
 
 # Setup Quarto (using exact version from workflow)
 RUN pwsh -Command "Invoke-WebRequest -Uri 'https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.31/quarto-1.7.31-win.zip' -OutFile 'quarto.zip'" && \
@@ -39,7 +39,7 @@ RUN choco install -y python --version=3.13.1
 
 # Install Python dependencies (same as workflow)
 RUN python -m pip install --upgrade pip && \
-    python -m pip install -r C:\temp\requirements.txt
+    python -m pip install -r C:/temp/requirements.txt
 
 # Install Ghostscript (using exact method from workflow)
 RUN pwsh -Command " \
@@ -75,7 +75,7 @@ RUN pwsh -Command " \
 # Note: This simulates what the GitHub Action does
 RUN pwsh -Command " \
     # Download TeX Live installer \
-    Invoke-WebRequest -Uri 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' -OutFile 'C:\temp\install-tl-windows.exe'; \
+    Invoke-WebRequest -Uri 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' -OutFile 'C:/temp/install-tl-windows.exe'; \
     # Create minimal installation profile \
     @' \
 selected_scheme scheme-infraonly \
@@ -88,20 +88,20 @@ TEXMFLOCAL C:/texlive/texmf-local \
 TEXMFSYSCONFIG C:/texlive/texmf-config \
 TEXMFSYSVAR C:/texlive/texmf-var \
 TEXMFVAR C:/texlive/texmf-var \
-'@ | Out-File -FilePath 'C:\temp\texlive.profile' -Encoding ASCII; \
+'@ | Out-File -FilePath 'C:/temp/texlive.profile' -Encoding ASCII; \
     # Install TeX Live base \
-    Start-Process -FilePath 'C:\temp\install-tl-windows.exe' -ArgumentList '-profile', 'C:\temp\texlive.profile' -Wait; \
+    Start-Process -FilePath 'C:/temp/install-tl-windows.exe' -ArgumentList '-profile', 'C:/temp/texlive.profile' -Wait; \
     # Add TeX Live to PATH \
     [Environment]::SetEnvironmentVariable('PATH', \"$env:PATH;C:\texlive\bin\windows\", [EnvironmentVariableTarget]::Machine); \
     # Install collections from tl_packages file \
-    $packages = Get-Content 'C:\temp\tl_packages' | Where-Object { $_.Trim() -ne '' }; \
+    $packages = Get-Content 'C:/temp/tl_packages' | Where-Object { $_.Trim() -ne '' }; \
     foreach ($package in $packages) { \
         Write-Host \"Installing TeX Live collection: $package\"; \
-        & 'C:\texlive\bin\windows\tlmgr.bat' install $package.Trim(); \
+        & 'C:/texlive/bin/windows/tlmgr.bat' install $package.Trim(); \
     }; \
     # Clean up installer \
-    Remove-Item 'C:\temp\install-tl-windows.exe'; \
-    Remove-Item 'C:\temp\texlive.profile' \
+    Remove-Item 'C:/temp/install-tl-windows.exe'; \
+    Remove-Item 'C:/temp/texlive.profile' \
     "
 
 # Setup R (using exact version from workflow)
@@ -122,13 +122,13 @@ RUN Rscript -e " \
 
 # Verify R package installation
 RUN pwsh -Command "Write-Host '🔍 Verifying R package installation...'" && \
-    Rscript C:\temp\verify_r_packages.R
+    Rscript C:/temp/verify_r_packages.R
 
 # Clean up
-RUN del C:\temp\requirements.txt C:\temp\install_packages.R C:\temp\verify_r_packages.R C:\temp\tl_packages
+RUN del C:/temp/requirements.txt C:/temp/install_packages.R C:/temp/verify_r_packages.R C:/temp/tl_packages
 
 # Set working directory
-WORKDIR C:\workspace
+WORKDIR C:/workspace
 
 # Final verification (using same tools that workflow uses)
 RUN quarto --version && \
