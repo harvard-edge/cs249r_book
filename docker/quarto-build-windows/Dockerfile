@@ -20,6 +20,7 @@ ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 
 # Copy dependency files needed for installations
+COPY tools/dependencies/requirements/ C:/temp/requirements/
 COPY tools/dependencies/requirements-build.txt C:/temp/requirements.txt
 COPY tools/dependencies/install_packages.R C:/temp/install_packages.R  
 COPY tools/dependencies/tl_packages C:/temp/tl_packages

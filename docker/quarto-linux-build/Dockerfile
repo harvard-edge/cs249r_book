@@ -217,6 +217,7 @@ RUN wget -q https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.31/q
 RUN mkdir -p $R_LIBS_USER
 
 # Copy dependency files
+COPY tools/dependencies/requirements/ /tmp/requirements/
 COPY tools/dependencies/requirements-build.txt /tmp/requirements.txt
 COPY tools/dependencies/install_packages.R /tmp/
 COPY docker/quarto-linux-build/verify_r_packages.R /tmp/
