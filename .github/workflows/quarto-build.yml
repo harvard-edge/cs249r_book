@@ -1,18 +1,81 @@
-name: '📚 Quarto Build'
+name: '🏗️ Quarto Build'
 
 # Set retention period to 7 days
 env:
   GITHUB_ACTIONS_RETENTION_DAYS: 7
 
-# This workflow builds a Quarto project and deploys it to either a development site or GitHub Pages
+# Cancel duplicate builds for same target+os+format combination
+concurrency:
+  group: quarto-build-${{ inputs.target }}-${{ inputs.os }}-${{ inputs.format }}-${{ github.sha }}
+  cancel-in-progress: true
+
+# This workflow builds a Quarto project and uploads artifacts
 # It handles both Windows and Linux environments with extensive caching for better performance
+# Note: This workflow does NOT deploy - all deployment is handled by publish-live workflow
 on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        required: false
+        type: string
+        default: 'development'
+        description: 'Build environment'
+      os:
+        required: false
+        type: choice
+        default: 'ubuntu-latest'
+        description: 'Operating system to run on'
+        options:
+          - ubuntu-latest
+          - windows-latest
+      quarto-version:
+        required: false
+        type: string
+        default: '1.7.31'
+        description: 'Version of Quarto to use'
+      r-version:
+        required: false
+        type: string
+        default: '4.3.2'
+        description: 'Version of R to use'
+      target:
+        required: false
+        type: choice
+        default: 'dev'
+        description: 'Target branch (dev/main) - determines build behavior'
+        options:
+          - dev
+          - main
+      format:
+        required: false
+        type: choice
+        default: 'html'
+        description: 'Format to build'
+        options:
+          - html
+          - pdf
+          - epub
+          - all
+      quarto-log-level:
+        required: false
+        type: choice
+        default: 'INFO'
+        description: 'Quarto log level'
+        options:
+          - INFO
+          - DEBUG
+      artifact_name:
+        required: false
+        type: string
+        default: ''
+        description: 'Explicit artifact name (if empty, uses build-{os}-{format} pattern)'
   workflow_call:
     inputs:
       environment:
-        required: true
+        required: false
         type: string
-        description: 'Build environment (development/production/test)'
+        default: 'development'
+        description: 'Build environment'
       os:
         required: true
         type: string
@@ -37,19 +100,18 @@ on:
         type: string
         default: 'all'
         description: 'Format to build (html/pdf/epub/all)'
-      deploy:
-        required: false
-        type: boolean
-        default: true
-        description: 'Whether to deploy the build or just validate'
+
       quarto-log-level:
         required: false
         type: string
         default: 'INFO'
         description: 'Quarto log level (INFO/DEBUG)'
-    secrets:
-      SSH_DEPLOY_KEY:
+      artifact_name:
         required: false
+        type: string
+        default: ''
+        description: 'Explicit artifact name (if empty, uses build-{os}-{format} pattern)'
+
         
 permissions:
   contents: write
@@ -97,7 +159,7 @@ jobs:
           Write-Output "👉 OS: ${{ inputs.os }}"
           Write-Output "👉 Environment: ${{ inputs.environment }}"
           Write-Output "👉 Format: ${{ inputs.format }}"
-          Write-Output "👉 Deploy: ${{ inputs.deploy }}"
+          Write-Output "👉 Deploy: Artifacts only - no deployment"
           Write-Output "👉 TeX Live: Always installed for all formats (consistent environment)"
           
           $valid_formats = @("html", "pdf", "epub", "all")
@@ -631,122 +693,27 @@ jobs:
           }
           
       - name: 📤 Upload build artifacts
-        if: github.event_name == 'pull_request' || inputs.deploy == false || inputs.format != 'html'
+        if: github.event_name == 'pull_request' || inputs.deploy == false || inputs.format != 'html' || inputs.target == 'main'
+        id: upload-artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: build-${{ inputs.os }}-${{ inputs.format }}
+          name: ${{ inputs.artifact_name != '' && inputs.artifact_name || format('build-{0}-{1}', inputs.os, inputs.format) }}
           path: |
             build/html
                     build/pdf
 
-      - name: 🚀 Stage to Dev Site
-        if: inputs.target == 'dev' && inputs.deploy == true && inputs.format == 'html' && runner.os == 'Linux'
-        shell: bash
-        env:
-          SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+      - name: 📋 Build Declaration
         run: |
-          echo "🔐 Starting ssh-agent..."
-          eval "$(ssh-agent -s)"
-          echo "$SSH_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
+          ARTIFACT_NAME="${{ inputs.artifact_name != '' && inputs.artifact_name || format('build-{0}-{1}', inputs.os, inputs.format) }}"
+          echo "📦 Build Declaration: Successfully created artifact '$ARTIFACT_NAME'"
+          echo "📊 Format: ${{ inputs.format }}"
+          echo "📊 OS: ${{ inputs.os }}"
+          echo "📊 Target: ${{ inputs.target }}"
+          echo "📊 Environment: ${{ inputs.environment }}"
+          echo "📝 Note: This workflow only builds artifacts - deployment handled by publish-live workflow"
+          echo "artifact_created=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
 
-          git config --global user.email "khoshnevis.naeem@gmail.com"
-          git config --global user.name "github-actions"
 
-          echo "🔄 Cloning target repo..."
-          git clone --depth=1 git@github.com:harvard-edge/cs249r_book_dev.git target-repo
-          cd target-repo
-          git checkout main
-          git pull origin main
-
-          echo "🧹 Cleaning existing docs/"
-          rm -rf docs
-          cp -r "${GITHUB_WORKSPACE}/build/html" docs
-          rm -f docs/CNAME  # remove if present
-
-          echo "🔍 Validating deployment content..."
-          test -f docs/index.html || (echo "❌ index.html missing" && exit 1)
-          [ "$(ls -1 docs | wc -l)" -gt 3 ] || (echo "❌ docs/ too empty — something went wrong" && exit 1)
-
-          echo "📦 Committing and pushing changes..."
-          git add docs
-          git commit -m "📚 Push dev branch build (manual version)" || echo "🟡 Nothing to commit"
-          git push origin main
-
-      - name: 📋 Dev Deployment Info
-        if: inputs.target == 'dev' && runner.os == 'Linux' && inputs.deploy == true
-        shell: bash
-        run: |
-          echo "🔄 Development deployment information:"
-          echo "📊 Deployed to repository: harvard-edge/cs249r_book_dev"
-          echo "📊 Target branch: main"
-          echo "📊 Target directory: docs"
-          echo "📊 Source directory: build/html"
-          echo "✅ Deployment should be complete"
-
-      # Deploy to GitHub Pages
-      - name: 🚀 Deploy to GitHub Pages
-        if: inputs.target == 'main' && runner.os == 'Linux' && inputs.deploy == true && inputs.format == 'html'
-        shell: bash
-        run: |
-          echo "🚀 Deploying to GitHub Pages..."
-          
-          # Update status to deploying
-          curl -X POST \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
-            -d "{
-              \"state\": \"pending\",
-              \"description\": \"Deploying to GitHub Pages (${{ inputs.os }})\",
-              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
-            }"
-          
-          # Clone gh-pages branch
-          git clone --depth=1 --branch=gh-pages https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git gh-pages-repo
-          
-          # Clear existing content
-          cd gh-pages-repo
-          rm -rf *
-          
-          # Copy new content
-          cp -r ../build/html/* .
-          
-          # Copy PDF if it exists (for download) - but don't commit it to git
-          if [ -f "../build/pdf/Machine-Learning-Systems.pdf" ]; then
-            echo "📄 Adding PDF to deployment for download access..."
-            mkdir -p assets
-            cp "../build/pdf/Machine-Learning-Systems.pdf" assets/
-            echo "✅ PDF added: assets/Machine-Learning-Systems.pdf"
-            echo "📝 Note: PDF will be available for download but not tracked in git"
-          else
-            echo "⚠️ PDF not found in build/pdf/"
-          fi
-          
-          # Configure git
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          
-          # Add all files EXCEPT the PDF
-          git add .
-          
-          # Remove PDF from git tracking (if it was added)
-          git rm --cached assets/Machine-Learning-Systems.pdf 2>/dev/null || true
-          
-          # Commit and push (PDF will be available for download but not in git)
-          git commit -m "Deploy from commit ${GITHUB_SHA}" || echo "No changes to commit"
-          git push origin gh-pages
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: 📋 GitHub Pages Deployment Info
-        if: inputs.target == 'main' && runner.os == 'Linux' && inputs.deploy == true
-        shell: bash
-        run: |
-          echo "🔄 GitHub Pages deployment information:"
-          echo "📊 Deployed to: gh-pages branch"
-          echo "📊 Source directory: build/html"
-          echo "✅ Deployment should be complete"
-          echo "🌐 Site should be available at: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
 
       - name: 📝 Collect Build Logs and System Info (Universal)
         if: always()  # Always run, even if previous steps failed
@@ -916,7 +883,7 @@ jobs:
           📚 Quarto Version: ${{ inputs.quarto-version }}
           🔬 R Version: ${{ inputs.r-version }}
           📄 Format: ${{ inputs.format }}
-          🚀 Deploy: ${{ inputs.deploy }}
+          🚀 Deploy: Artifacts only (no deployment in this workflow)
           🧩 Cache Status:
             - TeX Live: $texLiveStatus
             - R Packages: ${{ steps.cache-r-packages.outputs.cache-hit == 'true' && '✅ Hit' || '❌ Miss' }}
