@@ -11,6 +11,9 @@ env:
   OLLAMA_TIMEOUT: "300"                    # Timeout for Ollama operations (seconds)
   OLLAMA_RETRIES: "3"                      # Number of retries for Ollama calls
   BUILD_TIMEOUT: "3600"                    # Timeout for build operations (1 hour)
+  COMMIT_STATUS_TIMEOUT: "240"             # Number of attempts to check commit status (240 × 30s = 2 hours)
+  COMMIT_STATUS_INTERVAL: "30"             # Seconds between status checks
+  JOB_TIMEOUT_MULTIPLIER: "1.25"          # Job timeout = (COMMIT_STATUS_TIMEOUT × COMMIT_STATUS_INTERVAL × MULTIPLIER) / 60 minutes
   
   # Quarto Configuration Files
   QUARTO_HTML_CONFIG: "_quarto-html.yml"  # HTML build configuration file
@@ -703,14 +706,14 @@ jobs:
   monitor-build:
     name: '⏳ Monitor Production Build'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: ${{ (env.COMMIT_STATUS_TIMEOUT * env.COMMIT_STATUS_INTERVAL * env.JOB_TIMEOUT_MULTIPLIER / 60) }}
     needs: create-tag
     if: github.event.inputs.confirm == 'PUBLISH'
     
     steps:
       - name: ⏳ Wait for Production Build (Commit Status Monitoring)
         run: |
-          echo "⏳ Waiting for production build to complete (max 1 hour)..."
+          echo "⏳ Waiting for production build to complete (max ${{ (env.COMMIT_STATUS_TIMEOUT * env.COMMIT_STATUS_INTERVAL * env.JOB_TIMEOUT_MULTIPLIER / 60) }} minutes)..."
           echo "🔍 Monitoring commit status checks in real-time..."
           
           # Get the latest commit SHA from main branch
@@ -726,8 +729,8 @@ jobs:
           sleep 30  # Give the build a moment to start
           
           # Wait for all required status checks to complete
-          for i in {1..120}; do  # 120 attempts × 30 seconds = 1 hour
-            echo "🔍 Checking commit status (attempt $i/120)..."
+          for i in $(seq 1 ${{ env.COMMIT_STATUS_TIMEOUT }}); do  # ${{ env.COMMIT_STATUS_TIMEOUT }} attempts × 30 seconds = 2 hours
+            echo "🔍 Checking commit status (attempt $i/${{ env.COMMIT_STATUS_TIMEOUT }})..."
             
             # Get commit status
             STATUS_RESPONSE=$(curl -s \
@@ -784,7 +787,7 @@ jobs:
               TIME_DISPLAY="${ELAPSED_MINUTES}m"
             fi
             
-            echo "⏳ Build still in progress... (attempt $i/120, ~${TIME_DISPLAY} elapsed)"
+            echo "⏳ Build still in progress... (attempt $i/${{ env.COMMIT_STATUS_TIMEOUT }}, ~${TIME_DISPLAY} elapsed)"
             
             # Show build progress indicators with heartbeat-style updates
             if [ $i -eq 1 ]; then
