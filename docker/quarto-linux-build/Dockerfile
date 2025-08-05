@@ -155,7 +155,7 @@ RUN Rscript /tmp/install_packages.R
 
 # Verify R package installation (same as your workflow)
 RUN echo "🔍 Verifying R package installation..." && \
-    Rscript -e "required_packages <- c('ggplot2', 'ggrepel', 'knitr', 'rmarkdown', 'tidyverse', 'reshape2', 'reticulate', 'rsvg', 'viridis', 'xml2', 'dplyr', 'grid'); missing_packages <- required_packages[!sapply(required_packages, requireNamespace, quietly = TRUE)]; if(length(missing_packages) > 0) { cat('❌ Missing packages:', paste(missing_packages, collapse = ', '), '\n'); quit(status = 1) } else { cat('✅ All required R packages installed successfully\n') }"
+    Rscript -e "source('/tmp/install_packages.R'); missing_packages <- required_packages[!sapply(required_packages, requireNamespace, quietly = TRUE)]; if(length(missing_packages) > 0) { cat('❌ Missing packages:', paste(missing_packages, collapse = ', '), '\n'); quit(status = 1) } else { cat('✅ All required R packages installed successfully\n') }"
 
 # Clean up
 RUN rm -rf /tmp/requirements.txt /tmp/install_packages.R
