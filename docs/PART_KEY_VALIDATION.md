@@ -2,7 +2,7 @@
 
 ## Overview
 
-The part key validation system ensures that all `\part{key:xxx}` commands in your `.qmd` files reference valid keys defined in `book/part_summaries.yml`. This prevents build failures and ensures consistent part titles throughout your book.
+The part key validation system ensures that all `\part{key:xxx}` commands in your `.qmd` files reference valid keys defined in `quarto/part_summaries.yml`. This prevents build failures and ensures consistent part titles throughout your book.
 
 ## How It Works
 
@@ -64,7 +64,7 @@ pre-commit run --all-files
 
 ## Available Keys
 
-The following keys are defined in `book/part_summaries.yml`:
+The following keys are defined in `quarto/part_summaries.yml`:
 
 | Key | Title | Type |
 |-----|-------|------|
@@ -112,7 +112,7 @@ When the validation script finds issues:
       - Status: NOT FOUND in part_summaries.yml
 
 💡 To fix these issues:
-   1. Add the missing keys to book/part_summaries.yml
+   1. Add the missing keys to quarto/part_summaries.yml
    2. Or correct the key names in the .qmd files
    3. Or remove the \part{key:xxx} commands if not needed
 ```
@@ -170,7 +170,7 @@ Examples:
    ```bash
    python3 -c "
    import yaml
-   with open('book/part_summaries.yml') as f:
+   with open('quarto/part_summaries.yml') as f:
        data = yaml.safe_load(f)
        for part in data['parts']:
            print(f\"'{part['key']}' -> '{part['title']}'\")
@@ -206,7 +206,7 @@ Examples:
    pre-commit run validate-part-keys --all-files
    
    # Or test a single file
-   quarto render book/contents/core/example.qmd --to pdf
+   quarto render quarto/contents/core/example.qmd --to pdf
    ```
 
 5. **Install pre-commit hooks**:

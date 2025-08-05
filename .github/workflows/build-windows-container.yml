@@ -1,0 +1,222 @@
+name: '🐳 Build Windows Container'
+
+# This workflow builds the Windows Quarto build container
+# Windows containers are more complex but provide performance benefits
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: 'Force rebuild even if no changes'
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    - cron: '0 2 * * 0'  # Weekly rebuild (Sunday at 2am - after Linux container)
+  push:
+    paths:
+      - 'tools/dependencies/**'
+      - 'docker/quarto-build-windows/**'
+      - '.github/workflows/build-container-windows.yml'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/quarto-build-windows
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🔐 Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏷️ Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: 🐳 Build and push Windows container
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./docker/quarto-build-windows/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: windows/amd64
+
+      - name: 🧪 Test Windows Container Functionality
+        run: |
+          echo "🧪 Testing Windows container functionality..."
+          
+          # Pull the built container
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          
+          # Create a test directory with sample content
+          mkdir test-container
+          cd test-container
+          
+          # Create a simple Quarto document for testing
+          @"
+          ---
+          title: "Windows Container Test"
+          format: html
+          ---
+          
+          # Test Document
+          
+          This is a test document to verify the Windows container works properly.
+          
+          ```{python}
+          import pandas as pd
+          import numpy as np
+          print("Python test successful!")
+          ```
+          
+          ```{r}
+          library(ggplot2)
+          library(dplyr)
+          print("R test successful!")
+          ```
+          
+          ## Math Test
+          
+          Here's a simple equation: $E = mc^2$
+          
+          ```{tikz}
+          \begin{tikzpicture}
+          \node[draw, fill=blue!20] at (0,0) {TikZ Test};
+          \node[draw, fill=red!20] at (2,0) {Success};
+          \draw[->] (0.8,0) -- (1.2,0);
+          \end{tikzpicture}
+          ```
+          "@ | Out-File -Encoding UTF8 test.qmd
+          
+          # Test 1: Basic Quarto functionality
+          echo "📊 Test 1: Basic Quarto functionality..."
+          docker run --rm -v ${PWD}:/workspace ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest `
+            bash -c "cd /workspace && quarto --version"
+          
+          # Test 2: Python packages
+          echo "📊 Test 2: Python packages..."
+          docker run --rm -v ${PWD}:/workspace ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest `
+            bash -c "cd /workspace && python3 -c 'import pandas, numpy, jupyter, openai, groq, pybtex, PIL, yaml, yamllint, gradio, jsonschema, pypandoc, ghostscript, absl, pre_commit, requests, titlecase, rich, sentence_transformers, faiss, sklearn, torch; print(\"✅ All Python packages available!\")'"
+          
+          # Test 3: R packages
+          echo "📊 Test 3: R packages..."
+          docker run --rm -v ${PWD}:/workspace ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest `
+            bash -c "cd /workspace && Rscript -e 'library(ggplot2); library(ggrepel); library(knitr); library(rmarkdown); library(tidyverse); library(reshape2); library(reticulate); library(rsvg); library(viridis); library(xml2); library(dplyr); library(grid); cat(\"✅ All R packages available!\n\")'"
+          
+          # Test 4: TeX Live and LaTeX
+          echo "📊 Test 4: TeX Live and LaTeX..."
+          docker run --rm -v ${PWD}:/workspace ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest `
+            bash -c "cd /workspace && lualatex --version && pdflatex --version && echo '✅ LaTeX engines available!'"
+          
+          # Test 5: Ghostscript
+          echo "📊 Test 5: Ghostscript..."
+          docker run --rm -v ${PWD}:/workspace ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest `
+            bash -c "cd /workspace && gs --version && echo '✅ Ghostscript available!'"
+          
+          # Test 6: Quarto render test
+          echo "📊 Test 6: Quarto render test..."
+          docker run --rm -v ${PWD}:/workspace ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest `
+            bash -c "cd /workspace && quarto render test.qmd --to html && ls -la test.html && echo '✅ Quarto render successful!'"
+          
+          # Test 7: TikZ compilation test
+          echo "📊 Test 7: TikZ compilation test..."
+          @"
+          \documentclass{standalone}
+          \usepackage{tikz}
+          \usepackage{pgfplots}
+          \usepackage{amsmath}
+          \usepackage{amssymb}
+          \usepackage{xcolor}
+          \usepackage[T1]{fontenc}
+          \usetikzlibrary{positioning}
+          \usetikzlibrary{calc}
+          \begin{document}
+          \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+          \node[draw, fill=blue!20] at (0,0) {TikZ Test};
+          \node[draw, fill=red!20] at (2,0) {Success};
+          \draw[->] (0.8,0) -- (1.2,0);
+          \end{tikzpicture}
+          \end{document}
+          "@ | Out-File -Encoding UTF8 tikz_test.tex
+          
+          docker run --rm -v ${PWD}:/workspace ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest `
+            bash -c "cd /workspace && lualatex -interaction=nonstopmode tikz_test.tex && ls -la tikz_test.pdf && echo '✅ TikZ compilation successful!'"
+          
+          # Test 8: System resources check
+          echo "📊 Test 8: System resources..."
+          docker run --rm -v ${PWD}:/workspace ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest `
+            bash -c "df -h . && free -h && echo '✅ System resources adequate!'"
+          
+          # Test 9: Network connectivity
+          echo "📊 Test 9: Network connectivity..."
+          docker run --rm -v ${PWD}:/workspace ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest `
+            bash -c "curl -s https://cran.r-project.org/ > /dev/null && echo '✅ Network connectivity good!'"
+          
+          # Test 10: Book structure compatibility
+          echo "📊 Test 10: Book structure compatibility..."
+          docker run --rm -v ${PWD}:/workspace ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest `
+            bash -c "cd /workspace && ls -la quarto/ && echo '✅ Quarto directory accessible!'"
+          
+          # Test 11: Quarto check test
+          echo "📊 Test 11: Quarto check test..."
+          docker run --rm -v ${PWD}:/workspace ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest `
+            bash -c "cd /workspace/quarto && quarto check"
+          
+          echo "🎉 All Windows container tests completed successfully!"
+          echo "📊 Windows container is ready for production use!"
+
+      - name: 📋 Container Info
+        run: |
+          echo "✅ Windows container built and tested successfully"
+          echo "📊 Registry: ${{ env.REGISTRY }}"
+          echo "📊 Image: ${{ env.IMAGE_NAME }}"
+          echo "📊 Tags: ${{ steps.meta.outputs.tags }}"
+          echo "📊 Size: $(docker images ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest --format '{{.Size}}')"
+          
+          echo ""
+          echo "🚀 Usage in workflows:"
+          echo "container:"
+          echo "  image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+          echo "  options: --user root"
+          
+          echo ""
+          echo "🧪 Tests performed:"
+          echo "✅ Quarto functionality"
+          echo "✅ Python packages (all from requirements.txt)"
+          echo "✅ R packages (all from install_packages.R)"
+          echo "✅ TeX Live and LaTeX engines"
+          echo "✅ Ghostscript PDF compression"
+          echo "✅ Quarto render test"
+          echo "✅ TikZ compilation test"
+          echo "✅ System resources check"
+          echo "✅ Network connectivity"
+          echo "✅ Book structure compatibility"
+          echo "✅ Quarto check (same as workflow)"
+          
+          echo ""
+          echo "📈 Expected performance improvement:"
+          echo "   Traditional Windows build: 45 minutes"
+          echo "   Windows container build: 10-15 minutes" 

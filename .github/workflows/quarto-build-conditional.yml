@@ -1,0 +1,895 @@
+name: '🏗️ Quarto Build (Conditional Container)'
+
+# Set retention period to 7 days
+env:
+  GITHUB_ACTIONS_RETENTION_DAYS: 7
+
+# Cancel duplicate builds for same target+os+format combination
+concurrency:
+  group: quarto-build-${{ inputs.target }}-${{ inputs.os }}-${{ inputs.format }}-${{ github.sha }}
+  cancel-in-progress: true
+
+# This workflow uses containers when available, falls back to proven traditional approach
+# Provides maximum robustness with performance benefits where possible
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        required: false
+        type: string
+        default: 'development'
+        description: 'Build environment'
+      os:
+        required: false
+        type: choice
+        default: 'ubuntu-latest'
+        description: 'Operating system to run on'
+      quarto-version:
+        required: false
+        type: string
+        default: '1.7.31'
+        description: 'Version of Quarto to use'
+      r-version:
+        required: false
+        type: string
+        default: '4.3.2'
+        description: 'Version of R to use'
+      target:
+        required: false
+        type: choice
+        default: 'dev'
+        description: 'Target branch (dev/main) - determines build behavior'
+        options:
+          - dev
+          - main
+      format:
+        required: false
+        type: choice
+        default: 'html'
+        description: 'Format to build'
+        options:
+          - html
+          - pdf
+          - epub
+          - all
+      quarto-log-level:
+        required: false
+        type: choice
+        default: 'INFO'
+        description: 'Quarto log level'
+        options:
+          - INFO
+          - DEBUG
+      artifact_name:
+        required: false
+        type: string
+        default: ''
+        description: 'Explicit artifact name (if empty, uses build-{os}-{format} pattern)'
+      force_traditional:
+        required: false
+        type: boolean
+        default: false
+        description: 'Force traditional build (bypass container)'
+  workflow_call:
+    inputs:
+      environment:
+        required: false
+        type: string
+        default: 'development'
+        description: 'Build environment'
+      os:
+        required: true
+        type: string
+        description: 'Operating system to run on (ubuntu-latest/windows-latest)'
+      quarto-version:
+        required: false
+        type: string
+        default: '1.7.31'
+        description: 'Version of Quarto to use'
+      r-version:
+        required: false
+        type: string
+        default: '4.3.2'
+        description: 'Version of R to use'
+      target:
+        required: false
+        type: string
+        default: ''
+        description: 'Target branch (dev/main) - determines build behavior'
+      format:
+        required: false
+        type: string
+        default: 'all'
+        description: 'Format to build (html/pdf/epub/all)'
+      quarto-log-level:
+        required: false
+        type: string
+        default: 'INFO'
+        description: 'Quarto log level (INFO/DEBUG)'
+      artifact_name:
+        required: false
+        type: string
+        default: ''
+        description: 'Explicit artifact name (if empty, uses build-{os}-{format} pattern)'
+      force_traditional:
+        required: false
+        type: boolean
+        default: false
+        description: 'Force traditional build (bypass container)'
+
+permissions:
+  contents: write
+  pages: write
+
+jobs:
+  # Container-based build (when available and not forced traditional)
+  build-container:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/${{ github.repository }}/quarto-build:latest
+      options: --user root
+    timeout-minutes: 60
+    environment:
+      name: ${{ inputs.environment }}
+    if: inputs.os == 'ubuntu-latest' && !inputs.force_traditional
+    env:
+      QUARTO_LOG_LEVEL: ${{ inputs.quarto-log-level }}
+      PYTHONIOENCODING: utf-8
+      LANG: en_US.UTF-8
+      LC_ALL: en_US.UTF-8
+
+    steps:
+      - name: 🚦 Set Initial Build Status
+        shell: bash
+        run: |
+          echo "🚦 Setting initial build status to pending..."
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"pending\",
+              \"description\": \"Quarto build started (Linux container, ${{ inputs.format }})\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 📋 Container Environment Info
+        shell: bash
+        run: |
+          echo "🔄 Container environment information..."
+          echo "📊 Quarto version:"
+          quarto --version
+          echo "📊 Python version:"
+          python3 --version
+          echo "📊 R version:"
+          R --version | head -1
+          echo "📊 TeX Live version:"
+          lualatex --version | head -1
+          echo "📊 Available disk space:"
+          df -h .
+          echo "📊 Memory usage:"
+          free -h
+
+      - name: 🔨 Build HTML (copy config and render)
+        if: inputs.format == 'html' || inputs.format == 'all'
+        shell: bash
+        run: |
+          echo "🚀 Setting up HTML configuration..."
+          cd book
+          rm -f _quarto.yml
+          cp config/_quarto-html.yml _quarto.yml
+          echo "✅ Configuration set to HTML"
+          
+          echo "🔨 Building HTML..."
+          echo "⏰ HTML build started at: $(date)"
+          
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"pending\",
+              \"description\": \"Building HTML content (Linux container)\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+          
+          quarto render --to html
+          echo "✅ HTML build completed at: $(date)"
+        
+      - name: 🔨 Build PDF (copy config and render)
+        if: inputs.format == 'pdf' || inputs.format == 'all'
+        shell: bash
+        run: |
+          echo "🚀 Setting up PDF configuration..."
+          cd book
+          rm -f _quarto.yml
+          cp config/_quarto-pdf.yml _quarto.yml
+          echo "✅ Configuration set to PDF"
+          
+          echo "🔨 Building PDF..."
+          echo "⏰ PDF build started at: $(date)"
+          echo "📊 This should be much faster with pre-installed dependencies"
+          
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"pending\",
+              \"description\": \"Building PDF content (Linux container) - optimized\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+          
+          quarto render --to titlepage-pdf
+          echo "✅ PDF build completed at: $(date)"
+
+      - name: 📉 Compress PDF with Ghostscript
+        if: inputs.format == 'pdf' || inputs.format == 'all'
+        run: |
+          if [ -f "build/pdf/Machine-Learning-Systems.pdf" ]; then
+            gs \
+              -sDEVICE=pdfwrite \
+              -dCompatibilityLevel=1.4 \
+              -dPDFSETTINGS=/ebook \
+              -dNOPAUSE \
+              -dQUIET \
+              -dBATCH \
+              -sOutputFile="./build/pdf/ebook.pdf" \
+              "./build/pdf/Machine-Learning-Systems.pdf"
+
+            mv ./build/pdf/ebook.pdf ./build/pdf/Machine-Learning-Systems.pdf
+          else
+            echo "⚠️ PDF file not found for compression"
+          fi
+
+      - name: 📤 Upload build artifacts
+        if: github.event_name == 'pull_request' || inputs.deploy == false || inputs.format != 'html' || inputs.target == 'main'
+        id: upload-artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name != '' && inputs.artifact_name || format('build-{0}-{1}', inputs.os, inputs.format) }}
+          path: |
+            build/html
+            build/pdf
+
+      - name: 📋 Build Declaration
+        run: |
+          ARTIFACT_NAME="${{ inputs.artifact_name != '' && inputs.artifact_name || format('build-{0}-{1}', inputs.os, inputs.format) }}"
+          echo "📦 Build Declaration: Successfully created artifact '$ARTIFACT_NAME'"
+          echo "📊 Format: ${{ inputs.format }}"
+          echo "📊 OS: ${{ inputs.os }}"
+          echo "📊 Target: ${{ inputs.target }}"
+          echo "📊 Environment: ${{ inputs.environment }}"
+          echo "📊 Method: Container (Linux) - Experimental"
+          echo "📝 Note: This workflow only builds artifacts - deployment handled by publish-live workflow"
+          echo "artifact_created=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
+
+      - name: 🎯 Set Final Build Status
+        if: always()
+        shell: bash
+        run: |
+          echo "🎯 Setting final build status..."
+          
+          if [ "${{ job.status }}" = "success" ]; then
+            STATE="success"
+            DESCRIPTION="Build completed successfully (Linux container, ${{ inputs.format }})"
+          else
+            STATE="failure"
+            DESCRIPTION="Build failed (Linux container, ${{ inputs.format }})"
+          fi
+          
+          echo "📊 Final status: $STATE"
+          echo "📝 Description: $DESCRIPTION"
+          
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"$STATE\",
+              \"description\": \"$DESCRIPTION\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+          
+          echo "✅ Commit status updated successfully"
+
+  # Traditional build (fallback for all cases)
+  build-traditional:
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 60
+    environment:
+      name: ${{ inputs.environment }}
+    if: inputs.os == 'windows-latest' || inputs.force_traditional
+    env:
+      R_LIBS_USER: ${{ github.workspace }}/.r-lib
+      QUARTO_LOG_LEVEL: ${{ inputs.quarto-log-level }}
+      PYTHONIOENCODING: utf-8
+      LANG: en_US.UTF-8
+      LC_ALL: en_US.UTF-8
+
+    steps:
+      - name: 🚦 Set Initial Build Status
+        shell: bash
+        run: |
+          echo "🚦 Setting initial build status to pending..."
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"pending\",
+              \"description\": \"Quarto build started (Traditional, ${{ inputs.format }})\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+
+      - name: 🔍 Validate inputs
+        shell: pwsh
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          [Console]::InputEncoding = [System.Text.Encoding]::UTF8
+          
+          Write-Output "🔄 Validating workflow inputs..."
+          Write-Output "👉 Target: ${{ inputs.target }}"
+          Write-Output "👉 OS: ${{ inputs.os }}"
+          Write-Output "👉 Environment: ${{ inputs.environment }}"
+          Write-Output "👉 Format: ${{ inputs.format }}"
+          Write-Output "👉 Build Method: Traditional (Proven)"
+          Write-Output "✅ Input validation passed"
+
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 📦 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+        with:
+          version: ${{ inputs.quarto-version }}
+
+      - name: 📋 Quarto Setup Info
+        shell: bash
+        run: |
+          echo "🔄 Checking Quarto installation..."
+          quarto check
+          echo "📊 Quarto version info:"
+          quarto --version
+          echo "📍 Quarto installation location:"
+          which quarto || where.exe quarto
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: 💾 Cache Python packages
+        uses: actions/cache@v4
+        id: cache-python-packages
+        with:
+          path: |
+            ~/.cache/pip
+            ~\AppData\Local\pip\Cache
+          key: python-pkgs-${{ runner.os }}-${{ hashFiles('tools/dependencies/requirements.txt') }}
+          restore-keys: |
+            python-pkgs-${{ runner.os }}-
+
+      # Install Ghostscript before Python package verification
+      - name: 📦 Install Ghostscript (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y ghostscript
+
+      - name: 📦 Install Ghostscript (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          try {
+            winget install ArtifexSoftware.GhostScript --accept-source-agreements --accept-package-agreements
+            Write-Output "✅ Ghostscript installed via winget"
+          } catch {
+            Write-Output "🔄 winget not available, using chocolatey..."
+            choco install ghostscript -y
+          }
+          
+          $gsPath = Get-ChildItem "C:\Program Files\gs" | Sort-Object Name -Descending | Select-Object -First 1
+          $binPath = Join-Path $gsPath.FullName "bin"
+          echo "Adding Ghostscript path: $binPath"
+          echo "$binPath" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding UTF8
+
+      - name: 📦 Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r tools/dependencies/requirements.txt
+
+      # Cache Linux system packages without hardcoded paths
+      - name: 💾 Cache APT packages
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        id: cache-apt
+        with:
+          path: ~/.apt-cache
+          key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/*.yml') }}
+          restore-keys: |
+            apt-${{ runner.os }}-
+
+      - name: 🛠️ Install Linux Dependencies
+        if: runner.os == 'Linux' && steps.cache-apt.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          echo "🔄 Installing Linux dependencies..."
+          echo "📦 Creating APT cache directory"
+          mkdir -p ~/.apt-cache
+
+          echo "📦 Updating package lists"
+          sudo apt-get update
+
+          echo "📦 Installing required system libraries"
+          sudo apt-get -o dir::cache::archives="$HOME/.apt-cache" install -y \
+            fonts-dejavu \
+            fonts-freefont-ttf \
+            gdk-pixbuf2.0-bin \
+            libcairo2 \
+            libfontconfig1 \
+            libfontconfig1-dev \
+            libfreetype6 \
+            libfreetype6-dev \
+            libpango-1.0-0 \
+            libpangocairo-1.0-0 \
+            libpangoft2-1.0-0 \
+            libxml2-dev \
+            libcurl4-openssl-dev \
+            libjpeg-dev \
+            libtiff5-dev \
+            libpng-dev \
+            libharfbuzz-dev \
+            libfribidi-dev \
+            librsvg2-dev \
+            libgdal-dev \
+            libudunits2-dev
+
+          echo "✅ Linux dependencies installed"
+                
+      - name: 🎨 Install Inkscape and font dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get remove -y inkscape || true
+          echo "📦 Installing Inkscape from PPA..."
+          sudo add-apt-repository ppa:inkscape.dev/stable -y
+          sudo apt-get update
+          sudo apt-get install -y inkscape
+          
+          echo "📦 Installing font dependencies..."
+          sudo apt-get install -y \
+            fonts-freefont-ttf \
+            fonts-liberation \
+            fontconfig
+          
+          echo "🧹 Updating font cache..."
+          sudo fc-cache -fv
+          
+          echo "📊 Inkscape version:"
+          inkscape --version
+          
+          echo "🧪 Testing Inkscape SVG to PDF conversion..."
+          echo '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><circle cx="50" cy="50" r="40" fill="red"/></svg>' > test.svg
+          inkscape --export-type=pdf --export-filename=test.pdf test.svg
+          
+          if [ -f test.pdf ]; then
+            echo "✅ Inkscape SVG to PDF conversion successful!"
+            ls -lh test.pdf
+          else
+            echo "❌ Inkscape SVG to PDF conversion failed."
+            echo "🔍 Checking Inkscape installation..."
+            dpkg -l | grep inkscape
+            which inkscape
+            ldd $(which inkscape) | grep "not found" || echo "All dependencies resolved"
+          fi
+          
+      - name: 🎨 Install Inkscape (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          [Console]::InputEncoding = [System.Text.Encoding]::UTF8
+          
+          try {
+            winget install Inkscape.Inkscape --accept-source-agreements --accept-package-agreements
+            Write-Output "✅ Inkscape installed via winget"
+          } catch {
+            Write-Output "🔄 winget not available, using chocolatey..."
+            choco install inkscape -y
+          }
+          
+          echo "C:\Program Files\Inkscape\bin" | Out-File -Append -Encoding UTF8 $env:GITHUB_PATH
+          
+          inkscape --version
+
+      # Install TeX Live packages (Cross-platform) - ALWAYS install for consistency
+      - name: 📦 Install TeX Live packages
+        uses: zauguin/install-texlive@v4
+        with:
+          package_file: tools/dependencies/tl_packages
+          texlive_version: 2025
+          cache_version: 1
+          
+      - name: 🔍 Verify TeX Live Installation
+        shell: bash
+        run: |
+          echo "🔄 Verifying TeX Live installation (installed for all builds)..."
+          echo "📊 Current format: ${{ inputs.format }}"
+          echo "📊 Philosophy: All builds get same environment, only build targets differ"
+          
+          echo "📊 Checking LaTeX engines:"
+          which lualatex || echo "❌ lualatex not found"
+          which pdflatex || echo "❌ pdflatex not found"
+          lualatex --version | head -2 || echo "❌ lualatex version failed"
+          
+          echo "📊 Checking core LaTeX and TikZ packages:"
+          kpsewhich pgf.sty && echo "✅ PGF package found" || echo "❌ PGF package missing"
+          kpsewhich pgfplots.sty && echo "✅ PGFPlots package found" || echo "❌ PGFPlots package missing"
+          kpsewhich xcolor.sty && echo "✅ XColor package found" || echo "❌ XColor package missing"
+          kpsewhich amsmath.sty && echo "✅ AMSMath package found" || echo "❌ AMSMath package missing"
+          kpsewhich standalone.cls && echo "✅ Standalone class found" || echo "❌ Standalone class missing"
+          
+          echo "📊 Checking font packages:"
+          kpsewhich phvr7t.tfm && echo "✅ Helvetica font found" || echo "❌ Helvetica font missing"
+          kpsewhich t1phv.fd && echo "✅ Helvetica font descriptor found" || echo "❌ Helvetica font descriptor missing"
+          
+          echo "🧪 Testing TikZ compilation..."
+          cat > test_tikz.tex << 'EOF'
+          \documentclass{standalone}
+          \usepackage{tikz}
+          \usepackage{pgfplots}
+          \usepackage{amsmath}
+          \usepackage{amssymb}
+          \usepackage{xcolor}
+          \usepackage[T1]{fontenc}
+          \usetikzlibrary{positioning}
+          \usetikzlibrary{calc}
+          \begin{document}
+          \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+          \node[draw, fill=blue!20] at (0,0) {TikZ Test};
+          \node[draw, fill=red!20] at (2,0) {Success};
+          \draw[->] (0.8,0) -- (1.2,0);
+          \end{tikzpicture}
+          \end{document}
+          EOF
+          
+          if lualatex -interaction=nonstopmode test_tikz.tex; then
+            echo "✅ TikZ compilation successful"
+            ls -la test_tikz.pdf
+          else
+            echo "❌ TikZ compilation failed"
+            cat test_tikz.log | tail -20 || echo "No log file found"
+          fi
+          
+          rm -f test_tikz.*
+         
+      - name: 📊 Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: ${{ inputs.r-version }}
+          use-public-rspm: true
+
+      - name: 📋 R Setup Info
+        shell: Rscript {0}
+        run: |
+          cat("🔄 R Version Information:\n")
+          cat(paste("R version:", R.version$version.string, "\n"))
+          cat(paste("R home:", R.home(), "\n"))
+          cat(paste("R library paths:", paste(.libPaths(), collapse=", "), "\n"))
+
+      # Cache R packages using standard paths
+      - name: 💾 Cache R packages
+        uses: actions/cache@v4
+        id: cache-r-packages
+        with:
+          path: |
+            ${{ env.R_LIBS_USER }}
+          key: r-pkgs-${{ runner.os }}-${{ inputs.r-version }}-${{ hashFiles('tools/dependencies/install_packages.R', '**/*.qmd') }}
+          restore-keys: |
+            r-pkgs-${{ runner.os }}-${{ inputs.r-version }}-
+
+      - name: 📦 Install R packages
+        if: steps.cache-r-packages.outputs.cache-hit != 'true'
+        shell: Rscript {0}
+        run: |
+          # Set options for better package installation
+          options(repos = c(CRAN = "https://cran.rstudio.com"))
+          
+          cat("🔄 Installing R packages...\n")
+          cat(paste("R library path:", Sys.getenv("R_LIBS_USER"), "\n"))
+          
+          # Create and set library path
+          lib_path <- Sys.getenv("R_LIBS_USER")
+          dir.create(lib_path, showWarnings = FALSE, recursive = TRUE)
+          .libPaths(lib_path)
+          
+          # Install packages
+          cat("📦 Installing remotes package...\n")
+          install.packages("remotes")
+          
+          if (file.exists("tools/dependencies/install_packages.R")) {
+            cat("📦 Installing packages from tools/dependencies/install_packages.R...\n")
+            source("tools/dependencies/install_packages.R")
+          } else {
+            cat("⚠️ No tools/dependencies/install_packages.R found, installing common packages\n")
+            pkgs <- c("rmarkdown", "knitr", "tidyverse", "ggplot2", "bookdown")
+            cat(paste("📦 Installing packages:", paste(pkgs, collapse=", "), "\n"))
+            install.packages(pkgs)
+          }
+          
+          cat("✅ R package installation complete\n")
+          cat("📊 Installed packages:\n")
+          ip <- installed.packages()[, "Package"]
+          print(head(ip, 10))
+          cat(paste("Total packages installed:", nrow(ip), "\n"))
+          
+          # Verify critical R packages are installed
+          cat("🔍 Verifying R package installation...\n")
+          required_r_packages <- c("ggplot2", "ggrepel", "knitr", "rmarkdown", "tidyverse", 
+                                 "reshape2", "reticulate", "rsvg", "viridis", "xml2", "dplyr", "grid")
+          missing_r_packages <- c()
+          for (pkg in required_r_packages) {
+            if (!requireNamespace(pkg, quietly = TRUE)) {
+              missing_r_packages <- c(missing_r_packages, pkg)
+            }
+          }
+          
+          if (length(missing_r_packages) > 0) {
+            cat(paste("❌ Missing R packages:", paste(missing_r_packages, collapse = ", "), "\n"))
+            quit(status = 1)
+          } else {
+            cat("✅ All required R packages installed successfully\n")
+          }
+
+      - name: 💓 Start Build Heartbeat
+        shell: bash
+        run: |
+          echo "💓 Starting build heartbeat system..."
+          echo "⏰ Build started at: $(date)"
+          echo "📊 Build configuration:"
+          echo "   - Format: ${{ inputs.format }}"
+          echo "   - OS: ${{ inputs.os }}"
+          echo "   - Environment: ${{ inputs.environment }}"
+          echo "   - Method: Traditional (Proven)"
+          echo "   - Timeout: 60 minutes"
+          echo "💓 Heartbeat will show progress every 5 minutes"
+          
+          # Start background heartbeat process
+          (
+            while true; do
+              sleep 300  # 5 minutes
+              echo "💓 Build heartbeat: $(date) - Still building..."
+              echo "📊 Current memory usage:"
+              free -h || echo "Memory info not available"
+              echo "📊 Current disk usage:"
+              df -h . || echo "Disk info not available"
+              echo "📊 Active processes:"
+              ps aux | grep -E "(quarto|R|python)" | head -5 || echo "Process info not available"
+              echo "---"
+            done
+          ) &
+          HEARTBEAT_PID=$!
+          echo $HEARTBEAT_PID > /tmp/heartbeat.pid
+          echo "✅ Heartbeat started (PID: $HEARTBEAT_PID)"
+
+      - name: 🔨 Build HTML (copy config and render)
+        if: inputs.format == 'html' || inputs.format == 'all'
+        shell: bash
+        run: |
+          echo "🚀 Setting up HTML configuration..."
+          cd book
+          rm -f _quarto.yml
+          cp config/_quarto-html.yml _quarto.yml
+          echo "✅ Configuration set to HTML"
+          
+          echo "🔨 Building HTML..."
+          echo "⏰ HTML build started at: $(date)"
+          
+          # Update status to building
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"pending\",
+              \"description\": \"Building HTML content (${{ inputs.os }})\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+          
+          # Enable verbose logging for debugging
+          quarto render --to html
+          echo "✅ HTML build completed at: $(date)"
+        
+      - name: 🔨 Build PDF (copy config and render)
+        if: inputs.format == 'pdf' || inputs.format == 'all'
+        shell: bash
+        run: |
+          echo "🚀 Setting up PDF configuration..."
+          cd book
+          rm -f _quarto.yml
+          cp config/_quarto-pdf.yml _quarto.yml
+          echo "✅ Configuration set to PDF"
+          
+          echo "🔨 Building PDF..."
+          echo "⏰ PDF build started at: $(date)"
+          echo "📊 This is typically the longest step (can take 30-45 minutes)"
+          echo "💓 Heartbeat will continue showing progress..."
+          
+          # Update status to building PDF
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"pending\",
+              \"description\": \"Building PDF content (${{ inputs.os }}) - this takes 30-45min\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+          
+          # Enable verbose logging for debugging
+          quarto render --to titlepage-pdf
+          echo "✅ PDF build completed at: $(date)"
+      
+      - name: 💓 Stop Build Heartbeat
+        shell: bash
+        run: |
+          echo "💓 Stopping build heartbeat..."
+          if [ -f /tmp/heartbeat.pid ]; then
+            HEARTBEAT_PID=$(cat /tmp/heartbeat.pid)
+            if kill -0 $HEARTBEAT_PID 2>/dev/null; then
+              kill $HEARTBEAT_PID
+              echo "✅ Heartbeat stopped (PID: $HEARTBEAT_PID)"
+            else
+              echo "⚠️ Heartbeat process already stopped"
+            fi
+            rm -f /tmp/heartbeat.pid
+          else
+            echo "⚠️ No heartbeat PID file found"
+          fi
+          echo "⏰ Total build time: $(date)"
+
+      - name: 📋 Check Quarto Build Output
+        shell: bash
+        run: |
+          echo "🔄 Checking Quarto build output..."
+
+          # HTML check
+          if [[ "${{ inputs.format }}" == "html" || "${{ inputs.format }}" == "all" ]]; then
+            if [ -d "build/html" ]; then
+              echo "✅ build/html directory exists"
+              echo "📊 Files in build/html directory:"
+              ls -la build/html | head -n 20
+              echo "📊 Total files in build/html:"
+              find build/html -type f | wc -l
+            else
+              echo "❌ build/html directory not found!"
+            fi
+          fi
+
+          # PDF check
+          if [[ "${{ inputs.format }}" == "pdf" || "${{ inputs.format }}" == "all" ]]; then
+            if [ -d "build/pdf" ]; then
+              echo "✅ build/pdf directory exists"
+              echo "📊 Files in build/pdf directory:"
+              ls -la build/pdf | head -n 20
+              echo "📊 Total files in build/pdf:"
+              find build/pdf -type f | wc -l
+              
+              if [ -f "build/pdf/Machine-Learning-Systems.pdf" ]; then
+                echo "✅ PDF file exists"
+                echo "📊 PDF file size:"
+                du -h "build/pdf/Machine-Learning-Systems.pdf"
+              else
+                echo "⚠️ PDF file not found!"
+              fi
+            else
+              echo "❌ build/pdf directory not found!"
+            fi
+          fi
+
+      - name: 📉 Compress PDF with Ghostscript (Linux)
+        if: runner.os == 'Linux' && (inputs.format == 'pdf' || inputs.format == 'all')
+        run: |
+          if [ -f "build/pdf/Machine-Learning-Systems.pdf" ]; then
+            gs \
+              -sDEVICE=pdfwrite \
+              -dCompatibilityLevel=1.4 \
+              -dPDFSETTINGS=/ebook \
+              -dNOPAUSE \
+              -dQUIET \
+              -dBATCH \
+              -sOutputFile="./build/pdf/ebook.pdf" \
+              "./build/pdf/Machine-Learning-Systems.pdf"
+
+            # Replace original with compressed
+            mv ./build/pdf/ebook.pdf ./build/pdf/Machine-Learning-Systems.pdf
+          else
+            echo "⚠️ PDF file not found for compression"
+          fi
+
+      - name: 📉 Compress PDF with Ghostscript (Windows)
+        if: runner.os == 'Windows' && (inputs.format == 'pdf' || inputs.format == 'all')
+        shell: pwsh
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          [Console]::InputEncoding = [System.Text.Encoding]::UTF8
+          
+          $input = "./build/pdf/Machine-Learning-Systems.pdf"
+          $output = "./build/pdf/ebook.pdf"
+
+          if (!(Test-Path $input)) {
+            Write-Warning "⚠️ Input PDF not found! Skipping compression..."
+            exit 0
+          }
+
+          Write-Output "📉 Compressing PDF using Ghostscript..."
+
+          & gswin64c -sDEVICE=pdfwrite -dCompatibilityLevel:1.4 -dPDFSETTINGS=/ebook -dNOPAUSE -dBATCH -sOutputFile="$output" "$input"
+
+          if (Test-Path $output) {
+            $afterSize = (Get-Item $output).Length / 1MB
+            Write-Output ("📏 Compressed PDF size: {0:N2} MB" -f $afterSize)
+            Write-Output "✅ Compression successful"
+            Move-Item -Force $output $input
+          } else {
+            Write-Warning "⚠️ Compression failed but continuing"
+          }
+          
+      - name: 📤 Upload build artifacts
+        if: github.event_name == 'pull_request' || inputs.deploy == false || inputs.format != 'html' || inputs.target == 'main'
+        id: upload-artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name != '' && inputs.artifact_name || format('build-{0}-{1}', inputs.os, inputs.format) }}
+          path: |
+            build/html
+            build/pdf
+
+      - name: 📋 Build Declaration
+        run: |
+          ARTIFACT_NAME="${{ inputs.artifact_name != '' && inputs.artifact_name || format('build-{0}-{1}', inputs.os, inputs.format) }}"
+          echo "📦 Build Declaration: Successfully created artifact '$ARTIFACT_NAME'"
+          echo "📊 Format: ${{ inputs.format }}"
+          echo "📊 OS: ${{ inputs.os }}"
+          echo "📊 Target: ${{ inputs.target }}"
+          echo "📊 Environment: ${{ inputs.environment }}"
+          echo "📊 Method: Traditional (Proven)"
+          echo "📝 Note: This workflow only builds artifacts - deployment handled by publish-live workflow"
+          echo "artifact_created=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
+
+      - name: 🎯 Set Final Build Status
+        if: always()
+        shell: bash
+        run: |
+          echo "🎯 Setting final build status..."
+          
+          if [ "${{ job.status }}" = "success" ]; then
+            STATE="success"
+            DESCRIPTION="Build completed successfully (Traditional, ${{ inputs.format }})"
+          else
+            STATE="failure"
+            DESCRIPTION="Build failed (Traditional, ${{ inputs.format }})"
+          fi
+          
+          echo "📊 Final status: $STATE"
+          echo "📝 Description: $DESCRIPTION"
+          
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"$STATE\",
+              \"description\": \"$DESCRIPTION\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+          
+          echo "✅ Commit status updated successfully" 
