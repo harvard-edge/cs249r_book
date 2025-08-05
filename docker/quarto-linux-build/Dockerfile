@@ -145,6 +145,7 @@ RUN mkdir -p $R_LIBS_USER
 # Copy dependency files
 COPY tools/dependencies/requirements.txt /tmp/
 COPY tools/dependencies/install_packages.R /tmp/
+COPY docker/quarto-linux-build/verify_r_packages.R /tmp/
 
 # Install Python packages
 RUN pip3 install --upgrade pip && \
@@ -155,10 +156,10 @@ RUN Rscript /tmp/install_packages.R
 
 # Verify R package installation (same as your workflow)
 RUN echo "🔍 Verifying R package installation..." && \
-    Rscript -e "source('/tmp/install_packages.R'); missing_packages <- required_packages[!sapply(required_packages, requireNamespace, quietly = TRUE)]; if(length(missing_packages) > 0) { cat('❌ Missing packages:', paste(missing_packages, collapse = ', '), '\n'); quit(status = 1) } else { cat('✅ All required R packages installed successfully\n') }"
+    Rscript /tmp/verify_r_packages.R
 
 # Clean up
-RUN rm -rf /tmp/requirements.txt /tmp/install_packages.R
+RUN rm -rf /tmp/requirements.txt /tmp/install_packages.R /tmp/verify_r_packages.R
 
 # Set working directory
 WORKDIR /workspace
