@@ -193,8 +193,8 @@ cd path/to/MLSysBook
 
 The book now uses a **dual-configuration approach** that automatically switches between optimized settings for different output formats:
 
-- **`book/_quarto-html.yml`** → Optimized for interactive website (clean navigation, TikZ→SVG, no citations)
-- **`book/_quarto-pdf.yml`** → Optimized for academic PDF (full citations, LaTeX rendering, book structure)
+- **`quarto/_quarto-html.yml`** → Optimized for interactive website (clean navigation, TikZ→SVG, no citations)
+- **`quarto/_quarto-pdf.yml`** → Optimized for academic PDF (full citations, LaTeX rendering, book structure)
 
 The build system automatically handles configuration switching using symlinks — **no manual file copying needed!**
 
@@ -341,7 +341,7 @@ Let me know if you'd like this saved as `manual_setup.md` or included in your Qu
 If you see errors like `File 'icon_callout-quiz-question.pdf' not found`, the PNG icons need to be converted to PDF format for LaTeX rendering:
 
 ```sh
-cd book/_extensions/ute/custom-numbered-blocks/style/icons
+cd quarto/_extensions/ute/custom-numbered-blocks/style/icons
 convert icon_callout-quiz-question.png icon_callout-quiz-question.pdf
 convert icon_callout-quiz-answer.png icon_callout-quiz-answer.pdf
 convert icon_callout-chapter-connection.png icon_callout-chapter-connection.pdf
