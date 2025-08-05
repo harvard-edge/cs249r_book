@@ -30,14 +30,18 @@ Containerized Linux Build (5-10 minutes):
 ## Files
 
 ### Core Files
-- `docker/quarto-build/Dockerfile` - Container definition with all dependencies
-- `docker/quarto-build/README.md` - Container documentation
+- `docker/quarto-build/Dockerfile` - Linux container definition with all dependencies
+- `docker/quarto-build/README.md` - Linux container documentation
 - `docker/quarto-build/.dockerignore` - Build exclusions
-- `.github/workflows/build-container.yml` - Builds and pushes container
+- `docker/quarto-build-windows/Dockerfile` - Windows container definition
+- `.github/workflows/build-linux-container.yml` - Builds and pushes Linux container
+- `.github/workflows/build-windows-container.yml` - Builds and pushes Windows container
 - `.github/workflows/quarto-build-container.yml` - Containerized build workflow
 
 ### Container Lifecycle
 1. **Build**: Weekly automatic rebuilds + manual triggers
+   - Linux container: Sunday 12am
+   - Windows container: Sunday 2am
 2. **Storage**: GitHub Container Registry (ghcr.io)
 3. **Usage**: Pulled fresh for each build job
 4. **Cleanup**: GitHub manages old images automatically
@@ -46,8 +50,11 @@ Containerized Linux Build (5-10 minutes):
 
 ### Manual Container Build
 ```bash
-# Trigger container build manually
-gh workflow run build-container.yml
+# Trigger Linux container build manually
+gh workflow run build-linux-container.yml
+
+# Trigger Windows container build manually
+gh workflow run build-windows-container.yml
 ```
 
 ### Manual Build Test
@@ -57,15 +64,19 @@ gh workflow run quarto-build-container.yml --field os=ubuntu-latest --field form
 ```
 
 ### Container Information
-- **Registry**: `ghcr.io/harvard-edge/cs249r_book/quarto-build`
+- **Linux Registry**: `ghcr.io/harvard-edge/cs249r_book/quarto-build`
+- **Windows Registry**: `ghcr.io/harvard-edge/cs249r_book/quarto-build-windows`
 - **Tags**: `latest`, `main`, `dev`, branch-specific tags
-- **Size**: ~2-3GB (includes TeX Live, R, Python packages)
+- **Linux Size**: ~2-3GB (includes TeX Live, R, Python packages)
+- **Windows Size**: ~4-5GB (includes Windows Server Core + dependencies)
 
 ## Workflow Integration
 
 ### Current Workflows
-- `quarto-build.yml` - Original workflow (unchanged)
-- `quarto-build-container.yml` - New containerized version
+- `quarto-build.yml` - Original workflow (brute force approach)
+- `quarto-build-container.yml` - Containerized version (fast path)
+- `build-linux-container.yml` - Linux container management
+- `build-windows-container.yml` - Windows container management
 
 ### Migration Strategy
 1. **Phase 1**: Test containerized builds on dev branch
@@ -75,12 +86,22 @@ gh workflow run quarto-build-container.yml --field os=ubuntu-latest --field form
 ## Container Contents
 
 ### Pre-installed Dependencies
+
+#### Linux Container
 - **System**: Ubuntu 22.04 with all required libraries
 - **TeX Live**: Full distribution (texlive-full)
 - **R**: R-base with all required packages
 - **Python**: Python 3.13 with all requirements
 - **Quarto**: Version 1.7.31
 - **Tools**: Inkscape, Ghostscript, fonts
+
+#### Windows Container
+- **System**: Windows Server Core 2022
+- **TeX Live**: MiKTeX distribution
+- **R**: R-base with all required packages
+- **Python**: Python 3.x with all requirements
+- **Quarto**: Version 1.7.31
+- **Tools**: Inkscape, Ghostscript, Chocolatey package manager
 
 ### Environment Variables
 ```bash
