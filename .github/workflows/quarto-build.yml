@@ -1,4 +1,4 @@
-name: '📚 Quarto Build'
+name: '🏗️ Quarto Build'
 
 # Set retention period to 7 days
 env:
@@ -47,6 +47,11 @@ on:
         type: string
         default: 'INFO'
         description: 'Quarto log level (INFO/DEBUG)'
+      artifact_name:
+        required: false
+        type: string
+        default: ''
+        description: 'Explicit artifact name (if empty, uses build-{os}-{format} pattern)'
     secrets:
       SSH_DEPLOY_KEY:
         required: false
@@ -631,13 +636,25 @@ jobs:
           }
           
       - name: 📤 Upload build artifacts
-        if: github.event_name == 'pull_request' || inputs.deploy == false || inputs.format != 'html'
+        if: github.event_name == 'pull_request' || inputs.deploy == false || inputs.format != 'html' || inputs.target == 'main'
+        id: upload-artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: build-${{ inputs.os }}-${{ inputs.format }}
+          name: ${{ inputs.artifact_name != '' && inputs.artifact_name || format('build-{0}-{1}', inputs.os, inputs.format) }}
           path: |
             build/html
                     build/pdf
+
+      - name: 📋 Producer Declaration
+        if: github.event_name == 'pull_request' || inputs.deploy == false || inputs.format != 'html' || inputs.target == 'main'
+        run: |
+          ARTIFACT_NAME="${{ inputs.artifact_name != '' && inputs.artifact_name || format('build-{0}-{1}', inputs.os, inputs.format) }}"
+          echo "📦 Producer Declaration: Successfully created artifact '$ARTIFACT_NAME'"
+          echo "📊 Format: ${{ inputs.format }}"
+          echo "📊 OS: ${{ inputs.os }}"
+          echo "📊 Target: ${{ inputs.target }}"
+          echo "📊 Environment: ${{ inputs.environment }}"
+          echo "artifact_created=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
 
       - name: 🚀 Stage to Dev Site
         if: inputs.target == 'dev' && inputs.deploy == true && inputs.format == 'html' && runner.os == 'Linux'
@@ -683,9 +700,9 @@ jobs:
           echo "📊 Source directory: build/html"
           echo "✅ Deployment should be complete"
 
-      # Deploy to GitHub Pages
-      - name: 🚀 Deploy to GitHub Pages
-        if: inputs.target == 'main' && runner.os == 'Linux' && inputs.deploy == true && inputs.format == 'html'
+      # Deploy to GitHub Pages (only for dev builds - main builds use publish-live for coordinated deployment)
+      - name: 🚀 Deploy to GitHub Pages  
+        if: inputs.target == 'dev' && runner.os == 'Linux' && inputs.deploy == true && inputs.format == 'html'
         shell: bash
         run: |
           echo "🚀 Deploying to GitHub Pages..."
@@ -739,7 +756,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 📋 GitHub Pages Deployment Info
-        if: inputs.target == 'main' && runner.os == 'Linux' && inputs.deploy == true
+        if: inputs.target == 'dev' && runner.os == 'Linux' && inputs.deploy == true
         shell: bash
         run: |
           echo "🔄 GitHub Pages deployment information:"
