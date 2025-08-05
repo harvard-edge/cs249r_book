@@ -38,6 +38,7 @@ RUN mkdir C:\r-lib
 # Copy dependency files
 COPY tools/dependencies/requirements.txt C:\temp\
 COPY tools/dependencies/install_packages.R C:\temp\
+COPY docker/quarto-build-windows/verify_r_packages.R C:\temp\
 
 # Install Python packages
 RUN python -m pip install --upgrade pip
@@ -48,10 +49,10 @@ RUN Rscript C:\temp\install_packages.R
 
 # Verify R package installation (same as Linux container)
 RUN echo "🔍 Verifying R package installation..." && \
-    Rscript -e "source('C:/temp/install_packages.R'); missing_packages <- required_packages[!sapply(required_packages, requireNamespace, quietly = TRUE)]; if(length(missing_packages) > 0) { cat('❌ Missing packages:', paste(missing_packages, collapse = ', '), '\n'); quit(status = 1) } else { cat('✅ All required R packages installed successfully\n') }"
+    Rscript C:\temp\verify_r_packages.R
 
 # Clean up
-RUN del C:\temp\requirements.txt C:\temp\install_packages.R
+RUN del C:\temp\requirements.txt C:\temp\install_packages.R C:\temp\verify_r_packages.R
 
 # Set working directory
 WORKDIR C:\workspace
