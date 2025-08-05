@@ -62,14 +62,40 @@ insertPreamble = function(doc, classDefs, fmt)
   -- Set icon path from filter-metadata configuration if available
   local meta = doc.meta
   local filterMetadata = meta["filter-metadata"]
+  local iconCSS = ""
   if filterMetadata and filterMetadata["mlsysbook-ext/custom-numbered-blocks"] then
     local config = filterMetadata["mlsysbook-ext/custom-numbered-blocks"]
     if config["icon-path"] then
       local iconPath = str(config["icon-path"])
-      local iconFormat = str(config["icon-format"] or "pdf")
-      -- Define the commands before including foldbox.tex
-      quarto.doc.include_text("in-header", "\\newcommand{\\fbxIconPath}{" .. iconPath .. "}")
-      quarto.doc.include_text("in-header", "\\newcommand{\\fbxIconFormat}{" .. iconFormat .. "}")
+      local iconFormat = str(config["icon-format"] or "png")
+      
+      if fmt == "html" then
+        -- Generate dynamic CSS for icon paths
+        iconCSS = "<style>\n"
+        iconCSS = iconCSS .. "details.callout-quiz-question > summary::before {\n"
+        iconCSS = iconCSS .. "  background-image: url(\"" .. iconPath .. "/icon_callout-quiz-question." .. iconFormat .. "\");\n"
+        iconCSS = iconCSS .. "}\n"
+        iconCSS = iconCSS .. "details.callout-quiz-answer > summary::before {\n"
+        iconCSS = iconCSS .. "  background-image: url(\"" .. iconPath .. "/icon_callout-quiz-answer." .. iconFormat .. "\");\n"
+        iconCSS = iconCSS .. "}\n"
+        iconCSS = iconCSS .. "details.callout-chapter-connection > summary::before {\n"
+        iconCSS = iconCSS .. "  background-image: url(\"" .. iconPath .. "/icon_callout-chapter-connection." .. iconFormat .. "\");\n"
+        iconCSS = iconCSS .. "}\n"
+        iconCSS = iconCSS .. "details.callout-resource-slides > summary::before {\n"
+        iconCSS = iconCSS .. "  background-image: url(\"" .. iconPath .. "/icon_callout-resource-slides." .. iconFormat .. "\");\n"
+        iconCSS = iconCSS .. "}\n"
+        iconCSS = iconCSS .. "details.callout-resource-videos > summary::before {\n"
+        iconCSS = iconCSS .. "  background-image: url(\"" .. iconPath .. "/icon_callout-resource-videos." .. iconFormat .. "\");\n"
+        iconCSS = iconCSS .. "}\n"
+        iconCSS = iconCSS .. "details.callout-resource-exercises > summary::before {\n"
+        iconCSS = iconCSS .. "  background-image: url(\"" .. iconPath .. "/icon_callout-resource-exercises." .. iconFormat .. "\");\n"
+        iconCSS = iconCSS .. "}\n"
+        iconCSS = iconCSS .. "</style>"
+      elseif fmt == "pdf" then
+        -- Define the commands before including foldbox.tex
+        quarto.doc.include_text("in-header", "\\newcommand{\\fbxIconPath}{" .. iconPath .. "}")
+        quarto.doc.include_text("in-header", "\\newcommand{\\fbxIconFormat}{" .. iconFormat .. "}")
+      end
     end
   end
   
@@ -120,6 +146,7 @@ insertPreamble = function(doc, classDefs, fmt)
       quarto.doc.include_file("in-header", 'style/foldbox.tex')
   end
   if preamblestuff then quarto.doc.include_text("in-header", preamblestuff) end
+  if iconCSS ~= "" then quarto.doc.include_text("in-header", iconCSS) end
   return(doc)
 end
 }
