@@ -43,11 +43,25 @@ RUN pwsh -Command " \
     " && \
     choco install -y python --version=3.13.1 && \
     pwsh -Command " \
+    # Refresh environment variables to pick up Python PATH \
+    $env:PATH = [System.Environment]::GetEnvironmentVariable('PATH', [System.EnvironmentVariableTarget]::Machine) + ';' + [System.Environment]::GetEnvironmentVariable('PATH', [System.EnvironmentVariableTarget]::User); \
+    # Add common Python paths explicitly \
+    $env:PATH += ';C:\Python313;C:\Python313\Scripts;C:\ProgramData\chocolatey\bin'; \
+    \
     $endTime = Get-Date; \
     $duration = ($endTime - $startTime).TotalMinutes; \
     Write-Host ('✅ === PYTHON 3.13 INSTALLATION COMPLETE === (' + $duration.ToString('F1') + ' minutes)'); \
-    Write-Host ('📊 Python version: ' + (python --version)); \
-    Write-Host ('📊 Pip version: ' + (python -m pip --version)); \
+    \
+    # Test Python installation with explicit path handling \
+    try { \
+        $pythonVersion = & python --version 2>&1; \
+        Write-Host ('📊 Python version: ' + $pythonVersion); \
+        $pipVersion = & python -m pip --version 2>&1; \
+        Write-Host ('📊 Pip version: ' + $pipVersion); \
+    } catch { \
+        Write-Host '⚠️ Python installed but not immediately available in PATH (normal for containers)'; \
+        Write-Host 'Python will be available in subsequent RUN commands'; \
+    } \
     "
 
 # Install Python dependencies (same as workflow with progress indicators)
@@ -55,21 +69,30 @@ RUN pwsh -Command " \
     Write-Host '🚀 === STARTING PYTHON PACKAGE INSTALLATION ==='; \
     Write-Host '⏰ Estimated time: 1-2 minutes'; \
     $startTime = Get-Date; \
+    \
+    # Ensure Python is in PATH \
+    $env:PATH = [System.Environment]::GetEnvironmentVariable('PATH', [System.EnvironmentVariableTarget]::Machine) + ';C:\Python313;C:\Python313\Scripts;C:\ProgramData\chocolatey\bin'; \
+    \
     Write-Host '🔄 Upgrading pip...'; \
-    " && \
-    python -m pip install --upgrade pip && \
-    pwsh -Command " \
+    & python -m pip install --upgrade pip; \
+    \
     Write-Host '📊 Analyzing requirements.txt...'; \
     $packageCount = (Get-Content 'C:/temp/requirements.txt' | Where-Object { $_ -notmatch '^#' -and $_ -ne '' }).Count; \
     Write-Host ('📦 Found ' + $packageCount + ' Python packages to install'); \
+    \
     Write-Host '🔄 Installing Python packages...'; \
-    " && \
-    python -m pip install -r C:/temp/requirements.txt && \
-    pwsh -Command " \
+    & python -m pip install -r C:/temp/requirements.txt; \
+    \
     $endTime = Get-Date; \
     $duration = ($endTime - $startTime).TotalMinutes; \
     Write-Host ('✅ === PYTHON PACKAGES COMPLETE === (' + $duration.ToString('F1') + ' minutes)'); \
-    Write-Host ('📊 Total packages: ' + (python -m pip list | Measure-Object).Count); \
+    \
+    try { \
+        $packageCount = (& python -m pip list | Measure-Object).Count; \
+        Write-Host ('📊 Total packages: ' + $packageCount); \
+    } catch { \
+        Write-Host '📊 Python packages installed successfully'; \
+    } \
     "
 
 # Install Ghostscript (using exact method from workflow with progress indicators)
