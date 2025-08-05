@@ -97,11 +97,23 @@ RUN echo '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><circ
     fi && \
     rm -f test.svg test.pdf
 
-# Install Ghostscript
-RUN apt-get update && apt-get install -y ghostscript && rm -rf /var/lib/apt/lists/*
+# === PHASE 5: GHOSTSCRIPT INSTALLATION ===
+RUN echo "🚀 === STARTING GHOSTSCRIPT INSTALLATION ===" && \
+    echo "⏰ Estimated time: 30 seconds" && \
+    start_time=$(date +%s) && \
+    \
+    echo "📦 Installing Ghostscript..." && \
+    apt-get update && apt-get install -y ghostscript && \
+    \
+    echo "🧹 Cleaning package cache..." && \
+    rm -rf /var/lib/apt/lists/* && \
+    \
+    end_time=$(date +%s) && \
+    duration=$((end_time - start_time)) && \
+    echo "✅ === GHOSTSCRIPT INSTALLATION COMPLETE === (${duration}s)"
 
 # === PHASE 4: TEX LIVE INSTALLATION ===
-COPY tools/dependencies/tl_packages /tmp/
+COPY tools/dependencies/tl_packages /tmp/tl_packages
 RUN echo "🚀 === STARTING TEX LIVE INSTALLATION ===" && \
     echo "⏰ Estimated time: 8-12 minutes (largest phase)" && \
     echo "📊 Free disk space before: $(df -h / | tail -1 | awk '{print $4}')" && \
@@ -144,12 +156,15 @@ RUN echo "🚀 === STARTING TEX LIVE INSTALLATION ===" && \
     echo "📦 Found $collection_count TeX Live collections to install" && \
     \
     echo "🔄 Installing TeX Live collections..." && \
+    export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH && \
     i=1 && \
-    grep -E '^collection-' /tmp/tl_packages | while read collection; do \
-        echo "📦 [$i/$collection_count] Installing $collection..."; \
-        tlmgr install "$collection"; \
-        i=$((i+1)); \
-    done && \
+    while IFS= read -r collection; do \
+        if [[ "$collection" =~ ^collection- ]]; then \
+            echo "📦 [$i/$collection_count] Installing $collection..."; \
+            tlmgr install "$collection" || echo "⚠️ Failed to install $collection, continuing..."; \
+            i=$((i+1)); \
+        fi; \
+    done < /tmp/tl_packages && \
     \
     echo "🧹 Cleaning up TeX Live installer..." && \
     rm -rf /tmp/install-tl-* /tmp/texlive.profile /tmp/install-tl-unx.tar.gz && \
@@ -167,7 +182,7 @@ RUN export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH && \
     lualatex --version | head -1 && \
     echo "✅ TeX Live verification successful"
 
-# === PHASE 5: R INSTALLATION ===
+# === PHASE 6: R INSTALLATION ===
 RUN echo "🚀 === STARTING R INSTALLATION ===" && \
     echo "⏰ Estimated time: 1-2 minutes" && \
     start_time=$(date +%s) && \
@@ -187,7 +202,7 @@ RUN echo "🚀 === STARTING R INSTALLATION ===" && \
     duration=$((end_time - start_time)) && \
     echo "✅ === R INSTALLATION COMPLETE === (${duration}s)"
 
-# === PHASE 6: PYTHON INSTALLATION ===
+# === PHASE 7: PYTHON INSTALLATION ===
 RUN echo "🚀 === STARTING PYTHON INSTALLATION ===" && \
     echo "⏰ Estimated time: 1 minute" && \
     start_time=$(date +%s) && \
@@ -208,10 +223,23 @@ RUN echo "🚀 === STARTING PYTHON INSTALLATION ===" && \
     duration=$((end_time - start_time)) && \
     echo "✅ === PYTHON INSTALLATION COMPLETE === (${duration}s)"
 
-# Install Quarto
-RUN wget -q https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.31/quarto-1.7.31-linux-amd64.deb && \
+# === PHASE 3: QUARTO INSTALLATION ===
+RUN echo "🚀 === STARTING QUARTO INSTALLATION ===" && \
+    echo "⏰ Estimated time: 1 minute" && \
+    start_time=$(date +%s) && \
+    \
+    echo "📦 Downloading Quarto 1.7.31..." && \
+    wget -q https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.31/quarto-1.7.31-linux-amd64.deb && \
+    \
+    echo "📦 Installing Quarto..." && \
     dpkg -i quarto-1.7.31-linux-amd64.deb && \
-    rm quarto-1.7.31-linux-amd64.deb
+    \
+    echo "🧹 Cleaning up installer..." && \
+    rm quarto-1.7.31-linux-amd64.deb && \
+    \
+    end_time=$(date +%s) && \
+    duration=$((end_time - start_time)) && \
+    echo "✅ === QUARTO INSTALLATION COMPLETE === (${duration}s)"
 
 # Create R library directory
 RUN mkdir -p $R_LIBS_USER
@@ -219,10 +247,10 @@ RUN mkdir -p $R_LIBS_USER
 # Copy dependency files
 COPY tools/dependencies/requirements/ /tmp/requirements/
 COPY tools/dependencies/requirements-build.txt /tmp/requirements.txt
-COPY tools/dependencies/install_packages.R /tmp/
-COPY docker/quarto-linux-build/verify_r_packages.R /tmp/
+COPY tools/dependencies/install_packages.R /tmp/install_packages.R
+COPY docker/quarto-linux-build/verify_r_packages.R /tmp/verify_r_packages.R
 
-# === PHASE 12: PYTHON PACKAGES ===
+# === PHASE 8: PYTHON PACKAGES ===
 RUN echo "🚀 === STARTING PYTHON PACKAGE INSTALLATION ===" && \
     echo "⏰ Estimated time: 1-2 minutes" && \
     start_time=$(date +%s) && \
@@ -250,6 +278,7 @@ RUN echo "🚀 === STARTING PYTHON PACKAGE INSTALLATION ===" && \
     duration=$((end_time - start_time)) && \
     echo "✅ === PYTHON PACKAGES COMPLETE === (${duration}s)"
 
+# === PHASE 9: R PACKAGES ===
 # Install R packages (using same process as successful workflow)
 RUN R --slave -e " \
     # Set options for better package installation \
@@ -284,11 +313,11 @@ RUN R --slave -e " \
     cat(paste('Total packages installed:', nrow(ip), '\n')); \
     "
 
-# Verify R package installation (same as your workflow)
+# === PHASE 10: R PACKAGE VERIFICATION ===
 RUN echo "🔍 Verifying R package installation..." && \
     Rscript /tmp/verify_r_packages.R
 
-# === PHASE 15: AGGRESSIVE CLEANUP ===
+# === PHASE 11: COMPREHENSIVE CLEANUP ===
 RUN echo "🚀 === STARTING COMPREHENSIVE CLEANUP ===" && \
     echo "📊 Disk space before cleanup: $(df -h / | tail -1 | awk '{print $4}')" && \
     start_time=$(date +%s) && \

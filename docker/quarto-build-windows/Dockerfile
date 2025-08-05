@@ -4,12 +4,12 @@
 
 FROM mcr.microsoft.com/windows/servercore:ltsc2022
 
-# Install PowerShell 7 first using curl (available in Windows Server Core)
+# === PHASE 1: POWERSHELL 7 INSTALLATION ===
 RUN curl -fSLo PowerShell.msi https://github.com/PowerShell/PowerShell/releases/download/v7.4.1/PowerShell-7.4.1-win-x64.msi && \
     msiexec /i PowerShell.msi /quiet /norestart && \
     del PowerShell.msi
 
-# Install Chocolatey using PowerShell 7 (pwsh)
+# === PHASE 2: CHOCOLATEY INSTALLATION ===
 RUN pwsh -Command "Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))"
 
 # Set environment variables to match workflow
@@ -22,20 +22,35 @@ ENV LC_ALL=en_US.UTF-8
 # Copy dependency files needed for installations
 COPY tools/dependencies/requirements/ C:/temp/requirements/
 COPY tools/dependencies/requirements-build.txt C:/temp/requirements.txt
-COPY tools/dependencies/install_packages.R C:/temp/install_packages.R  
+COPY tools/dependencies/install_packages.R C:/temp/install_packages.R
 COPY tools/dependencies/tl_packages C:/temp/tl_packages
 COPY docker/quarto-build-windows/verify_r_packages.R C:/temp/verify_r_packages.R
 
 # Create R library directory
 RUN pwsh -Command "New-Item -ItemType Directory -Path 'C:/r-lib' -Force"
 
-# Setup Quarto (using exact version from workflow)
-RUN pwsh -Command "Invoke-WebRequest -Uri 'https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.31/quarto-1.7.31-win.zip' -OutFile 'quarto.zip'" && \
-    pwsh -Command "Expand-Archive -Path 'quarto.zip' -DestinationPath 'C:\quarto' -Force" && \
-    pwsh -Command "del quarto.zip" && \
+# === PHASE 3: QUARTO INSTALLATION ===
+RUN pwsh -Command " \
+    Write-Host '🚀 === STARTING QUARTO INSTALLATION ==='; \
+    Write-Host '⏰ Estimated time: 1-2 minutes'; \
+    $startTime = Get-Date; \
+    \
+    Write-Host '📦 Downloading Quarto 1.7.31...'; \
+    Invoke-WebRequest -Uri 'https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.31/quarto-1.7.31-win.zip' -OutFile 'quarto.zip'; \
+    \
+    Write-Host '📦 Extracting Quarto...'; \
+    Expand-Archive -Path 'quarto.zip' -DestinationPath 'C:\quarto' -Force; \
+    \
+    Write-Host '🧹 Cleaning up installer...'; \
+    Remove-Item 'quarto.zip'; \
+    \
+    $endTime = Get-Date; \
+    $duration = ($endTime - $startTime).TotalMinutes; \
+    Write-Host ('✅ === QUARTO INSTALLATION COMPLETE === (' + $duration.ToString('F1') + ' minutes)'); \
+    " && \
     setx PATH "%PATH%;C:\quarto\quarto-1.7.31\bin" /M
 
-# Setup Python 3.13 (same as workflow with progress indicators)
+# === PHASE 4: PYTHON 3.13 INSTALLATION ===
 RUN pwsh -Command " \
     Write-Host '🚀 === STARTING PYTHON 3.13 INSTALLATION ==='; \
     Write-Host '⏰ Estimated time: 2-3 minutes'; \
@@ -65,7 +80,7 @@ RUN pwsh -Command " \
     } \
     "
 
-# Install Python dependencies (same as workflow with progress indicators)
+# === PHASE 5: PYTHON PACKAGE INSTALLATION ===
 RUN pwsh -Command " \
     Write-Host '🚀 === STARTING PYTHON PACKAGE INSTALLATION ==='; \
     Write-Host '⏰ Estimated time: 1-2 minutes'; \
@@ -96,38 +111,17 @@ RUN pwsh -Command " \
     } \
     "
 
-# Install Ghostscript (direct download - most reliable for containers)
+# === PHASE 6: GHOSTSCRIPT INSTALLATION ===
 RUN pwsh -Command " \
     Write-Host '🚀 === STARTING GHOSTSCRIPT INSTALLATION ==='; \
-    Write-Host '⏰ Estimated time: 1-2 minutes (direct download)'; \
-    Write-Host 'Free disk space: ' + ((Get-WmiObject -Class Win32_LogicalDisk -Filter \"DeviceID='C:'\").FreeSpace / 1GB).ToString('F2') + ' GB'; \
+    Write-Host '⏰ Estimated time: 1-2 minutes (using proven method from quarto-build workflow)'; \
     $startTime = Get-Date; \
     \
-    Write-Host '📦 Downloading Ghostscript directly (bypassing package managers)...'; \
-    $url = 'https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/gs10051/gs10051w64.exe'; \
-    $installer = 'C:/temp/ghostscript.exe'; \
+    Write-Host '📦 Installing Ghostscript using chocolatey (most reliable for containers)...'; \
+    choco install ghostscript -y; \
+    Write-Host '✅ Ghostscript installed via chocolatey'; \
     \
-    Write-Host '🔄 Starting download from GitHub releases...'; \
-    try { \
-        Invoke-WebRequest -Uri $url -OutFile $installer -UseBasicParsing; \
-        $fileSize = (Get-Item $installer).Length / 1MB; \
-        Write-Host ('📊 Downloaded: ' + $fileSize.ToString('F1') + ' MB'); \
-    } catch { \
-        Write-Host '⚠️ GitHub download failed, trying alternative source...'; \
-        $altUrl = 'https://www.ghostscript.com/releases/gpcldnld.html'; \
-        Write-Host '🔄 Using direct Ghostscript.com download...'; \
-        $altUrl = 'https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/gs10051/gs10051w32.exe'; \
-        Invoke-WebRequest -Uri $altUrl -OutFile $installer -UseBasicParsing; \
-    } \
-    \
-    Write-Host '📦 Installing Ghostscript silently...'; \
-    Write-Host 'Running: ' + $installer + ' /S /D=C:/Program Files/gs/gs10.05.1'; \
-    Start-Process -FilePath $installer -ArgumentList '/S', '/D=C:/Program Files/gs/gs10.05.1' -Wait -NoNewWindow; \
-    \
-    Write-Host '🧹 Cleaning up installer...'; \
-    Remove-Item $installer -ErrorAction SilentlyContinue; \
-    \
-    Write-Host '🔧 Configuring Ghostscript PATH...'; \
+    Write-Host '🔧 Adding Ghostscript to PATH...'; \
     $gsPath = Get-ChildItem 'C:/Program Files/gs' -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1; \
     if ($gsPath) { \
         $binPath = Join-Path $gsPath.FullName 'bin'; \
@@ -142,16 +136,8 @@ RUN pwsh -Command " \
             Write-Host '⚠️ Ghostscript installed but test failed (normal in some containers)'; \
         } \
     } else { \
-        Write-Host '⚠️ Ghostscript installation directory not found, checking alternative locations...'; \
-        $altPath = 'C:/Program Files (x86)/gs'; \
-        if (Test-Path $altPath) { \
-            $gsPath = Get-ChildItem $altPath | Sort-Object Name -Descending | Select-Object -First 1; \
-            $binPath = Join-Path $gsPath.FullName 'bin'; \
-            Write-Host ('📍 Found Ghostscript at: ' + $binPath); \
-            [Environment]::SetEnvironmentVariable('PATH', \"$env:PATH;$binPath\", [EnvironmentVariableTarget]::Machine); \
-        } else { \
-            Write-Host '❌ Ghostscript installation failed - directory not found'; \
-        } \
+        Write-Host '❌ Ghostscript installation failed - directory not found'; \
+        exit 1; \
     } \
     \
     $endTime = Get-Date; \
@@ -159,7 +145,7 @@ RUN pwsh -Command " \
     Write-Host ('✅ === GHOSTSCRIPT INSTALLATION COMPLETE === (' + $duration.ToString('F1') + ' minutes)'); \
     "
 
-# Install Inkscape (using exact method from workflow with progress indicators)
+# === PHASE 7: INKSCAPE INSTALLATION ===
 RUN pwsh -Command " \
     Write-Host '🚀 === STARTING INKSCAPE INSTALLATION ==='; \
     Write-Host '⏰ Estimated time: 2-3 minutes'; \
@@ -188,7 +174,7 @@ RUN pwsh -Command " \
     Write-Host ('✅ === INKSCAPE INSTALLATION COMPLETE === (' + $duration.ToString('F1') + ' minutes)'); \
     "
 
-# Install TeX Live packages (using zauguin/install-texlive equivalent with progress indicators)
+# === PHASE 8: TEX LIVE INSTALLATION ===
 RUN pwsh -Command " \
     Write-Host '🚀 === STARTING TEX LIVE INSTALLATION ==='; \
     Write-Host '⏰ Estimated time: 8-12 minutes (largest phase)'; \
@@ -241,7 +227,7 @@ TEXMFVAR C:/texlive/texmf-var \
     Write-Host 'Free disk space after: ' + ((Get-WmiObject -Class Win32_LogicalDisk -Filter \"DeviceID='C:'\").FreeSpace / 1GB).ToString('F2') + ' GB'; \
     "
 
-# Setup R (using exact version from workflow with progress indicators)
+# === PHASE 9: R INSTALLATION ===
 RUN pwsh -Command " \
     Write-Host '🚀 === STARTING R INSTALLATION ==='; \
     Write-Host '⏰ Estimated time: 2-3 minutes'; \
@@ -256,7 +242,7 @@ RUN pwsh -Command " \
     Write-Host ('📊 R version: ' + (R --version | Select-Object -First 1)); \
     "
 
-# Install R packages (using simplified workflow approach with progress indicators)
+# === PHASE 10: R PACKAGE INSTALLATION ===
 RUN pwsh -Command " \
     Write-Host '🚀 === STARTING R PACKAGE INSTALLATION ==='; \
     Write-Host '⏰ Estimated time: 3-5 minutes'; \
@@ -292,12 +278,20 @@ RUN pwsh -Command " \
     Write-Host ('✅ === R PACKAGE INSTALLATION COMPLETE === (' + $duration.ToString('F1') + ' minutes)'); \
     "
 
-# Verify R package installation
+# === PHASE 11: R PACKAGE VERIFICATION ===
 RUN pwsh -Command "Write-Host '🔍 Verifying R package installation...'" && \
     Rscript C:/temp/verify_r_packages.R
 
-# Clean up
-RUN del C:/temp/requirements.txt C:/temp/install_packages.R C:/temp/verify_r_packages.R C:/temp/tl_packages
+# === PHASE 12: CLEANUP ===
+RUN pwsh -Command " \
+    Write-Host '🧹 === STARTING CLEANUP ==='; \
+    Remove-Item C:/temp/requirements.txt -ErrorAction SilentlyContinue; \
+    Remove-Item C:/temp/install_packages.R -ErrorAction SilentlyContinue; \
+    Remove-Item C:/temp/verify_r_packages.R -ErrorAction SilentlyContinue; \
+    Remove-Item C:/temp/tl_packages -ErrorAction SilentlyContinue; \
+    Remove-Item C:/temp/requirements/ -Recurse -Force -ErrorAction SilentlyContinue; \
+    Write-Host '✅ === CLEANUP COMPLETE ==='; \
+    "
 
 # Set working directory
 WORKDIR C:/workspace

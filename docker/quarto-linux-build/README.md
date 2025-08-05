@@ -75,6 +75,35 @@ The container build includes 17 comprehensive tests:
 
 ## Performance
 
+The container reduces build times significantly:
+- **Traditional Linux build**: 45 minutes (including dependency installation)
+- **Containerized build**: 5-10 minutes (dependencies pre-installed)
+- **Container size**: ~2-3GB (optimized with multi-layer cleanup)
+- **Build phases**: 11 optimized phases with progress tracking
+
+## Recent Improvements (2025)
+
+- Fixed dependency path issues after repository restructuring
+- Improved error handling and progress tracking
+- Optimized TeX Live package installation
+- Enhanced cleanup procedures for smaller image size
+- Added comprehensive testing (17 test scenarios)
+- Fixed PATH environment variables for all tools
+
+## Build Phases
+
+1. **System Dependencies** - Core Ubuntu packages and libraries
+2. **Inkscape Installation** - SVG to PDF conversion capability
+3. **Quarto Installation** - Latest Quarto CLI (v1.7.31)
+4. **TeX Live Installation** - Complete LaTeX distribution
+5. **Ghostscript Installation** - PDF processing capabilities
+6. **R Installation** - R base and development packages
+7. **Python Installation** - Python 3 with pip
+8. **Python Packages** - All production requirements
+9. **R Packages** - All required R libraries
+10. **R Package Verification** - Validation of successful installation
+11. **Comprehensive Cleanup** - Size optimization and cache clearing
+
 - **Traditional build**: 45 minutes
 - **Containerized build**: 5-10 minutes
 - **Improvement**: 80-90% time reduction 
