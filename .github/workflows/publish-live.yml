@@ -44,6 +44,17 @@ env:
 
 # Manual trigger only - big red button!
 # Only allow manual triggers from main and dev branches
+#
+# 🎯 PUBLISHING BEHAVIOR:
+# ├── With dev_commit specified (e.g., "b5b452e"):
+# │   ├── Merges EXACTLY that commit into main
+# │   ├── Includes content + workflow files from that point in time
+# │   └── Warning: You get the old workflow version too!
+# │
+# └── Without dev_commit (empty):
+#     ├── Merges latest dev branch into main  
+#     ├── Includes newest content + newest workflow files
+#     └── Recommended for most releases
 on:
   workflow_dispatch:
     inputs:
@@ -61,7 +72,7 @@ on:
           - 'major'
         default: 'patch'
       dev_commit:
-        description: 'Specific dev commit to publish (optional - uses latest if empty)'
+        description: 'Specific dev commit to publish (WARNING: includes old workflow files!) Leave empty for latest dev'
         required: false
         default: ''
       confirm:
@@ -603,6 +614,30 @@ jobs:
           git checkout main
           git pull origin main
           
+          # Safety check: Ensure main isn't ahead of specified dev commit
+          if [ -n "${{ github.event.inputs.dev_commit }}" ]; then
+            DEV_COMMIT=$(echo "${{ github.event.inputs.dev_commit }}" | xargs)
+            echo "🔍 Checking if main is ahead of specified commit $DEV_COMMIT..."
+            
+            # Check if dev_commit is an ancestor of current main
+            if git merge-base --is-ancestor "$DEV_COMMIT" HEAD; then
+              echo "⚠️ MAIN IS AHEAD OF SPECIFIED COMMIT!"
+              echo "📊 Current main includes changes newer than $DEV_COMMIT"
+              echo ""
+              echo "🛑 This would create a mixed state (old dev + new main changes)"
+              echo "📋 Options to resolve:"
+              echo "   A) Use latest dev instead (leave dev_commit empty)"
+              echo "   B) Reset main to match dev commit (destructive):"
+              echo "      git checkout main && git reset --hard $DEV_COMMIT && git push --force-with-lease"
+              echo "   C) Merge dev branch normally first, then publish"
+              echo ""
+              echo "❌ Stopping to prevent untested mixed state"
+              exit 1
+            else
+              echo "✅ Safe to merge: $DEV_COMMIT is newer than current main"
+            fi
+          fi
+          
           echo "🔍 Checking for potential merge conflicts..."
           # Test merge without committing
           if ! git merge --no-commit --no-ff origin/dev 2>/dev/null; then
@@ -622,14 +657,22 @@ jobs:
           echo "✅ No conflicts detected. Proceeding with merge..."
           echo "🔄 Merging dev into main..."
           
+          # Debug: Show what dev_commit input was received
+          echo "🔍 DEBUG: dev_commit input = '${{ github.event.inputs.dev_commit }}'"
+          echo "🔍 DEBUG: Input length = ${#'${{ github.event.inputs.dev_commit }}'}"
+          
           # Determine which commit to merge
           if [ -n "${{ github.event.inputs.dev_commit }}" ]; then
             MERGE_COMMIT=$(echo "${{ github.event.inputs.dev_commit }}" | xargs)
-            echo "📌 Merging specific commit: $MERGE_COMMIT"
+            echo "📌 SPECIFIC COMMIT MODE: Merging exact commit: $MERGE_COMMIT"
+            echo "⚠️  This includes content + workflow files from that point in time"
           else
             MERGE_COMMIT="origin/dev"
-            echo "📊 Merging latest dev commit"
+            echo "📊 LATEST DEV MODE: Merging latest dev commit"
+            echo "✅ This includes newest content + newest workflow files"
           fi
+          
+          echo "🎯 Final merge target: $MERGE_COMMIT"
           
           git merge "$MERGE_COMMIT" --no-ff -m "🚀 Release ${{ needs.validate-inputs.outputs.new_version }}: ${{ github.event.inputs.description }}
 
