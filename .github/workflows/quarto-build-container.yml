@@ -1,4 +1,4 @@
-name: '🏗️ Quarto Build (Containerized)'
+name: '🏗️ Quarto Build (Container)'
 
 # Set retention period to 7 days
 env:
@@ -9,8 +9,8 @@ concurrency:
   group: quarto-build-${{ inputs.target }}-${{ inputs.os }}-${{ inputs.format }}-${{ github.sha }}
   cancel-in-progress: true
 
-# This workflow builds a Quarto project using containers for Linux builds
-# Windows builds still use the traditional approach
+# This workflow uses containers for all builds (Linux and Windows)
+# This is the primary workflow for daily builds
 on:
   workflow_dispatch:
     inputs:
@@ -24,6 +24,9 @@ on:
         type: choice
         default: 'ubuntu-latest'
         description: 'Operating system to run on'
+        options:
+          - ubuntu-latest
+          - windows-latest
       quarto-version:
         required: false
         type: string
@@ -112,7 +115,7 @@ permissions:
   pages: write
 
 jobs:
-  # Linux builds using container (fast path)
+  # Linux builds using container
   build-linux:
     runs-on: ubuntu-latest
     container:
@@ -143,17 +146,6 @@ jobs:
               \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
             }"
 
-      - name: 🔍 Validate inputs
-        shell: bash
-        run: |
-          echo "🔄 Validating workflow inputs..."
-          echo "👉 Target: ${{ inputs.target }}"
-          echo "👉 OS: ${{ inputs.os }}"
-          echo "👉 Environment: ${{ inputs.environment }}"
-          echo "👉 Format: ${{ inputs.format }}"
-          echo "👉 Build Method: Container (Linux)"
-          echo "✅ Input validation passed"
-
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
         with:
@@ -176,37 +168,6 @@ jobs:
           echo "📊 Memory usage:"
           free -h
 
-      - name: 💓 Start Build Heartbeat
-        shell: bash
-        run: |
-          echo "💓 Starting build heartbeat system..."
-          echo "⏰ Build started at: $(date)"
-          echo "📊 Build configuration:"
-          echo "   - Format: ${{ inputs.format }}"
-          echo "   - OS: ${{ inputs.os }}"
-          echo "   - Environment: ${{ inputs.environment }}"
-          echo "   - Method: Container (Linux)"
-          echo "   - Timeout: 60 minutes"
-          echo "💓 Heartbeat will show progress every 5 minutes"
-          
-          # Start background heartbeat process
-          (
-            while true; do
-              sleep 300  # 5 minutes
-              echo "💓 Build heartbeat: $(date) - Still building..."
-              echo "📊 Current memory usage:"
-              free -h || echo "Memory info not available"
-              echo "📊 Current disk usage:"
-              df -h . || echo "Disk info not available"
-              echo "📊 Active processes:"
-              ps aux | grep -E "(quarto|R|python)" | head -5 || echo "Process info not available"
-              echo "---"
-            done
-          ) &
-          HEARTBEAT_PID=$!
-          echo $HEARTBEAT_PID > /tmp/heartbeat.pid
-          echo "✅ Heartbeat started (PID: $HEARTBEAT_PID)"
-
       - name: 🔨 Build HTML (copy config and render)
         if: inputs.format == 'html' || inputs.format == 'all'
         shell: bash
@@ -220,7 +181,6 @@ jobs:
           echo "🔨 Building HTML..."
           echo "⏰ HTML build started at: $(date)"
           
-          # Update status to building
           curl -X POST \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
@@ -231,7 +191,6 @@ jobs:
               \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
             }"
           
-          # Enable verbose logging for debugging
           quarto render --to html
           echo "✅ HTML build completed at: $(date)"
         
@@ -248,9 +207,7 @@ jobs:
           echo "🔨 Building PDF..."
           echo "⏰ PDF build started at: $(date)"
           echo "📊 This should be much faster with pre-installed dependencies"
-          echo "💓 Heartbeat will continue showing progress..."
           
-          # Update status to building PDF
           curl -X POST \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
@@ -261,66 +218,8 @@ jobs:
               \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
             }"
           
-          # Enable verbose logging for debugging
           quarto render --to titlepage-pdf
           echo "✅ PDF build completed at: $(date)"
-      
-      - name: 💓 Stop Build Heartbeat
-        shell: bash
-        run: |
-          echo "💓 Stopping build heartbeat..."
-          if [ -f /tmp/heartbeat.pid ]; then
-            HEARTBEAT_PID=$(cat /tmp/heartbeat.pid)
-            if kill -0 $HEARTBEAT_PID 2>/dev/null; then
-              kill $HEARTBEAT_PID
-              echo "✅ Heartbeat stopped (PID: $HEARTBEAT_PID)"
-            else
-              echo "⚠️ Heartbeat process already stopped"
-            fi
-            rm -f /tmp/heartbeat.pid
-          else
-            echo "⚠️ No heartbeat PID file found"
-          fi
-          echo "⏰ Total build time: $(date)"
-
-      - name: 📋 Check Quarto Build Output
-        shell: bash
-        run: |
-          echo "🔄 Checking Quarto build output..."
-
-          # HTML check
-          if [[ "${{ inputs.format }}" == "html" || "${{ inputs.format }}" == "all" ]]; then
-            if [ -d "build/html" ]; then
-              echo "✅ build/html directory exists"
-              echo "📊 Files in build/html directory:"
-              ls -la build/html | head -n 20
-              echo "📊 Total files in build/html:"
-              find build/html -type f | wc -l
-            else
-              echo "❌ build/html directory not found!"
-            fi
-          fi
-
-          # PDF check
-          if [[ "${{ inputs.format }}" == "pdf" || "${{ inputs.format }}" == "all" ]]; then
-            if [ -d "build/pdf" ]; then
-              echo "✅ build/pdf directory exists"
-              echo "📊 Files in build/pdf directory:"
-              ls -la build/pdf | head -n 20
-              echo "📊 Total files in build/pdf:"
-              find build/pdf -type f | wc -l
-              
-              if [ -f "build/pdf/Machine-Learning-Systems.pdf" ]; then
-                echo "✅ PDF file exists"
-                echo "📊 PDF file size:"
-                du -h "build/pdf/Machine-Learning-Systems.pdf"
-              else
-                echo "⚠️ PDF file not found!"
-              fi
-            else
-              echo "❌ build/pdf directory not found!"
-            fi
-          fi
 
       - name: 📉 Compress PDF with Ghostscript
         if: inputs.format == 'pdf' || inputs.format == 'all'
@@ -336,7 +235,6 @@ jobs:
               -sOutputFile="./build/pdf/ebook.pdf" \
               "./build/pdf/Machine-Learning-Systems.pdf"
 
-            # Replace original with compressed
             mv ./build/pdf/ebook.pdf ./build/pdf/Machine-Learning-Systems.pdf
           else
             echo "⚠️ PDF file not found for compression"
@@ -360,7 +258,7 @@ jobs:
           echo "📊 OS: ${{ inputs.os }}"
           echo "📊 Target: ${{ inputs.target }}"
           echo "📊 Environment: ${{ inputs.environment }}"
-          echo "📊 Method: Container (Linux) - Optimized"
+          echo "📊 Method: Container (Linux) - Fast Path"
           echo "📝 Note: This workflow only builds artifacts - deployment handled by publish-live workflow"
           echo "artifact_created=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
 
@@ -370,7 +268,6 @@ jobs:
         run: |
           echo "🎯 Setting final build status..."
           
-          # Determine the final status based on job status
           if [ "${{ job.status }}" = "success" ]; then
             STATE="success"
             DESCRIPTION="Build completed successfully (Linux container, ${{ inputs.format }})"
@@ -382,7 +279,6 @@ jobs:
           echo "📊 Final status: $STATE"
           echo "📝 Description: $DESCRIPTION"
           
-          # Set the final commit status
           curl -X POST \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
@@ -395,24 +291,23 @@ jobs:
           
           echo "✅ Commit status updated successfully"
 
-  # Windows builds using traditional approach (unchanged)
+  # Windows builds using container (when available)
   build-windows:
     runs-on: windows-latest
+    container:
+      image: ghcr.io/${{ github.repository }}/quarto-build-windows:latest
+      options: --user root
     timeout-minutes: 60
     environment:
       name: ${{ inputs.environment }}
     if: inputs.os == 'windows-latest'
     env:
-      R_LIBS_USER: ${{ github.workspace }}/.r-lib
       QUARTO_LOG_LEVEL: ${{ inputs.quarto-log-level }}
       PYTHONIOENCODING: utf-8
       LANG: en_US.UTF-8
       LC_ALL: en_US.UTF-8
 
     steps:
-      # Copy all the Windows build steps from the original quarto-build.yml
-      # This keeps Windows builds unchanged while we test the container approach
-      
       - name: 🚦 Set Initial Build Status
         shell: bash
         run: |
@@ -423,7 +318,7 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
             -d "{
               \"state\": \"pending\",
-              \"description\": \"Quarto build started (Windows, ${{ inputs.format }})\",
+              \"description\": \"Quarto build started (Windows container, ${{ inputs.format }})\",
               \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
             }"
 
@@ -432,89 +327,22 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: 📦 Setup Quarto
-        uses: quarto-dev/quarto-actions/setup@v2
-        with:
-          version: ${{ inputs.quarto-version }}
-
-      - name: 🐍 Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-
-      - name: 💾 Cache Python packages
-        uses: actions/cache@v4
-        id: cache-python-packages
-        with:
-          path: |
-            ~/.cache/pip
-            ~\AppData\Local\pip\Cache
-          key: python-pkgs-${{ runner.os }}-${{ hashFiles('tools/dependencies/requirements.txt') }}
-          restore-keys: |
-            python-pkgs-${{ runner.os }}-
-
-      - name: 📦 Install Ghostscript (Windows)
-        shell: pwsh
+      - name: 📋 Container Environment Info
+        shell: bash
         run: |
-          try {
-            winget install ArtifexSoftware.GhostScript --accept-source-agreements --accept-package-agreements
-            Write-Output "✅ Ghostscript installed via winget"
-          } catch {
-            Write-Output "🔄 winget not available, using chocolatey..."
-            choco install ghostscript -y
-          }
-          
-          $gsPath = Get-ChildItem "C:\Program Files\gs" | Sort-Object Name -Descending | Select-Object -First 1
-          $binPath = Join-Path $gsPath.FullName "bin"
-          echo "Adding Ghostscript path: $binPath"
-          echo "$binPath" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding UTF8
-
-      - name: 📦 Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r tools/dependencies/requirements.txt
-
-      - name: 📦 Install TeX Live packages
-        uses: zauguin/install-texlive@v4
-        with:
-          package_file: tools/dependencies/tl_packages
-          texlive_version: 2025
-          cache_version: 1
-
-      - name: 📊 Setup R
-        uses: r-lib/actions/setup-r@v2
-        with:
-          r-version: ${{ inputs.r-version }}
-          use-public-rspm: true
-
-      - name: 💾 Cache R packages
-        uses: actions/cache@v4
-        id: cache-r-packages
-        with:
-          path: |
-            ${{ env.R_LIBS_USER }}
-          key: r-pkgs-${{ runner.os }}-${{ inputs.r-version }}-${{ hashFiles('tools/dependencies/install_packages.R', '**/*.qmd') }}
-          restore-keys: |
-            r-pkgs-${{ runner.os }}-${{ inputs.r-version }}-
-
-      - name: 📦 Install R packages
-        if: steps.cache-r-packages.outputs.cache-hit != 'true'
-        shell: Rscript {0}
-        run: |
-          options(repos = c(CRAN = "https://cran.rstudio.com"))
-          
-          lib_path <- Sys.getenv("R_LIBS_USER")
-          dir.create(lib_path, showWarnings = FALSE, recursive = TRUE)
-          .libPaths(lib_path)
-          
-          install.packages("remotes")
-          
-          if (file.exists("tools/dependencies/install_packages.R")) {
-            source("tools/dependencies/install_packages.R")
-          } else {
-            pkgs <- c("rmarkdown", "knitr", "tidyverse", "ggplot2", "bookdown")
-            install.packages(pkgs)
-          }
+          echo "🔄 Container environment information..."
+          echo "📊 Quarto version:"
+          quarto --version
+          echo "📊 Python version:"
+          python3 --version
+          echo "📊 R version:"
+          R --version | head -1
+          echo "📊 TeX Live version:"
+          lualatex --version | head -1
+          echo "📊 Available disk space:"
+          df -h .
+          echo "📊 Memory usage:"
+          free -h
 
       - name: 🔨 Build HTML (copy config and render)
         if: inputs.format == 'html' || inputs.format == 'all'
@@ -535,7 +363,7 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
             -d "{
               \"state\": \"pending\",
-              \"description\": \"Building HTML content (Windows)\",
+              \"description\": \"Building HTML content (Windows container)\",
               \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
             }"
           
@@ -554,6 +382,7 @@ jobs:
           
           echo "🔨 Building PDF..."
           echo "⏰ PDF build started at: $(date)"
+          echo "📊 This should be much faster with pre-installed dependencies"
           
           curl -X POST \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
@@ -561,14 +390,14 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
             -d "{
               \"state\": \"pending\",
-              \"description\": \"Building PDF content (Windows)\",
+              \"description\": \"Building PDF content (Windows container) - optimized\",
               \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
             }"
           
           quarto render --to titlepage-pdf
           echo "✅ PDF build completed at: $(date)"
 
-      - name: 📉 Compress PDF with Ghostscript (Windows)
+      - name: 📉 Compress PDF with Ghostscript
         if: inputs.format == 'pdf' || inputs.format == 'all'
         shell: pwsh
         run: |
@@ -607,7 +436,7 @@ jobs:
           echo "📊 OS: ${{ inputs.os }}"
           echo "📊 Target: ${{ inputs.target }}"
           echo "📊 Environment: ${{ inputs.environment }}"
-          echo "📊 Method: Traditional (Windows) - Unchanged"
+          echo "📊 Method: Container (Windows) - Fast Path"
           echo "📝 Note: This workflow only builds artifacts - deployment handled by publish-live workflow"
           echo "artifact_created=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
 
@@ -619,10 +448,10 @@ jobs:
           
           if [ "${{ job.status }}" = "success" ]; then
             STATE="success"
-            DESCRIPTION="Build completed successfully (Windows, ${{ inputs.format }})"
+            DESCRIPTION="Build completed successfully (Windows container, ${{ inputs.format }})"
           else
             STATE="failure"
-            DESCRIPTION="Build failed (Windows, ${{ inputs.format }})"
+            DESCRIPTION="Build failed (Windows container, ${{ inputs.format }})"
           fi
           
           echo "📊 Final status: $STATE"
