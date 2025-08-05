@@ -1,0 +1,302 @@
+# MLSysBook Windows Quarto Build Container - Enhanced with Progress Indicators
+# Replicates the exact environment that quarto-build workflow uses successfully
+# Based on Windows Server 2022 (same as windows-latest GitHub Actions runner)
+
+FROM mcr.microsoft.com/windows/servercore:ltsc2022
+
+# === PHASE 1: POWERSHELL INSTALLATION ===
+RUN echo "=== STARTING POWERSHELL 7 INSTALLATION ===" && \
+    echo "Estimated time: 1-2 minutes" && \
+    echo "Downloading PowerShell 7.4.1..." && \
+    curl -fSLo PowerShell.msi https://github.com/PowerShell/PowerShell/releases/download/v7.4.1/PowerShell-7.4.1-win-x64.msi && \
+    echo "Installing PowerShell 7..." && \
+    msiexec /i PowerShell.msi /quiet /norestart && \
+    echo "Cleaning up installer..." && \
+    del PowerShell.msi && \
+    echo "=== POWERSHELL 7 INSTALLATION COMPLETE ==="
+
+# === PHASE 2: CHOCOLATEY INSTALLATION ===
+RUN pwsh -Command " \
+    Write-Host '=== STARTING CHOCOLATEY INSTALLATION ==='; \
+    Write-Host 'Estimated time: 1 minute'; \
+    Write-Host 'Setting execution policy...'; \
+    Set-ExecutionPolicy Bypass -Scope Process -Force; \
+    Write-Host 'Configuring security protocol...'; \
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
+    Write-Host 'Downloading and installing Chocolatey...'; \
+    iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1')); \
+    Write-Host '=== CHOCOLATEY INSTALLATION COMPLETE ==='; \
+    "
+
+# Set environment variables to match workflow
+ENV R_LIBS_USER=C:/r-lib
+ENV QUARTO_LOG_LEVEL=INFO
+ENV PYTHONIOENCODING=utf-8
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
+
+# Copy dependency files needed for installations
+COPY tools/dependencies/requirements.txt C:/temp/requirements.txt
+COPY tools/dependencies/install_packages.R C:/temp/install_packages.R  
+COPY tools/dependencies/tl_packages C:/temp/tl_packages
+COPY docker/quarto-build-windows/verify_r_packages.R C:/temp/verify_r_packages.R
+
+# === PHASE 3: DIRECTORY SETUP ===
+RUN pwsh -Command " \
+    Write-Host '=== SETTING UP DIRECTORIES ==='; \
+    Write-Host 'Creating R library directory: C:/r-lib'; \
+    New-Item -ItemType Directory -Path 'C:/r-lib' -Force; \
+    Write-Host 'Directory created successfully'; \
+    Write-Host '=== DIRECTORY SETUP COMPLETE ==='; \
+    "
+
+# === PHASE 4: QUARTO INSTALLATION ===
+RUN pwsh -Command " \
+    Write-Host '=== STARTING QUARTO INSTALLATION ==='; \
+    Write-Host 'Estimated time: 1 minute'; \
+    Write-Host 'Downloading Quarto v1.7.31 (exact version from workflow)...'; \
+    Invoke-WebRequest -Uri 'https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.31/quarto-1.7.31-win.zip' -OutFile 'quarto.zip'; \
+    Write-Host 'Extracting Quarto...'; \
+    Expand-Archive -Path 'quarto.zip' -DestinationPath 'C:/quarto' -Force; \
+    Write-Host 'Cleaning up zip file...'; \
+    Remove-Item 'quarto.zip'; \
+    Write-Host 'Adding Quarto to PATH...'; \
+    $env:PATH += ';C:/quarto/quarto-1.7.31/bin'; \
+    [Environment]::SetEnvironmentVariable('PATH', $env:PATH, [EnvironmentVariableTarget]::Machine); \
+    Write-Host '=== QUARTO INSTALLATION COMPLETE ==='; \
+    " && \
+    setx PATH "%PATH%;C:/quarto/quarto-1.7.31/bin" /M
+
+# === PHASE 5: PYTHON INSTALLATION ===
+RUN pwsh -Command " \
+    Write-Host '=== STARTING PYTHON 3.13 INSTALLATION ==='; \
+    Write-Host 'Estimated time: 2-3 minutes'; \
+    Write-Host 'Installing Python 3.13.1 (exact version from workflow)...'; \
+    " && \
+    choco install -y python --version=3.13.1 && \
+    pwsh -Command " \
+    Write-Host 'Python installation complete'; \
+    Write-Host ('Python version: ' + (python --version)); \
+    Write-Host ('Pip version: ' + (python -m pip --version)); \
+    Write-Host '=== PYTHON 3.13 INSTALLATION COMPLETE ==='; \
+    "
+
+# === PHASE 6: PYTHON PACKAGES ===
+RUN pwsh -Command " \
+    Write-Host '=== STARTING PYTHON PACKAGE INSTALLATION ==='; \
+    Write-Host 'Estimated time: 1-2 minutes'; \
+    Write-Host 'Analyzing requirements.txt...'; \
+    $packageCount = (Get-Content 'C:/temp/requirements.txt' | Where-Object { $_ -notmatch '^#' -and $_ -ne '' }).Count; \
+    Write-Host ('Found ' + $packageCount + ' Python packages to install'); \
+    Write-Host 'Upgrading pip...'; \
+    " && \
+    python -m pip install --upgrade pip && \
+    pwsh -Command " \
+    Write-Host 'Installing Python packages from requirements.txt...'; \
+    " && \
+    python -m pip install -r C:/temp/requirements.txt && \
+    pwsh -Command " \
+    Write-Host 'Python packages installed successfully'; \
+    Write-Host 'Installed packages summary:'; \
+    python -m pip list | Select-Object -First 10; \
+    Write-Host ('Total packages: ' + (python -m pip list | Measure-Object).Count); \
+    Write-Host '=== PYTHON PACKAGES COMPLETE ==='; \
+    "
+
+# === PHASE 7: GHOSTSCRIPT INSTALLATION ===
+RUN pwsh -Command " \
+    Write-Host '=== STARTING GHOSTSCRIPT INSTALLATION ==='; \
+    Write-Host 'Estimated time: 1-2 minutes'; \
+    try { \
+        Write-Host 'Attempting winget installation...'; \
+        winget install ArtifexSoftware.GhostScript --accept-source-agreements --accept-package-agreements; \
+        Write-Host 'Ghostscript installed via winget'; \
+    } catch { \
+        Write-Host 'winget not available, using chocolatey...'; \
+        choco install ghostscript -y; \
+        Write-Host 'Ghostscript installed via chocolatey'; \
+    } \
+    Write-Host 'Configuring Ghostscript PATH...'; \
+    $gsPath = Get-ChildItem 'C:/Program Files/gs' | Sort-Object Name -Descending | Select-Object -First 1; \
+    $binPath = Join-Path $gsPath.FullName 'bin'; \
+    Write-Host ('Adding Ghostscript path: ' + $binPath); \
+    $env:PATH += ';' + $binPath; \
+    [Environment]::SetEnvironmentVariable('PATH', $env:PATH, [EnvironmentVariableTarget]::Machine); \
+    Write-Host '=== GHOSTSCRIPT INSTALLATION COMPLETE ==='; \
+    "
+
+# === PHASE 8: INKSCAPE INSTALLATION ===
+RUN pwsh -Command " \
+    Write-Host '=== STARTING INKSCAPE INSTALLATION ==='; \
+    Write-Host 'Estimated time: 1-2 minutes'; \
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
+    $OutputEncoding = [System.Text.Encoding]::UTF8; \
+    [Console]::InputEncoding = [System.Text.Encoding]::UTF8; \
+    try { \
+        Write-Host 'Attempting winget installation...'; \
+        winget install Inkscape.Inkscape --accept-source-agreements --accept-package-agreements; \
+        Write-Host 'Inkscape installed via winget'; \
+    } catch { \
+        Write-Host 'winget not available, using chocolatey...'; \
+        choco install inkscape -y; \
+        Write-Host 'Inkscape installed via chocolatey'; \
+    } \
+    Write-Host 'Adding Inkscape to PATH...'; \
+    $env:PATH += ';C:/Program Files/Inkscape/bin/'; \
+    [Environment]::SetEnvironmentVariable('PATH', $env:PATH, [EnvironmentVariableTarget]::Machine); \
+    Write-Host '=== INKSCAPE INSTALLATION COMPLETE ==='; \
+    "
+
+# === PHASE 9: TEX LIVE INSTALLATION ===
+RUN pwsh -Command " \
+    Write-Host '=== STARTING TEX LIVE INSTALLATION ==='; \
+    Write-Host 'Estimated time: 8-12 minutes (largest phase)'; \
+    Write-Host 'Free disk space before: ' + ((Get-WmiObject -Class Win32_LogicalDisk -Filter \"DeviceID='C:'\").FreeSpace / 1GB).ToString('F2') + ' GB'; \
+    $startTime = Get-Date; \
+    \
+    Write-Host 'Downloading TeX Live installer...'; \
+    Invoke-WebRequest -Uri 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' -OutFile 'C:/temp/install-tl-windows.exe'; \
+    \
+    Write-Host 'Creating TeX Live installation profile...'; \
+    @' \
+selected_scheme scheme-infraonly \
+tlpdbopt_install_docfiles 0 \
+tlpdbopt_install_srcfiles 0 \
+TEXDIR C:/texlive \
+TEXMFCONFIG C:/texlive/texmf-config \
+TEXMFHOME C:/texlive/texmf-home \
+TEXMFLOCAL C:/texlive/texmf-local \
+TEXMFSYSCONFIG C:/texlive/texmf-config \
+TEXMFSYSVAR C:/texlive/texmf-var \
+TEXMFVAR C:/texlive/texmf-var \
+'@ | Out-File -FilePath 'C:/temp/texlive.profile' -Encoding ASCII; \
+    \
+    Write-Host 'Installing TeX Live base system...'; \
+    Start-Process -FilePath 'C:/temp/install-tl-windows.exe' -ArgumentList '-profile', 'C:/temp/texlive.profile' -Wait; \
+    \
+    Write-Host 'Adding TeX Live to PATH...'; \
+    $env:PATH += ';C:/texlive/bin/windows/'; \
+    [Environment]::SetEnvironmentVariable('PATH', $env:PATH, [EnvironmentVariableTarget]::Machine); \
+    \
+    Write-Host 'Analyzing tl_packages file...'; \
+    $packages = Get-Content 'C:/temp/tl_packages' | Where-Object { $_.Trim() -ne '' }; \
+    $packageCount = $packages.Count; \
+    Write-Host ('Found ' + $packageCount + ' TeX Live collections to install'); \
+    \
+    Write-Host 'Installing TeX Live collections...'; \
+    $i = 1; \
+    foreach ($package in $packages) { \
+        Write-Host ('Package [' + $i + '/' + $packageCount + '] Installing: ' + $package.Trim()); \
+        & 'C:/texlive/bin/windows/tlmgr.bat' install $package.Trim(); \
+        $i++; \
+    }; \
+    \
+    Write-Host 'Cleaning up TeX Live installer...'; \
+    Remove-Item 'C:/temp/install-tl-windows.exe'; \
+    Remove-Item 'C:/temp/texlive.profile'; \
+    \
+    $endTime = Get-Date; \
+    $duration = ($endTime - $startTime).TotalMinutes; \
+    Write-Host ('=== TEX LIVE INSTALLATION COMPLETE === (' + $duration.ToString('F1') + ' minutes)'); \
+    Write-Host 'Free disk space after: ' + ((Get-WmiObject -Class Win32_LogicalDisk -Filter \"DeviceID='C:'\").FreeSpace / 1GB).ToString('F2') + ' GB'; \
+    "
+
+# === PHASE 10: R INSTALLATION ===
+RUN pwsh -Command " \
+    Write-Host '=== STARTING R INSTALLATION ==='; \
+    Write-Host 'Estimated time: 2-3 minutes'; \
+    Write-Host 'Installing R 4.4.1 (exact version from workflow)...'; \
+    " && \
+    choco install -y r --version=4.4.1 && \
+    pwsh -Command " \
+    Write-Host 'R installation complete'; \
+    Write-Host ('R version: ' + (R --version | Select-Object -First 1)); \
+    Write-Host '=== R INSTALLATION COMPLETE ==='; \
+    "
+
+# === PHASE 11: R PACKAGES ===
+RUN pwsh -Command " \
+    Write-Host '=== STARTING R PACKAGE INSTALLATION ==='; \
+    Write-Host 'Estimated time: 3-5 minutes'; \
+    " && \
+    Rscript -e " \
+    options(repos = c(CRAN = 'https://cran.rstudio.com')); \
+    cat('Starting R package installation...\n'); \
+    cat(paste('R library path:', Sys.getenv('R_LIBS_USER'), '\n')); \
+    \
+    lib_path <- Sys.getenv('R_LIBS_USER'); \
+    dir.create(lib_path, showWarnings = FALSE, recursive = TRUE); \
+    .libPaths(lib_path); \
+    \
+    cat('Package [1/2] Installing remotes...\n'); \
+    install.packages('remotes'); \
+    \
+    if (file.exists('C:/temp/install_packages.R')) { \
+      cat('Package [2/2] Installing packages from tools/dependencies/install_packages.R...\n'); \
+      source('C:/temp/install_packages.R'); \
+    } else { \
+      cat('Warning: No install_packages.R found, installing basic packages\n'); \
+      install.packages(c('rmarkdown', 'knitr', 'ggplot2')); \
+    }; \
+    \
+    cat('R package installation complete\n'); \
+    ip <- installed.packages()[, 'Package']; \
+    cat(paste('Total R packages installed:', length(ip), '\n')); \
+    " && \
+    pwsh -Command " \
+    Write-Host '=== R PACKAGES COMPLETE ==='; \
+    "
+
+# === PHASE 12: R PACKAGE VERIFICATION ===
+RUN pwsh -Command " \
+    Write-Host '=== VERIFYING R PACKAGE INSTALLATION ==='; \
+    Write-Host 'Running R package verification script...'; \
+    " && \
+    Rscript C:/temp/verify_r_packages.R && \
+    pwsh -Command " \
+    Write-Host '=== R PACKAGE VERIFICATION COMPLETE ==='; \
+    "
+
+# === PHASE 13: CLEANUP ===
+RUN pwsh -Command " \
+    Write-Host '=== STARTING CLEANUP ==='; \
+    Write-Host 'Removing temporary files...'; \
+    Remove-Item 'C:/temp/requirements.txt' -ErrorAction SilentlyContinue; \
+    Remove-Item 'C:/temp/install_packages.R' -ErrorAction SilentlyContinue; \
+    Remove-Item 'C:/temp/verify_r_packages.R' -ErrorAction SilentlyContinue; \
+    Remove-Item 'C:/temp/tl_packages' -ErrorAction SilentlyContinue; \
+    Write-Host 'Final disk space: ' + ((Get-WmiObject -Class Win32_LogicalDisk -Filter \"DeviceID='C:'\").FreeSpace / 1GB).ToString('F2') + ' GB free'; \
+    Write-Host '=== CLEANUP COMPLETE ==='; \
+    "
+
+# Set working directory
+WORKDIR C:/workspace
+
+# === PHASE 14: FINAL VERIFICATION ===
+RUN pwsh -Command " \
+    Write-Host '=== FINAL VERIFICATION ==='; \
+    Write-Host 'Verifying all installations...'; \
+    " && \
+    quarto --version && \
+    python --version && \
+    R --version && \
+    lualatex --version && \
+    pwsh -Command " \
+    Write-Host 'Quarto: ' + (quarto --version); \
+    Write-Host 'Python: ' + (python --version); \
+    Write-Host 'R: ' + (R --version | Select-Object -First 1); \
+    Write-Host 'TeX Live: ' + (lualatex --version | Select-Object -First 1); \
+    Write-Host '=== FINAL VERIFICATION COMPLETE ==='; \
+    "
+
+# === FINAL HEALTH CHECK ===
+RUN pwsh -Command " \
+    Write-Host '=== CONTAINER BUILD COMPLETED SUCCESSFULLY ==='; \
+    Write-Host 'Final Status Summary:'; \
+    Write-Host '  Quarto version: ' + (quarto --version); \
+    Write-Host '  Python version: ' + (python --version); \
+    Write-Host '  R version: ' + (R --version | Select-Object -First 1); \
+    Write-Host '  TeX Live: ' + (lualatex --version | Select-Object -First 1); \
+    Write-Host '  Final disk usage: ' + ((Get-WmiObject -Class Win32_LogicalDisk -Filter \"DeviceID='C:'\").FreeSpace / 1GB).ToString('F2') + ' GB free'; \
+    Write-Host '=== READY FOR QUARTO BUILDS ==='; \
+    "
