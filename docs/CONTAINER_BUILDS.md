@@ -30,7 +30,9 @@ Containerized Linux Build (5-10 minutes):
 ## Files
 
 ### Core Files
-- `Dockerfile` - Container definition with all dependencies
+- `docker/quarto-build/Dockerfile` - Container definition with all dependencies
+- `docker/quarto-build/README.md` - Container documentation
+- `docker/quarto-build/.dockerignore` - Build exclusions
 - `.github/workflows/build-container.yml` - Builds and pushes container
 - `.github/workflows/quarto-build-container.yml` - Containerized build workflow
 
