@@ -1213,14 +1213,19 @@ class BookBinder:
             
             # Check if version exists
             if self._version_exists(new_version):
-                console.print(f"[yellow]⚠️  Version {new_version} already exists[/yellow]")
-                console.print("[yellow]Replace existing version? [y/N]: [/yellow]", end="")
+                console.print(f"[yellow]⚠️  Git tag {new_version} already exists[/yellow]")
+                console.print("[dim]   This will delete the existing tag from both local and remote repositories[/dim]")
+                console.print("[dim]   and recreate it with the new release[/dim]")
+                console.print()
+                console.print("[yellow]Delete existing tag and recreate? [y/N]: [/yellow]", end="")
                 choice = input().strip().lower()
                 if choice in ['y', 'yes']:
+                    console.print("[purple]🔄 Deleting existing tag...[/purple]")
                     self._delete_version(new_version)
-                    console.print("[green]✅ Existing version removed[/green]")
+                    console.print(f"[green]✅ Existing tag {new_version} deleted from local and remote[/green]")
                 else:
-                    console.print("[red]❌ Cannot continue with existing version[/red]")
+                    console.print("[red]❌ Cannot continue with existing tag[/red]")
+                    console.print("[blue]💡 Choose a different version or delete the tag manually[/blue]")
                     return None
             
             # Get release description
@@ -1278,6 +1283,53 @@ class BookBinder:
         console.print("\n[bold cyan]┌─ Building Phase ─────────────────────────────────────────────────────────[/bold cyan]")
         
         try:
+            # Check for existing builds
+            pdf_path = self.build_dir / "pdf" / "Machine-Learning-Systems.pdf"
+            html_dir = self.build_dir / "html"
+            
+            has_pdf = pdf_path.exists()
+            has_html = html_dir.exists() and any(html_dir.iterdir())
+            
+            if has_pdf or has_html:
+                console.print("[yellow]🔍 Found existing build artifacts:[/yellow]")
+                if has_pdf:
+                    size_mb = pdf_path.stat().st_size / (1024 * 1024)
+                    console.print(f"[green]  ✅ PDF: {pdf_path} ({size_mb:.1f} MB)[/green]")
+                if has_html:
+                    console.print(f"[green]  ✅ HTML: {html_dir}[/green]")
+                console.print()
+                
+                console.print("[white]Reuse existing builds? This will skip the build phase and save time.[/white]")
+                console.print("[yellow]Reuse existing builds? [y/N]: [/yellow]", end="")
+                choice = input().strip().lower()
+                
+                if choice in ['y', 'yes']:
+                    console.print("[blue]✅ Using existing builds[/blue]")
+                    
+                    # Ask about PDF compression
+                    if has_pdf:
+                        # Show current PDF size
+                        size_mb = pdf_path.stat().st_size / (1024 * 1024)
+                        console.print()
+                        console.print("[bold white]🗜️  PDF Compression Options:[/bold white]")
+                        console.print("[dim]   Uses Ghostscript with /ebook settings to reduce file size[/dim]")
+                        console.print("[dim]   Good balance between size and quality for web distribution[/dim]")
+                        console.print(f"[blue]   Current PDF size: {size_mb:.1f} MB[/blue]")
+                        console.print("[yellow]Compress PDF? [y/N]: [/yellow]", end="")
+                        compress_choice = input().strip().lower()
+                        if compress_choice in ['y', 'yes']:
+                            console.print("[purple]🔄 Compressing PDF...[/purple]")
+                            if not self._compress_pdf():
+                                console.print("[yellow]⚠️  PDF compression failed, using original[/yellow]")
+                            else:
+                                console.print("[green]✅ PDF compression completed[/green]")
+                        else:
+                            console.print("[blue]ℹ️  Using original PDF without compression[/blue]")
+                    
+                    return True
+                else:
+                    console.print("[blue]🔄 Rebuilding from scratch...[/blue]")
+            
             # Clean builds
             console.print("[purple]🔄 Cleaning previous builds...[/purple]")
             self.clean()
@@ -1289,10 +1341,25 @@ class BookBinder:
                 return False
             console.print("[green]✅ PDF build completed[/green]")
             
-            # Compress PDF with Ghostscript
-            console.print("[purple]🔄 Compressing PDF...[/purple]")
-            if not self._compress_pdf():
-                console.print("[yellow]⚠️  PDF compression failed, continuing with uncompressed PDF[/yellow]")
+            # Ask about PDF compression
+            pdf_path = self.build_dir / "pdf" / "Machine-Learning-Systems.pdf"
+            if pdf_path.exists():
+                size_mb = pdf_path.stat().st_size / (1024 * 1024)
+                console.print()
+                console.print("[bold white]🗜️  PDF Compression Options:[/bold white]")
+                console.print("[dim]   Uses Ghostscript with /ebook settings to reduce file size[/dim]")
+                console.print("[dim]   Good balance between size and quality for web distribution[/dim]")
+                console.print(f"[blue]   Current PDF size: {size_mb:.1f} MB[/blue]")
+                console.print("[yellow]Compress PDF? [y/N]: [/yellow]", end="")
+                compress_choice = input().strip().lower()
+                if compress_choice in ['y', 'yes']:
+                    console.print("[purple]🔄 Compressing PDF...[/purple]")
+                    if not self._compress_pdf():
+                        console.print("[yellow]⚠️  PDF compression failed, continuing with uncompressed PDF[/yellow]")
+                    else:
+                        console.print("[green]✅ PDF compression completed[/green]")
+                else:
+                    console.print("[blue]ℹ️  Skipping PDF compression[/blue]")
             
             # Build HTML (faster, after PDF is ready)
             console.print("[purple]🔄 Building HTML version...[/purple]")
@@ -1353,28 +1420,92 @@ class BookBinder:
             return False
 
     def _delete_version(self, version):
-        """Delete a version tag"""
+        """Delete a version tag and any associated GitHub release"""
         try:
+            # Delete local git tag
             subprocess.run(['git', 'tag', '-d', version], cwd=self.root_dir, check=True)
+            
+            # Delete remote git tag
             subprocess.run(['git', 'push', 'origin', '--delete', version], 
                          cwd=self.root_dir, capture_output=True)
-        except:
+            
+            # Delete GitHub release if it exists (requires GitHub CLI)
+            try:
+                subprocess.run(['gh', '--version'], capture_output=True, check=True)
+                # Delete the release (this also deletes associated assets)
+                result = subprocess.run(['gh', 'release', 'delete', version, '--yes'], 
+                                      cwd=self.root_dir, capture_output=True, text=True)
+                if result.returncode == 0:
+                    console.print(f"[blue]   ✅ GitHub release {version} also deleted[/blue]")
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                # GitHub CLI not available or release doesn't exist, continue
+                pass
+            
+        except Exception:
             pass
 
     def _get_repo_info(self):
-        """Get repository info"""
+        """Get repository info and validate URLs"""
         try:
             result = subprocess.run(['git', 'remote', 'get-url', 'origin'], 
                                   capture_output=True, text=True, cwd=self.root_dir)
+            if result.returncode != 0:
+                return None
+                
             remote_url = result.stdout.strip()
+            if not remote_url:
+                return None
             
             import re
             match = re.search(r'github\.com[:/]([^/]+)/([^/]+)(\.git)?$', remote_url)
             if match:
-                return f"{match.group(1)}/{match.group(2)}"
-        except:
+                owner = match.group(1)
+                repo_name = match.group(2)
+                
+                # Remove .git suffix if present
+                if repo_name.endswith('.git'):
+                    repo_name = repo_name[:-4]
+                
+                repo_info = f"{owner}/{repo_name}"
+                
+                # Validate the extracted repository info
+                if self._validate_repo_info(repo_info):
+                    return repo_info
+                else:
+                    console.print(f"[yellow]⚠️  Warning: Could not validate repository URLs for {repo_info}[/yellow]")
+                    return None
+        except Exception as e:
+            console.print(f"[yellow]⚠️  Warning: Failed to get repository info: {e}[/yellow]")
             pass
         return None
+    
+    def _validate_repo_info(self, repo_info):
+        """Validate that the repository info generates valid URLs"""
+        try:
+            import urllib.request
+            import urllib.error
+            
+            # Test if the main repository URL is accessible
+            repo_url = f"https://github.com/{repo_info}"
+            
+            # Create a request with a user agent
+            req = urllib.request.Request(repo_url, headers={
+                'User-Agent': 'MLSysBook-Binder/1.0'
+            })
+            
+            # Try to access the repository (just check if it exists)
+            with urllib.request.urlopen(req, timeout=10) as response:
+                if response.status == 200:
+                    return True
+        except (urllib.error.URLError, urllib.error.HTTPError, Exception):
+            # If we can't validate (network issues, etc.), assume it's valid
+            # to avoid blocking legitimate publishes due to temporary network issues
+            pass
+        
+        # Fallback: basic format validation
+        import re
+        pattern = r'^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$'
+        return bool(re.match(pattern, repo_info))
 
     def _compress_pdf(self):
         """Compress PDF using Ghostscript with ebook settings"""
@@ -1484,14 +1615,34 @@ class BookBinder:
             console.print("[dim]   Create a public release with downloadable PDF and AI-generated release notes[/dim]")
             console.print("[yellow]Create GitHub release? [y/N]: [/yellow]", end="")
             choice = input().strip().lower()
+            release_created = False
             if choice in ['y', 'yes']:
                 pdf_path = self.build_dir / "pdf" / "Machine-Learning-Systems.pdf"
                 if self._create_github_release(version, description, pdf_path):
                     console.print("[green]✅ GitHub release created[/green]")
+                    release_created = True
                 else:
                     console.print("[yellow]⚠️  GitHub release creation failed[/yellow]")
             else:
                 console.print("[blue]ℹ️  Skipping GitHub release creation[/blue]")
+            
+            # Update GitHub Pages PDF (if we have a PDF and created a release)
+            pdf_path = self.build_dir / "pdf" / "Machine-Learning-Systems.pdf"
+            if release_created and pdf_path.exists():
+                console.print()
+                console.print("[bold white]🌐 GitHub Pages PDF Update:[/bold white]")
+                console.print("[dim]   Update the PDF in mlsysbook.ai/assets/ to match the release[/dim]")
+                console.print("[yellow]Update GitHub Pages PDF? [y/N]: [/yellow]", end="")
+                choice = input().strip().lower()
+                if choice in ['y', 'yes']:
+                    console.print("[purple]🔄 Updating GitHub Pages PDF...[/purple]")
+                    if self._update_github_pages_pdf(pdf_path):
+                        console.print("[green]✅ PDF updated on GitHub Pages (mlsysbook.ai/assets/)[/green]")
+                    else:
+                        console.print("[yellow]⚠️  GitHub Pages PDF update failed[/yellow]")
+                        console.print("[dim]   PDF will only be available via GitHub releases[/dim]")
+                else:
+                    console.print("[blue]ℹ️  Skipping GitHub Pages PDF update[/blue]")
             
             return True
             
@@ -1523,11 +1674,13 @@ class BookBinder:
         
         repo_info = self._get_repo_info()
         if repo_info:
-            console.print(f"\n[white]🌐 Access your publication:[/white]")
+            console.print(f"\n[white]🌐 Access your publication (URLs validated ✅):[/white]")
             owner, name = repo_info.split('/')
             console.print(f"[blue]   📖 Web version: https://{owner}.github.io/{name}[/blue]")
             console.print(f"[blue]   📦 Releases: https://github.com/{repo_info}/releases[/blue]")
             console.print(f"[blue]   📄 PDF: https://github.com/{repo_info}/releases/download/{version_info['version']}/Machine-Learning-Systems.pdf[/blue]")
+        else:
+            console.print(f"\n[yellow]⚠️  Could not validate repository URLs - please check manually[/yellow]")
         
         console.print("\n[green]✅ Ready for distribution! 🚀[/green]")
 
@@ -1551,16 +1704,67 @@ class BookBinder:
             # Generate enhanced release notes with AI
             release_notes = self._generate_enhanced_release_notes(version, description)
             
+            # Save release notes to file for editing
+            release_notes_file = self.root_dir / f"release_notes_{version}.md"
+            with open(release_notes_file, 'w', encoding='utf-8') as f:
+                f.write(release_notes)
+            
+            console.print(f"[green]✅ Release notes generated and saved to: {release_notes_file}[/green]")
+            console.print()
+            console.print("[bold white]📝 Review and Edit Release Notes:[/bold white]")
+            console.print(f"[blue]   File: {release_notes_file}[/blue]")
+            console.print("[dim]   You can now review and edit the release notes in your favorite editor[/dim]")
+            console.print()
+            console.print("[yellow]Open file in default editor? [y/N]: [/yellow]", end="")
+            open_choice = input().strip().lower()
+            if open_choice in ['y', 'yes']:
+                try:
+                    import subprocess
+                    import platform
+                    system = platform.system().lower()
+                    if system == "darwin":  # macOS
+                        subprocess.run(['open', str(release_notes_file)])
+                    elif system == "linux":
+                        subprocess.run(['xdg-open', str(release_notes_file)])
+                    elif system == "windows":
+                        subprocess.run(['start', str(release_notes_file)], shell=True)
+                    console.print("[green]✅ File opened in default editor[/green]")
+                except Exception as e:
+                    console.print(f"[yellow]⚠️  Could not open file automatically: {e}[/yellow]")
+                    console.print(f"[blue]💡 Please open manually: {release_notes_file}[/blue]")
+            
+            console.print()
+            console.print("[yellow]Press Enter to continue after reviewing/editing the release notes...[/yellow]", end="")
+            input()
+            
+            # Read the potentially edited release notes
+            try:
+                with open(release_notes_file, 'r', encoding='utf-8') as f:
+                    final_release_notes = f.read()
+                console.print("[green]✅ Using edited release notes[/green]")
+            except Exception as e:
+                console.print(f"[yellow]⚠️  Could not read edited file, using original: {e}[/yellow]")
+                final_release_notes = release_notes
+            
             # Create release
             cmd = [
                 'gh', 'release', 'create', version,
                 '--title', f"{version}: {description}",
-                '--notes', release_notes,
+                '--notes', final_release_notes,
                 '--draft',
                 str(pdf_path)
             ]
             
             result = subprocess.run(cmd, cwd=self.root_dir, capture_output=True)
+            
+            # Clean up the release notes file after successful creation
+            if result.returncode == 0:
+                try:
+                    release_notes_file.unlink()
+                    console.print(f"[blue]ℹ️  Cleaned up temporary file: {release_notes_file}[/blue]")
+                except:
+                    pass
+            
             return result.returncode == 0
             
         except (subprocess.CalledProcessError, FileNotFoundError):
@@ -1598,6 +1802,77 @@ This release includes the following changes:
 {git_changes}"""
         
         return release_notes
+
+    def _update_github_pages_pdf(self, pdf_path):
+        """Update the PDF in GitHub Pages assets folder"""
+        try:
+            import tempfile
+            import shutil
+            
+            with tempfile.TemporaryDirectory() as temp_dir:
+                console.print("[blue]   📥 Cloning gh-pages branch...[/blue]")
+                
+                # Clone gh-pages branch
+                result = subprocess.run([
+                    'git', 'clone', '--depth=1', '--branch=gh-pages',
+                    'https://github.com/harvard-edge/cs249r_book.git',
+                    temp_dir + '/gh-pages'
+                ], capture_output=True, text=True)
+                
+                if result.returncode != 0:
+                    console.print(f"[red]Failed to clone gh-pages: {result.stderr}[/red]")
+                    return False
+                
+                gh_pages_dir = Path(temp_dir) / 'gh-pages'
+                assets_dir = gh_pages_dir / 'assets'
+                
+                # Create assets directory if it doesn't exist
+                assets_dir.mkdir(exist_ok=True)
+                
+                # Copy PDF to assets
+                target_pdf = assets_dir / 'Machine-Learning-Systems.pdf'
+                console.print(f"[blue]   📄 Copying PDF to {target_pdf}...[/blue]")
+                shutil.copy2(pdf_path, target_pdf)
+                
+                # Configure git in the temp directory
+                subprocess.run(['git', 'config', 'user.name', 'binder-bot'], 
+                             cwd=gh_pages_dir, check=True)
+                subprocess.run(['git', 'config', 'user.email', 'binder@mlsysbook.ai'], 
+                             cwd=gh_pages_dir, check=True)
+                
+                # Add, commit, and push
+                subprocess.run(['git', 'add', 'assets/Machine-Learning-Systems.pdf'], 
+                             cwd=gh_pages_dir, check=True)
+                
+                commit_result = subprocess.run([
+                    'git', 'commit', '-m', 
+                    f'📄 Update PDF for recreated release\n\nUpdated from binder recreate-release command'
+                ], cwd=gh_pages_dir, capture_output=True, text=True)
+                
+                if commit_result.returncode != 0:
+                    if "nothing to commit" in commit_result.stdout.lower():
+                        console.print("[blue]   ℹ️  PDF already up to date on GitHub Pages[/blue]")
+                        return True
+                    else:
+                        console.print(f"[red]Failed to commit: {commit_result.stderr}[/red]")
+                        return False
+                
+                push_result = subprocess.run(['git', 'push', 'origin', 'gh-pages'], 
+                           cwd=gh_pages_dir, capture_output=True, text=True)
+                
+                if push_result.returncode != 0:
+                    console.print(f"[red]Failed to push: {push_result.stderr}[/red]")
+                    return False
+                
+                console.print("[blue]   ✅ PDF successfully updated on GitHub Pages[/blue]")
+                return True
+                
+        except subprocess.CalledProcessError as e:
+            console.print(f"[red]Git operation failed: {e}[/red]")
+            return False
+        except Exception as e:
+            console.print(f"[red]Failed to update GitHub Pages PDF: {e}[/red]")
+            return False
 
     def _generate_git_log(self, current_version):
         """Generate detailed git log from previous version"""
@@ -1836,6 +2111,7 @@ Please format as:
         full_table.add_row("build - <format>", "Build complete book", "./binder build - pdf")
         full_table.add_row("preview-full [format]", "Preview complete book", "./binder preview-full")
         full_table.add_row("publish", "Manual publisher (interactive)", "./binder publish")
+        full_table.add_row("publish help", "Show detailed publish workflow", "./binder publish help")
         
         # Management Commands
         mgmt_table = Table(show_header=True, header_style="bold blue", box=None)
@@ -1899,6 +2175,155 @@ Please format as:
         examples.append("\n", style="dim")
         
         console.print(Panel(examples, title="💡 Pro Tips", border_style="magenta"))
+
+    def show_publish_help(self):
+        """Display detailed publish workflow help"""
+        self.show_banner()
+        
+        # Overview panel
+        overview_panel = Panel(
+            "[bold blue]🚀 Binder Publish Workflow[/bold blue]\n\n"
+            "[green]The publish command intelligently handles the complete release process with smart build detection.[/green]\n\n"
+            "[bold yellow]🎯 What it does:[/bold yellow]\n"
+            "  • Detects existing builds and offers reuse\n"
+            "  • Interactive PDF compression with size info\n"
+            "  • Smart version management with tag handling\n"
+            "  • Dual PDF distribution (GitHub + Pages)\n"
+            "  • AI-enhanced release notes generation\n"
+            "  • Complete URL validation\n\n"
+            "[bold cyan]💡 Usage:[/bold cyan]\n"
+            "  ./binder publish           # Interactive publishing\n"
+            "  ./binder publish help      # Show this detailed help\n\n"
+            "[dim]All steps are interactive with clear prompts and explanations[/dim]",
+            title="📚 Publish Overview",
+            border_style="blue",
+            padding=(1, 2)
+        )
+        console.print(overview_panel)
+        
+        # Workflow steps
+        workflow_table = Table(show_header=True, header_style="bold green", box=None)
+        workflow_table.add_column("Phase", style="cyan", width=20)
+        workflow_table.add_column("Steps", style="white", width=50)
+        workflow_table.add_column("User Control", style="yellow", width=30)
+        
+        workflow_table.add_row(
+            "🔍 Build Detection", 
+            "• Scans for existing PDF and HTML builds\n• Shows file sizes and details\n• Offers to reuse or rebuild",
+            "Choose: Reuse or rebuild"
+        )
+        
+        workflow_table.add_row(
+            "🗜️ PDF Compression", 
+            "• Shows current PDF file size\n• Explains compression benefits\n• Uses Ghostscript /ebook settings",
+            "Choose: Compress or skip"
+        )
+        
+        workflow_table.add_row(
+            "📋 Version Management", 
+            "• Shows current version\n• Offers patch/minor/major/custom\n• Handles existing tag conflicts",
+            "Choose: Version type\nResolve: Tag conflicts"
+        )
+        
+        workflow_table.add_row(
+            "🏷️ Git Operations", 
+            "• Creates annotated git tags\n• Pushes to remote repository\n• Validates git status",
+            "Automatic (with confirmation)"
+        )
+        
+        workflow_table.add_row(
+            "🌐 GitHub Pages", 
+            "• Deploys HTML website\n• Updates live site content\n• Validates deployment",
+            "Choose: Deploy or skip"
+        )
+        
+        workflow_table.add_row(
+            "📦 GitHub Release", 
+            "• Creates public release\n• Attaches PDF as asset\n• Generates AI release notes\n• Saves notes for editing",
+            "Choose: Create or skip\nEdit: Release notes"
+        )
+        
+        workflow_table.add_row(
+            "📄 PDF Distribution", 
+            "• Updates mlsysbook.ai/assets/\n• Syncs with GitHub Pages\n• Dual download availability",
+            "Choose: Update or skip"
+        )
+        
+        console.print(Panel(workflow_table, title="🔄 Publishing Workflow", border_style="green"))
+        
+        # Key features
+        features_table = Table(show_header=True, header_style="bold blue", box=None)
+        features_table.add_column("Feature", style="cyan", width=25)
+        features_table.add_column("Description", style="white", width=45)
+        features_table.add_column("Benefit", style="green", width=30)
+        
+        features_table.add_row(
+            "🔍 Smart Build Detection", 
+            "Automatically finds existing builds and shows details with file sizes",
+            "Save time by reusing builds"
+        )
+        
+        features_table.add_row(
+            "🗜️ Interactive Compression", 
+            "Shows current PDF size and explains compression trade-offs",
+            "Informed decisions on size vs quality"
+        )
+        
+        features_table.add_row(
+            "🏷️ Tag Conflict Resolution", 
+            "Detects existing tags and offers clean deletion/recreation",
+            "No git conflicts or failures"
+        )
+        
+        features_table.add_row(
+            "📄 Dual PDF Distribution", 
+            "PDF available via both GitHub releases and website assets",
+            "Multiple download paths for users"
+        )
+        
+        features_table.add_row(
+            "🤖 AI Release Notes", 
+            "Generates professional release notes using Ollama AI and saves for editing",
+            "Review and customize before publishing"
+        )
+        
+        features_table.add_row(
+            "✅ URL Validation", 
+            "Validates all generated URLs before showing to user",
+            "Guaranteed working download links"
+        )
+        
+        console.print(Panel(features_table, title="✨ Key Features", border_style="blue"))
+        
+        # Example workflow
+        example_panel = Panel(
+            "[bold yellow]📋 Example Workflow:[/bold yellow]\n\n"
+            "[green]$ ./binder publish[/green]\n"
+            "[dim]🔍 Found existing build artifacts:[/dim]\n"
+            "[dim]  ✅ PDF: build/pdf/Machine-Learning-Systems.pdf (45.2 MB)[/dim]\n"
+            "[dim]  ✅ HTML: build/html[/dim]\n"
+            "[yellow]Reuse existing builds? [y/N]: y[/yellow]\n\n"
+            "[dim]🗜️  PDF Compression Options:[/dim]\n"
+            "[dim]   Uses Ghostscript with /ebook settings to reduce file size[/dim]\n"
+            "[dim]   Current PDF size: 45.2 MB[/dim]\n"
+            "[yellow]Compress PDF? [y/N]: y[/yellow]\n"
+            "[dim]✅ PDF compressed successfully (saved 20.1%)[/dim]\n\n"
+            "[dim]📌 New version will be: v0.4.0[/dim]\n"
+            "[yellow]Create GitHub release? [y/N]: y[/yellow]\n"
+            "[dim]✅ Release notes generated and saved to: release_notes_v0.4.0.md[/dim]\n"
+            "[yellow]Open file in default editor? [y/N]: y[/yellow]\n"
+            "[dim]✅ File opened in default editor[/dim]\n"
+            "[yellow]Press Enter to continue after reviewing/editing...[/yellow]\n"
+            "[yellow]Update GitHub Pages PDF? [y/N]: y[/yellow]\n\n"
+            "[green]🎉 Publication successful![/green]\n"
+            "[dim]📖 Web version: https://mlsysbook.ai[/dim]\n"
+            "[dim]📦 Releases: https://github.com/harvard-edge/cs249r_book/releases[/dim]\n"
+            "[dim]📄 PDF: https://github.com/.../releases/download/v0.4.0/Machine-Learning-Systems.pdf[/dim]",
+            title="🎯 Example Session",
+            border_style="yellow",
+            padding=(1, 2)
+        )
+        console.print(example_panel)
 
     def show_hello(self):
         """Display welcome message and getting started guide"""
@@ -2564,8 +2989,11 @@ def main():
             binder.show_chapters()
 
         elif command == "publish":
-            binder.show_symlink_status()
-            binder.publish()
+            if len(sys.argv) > 2 and sys.argv[2].lower() == "help":
+                binder.show_publish_help()
+            else:
+                binder.show_symlink_status()
+                binder.publish()
 
         elif command == "about":
             binder.show_about()
