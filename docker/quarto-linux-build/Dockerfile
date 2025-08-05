@@ -13,8 +13,17 @@ ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 ENV PATH=/usr/local/texlive/bin/x86_64-linux:$PATH
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+# === PHASE 1: SYSTEM DEPENDENCIES ===
+RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
+    echo "⏰ Estimated time: 2-3 minutes" && \
+    echo "📊 Free disk space: $(df -h / | tail -1 | awk '{print $4}')" && \
+    start_time=$(date +%s) && \
+    \
+    echo "🔄 Updating package lists..." && \
+    apt-get update && \
+    \
+    echo "📦 Installing core system packages (25 packages)..." && \
+    apt-get install -y \
     fonts-dejavu \
     fonts-freefont-ttf \
     gdk-pixbuf2.0-bin \
@@ -38,16 +47,36 @@ RUN apt-get update && apt-get install -y \
     libudunits2-dev \
     wget \
     curl \
-    git \
-    && rm -rf /var/lib/apt/lists/*
+    git && \
+    \
+    echo "🧹 Cleaning package cache..." && \
+    rm -rf /var/lib/apt/lists/* && \
+    \
+    end_time=$(date +%s) && \
+    duration=$((end_time - start_time)) && \
+    echo "✅ === SYSTEM DEPENDENCIES COMPLETE === (${duration}s)" && \
+    echo "📊 Free disk space: $(df -h / | tail -1 | awk '{print $4}')"
 
-# Install Inkscape from PPA
-RUN apt-get update && \
+# === PHASE 2: INKSCAPE INSTALLATION ===
+RUN echo "🚀 === STARTING INKSCAPE INSTALLATION ===" && \
+    echo "⏰ Estimated time: 1-2 minutes" && \
+    start_time=$(date +%s) && \
+    \
+    echo "🔄 Adding Inkscape PPA repository..." && \
+    apt-get update && \
     apt-get install -y software-properties-common && \
     add-apt-repository ppa:inkscape.dev/stable -y && \
+    \
+    echo "📦 Installing Inkscape..." && \
     apt-get update && \
     apt-get install -y inkscape && \
-    rm -rf /var/lib/apt/lists/*
+    \
+    echo "🧹 Cleaning package cache..." && \
+    rm -rf /var/lib/apt/lists/* && \
+    \
+    end_time=$(date +%s) && \
+    duration=$((end_time - start_time)) && \
+    echo "✅ === INKSCAPE INSTALLATION COMPLETE === (${duration}s)"
 
 # Install font dependencies (note: fonts-freefont-ttf already installed above)
 RUN apt-get update && apt-get install -y \
@@ -71,18 +100,27 @@ RUN echo '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><circ
 # Install Ghostscript
 RUN apt-get update && apt-get install -y ghostscript && rm -rf /var/lib/apt/lists/*
 
-# Install TeX Live using the same method as GitHub workflows for consistency
-# Download and install TeX Live based on the tl_packages file
+# === PHASE 4: TEX LIVE INSTALLATION ===
 COPY tools/dependencies/tl_packages /tmp/
-RUN apt-get update && apt-get install -y \
+RUN echo "🚀 === STARTING TEX LIVE INSTALLATION ===" && \
+    echo "⏰ Estimated time: 8-12 minutes (largest phase)" && \
+    echo "📊 Free disk space before: $(df -h / | tail -1 | awk '{print $4}')" && \
+    start_time=$(date +%s) && \
+    \
+    echo "📦 Installing TeX Live prerequisites..." && \
+    apt-get update && apt-get install -y \
     perl \
     wget \
     xzdec && \
     rm -rf /var/lib/apt/lists/* && \
-    # Install TeX Live installer
+    \
+    echo "🔄 Downloading TeX Live installer (~4MB)..." && \
     wget -O /tmp/install-tl-unx.tar.gz "https://mirror.ctan.org/systems/texlive/tlnet/install-tl-unx.tar.gz" && \
+    \
+    echo "📦 Extracting TeX Live installer..." && \
     cd /tmp && tar -xzf install-tl-unx.tar.gz && \
-    # Create TeX Live profile for automated installation
+    \
+    echo "🔧 Creating TeX Live installation profile..." && \
     echo "selected_scheme scheme-infraonly" > /tmp/texlive.profile && \
     echo "tlpdbopt_install_docfiles 0" >> /tmp/texlive.profile && \
     echo "tlpdbopt_install_srcfiles 0" >> /tmp/texlive.profile && \
@@ -93,18 +131,34 @@ RUN apt-get update && apt-get install -y \
     echo "TEXMFSYSCONFIG /usr/local/texlive/texmf-config" >> /tmp/texlive.profile && \
     echo "TEXMFSYSVAR /usr/local/texlive/texmf-var" >> /tmp/texlive.profile && \
     echo "TEXMFVAR /usr/local/texlive/texmf-var" >> /tmp/texlive.profile && \
-    # Install TeX Live with minimal scheme
+    \
+    echo "🔄 Installing TeX Live base system..." && \
     /tmp/install-tl-*/install-tl --profile=/tmp/texlive.profile && \
-    # Add TeX Live to PATH
+    \
+    echo "🔧 Setting up TeX Live PATH..." && \
     echo 'export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH' >> /etc/bash.bashrc && \
     export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH && \
-    # Install packages from tl_packages file
+    \
+    echo "📊 Analyzing tl_packages file..." && \
+    collection_count=$(grep -c '^collection-' /tmp/tl_packages) && \
+    echo "📦 Found $collection_count TeX Live collections to install" && \
+    \
+    echo "🔄 Installing TeX Live collections..." && \
+    i=1 && \
     grep -E '^collection-' /tmp/tl_packages | while read collection; do \
-        echo "Installing $collection..."; \
+        echo "📦 [$i/$collection_count] Installing $collection..."; \
         tlmgr install "$collection"; \
+        i=$((i+1)); \
     done && \
-    # Clean up
-    rm -rf /tmp/install-tl-* /tmp/texlive.profile /tmp/install-tl-unx.tar.gz
+    \
+    echo "🧹 Cleaning up TeX Live installer..." && \
+    rm -rf /tmp/install-tl-* /tmp/texlive.profile /tmp/install-tl-unx.tar.gz && \
+    \
+    end_time=$(date +%s) && \
+    duration=$((end_time - start_time)) && \
+    echo "✅ === TEX LIVE INSTALLATION COMPLETE === (${duration}s)" && \
+    echo "📊 Free disk space after: $(df -h / | tail -1 | awk '{print $4}')" && \
+    echo "📊 TeX Live disk usage: $(du -sh /usr/local/texlive 2>/dev/null || echo 'N/A')"
 
 # Verify TeX Live installation (simplified)
 RUN export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH && \
@@ -113,19 +167,46 @@ RUN export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH && \
     lualatex --version | head -1 && \
     echo "✅ TeX Live verification successful"
 
-# Install R
-RUN apt-get update && apt-get install -y \
+# === PHASE 5: R INSTALLATION ===
+RUN echo "🚀 === STARTING R INSTALLATION ===" && \
+    echo "⏰ Estimated time: 1-2 minutes" && \
+    start_time=$(date +%s) && \
+    \
+    echo "📦 Installing R and development packages..." && \
+    apt-get update && apt-get install -y \
     r-base \
     r-base-dev \
     r-recommended && \
-    rm -rf /var/lib/apt/lists/*
+    \
+    echo "🧹 Cleaning package cache..." && \
+    rm -rf /var/lib/apt/lists/* && \
+    \
+    echo "📊 R version: $(R --version | head -1)" && \
+    \
+    end_time=$(date +%s) && \
+    duration=$((end_time - start_time)) && \
+    echo "✅ === R INSTALLATION COMPLETE === (${duration}s)"
 
-# Install Python
-RUN apt-get update && apt-get install -y \
+# === PHASE 6: PYTHON INSTALLATION ===
+RUN echo "🚀 === STARTING PYTHON INSTALLATION ===" && \
+    echo "⏰ Estimated time: 1 minute" && \
+    start_time=$(date +%s) && \
+    \
+    echo "📦 Installing Python 3 and development packages..." && \
+    apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     python3-dev && \
-    rm -rf /var/lib/apt/lists/*
+    \
+    echo "🧹 Cleaning package cache..." && \
+    rm -rf /var/lib/apt/lists/* && \
+    \
+    echo "📊 Python version: $(python3 --version)" && \
+    echo "📊 Pip version: $(pip3 --version)" && \
+    \
+    end_time=$(date +%s) && \
+    duration=$((end_time - start_time)) && \
+    echo "✅ === PYTHON INSTALLATION COMPLETE === (${duration}s)"
 
 # Install Quarto
 RUN wget -q https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.31/quarto-1.7.31-linux-amd64.deb && \
