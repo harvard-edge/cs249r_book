@@ -695,186 +695,114 @@ jobs:
           echo "✅ Main branch updated successfully!"
           echo "📋 Next step: Monitor production build, then create release tag"
 
-  monitor-build:
-    name: '⏳ Monitor Production Build'
+  trigger-build:
+    name: '🚀 Trigger Production Build'
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 10
     needs: merge-to-main
     if: github.event.inputs.confirm == 'PUBLISH'
+    outputs:
+      workflow_run_id: ${{ steps.trigger.outputs.workflow_run_id }}
     
     steps:
-      - name: ⏳ Wait for Production Build (Commit Status Monitoring)
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 🚀 Trigger quarto-build workflow directly
+        id: trigger
         run: |
-          echo "⏳ Waiting for production build to complete (max 3 hours)..."
-          echo "🔍 Monitoring commit status checks in real-time..."
+          echo "🚀 Triggering quarto-build workflow directly for main branch..."
           
-          # Get the latest commit SHA from main branch
+          # Get the latest commit SHA from main branch  
           COMMIT_SHA=$(curl -s \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/${{ github.repository }}/commits/main" \
             | jq -r '.sha')
           
-          echo "📌 Monitoring commit: $COMMIT_SHA"
-          echo "🎯 Required status checks: ci/quarto-build-ubuntu-latest-html, ci/quarto-build-ubuntu-latest-pdf"
+          echo "📌 Triggering build for commit: $COMMIT_SHA"
           
-          # Check if quarto-build workflow is running
-          echo "🔍 Checking for quarto-build workflow runs..."
-          WORKFLOW_RUNS=$(curl -s \
+          # Trigger quarto-build workflow with production parameters
+          TRIGGER_RESPONSE=$(curl -s -X POST \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/runs?head_sha=$COMMIT_SHA&per_page=10")
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/quarto-build.yml/dispatches" \
+            -d '{"ref":"main","inputs":{"environment":"production","os":"ubuntu-latest","quarto-version":"release"}}')
           
-          echo "📊 Workflow runs for this commit:"
-          echo "$WORKFLOW_RUNS" | jq -r '.workflow_runs[] | "  - \(.name): \(.status) (\(.conclusion)) - \(.created_at)"' | head -5
+          echo "✅ Build trigger sent"
           
-          # Find quarto-build workflow runs
-          QUARTO_BUILD_RUNS=$(echo "$WORKFLOW_RUNS" | jq -r '.workflow_runs[] | select(.name == "📚 Quarto Build") | .id' | head -2)
+          # Wait a moment for workflow to start
+          sleep 10
           
-          if [ -n "$QUARTO_BUILD_RUNS" ]; then
-            echo "🔍 Found quarto-build workflow runs: $QUARTO_BUILD_RUNS"
-            
-            # Get the latest quarto-build run
-            LATEST_QUARTO_RUN=$(echo "$QUARTO_BUILD_RUNS" | head -1)
-            echo "📊 Latest quarto-build run ID: $LATEST_QUARTO_RUN"
-            
-            # Get workflow run details
-            RUN_DETAILS=$(curl -s \
-              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              -H "Accept: application/vnd.github.v3+json" \
-              "https://api.github.com/repos/${{ github.repository }}/actions/runs/$LATEST_QUARTO_RUN")
-            
-            RUN_STATUS=$(echo "$RUN_DETAILS" | jq -r '.status')
-            RUN_CONCLUSION=$(echo "$RUN_DETAILS" | jq -r '.conclusion')
-            RUN_CREATED=$(echo "$RUN_DETAILS" | jq -r '.created_at')
-            
-            echo "📋 Quarto-build status: $RUN_STATUS ($RUN_CONCLUSION) - Started: $RUN_CREATED"
-            
-            # Get jobs from the workflow run
-            JOBS_RESPONSE=$(curl -s \
-              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              -H "Accept: application/vnd.github.v3+json" \
-              "https://api.github.com/repos/${{ github.repository }}/actions/runs/$LATEST_QUARTO_RUN/jobs")
-            
-            echo "📋 Quarto-build jobs:"
-            echo "$JOBS_RESPONSE" | jq -r '.jobs[] | "  - \(.name): \(.status) (\(.conclusion)) - \(.started_at)"' | head -5
+          # Get the workflow run ID
+          RUN_RESPONSE=$(curl -s \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/quarto-build.yml/runs?head_sha=$COMMIT_SHA&per_page=1")
+          
+          WORKFLOW_RUN_ID=$(echo "$RUN_RESPONSE" | jq -r '.workflow_runs[0].id // empty')
+          
+          if [ -n "$WORKFLOW_RUN_ID" ] && [ "$WORKFLOW_RUN_ID" != "null" ]; then
+            echo "📊 Workflow run ID: $WORKFLOW_RUN_ID"
+            echo "workflow_run_id=$WORKFLOW_RUN_ID" >> $GITHUB_OUTPUT
           else
-            echo "⚠️ No quarto-build workflow runs found for this commit"
-            
-            # Check if Controller workflow was cancelled (which would prevent quarto-build from running)
-            echo "🔍 Checking if Controller workflow was cancelled..."
-            CONTROLLER_RUNS=$(curl -s \
-              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              -H "Accept: application/vnd.github.v3+json" \
-              "https://api.github.com/repos/${{ github.repository }}/actions/workflows/controller.yml/runs?head_sha=$COMMIT_SHA&per_page=5")
-            
-            CONTROLLER_STATUS=$(echo "$CONTROLLER_RUNS" | jq -r '.workflow_runs[0].conclusion // "null"')
-            CONTROLLER_NAME=$(echo "$CONTROLLER_RUNS" | jq -r '.workflow_runs[0].name // "unknown"')
-            
-            if [ "$CONTROLLER_STATUS" = "cancelled" ]; then
-              echo "🚫 Controller workflow was cancelled - quarto-build never triggered"
-              echo "📊 Controller status: $CONTROLLER_NAME ($CONTROLLER_STATUS)"
-              echo "❌ Cannot proceed with release - build was cancelled"
-              echo "🔗 Check workflow: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
-              exit 1
-            elif [ "$CONTROLLER_STATUS" = "failure" ]; then
-              echo "❌ Controller workflow failed - quarto-build never triggered"
-              echo "📊 Controller status: $CONTROLLER_NAME ($CONTROLLER_STATUS)"
-              echo "❌ Cannot proceed with release - controller failed"
-              echo "🔗 Check workflow: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
-              exit 1
-            else
-              echo "📊 Controller status: $CONTROLLER_NAME ($CONTROLLER_STATUS)"
-              echo "⏳ Will continue monitoring for quarto-build to start..."
-            fi
+            echo "❌ Failed to get workflow run ID"
+            exit 1
           fi
+
+  monitor-build:
+    name: '⏳ Monitor Production Build'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    needs: trigger-build
+    if: github.event.inputs.confirm == 'PUBLISH'
+    
+    steps:
+      - name: ⏳ Wait for Production Build Completion
+        run: |
+          echo "⏳ Waiting for production build to complete (max 3 hours)..."
+          echo "🔍 Monitoring workflow run directly..."
           
-          sleep 30  # Give the build a moment to start
+          WORKFLOW_RUN_ID="${{ needs.trigger-build.outputs.workflow_run_id }}"
+          echo "📌 Monitoring workflow run: $WORKFLOW_RUN_ID"
           
-          # Wait for all required status checks to complete
-          for i in $(seq 1 ${{ github.event.inputs.commit_status_timeout }}); do  # ${{ github.event.inputs.commit_status_timeout }} attempts × 60 seconds = 3 hours max
-            echo "🔍 Checking commit status (attempt $i/${{ github.event.inputs.commit_status_timeout }})..."
+          # Monitor the specific workflow run
+          for i in $(seq 1 ${{ github.event.inputs.commit_status_timeout }}); do
+            echo "🔍 Checking workflow status (attempt $i/${{ github.event.inputs.commit_status_timeout }})..."
             
-            # Get commit status
-            STATUS_RESPONSE=$(curl -s \
+            # Get workflow run status
+            RUN_RESPONSE=$(curl -s \
               -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
               -H "Accept: application/vnd.github.v3+json" \
-              "https://api.github.com/repos/${{ github.repository }}/commits/$COMMIT_SHA/status")
+              "https://api.github.com/repos/${{ github.repository }}/actions/runs/$WORKFLOW_RUN_ID")
             
-            # Check overall status
-            OVERALL_STATE=$(echo "$STATUS_RESPONSE" | jq -r '.state')
-            TOTAL_COUNT=$(echo "$STATUS_RESPONSE" | jq -r '.total_count')
+            RUN_STATUS=$(echo "$RUN_RESPONSE" | jq -r '.status')
+            RUN_CONCLUSION=$(echo "$RUN_RESPONSE" | jq -r '.conclusion')
             
-            echo "📊 Overall status: $OVERALL_STATE ($TOTAL_COUNT checks)"
+            echo "📊 Workflow status: $RUN_STATUS ($RUN_CONCLUSION)"
             
-            # Get individual status checks
-            STATUSES=$(echo "$STATUS_RESPONSE" | jq -r '.statuses')
-            
-            # Show ALL available status checks for debugging
-            echo "🔍 All available status checks:"
-            echo "$STATUSES" | jq -r '.[] | "  - \(.context): \(.state) - \(.description)"' | head -10
-            
-            # Early exit if no status checks exist after reasonable time
-            if [ "$TOTAL_COUNT" -eq 0 ] && [ $i -gt 10 ]; then
-              echo "⚠️ No status checks found after $((i * ${{ github.event.inputs.commit_status_interval }} / 60)) minutes"
-              echo "🔍 Re-checking if quarto-build workflow was triggered..."
-              
-              # Re-check for quarto-build workflow
-              QUARTO_CHECK=$(curl -s \
-                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                -H "Accept: application/vnd.github.v3+json" \
-                "https://api.github.com/repos/${{ github.repository }}/actions/workflows/quarto-build.yml/runs?head_sha=$COMMIT_SHA&per_page=1")
-              
-              QUARTO_COUNT=$(echo "$QUARTO_CHECK" | jq -r '.total_count')
-              
-              if [ "$QUARTO_COUNT" -eq 0 ]; then
-                echo "❌ Quarto-build workflow still not triggered after $((i * ${{ github.event.inputs.commit_status_interval }} / 60)) minutes"
-                echo "🔍 This suggests a workflow configuration issue"
-                echo "🔗 Check workflows: https://github.com/${{ github.repository }}/actions"
+            # Check if completed
+            if [ "$RUN_STATUS" = "completed" ]; then
+              if [ "$RUN_CONCLUSION" = "success" ]; then
+                echo "✅ Production build completed successfully!"
+                echo "🔗 View run: https://github.com/${{ github.repository }}/actions/runs/$WORKFLOW_RUN_ID"
+                break
+              elif [ "$RUN_CONCLUSION" = "failure" ]; then
+                echo "❌ Production build failed!"
+                echo "🔗 View run: https://github.com/${{ github.repository }}/actions/runs/$WORKFLOW_RUN_ID"
+                exit 1
+              elif [ "$RUN_CONCLUSION" = "cancelled" ]; then
+                echo "🚫 Production build was cancelled!"
+                echo "🔗 View run: https://github.com/${{ github.repository }}/actions/runs/$WORKFLOW_RUN_ID"
+                exit 1
+              else
+                echo "⚠️ Production build completed with status: $RUN_CONCLUSION"
+                echo "🔗 View run: https://github.com/${{ github.repository }}/actions/runs/$WORKFLOW_RUN_ID"
                 exit 1
               fi
-            fi
-            
-            # Check for our specific quarto-build status checks
-            HTML_STATUS=$(echo "$STATUSES" | jq -r '.[] | select(.context == "ci/quarto-build-ubuntu-latest-html") | .state' | head -1)
-            PDF_STATUS=$(echo "$STATUSES" | jq -r '.[] | select(.context == "ci/quarto-build-ubuntu-latest-pdf") | .state' | head -1)
-            
-            echo "📋 Expected build status checks:"
-            echo "  - HTML Build (Linux): ${HTML_STATUS:-pending}"
-            echo "  - PDF Build (Linux): ${PDF_STATUS:-pending}"
-            
-            # Show detailed status for quarto-build checks specifically
-            echo "📋 Quarto build status checks:"
-            echo "$STATUSES" | jq -r '.[] | select(.context | startswith("ci/quarto-build")) | "  - \(.context): \(.state) - \(.description)"' | head -4
-            
-            # Check if all required builds are successful
-            if [ "$HTML_STATUS" = "success" ] && [ "$PDF_STATUS" = "success" ]; then
-              echo "✅ All production builds completed successfully!"
-              echo "📊 HTML Build: ✅ Success"
-              echo "📊 PDF Build: ✅ Success"
-              echo "🔗 View commit status: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
-              break
-            fi
-            
-            # Check for any failures, cancellations, or errors
-            if [ "$HTML_STATUS" = "failure" ] || [ "$PDF_STATUS" = "failure" ]; then
-              echo "❌ Production build failed!"
-              echo "📊 HTML Build: ${HTML_STATUS:-pending}"
-              echo "📊 PDF Build: ${PDF_STATUS:-pending}"
-              echo "🔗 View commit status: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
-              exit 1
-            elif [ "$HTML_STATUS" = "cancelled" ] || [ "$PDF_STATUS" = "cancelled" ]; then
-              echo "🚫 Production build was cancelled!"
-              echo "📊 HTML Build: ${HTML_STATUS:-pending}"
-              echo "📊 PDF Build: ${PDF_STATUS:-pending}"
-              echo "🔗 View commit status: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
-              exit 1
-            elif [ "$HTML_STATUS" = "error" ] || [ "$PDF_STATUS" = "error" ]; then
-              echo "⚠️ Production build encountered an error!"
-              echo "📊 HTML Build: ${HTML_STATUS:-pending}"
-              echo "📊 PDF Build: ${PDF_STATUS:-pending}"
-              echo "🔗 View commit status: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
-              exit 1
             fi
             
             # Show current status with time elapsed
@@ -890,91 +818,23 @@ jobs:
             
             echo "⏳ Build still in progress... (attempt $i/${{ github.event.inputs.commit_status_timeout }}, ~${TIME_DISPLAY} elapsed)"
             
-            # Show build progress indicators with heartbeat-style updates
-            if [ $i -eq 1 ]; then
-              echo "📋 Expected build timeline (Linux only):"
-              echo "  0-10m: Initial setup and quality checks"
-              echo "  10-25m: Quarto build (HTML + PDF generation)"
-              echo "  25-35m: PDF compression and processing"
-              echo "  35-45m: GitHub Pages deployment"
-              echo "  45-60m: Asset copying and finalization"
-            fi
-            
-            # Show heartbeat-style progress every 4th attempt (every 2 minutes)
-            if [ $((i % 4)) -eq 0 ]; then
+            # Show heartbeat-style progress every 5th attempt (every 5 minutes)
+            if [ $((i % 5)) -eq 0 ]; then
               echo "💓 Build heartbeat: $(date)"
-              echo "📊 Current build status: Monitoring commit checks"
+              echo "📊 Current status: $RUN_STATUS"
               echo "⏰ Time elapsed: ${TIME_DISPLAY}"
-              echo "📈 HTML: ${HTML_STATUS:-pending} | PDF: ${PDF_STATUS:-pending}"
-              echo "🔗 Monitor: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
-              
-              # Show quarto-build logs if available
-              if [ -n "$LATEST_QUARTO_RUN" ]; then
-                echo "📋 Latest quarto-build logs:"
-                
-                # Get the latest job from the workflow run
-                LATEST_JOB=$(curl -s \
-                  -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                  -H "Accept: application/vnd.github.v3+json" \
-                  "https://api.github.com/repos/${{ github.repository }}/actions/runs/$LATEST_QUARTO_RUN/jobs" \
-                  | jq -r '.jobs[0].id')
-                
-                if [ "$LATEST_JOB" != "null" ] && [ -n "$LATEST_JOB" ]; then
-                  echo "🔍 Fetching logs from job: $LATEST_JOB"
-                  
-                  # Get the latest step from the job
-                  LATEST_STEP=$(curl -s \
-                    -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                    -H "Accept: application/vnd.github.v3+json" \
-                    "https://api.github.com/repos/${{ github.repository }}/actions/runs/$LATEST_QUARTO_RUN/jobs/$LATEST_JOB/logs" \
-                    | grep -o 'step_[0-9]*' | tail -1)
-                  
-                  if [ -n "$LATEST_STEP" ]; then
-                    echo "📝 Latest step logs ($LATEST_STEP):"
-                    curl -s \
-                      -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                      -H "Accept: application/vnd.github.v3+json" \
-                      "https://api.github.com/repos/${{ github.repository }}/actions/runs/$LATEST_QUARTO_RUN/jobs/$LATEST_JOB/logs" \
-                      | grep -A 10 "$LATEST_STEP" | tail -5
-                  fi
-                fi
-              fi
-              
-              # Update GitHub status with progress
-              curl -s -X POST \
-                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                -H "Accept: application/vnd.github.v3+json" \
-                "https://api.github.com/repos/${{ github.repository }}/statuses/$COMMIT_SHA" \
-                -d "{
-                  \"state\": \"pending\",
-                  \"description\": \"Publishing: Build ${TIME_DISPLAY} (HTML: ${HTML_STATUS:-pending}, PDF: ${PDF_STATUS:-pending})\",
-                  \"context\": \"ci/publish-live-monitor\"
-                }" >/dev/null
+              echo "🔗 Monitor: https://github.com/${{ github.repository }}/actions/runs/$WORKFLOW_RUN_ID"
               echo "---"
             fi
             
             sleep ${{ github.event.inputs.commit_status_interval }}
           done
           
-          # If we get here, check final status after timeout
-          if [ "$HTML_STATUS" != "success" ] || [ "$PDF_STATUS" != "success" ]; then
-            echo "⏰ Build monitoring timed out after 3 hours"
-            echo "📊 Final status: HTML=$HTML_STATUS, PDF=$PDF_STATUS"
-            
-            # Provide specific guidance based on final state
-            if [ "$HTML_STATUS" = "cancelled" ] || [ "$PDF_STATUS" = "cancelled" ]; then
-              echo "🚫 Build was cancelled - no release will be created"
-            elif [ "$HTML_STATUS" = "failure" ] || [ "$PDF_STATUS" = "failure" ]; then
-              echo "❌ Build failed - check logs for errors"
-            elif [ "$HTML_STATUS" = "error" ] || [ "$PDF_STATUS" = "error" ]; then
-              echo "⚠️ Build encountered an error - check GitHub Actions logs"
-            else
-              echo "⏳ Build may still be running - check manually"
-            fi
-            
-            echo "🔗 Check status: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
-            exit 1
-          fi
+          # If we get here, build timed out
+          echo "⏰ Build monitoring timed out after 3 hours"
+          echo "📊 Final status: $RUN_STATUS ($RUN_CONCLUSION)"
+          echo "🔗 Check run: https://github.com/${{ github.repository }}/actions/runs/$WORKFLOW_RUN_ID"
+          exit 1
 
   create-tag:
     name: '🏷️ Create Release Tag'
