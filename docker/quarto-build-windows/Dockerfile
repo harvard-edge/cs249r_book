@@ -4,13 +4,13 @@
 
 FROM mcr.microsoft.com/windows/servercore:ltsc2022
 
-# Install PowerShell 7 (same as GitHub Actions runners)
-RUN powershell -Command "Invoke-WebRequest -Uri 'https://github.com/PowerShell/PowerShell/releases/download/v7.4.1/PowerShell-7.4.1-win-x64.msi' -OutFile 'PowerShell.msi'" && \
+# Install PowerShell 7 first using curl (available in Windows Server Core)
+RUN curl -fSLo PowerShell.msi https://github.com/PowerShell/PowerShell/releases/download/v7.4.1/PowerShell-7.4.1-win-x64.msi && \
     msiexec /i PowerShell.msi /quiet /norestart && \
     del PowerShell.msi
 
-# Install Chocolatey (available in GitHub Actions runners)
-RUN powershell -Command "Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))"
+# Install Chocolatey using PowerShell 7 (pwsh)
+RUN pwsh -Command "Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))"
 
 # Set environment variables to match workflow
 ENV R_LIBS_USER=C:\r-lib
@@ -29,9 +29,9 @@ COPY docker/quarto-build-windows/verify_r_packages.R C:\temp\
 RUN mkdir C:\r-lib
 
 # Setup Quarto (using exact version from workflow)
-RUN powershell -Command "Invoke-WebRequest -Uri 'https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.31/quarto-1.7.31-win.zip' -OutFile 'quarto.zip'" && \
-    powershell -Command "Expand-Archive -Path 'quarto.zip' -DestinationPath 'C:\quarto' -Force" && \
-    powershell -Command "del quarto.zip" && \
+RUN pwsh -Command "Invoke-WebRequest -Uri 'https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.31/quarto-1.7.31-win.zip' -OutFile 'quarto.zip'" && \
+    pwsh -Command "Expand-Archive -Path 'quarto.zip' -DestinationPath 'C:\quarto' -Force" && \
+    pwsh -Command "del quarto.zip" && \
     setx PATH "%PATH%;C:\quarto\quarto-1.7.31\bin" /M
 
 # Setup Python 3.13 (same as workflow)
@@ -42,7 +42,7 @@ RUN python -m pip install --upgrade pip && \
     python -m pip install -r C:\temp\requirements.txt
 
 # Install Ghostscript (using exact method from workflow)
-RUN powershell -Command " \
+RUN pwsh -Command " \
     try { \
         winget install ArtifexSoftware.GhostScript --accept-source-agreements --accept-package-agreements; \
         Write-Output '✅ Ghostscript installed via winget'; \
@@ -57,7 +57,7 @@ RUN powershell -Command " \
     "
 
 # Install Inkscape (using exact method from workflow)
-RUN powershell -Command " \
+RUN pwsh -Command " \
     [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
     $OutputEncoding = [System.Text.Encoding]::UTF8; \
     [Console]::InputEncoding = [System.Text.Encoding]::UTF8; \
@@ -73,7 +73,7 @@ RUN powershell -Command " \
 
 # Install TeX Live packages (using zauguin/install-texlive equivalent)
 # Note: This simulates what the GitHub Action does
-RUN powershell -Command " \
+RUN pwsh -Command " \
     # Download TeX Live installer \
     Invoke-WebRequest -Uri 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' -OutFile 'C:\temp\install-tl-windows.exe'; \
     # Create minimal installation profile \
@@ -121,7 +121,7 @@ RUN Rscript -e " \
     "
 
 # Verify R package installation
-RUN powershell -Command "Write-Host '🔍 Verifying R package installation...'" && \
+RUN pwsh -Command "Write-Host '🔍 Verifying R package installation...'" && \
     Rscript C:\temp\verify_r_packages.R
 
 # Clean up
@@ -137,4 +137,4 @@ RUN quarto --version && \
     lualatex --version
 
 # Health check
-RUN powershell -Command "Write-Host '✅ Windows container build completed successfully'"
+RUN pwsh -Command "Write-Host '✅ Windows container build completed successfully'"
