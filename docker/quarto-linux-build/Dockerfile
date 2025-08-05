@@ -115,7 +115,7 @@ RUN echo "🔄 Verifying TeX Live installation..." && \
 \end{tikzpicture}
 \end{document}
 EOF
-    lualatex -interaction=nonstopmode test_tikz.tex && \
+    && lualatex -interaction=nonstopmode test_tikz.tex && \
     echo "✅ TikZ compilation successful" && \
     ls -la test_tikz.pdf && \
     rm -f test_tikz.*
