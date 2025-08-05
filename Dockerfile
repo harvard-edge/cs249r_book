@@ -71,49 +71,15 @@ RUN echo '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><circ
 # Install Ghostscript
 RUN apt-get update && apt-get install -y ghostscript && rm -rf /var/lib/apt/lists/*
 
-# Install TeX Live using your specific package list
+# Install TeX Live (full distribution for consistency)
 RUN apt-get update && apt-get install -y \
-    texlive \
-    texlive-latex-base \
-    texlive-latex-recommended \
+    texlive-full \
     texlive-latex-extra \
     texlive-fonts-recommended \
     texlive-fonts-extra \
-    texlive-fontutils \
     texlive-luatex \
-    texlive-pictures \
-    texlive-pstricks \
-    texlive-science \
-    texlive-bibtex-extra \
-    texlive-extra-utils \
-    texlive-lang-english \
-    texlive-lang-other \
-    texlive-publishers \
-    texlive-generic-extra \
-    texlive-generic-recommended \
-    texlive-plain-extra \
-    texlive-plain-generic \
-    texlive-science \
-    texlive-math-extra \
-    texlive-math-science \
-    texlive-metapost \
-    texlive-music \
-    texlive-omega \
-    texlive-other-extra \
-    texlive-other-recommended \
-    texlive-pictures \
-    texlive-plain-extra \
-    texlive-plain-generic \
-    texlive-publishers \
-    texlive-science \
-    texlive-xetex \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install specific TeX Live packages from your tl_packages file
-COPY tools/dependencies/tl_packages /tmp/
-RUN tlmgr update --self && \
-    tlmgr install $(cat /tmp/tl_packages | grep -v '^#' | grep -v '^$' | tr '\n' ' ') && \
-    rm -f /tmp/tl_packages
+    texlive-pictures && \
+    rm -rf /var/lib/apt/lists/*
 
 # Verify TeX Live installation (same as your workflow)
 RUN echo "🔄 Verifying TeX Live installation..." && \
