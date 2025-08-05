@@ -11,6 +11,7 @@ ENV QUARTO_LOG_LEVEL=INFO
 ENV PYTHONIOENCODING=utf-8
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
+ENV PATH=/usr/local/texlive/bin/x86_64-linux:$PATH
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -48,9 +49,8 @@ RUN apt-get update && \
     apt-get install -y inkscape && \
     rm -rf /var/lib/apt/lists/*
 
-# Install font dependencies
+# Install font dependencies (note: fonts-freefont-ttf already installed above)
 RUN apt-get update && apt-get install -y \
-    fonts-freefont-ttf \
     fonts-liberation \
     fontconfig && \
     fc-cache -fv && \
@@ -71,18 +71,44 @@ RUN echo '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><circ
 # Install Ghostscript
 RUN apt-get update && apt-get install -y ghostscript && rm -rf /var/lib/apt/lists/*
 
-# Install TeX Live (full distribution for consistency)
+# Install TeX Live using the same method as GitHub workflows for consistency
+# Download and install TeX Live based on the tl_packages file
+COPY tools/dependencies/tl_packages /tmp/
 RUN apt-get update && apt-get install -y \
-    texlive-full \
-    texlive-latex-extra \
-    texlive-fonts-recommended \
-    texlive-fonts-extra \
-    texlive-luatex \
-    texlive-pictures && \
-    rm -rf /var/lib/apt/lists/*
+    perl \
+    wget \
+    xzdec && \
+    rm -rf /var/lib/apt/lists/* && \
+    # Install TeX Live installer
+    wget -O /tmp/install-tl-unx.tar.gz "https://mirror.ctan.org/systems/texlive/tlnet/install-tl-unx.tar.gz" && \
+    cd /tmp && tar -xzf install-tl-unx.tar.gz && \
+    # Create TeX Live profile for automated installation
+    echo "selected_scheme scheme-infraonly" > /tmp/texlive.profile && \
+    echo "tlpdbopt_install_docfiles 0" >> /tmp/texlive.profile && \
+    echo "tlpdbopt_install_srcfiles 0" >> /tmp/texlive.profile && \
+    echo "TEXDIR /usr/local/texlive" >> /tmp/texlive.profile && \
+    echo "TEXMFCONFIG /usr/local/texlive/texmf-config" >> /tmp/texlive.profile && \
+    echo "TEXMFHOME /usr/local/texlive/texmf-home" >> /tmp/texlive.profile && \
+    echo "TEXMFLOCAL /usr/local/texlive/texmf-local" >> /tmp/texlive.profile && \
+    echo "TEXMFSYSCONFIG /usr/local/texlive/texmf-config" >> /tmp/texlive.profile && \
+    echo "TEXMFSYSVAR /usr/local/texlive/texmf-var" >> /tmp/texlive.profile && \
+    echo "TEXMFVAR /usr/local/texlive/texmf-var" >> /tmp/texlive.profile && \
+    # Install TeX Live with minimal scheme
+    /tmp/install-tl-*/install-tl --profile=/tmp/texlive.profile && \
+    # Add TeX Live to PATH
+    echo 'export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH' >> /etc/bash.bashrc && \
+    export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH && \
+    # Install packages from tl_packages file
+    grep -E '^collection-' /tmp/tl_packages | while read collection; do \
+        echo "Installing $collection..."; \
+        tlmgr install "$collection"; \
+    done && \
+    # Clean up
+    rm -rf /tmp/install-tl-* /tmp/texlive.profile /tmp/install-tl-unx.tar.gz
 
 # Verify TeX Live installation (same as your workflow)
-RUN echo "🔄 Verifying TeX Live installation..." && \
+RUN export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH && \
+    echo "🔄 Verifying TeX Live installation..." && \
     echo "📊 Checking LaTeX engines:" && \
     which lualatex && echo "✅ lualatex found" && \
     which pdflatex && echo "✅ pdflatex found" && \
@@ -151,27 +177,60 @@ COPY docker/quarto-linux-build/verify_r_packages.R /tmp/
 RUN pip3 install --upgrade pip && \
     pip3 install -r /tmp/requirements.txt
 
-# Install R packages
-RUN Rscript /tmp/install_packages.R
+# Install R packages (using same process as successful workflow)
+RUN R --slave -e " \
+    # Set options for better package installation \
+    options(repos = c(CRAN = 'https://cran.rstudio.com')); \
+    \
+    cat('🔄 Installing R packages...\n'); \
+    cat(paste('R library path:', Sys.getenv('R_LIBS_USER'), '\n')); \
+    \
+    # Create and set library path \
+    lib_path <- Sys.getenv('R_LIBS_USER'); \
+    dir.create(lib_path, showWarnings = FALSE, recursive = TRUE); \
+    .libPaths(lib_path); \
+    \
+    # Install packages \
+    cat('📦 Installing remotes package...\n'); \
+    install.packages('remotes'); \
+    \
+    if (file.exists('/tmp/install_packages.R')) { \
+      cat('📦 Installing packages from tools/dependencies/install_packages.R...\n'); \
+      source('/tmp/install_packages.R'); \
+    } else { \
+      cat('⚠️ No tools/dependencies/install_packages.R found, installing common packages\n'); \
+      pkgs <- c('rmarkdown', 'knitr', 'tidyverse', 'ggplot2', 'bookdown'); \
+      cat(paste('📦 Installing packages:', paste(pkgs, collapse=', '), '\n')); \
+      install.packages(pkgs); \
+    }; \
+    \
+    cat('✅ R package installation complete\n'); \
+    cat('📊 Installed packages:\n'); \
+    ip <- installed.packages()[, 'Package']; \
+    print(head(ip, 10)); \
+    cat(paste('Total packages installed:', nrow(ip), '\n')); \
+    "
 
 # Verify R package installation (same as your workflow)
 RUN echo "🔍 Verifying R package installation..." && \
     Rscript /tmp/verify_r_packages.R
 
 # Clean up
-RUN rm -rf /tmp/requirements.txt /tmp/install_packages.R /tmp/verify_r_packages.R
+RUN rm -rf /tmp/requirements.txt /tmp/install_packages.R /tmp/verify_r_packages.R /tmp/tl_packages
 
 # Set working directory
 WORKDIR /workspace
 
 # Verify installations
-RUN quarto --version && \
+RUN export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH && \
+    quarto --version && \
     python3 --version && \
     R --version && \
     lualatex --version
 
 # Health check
-RUN echo "✅ Container build completed successfully" && \
+RUN export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH && \
+    echo "✅ Container build completed successfully" && \
     echo "📊 Quarto version: $(quarto --version)" && \
     echo "📊 Python version: $(python3 --version)" && \
     echo "📊 R version: $(R --version | head -1)" && \
