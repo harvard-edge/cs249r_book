@@ -175,4 +175,4 @@ RUN echo "✅ Container build completed successfully" && \
     echo "📊 Quarto version: $(quarto --version)" && \
     echo "📊 Python version: $(python3 --version)" && \
     echo "📊 R version: $(R --version | head -1)" && \
-    echo "📊 TeX Live: $(lualatex --version | head -1)" 
+    echo "📊 TeX Live: $(lualatex --version | head -1)"
