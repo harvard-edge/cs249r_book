@@ -81,11 +81,11 @@ on:
   workflow_dispatch:
     inputs:
       description:
-        description: 'What are you publishing? (brief description)'
+        description: 'What are you publishing? [Content updates and improvements]'
         required: false
         default: 'Content updates and improvements'
       release_type:
-        description: 'Release type'
+        description: 'Release type [patch]'
         required: true
         type: choice
         options:
@@ -94,15 +94,15 @@ on:
           - 'major'
         default: 'patch'
       dev_commit:
-        description: 'Specific dev commit to publish (WARNING: includes old workflow files!) Leave empty for latest dev'
+        description: 'Specific dev commit to publish (WARNING: includes old workflow files!) [latest dev]'
         required: false
         default: ''
       confirm:
-        description: 'Type "PUBLISH" to confirm (safety check)'
+        description: 'Type "PUBLISH" to confirm (safety check) [required]'
         required: true
         default: ''
       ai_generated_notes:
-        description: 'Generate AI-enhanced release notes? (yes = AI + git log, no = git log only)'
+        description: 'Generate AI-enhanced release notes? [yes]'
         required: true
         type: choice
         options:
@@ -110,13 +110,17 @@ on:
           - 'no'
         default: 'yes'
       commit_status_timeout:
-        description: 'Number of status check attempts (180 = 3 hours at 60s intervals)'
+        description: 'Number of status check attempts [180 = 3 hours at 60s intervals]'
         required: false
         default: '180'
       commit_status_interval:
-        description: 'Seconds between status checks (heartbeat interval)'
+        description: 'Seconds between status checks [60]'
         required: false
         default: '60'
+      previous_version:
+        description: 'Previous version to increment from [auto-detect from latest git tag]'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -326,13 +330,14 @@ jobs:
             LATEST_VERSION="${{ github.event.inputs.previous_version }}"
             echo "📌 Using provided previous version: $LATEST_VERSION"
           else
-            # Get latest release version, default to v0.0.0 if no releases exist
-            LATEST_VERSION=$(curl -s \
-              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              -H "Accept: application/vnd.github.v3+json" \
-              "https://api.github.com/repos/${{ github.repository }}/releases/latest" \
-              | jq -r '.tag_name // "v0.0.0"')
-            echo "📊 Auto-detected latest version: $LATEST_VERSION"
+            # Get latest git tag version, default to v0.0.0 if no tags exist
+            LATEST_VERSION=$(git tag -l "v*" | sort -V | tail -n1)
+            if [ -z "$LATEST_VERSION" ]; then
+              LATEST_VERSION="v0.0.0"
+              echo "📊 No git tags found, using default: $LATEST_VERSION"
+            else
+              echo "📊 Auto-detected latest git tag: $LATEST_VERSION"
+            fi
           fi
           
           # Remove 'v' prefix for calculation
@@ -423,7 +428,7 @@ jobs:
         run: |
           echo "📚 Validating Quarto project structure..."
           
-          cd book
+          cd quarto
           
           # Check critical files exist using environment variables
           REQUIRED_FILES=("${{ env.QUARTO_MAIN_CONFIG }}" "config/${{ env.QUARTO_HTML_CONFIG }}" "config/${{ env.QUARTO_PDF_CONFIG }}")
