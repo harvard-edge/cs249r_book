@@ -97,24 +97,24 @@ RUN echo "🔄 Verifying TeX Live installation..." && \
     kpsewhich phvr7t.tfm && echo "✅ Helvetica font found" && \
     kpsewhich t1phv.fd && echo "✅ Helvetica font descriptor found" && \
     echo "🧪 Testing TikZ compilation..." && \
-    cat > test_tikz.tex << 'EOF' && \
-\documentclass{standalone} && \
-\usepackage{tikz} && \
-\usepackage{pgfplots} && \
-\usepackage{amsmath} && \
-\usepackage{amssymb} && \
-\usepackage{xcolor} && \
-\usepackage[T1]{fontenc} && \
-\usetikzlibrary{positioning} && \
-\usetikzlibrary{calc} && \
-\begin{document} && \
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}] && \
-\node[draw, fill=blue!20] at (0,0) {TikZ Test}; && \
-\node[draw, fill=red!20] at (2,0) {Success}; && \
-\draw[->] (0.8,0) -- (1.2,0); && \
-\end{tikzpicture} && \
-\end{document} && \
-EOF && \
+    cat > test_tikz.tex << 'EOF'
+\documentclass{standalone}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{xcolor}
+\usepackage[T1]{fontenc}
+\usetikzlibrary{positioning}
+\usetikzlibrary{calc}
+\begin{document}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+\node[draw, fill=blue!20] at (0,0) {TikZ Test};
+\node[draw, fill=red!20] at (2,0) {Success};
+\draw[->] (0.8,0) -- (1.2,0);
+\end{tikzpicture}
+\end{document}
+EOF
     if lualatex -interaction=nonstopmode test_tikz.tex; then && \
         echo "✅ TikZ compilation successful" && \
         ls -la test_tikz.pdf; && \
