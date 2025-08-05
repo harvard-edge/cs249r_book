@@ -1,35 +1,54 @@
 # Python Dependencies
 
-This directory contains Python dependencies split for different use cases.
+This directory contains Python dependencies organized in a clean, modular structure.
+
+## Structure
+
+```
+requirements/
+├── base.txt          # Core dependencies (pandas, requests, etc.)
+├── production.txt    # Production-specific (includes base.txt)
+└── development.txt   # Full ML stack (includes production.txt)
+```
 
 ## Files
 
-### `requirements.txt` (Default - Full Dependencies)
-**Use for**: General development, complete functionality
+### `requirements/base.txt` (Core Dependencies)
+- Essential packages needed by all environments
+- Jupyter, pandas, requests, PyYAML, etc.
+- Lightweight foundation (~200MB)
+
+### `requirements/production.txt` (Container/Build)
+- Includes `base.txt` + production-specific packages
+- OpenAI API, Groq, pre-commit, Ghostscript, etc.
+- Excludes heavy ML libraries
+- Optimized for containers (~500MB)
+
+### `requirements/development.txt` (Full ML Stack)
+- Includes `production.txt` + ML dependencies
+- PyTorch, sentence-transformers, FAISS, scikit-learn
+- Required for cross-reference generation
+- Complete development environment (~4GB)
+
+## Convenience Files
+
+### `requirements.txt` (Default - Full)
 ```bash
 pip install -r requirements.txt
 ```
-- Complete dependency set including ML tools
-- Includes PyTorch, sentence-transformers, FAISS
-- ~4GB total with all dependencies
+References `requirements/development.txt` for complete functionality
 
-### `requirements-build.txt` (Container/Build Only)
-**Use for**: Container builds, CI/CD, production deployments
+### `requirements-build.txt` (Container Optimized)
 ```bash
 pip install -r requirements-build.txt
 ```
-- Minimal dependencies for Quarto book builds
-- Excludes heavy ML libraries (PyTorch, etc.)
-- ~500MB total vs ~4GB with ML dependencies
-- Optimized for fast container builds
+References `requirements/production.txt` for lightweight builds
 
-### `requirements-dev.txt` (Development - Same as requirements.txt)
-**Use for**: Alternative name for full dependencies
+### `requirements-dev.txt` (Development Alias)
 ```bash
 pip install -r requirements-dev.txt
 ```
-- Identical to `requirements.txt`
-- Provided for clarity in development contexts
+Alias for `requirements/development.txt`
 
 ## Usage Patterns
 
