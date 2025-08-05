@@ -95,30 +95,47 @@ RUN pwsh -Command " \
     } \
     "
 
-# Install Ghostscript (using exact method from workflow with progress indicators)
+# Install Ghostscript (container-optimized approach - chocolatey first)
 RUN pwsh -Command " \
     Write-Host '🚀 === STARTING GHOSTSCRIPT INSTALLATION ==='; \
-    Write-Host '⏰ Estimated time: 3-5 minutes (large download)'; \
+    Write-Host '⏰ Estimated time: 2-3 minutes'; \
     Write-Host 'Free disk space: ' + ((Get-WmiObject -Class Win32_LogicalDisk -Filter \"DeviceID='C:'\").FreeSpace / 1GB).ToString('F2') + ' GB'; \
     $startTime = Get-Date; \
     \
-    try { \
-        Write-Host '🔄 Attempting winget installation (may be slow)...'; \
-        Write-Host '📦 This will download ~150MB Ghostscript package'; \
-        winget install ArtifexSoftware.GhostScript --accept-source-agreements --accept-package-agreements; \
-        Write-Host '✅ Ghostscript installed via winget'; \
-    } catch { \
-        Write-Host '🔄 winget failed or unavailable, using chocolatey...'; \
-        Write-Host '📦 Installing via chocolatey (alternative method)...'; \
-        choco install ghostscript -y; \
+    Write-Host '🔄 Installing Ghostscript via chocolatey (container-optimized)...'; \
+    Write-Host '📦 Chocolatey is more reliable than winget in container environments'; \
+    choco install ghostscript -y --no-progress; \
+    \
+    if ($LASTEXITCODE -eq 0) { \
         Write-Host '✅ Ghostscript installed via chocolatey'; \
+    } else { \
+        Write-Host '🔄 Chocolatey failed, trying direct download...'; \
+        Write-Host '📦 Downloading Ghostscript directly...'; \
+        $url = 'https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/gs10051/gs10051w64.exe'; \
+        $installer = 'C:/temp/ghostscript.exe'; \
+        Invoke-WebRequest -Uri $url -OutFile $installer; \
+        Write-Host '📦 Installing Ghostscript silently...'; \
+        Start-Process -FilePath $installer -ArgumentList '/S' -Wait; \
+        Remove-Item $installer; \
+        Write-Host '✅ Ghostscript installed via direct download'; \
     } \
     \
     Write-Host '🔧 Configuring Ghostscript PATH...'; \
-    $gsPath = Get-ChildItem 'C:/Program Files/gs' | Sort-Object Name -Descending | Select-Object -First 1; \
-    $binPath = Join-Path $gsPath.FullName 'bin'; \
-    Write-Host ('📍 Found Ghostscript at: ' + $binPath); \
-    [Environment]::SetEnvironmentVariable('PATH', \"$env:PATH;$binPath\", [EnvironmentVariableTarget]::Machine); \
+    $gsPath = Get-ChildItem 'C:/Program Files/gs' -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1; \
+    if ($gsPath) { \
+        $binPath = Join-Path $gsPath.FullName 'bin'; \
+        Write-Host ('📍 Found Ghostscript at: ' + $binPath); \
+        [Environment]::SetEnvironmentVariable('PATH', \"$env:PATH;$binPath\", [EnvironmentVariableTarget]::Machine); \
+    } else { \
+        Write-Host '⚠️ Ghostscript installation directory not found, checking alternative locations...'; \
+        $altPath = 'C:/Program Files (x86)/gs'; \
+        if (Test-Path $altPath) { \
+            $gsPath = Get-ChildItem $altPath | Sort-Object Name -Descending | Select-Object -First 1; \
+            $binPath = Join-Path $gsPath.FullName 'bin'; \
+            Write-Host ('📍 Found Ghostscript at: ' + $binPath); \
+            [Environment]::SetEnvironmentVariable('PATH', \"$env:PATH;$binPath\", [EnvironmentVariableTarget]::Machine); \
+        } \
+    } \
     \
     $endTime = Get-Date; \
     $duration = ($endTime - $startTime).TotalMinutes; \
