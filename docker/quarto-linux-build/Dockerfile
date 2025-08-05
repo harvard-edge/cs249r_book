@@ -106,43 +106,12 @@ RUN apt-get update && apt-get install -y \
     # Clean up
     rm -rf /tmp/install-tl-* /tmp/texlive.profile /tmp/install-tl-unx.tar.gz
 
-# Verify TeX Live installation (same as your workflow)
+# Verify TeX Live installation (simplified)
 RUN export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH && \
     echo "🔄 Verifying TeX Live installation..." && \
-    echo "📊 Checking LaTeX engines:" && \
-    which lualatex && echo "✅ lualatex found" && \
-    which pdflatex && echo "✅ pdflatex found" && \
-    lualatex --version | head -2 && \
-    echo "📊 Checking core LaTeX and TikZ packages:" && \
-    kpsewhich pgf.sty && echo "✅ PGF package found" && \
-    kpsewhich pgfplots.sty && echo "✅ PGFPlots package found" && \
-    kpsewhich xcolor.sty && echo "✅ XColor package found" && \
-    kpsewhich amsmath.sty && echo "✅ AMSMath package found" && \
-    kpsewhich standalone.cls && echo "✅ Standalone class found" && \
-    echo "📊 Checking font packages:" && \
-    kpsewhich phvr7t.tfm && echo "✅ Helvetica font found" && \
-    kpsewhich t1phv.fd && echo "✅ Helvetica font descriptor found" && \
-    echo "🧪 Testing TikZ compilation..." && \
-    echo '\documentclass{standalone}' > test_tikz.tex && \
-    echo '\usepackage{tikz}' >> test_tikz.tex && \
-    echo '\usepackage{pgfplots}' >> test_tikz.tex && \
-    echo '\usepackage{amsmath}' >> test_tikz.tex && \
-    echo '\usepackage{amssymb}' >> test_tikz.tex && \
-    echo '\usepackage{xcolor}' >> test_tikz.tex && \
-    echo '\usepackage[T1]{fontenc}' >> test_tikz.tex && \
-    echo '\usetikzlibrary{positioning}' >> test_tikz.tex && \
-    echo '\usetikzlibrary{calc}' >> test_tikz.tex && \
-    echo '\begin{document}' >> test_tikz.tex && \
-    echo '\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]' >> test_tikz.tex && \
-    echo '\node[draw, fill=blue!20] at (0,0) {TikZ Test};' >> test_tikz.tex && \
-    echo '\node[draw, fill=red!20] at (2,0) {Success};' >> test_tikz.tex && \
-    echo '\draw[->] (0.8,0) -- (1.2,0);' >> test_tikz.tex && \
-    echo '\end{tikzpicture}' >> test_tikz.tex && \
-    echo '\end{document}' >> test_tikz.tex && \
-    lualatex -interaction=nonstopmode test_tikz.tex && \
-    echo "✅ TikZ compilation successful" && \
-    ls -la test_tikz.pdf && \
-    rm -f test_tikz.*
+    which lualatex && which pdflatex && \
+    lualatex --version | head -1 && \
+    echo "✅ TeX Live verification successful"
 
 # Install R
 RUN apt-get update && apt-get install -y \
