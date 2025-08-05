@@ -12,8 +12,8 @@ env:
   OLLAMA_RETRIES: "3"                      # Number of retries for Ollama calls
   BUILD_TIMEOUT: "3600"                    # Timeout for build operations (1 hour)
   COMMIT_STATUS_TIMEOUT: "180"             # Number of attempts to check commit status (180 × 60s = 3 hours)
-  COMMIT_STATUS_INTERVAL: "60"             # Seconds between status checks (1 minute)
-  JOB_TIMEOUT_MULTIPLIER: "1.25"          # Job timeout = (COMMIT_STATUS_TIMEOUT × COMMIT_STATUS_INTERVAL × MULTIPLIER) / 60 minutes
+  COMMIT_STATUS_INTERVAL: "60"             # Seconds between status checks (60 seconds)
+  MONITOR_BUILD_TIMEOUT: "180"             # Monitor build timeout in minutes (3 hours max)
   
   # Quarto Configuration Files
   QUARTO_HTML_CONFIG: "_quarto-html.yml"  # HTML build configuration file
@@ -706,14 +706,14 @@ jobs:
   monitor-build:
     name: '⏳ Monitor Production Build'
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ (env.COMMIT_STATUS_TIMEOUT * env.COMMIT_STATUS_INTERVAL * env.JOB_TIMEOUT_MULTIPLIER / 60) }}
+    timeout-minutes: ${{ env.MONITOR_BUILD_TIMEOUT }}
     needs: create-tag
     if: github.event.inputs.confirm == 'PUBLISH'
     
     steps:
       - name: ⏳ Wait for Production Build (Commit Status Monitoring)
         run: |
-          echo "⏳ Waiting for production build to complete (max ${{ (env.COMMIT_STATUS_TIMEOUT * env.COMMIT_STATUS_INTERVAL * env.JOB_TIMEOUT_MULTIPLIER / 60) }} minutes)..."
+          echo "⏳ Waiting for production build to complete (max ${{ env.MONITOR_BUILD_TIMEOUT }} minutes)..."
           echo "🔍 Monitoring commit status checks in real-time..."
           
           # Get the latest commit SHA from main branch
@@ -773,7 +773,7 @@ jobs:
           sleep 30  # Give the build a moment to start
           
           # Wait for all required status checks to complete
-          for i in $(seq 1 ${{ env.COMMIT_STATUS_TIMEOUT }}); do  # ${{ env.COMMIT_STATUS_TIMEOUT }} attempts × 30 seconds = 2 hours
+          for i in $(seq 1 ${{ env.COMMIT_STATUS_TIMEOUT }}); do  # ${{ env.COMMIT_STATUS_TIMEOUT }} attempts × 60 seconds = 3 hours max
             echo "🔍 Checking commit status (attempt $i/${{ env.COMMIT_STATUS_TIMEOUT }})..."
             
             # Get commit status
@@ -906,7 +906,7 @@ jobs:
           
           # If we get here, check final status
           if [ "$HTML_STATUS" != "success" ] || [ "$PDF_STATUS" != "success" ]; then
-            echo "⚠️ Build may still be in progress or failed after 1 hour"
+            echo "⚠️ Build may still be in progress or failed after 3 hours"
             echo "📊 Final status: HTML=$HTML_STATUS, PDF=$PDF_STATUS"
             echo "🔗 Check status: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
             exit 1
@@ -1177,7 +1177,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: release-notes
-          path: release_notes_v${{ needs.validate-inputs.outputs.new_version }}.md
+          path: release_notes_${{ needs.validate-inputs.outputs.new_version }}.md
           retention-days: 1
 
       - name: 📤 Upload Git Log Artifacts
@@ -1343,7 +1343,7 @@ jobs:
           echo "3. ✅ Merged dev → main branch" >> $GITHUB_STEP_SUMMARY
           echo "4. ✅ Created release tag ${{ needs.validate-inputs.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY
           echo "5. ✅ Pushed to main (triggered production build)" >> $GITHUB_STEP_SUMMARY
-          echo "6. ✅ Waited for build completion (up to 1 hour)" >> $GITHUB_STEP_SUMMARY
+          echo "6. ✅ Waited for build completion (up to 3 hours)" >> $GITHUB_STEP_SUMMARY
           echo "7. ✅ Created GitHub Release (DRAFT - edit manually)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🏗️ Build Process:" >> $GITHUB_STEP_SUMMARY
