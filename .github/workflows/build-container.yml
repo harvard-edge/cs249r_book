@@ -1,0 +1,78 @@
+name: '🐳 Build Container'
+
+# This workflow builds the Quarto build container and pushes it to GitHub Container Registry
+# The container pre-installs all dependencies to eliminate 30-45 minute setup time
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: 'Force rebuild even if no changes'
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    - cron: '0 0 * * 0'  # Weekly rebuild (Sunday at midnight)
+  push:
+    paths:
+      - 'tools/dependencies/**'
+      - 'Dockerfile'
+      - '.github/workflows/build-container.yml'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/quarto-build
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🔐 Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏷️ Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: 🐳 Build and push container
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 📋 Container Info
+        run: |
+          echo "✅ Container built and pushed successfully"
+          echo "📊 Registry: ${{ env.REGISTRY }}"
+          echo "📊 Image: ${{ env.IMAGE_NAME }}"
+          echo "📊 Tags: ${{ steps.meta.outputs.tags }}"
+          echo "📊 Size: $(docker images ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest --format '{{.Size}}')"
+          
+          echo ""
+          echo "🚀 Usage in workflows:"
+          echo "container:"
+          echo "  image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+          echo "  options: --user root" 
