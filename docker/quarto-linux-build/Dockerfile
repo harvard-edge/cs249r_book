@@ -161,15 +161,17 @@ RUN echo "🚀 === STARTING TEX LIVE INSTALLATION ===" && \
     which tlmgr && tlmgr --version || echo "❌ tlmgr not found or not working" && \
     i=1 && \
     while IFS= read -r collection; do \
-        if [[ "$collection" =~ ^collection- ]]; then \
-            echo "📦 [$i/$collection_count] Installing $collection..."; \
-            if command -v tlmgr >/dev/null 2>&1; then \
-                tlmgr install "$collection" || echo "⚠️ Failed to install $collection, continuing..."; \
-            else \
-                echo "⚠️ tlmgr not available, skipping $collection"; \
-            fi; \
-            i=$((i+1)); \
-        fi; \
+        case "$collection" in \
+            collection-*) \
+                echo "📦 [$i/$collection_count] Installing $collection..."; \
+                if command -v tlmgr >/dev/null 2>&1; then \
+                    tlmgr install "$collection" || echo "⚠️ Failed to install $collection, continuing..."; \
+                else \
+                    echo "⚠️ tlmgr not available, skipping $collection"; \
+                fi; \
+                i=$((i+1)); \
+                ;; \
+        esac; \
     done < /tmp/tl_packages && \
     \
     echo "🧹 Cleaning up TeX Live installer..." && \
