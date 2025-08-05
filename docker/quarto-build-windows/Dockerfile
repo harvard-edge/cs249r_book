@@ -26,7 +26,7 @@ COPY tools/dependencies/tl_packages C:/temp/tl_packages
 COPY docker/quarto-build-windows/verify_r_packages.R C:/temp/verify_r_packages.R
 
 # Create R library directory
-RUN mkdir C:/r-lib
+RUN pwsh -Command "New-Item -ItemType Directory -Path 'C:/r-lib' -Force"
 
 # Setup Quarto (using exact version from workflow)
 RUN pwsh -Command "Invoke-WebRequest -Uri 'https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.31/quarto-1.7.31-win.zip' -OutFile 'quarto.zip'" && \
