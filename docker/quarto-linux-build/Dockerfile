@@ -115,14 +115,9 @@ RUN echo "🔄 Verifying TeX Live installation..." && \
 \end{tikzpicture}
 \end{document}
 EOF
-    if lualatex -interaction=nonstopmode test_tikz.tex; then && \
-        echo "✅ TikZ compilation successful" && \
-        ls -la test_tikz.pdf; && \
-    else && \
-        echo "❌ TikZ compilation failed" && \
-        cat test_tikz.log | tail -20; && \
-        exit 1; && \
-    fi && \
+    lualatex -interaction=nonstopmode test_tikz.tex && \
+    echo "✅ TikZ compilation successful" && \
+    ls -la test_tikz.pdf && \
     rm -f test_tikz.*
 
 # Install R
