@@ -11,9 +11,6 @@ env:
   OLLAMA_TIMEOUT: "300"                    # Timeout for Ollama operations (seconds)
   OLLAMA_RETRIES: "3"                      # Number of retries for Ollama calls
   BUILD_TIMEOUT: "3600"                    # Timeout for build operations (1 hour)
-  COMMIT_STATUS_TIMEOUT: "180"             # Number of attempts to check commit status (180 × 60s = 3 hours)
-  COMMIT_STATUS_INTERVAL: "60"             # Seconds between status checks (60 seconds)
-  MONITOR_BUILD_TIMEOUT: "180"             # Monitor build timeout in minutes (3 hours max)
   
   # Quarto Configuration Files
   QUARTO_HTML_CONFIG: "_quarto-html.yml"  # HTML build configuration file
@@ -79,6 +76,14 @@ on:
           - 'yes'
           - 'no'
         default: 'yes'
+      commit_status_timeout:
+        description: 'Number of status check attempts (180 = 3 hours at 60s intervals)'
+        required: false
+        default: '180'
+      commit_status_interval:
+        description: 'Seconds between status checks (heartbeat interval)'
+        required: false
+        default: '60'
 
 permissions:
   contents: write
@@ -121,6 +126,8 @@ jobs:
           echo "Dev Commit: '${{ github.event.inputs.dev_commit }}'"
           echo "Confirmation: '${{ github.event.inputs.confirm }}'"
           echo "AI Generated Notes: '${{ github.event.inputs.ai_generated_notes }}'"
+          echo "Status Check Timeout: '${{ github.event.inputs.commit_status_timeout }}' attempts"
+          echo "Status Check Interval: '${{ github.event.inputs.commit_status_interval }}' seconds"
           echo ""
           
           echo "### 📝 User Inputs:" >> $GITHUB_STEP_SUMMARY
@@ -129,6 +136,8 @@ jobs:
           echo "- **Dev Commit:** ${{ github.event.inputs.dev_commit }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Confirmation:** ${{ github.event.inputs.confirm }}" >> $GITHUB_STEP_SUMMARY
           echo "- **AI Generated Notes:** ${{ github.event.inputs.ai_generated_notes }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status Check Timeout:** ${{ github.event.inputs.commit_status_timeout }} attempts" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status Check Interval:** ${{ github.event.inputs.commit_status_interval }} seconds" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
       - name: 🔍 Log Git & Environment Context
@@ -706,14 +715,14 @@ jobs:
   monitor-build:
     name: '⏳ Monitor Production Build'
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ env.MONITOR_BUILD_TIMEOUT }}
+    timeout-minutes: 180
     needs: create-tag
     if: github.event.inputs.confirm == 'PUBLISH'
     
     steps:
       - name: ⏳ Wait for Production Build (Commit Status Monitoring)
         run: |
-          echo "⏳ Waiting for production build to complete (max ${{ env.MONITOR_BUILD_TIMEOUT }} minutes)..."
+          echo "⏳ Waiting for production build to complete (max 3 hours)..."
           echo "🔍 Monitoring commit status checks in real-time..."
           
           # Get the latest commit SHA from main branch
@@ -773,8 +782,8 @@ jobs:
           sleep 30  # Give the build a moment to start
           
           # Wait for all required status checks to complete
-          for i in $(seq 1 ${{ env.COMMIT_STATUS_TIMEOUT }}); do  # ${{ env.COMMIT_STATUS_TIMEOUT }} attempts × 60 seconds = 3 hours max
-            echo "🔍 Checking commit status (attempt $i/${{ env.COMMIT_STATUS_TIMEOUT }})..."
+          for i in $(seq 1 ${{ github.event.inputs.commit_status_timeout }}); do  # ${{ github.event.inputs.commit_status_timeout }} attempts × 60 seconds = 3 hours max
+            echo "🔍 Checking commit status (attempt $i/${{ github.event.inputs.commit_status_timeout }})..."
             
             # Get commit status
             STATUS_RESPONSE=$(curl -s \
@@ -826,7 +835,7 @@ jobs:
             fi
             
             # Show current status with time elapsed
-            ELAPSED_MINUTES=$((i * ${{ env.COMMIT_STATUS_INTERVAL }} / 60))
+            ELAPSED_MINUTES=$((i * ${{ github.event.inputs.commit_status_interval }} / 60))
             ELAPSED_HOURS=$((ELAPSED_MINUTES / 60))
             REMAINING_MINUTES=$((ELAPSED_MINUTES % 60))
             
@@ -836,7 +845,7 @@ jobs:
               TIME_DISPLAY="${ELAPSED_MINUTES}m"
             fi
             
-            echo "⏳ Build still in progress... (attempt $i/${{ env.COMMIT_STATUS_TIMEOUT }}, ~${TIME_DISPLAY} elapsed)"
+            echo "⏳ Build still in progress... (attempt $i/${{ github.event.inputs.commit_status_timeout }}, ~${TIME_DISPLAY} elapsed)"
             
             # Show build progress indicators with heartbeat-style updates
             if [ $i -eq 1 ]; then
@@ -901,7 +910,7 @@ jobs:
               echo "---"
             fi
             
-            sleep ${{ env.COMMIT_STATUS_INTERVAL }}
+            sleep ${{ github.event.inputs.commit_status_interval }}
           done
           
           # If we get here, check final status
@@ -1447,6 +1456,8 @@ jobs:
           echo "- **Dev Commit:** ${{ github.event.inputs.dev_commit }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Confirmation:** ${{ github.event.inputs.confirm }}" >> $GITHUB_STEP_SUMMARY
           echo "- **AI Generated Notes:** ${{ github.event.inputs.ai_generated_notes }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status Check Timeout:** ${{ github.event.inputs.commit_status_timeout }} attempts" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status Check Interval:** ${{ github.event.inputs.commit_status_interval }} seconds" >> $GITHUB_STEP_SUMMARY
           echo "- **Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Run ID:** ${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
@@ -1576,6 +1587,8 @@ jobs:
           echo "- **Dev Commit:** ${{ github.event.inputs.dev_commit }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Confirmation:** ${{ github.event.inputs.confirm }}" >> $GITHUB_STEP_SUMMARY
           echo "- **AI Generated Notes:** ${{ github.event.inputs.ai_generated_notes }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status Check Timeout:** ${{ github.event.inputs.commit_status_timeout }} attempts" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status Check Interval:** ${{ github.event.inputs.commit_status_interval }} seconds" >> $GITHUB_STEP_SUMMARY
           echo "- **Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Run ID:** ${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
