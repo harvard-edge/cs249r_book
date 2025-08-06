@@ -180,7 +180,7 @@ When called with arguments, `publish` triggers the GitHub Actions workflow direc
 ### After Publishing:
 
 - **🌐 Web version**: Available at https://harvard-edge.github.io/cs249r_book
-- **📄 PDF download**: Available at https://harvard-edge.github.io/cs249r_book/assets/Machine-Learning-Systems.pdf
+- **📄 PDF download**: Available at https://harvard-edge.github.io/cs249r_book/assets/downloads/Machine-Learning-Systems.pdf
 - **📈 GitHub Actions**: Monitors build progress at https://github.com/harvard-edge/cs249r_book/actions
 
 ### Requirements:
