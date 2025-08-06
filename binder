@@ -1420,7 +1420,7 @@ class BookBinder:
 
     # Helper methods
     def _get_current_version(self):
-        """Get current version from git tags"""
+        """Get current version from git tags, handling orphaned tags"""
         try:
             result = subprocess.run(['git', 'tag', '--list', 'v*'], 
                                   capture_output=True, text=True, cwd=self.root_dir)
@@ -1429,15 +1429,191 @@ class BookBinder:
             if not tags:
                 return "v0.0.0"
             
-            # Find the highest version
+            # Find all version tags, sorted by version
             versions = [tag for tag in tags if tag.startswith('v')]
             if not versions:
                 return "v0.0.0"
             
-            return max(versions, key=lambda v: [int(x) for x in v[1:].split('.')])
+            # Sort versions to get the latest
+            sorted_versions = sorted(versions, key=lambda v: [int(x) for x in v[1:].split('.')])
+            latest_version = sorted_versions[-1]
+            
+            # Check for orphaned tags (tags without GitHub releases)
+            orphaned_tags = self._find_orphaned_tags(sorted_versions)
+            
+            if orphaned_tags:
+                # Handle orphaned tags before proceeding
+                handled_version = self._handle_orphaned_tags(orphaned_tags, latest_version)
+                if handled_version:
+                    return handled_version
+            
+            return latest_version
             
         except Exception:
             return "v0.0.0"
+
+    def _find_orphaned_tags(self, versions):
+        """Find git tags that don't have corresponding GitHub releases"""
+        orphaned_tags = []
+        
+        try:
+            # Check if GitHub CLI is available
+            subprocess.run(['gh', '--version'], capture_output=True, check=True)
+            
+            # Get list of GitHub releases
+            result = subprocess.run(['gh', 'release', 'list', '--limit', '100'], 
+                                  capture_output=True, text=True, cwd=self.root_dir)
+            
+            if result.returncode == 0:
+                # Parse release list to get tag names
+                release_lines = result.stdout.strip().split('\n') if result.stdout.strip() else []
+                release_tags = set()
+                
+                for line in release_lines:
+                    if line.strip():
+                        # GitHub CLI output format: "title	tag	status	date"
+                        parts = line.split('\t')
+                        if len(parts) >= 2:
+                            tag = parts[1].strip()
+                            release_tags.add(tag)
+                
+                # Find tags without releases
+                for version in versions:
+                    if version not in release_tags:
+                        orphaned_tags.append(version)
+            
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            # GitHub CLI not available, can't check for orphaned tags
+            pass
+        
+        return orphaned_tags
+
+    def _handle_orphaned_tags(self, orphaned_tags, latest_version):
+        """Handle orphaned tags with user interaction"""
+        console.print()
+        console.print("[bold yellow]⚠️  Orphaned Git Tags Detected[/bold yellow]")
+        console.print("[dim]These tags exist but don't have corresponding GitHub releases:[/dim]")
+        console.print()
+        
+        for tag in orphaned_tags:
+            console.print(f"[yellow]  🏷️  {tag}[/yellow]")
+        
+        console.print()
+        console.print("[bold white]💡 This usually happens when a previous publish failed after creating the tag[/bold white]")
+        console.print("[dim]but before completing the GitHub release. These orphaned tags can cause[/dim]")
+        console.print("[dim]version numbering issues and should be cleaned up.[/dim]")
+        console.print()
+        
+        console.print("[bold white]Options:[/bold white]")
+        console.print("[green]  1. clean[/green] - Delete all orphaned tags and use the latest valid version")
+        console.print("[yellow]  2. ignore[/yellow] - Continue with current latest tag (may cause issues)")
+        console.print("[blue]  3. manual[/blue] - Let me choose which tags to delete [default]")
+        console.print("[red]  4. cancel[/red] - Cancel publishing to handle manually")
+        console.print()
+        
+        console.print("[white]How would you like to handle orphaned tags? [1/2/3/4] [default: 3]: [/white]", end="")
+        choice = input().strip()
+        if not choice:
+            choice = "3"
+        
+        if choice == "1":
+            # Clean all orphaned tags
+            console.print("[purple]🧹 Cleaning all orphaned tags...[/purple]")
+            for tag in orphaned_tags:
+                self._delete_version(tag)
+                console.print(f"[green]  ✅ Deleted orphaned tag: {tag}[/green]")
+            
+            # Find the latest non-orphaned version
+            # Get all tags again and exclude the orphaned ones
+            try:
+                result = subprocess.run(['git', 'tag', '--list', 'v*'], 
+                                      capture_output=True, text=True, cwd=self.root_dir)
+                remaining_tags = result.stdout.strip().split('\n') if result.stdout.strip() else []
+                remaining_versions = [tag for tag in remaining_tags if tag.startswith('v')]
+                
+                if remaining_versions:
+                    return max(remaining_versions, key=lambda v: [int(x) for x in v[1:].split('.')])
+                else:
+                    return "v0.0.0"
+            except:
+                return "v0.0.0"
+            
+        elif choice == "2":
+            # Continue with latest tag
+            console.print("[yellow]⚠️  Continuing with potentially orphaned tag. This may cause issues.[/yellow]")
+            return latest_version
+            
+        elif choice == "3":
+            # Manual selection
+            return self._manual_orphaned_tag_cleanup(orphaned_tags, latest_version)
+            
+        else:  # choice == "4" or invalid
+            console.print("[blue]ℹ️  Publishing cancelled. Please handle orphaned tags manually.[/blue]")
+            console.print("[dim]You can delete tags with: git tag -d <tag> && git push origin --delete <tag>[/dim]")
+            return None
+
+    def _manual_orphaned_tag_cleanup(self, orphaned_tags, latest_version):
+        """Manual orphaned tag cleanup with individual choices"""
+        console.print()
+        console.print("[bold blue]🔧 Manual Orphaned Tag Cleanup[/bold blue]")
+        console.print("[dim]Review each orphaned tag and decide whether to delete it:[/dim]")
+        console.print()
+        
+        deleted_tags = []
+        
+        for tag in sorted(orphaned_tags, key=lambda v: [int(x) for x in v[1:].split('.')], reverse=True):
+            console.print(f"[bold white]Tag: {tag}[/bold white]")
+            
+            # Show when this tag was created
+            try:
+                result = subprocess.run(['git', 'log', '--format=%ai %s', '-1', tag], 
+                                      capture_output=True, text=True, cwd=self.root_dir)
+                if result.returncode == 0 and result.stdout.strip():
+                    tag_info = result.stdout.strip()
+                    console.print(f"[dim]  Created: {tag_info}[/dim]")
+            except:
+                pass
+            
+            console.print("[bold white]Options:[/bold white]")
+            console.print("[red]  d/delete[/red] - Delete this orphaned tag")
+            console.print("[green]  k/keep[/green] - Keep this tag (may cause version issues)")
+            console.print("[blue]  s/skip[/blue] - Skip for now [default]")
+            
+            console.print(f"[yellow]Delete orphaned tag {tag}? [d/k/s] [default: s]: [/yellow]", end="")
+            choice = input().strip().lower()
+            if not choice:
+                choice = 's'
+            
+            if choice in ['d', 'delete']:
+                console.print(f"[purple]🗑️  Deleting orphaned tag {tag}...[/purple]")
+                self._delete_version(tag)
+                deleted_tags.append(tag)
+                console.print(f"[green]  ✅ Deleted: {tag}[/green]")
+            elif choice in ['k', 'keep']:
+                console.print(f"[yellow]  ⚠️  Keeping potentially problematic tag: {tag}[/yellow]")
+            else:
+                console.print(f"[blue]  ⏭️  Skipping: {tag}[/blue]")
+            
+            console.print()
+        
+        if deleted_tags:
+            console.print(f"[green]✅ Cleanup complete. Deleted {len(deleted_tags)} orphaned tags.[/green]")
+            # Recalculate the latest version after cleanup
+            try:
+                result = subprocess.run(['git', 'tag', '--list', 'v*'], 
+                                      capture_output=True, text=True, cwd=self.root_dir)
+                remaining_tags = result.stdout.strip().split('\n') if result.stdout.strip() else []
+                remaining_versions = [tag for tag in remaining_tags if tag.startswith('v')]
+                
+                if remaining_versions:
+                    return max(remaining_versions, key=lambda v: [int(x) for x in v[1:].split('.')])
+                else:
+                    return "v0.0.0"
+            except:
+                return "v0.0.0"
+        else:
+            console.print("[blue]ℹ️  No tags were deleted.[/blue]")
+            return latest_version
 
     def _calculate_next_version(self, current_version, release_type):
         """Calculate next version based on release type"""
@@ -2240,6 +2416,7 @@ Please format as:
         
         mgmt_table.add_row("clean", "Clean configs & artifacts", "./binder clean")
         mgmt_table.add_row("check", "Check for build artifacts", "./binder check")
+        mgmt_table.add_row("check-tags", "Check for orphaned git tags", "./binder check-tags")
         mgmt_table.add_row("switch <format>", "Switch config", "./binder switch pdf")
         mgmt_table.add_row("status", "Show current status", "./binder status")
         mgmt_table.add_row("list", "List chapters", "./binder list")
@@ -3013,6 +3190,54 @@ Please format as:
         except Exception as e:
             console.print(f"[red]❌ Test failed: {e}[/red]")
 
+    def check_orphaned_tags(self):
+        """Check for orphaned git tags without GitHub releases"""
+        self.show_banner()
+        console.print("[bold blue]🔍 Checking for Orphaned Git Tags[/bold blue]")
+        console.print("[dim]Scanning for git tags that don't have corresponding GitHub releases...[/dim]")
+        console.print()
+        
+        try:
+            # Get all version tags
+            result = subprocess.run(['git', 'tag', '--list', 'v*'], 
+                                  capture_output=True, text=True, cwd=self.root_dir)
+            tags = result.stdout.strip().split('\n') if result.stdout.strip() else []
+            
+            if not tags:
+                console.print("[blue]ℹ️  No version tags found in repository[/blue]")
+                return
+            
+            versions = [tag for tag in tags if tag.startswith('v')]
+            if not versions:
+                console.print("[blue]ℹ️  No version tags found in repository[/blue]")
+                return
+            
+            console.print(f"[blue]ℹ️  Found {len(versions)} version tags[/blue]")
+            
+            # Check for orphaned tags
+            orphaned_tags = self._find_orphaned_tags(versions)
+            
+            if not orphaned_tags:
+                console.print("[green]✅ No orphaned tags detected![/green]")
+                console.print("[dim]All git tags have corresponding GitHub releases[/dim]")
+                
+                # Show current version info
+                latest_version = max(versions, key=lambda v: [int(x) for x in v[1:].split('.')])
+                console.print(f"[blue]ℹ️  Latest version: {latest_version}[/blue]")
+                return
+            
+            # Handle orphaned tags
+            console.print(f"[yellow]⚠️  Found {len(orphaned_tags)} orphaned tags[/yellow]")
+            handled_version = self._handle_orphaned_tags(orphaned_tags, versions[-1])
+            
+            if handled_version:
+                console.print(f"[green]✅ Cleanup complete. Current version: {handled_version}[/green]")
+            else:
+                console.print("[blue]ℹ️  Tag check cancelled. No changes made.[/blue]")
+                
+        except Exception as e:
+            console.print(f"[red]❌ Error checking tags: {e}[/red]")
+
 def main():
     binder = BookBinder()
     
@@ -3128,6 +3353,9 @@ def main():
 
         elif command == "setup":
             binder.setup_environment()
+
+        elif command == "check-tags":
+            binder.check_orphaned_tags()
 
         else:
             console.print(f"[red]❌ Unknown command: {command}[/red]")
