@@ -38,11 +38,47 @@ class BookBinder:
             self.root_dir = current_dir
             self.book_dir = self.root_dir / "quarto"
         
-        self.build_dir = self.book_dir / "_build"
         self.html_config = self.book_dir / "config" / "_quarto-html.yml"
         self.pdf_config = self.book_dir / "config" / "_quarto-pdf.yml"
         self.active_config = self.book_dir / "_quarto.yml"
         
+    def get_output_dir(self, format_type="html"):
+        """Get the output directory from Quarto configuration"""
+        try:
+            import yaml
+            
+            # Choose the appropriate config file
+            config_file = self.html_config if format_type == "html" else self.pdf_config
+            
+            if not config_file.exists():
+                console.print(f"[yellow]⚠️  Config file not found: {config_file}[/yellow]")
+                # Fallback to default
+                return self.book_dir / f"_build/{format_type}"
+            
+            # Read and parse the YAML config
+            with open(config_file, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+            
+            # Extract output-dir from project section
+            output_dir = config.get('project', {}).get('output-dir')
+            
+            if output_dir:
+                # Convert to Path object, relative to book_dir
+                if output_dir.startswith('/'):
+                    # Absolute path
+                    return Path(output_dir)
+                else:
+                    # Relative path (relative to book_dir)
+                    return self.book_dir / output_dir
+            else:
+                # Fallback to default Quarto behavior
+                return self.book_dir / f"_build/{format_type}"
+                
+        except Exception as e:
+            console.print(f"[yellow]⚠️  Could not read output dir from config: {e}[/yellow]")
+            # Fallback to default
+            return self.book_dir / f"_build/{format_type}"
+
     def show_banner(self):
         """Display beautiful banner"""
         banner = Panel.fit(
@@ -580,8 +616,9 @@ class BookBinder:
         else:
             raise ValueError(f"Unknown format type: {format_type}")
         
-        # Create build directory
-        (self.build_dir / build_subdir).mkdir(parents=True, exist_ok=True)
+        # Create build directory  
+        output_dir = self.get_output_dir(format_type)
+        output_dir.mkdir(parents=True, exist_ok=True)
         
         # Setup correct configuration symlink for the format
         self.setup_symlink(format_type)
@@ -626,11 +663,11 @@ class BookBinder:
             )
             
             if result:
-                console.print(f"  ✅ Unified build complete: build/{build_subdir}/")
+                console.print(f"  ✅ Unified build complete: {self.get_output_dir(format_type)}/")
                 
                 # Open browser for HTML builds
                 if format_type == "html" and result:
-                    self.open_browser_if_needed(f"../build/{build_subdir}/index.html")
+                    self.open_browser_if_needed(f"{self.get_output_dir(format_type)}/index.html")
                     
                 return True
             else:
@@ -673,8 +710,9 @@ class BookBinder:
         else:
             raise ValueError(f"Unknown format type: {format_type}")
         
-        # Create build directory
-        (self.build_dir / build_subdir).mkdir(parents=True, exist_ok=True)
+        # Create build directory  
+        output_dir = self.get_output_dir(format_type)
+        output_dir.mkdir(parents=True, exist_ok=True)
         
         # Setup correct configuration symlink for the format
         self.setup_symlink(format_type)
@@ -723,7 +761,7 @@ class BookBinder:
                 success, output = result, ""
             
             if success:
-                console.print(f"[green]  ✅ Fast build complete: build/{build_subdir}/[/green]")
+                console.print(f"[green]  ✅ Fast build complete: {self.get_output_dir(format_type)}/[/green]")
                 
                             # Automatically open the output file if HTML and requested
             if format_type == "html" and output and open_browser:
@@ -826,7 +864,7 @@ class BookBinder:
         
         # Clean build artifacts
         artifacts_to_clean = [
-            (self.build_dir, "Build directory (all formats)"),
+            (self.get_output_dir("html").parent, "Build directory (all formats)"),  # Parent of _build/html is _build
             (self.book_dir / "index_files", "Book index files"),  
             (self.book_dir / ".quarto", "Quarto cache (book)")
         ]
@@ -872,7 +910,7 @@ class BookBinder:
         artifacts_found = []
         
         potential_artifacts = [
-            (self.build_dir, "Build directory"),
+            (self.get_output_dir("html").parent, "Build directory"),  # Parent of _build/html is _build
             (self.book_dir / "index_files", "Book index files"),
             (self.book_dir / ".quarto", "Quarto cache"),
             (self.book_dir / "config" / "_quarto-html.yml.fast-build-backup", "HTML config backup"),
@@ -937,8 +975,8 @@ class BookBinder:
             return True
         
         # Create build directory
-        build_subdir = format_type
-        (self.build_dir / build_subdir).mkdir(parents=True, exist_ok=True)
+        output_dir = self.get_output_dir(format_type)
+        output_dir.mkdir(parents=True, exist_ok=True)
         
         # Setup config
         config_name = self.setup_symlink(format_type)
@@ -963,7 +1001,7 @@ class BookBinder:
         )
         
         if success:
-            console.print(f"[green]  ✅ {format_type.upper()} build complete: build/{build_subdir}/[/green]")
+            console.print(f"[green]  ✅ {format_type.upper()} build complete: {self.get_output_dir(format_type)}/[/green]")
         
         return success
     
@@ -1312,8 +1350,8 @@ class BookBinder:
         
         try:
             # Check for existing builds
-            pdf_path = self.build_dir / "pdf" / "Machine-Learning-Systems.pdf"
-            html_dir = self.build_dir / "html"
+            pdf_path = self.get_output_dir("pdf") / "Machine-Learning-Systems.pdf"
+            html_dir = self.get_output_dir("html")
             
             has_pdf = pdf_path.exists()
             has_html = html_dir.exists() and any(html_dir.iterdir())
@@ -1380,7 +1418,7 @@ class BookBinder:
             console.print("[green]✅ PDF build completed[/green]")
             
             # Ask about PDF compression
-            pdf_path = self.build_dir / "pdf" / "Machine-Learning-Systems.pdf"
+            pdf_path = self.get_output_dir("pdf") / "Machine-Learning-Systems.pdf"
             if pdf_path.exists():
                 size_mb = pdf_path.stat().st_size / (1024 * 1024)
                 console.print()
@@ -1728,8 +1766,8 @@ class BookBinder:
 
     def _compress_pdf(self):
         """Compress PDF using Ghostscript with ebook settings"""
-        pdf_path = self.build_dir / "pdf" / "Machine-Learning-Systems.pdf"
-        compressed_path = self.build_dir / "pdf" / "Machine-Learning-Systems-compressed.pdf"
+        pdf_path = self.get_output_dir("pdf") / "Machine-Learning-Systems.pdf"
+        compressed_path = self.get_output_dir("pdf") / "Machine-Learning-Systems-compressed.pdf"
         
         # Check if Ghostscript is available
         try:
@@ -1846,7 +1884,7 @@ class BookBinder:
                 choice = 'n'
             release_created = False
             if choice in ['y', 'yes']:
-                pdf_path = self.build_dir / "pdf" / "Machine-Learning-Systems.pdf"
+                pdf_path = self.get_output_dir("pdf") / "Machine-Learning-Systems.pdf"
                 if self._create_github_release(version, description, pdf_path):
                     console.print("[green]✅ GitHub release created[/green]")
                     release_created = True
@@ -1856,7 +1894,7 @@ class BookBinder:
                 console.print("[blue]ℹ️  Skipping GitHub release creation[/blue]")
             
             # Update GitHub Pages PDF (if we have a PDF and created a release)
-            pdf_path = self.build_dir / "pdf" / "Machine-Learning-Systems.pdf"
+            pdf_path = self.get_output_dir("pdf") / "Machine-Learning-Systems.pdf"
             if release_created and pdf_path.exists():
                 console.print()
                 console.print("[bold white]🌐 GitHub Pages PDF Update:[/bold white]")
@@ -1922,9 +1960,10 @@ class BookBinder:
         """Deploy to GitHub Pages"""
         try:
             # Ensure we have a build to deploy
-            html_build_dir = self.build_dir / "html"
+            html_build_dir = self.get_output_dir("html")
             if not html_build_dir.exists():
                 console.print("[red]❌ No HTML build found. Run build first.[/red]")
+                console.print(f"[blue]💡 Expected build at: {html_build_dir}[/blue]")
                 return False
             
             # Copy build output to _site for quarto publish
@@ -2374,7 +2413,7 @@ Please format as:
         status_table.add_row("📁 Book Directory", "✅ Found", str(self.book_dir))
         status_table.add_row("🔗 Active Config", "✅ Active", str(self.active_config))
         status_table.add_row("📚 Chapters", "✅ Available", f"{len(self.find_chapters())} chapters")
-        status_table.add_row("🏗️ Build Directory", "✅ Ready", str(self.build_dir))
+        status_table.add_row("🏗️ Build Directory", "📋 Dynamic", "Reads from Quarto config files")
         
         # Check git status
         try:
@@ -2621,8 +2660,8 @@ Please format as:
             "[bold yellow]📋 Example Workflow:[/bold yellow]\n\n"
             "[green]$ ./binder publish[/green]\n"
             "[dim]🔍 Found existing build artifacts:[/dim]\n"
-            "[dim]  ✅ PDF: build/pdf/Machine-Learning-Systems.pdf (45.2 MB)[/dim]\n"
-            "[dim]  ✅ HTML: build/html[/dim]\n"
+            f"[dim]  ✅ PDF: {self.get_output_dir('pdf')}/Machine-Learning-Systems.pdf (45.2 MB)[/dim]\n"
+                            f"[dim]  ✅ HTML: {self.get_output_dir('html')}[/dim]\n"
             "[yellow]Reuse existing builds? [y/N]: y[/yellow]\n\n"
             "[dim]🗜️  PDF Compression Options:[/dim]\n"
             "[dim]   Uses Ghostscript with /ebook settings to reduce file size[/dim]\n"
