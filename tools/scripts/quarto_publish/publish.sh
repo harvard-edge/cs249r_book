@@ -431,11 +431,131 @@ $(git log --oneline "$(get_latest_version)"..HEAD | head -10 | sed 's/^/- /')"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
+# 📋 Detailed Information Functions
+# ═══════════════════════════════════════════════════════════════════════════
+
+show_detailed_release_info() {
+    echo ""
+    echo -e "${BOLD}${BLUE}📋 Detailed Release Information${NC}"
+    echo ""
+    echo -e "${WHITE}🔧 Technical Process:${NC}"
+    echo -e "${BLUE}  1. Git Status Check${NC}"
+    echo -e "${CYAN}     • Verify repository is clean or changes are committed${NC}"
+    echo -e "${CYAN}     • Ensure we're on the main branch${NC}"
+    echo -e "${CYAN}     • Check for any merge conflicts${NC}"
+    echo ""
+    echo -e "${BLUE}  2. Version Management${NC}"
+    echo -e "${CYAN}     • Calculate next version number${NC}"
+    echo -e "${CYAN}     • Validate version format${NC}"
+    echo -e "${CYAN}     • Check for existing versions${NC}"
+    echo ""
+    echo -e "${BLUE}  3. Build Phase${NC}"
+    echo -e "${CYAN}     • Clean previous build artifacts${NC}"
+    echo -e "${CYAN}     • Build PDF version (3-5 minutes)${NC}"
+    echo -e "${CYAN}     • Build HTML version (1-2 minutes)${NC}"
+    echo -e "${CYAN}     • Validate file sizes and completeness${NC}"
+    echo -e "${CYAN}     • Compress PDF for web distribution${NC}"
+    echo ""
+    echo -e "${BLUE}  4. Release Phase${NC}"
+    echo -e "${CYAN}     • Create git tag with version${NC}"
+    echo -e "${CYAN}     • Push tag to remote repository${NC}"
+    echo -e "${CYAN}     • Deploy to GitHub Pages (optional)${NC}"
+    echo -e "${CYAN}     • Create GitHub release with PDF (optional)${NC}"
+    echo ""
+    echo -e "${WHITE}🌐 What Gets Released:${NC}"
+    echo -e "${GREEN}  • Complete HTML textbook website${NC}"
+    echo -e "${GREEN}  • All textbook chapters and content${NC}"
+    echo -e "${GREEN}  • Navigation and search functionality${NC}"
+    echo -e "${GREEN}  • PDF download link${NC}"
+    echo -e "${GREEN}  • All images, figures, and media${NC}"
+    echo ""
+    echo -e "${WHITE}📊 Quality Checks:${NC}"
+    echo -e "${YELLOW}  • PDF file size validation (>1MB)${NC}"
+    echo -e "${YELLOW}  • HTML build completeness${NC}"
+    echo -e "${YELLOW}  • Asset file integrity${NC}"
+    echo -e "${YELLOW}  • Deployment success verification${NC}"
+    echo ""
+    echo -e "${WHITE}⚠️  Potential Issues:${NC}"
+    echo -e "${RED}  • Build failures due to syntax errors${NC}"
+    echo -e "${RED}  • Large file sizes causing timeout${NC}"
+    echo -e "${RED}  • Network connectivity issues${NC}"
+    echo -e "${RED}  • GitHub Pages deployment limits${NC}"
+    echo ""
+    echo -e "${WHITE}🔄 Rollback Options:${NC}"
+    echo -e "${BLUE}  • Previous version remains accessible${NC}"
+    echo -e "${BLUE}  • Can redeploy previous commit if needed${NC}"
+    echo -e "${BLUE}  • GitHub Pages maintains version history${NC}"
+    echo ""
+    echo -e "${WHITE}📞 Support:${NC}"
+    echo -e "${CYAN}  • Check build logs for detailed error messages${NC}"
+    echo -e "${CYAN}  • Review GitHub Actions for deployment status${NC}"
+    echo -e "${CYAN}  • Contact maintainers if deployment fails${NC}"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
 # 🎯 Main Publishing Workflow
 # ═══════════════════════════════════════════════════════════════════════════
 
 main() {
     print_header
+    
+    # Comprehensive Publishing Overview
+    print_section "Publishing Overview"
+    echo -e "${WHITE}🎯 What this will do:${NC}"
+    echo -e "   ${GREEN}✅ Build HTML version of your textbook${NC}"
+    echo -e "   ${GREEN}✅ Build PDF version of your textbook${NC}"
+    echo -e "   ${GREEN}✅ Compress PDF for faster downloads${NC}"
+    echo -e "   ${GREEN}✅ Create git tag with version number${NC}"
+    echo -e "   ${GREEN}✅ Deploy to GitHub Pages (optional)${NC}"
+    echo -e "   ${GREEN}✅ Create GitHub release with PDF (optional)${NC}"
+    echo ""
+    echo -e "${WHITE}⚠️  Important Notes:${NC}"
+    echo -e "   ${YELLOW}• This creates a FORMAL RELEASE with versioning${NC}"
+    echo -e "   ${YELLOW}• Changes will be publicly available${NC}"
+    echo -e "   ${YELLOW}• Git tags and GitHub releases are permanent${NC}"
+    echo -e "   ${YELLOW}• Anyone can access the released content${NC}"
+    echo ""
+    echo -e "${WHITE}🔍 What will be checked:${NC}"
+    echo -e "   ${BLUE}• Git repository status and branch${NC}"
+    echo -e "   ${BLUE}• Build artifacts and file sizes${NC}"
+    echo -e "   ${BLUE}• PDF quality and completeness${NC}"
+    echo -e "   ${BLUE}• HTML build validity${NC}"
+    echo ""
+    echo -e "${WHITE}⏱️  Estimated time:${NC}"
+    echo -e "   ${CYAN}• PDF build: 3-5 minutes${NC}"
+    echo -e "   ${CYAN}• HTML build: 1-2 minutes${NC}"
+    echo -e "   ${CYAN}• PDF compression: 30-60 seconds${NC}"
+    echo -e "   ${CYAN}• GitHub deployment: 1-2 minutes${NC}"
+    echo -e "   ${CYAN}• Total: 6-10 minutes${NC}"
+    echo ""
+    
+    # Initial confirmation
+    echo -e "${BOLD}${RED}🚨 PRODUCTION RELEASE CONFIRMATION${NC}"
+    echo -e "${RED}This will create a formal release with versioning and make it publicly available.${NC}"
+    echo -e "${RED}The release will be permanent and accessible to students, educators, and the public.${NC}"
+    echo ""
+    echo -e "${WHITE}Options:${NC}"
+    echo -e "   ${GREEN}y/yes${NC} - Proceed with formal release creation"
+    echo -e "   ${RED}n/no${NC} - Cancel release [default]"
+    echo -e "   ${BLUE}info${NC} - Show more details about the release process"
+    echo ""
+    echo -e -n "${YELLOW}Create formal release? [y/N/info] [default: N]: ${NC}"
+    read -r initial_choice
+    
+    if [ "$initial_choice" = "info" ]; then
+        show_detailed_release_info
+        echo ""
+        echo -e -n "${YELLOW}Create formal release? [y/N] [default: N]: ${NC}"
+        read -r initial_choice
+    fi
+    
+    if [ "$initial_choice" != "y" ] && [ "$initial_choice" != "yes" ]; then
+        print_info "Release creation cancelled"
+        exit 0
+    fi
+    
+    echo -e "${GREEN}✅ Release creation confirmed${NC}"
+    echo ""
     
     # Check git status
     print_section "Git Status Check"
