@@ -1071,6 +1071,10 @@ class BookBinder:
         """Create formal release with versioning and GitHub release"""
         self._show_release_header()
         
+        # Validate we're on main branch
+        if not self._validate_main_branch_for_release():
+            return False
+        
         try:
             # Get current version
             current_version = self._get_current_version()
@@ -1262,6 +1266,79 @@ class BookBinder:
         console.print()
         console.print("[dim]💡 Changes may take a few minutes to appear due to caching[/dim]")
         console.print("[green]✅ Ready for students and educators![/green]")
+
+    def _validate_git_status_for_publish(self):
+        """Validate git status for website publishing (main branch required)"""
+        try:
+            # Check if we're in a git repo
+            result = subprocess.run(['git', 'status', '--porcelain'], 
+                                  capture_output=True, text=True, cwd=self.root_dir)
+            if result.returncode != 0:
+                console.print("[red]❌ Not in a valid git repository[/red]")
+                return False
+            
+            # Check current branch
+            branch_result = subprocess.run(['git', 'branch', '--show-current'], 
+                                         capture_output=True, text=True, cwd=self.root_dir)
+            current_branch = branch_result.stdout.strip()
+            
+            if current_branch != "main":
+                console.print(f"[red]❌ Website publishing requires main branch[/red]")
+                console.print(f"[blue]ℹ️  Current branch: {current_branch}[/blue]")
+                console.print("[blue]ℹ️  User-facing operations must be from main branch[/blue]")
+                console.print()
+                console.print("[bold white]Options:[/bold white]")
+                console.print("[green]  y/yes[/green] - Switch to main branch")
+                console.print("[red]  n/no[/red]  - Cancel publishing [default]")
+                console.print("[yellow]Switch to main branch? [y/N] [default: N]: [/yellow]", end="")
+                choice = input().strip().lower()
+                if not choice:
+                    choice = 'n'
+                
+                if choice in ['y', 'yes']:
+                    # Handle uncommitted changes before switching
+                    if result.stdout.strip():
+                        console.print("[yellow]⚠️  You have uncommitted changes[/yellow]")
+                        console.print("[bold white]Options:[/bold white]")
+                        console.print("[green]  y/yes[/green] - Commit changes before switching")
+                        console.print("[red]  n/no[/red]  - Cancel (cannot switch with uncommitted changes) [default]")
+                        console.print("[yellow]Commit current changes before switching? [y/N] [default: N]: [/yellow]", end="")
+                        commit_choice = input().strip().lower()
+                        if not commit_choice:
+                            commit_choice = 'n'
+                        if commit_choice in ['y', 'yes']:
+                            console.print("[white]Commit message [fix: update before switching to main]: [/white]", end="")
+                            commit_msg = input().strip() or "fix: update before switching to main"
+                            subprocess.run(['git', 'add', '.'], cwd=self.root_dir, check=True)
+                            subprocess.run(['git', 'commit', '-m', commit_msg], cwd=self.root_dir, check=True)
+                            console.print("[green]✅ Changes committed[/green]")
+                        else:
+                            console.print("[red]❌ Cannot switch branches with uncommitted changes[/red]")
+                            return False
+                    
+                    # Switch to main
+                    console.print("[purple]🔄 Switching to main branch...[/purple]")
+                    subprocess.run(['git', 'checkout', 'main'], cwd=self.root_dir, check=True)
+                    console.print("[green]✅ Switched to main branch[/green]")
+                    
+                    # Pull latest main
+                    console.print("[purple]🔄 Pulling latest main branch changes...[/purple]")
+                    subprocess.run(['git', 'pull', 'origin', 'main'], cwd=self.root_dir, check=True)
+                    console.print("[green]✅ Main branch updated[/green]")
+                else:
+                    console.print("[blue]ℹ️  Publishing cancelled - main branch required[/blue]")
+                    return False
+            
+            # For publishing, we allow uncommitted changes (just warn)
+            if result.stdout.strip():
+                console.print("[yellow]⚠️  You have uncommitted changes.[/yellow]")
+                console.print("[dim]Website will be built from committed content only.[/dim]")
+                console.print()
+            
+            return True
+        except Exception as e:
+            console.print(f"[red]❌ Git validation failed: {e}[/red]")
+            return False
 
     def _show_publisher_header(self):
         """Display the publisher header with prominent warning"""
@@ -3563,6 +3640,68 @@ This is an ACADEMIC TEXTBOOK release. Please format as:
                 
         except Exception as e:
             console.print(f"[red]❌ Error checking tags: {e}[/red]")
+
+    def _validate_main_branch_for_release(self):
+        """Validate main branch for formal releases"""
+        try:
+            # Check current branch
+            branch_result = subprocess.run(['git', 'branch', '--show-current'], 
+                                         capture_output=True, text=True, cwd=self.root_dir)
+            current_branch = branch_result.stdout.strip()
+            
+            if current_branch != "main":
+                console.print(f"[red]❌ Formal releases require main branch[/red]")
+                console.print(f"[blue]ℹ️  Current branch: {current_branch}[/blue]")
+                console.print("[blue]ℹ️  Releases must be created from main branch for proper versioning[/blue]")
+                console.print()
+                console.print("[bold white]Options:[/bold white]")
+                console.print("[green]  y/yes[/green] - Switch to main branch")
+                console.print("[red]  n/no[/red]  - Cancel release [default]")
+                console.print("[yellow]Switch to main branch? [y/N] [default: N]: [/yellow]", end="")
+                choice = input().strip().lower()
+                if not choice:
+                    choice = 'n'
+                
+                if choice in ['y', 'yes']:
+                    # Check for uncommitted changes
+                    result = subprocess.run(['git', 'status', '--porcelain'], 
+                                          capture_output=True, text=True, cwd=self.root_dir)
+                    if result.stdout.strip():
+                        console.print("[yellow]⚠️  You have uncommitted changes[/yellow]")
+                        console.print("[bold white]Options:[/bold white]")
+                        console.print("[green]  y/yes[/green] - Commit changes before switching")
+                        console.print("[red]  n/no[/red]  - Cancel (cannot switch with uncommitted changes) [default]")
+                        console.print("[yellow]Commit current changes before switching? [y/N] [default: N]: [/yellow]", end="")
+                        commit_choice = input().strip().lower()
+                        if not commit_choice:
+                            commit_choice = 'n'
+                        if commit_choice in ['y', 'yes']:
+                            console.print("[white]Commit message [fix: update before switching to main]: [/white]", end="")
+                            commit_msg = input().strip() or "fix: update before switching to main"
+                            subprocess.run(['git', 'add', '.'], cwd=self.root_dir, check=True)
+                            subprocess.run(['git', 'commit', '-m', commit_msg], cwd=self.root_dir, check=True)
+                            console.print("[green]✅ Changes committed[/green]")
+                        else:
+                            console.print("[red]❌ Cannot switch branches with uncommitted changes[/red]")
+                            return False
+                    
+                    # Switch to main
+                    console.print("[purple]🔄 Switching to main branch...[/purple]")
+                    subprocess.run(['git', 'checkout', 'main'], cwd=self.root_dir, check=True)
+                    console.print("[green]✅ Switched to main branch[/green]")
+                    
+                    # Pull latest main
+                    console.print("[purple]🔄 Pulling latest main branch changes...[/purple]")
+                    subprocess.run(['git', 'pull', 'origin', 'main'], cwd=self.root_dir, check=True)
+                    console.print("[green]✅ Main branch updated[/green]")
+                else:
+                    console.print("[blue]ℹ️  Release cancelled - main branch required[/blue]")
+                    return False
+            
+            return True
+        except Exception as e:
+            console.print(f"[red]❌ Git validation failed: {e}[/red]")
+            return False
 
 def main():
     binder = BookBinder()
