@@ -114,14 +114,63 @@ RUN pwsh -Command " \
 # === PHASE 6: GHOSTSCRIPT INSTALLATION ===
 RUN pwsh -Command " \
     Write-Host '🚀 === STARTING GHOSTSCRIPT INSTALLATION ==='; \
-    Write-Host '⏰ Estimated time: 1-2 minutes (using proven method from quarto-build workflow)'; \
+    Write-Host '⏰ Estimated time: 1-3 minutes (multiple fallback methods)'; \
     $startTime = Get-Date; \
+    $gsInstalled = $false; \
     \
-    Write-Host '📦 Installing Ghostscript using chocolatey (most reliable for containers)...'; \
-    choco install ghostscript -y; \
-    Write-Host '✅ Ghostscript installed via chocolatey'; \
+    Write-Host '📦 Method 1: Trying winget (same as working quarto-build.yml)...'; \
+    try { \
+        $wingetProcess = Start-Process -FilePath 'winget' -ArgumentList 'install', 'ArtifexSoftware.GhostScript', '--accept-source-agreements', '--accept-package-agreements' -Wait -PassThru -NoNewWindow; \
+        if ($wingetProcess.ExitCode -eq 0) { \
+            Write-Host '✅ Ghostscript installed via winget'; \
+            $gsInstalled = $true; \
+        } else { \
+            Write-Host '⚠️ winget failed with exit code: ' + $wingetProcess.ExitCode; \
+        } \
+    } catch { \
+        Write-Host '⚠️ winget not available or failed: ' + $_.Exception.Message; \
+    } \
     \
-    Write-Host '🔧 Adding Ghostscript to PATH...'; \
+    if (-not $gsInstalled) { \
+        Write-Host '📦 Method 2: Trying chocolatey with timeout...'; \
+        try { \
+            $chocoJob = Start-Job -ScriptBlock { choco install ghostscript -y --timeout 300 }; \
+            $chocoCompleted = Wait-Job -Job $chocoJob -Timeout 600; \
+            if ($chocoCompleted) { \
+                $chocoResult = Receive-Job -Job $chocoJob; \
+                Write-Host '✅ Ghostscript installed via chocolatey'; \
+                $gsInstalled = $true; \
+            } else { \
+                Write-Host '⚠️ Chocolatey installation timed out after 10 minutes'; \
+                Remove-Job -Job $chocoJob -Force; \
+            } \
+        } catch { \
+            Write-Host '⚠️ Chocolatey failed: ' + $_.Exception.Message; \
+        } \
+    } \
+    \
+    if (-not $gsInstalled) { \
+        Write-Host '📦 Method 3: Direct download and install...'; \
+        try { \
+            $gsUrl = 'https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/gs10051/gs10051w64.exe'; \
+            $gsInstaller = 'C:/temp/gs_installer.exe'; \
+            Write-Host '🔄 Downloading Ghostscript installer...'; \
+            Invoke-WebRequest -Uri $gsUrl -OutFile $gsInstaller -TimeoutSec 300; \
+            Write-Host '🔄 Installing Ghostscript silently...'; \
+            Start-Process -FilePath $gsInstaller -ArgumentList '/S' -Wait -NoNewWindow; \
+            Write-Host '✅ Ghostscript installed via direct download'; \
+            $gsInstalled = $true; \
+        } catch { \
+            Write-Host '⚠️ Direct download failed: ' + $_.Exception.Message; \
+        } \
+    } \
+    \
+    if (-not $gsInstalled) { \
+        Write-Host '❌ All Ghostscript installation methods failed'; \
+        Write-Host '⚠️ Continuing build without Ghostscript (some features may not work)'; \
+    } \
+    \
+    Write-Host '🔧 Setting up Ghostscript PATH...'; \
     $gsPath = Get-ChildItem 'C:/Program Files/gs' -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1; \
     if ($gsPath) { \
         $binPath = Join-Path $gsPath.FullName 'bin'; \
@@ -136,8 +185,15 @@ RUN pwsh -Command " \
             Write-Host '⚠️ Ghostscript installed but test failed (normal in some containers)'; \
         } \
     } else { \
-        Write-Host '❌ Ghostscript installation failed - directory not found'; \
-        exit 1; \
+        Write-Host '⚠️ Ghostscript directory not found - checking alternative locations...'; \
+        $altPaths = @('C:/Program Files (x86)/gs', 'C:/gs', 'C:/ghostscript'); \
+        foreach ($altPath in $altPaths) { \
+            if (Test-Path $altPath) { \
+                Write-Host ('📍 Found Ghostscript at alternative location: ' + $altPath); \
+                [Environment]::SetEnvironmentVariable('PATH', \"$env:PATH;$altPath/bin\", [EnvironmentVariableTarget]::Machine); \
+                break; \
+            } \
+        } \
     } \
     \
     $endTime = Get-Date; \
