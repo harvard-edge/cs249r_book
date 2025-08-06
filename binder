@@ -38,7 +38,7 @@ class BookBinder:
             self.root_dir = current_dir
             self.book_dir = self.root_dir / "quarto"
         
-        self.build_dir = self.root_dir / "build"
+        self.build_dir = self.book_dir / "_build"
         self.html_config = self.book_dir / "config" / "_quarto-html.yml"
         self.pdf_config = self.book_dir / "config" / "_quarto-pdf.yml"
         self.active_config = self.book_dir / "_quarto.yml"
@@ -826,7 +826,7 @@ class BookBinder:
         
         # Clean build artifacts
         artifacts_to_clean = [
-            (self.root_dir / "build", "Build directory (all formats)"),
+            (self.build_dir, "Build directory (all formats)"),
             (self.book_dir / "index_files", "Book index files"),  
             (self.book_dir / ".quarto", "Quarto cache (book)")
         ]
@@ -872,12 +872,11 @@ class BookBinder:
         artifacts_found = []
         
         potential_artifacts = [
-            (self.root_dir / "build", "Build directory"),
+            (self.build_dir, "Build directory"),
             (self.book_dir / "index_files", "Book index files"),
             (self.book_dir / ".quarto", "Quarto cache"),
-                    (self.book_dir / "config" / "_quarto-html.yml.fast-build-backup", "HTML config backup"),
-        (self.book_dir / "config" / "_quarto-pdf.yml.fast-build-backup", "PDF config backup"),
-
+            (self.book_dir / "config" / "_quarto-html.yml.fast-build-backup", "HTML config backup"),
+            (self.book_dir / "config" / "_quarto-pdf.yml.fast-build-backup", "PDF config backup"),
         ]
         
         for path, description in potential_artifacts:
@@ -1922,10 +1921,36 @@ class BookBinder:
     def _deploy_to_github_pages(self):
         """Deploy to GitHub Pages"""
         try:
+            # Ensure we have a build to deploy
+            html_build_dir = self.build_dir / "html"
+            if not html_build_dir.exists():
+                console.print("[red]❌ No HTML build found. Run build first.[/red]")
+                return False
+            
+            # Copy build output to _site for quarto publish
+            site_dir = self.book_dir / "_site"
+            if site_dir.exists():
+                import shutil
+                shutil.rmtree(site_dir)
+            
+            import shutil
+            shutil.copytree(html_build_dir, site_dir)
+            console.print(f"[blue]   📂 Copied build output to {site_dir}[/blue]")
+            
+            # Now deploy using quarto publish
             result = subprocess.run(['quarto', 'publish', 'gh-pages', '--no-render'], 
-                                  cwd=self.book_dir, capture_output=True)
+                                  cwd=self.book_dir, capture_output=True, text=True)
+            
+            # Clean up the temporary _site directory
+            if site_dir.exists():
+                shutil.rmtree(site_dir)
+            
+            if result.returncode != 0:
+                console.print(f"[red]GitHub Pages deployment failed: {result.stderr}[/red]")
+                
             return result.returncode == 0
-        except:
+        except Exception as e:
+            console.print(f"[red]GitHub Pages deployment error: {e}[/red]")
             return False
 
     def _create_github_release(self, version, description, pdf_path):
