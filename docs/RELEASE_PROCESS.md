@@ -26,7 +26,7 @@ We follow a milestone-based release approach suitable for an academic textbook p
 
 ## 🔄 Daily Workflow
 
-### For Regular Development
+### For Regular Development (Website Updates)
 ```bash
 # 1. Make changes on feature branches
 git checkout -b feature/new-chapter
@@ -39,24 +39,24 @@ git push origin feature/new-chapter
 # 3. Create PR and merge to main
 # (GitHub PR process)
 
-# 4. Deploy to website (no release needed)
-./binder publish
+# 4. Deploy to website (no formal release)
+./binder publish     # Quick website deployment
 ```
 
-### For Release Creation
+### For Formal Releases (Milestones)
 ```bash
 # 1. Ensure main is up to date
 git checkout main
 git pull origin main
 
-# 2. Create release using binder
+# 2. Create formal release with versioning
 ./binder release
 
 # 3. Follow interactive prompts for:
-#    - Version number (semantic versioning)
-#    - Release notes generation
-#    - Tag creation
-#    - GitHub release publishing
+#    - Semantic version type (patch/minor/major)  
+#    - Release description
+#    - Git tag creation
+#    - GitHub release with PDF attachment
 ```
 
 ## 🏷️ Versioning Guidelines
@@ -123,20 +123,27 @@ git pull origin main
 
 ## 🚀 Deployment Strategy
 
-### GitHub Pages (Continuous)
-- **Automatic:** Every push to `main` triggers website update
-- **Manual:** Use `./binder publish` for immediate deployment
-- **No release required** for daily updates
+### Two-Tier Publishing System
 
-### PDF Distribution
-- **Automatic:** Generated with each release
-- **Manual:** Use `./binder build pdf` for ad-hoc PDF generation
-- **Location:** Available at `/assets/Machine-Learning-Systems.pdf`
+#### Website Publishing (`./binder publish`)
+- **Purpose:** Quick content updates for daily development
+- **Process:** Builds HTML + PDF, deploys to GitHub Pages
+- **Requirements:** Minimal git validation (allows uncommitted changes)
+- **Result:** Updates https://mlsysbook.ai immediately
+- **No Versioning:** No git tags or formal releases created
 
-### Release Artifacts
-- **Website:** Always latest from `main` branch
-- **PDF:** Versioned PDFs attached to GitHub releases
-- **Archive:** Complete release snapshots in GitHub releases
+#### Formal Releases (`./binder release`)  
+- **Purpose:** Academic milestones and citation-ready releases
+- **Process:** Semantic versioning + GitHub release creation
+- **Requirements:** Clean git state, intentional versioning decisions
+- **Result:** Tagged releases with attached PDFs for citations
+- **Versioning:** Git tags, release notes, academic distribution
+
+### Deployment Locations
+- **Live Website:** https://mlsysbook.ai (updated by `publish`)
+- **PDF Download:** https://mlsysbook.ai/assets/Machine-Learning-Systems.pdf
+- **Tagged Releases:** https://github.com/harvard-edge/cs249r_book/releases
+- **Versioned PDFs:** Attached to each GitHub release for citations
 
 ## 🛡️ Best Practices
 
