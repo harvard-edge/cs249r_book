@@ -141,7 +141,7 @@ git pull origin main
 
 ### Deployment Locations
 - **Live Website:** https://mlsysbook.ai (updated by `publish`)
-- **PDF Download:** https://mlsysbook.ai/assets/Machine-Learning-Systems.pdf
+- **PDF Download:** https://mlsysbook.ai/assets/downloads/Machine-Learning-Systems.pdf
 - **Tagged Releases:** https://github.com/harvard-edge/cs249r_book/releases
 - **Versioned PDFs:** Attached to each GitHub release for citations
 

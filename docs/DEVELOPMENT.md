@@ -175,7 +175,7 @@ git merge dev
 cp build/pdf/Machine-Learning-Systems.pdf assets/
 
 # 4. Commit and push
-git add assets/Machine-Learning-Systems.pdf
+git add assets/downloads/Machine-Learning-Systems.pdf
 git commit -m "Add PDF to assets"
 git push origin main
 ```
