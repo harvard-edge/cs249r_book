@@ -1032,51 +1032,237 @@ class BookBinder:
             return False
     
     def publish(self):
-        """Enhanced manual publisher with integrated functionality"""
-        self._show_publisher_header()
+        """Deploy website updates to GitHub Pages (no formal release)"""
+        self._show_publish_header()
         
-        # Step 0: Production Publishing Confirmation
-        console.print("[bold red]⚠️  You are about to publish to LIVE PRODUCTION systems.[/bold red]")
-        console.print("[red]This will create public releases and deploy to GitHub Pages.[/red]")
-        console.print("[yellow]Type 'PUBLISH' (all caps) to confirm: [/yellow]", end="")
-        confirmation = input().strip()
+        # Step 0: Website Publishing Confirmation
+        console.print("[bold blue]📚 Deploy Website Updates[/bold blue]")
+        console.print("[cyan]This will build and deploy your latest content to GitHub Pages.[/cyan]")
+        console.print("[dim]No git tags or formal releases will be created.[/dim]")
+        console.print()
+        console.print("[yellow]Deploy to https://mlsysbook.ai? [Y/n] [default: Y]: [/yellow]", end="")
+        confirmation = input().strip().lower()
         
-        if confirmation != "PUBLISH":
-            console.print("[blue]ℹ️  Publishing cancelled - confirmation not received[/blue]")
-            console.print("[dim]To publish, you must type exactly: PUBLISH[/dim]")
+        if confirmation and confirmation not in ['y', 'yes']:
+            console.print("[blue]ℹ️  Website deployment cancelled[/blue]")
             return False
         
-        console.print("[green]✅ Production publishing confirmed[/green]")
+        console.print("[green]✅ Website deployment confirmed[/green]")
+        console.print()
         
-        # Step 1: Git Status Check
-        if not self._validate_git_status():
+        # Step 1: Git Status Check (relaxed - allow uncommitted changes for website)
+        if not self._validate_git_status_for_publish():
             return False
         
-        # Step 2: Version Management
-        version_info = self._plan_version_release()
-        if not version_info:
-            return False
-        
-        # Step 3: Confirmation
-        if not self._confirm_publishing(version_info):
-            return False
-        
-        # Step 4: Building Phase
+        # Step 2: Building Phase
         if not self._execute_build_phase():
             return False
         
-        # Step 5: Publishing Phase
-        if not self._execute_publishing_phase(version_info):
+        # Step 3: Deploy to GitHub Pages
+        if not self._deploy_to_github_pages():
+            console.print("[red]❌ GitHub Pages deployment failed[/red]")
             return False
         
-        # Step 6: Success
-        self._show_publish_success(version_info)
+        # Step 4: Success
+        self._show_publish_website_success()
         return True
+
+    def release(self):
+        """Create formal release with versioning and GitHub release"""
+        self._show_release_header()
+        
+        try:
+            # Get current version
+            current_version = self._get_current_version()
+            console.print(f"[blue]ℹ️  Current version: {current_version}[/blue]")
+            console.print()
+            
+            # Show version type guide (textbook-specific)
+            console.print("[bold white]📋 Textbook Release Type Guide:[/bold white]")
+            console.print("[green]  1. patch[/green]   - Typos, corrections, minor fixes          (v1.0.0 → v1.0.1)")
+            console.print("[yellow]  2. minor[/yellow]   - New chapters, labs, major content       (v1.0.0 → v1.1.0)")
+            console.print("[red]  3. major[/red]   - Complete restructuring, new edition     (v1.0.0 → v2.0.0)")
+            console.print("[blue]  4. custom[/blue]  - Specify your own version number")
+            console.print()
+            console.print("[dim]💡 Examples:[/dim]")
+            console.print("[dim]   • Patch: Fixed equations in Chapter 8, corrected references[/dim]")
+            console.print("[dim]   • Minor: Added new \"Federated Learning\" chapter[/dim]")
+            console.print("[dim]   • Major: Restructured entire book for new academic year[/dim]")
+            console.print()
+            
+            console.print("[white]What type of changes are you releasing?[/white]")
+            console.print("[white]Select option [1-4] [default: 2 for minor]: [/white]", end="")
+            choice = input().strip()
+            if not choice:
+                choice = "2"
+            
+            release_types = ["patch", "minor", "major", "custom"]
+            try:
+                choice_idx = int(choice) - 1
+                if 0 <= choice_idx < len(release_types):
+                    release_type = release_types[choice_idx]
+                else:
+                    release_type = "minor"
+            except ValueError:
+                release_type = "minor"
+            
+            # Calculate new version
+            if release_type == "custom":
+                console.print()
+                console.print("[blue]ℹ️  Custom version format: vX.Y.Z (e.g., v1.2.3)[/blue]")
+                console.print("[white]Enter your custom version: [/white]", end="")
+                new_version = input().strip()
+                if not new_version.startswith('v'):
+                    new_version = f"v{new_version}"
+            else:
+                new_version = self._calculate_next_version(current_version, release_type)
+            
+            console.print()
+            console.print(f"[bold green]📌 New version will be: {new_version}[/bold green]")
+            console.print(f"[dim]   Previous: {current_version} → New: {new_version}[/dim]")
+            
+            # Check if version exists
+            if self._version_exists(new_version):
+                console.print(f"[yellow]⚠️  Git tag {new_version} already exists[/yellow]")
+                console.print("[dim]   This will delete the existing tag from both local and remote repositories[/dim]")
+                console.print("[dim]   and recreate it with the new release[/dim]")
+                console.print()
+                console.print("[bold white]Options:[/bold white]")
+                console.print("[green]  y/yes[/green] - Delete existing tag and recreate with new release")
+                console.print("[red]  n/no[/red]  - Cancel publishing (keep existing tag) [default]")
+                console.print("[yellow]Delete existing tag and recreate? [y/N] [default: N]: [/yellow]", end="")
+                choice = input().strip().lower()
+                if not choice:
+                    choice = 'n'
+                if choice in ['y', 'yes']:
+                    console.print("[purple]🔄 Deleting existing tag...[/purple]")
+                    self._delete_version(new_version)
+                    console.print(f"[green]✅ Existing tag {new_version} deleted from local and remote[/green]")
+                else:
+                    console.print("[blue]ℹ️  Release cancelled - keeping existing tag[/blue]")
+                    return False
+            
+            # Get release description
+            console.print()
+            console.print("[white]Enter release description: [/white]", end="")
+            description = input().strip()
+            if not description:
+                description = f"Release {new_version}"
+            
+            # Ensure we have builds for the release
+            html_build_dir = self.get_output_dir("html")
+            pdf_build_dir = self.get_output_dir("pdf")
+            
+            if not html_build_dir.exists() or not pdf_build_dir.exists():
+                console.print("[yellow]⚠️  Missing builds detected. Building now...[/yellow]")
+                if not self._execute_build_phase():
+                    return False
+            
+            # Create git tag
+            console.print(f"[purple]🔄 Creating git tag {new_version}...[/purple]")
+            tag_result = subprocess.run(['git', 'tag', '-a', new_version, '-m', f"Release {new_version}: {description}"], 
+                                      cwd=self.root_dir, capture_output=True)
+            if tag_result.returncode != 0:
+                console.print(f"[red]❌ Failed to create git tag: {tag_result.stderr.decode()}[/red]")
+                return False
+            
+            # Push tag
+            console.print(f"[purple]🔄 Pushing tag to remote...[/purple]")
+            push_result = subprocess.run(['git', 'push', 'origin', new_version], 
+                                       cwd=self.root_dir, capture_output=True)
+            if push_result.returncode != 0:
+                console.print(f"[red]❌ Failed to push tag: {push_result.stderr.decode()}[/red]")
+                return False
+            
+            # Create GitHub release
+            if self._create_github_release(new_version, description):
+                console.print(f"[green]✅ Release {new_version} created successfully![/green]")
+                console.print()
+                console.print("[bold white]📦 Release Information:[/bold white]")
+                console.print(f"[blue]   🏷️  Version: {new_version}[/blue]")
+                console.print(f"[blue]   📝 Description: {description}[/blue]")
+                console.print(f"[blue]   🌐 Release: https://github.com/harvard-edge/cs249r_book/releases/tag/{new_version}[/blue]")
+                console.print(f"[blue]   📄 PDF: https://github.com/harvard-edge/cs249r_book/releases/download/{new_version}/Machine-Learning-Systems.pdf[/blue]")
+                console.print()
+                console.print("[green]🎉 Ready for academic citations and distribution![/green]")
+                return True
+            else:
+                console.print("[red]❌ Failed to create GitHub release[/red]")
+                return False
+                
+        except Exception as e:
+            console.print(f"[red]❌ Release failed: {e}[/red]")
+            return False
 
     # ═══════════════════════════════════════════════════════════════════════════
     # 🚀 Enhanced Publishing Methods
     # ═══════════════════════════════════════════════════════════════════════════
     
+    def _show_publish_header(self):
+        """Display header for website publishing"""
+        console.print()
+        banner = Panel(
+            "[bold blue]📚 Website Publisher[/bold blue]\n\n"
+            "[cyan]Deploy latest content to GitHub Pages[/cyan]\n"
+            "[dim]• Builds HTML + PDF\n"
+            "• Updates https://mlsysbook.ai\n"
+            "• No versioning or releases[/dim]",
+            title="🌐 Binder Publish",
+            border_style="blue",
+            padding=(1, 2)
+        )
+        console.print(banner)
+        console.print()
+
+    def _show_release_header(self):
+        """Display header for formal releases"""
+        console.print()
+        banner = Panel(
+            "[bold green]🏷️  Release Manager[/bold green]\n\n"
+            "[yellow]Create formal textbook releases[/yellow]\n"
+            "[dim]• Semantic versioning\n"
+            "• Git tags & GitHub releases\n"
+            "• Academic citations ready[/dim]",
+            title="📦 Binder Release",
+            border_style="green",
+            padding=(1, 2)
+        )
+        console.print(banner)
+        console.print()
+
+    def _validate_git_status_for_publish(self):
+        """Relaxed git validation for website publishing"""
+        try:
+            # Check if we're in a git repo
+            result = subprocess.run(['git', 'status', '--porcelain'], 
+                                  capture_output=True, text=True, cwd=self.root_dir)
+            if result.returncode != 0:
+                console.print("[red]❌ Not in a valid git repository[/red]")
+                return False
+            
+            # For publishing, we allow uncommitted changes (just warn)
+            if result.stdout.strip():
+                console.print("[yellow]⚠️  You have uncommitted changes.[/yellow]")
+                console.print("[dim]Website will be built from committed content only.[/dim]")
+                console.print()
+            
+            return True
+        except Exception as e:
+            console.print(f"[red]❌ Git validation failed: {e}[/red]")
+            return False
+
+    def _show_publish_website_success(self):
+        """Show success message for website publishing"""
+        console.print()
+        console.print("[bold green]🎉 Website Successfully Deployed![/bold green]")
+        console.print()
+        console.print("[bold white]📋 Access Your Updated Website:[/bold white]")
+        console.print("[blue]   🌐 Website: https://mlsysbook.ai[/blue]")
+        console.print("[blue]   📄 PDF: https://mlsysbook.ai/assets/Machine-Learning-Systems.pdf[/blue]")
+        console.print()
+        console.print("[dim]💡 Changes may take a few minutes to appear due to caching[/dim]")
+        console.print("[green]✅ Ready for students and educators![/green]")
+
     def _show_publisher_header(self):
         """Display the publisher header with prominent warning"""
         # Big red warning box
@@ -2479,8 +2665,8 @@ This is an ACADEMIC TEXTBOOK release. Please format as:
         
         full_table.add_row("build - <format>", "Build complete book", "./binder build - pdf")
         full_table.add_row("preview-full [format]", "Preview complete book", "./binder preview-full")
-        full_table.add_row("publish", "Manual publisher (interactive)", "./binder publish")
-        full_table.add_row("publish help", "Show detailed publish workflow", "./binder publish help")
+        full_table.add_row("publish", "Deploy website updates (no release)", "./binder publish")
+        full_table.add_row("release", "Create formal textbook release", "./binder release")
         
         # Management Commands
         mgmt_table = Table(show_header=True, header_style="bold blue", box=None)
@@ -2517,6 +2703,7 @@ This is an ACADEMIC TEXTBOOK release. Please format as:
         shortcuts_table.add_row("he", "hello")
         shortcuts_table.add_row("se", "setup")
         shortcuts_table.add_row("pu", "publish")
+        shortcuts_table.add_row("r", "release")
         shortcuts_table.add_row("a", "about")
         shortcuts_table.add_row("h", "help")
         
@@ -3334,6 +3521,7 @@ def main():
         'he': 'hello',
         'se': 'setup',
         'pu': 'publish',
+        'r': 'release',
         'h': 'help'
     }
 
@@ -3415,6 +3603,10 @@ def main():
             else:
                 binder.show_symlink_status()
                 binder.publish()
+
+        elif command == "release":
+            binder.show_symlink_status()
+            binder.release()
 
         elif command == "about":
             binder.show_about()
