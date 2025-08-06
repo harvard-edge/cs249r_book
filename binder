@@ -1782,6 +1782,29 @@ class BookBinder:
                 return False
             console.print("[green]✅ HTML build completed[/green]")
             
+            # Validate both builds are complete and valid
+            console.print("[purple]🔄 Validating builds...[/purple]")
+            
+            # Check PDF
+            pdf_path = self.get_output_dir("pdf") / "Machine-Learning-Systems.pdf"
+            if not pdf_path.exists():
+                console.print("[red]❌ PDF build validation failed - file not found[/red]")
+                return False
+            
+            pdf_size_mb = pdf_path.stat().st_size / (1024 * 1024)
+            if pdf_size_mb < 1:
+                console.print(f"[red]❌ PDF build validation failed - file too small: {pdf_size_mb:.1f} MB[/red]")
+                return False
+            
+            # Check HTML
+            html_dir = self.get_output_dir("html")
+            if not html_dir.exists() or not any(html_dir.iterdir()):
+                console.print("[red]❌ HTML build validation failed - directory empty or missing[/red]")
+                return False
+            
+            console.print(f"[green]✅ PDF validated: {pdf_size_mb:.1f} MB[/green]")
+            console.print(f"[green]✅ HTML validated: {html_dir}[/green]")
+            console.print("[green]✅ Build phase completed successfully[/green]")
             return True
             
         except Exception as e:
@@ -2292,12 +2315,32 @@ class BookBinder:
     def _deploy_to_github_pages(self):
         """Deploy to GitHub Pages"""
         try:
-            # Ensure we have a build to deploy
+            # Validate HTML build
             html_build_dir = self.get_output_dir("html")
             if not html_build_dir.exists():
                 console.print("[red]❌ No HTML build found. Run build first.[/red]")
                 console.print(f"[blue]💡 Expected build at: {html_build_dir}[/blue]")
                 return False
+            
+            # Validate PDF build
+            pdf_build_dir = self.get_output_dir("pdf")
+            pdf_source = pdf_build_dir / "Machine-Learning-Systems.pdf"
+            if not pdf_source.exists():
+                console.print("[red]❌ No PDF build found. Run build first.[/red]")
+                console.print(f"[blue]💡 Expected PDF at: {pdf_source}[/blue]")
+                console.print("[blue]💡 Both HTML and PDF builds are required for deployment[/blue]")
+                return False
+            
+            # Validate PDF file size (should be reasonable)
+            pdf_size_mb = pdf_source.stat().st_size / (1024 * 1024)
+            if pdf_size_mb < 1:  # Less than 1MB is suspicious
+                console.print(f"[red]❌ PDF file size too small: {pdf_size_mb:.1f} MB[/red]")
+                console.print("[blue]💡 PDF may be corrupted or incomplete[/blue]")
+                return False
+            
+            console.print(f"[green]✅ HTML build validated: {html_build_dir}[/green]")
+            console.print(f"[green]✅ PDF build validated: {pdf_source} ({pdf_size_mb:.1f} MB)[/green]")
+            console.print()
             
             # Copy build output to _site for quarto publish
             site_dir = self.book_dir / "_site"
@@ -2308,6 +2351,30 @@ class BookBinder:
             import shutil
             shutil.copytree(html_build_dir, site_dir)
             console.print(f"[blue]   📂 Copied build output to {site_dir}[/blue]")
+            
+            # Copy PDF to assets directory for GitHub Pages
+            assets_dir = site_dir / "assets"
+            
+            # Create assets directory if it doesn't exist
+            assets_dir.mkdir(exist_ok=True)
+            
+            # Copy PDF to assets directory
+            pdf_dest = assets_dir / "Machine-Learning-Systems.pdf"
+            shutil.copy2(pdf_source, pdf_dest)
+            console.print(f"[blue]   📄 Copied PDF to {pdf_dest}[/blue]")
+            
+            # Validate the copied PDF
+            if not pdf_dest.exists():
+                console.print("[red]❌ Failed to copy PDF to assets directory[/red]")
+                return False
+            
+            copied_size_mb = pdf_dest.stat().st_size / (1024 * 1024)
+            if abs(copied_size_mb - pdf_size_mb) > 0.1:  # More than 0.1MB difference
+                console.print(f"[red]❌ PDF copy validation failed[/red]")
+                console.print(f"[blue]💡 Original: {pdf_size_mb:.1f} MB, Copied: {copied_size_mb:.1f} MB[/blue]")
+                return False
+            
+            console.print(f"[green]✅ PDF copied successfully: {copied_size_mb:.1f} MB[/green]")
             
             # Now deploy using quarto publish
             result = subprocess.run(['quarto', 'publish', 'gh-pages', '--no-render'], 
