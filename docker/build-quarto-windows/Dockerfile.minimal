@@ -60,37 +60,61 @@ RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
         } \
     } \
     \
-    Write-Host '📦 === DOWNLOAD METHOD 1: WebClient ==='; \
-    $gsInstaller = 'C:/temp/gs_installer_method1.exe'; \
-    $downloadSuccess = $false; \
-    \
-    foreach ($gsUrl in $gsUrls) { \
-        Write-Host ('🔄 WebClient trying: ' + $gsUrl + ' (3 minute timeout)'); \
-        try { \
-            [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
-            $webClient = New-Object System.Net.WebClient; \
-            $webClient.Headers.Add('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'); \
-            $webClient.Timeout = 180000; # 3 minutes in milliseconds \
-            $webClient.DownloadFile($gsUrl, $gsInstaller); \
-            $webClient.Dispose(); \
-            \
-            if ((Test-Path $gsInstaller) -and ((Get-Item $gsInstaller).Length -gt 1MB)) { \
-                Write-Host ('✅ WebClient SUCCESS - Size: ' + ((Get-Item $gsInstaller).Length / 1MB).ToString('F1') + ' MB'); \
+    Write-Host '📦 === DOWNLOAD METHOD 1: Chocolatey (should work with full Windows image) ==='; \
+    try { \
+        Write-Host '🔄 Testing Chocolatey availability...'; \
+        $chocoTest = & choco --version 2>&1; \
+        if ($LASTEXITCODE -eq 0) { \
+            Write-Host '✅ Chocolatey available, trying Ghostscript installation...'; \
+            Write-Host '📦 Installing Ghostscript via simple Chocolatey command (matching quarto-build.yml)...'; \
+            # Use simple approach like working quarto-build.yml \
+            choco install ghostscript -y; \
+            if ($LASTEXITCODE -eq 0) { \
+                Write-Host '✅ Chocolatey Ghostscript installation SUCCESS!'; \
                 $downloadSuccess = $true; \
-                break; \
             } else { \
-                Write-Host '⚠️ WebClient downloaded but file too small'; \
+                Write-Host ('❌ Chocolatey installation failed with exit code: ' + $LASTEXITCODE); \
+            } \
+        } else { \
+            Write-Host '⚠️ Chocolatey not available, trying direct download methods...'; \
+        } \
+    } catch { \
+        Write-Host ('❌ Chocolatey method failed: ' + $_.Exception.Message); \
+        Write-Host '⚠️ Will try direct download methods as fallback...'; \
+    } \
+    \
+    if (-not $downloadSuccess) { \
+        Write-Host '📦 === DOWNLOAD METHOD 2: WebClient (fallback) ==='; \
+        $gsInstaller = 'C:/temp/gs_installer_method2.exe'; \
+        \
+        foreach ($gsUrl in $gsUrls) { \
+            Write-Host ('🔄 WebClient trying: ' + $gsUrl + ' (3 minute timeout)'); \
+            try { \
+                [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
+                $webClient = New-Object System.Net.WebClient; \
+                $webClient.Headers.Add('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'); \
+                $webClient.Timeout = 180000; # 3 minutes in milliseconds \
+                $webClient.DownloadFile($gsUrl, $gsInstaller); \
+                $webClient.Dispose(); \
+                \
+                if ((Test-Path $gsInstaller) -and ((Get-Item $gsInstaller).Length -gt 1MB)) { \
+                    Write-Host ('✅ WebClient SUCCESS - Size: ' + ((Get-Item $gsInstaller).Length / 1MB).ToString('F1') + ' MB'); \
+                    $downloadSuccess = $true; \
+                    break; \
+                } else { \
+                    Write-Host '⚠️ WebClient downloaded but file too small'; \
+                    if (Test-Path $gsInstaller) { Remove-Item $gsInstaller -ErrorAction SilentlyContinue }; \
+                } \
+            } catch { \
+                Write-Host ('❌ WebClient failed: ' + $_.Exception.Message); \
                 if (Test-Path $gsInstaller) { Remove-Item $gsInstaller -ErrorAction SilentlyContinue }; \
             } \
-        } catch { \
-            Write-Host ('❌ WebClient failed: ' + $_.Exception.Message); \
-            if (Test-Path $gsInstaller) { Remove-Item $gsInstaller -ErrorAction SilentlyContinue }; \
         } \
     } \
     \
     if (-not $downloadSuccess) { \
-        Write-Host '📦 === DOWNLOAD METHOD 2: Invoke-WebRequest ==='; \
-        $gsInstaller = 'C:/temp/gs_installer_method2.exe'; \
+        Write-Host '📦 === DOWNLOAD METHOD 3: Invoke-WebRequest ==='; \
+        $gsInstaller = 'C:/temp/gs_installer_method3.exe'; \
         \
         foreach ($gsUrl in $gsUrls) { \
             Write-Host ('🔄 Invoke-WebRequest trying: ' + $gsUrl + ' (5 minute timeout)'); \
@@ -113,8 +137,8 @@ RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     } \
     \
     if (-not $downloadSuccess) { \
-        Write-Host '📦 === DOWNLOAD METHOD 3: curl (direct download fallback) ==='; \
-        $gsInstaller = 'C:/temp/gs_installer_method3.exe'; \
+        Write-Host '📦 === DOWNLOAD METHOD 4: curl (final fallback) ==='; \
+        $gsInstaller = 'C:/temp/gs_installer_method4.exe'; \
         \
         foreach ($gsUrl in $gsUrls) { \
             Write-Host ('🔄 curl trying: ' + $gsUrl + ' (5 minute timeout)'); \
@@ -136,29 +160,7 @@ RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
         } \
     } \
     \
-            if (-not $downloadSuccess) { \
-        Write-Host '📦 === DOWNLOAD METHOD 4: Chocolatey (simplified like quarto-build.yml) ==='; \
-        try { \
-            Write-Host '🔄 Testing Chocolatey availability...'; \
-            $chocoTest = & choco --version 2>&1; \
-            if ($LASTEXITCODE -eq 0) { \
-                Write-Host '✅ Chocolatey available, trying Ghostscript installation...'; \
-                Write-Host '📦 Installing Ghostscript via simple Chocolatey command (matching quarto-build.yml)...'; \
-                # Use simple approach like working quarto-build.yml \
-                choco install ghostscript -y; \
-                if ($LASTEXITCODE -eq 0) { \
-                    Write-Host '✅ Chocolatey Ghostscript installation SUCCESS!'; \
-                    $downloadSuccess = $true; \
-                } else { \
-                    Write-Host ('❌ Chocolatey installation failed with exit code: ' + $LASTEXITCODE); \
-                } \
-            } else { \
-                Write-Host '⚠️ Chocolatey not available, skipping this method'; \
-            } \
-        } catch { \
-            Write-Host ('❌ Chocolatey method failed: ' + $_.Exception.Message); \
-        } \
-    } \
+ \
     \
     if ($downloadSuccess) { \
         Write-Host '🎉 === DOWNLOAD/INSTALL SUCCESSFUL ==='; \
