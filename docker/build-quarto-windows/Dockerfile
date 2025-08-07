@@ -13,11 +13,12 @@ RUN curl -L -o PowerShell.msi https://github.com/PowerShell/PowerShell/releases/
     if %ERRORLEVEL% neq 0 (echo ❌ PowerShell installation failed - aborting build && exit 1) && \
     del PowerShell.msi
 
-# Verify PowerShell 7 installation with more thorough search and longer wait
-RUN powershell -Command "Write-Host 'Waiting for PowerShell 7 installation to complete...'; Start-Sleep 10; Write-Host 'Searching for PowerShell 7...'; if (Test-Path 'C:\Program Files\PowerShell') { Write-Host 'PowerShell directory exists'; Get-ChildItem 'C:\Program Files\PowerShell' -Recurse | Where-Object Name -eq 'pwsh.exe' | ForEach-Object { Write-Host \"Found pwsh.exe at: $($_.FullName)\" } } else { Write-Host 'PowerShell directory not found' }; $pwshExe = Get-ChildItem 'C:\Program Files\PowerShell' -Recurse -Filter 'pwsh.exe' -ErrorAction SilentlyContinue | Select-Object -First 1; if ($pwshExe) { Write-Host \"PowerShell 7 found at: $($pwshExe.DirectoryName)\"; $env:PATH = $env:PATH + \";$($pwshExe.DirectoryName)\"; [Environment]::SetEnvironmentVariable('PATH', $env:PATH, [EnvironmentVariableTarget]::Machine); & $pwshExe.FullName -Command \"Write-Host 'PowerShell 7 verification successful'\" } else { Write-Host 'Detailed directory listing:'; if (Test-Path 'C:\Program Files\PowerShell') { Get-ChildItem 'C:\Program Files\PowerShell' -Recurse | Format-Table Name, FullName -AutoSize }; throw 'PowerShell 7 installation failed - pwsh.exe not found' }"
+# Add PowerShell to PATH and test (simple approach that works)
+RUN setx PATH "%PATH%;C:\Program Files\PowerShell\7" /M && \
+    "C:\Program Files\PowerShell\7\pwsh.exe" -Command "Write-Host 'PowerShell 7 installation verified'"
 
 # === PHASE 2: CHOCOLATEY INSTALLATION ===
-RUN powershell -Command " \
+RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     Write-Host '🚀 === STARTING CHOCOLATEY INSTALLATION ==='; \
     try { \
         Set-ExecutionPolicy Bypass -Scope Process -Force; \
@@ -48,8 +49,8 @@ COPY tools/dependencies/install_packages.R C:/temp/install_packages.R
 COPY tools/dependencies/tl_packages C:/temp/tl_packages
 COPY docker/build-quarto-windows/verify_r_packages.R C:/temp/verify_r_packages.R
 
-# Create R library directory
-RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command "New-Item -ItemType Directory -Path 'C:/r-lib' -Force"
+# Create necessary directories
+RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command "New-Item -ItemType Directory -Path 'C:/r-lib' -Force; New-Item -ItemType Directory -Path 'C:/temp' -Force"
 
 # === PHASE 3: QUARTO INSTALLATION ===
 RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
@@ -96,8 +97,8 @@ RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     Write-Host '📦 Installing Python 3.13.1 (exact version from workflow)...'; \
     " && \
     choco install -y python --version=3.13.1 && \
-    pwsh -Command "if ($LASTEXITCODE -ne 0) { throw 'Python 3.13.1 installation failed - aborting build' }" && \
-    pwsh -Command " \
+    "C:\Program Files\PowerShell\7\pwsh.exe" -Command "if ($LASTEXITCODE -ne 0) { throw 'Python 3.13.1 installation failed - aborting build' }" && \
+    "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     # Refresh environment variables to pick up Python PATH \
     $env:PATH = [System.Environment]::GetEnvironmentVariable('PATH', [System.EnvironmentVariableTarget]::Machine) + ';' + [System.Environment]::GetEnvironmentVariable('PATH', [System.EnvironmentVariableTarget]::User); \
     # Add common Python paths explicitly \
@@ -161,8 +162,8 @@ RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     \
     Write-Host '📦 Installing Ghostscript via direct download (latest version)...'; \
     \
-                # Use same approach as working quarto-build.yml (with winget fallback to chocolatey) \
-            try { \
+    # Use same approach as working quarto-build.yml (with winget fallback to chocolatey) \
+    try { \
                 Write-Host '🔄 Trying winget installation (primary method from quarto-build.yml)...'; \
                 winget install ArtifexSoftware.GhostScript --accept-source-agreements --accept-package-agreements; \
                 Write-Host '✅ Ghostscript installed via winget'; \
@@ -390,8 +391,8 @@ RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     Write-Host '📦 Installing R 4.4.1 (exact version from workflow)...'; \
     " && \
     choco install -y r --version=4.4.1 && \
-    pwsh -Command "if ($LASTEXITCODE -ne 0) { throw 'R 4.4.1 installation failed - aborting build' }" && \
-    pwsh -Command " \
+    "C:\Program Files\PowerShell\7\pwsh.exe" -Command "if ($LASTEXITCODE -ne 0) { throw 'R 4.4.1 installation failed - aborting build' }" && \
+    "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     $endTime = Get-Date; \
     $duration = ($endTime - $startTime).TotalMinutes; \
     Write-Host ('✅ === R INSTALLATION COMPLETE === (' + $duration.ToString('F1') + ' minutes)'); \
@@ -444,7 +445,7 @@ RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
       quit(status = 1); \
     }) \
     " && \
-    pwsh -Command " \
+    "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     $endTime = Get-Date; \
     $duration = ($endTime - $startTime).TotalMinutes; \
     Write-Host ('✅ === R PACKAGE INSTALLATION COMPLETE === (' + $duration.ToString('F1') + ' minutes)'); \
