@@ -6,7 +6,7 @@ This document summarizes the comprehensive fixes applied to the Docker container
 
 ## Issues Fixed
 
-### 1. Linux Container (docker/quarto-linux-build/Dockerfile)
+### 1. Linux Container (docker/quarto-build-linux/Dockerfile)
 
 **Problems Identified:**
 - Incorrect dependency file paths after repository restructuring
@@ -152,7 +152,7 @@ Converted from bash to PowerShell with proper Windows paths:
 ## Files Modified
 
 ### Container Definitions:
-- `docker/quarto-linux-build/Dockerfile` - Complete rebuild with 11 optimized phases
+- `docker/quarto-build-linux/Dockerfile` - Complete rebuild with 11 optimized phases
 - `docker/quarto-build-windows/Dockerfile` - Enhanced with PowerShell 7 and better error handling
 
 ### Workflow Files:
@@ -160,7 +160,7 @@ Converted from bash to PowerShell with proper Windows paths:
 - `.github/workflows/build-windows-container.yml` - Converted to PowerShell commands throughout
 
 ### Documentation:
-- `docker/quarto-linux-build/README.md` - Updated with new phase information
+- `docker/quarto-build-linux/README.md` - Updated with new phase information
 - `docker/quarto-build-windows/README.md` - Enhanced with Windows-specific details
 - `docs/CONTAINER_FIXES_2025.md` - This comprehensive summary
 
