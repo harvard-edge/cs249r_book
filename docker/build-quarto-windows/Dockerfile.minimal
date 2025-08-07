@@ -1,0 +1,165 @@
+# MINIMAL WINDOWS DOCKERFILE - GHOSTSCRIPT ONLY
+# Focus on fixing Ghostscript download/install, then add other components back
+
+FROM mcr.microsoft.com/windows/servercore:ltsc2022
+
+# === PHASE 1: POWERSHELL 7 INSTALLATION (Required for our scripts) ===
+RUN curl -fSLo PowerShell.msi https://github.com/PowerShell/PowerShell/releases/download/v7.4.1/PowerShell-7.4.1-win-x64.msi; \
+    if not exist PowerShell.msi (echo ❌ PowerShell download failed - aborting build && exit 1); \
+    msiexec /i PowerShell.msi /quiet /norestart; \
+    if %ERRORLEVEL% neq 0 (echo ❌ PowerShell installation failed - aborting build && exit 1); \
+    del PowerShell.msi
+
+# === MINIMAL SETUP ===
+RUN mkdir C:\temp
+
+# === GHOSTSCRIPT TESTING - MULTIPLE STRATEGIES ===
+RUN pwsh -Command " \
+    Write-Host '🚀 === GHOSTSCRIPT DOWNLOAD TESTING ==='; \
+    Write-Host '⏰ Testing multiple download methods...'; \
+    $startTime = Get-Date; \
+    \
+    # Test URLs first \
+    $gsUrls = @( \
+        'https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/gs10051/gs10051w64.exe', \
+        'https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/latest/download/gs10051w64.exe', \
+        'https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/gs10051/gs10051w32.exe' \
+    ); \
+    \
+    Write-Host '📊 Testing URL accessibility...'; \
+    foreach ($url in $gsUrls) { \
+        Write-Host ('🔍 Testing: ' + $url); \
+        try { \
+            $response = Invoke-WebRequest -Uri $url -Method Head -TimeoutSec 30 -ErrorAction Stop; \
+            Write-Host ('✅ URL accessible - Status: ' + $response.StatusCode + ' Size: ' + $response.Headers['Content-Length']); \
+        } catch { \
+            Write-Host ('❌ URL test failed: ' + $_.Exception.Message); \
+        } \
+    } \
+    \
+    Write-Host '📦 === DOWNLOAD METHOD 1: WebClient ==='; \
+    $gsInstaller = 'C:/temp/gs_installer_method1.exe'; \
+    $downloadSuccess = $false; \
+    \
+    foreach ($gsUrl in $gsUrls) { \
+        Write-Host ('🔄 WebClient trying: ' + $gsUrl); \
+        try { \
+            [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
+            $webClient = New-Object System.Net.WebClient; \
+            $webClient.Headers.Add('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'); \
+            $webClient.DownloadFile($gsUrl, $gsInstaller); \
+            $webClient.Dispose(); \
+            \
+            if ((Test-Path $gsInstaller) -and ((Get-Item $gsInstaller).Length -gt 1MB)) { \
+                Write-Host ('✅ WebClient SUCCESS - Size: ' + ((Get-Item $gsInstaller).Length / 1MB).ToString('F1') + ' MB'); \
+                $downloadSuccess = $true; \
+                break; \
+            } else { \
+                Write-Host '⚠️ WebClient downloaded but file too small'; \
+                if (Test-Path $gsInstaller) { Remove-Item $gsInstaller -ErrorAction SilentlyContinue }; \
+            } \
+        } catch { \
+            Write-Host ('❌ WebClient failed: ' + $_.Exception.Message); \
+            if (Test-Path $gsInstaller) { Remove-Item $gsInstaller -ErrorAction SilentlyContinue }; \
+        } \
+    } \
+    \
+    if (-not $downloadSuccess) { \
+        Write-Host '📦 === DOWNLOAD METHOD 2: Invoke-WebRequest ==='; \
+        $gsInstaller = 'C:/temp/gs_installer_method2.exe'; \
+        \
+        foreach ($gsUrl in $gsUrls) { \
+            Write-Host ('🔄 Invoke-WebRequest trying: ' + $gsUrl); \
+            try { \
+                Invoke-WebRequest -Uri $gsUrl -OutFile $gsInstaller -TimeoutSec 300 -UserAgent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' -UseBasicParsing; \
+                \
+                if ((Test-Path $gsInstaller) -and ((Get-Item $gsInstaller).Length -gt 1MB)) { \
+                    Write-Host ('✅ Invoke-WebRequest SUCCESS - Size: ' + ((Get-Item $gsInstaller).Length / 1MB).ToString('F1') + ' MB'); \
+                    $downloadSuccess = $true; \
+                    break; \
+                } else { \
+                    Write-Host '⚠️ Invoke-WebRequest downloaded but file too small'; \
+                    if (Test-Path $gsInstaller) { Remove-Item $gsInstaller -ErrorAction SilentlyContinue }; \
+                } \
+            } catch { \
+                Write-Host ('❌ Invoke-WebRequest failed: ' + $_.Exception.Message); \
+                if (Test-Path $gsInstaller) { Remove-Item $gsInstaller -ErrorAction SilentlyContinue }; \
+            } \
+        } \
+    } \
+    \
+    if (-not $downloadSuccess) { \
+        Write-Host '📦 === DOWNLOAD METHOD 3: curl (fallback) ==='; \
+        $gsInstaller = 'C:/temp/gs_installer_method3.exe'; \
+        \
+        foreach ($gsUrl in $gsUrls) { \
+            Write-Host ('🔄 curl trying: ' + $gsUrl); \
+            try { \
+                $curlResult = & curl -L -o $gsInstaller $gsUrl --user-agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' --max-time 300; \
+                \
+                if ((Test-Path $gsInstaller) -and ((Get-Item $gsInstaller).Length -gt 1MB)) { \
+                    Write-Host ('✅ curl SUCCESS - Size: ' + ((Get-Item $gsInstaller).Length / 1MB).ToString('F1') + ' MB'); \
+                    $downloadSuccess = $true; \
+                    break; \
+                } else { \
+                    Write-Host '⚠️ curl downloaded but file too small'; \
+                    if (Test-Path $gsInstaller) { Remove-Item $gsInstaller -ErrorAction SilentlyContinue }; \
+                } \
+            } catch { \
+                Write-Host ('❌ curl failed: ' + $_.Exception.Message); \
+                if (Test-Path $gsInstaller) { Remove-Item $gsInstaller -ErrorAction SilentlyContinue }; \
+            } \
+        } \
+    } \
+    \
+    if ($downloadSuccess) { \
+        Write-Host '🎉 === DOWNLOAD SUCCESSFUL ==='; \
+        Write-Host '🔄 Testing installation...'; \
+        \
+        $installProcess = Start-Process -FilePath $gsInstaller -ArgumentList '/S' -Wait -PassThru -NoNewWindow; \
+        if ($installProcess.ExitCode -eq 0) { \
+            Write-Host '✅ Ghostscript installation SUCCESS!'; \
+            \
+            # Test installation \
+            Write-Host '🧪 Testing Ghostscript functionality...'; \
+            $gsPath = Get-ChildItem 'C:/Program Files/gs' -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1; \
+            if ($gsPath) { \
+                $binPath = Join-Path $gsPath.FullName 'bin'; \
+                Write-Host ('📍 Found Ghostscript at: ' + $binPath); \
+                try { \
+                    $gsVersion = & \"$binPath/gs.exe\" --version 2>&1; \
+                    Write-Host ('✅ Ghostscript version: ' + $gsVersion); \
+                    Write-Host '🎉 === GHOSTSCRIPT FULLY WORKING ==='; \
+                } catch { \
+                    Write-Host '⚠️ Ghostscript installed but version test failed (may be normal in containers)'; \
+                } \
+            } else { \
+                Write-Host '⚠️ Installation succeeded but Ghostscript directory not found'; \
+            } \
+        } else { \
+            Write-Host ('❌ Installation failed with exit code: ' + $installProcess.ExitCode); \
+            throw 'Ghostscript installation failed'; \
+        } \
+    } else { \
+        Write-Host '❌ === ALL DOWNLOAD METHODS FAILED ==='; \
+        Write-Host 'This will help us debug the root cause of download failures'; \
+        throw 'All Ghostscript download methods failed'; \
+    } \
+    \
+    $endTime = Get-Date; \
+    $duration = ($endTime - $startTime).TotalMinutes; \
+    Write-Host ('✅ === GHOSTSCRIPT TEST COMPLETE === (' + $duration.ToString('F1') + ' minutes)'); \
+    "
+
+# === BASIC VERIFICATION ===
+RUN pwsh -Command " \
+    Write-Host '🔍 === FINAL VERIFICATION ==='; \
+    Write-Host 'PowerShell 7: OK'; \
+    Write-Host 'Temp directory: OK'; \
+    if (Get-Command gs -ErrorAction SilentlyContinue) { \
+        Write-Host 'Ghostscript: AVAILABLE'; \
+    } else { \
+        Write-Host 'Ghostscript: Not in PATH (expected)'; \
+    } \
+    Write-Host '✅ Minimal container ready for testing'; \
+    "
