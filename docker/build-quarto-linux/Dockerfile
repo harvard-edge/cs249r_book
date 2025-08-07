@@ -13,6 +13,12 @@ ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 ENV PATH=/usr/local/texlive/bin/x86_64-linux:$PATH
 
+# Install and configure locales
+RUN apt-get update && apt-get install -y locales && \
+    locale-gen en_US.UTF-8 && \
+    update-locale LANG=en_US.UTF-8 && \
+    rm -rf /var/lib/apt/lists/*
+
 # === PHASE 1: SYSTEM DEPENDENCIES ===
 RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
     echo "⏰ Estimated time: 2-3 minutes" && \

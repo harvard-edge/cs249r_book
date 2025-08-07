@@ -81,6 +81,42 @@ jobs:
       packages: write
 
     steps:
+      - name: 🔍 Check workflow environment
+        run: |
+          set -euo pipefail  # Exit immediately on any error
+          echo "🔍 Checking workflow environment..."
+          echo "📊 Repository: ${{ github.repository }}"
+          echo "📊 Actor: ${{ github.actor }}"
+          echo "📊 Event: ${{ github.event_name }}"
+          echo "📊 Ref: ${{ github.ref }}"
+          echo "📊 SHA: ${{ github.sha }}"
+          echo "📊 Workflow: ${{ github.workflow }}"
+          echo "📊 Run ID: ${{ github.run_id }}"
+          echo "📊 Run Number: ${{ github.run_number }}"
+          
+          # Check if we have the required permissions
+          echo "🔍 Checking permissions..."
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "✅ Manual workflow dispatch - should have full permissions"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            echo "✅ Push event - should have full permissions"
+          elif [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "✅ Scheduled event - should have full permissions"
+          else
+            echo "⚠️ Unknown event type: ${{ github.event_name }}"
+          fi
+          
+          # Check if secrets are available
+          echo "🔍 Checking secrets availability..."
+          if [ -n "${{ secrets.GITHUB_TOKEN }}" ]; then
+            echo "✅ GITHUB_TOKEN is available"
+          else
+            echo "❌ GITHUB_TOKEN is not available"
+            exit 1
+          fi
+          
+          echo "✅ Environment check completed"
+
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
@@ -88,11 +124,71 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: 🔐 Log in to Container Registry
+        id: login
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔍 Check registry access
+        run: |
+          set -euo pipefail  # Exit immediately on any error
+          echo "🔍 Checking container registry access..."
+          echo "📊 Registry: ${{ env.REGISTRY }}"
+          echo "📊 Repository: ${{ github.repository }}"
+          echo "📊 Actor: ${{ github.actor }}"
+          echo "📊 Event: ${{ github.event_name }}"
+          
+          # Test if we can access the registry
+          echo "🔍 Testing Docker daemon access..."
+          if docker info >/dev/null 2>&1; then
+            echo "✅ Docker daemon is accessible"
+          else
+            echo "❌ Docker daemon not accessible"
+            exit 1
+          fi
+          
+          # Test registry login with detailed error checking
+          echo "🔍 Testing container registry login..."
+          if echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin; then
+            echo "✅ Successfully logged into container registry"
+          else
+            echo "❌ Failed to log into container registry"
+            echo "🔍 This could be due to:"
+            echo "   - Missing GITHUB_TOKEN secret"
+            echo "   - Insufficient permissions"
+            echo "   - Registry access issues"
+            echo "🔍 Checking GITHUB_TOKEN availability..."
+            if [ -n "${{ secrets.GITHUB_TOKEN }}" ]; then
+              echo "✅ GITHUB_TOKEN is available"
+            else
+              echo "❌ GITHUB_TOKEN is empty or not available"
+            fi
+            exit 1
+          fi
+          
+          # Verify we can actually push to the registry
+          echo "🔍 Testing registry write permissions..."
+          TEST_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/test-push:latest"
+          if docker pull hello-world:latest >/dev/null 2>&1; then
+            if docker tag hello-world:latest $TEST_IMAGE >/dev/null 2>&1; then
+              if docker push $TEST_IMAGE >/dev/null 2>&1; then
+                echo "✅ Registry write permissions confirmed"
+                # Clean up test image
+                docker rmi $TEST_IMAGE >/dev/null 2>&1 || true
+              else
+                echo "❌ Registry write permissions failed"
+                exit 1
+              fi
+            else
+              echo "❌ Failed to tag test image"
+              exit 1
+            fi
+          else
+            echo "❌ Failed to pull hello-world image for testing"
+            exit 1
+          fi
 
       - name: 🏷️ Extract metadata
         id: meta
@@ -103,6 +199,7 @@ jobs:
             type=raw,value=${{ env.CONTAINER_TAG }}
 
       - name: 🐳 Build container
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: ${{ env.CONTEXT_PATH }}
@@ -113,14 +210,70 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           no-cache: ${{ inputs.no_cache || (github.event_name == 'workflow_dispatch') }}  # Fresh if manual, cache if called
           platforms: ${{ env.PLATFORM }}
+          provenance: false  # Disable provenance for better compatibility
+          sbom: false  # Disable SBOM for better compatibility
+
+      - name: 🔍 Verify container push
+        run: |
+          set -euo pipefail  # Exit immediately on any error
+          echo "🔍 Verifying container was pushed to registry..."
+          
+          # Wait a moment for the push to complete
+          echo "⏳ Waiting for push to complete..."
+          sleep 15
+          
+          # Try to pull the container to verify it exists
+          LOCAL_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.CONTAINER_TAG }}"
+          echo "📊 Attempting to pull: $LOCAL_IMAGE"
+          
+          # Multiple attempts to pull the container
+          MAX_ATTEMPTS=3
+          ATTEMPT=1
+          
+          while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+            echo "🔍 Attempt $ATTEMPT/$MAX_ATTEMPTS to pull container..."
+            
+            if docker pull $LOCAL_IMAGE 2>&1; then
+              echo "✅ Container successfully pushed and verified in registry!"
+              echo "📊 Container details:"
+              docker images $LOCAL_IMAGE
+              break
+            else
+              echo "❌ Attempt $ATTEMPT failed to pull container"
+              if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+                echo "❌ All attempts to pull container failed!"
+                echo "🔍 This means the container was built but not pushed to the registry."
+                echo "🔍 Possible causes:"
+                echo "   - Push step failed silently"
+                echo "   - Registry permissions issue"
+                echo "   - Network connectivity problem"
+                echo "   - Container registry service issue"
+                echo "🔍 Check the build step logs for push errors."
+                exit 1
+              else
+                echo "⏳ Waiting 10 seconds before retry..."
+                sleep 10
+                ATTEMPT=$((ATTEMPT + 1))
+              fi
+            fi
+          done
 
       - name: 🧪 Test Container Functionality
         run: |
+          set -euo pipefail  # Exit immediately on any error
           echo "🧪 Testing container functionality..."
           
           # Use the configured image tag
           LOCAL_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.CONTAINER_TAG }}"
           echo "📊 Using locally built container: $LOCAL_IMAGE"
+          
+          # Verify the container image exists locally
+          if ! docker images $LOCAL_IMAGE | grep -q "$LOCAL_IMAGE"; then
+            echo "❌ Container image not found locally: $LOCAL_IMAGE"
+            echo "🔍 Available images:"
+            docker images | head -10
+            exit 1
+          fi
           
           # Create a test directory with sample content
           mkdir -p test-container
@@ -216,4 +369,28 @@ jobs:
           echo ""
           echo "📈 Expected performance improvement:"
           echo "   Traditional build: 45 minutes"
-          echo "   Containerized build: 5-10 minutes" 
+          echo "   Containerized build: 5-10 minutes"
+          
+          echo ""
+          echo "🔗 Container Registry Links:"
+          echo "   📊 GitHub Packages: https://github.com/${{ github.repository }}/pkgs/container/${{ inputs.container_name || 'quarto-linux' }}"
+          echo "   📊 Container URL: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.CONTAINER_TAG }}"
+          
+          echo ""
+          echo "📋 To verify the container exists:"
+          echo "   1. Visit: https://github.com/${{ github.repository }}/pkgs/container/${{ inputs.container_name || 'quarto-linux' }}"
+          echo "   2. Look for the 'Packages' tab in your repository"
+          echo "   3. Try: docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.CONTAINER_TAG }}"
+          
+          echo ""
+          echo "🔍 Final verification - checking container registry..."
+          # Final verification using curl to check if container exists
+          CONTAINER_URL="https://${{ env.REGISTRY }}/v2/${{ env.IMAGE_NAME }}/manifests/${{ env.CONTAINER_TAG }}"
+          echo "🔍 Checking: $CONTAINER_URL"
+          
+          if curl -s -f "$CONTAINER_URL" >/dev/null 2>&1; then
+            echo "✅ Container verified in registry via HTTP API"
+          else
+            echo "⚠️ Could not verify container via HTTP API (this is normal for private repos)"
+            echo "🔍 Container should be available via docker pull"
+          fi 
