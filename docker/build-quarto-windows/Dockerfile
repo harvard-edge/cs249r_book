@@ -55,7 +55,7 @@ COPY docker/build-quarto-windows/verify_r_packages.R C:/temp/verify_r_packages.R
 RUN pwsh.exe -Command "Write-Host 'Installing Quarto 1.7.31...'; Invoke-WebRequest -Uri 'https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.31/quarto-1.7.31-win.zip' -OutFile 'C:\quarto.zip' -TimeoutSec 300; Expand-Archive -Path 'C:\quarto.zip' -DestinationPath 'C:\quarto' -Force; Remove-Item 'C:\quarto.zip' -Force"
 ENV PATH="C:\\quarto\\quarto-1.7.31\\bin;%PATH%"
 
-RUN quarto --version
+RUN pwsh.exe -Command "quarto --version"
 
 # ------------------------------------------------------------
 # PHASE 5: Python 3.13.1 + packages
