@@ -344,22 +344,27 @@ And, so, we have as a training result:
 
 The model profile predicts **233 KB of RAM and 546 KB of Flash**, indicating no problem with the Xiao ESP32S3, which has 8 MB of PSRAM. Additionally, the Studio indicates a **latency of around 1160 ms**, which is very high. However, this is to be expected, given that we are using the ESP-EYE, whose CPU is an Extensa LX6, and the ESP32S3 uses a newer and more powerful Xtensa LX7.
 
-> With the test data, we also achieved 100% accuracy, even with a quantized INT8 model. This result is not typical in real projects, but our project here is relatively simple, with 2 objects that are very distinctive from each other.
+> With the test data, we also achieved 100% accuracy, even with a quantized INT8 model. This result is not typical in real projects, but our project here is relatively simple, with two objects that are very distinctive from each other.
 
-### Model Deployment
+## Model Deployment
 
-WE can deploy the model as an Arduino Library or get the **trained model to test it on the SenseCraft AI**. Let's go with this second option.
+We can deploy the trained model:
+
+-  As `.TFLITE` to be used on the **SenseCraft AI  **
+- As an `Arduino Library` in the **Edge Impulse Studio**. 
+
+Let's start with the SenseCraft, which is more straightforward and more intuitive.
+
+### Model Deployment on the SenseCraft AI
 
 On the **Dashboard**, it is possible to download the trained model in several different formats. Let's download `TensorFlow Lite (int8 quantized)`, which has a size of 623KB.
 
 \noindent
 ![](./images/png/deploy-1.png){width=85% fig-align="center"}
 
-### Deploy the model on the SenseCraft AI Studio
-
 On **SenseCraft AI Studio**, go to the `Workspace` tab, select `XIAO ESP32S3`, the corresponding Port, and connect the device.
 
-You should see the last model that was uploaded to the device. Select the green button `[Upload Model]`. A pop-up window will ask for the **model name**, the **model file,** and to enter the class names (**objects**).  We should use labels following alphabetical order: `0: background`, `1: box`, and `2: wheel`, and then press `[Send]`.
+You should see the last model that was uploaded to the device. Select the green button `[Upload Model]`. A pop-up window will prompt you to enter the model name, the model file, and the class names (**objects**).  We should use labels in alphabetical order: `0: background`, `1: box`, and `2: wheel`, and then press `[Send]`.
 
 \noindent
 ![](./images/png/model-tflite-infer.png){width=85% fig-align="center"}
@@ -373,7 +378,7 @@ On the **Device Logger**, we can view the Serial Monitor, where we can observe t
 \noindent
 ![](./images/png/tfmodel-infer.png){width=85% fig-align="center"}
 
-## Post-Processing
+#### Post-Processing
 
 It is possible to obtain the output of a model inference, including Latency, Class ID, and Confidence, as shown on the Device Logger in SenseCraft AI. This allows us to utilize the **XIAO ESP32S3 Sense as an AI sensor**. In other words, we can retrieve the model data using different communication protocols such as MQTT, UART, I2C, or SPI, depending on our project requirements.
 
@@ -383,7 +388,229 @@ Below is an example of a connection using the I2C bus.
 
 ![As a Sensor | Seeed Studio Wiki](https://files.seeedstudio.com/wiki/SenseCraft_AI/img2/iic_connection.png){width=75% fig-align="center"}
 
-Please refer to [Seeed Studio Wiki](https://wiki.seeedstudio.com/sensecraft-ai/tutorials/sensecraft-ai-output-libraries-xiao/) for more information.
+Please refer to the [Seeed Studio Wiki](https://wiki.seeedstudio.com/sensecraft-ai/tutorials/sensecraft-ai-output-libraries-xiao/) for more information.
+
+### Model Deployment as an Arduino Library at EI Studio
+
+On the **Deploy** section at Edge Impulse Studio, Select `Arduino library`, `TensorFlow Lite`, `Quantized(int8)`, and press `[Build]`. The trained model will be downloaded as a .zip Arduino library:
+
+\noindent
+![](./images/png/ard-deploy.png){width=80% fig-align="center"}
+
+Open your Arduino IDE, and under **Sketch,** go to **Include Library** and **add .ZIP Library.** Next, select the file downloaded from Edge Impulse Studio and press `[Open]`. 
+
+\noindent
+![](./images/png/ard-install_lib.png){width=80% fig-align="center"}
+
+Go to the Arduino IDE `Examples` and look for the project by its name (in this case: "Box_versus_Whell_...Interfering". Open `esp32` ->  `esp32_camera`. The sketch `esp32_camera.ino` will be downloaded to the IDE. 
+
+This sketch was developed for the standard ESP32 and will not work with the XIAO ESP32S3 Sense. It should be modified. Let's download the modified one from the project GitHub: [Image_class_XIAOML-Kit.ino](https://github.com/Mjrovai/XIAO-ESP32S3-Sense/blob/main/XIAOML_Kit_code/image_class_XIAOML-Kit/image_class_XIAOML-Kit.ino).
+
+#### XIAO ESP32S3 Image Classification Code Explained
+
+The code captures images from the onboard camera, processes them, and classifies them (in this case, "Box", "Wheel", or "Background") using the trained model on EI Studio. It runs continuously, performing real-time inference on the edge device.
+
+In short,:
+
+Camera → JPEG Image → RGB888 Conversion → Resize to 96x96 → 
+Neural Network → Classification Results → Serial Output
+
+##### Key Components
+
+1. **Library Includes and Dependencies**
+
+```cpp
+#include <Box_versus_Wheel_-_XIAO_ESP32S3_inferencing.h>
+#include "edge-impulse-sdk/dsp/image/image.hpp"
+#include "esp_camera.h"
+```
+
+- **Edge Impulse Inference Library**: Contains our trained model and inference engine
+- **Image Processing**: Provides functions for image manipulation
+- **ESP Camera**: Hardware interface for the camera module
+
+2. **Camera Pin Configurations**
+
+The XIAO ESP32S3 Sense can work with different camera sensors (OV2640 or OV3660), which may have different pin configurations. The code defines three possible configurations:
+
+```cpp
+// Configuration 1: Most common OV2640 configuration
+#define CONFIG_1_XCLK_GPIO_NUM    10
+#define CONFIG_1_SIOD_GPIO_NUM    40
+#define CONFIG_1_SIOC_GPIO_NUM    39
+// ... more pins
+```
+
+This flexibility allows the code to automatically try different pin mappings if the first one doesn't work, making it more robust across different hardware revisions.
+
+3. **Memory Management Settings**
+
+```cpp
+#define EI_CAMERA_RAW_FRAME_BUFFER_COLS   320
+#define EI_CAMERA_RAW_FRAME_BUFFER_ROWS   240
+#define EI_CLASSIFIER_ALLOCATION_HEAP      1
+```
+
+- **Frame Buffer Size**: Defines the raw image size (320x240 pixels)
+- **Heap Allocation**: Uses dynamic memory allocation for flexibility
+- **PSRAM Support**: The ESP32S3 has 8MB of PSRAM for storing large data like images
+
+#####  `setup()` - Initialization
+
+```cpp
+void setup() {
+    Serial.begin(115200);
+    while (!Serial);
+    
+    if (ei_camera_init() == false) {
+        ei_printf("Failed to initialize Camera!\r\n");
+    } else {
+        ei_printf("Camera initialized\r\n");
+    }
+    
+    ei_sleep(2000);  // Wait 2 seconds before starting
+}
+```
+
+This function:
+
+1. Initializes serial communication for debugging output
+2. Initializes the camera with automatic configuration detection
+3. Waits 2 seconds before starting continuous inference
+
+##### `loop()` - Main Processing Loop
+
+The loop performs these steps continuously:
+
+**Step 1: Memory Allocation**
+
+```cpp
+snapshot_buf = (uint8_t*)ps_malloc(EI_CAMERA_RAW_FRAME_BUFFER_COLS * 
+                                   EI_CAMERA_RAW_FRAME_BUFFER_ROWS * 
+                                   EI_CAMERA_FRAME_BYTE_SIZE);
+```
+
+Allocates memory for the image buffer, preferring PSRAM (faster external RAM) but falling back to regular heap if needed.
+
+**Step 2: Image Capture**
+
+```cpp
+if (ei_camera_capture((size_t)EI_CLASSIFIER_INPUT_WIDTH, 
+                     (size_t)EI_CLASSIFIER_INPUT_HEIGHT, 
+                     snapshot_buf) == false) {
+    ei_printf("Failed to capture image\r\n");
+    free(snapshot_buf);
+    return;
+}
+```
+
+Captures an image from the camera and stores it in the buffer.
+
+**Step 3: Run Inference**
+
+```cpp
+ei_impulse_result_t result = { 0 };
+EI_IMPULSE_ERROR err = run_classifier(&signal, &result, false);
+```
+
+Runs the machine learning model on the captured image.
+
+**Step 4: Output Results**
+
+```cpp
+for (uint16_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT; i++) {
+    ei_printf("  %s: %.5f\r\n", 
+              ei_classifier_inferencing_categories[i],
+              result.classification[i].value);
+}
+```
+
+Prints the classification results showing confidence scores for each category.
+
+##### `ei_camera_init()` - Smart Camera Initialization
+
+This function implements an intelligent initialization sequence:
+
+```cpp
+bool ei_camera_init(void) {
+    // Try Configuration 1 (OV2640 common)
+    update_camera_config(1);
+    esp_err_t err = esp_camera_init(&camera_config);
+    if (err == ESP_OK) goto camera_init_success;
+    
+    // Try Configuration 2 (OV3660)
+    esp_camera_deinit();
+    update_camera_config(2);
+    err = esp_camera_init(&camera_config);
+    if (err == ESP_OK) goto camera_init_success;
+    
+    // Continue trying other configurations...
+}
+```
+
+The function:
+
+1. Tries multiple pin configurations
+2. Tests different clock frequencies (10MHz or 16MHz)
+3. Attempts PSRAM first, then falls back to DRAM
+4. Applies sensor-specific settings based on detected hardware
+
+##### `ei_camera_capture()` - Image Processing Pipeline
+
+```cpp
+bool ei_camera_capture(uint32_t img_width, uint32_t img_height, uint8_t *out_buf) {
+    // 1. Get frame from camera
+    camera_fb_t *fb = esp_camera_fb_get();
+    
+    // 2. Convert JPEG to RGB888 format
+    bool converted = fmt2rgb888(fb->buf, fb->len, PIXFORMAT_JPEG, snapshot_buf);
+    
+    // 3. Return frame buffer to camera driver
+    esp_camera_fb_return(fb);
+    
+    // 4. Resize if needed
+    if (do_resize) {
+        ei::image::processing::crop_and_interpolate_rgb888(...);
+    }
+}
+```
+
+This function:
+
+1. Captures a JPEG image from the camera
+2. Converts it to RGB888 format (required by the ML model)
+3. Resizes the image to match the model's input size (96x96 pixels)
+
+### Inference
+
+- Upload the code to the XIAO ESP32S3 Sense. 
+
+> ⚠️ **Attention** 
+>
+> - The Xiao ESP32S3 **MUST** have the PSRAM enabled. You can check it on the Arduino IDE upper menu: `Tools`--> `PSRAM:OPI PSRAM`
+> - The Arduino Library (`esp32 by Espressif Systems` should be **version 2.017**. Do not update it)
+
+\noindent
+![](./images/png/ard-ide.png){width=90% fig-align="center"}
+
+- Open the Serial Monitor 
+- Point the camera at the objects, and check the result on the Serial Monitor.
+
+\noindent
+![](./images/png/ard-inf.png){width=90% fig-align="center"}
+
+### Post-Processing
+
+In edge AI applications, the inference result is only as valuable as our ability to act upon it. While serial output provides detailed information for debugging and development, real-world deployments require immediate, human-readable feedback that doesn't depend on external monitors or connections. 
+
+The XIAOML Kit tiny 0.42" OLED display (72×40 pixels) serves as a crucial post-processing component that transforms raw ML inference results into immediate, human-readable feedback—displaying detected class names and confidence levels directly on the device, eliminating the need for external monitors and enabling truly standalone edge AI deployment in industrial, agricultural, or retail environments where instant visual confirmation of AI predictions is essential.
+
+So, let's modify the sketch to automatically adapt to the model trained on Edge Impulse by reading the class names and count directly from the model. The display will show abbreviated class names (3 letters) with larger fonts for better visibility on the tiny 72x40 pixel display. Download the code from the GitHub: [XIAOML-Kit-Img_Class_OLED_Gen](https://github.com/Mjrovai/XIAO-ESP32S3-Sense/tree/main/XIAOML_Kit_code/XIAOML-Kit-Img_Class_OLED_Gen).
+
+Running the code, we can see the result:
+
+\noindent
+![](./images/png/ard-inher-gen-oled.png){width=90% fig-align="center"}
 
 ## Summary
 
@@ -408,3 +635,4 @@ This foundation in image classification prepares you for more complex computer v
 - [Edge Impulse Project](https://studio.edgeimpulse.com/public/757065/live)
 - [XIAO as an AI Sensor](https://wiki.seeedstudio.com/sensecraft-ai/tutorials/sensecraft-ai-output-libraries-xiao/)
 - [Seeed Arduino SSCMA Library](https://github.com/Seeed-Studio/Seeed_Arduino_SSCMA)
+- [XIAOML Kit Code](https://github.com/Mjrovai/XIAO-ESP32S3-Sense/tree/main/XIAOML_Kit_code)
