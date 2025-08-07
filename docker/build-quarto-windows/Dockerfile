@@ -70,7 +70,7 @@ RUN Write-Host 'Installing Quarto 1.7.31...' ; `
     if (-not $qDir) { throw 'Quarto bin folder not found under C:\quarto' } ; `
     Write-Host "Quarto located at: $($qDir.FullName)" ; `
     $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
-    $qbin = "$($qDir.FullName)\bin" ; `
+    $qbin = Join-Path $qDir.FullName 'bin' ; `
     if ($mach -notmatch [regex]::Escape($qbin)) { [Environment]::SetEnvironmentVariable('PATH', ($qbin + ';' + $mach), 'Machine') } ; `
     Get-Command quarto ; `
     quarto --version
