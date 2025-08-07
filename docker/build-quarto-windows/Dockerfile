@@ -233,18 +233,17 @@ RUN pwsh -Command " \
     Invoke-WebRequest -Uri 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' -OutFile 'C:/temp/install-tl-windows.exe'; \
     \
     Write-Host '🔧 Creating TeX Live installation profile...'; \
-    @' \
-selected_scheme scheme-infraonly \
-tlpdbopt_install_docfiles 0 \
-tlpdbopt_install_srcfiles 0 \
-TEXDIR C:/texlive \
-TEXMFCONFIG C:/texlive/texmf-config \
-TEXMFHOME C:/texlive/texmf-home \
-TEXMFLOCAL C:/texlive/texmf-local \
-TEXMFSYSCONFIG C:/texlive/texmf-config \
-TEXMFSYSVAR C:/texlive/texmf-var \
-TEXMFVAR C:/texlive/texmf-var \
-'@ | Out-File -FilePath 'C:/temp/texlive.profile' -Encoding ASCII; \
+    $profileContent = 'selected_scheme scheme-infraonly' + \"`n\" + \
+                     'tlpdbopt_install_docfiles 0' + \"`n\" + \
+                     'tlpdbopt_install_srcfiles 0' + \"`n\" + \
+                     'TEXDIR C:/texlive' + \"`n\" + \
+                     'TEXMFCONFIG C:/texlive/texmf-config' + \"`n\" + \
+                     'TEXMFHOME C:/texlive/texmf-home' + \"`n\" + \
+                     'TEXMFLOCAL C:/texlive/texmf-local' + \"`n\" + \
+                     'TEXMFSYSCONFIG C:/texlive/texmf-config' + \"`n\" + \
+                     'TEXMFSYSVAR C:/texlive/texmf-var' + \"`n\" + \
+                     'TEXMFVAR C:/texlive/texmf-var'; \
+    $profileContent | Out-File -FilePath 'C:/temp/texlive.profile' -Encoding ASCII; \
     \
     Write-Host '📦 Installing TeX Live base system (this may take 3-5 minutes)...'; \
     Start-Process -FilePath 'C:/temp/install-tl-windows.exe' -ArgumentList '-profile', 'C:/temp/texlive.profile' -Wait; \
