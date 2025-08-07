@@ -118,50 +118,99 @@ RUN pwsh -Command " \
     $startTime = Get-Date; \
     $gsInstalled = $false; \
     \
-    Write-Host '📦 Method 1: Trying winget (same as working quarto-build.yml)...'; \
+    Write-Host '📦 Method 1: Direct download and install (latest version - most reliable)...'; \
     try { \
-        $wingetProcess = Start-Process -FilePath 'winget' -ArgumentList 'install', 'ArtifexSoftware.GhostScript', '--accept-source-agreements', '--accept-package-agreements' -Wait -PassThru -NoNewWindow; \
-        if ($wingetProcess.ExitCode -eq 0) { \
-            Write-Host '✅ Ghostscript installed via winget'; \
-            $gsInstalled = $true; \
-        } else { \
-            Write-Host '⚠️ winget failed with exit code: ' + $wingetProcess.ExitCode; \
+        # Try multiple download URLs for latest Ghostscript 10.05.1 \
+        $gsUrls = @( \
+            'https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/gs10051/gs10051w64.exe', \
+            'https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/latest/download/gs10051w64.exe' \
+        ); \
+        $gsInstaller = 'C:/temp/gs_installer.exe'; \
+        $downloadSuccess = $false; \
+        \
+        foreach ($gsUrl in $gsUrls) { \
+            Write-Host ('🔄 Trying download from: ' + $gsUrl); \
+            try { \
+                Invoke-WebRequest -Uri $gsUrl -OutFile $gsInstaller -TimeoutSec 300 -UserAgent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'; \
+                if (Test-Path $gsInstaller -and (Get-Item $gsInstaller).Length -gt 1MB) { \
+                    Write-Host ('✅ Downloaded successfully (' + ((Get-Item $gsInstaller).Length / 1MB).ToString('F1') + ' MB)'); \
+                    $downloadSuccess = $true; \
+                    break; \
+                } \
+            } catch { \
+                Write-Host ('⚠️ Download failed from ' + $gsUrl + ': ' + $_.Exception.Message); \
+            } \
         } \
-    } catch { \
-        Write-Host '⚠️ winget not available or failed: ' + $_.Exception.Message; \
-    } \
-    \
-    if (-not $gsInstalled) { \
-        Write-Host '📦 Method 2: Trying chocolatey with timeout...'; \
-        try { \
-            $chocoJob = Start-Job -ScriptBlock { choco install ghostscript -y --timeout 300 }; \
-            $chocoCompleted = Wait-Job -Job $chocoJob -Timeout 600; \
-            if ($chocoCompleted) { \
-                $chocoResult = Receive-Job -Job $chocoJob; \
-                Write-Host '✅ Ghostscript installed via chocolatey'; \
+        \
+        if ($downloadSuccess) { \
+            Write-Host '🔄 Installing Ghostscript silently...'; \
+            $installProcess = Start-Process -FilePath $gsInstaller -ArgumentList '/S' -Wait -PassThru -NoNewWindow; \
+            if ($installProcess.ExitCode -eq 0) { \
+                Write-Host '✅ Ghostscript installed via direct download'; \
                 $gsInstalled = $true; \
             } else { \
-                Write-Host '⚠️ Chocolatey installation timed out after 10 minutes'; \
-                Remove-Job -Job $chocoJob -Force; \
+                Write-Host ('⚠️ Installation failed with exit code: ' + $installProcess.ExitCode); \
             } \
-        } catch { \
-            Write-Host '⚠️ Chocolatey failed: ' + $_.Exception.Message; \
+            # Clean up installer \
+            Remove-Item $gsInstaller -ErrorAction SilentlyContinue; \
+        } else { \
+            Write-Host '❌ All download attempts failed'; \
         } \
+    } catch { \
+        Write-Host '⚠️ Direct download method failed: ' + $_.Exception.Message; \
     } \
     \
     if (-not $gsInstalled) { \
-        Write-Host '📦 Method 3: Direct download and install...'; \
+        Write-Host '📦 Method 2: Chocolatey fallback (with verbose logging)...'; \
         try { \
-            $gsUrl = 'https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/gs10051/gs10051w64.exe'; \
-            $gsInstaller = 'C:/temp/gs_installer.exe'; \
-            Write-Host '🔄 Downloading Ghostscript installer...'; \
-            Invoke-WebRequest -Uri $gsUrl -OutFile $gsInstaller -TimeoutSec 300; \
-            Write-Host '🔄 Installing Ghostscript silently...'; \
-            Start-Process -FilePath $gsInstaller -ArgumentList '/S' -Wait -NoNewWindow; \
-            Write-Host '✅ Ghostscript installed via direct download'; \
-            $gsInstalled = $true; \
+            # First check chocolatey version and availability \
+            Write-Host '🔍 Chocolatey status check...'; \
+            $chocoVersion = choco --version 2>&1; \
+            Write-Host ('📊 Chocolatey version: ' + $chocoVersion); \
+            \
+            # Set UTF-8 encoding like the working workflow \
+            [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
+            $OutputEncoding = [System.Text.Encoding]::UTF8; \
+            [Console]::InputEncoding = [System.Text.Encoding]::UTF8; \
+            \
+            # Run chocolatey install with verbose logging \
+            Write-Host '🔄 Installing Ghostscript via chocolatey with verbose output...'; \
+            \
+            $chocoInstallScript = { \
+                try { \
+                    choco install ghostscript -y -dv; \
+                    return @{ ExitCode = $LASTEXITCODE; Success = $true; Output = 'Install completed' }; \
+                } catch { \
+                    return @{ ExitCode = -1; Success = $false; Output = $_.Exception.Message }; \
+                } \
+            }; \
+            \
+            $chocoJob = Start-Job -ScriptBlock $chocoInstallScript; \
+            $timeout = 1800; # 30 minutes \
+            \
+            Write-Host ('⏰ Waiting up to ' + ($timeout / 60) + ' minutes for chocolatey installation...'); \
+            $completed = Wait-Job -Job $chocoJob -Timeout $timeout; \
+            \
+            if ($completed) { \
+                $result = Receive-Job -Job $chocoJob; \
+                Write-Host ('📋 Installation result: ' + $result.Output); \
+                Write-Host ('📋 Exit code: ' + $result.ExitCode); \
+                \
+                if ($result.ExitCode -eq 0) { \
+                    Write-Host '✅ Ghostscript installed via chocolatey'; \
+                    $gsInstalled = $true; \
+                } else { \
+                    Write-Host ('⚠️ Chocolatey install failed with exit code: ' + $result.ExitCode); \
+                } \
+            } else { \
+                Write-Host ('⚠️ Chocolatey installation timed out after ' + ($timeout / 60) + ' minutes'); \
+                Remove-Job -Job $chocoJob -Force; \
+            } \
+            \
+            Remove-Job -Job $chocoJob -Force -ErrorAction SilentlyContinue; \
+            \
         } catch { \
-            Write-Host '⚠️ Direct download failed: ' + $_.Exception.Message; \
+            Write-Host ('⚠️ Chocolatey method failed: ' + $_.Exception.Message); \
         } \
     } \
     \
