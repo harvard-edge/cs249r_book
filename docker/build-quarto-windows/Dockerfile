@@ -13,29 +13,27 @@ RUN curl -L -o PowerShell.msi https://github.com/PowerShell/PowerShell/releases/
     if %ERRORLEVEL% neq 0 (echo ❌ PowerShell installation failed - aborting build && exit 1) && \
     del PowerShell.msi
 
-# Add PowerShell to PATH
-RUN setx PATH "%PATH%;C:\Program Files\PowerShell\7" /M
+# Add PowerShell to PATH and verify
+ENV PATH="C:\\Program Files\\PowerShell\\7;%PATH%"
+RUN ["C:\\Program Files\\PowerShell\\7\\pwsh.exe", "-Command", "Write-Host 'PowerShell 7 installation verified'"]
 
-# Verify PowerShell 7 installation (separate RUN command so PATH takes effect)
-RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command "Write-Host 'PowerShell 7 installation verified'"
+# Use PowerShell 7 for all subsequent RUN commands
+SHELL ["C:\\Program Files\\PowerShell\\7\\pwsh.exe", "-Command"]
 
 # === PHASE 2: CHOCOLATEY INSTALLATION ===
-RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
-    Write-Host '🚀 === STARTING CHOCOLATEY INSTALLATION ==='; \
+RUN Write-Host '🚀 === STARTING CHOCOLATEY INSTALLATION ==='; \
     try { \
         Set-ExecutionPolicy Bypass -Scope Process -Force; \
         [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
         iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1')); \
         Write-Host '✅ Chocolatey installation complete'; \
-        # Test chocolatey installation \
         $chocoVersion = & choco --version 2>&1; \
         if ($LASTEXITCODE -ne 0) { throw 'Chocolatey test failed' }; \
         Write-Host ('📊 Chocolatey version: ' + $chocoVersion); \
     } catch { \
         Write-Host ('❌ Chocolatey installation failed: ' + $_.Exception.Message); \
         throw 'Chocolatey installation failed - aborting build'; \
-    } \
-    "
+    }
 
 # Set environment variables to match workflow
 ENV R_LIBS_USER=C:/r-lib
@@ -52,65 +50,45 @@ COPY tools/dependencies/tl_packages C:/temp/tl_packages
 COPY docker/build-quarto-windows/verify_r_packages.R C:/temp/verify_r_packages.R
 
 # Create necessary directories
-RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command "New-Item -ItemType Directory -Path 'C:/r-lib' -Force; New-Item -ItemType Directory -Path 'C:/temp' -Force"
+RUN New-Item -ItemType Directory -Path 'C:/r-lib' -Force; New-Item -ItemType Directory -Path 'C:/temp' -Force
 
 # === PHASE 3: QUARTO INSTALLATION ===
-RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
-    Write-Host '🚀 === STARTING QUARTO INSTALLATION ==='; \
+RUN Write-Host '🚀 === STARTING QUARTO INSTALLATION ==='; \
     Write-Host '⏰ Estimated time: 1-2 minutes'; \
     $startTime = Get-Date; \
-    \
     Write-Host '📦 Downloading Quarto 1.7.31...'; \
     try { \
         Invoke-WebRequest -Uri 'https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.31/quarto-1.7.31-win.zip' -OutFile 'quarto.zip' -TimeoutSec 300; \
-        if (-not (Test-Path 'quarto.zip') -or (Get-Item 'quarto.zip').Length -lt 10MB) { \
-            throw 'Quarto download failed or file is too small'; \
-        } \
+        if (-not (Test-Path 'quarto.zip') -or (Get-Item 'quarto.zip').Length -lt 10MB) { throw 'Quarto download failed or file is too small' } \
     } catch { \
         Write-Host ('❌ Quarto download failed: ' + $_.Exception.Message); \
         throw 'Quarto download failed - aborting build'; \
     } \
-    \
     Write-Host '📦 Extracting Quarto...'; \
     try { \
         Expand-Archive -Path 'quarto.zip' -DestinationPath 'C:\quarto' -Force; \
-        if (-not (Test-Path 'C:\quarto\quarto-1.7.31\bin\quarto.cmd')) { \
-            throw 'Quarto extraction failed - quarto.cmd not found'; \
-        } \
+        if (-not (Test-Path 'C:\quarto\quarto-1.7.31\bin\quarto.cmd')) { throw 'Quarto extraction failed - quarto.cmd not found' } \
     } catch { \
         Write-Host ('❌ Quarto extraction failed: ' + $_.Exception.Message); \
         throw 'Quarto extraction failed - aborting build'; \
     } \
-    \
     Write-Host '🧹 Cleaning up installer...'; \
     Remove-Item 'quarto.zip'; \
-    \
     $endTime = Get-Date; \
     $duration = ($endTime - $startTime).TotalMinutes; \
-    Write-Host ('✅ === QUARTO INSTALLATION COMPLETE === (' + $duration.ToString('F1') + ' minutes)'); \
-    " && \
-    setx PATH "%PATH%;C:\quarto\quarto-1.7.31\bin" /M
+    Write-Host ('✅ === QUARTO INSTALLATION COMPLETE === (' + $duration.ToString('F1') + ' minutes)')
+ENV PATH="C:\\quarto\\quarto-1.7.31\\bin;%PATH%"
 
 # === PHASE 4: PYTHON 3.13 INSTALLATION ===
-RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
-    Write-Host '🚀 === STARTING PYTHON 3.13 INSTALLATION ==='; \
+RUN Write-Host '🚀 === STARTING PYTHON 3.13 INSTALLATION ==='; \
     Write-Host '⏰ Estimated time: 2-3 minutes'; \
     $startTime = Get-Date; \
     Write-Host '📦 Installing Python 3.13.1 (exact version from workflow)...'; \
-    " && \
-    choco install -y python --version=3.13.1 && \
-    "C:\Program Files\PowerShell\7\pwsh.exe" -Command "if ($LASTEXITCODE -ne 0) { throw 'Python 3.13.1 installation failed - aborting build' }" && \
-    "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
-    # Refresh environment variables to pick up Python PATH \
-    $env:PATH = [System.Environment]::GetEnvironmentVariable('PATH', [System.EnvironmentVariableTarget]::Machine) + ';' + [System.Environment]::GetEnvironmentVariable('PATH', [System.EnvironmentVariableTarget]::User); \
-    # Add common Python paths explicitly \
-    $env:PATH += ';C:\Python313;C:\Python313\Scripts;C:\ProgramData\chocolatey\bin'; \
-    \
+    choco install -y python --version=3.13.1; \
+    if ($LASTEXITCODE -ne 0) { throw 'Python 3.13.1 installation failed - aborting build' }; \
     $endTime = Get-Date; \
     $duration = ($endTime - $startTime).TotalMinutes; \
     Write-Host ('✅ === PYTHON 3.13 INSTALLATION COMPLETE === (' + $duration.ToString('F1') + ' minutes)'); \
-    \
-    # Test Python installation with explicit path handling \
     try { \
         $pythonVersion = & python --version 2>&1; \
         Write-Host ('📊 Python version: ' + $pythonVersion); \
@@ -119,83 +97,67 @@ RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     } catch { \
         Write-Host '⚠️ Python installed but not immediately available in PATH (normal for containers)'; \
         Write-Host 'Python will be available in subsequent RUN commands'; \
-    } \
-    "
+    }
+ENV PATH="C:\\Python313;C:\\Python313\\Scripts;%PATH%"
 
 # === PHASE 5: PYTHON PACKAGE INSTALLATION ===
-RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
-    Write-Host '🚀 === STARTING PYTHON PACKAGE INSTALLATION ==='; \
+RUN Write-Host '🚀 === STARTING PYTHON PACKAGE INSTALLATION ==='; \
     Write-Host '⏰ Estimated time: 1-2 minutes'; \
     $startTime = Get-Date; \
-    \
-    # Ensure Python is in PATH \
-    $env:PATH = [System.Environment]::GetEnvironmentVariable('PATH', [System.EnvironmentVariableTarget]::Machine) + ';C:\Python313;C:\Python313\Scripts;C:\ProgramData\chocolatey\bin'; \
-    \
     Write-Host '🔄 Upgrading pip...'; \
     & python -m pip install --upgrade pip; \
     if ($LASTEXITCODE -ne 0) { throw 'Pip upgrade failed - aborting build' }; \
-    \
     Write-Host '📊 Analyzing requirements.txt...'; \
     $packageCount = (Get-Content 'C:/temp/requirements.txt' | Where-Object { $_ -notmatch '^#' -and $_ -ne '' }).Count; \
     Write-Host ('📦 Found ' + $packageCount + ' Python packages to install'); \
-    \
     Write-Host '🔄 Installing Python packages...'; \
     & python -m pip install -r C:/temp/requirements.txt; \
     if ($LASTEXITCODE -ne 0) { throw 'Python packages installation failed - aborting build' }; \
-    \
     $endTime = Get-Date; \
     $duration = ($endTime - $startTime).TotalMinutes; \
     Write-Host ('✅ === PYTHON PACKAGES COMPLETE === (' + $duration.ToString('F1') + ' minutes)'); \
-    \
     try { \
         $packageCount = (& python -m pip list | Measure-Object).Count; \
         Write-Host ('📊 Total packages: ' + $packageCount); \
     } catch { \
         Write-Host '📊 Python packages installed successfully'; \
-    } \
-    "
+    }
 
 # === PHASE 6: GHOSTSCRIPT INSTALLATION ===
-RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
-    Write-Host '🚀 === STARTING GHOSTSCRIPT INSTALLATION ==='; \
+RUN Write-Host '🚀 === STARTING GHOSTSCRIPT INSTALLATION ==='; \
     Write-Host '⏰ Estimated time: 1-2 minutes (direct download only)'; \
     $startTime = Get-Date; \
     $gsInstalled = $false; \
-    \
     Write-Host '📦 Installing Ghostscript via direct download (latest version)...'; \
-    \
-    # Use same approach as working quarto-build.yml (with winget fallback to chocolatey) \
     try { \
-                Write-Host '🔄 Trying winget installation (primary method from quarto-build.yml)...'; \
-                winget install ArtifexSoftware.GhostScript --accept-source-agreements --accept-package-agreements; \
-                Write-Host '✅ Ghostscript installed via winget'; \
+        Write-Host '🔄 Trying winget installation (primary method from quarto-build.yml)...'; \
+        winget install ArtifexSoftware.GhostScript --accept-source-agreements --accept-package-agreements; \
+        Write-Host '✅ Ghostscript installed via winget'; \
+        $gsInstalled = $true; \
+    } catch { \
+        Write-Host '🔄 winget not available, using chocolatey fallback...'; \
+        try { \
+            choco install ghostscript -y; \
+            if ($LASTEXITCODE -eq 0) { \
+                Write-Host '✅ Ghostscript installed via chocolatey'; \
                 $gsInstalled = $true; \
-            } catch { \
-                Write-Host '🔄 winget not available, using chocolatey fallback...'; \
-                try { \
-                    choco install ghostscript -y; \
-                    if ($LASTEXITCODE -eq 0) { \
-                        Write-Host '✅ Ghostscript installed via chocolatey'; \
-                        $gsInstalled = $true; \
-                    } else { \
-                        throw ('Chocolatey installation failed with exit code: ' + $LASTEXITCODE); \
-                    } \
-                } catch { \
-                    Write-Host ('❌ All Ghostscript installation methods failed: ' + $_.Exception.Message); \
-                    throw 'Ghostscript installation failed - aborting build'; \
-                } \
+            } else { \
+                throw ('Chocolatey installation failed with exit code: ' + $LASTEXITCODE); \
             } \
-    \
+        } catch { \
+            Write-Host ('❌ All Ghostscript installation methods failed: ' + $_.Exception.Message); \
+            throw 'Ghostscript installation failed - aborting build'; \
+        } \
+    } \
     Write-Host '🔧 Setting up Ghostscript PATH...'; \
     $gsPath = Get-ChildItem 'C:/Program Files/gs' -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1; \
     if ($gsPath) { \
         $binPath = Join-Path $gsPath.FullName 'bin'; \
         Write-Host ('📍 Found Ghostscript at: ' + $binPath); \
-        [Environment]::SetEnvironmentVariable('PATH', \"$env:PATH;$binPath\", [EnvironmentVariableTarget]::Machine); \
-        \
+        [Environment]::SetEnvironmentVariable('PATH', "$env:PATH;$binPath", [EnvironmentVariableTarget]::Machine); \
         Write-Host '🧪 Testing Ghostscript installation...'; \
         try { \
-            $gsVersion = & \"$binPath/gs.exe\" --version 2>&1; \
+            $gsVersion = & "$binPath/gs.exe" --version 2>&1; \
             Write-Host ('✅ Ghostscript version: ' + $gsVersion); \
         } catch { \
             Write-Host '⚠️ Ghostscript installed but test failed (normal in some containers)'; \
@@ -206,16 +168,14 @@ RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
         foreach ($altPath in $altPaths) { \
             if (Test-Path $altPath) { \
                 Write-Host ('📍 Found Ghostscript at alternative location: ' + $altPath); \
-                [Environment]::SetEnvironmentVariable('PATH', \"$env:PATH;$altPath/bin\", [EnvironmentVariableTarget]::Machine); \
+                [Environment]::SetEnvironmentVariable('PATH', "$env:PATH;$altPath/bin", [EnvironmentVariableTarget]::Machine); \
                 break; \
             } \
         } \
     } \
-    \
     $endTime = Get-Date; \
     $duration = ($endTime - $startTime).TotalMinutes; \
-    Write-Host ('✅ === GHOSTSCRIPT INSTALLATION COMPLETE === (' + $duration.ToString('F1') + ' minutes)'); \
-    "
+    Write-Host ('✅ === GHOSTSCRIPT INSTALLATION COMPLETE === (' + $duration.ToString('F1') + ' minutes)')
 
 # === PHASE 7: INKSCAPE INSTALLATION ===
 RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
@@ -270,6 +230,7 @@ RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     $duration = ($endTime - $startTime).TotalMinutes; \
     Write-Host ('✅ === INKSCAPE INSTALLATION COMPLETE === (' + $duration.ToString('F1') + ' minutes)'); \
     "
+ENV PATH="C:\\Program Files\\Inkscape\\bin;%PATH%"
 
 # === PHASE 8: TEX LIVE INSTALLATION ===
 RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
@@ -454,28 +415,23 @@ RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     "
 
 # === PHASE 11: R PACKAGE VERIFICATION ===
-RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command "Write-Host '🔍 Verifying R package installation...'" && \
+RUN Write-Host '🔍 Verifying R package installation...'; \
     Rscript C:/temp/verify_r_packages.R
 
 # === PHASE 12: CLEANUP ===
-RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
-    Write-Host '🧹 === STARTING CLEANUP ==='; \
+RUN Write-Host '🧹 === STARTING CLEANUP ==='; \
     Remove-Item C:/temp/requirements.txt -ErrorAction SilentlyContinue; \
     Remove-Item C:/temp/install_packages.R -ErrorAction SilentlyContinue; \
     Remove-Item C:/temp/verify_r_packages.R -ErrorAction SilentlyContinue; \
     Remove-Item C:/temp/tl_packages -ErrorAction SilentlyContinue; \
     Remove-Item C:/temp/requirements/ -Recurse -Force -ErrorAction SilentlyContinue; \
-    Write-Host '✅ === CLEANUP COMPLETE ==='; \
-    "
+    Write-Host '✅ === CLEANUP COMPLETE ==='
 
 # Set working directory
 WORKDIR C:/workspace
 
 # Final verification (using same tools that workflow uses)
-RUN quarto --version && \
-    python --version && \
-    R --version && \
-    lualatex --version
+RUN quarto --version && python --version && R --version && lualatex --version
 
 # Health check
-RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command "Write-Host '✅ Windows container build completed successfully'"
+RUN Write-Host '✅ Windows container build completed successfully'
