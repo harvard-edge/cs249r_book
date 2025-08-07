@@ -13,12 +13,11 @@ RUN curl -L -o PowerShell.msi https://github.com/PowerShell/PowerShell/releases/
     if %ERRORLEVEL% neq 0 (echo ❌ PowerShell installation failed - aborting build && exit 1) && \
     del PowerShell.msi
 
-# Add PowerShell to PATH and test
-RUN setx PATH "%PATH%;C:\Program Files\PowerShell\7" /M && \
-    "C:\Program Files\PowerShell\7\pwsh.exe" -Command "Write-Host 'PowerShell 7 installation verified'"
+# Verify PowerShell 7 installation and add to PATH
+RUN powershell -Command "Start-Sleep 3; $psPath = Get-ChildItem 'C:\Program Files\PowerShell' -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1; if ($psPath) { Write-Host ('PowerShell 7 found at: ' + $psPath.FullName); $env:PATH = $env:PATH + ';' + $psPath.FullName; [Environment]::SetEnvironmentVariable('PATH', $env:PATH, [EnvironmentVariableTarget]::Machine); & \"$($psPath.FullName)\pwsh.exe\" -Command \"Write-Host 'PowerShell 7 verification successful'\" } else { throw 'PowerShell 7 installation failed' }"
 
 # === PHASE 2: CHOCOLATEY INSTALLATION ===
-RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
+RUN powershell -Command " \
     Write-Host '🚀 === STARTING CHOCOLATEY INSTALLATION ==='; \
     try { \
         Set-ExecutionPolicy Bypass -Scope Process -Force; \
