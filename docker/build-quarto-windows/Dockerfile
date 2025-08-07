@@ -167,14 +167,34 @@ RUN pwsh -Command " \
     foreach ($gsUrl in $gsUrls) { \
         Write-Host ('🔄 Trying download from: ' + $gsUrl); \
         try { \
-            Invoke-WebRequest -Uri $gsUrl -OutFile $gsInstaller -TimeoutSec 300 -UserAgent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'; \
+            # Method 1: Try PowerShell with enhanced settings \
+            [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
+            $webClient = New-Object System.Net.WebClient; \
+            $webClient.Headers.Add('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'); \
+            $webClient.DownloadFile($gsUrl, $gsInstaller); \
+            $webClient.Dispose(); \
+            \
             if ((Test-Path $gsInstaller) -and ((Get-Item $gsInstaller).Length -gt 1MB)) { \
                 Write-Host ('✅ Downloaded successfully (' + ((Get-Item $gsInstaller).Length / 1MB).ToString('F1') + ' MB)'); \
                 $downloadSuccess = $true; \
                 break; \
+            } else { \
+                Write-Host '⚠️ Download succeeded but file is too small or missing'; \
+                if (Test-Path $gsInstaller) { Remove-Item $gsInstaller -ErrorAction SilentlyContinue }; \
             } \
         } catch { \
-            Write-Host ('⚠️ Download failed from ' + $gsUrl + ': ' + $_.Exception.Message); \
+            Write-Host ('⚠️ WebClient download failed: ' + $_.Exception.Message); \
+            try { \
+                Write-Host '🔄 Fallback to Invoke-WebRequest...'; \
+                Invoke-WebRequest -Uri $gsUrl -OutFile $gsInstaller -TimeoutSec 300 -UserAgent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' -UseBasicParsing; \
+                if ((Test-Path $gsInstaller) -and ((Get-Item $gsInstaller).Length -gt 1MB)) { \
+                    Write-Host ('✅ Downloaded successfully via fallback (' + ((Get-Item $gsInstaller).Length / 1MB).ToString('F1') + ' MB)'); \
+                    $downloadSuccess = $true; \
+                    break; \
+                } \
+            } catch { \
+                Write-Host ('⚠️ Both download methods failed from ' + $gsUrl + ': ' + $_.Exception.Message); \
+            } \
         } \
     } \
     \
