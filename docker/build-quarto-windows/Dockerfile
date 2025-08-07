@@ -2,17 +2,23 @@
 # Replicates the exact environment that quarto-build workflow uses successfully
 # Based on Windows Server 2022 (same as windows-latest GitHub Actions runner)
 
-FROM mcr.microsoft.com/windows/servercore:ltsc2022
+# Use full Windows instead of Server Core for better compatibility with package managers
+# This matches the GitHub Actions windows-latest environment more closely
+FROM mcr.microsoft.com/windows:ltsc2022
 
 # === PHASE 1: POWERSHELL 7 INSTALLATION ===
-RUN curl -fSLo PowerShell.msi https://github.com/PowerShell/PowerShell/releases/download/v7.4.1/PowerShell-7.4.1-win-x64.msi; \
-    if not exist PowerShell.msi (echo ❌ PowerShell download failed - aborting build && exit 1); \
-    msiexec /i PowerShell.msi /quiet /norestart; \
-    if %ERRORLEVEL% neq 0 (echo ❌ PowerShell installation failed - aborting build && exit 1); \
+RUN curl -L -o PowerShell.msi https://github.com/PowerShell/PowerShell/releases/download/v7.4.1/PowerShell-7.4.1-win-x64.msi && \
+    if not exist PowerShell.msi (echo ❌ PowerShell download failed - aborting build && exit 1) && \
+    msiexec /i PowerShell.msi /quiet /norestart && \
+    if %ERRORLEVEL% neq 0 (echo ❌ PowerShell installation failed - aborting build && exit 1) && \
     del PowerShell.msi
 
+# Add PowerShell to PATH and test
+RUN setx PATH "%PATH%;C:\Program Files\PowerShell\7" /M && \
+    "C:\Program Files\PowerShell\7\pwsh.exe" -Command "Write-Host 'PowerShell 7 installation verified'"
+
 # === PHASE 2: CHOCOLATEY INSTALLATION ===
-RUN pwsh -Command " \
+RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     Write-Host '🚀 === STARTING CHOCOLATEY INSTALLATION ==='; \
     try { \
         Set-ExecutionPolicy Bypass -Scope Process -Force; \
@@ -44,10 +50,10 @@ COPY tools/dependencies/tl_packages C:/temp/tl_packages
 COPY docker/build-quarto-windows/verify_r_packages.R C:/temp/verify_r_packages.R
 
 # Create R library directory
-RUN pwsh -Command "New-Item -ItemType Directory -Path 'C:/r-lib' -Force"
+RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command "New-Item -ItemType Directory -Path 'C:/r-lib' -Force"
 
 # === PHASE 3: QUARTO INSTALLATION ===
-RUN pwsh -Command " \
+RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     Write-Host '🚀 === STARTING QUARTO INSTALLATION ==='; \
     Write-Host '⏰ Estimated time: 1-2 minutes'; \
     $startTime = Get-Date; \
@@ -84,7 +90,7 @@ RUN pwsh -Command " \
     setx PATH "%PATH%;C:\quarto\quarto-1.7.31\bin" /M
 
 # === PHASE 4: PYTHON 3.13 INSTALLATION ===
-RUN pwsh -Command " \
+RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     Write-Host '🚀 === STARTING PYTHON 3.13 INSTALLATION ==='; \
     Write-Host '⏰ Estimated time: 2-3 minutes'; \
     $startTime = Get-Date; \
@@ -115,7 +121,7 @@ RUN pwsh -Command " \
     "
 
 # === PHASE 5: PYTHON PACKAGE INSTALLATION ===
-RUN pwsh -Command " \
+RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     Write-Host '🚀 === STARTING PYTHON PACKAGE INSTALLATION ==='; \
     Write-Host '⏰ Estimated time: 1-2 minutes'; \
     $startTime = Get-Date; \
@@ -148,7 +154,7 @@ RUN pwsh -Command " \
     "
 
 # === PHASE 6: GHOSTSCRIPT INSTALLATION ===
-RUN pwsh -Command " \
+RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     Write-Host '🚀 === STARTING GHOSTSCRIPT INSTALLATION ==='; \
     Write-Host '⏰ Estimated time: 1-2 minutes (direct download only)'; \
     $startTime = Get-Date; \
@@ -156,66 +162,27 @@ RUN pwsh -Command " \
     \
     Write-Host '📦 Installing Ghostscript via direct download (latest version)...'; \
     \
-    # Try multiple download URLs for latest Ghostscript 10.05.1 \
-    $gsUrls = @( \
-        'https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/gs10051/gs10051w64.exe', \
-        'https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/latest/download/gs10051w64.exe' \
-    ); \
-    $gsInstaller = 'C:/temp/gs_installer.exe'; \
-    $downloadSuccess = $false; \
-    \
-    foreach ($gsUrl in $gsUrls) { \
-        Write-Host ('🔄 Trying download from: ' + $gsUrl); \
-        try { \
-            # Method 1: Try PowerShell with enhanced settings \
-            [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
-            $webClient = New-Object System.Net.WebClient; \
-            $webClient.Headers.Add('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'); \
-            $webClient.DownloadFile($gsUrl, $gsInstaller); \
-            $webClient.Dispose(); \
-            \
-            if ((Test-Path $gsInstaller) -and ((Get-Item $gsInstaller).Length -gt 1MB)) { \
-                Write-Host ('✅ Downloaded successfully (' + ((Get-Item $gsInstaller).Length / 1MB).ToString('F1') + ' MB)'); \
-                $downloadSuccess = $true; \
-                break; \
-            } else { \
-                Write-Host '⚠️ Download succeeded but file is too small or missing'; \
-                if (Test-Path $gsInstaller) { Remove-Item $gsInstaller -ErrorAction SilentlyContinue }; \
-            } \
-        } catch { \
-            Write-Host ('⚠️ WebClient download failed: ' + $_.Exception.Message); \
+                # Use same approach as working quarto-build.yml (with winget fallback to chocolatey) \
             try { \
-                Write-Host '🔄 Fallback to Invoke-WebRequest...'; \
-                Invoke-WebRequest -Uri $gsUrl -OutFile $gsInstaller -TimeoutSec 300 -UserAgent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' -UseBasicParsing; \
-                if ((Test-Path $gsInstaller) -and ((Get-Item $gsInstaller).Length -gt 1MB)) { \
-                    Write-Host ('✅ Downloaded successfully via fallback (' + ((Get-Item $gsInstaller).Length / 1MB).ToString('F1') + ' MB)'); \
-                    $downloadSuccess = $true; \
-                    break; \
-                } \
+                Write-Host '🔄 Trying winget installation (primary method from quarto-build.yml)...'; \
+                winget install ArtifexSoftware.GhostScript --accept-source-agreements --accept-package-agreements; \
+                Write-Host '✅ Ghostscript installed via winget'; \
+                $gsInstalled = $true; \
             } catch { \
-                Write-Host ('⚠️ Both download methods failed from ' + $gsUrl + ': ' + $_.Exception.Message); \
+                Write-Host '🔄 winget not available, using chocolatey fallback...'; \
+                try { \
+                    choco install ghostscript -y; \
+                    if ($LASTEXITCODE -eq 0) { \
+                        Write-Host '✅ Ghostscript installed via chocolatey'; \
+                        $gsInstalled = $true; \
+                    } else { \
+                        throw ('Chocolatey installation failed with exit code: ' + $LASTEXITCODE); \
+                    } \
+                } catch { \
+                    Write-Host ('❌ All Ghostscript installation methods failed: ' + $_.Exception.Message); \
+                    throw 'Ghostscript installation failed - aborting build'; \
+                } \
             } \
-        } \
-    } \
-    \
-    if ($downloadSuccess) { \
-        Write-Host '🔄 Installing Ghostscript silently...'; \
-        $installProcess = Start-Process -FilePath $gsInstaller -ArgumentList '/S' -Wait -PassThru -NoNewWindow; \
-        if ($installProcess.ExitCode -eq 0) { \
-            Write-Host '✅ Ghostscript installed successfully via direct download'; \
-            $gsInstalled = $true; \
-        } else { \
-            Write-Host ('❌ Installation failed with exit code: ' + $installProcess.ExitCode); \
-            throw ('Ghostscript installation failed with exit code: ' + $installProcess.ExitCode); \
-        } \
-        # Clean up installer \
-        Remove-Item $gsInstaller -ErrorAction SilentlyContinue; \
-    } else { \
-        Write-Host '❌ CRITICAL: Download failed from all URLs'; \
-        Write-Host '❌ Ghostscript is required for PDF processing in Quarto'; \
-        Write-Host '❌ Container build cannot continue without essential dependencies'; \
-        throw 'Ghostscript download failed from all sources - aborting build'; \
-    } \
     \
     Write-Host '🔧 Setting up Ghostscript PATH...'; \
     $gsPath = Get-ChildItem 'C:/Program Files/gs' -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1; \
@@ -249,7 +216,7 @@ RUN pwsh -Command " \
     "
 
 # === PHASE 7: INKSCAPE INSTALLATION ===
-RUN pwsh -Command " \
+RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     Write-Host '🚀 === STARTING INKSCAPE INSTALLATION ==='; \
     Write-Host '⏰ Estimated time: 2-3 minutes'; \
     [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
@@ -303,7 +270,7 @@ RUN pwsh -Command " \
     "
 
 # === PHASE 8: TEX LIVE INSTALLATION ===
-RUN pwsh -Command " \
+RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     Write-Host '🚀 === STARTING TEX LIVE INSTALLATION ==='; \
     Write-Host '⏰ Estimated time: 8-12 minutes (largest phase)'; \
     Write-Host 'Free disk space before: ' + ((Get-WmiObject -Class Win32_LogicalDisk -Filter \"DeviceID='C:'\").FreeSpace / 1GB).ToString('F2') + ' GB'; \
@@ -367,7 +334,7 @@ RUN pwsh -Command " \
     "
 
 # === TEX LIVE VERIFICATION (matching quarto-build.yml workflow) ===
-RUN pwsh -Command " \
+RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     Write-Host '🔍 Verifying TeX Live installation (matching workflow verification)...'; \
     \
     # Refresh PATH to include TeX Live \
@@ -417,7 +384,7 @@ RUN pwsh -Command " \
     "
 
 # === PHASE 9: R INSTALLATION ===
-RUN pwsh -Command " \
+RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     Write-Host '🚀 === STARTING R INSTALLATION ==='; \
     Write-Host '⏰ Estimated time: 2-3 minutes'; \
     $startTime = Get-Date; \
@@ -433,7 +400,7 @@ RUN pwsh -Command " \
     "
 
 # === PHASE 10: R PACKAGE INSTALLATION ===
-RUN pwsh -Command " \
+RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     Write-Host '🚀 === STARTING R PACKAGE INSTALLATION ==='; \
     Write-Host '⏰ Estimated time: 3-5 minutes'; \
     $startTime = Get-Date; \
@@ -485,11 +452,11 @@ RUN pwsh -Command " \
     "
 
 # === PHASE 11: R PACKAGE VERIFICATION ===
-RUN pwsh -Command "Write-Host '🔍 Verifying R package installation...'" && \
+RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command "Write-Host '🔍 Verifying R package installation...'" && \
     Rscript C:/temp/verify_r_packages.R
 
 # === PHASE 12: CLEANUP ===
-RUN pwsh -Command " \
+RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     Write-Host '🧹 === STARTING CLEANUP ==='; \
     Remove-Item C:/temp/requirements.txt -ErrorAction SilentlyContinue; \
     Remove-Item C:/temp/install_packages.R -ErrorAction SilentlyContinue; \
@@ -509,4 +476,4 @@ RUN quarto --version && \
     lualatex --version
 
 # Health check
-RUN pwsh -Command "Write-Host '✅ Windows container build completed successfully'"
+RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command "Write-Host '✅ Windows container build completed successfully'"
