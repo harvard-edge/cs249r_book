@@ -13,8 +13,8 @@ RUN curl -L -o PowerShell.msi https://github.com/PowerShell/PowerShell/releases/
     if %ERRORLEVEL% neq 0 (echo ❌ PowerShell installation failed - aborting build && exit 1) && \
     del PowerShell.msi
 
-# Verify PowerShell 7 installation and add to PATH
-RUN powershell -Command "Start-Sleep 3; $psPath = Get-ChildItem 'C:\Program Files\PowerShell' -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1; if ($psPath) { Write-Host ('PowerShell 7 found at: ' + $psPath.FullName); $env:PATH = $env:PATH + ';' + $psPath.FullName; [Environment]::SetEnvironmentVariable('PATH', $env:PATH, [EnvironmentVariableTarget]::Machine); & \"$($psPath.FullName)\pwsh.exe\" -Command \"Write-Host 'PowerShell 7 verification successful'\" } else { throw 'PowerShell 7 installation failed' }"
+# Verify PowerShell 7 installation and add to PATH  
+RUN powershell -Command "Start-Sleep 3; Write-Host 'Searching for PowerShell 7...'; if (Test-Path 'C:\Program Files\PowerShell') { Get-ChildItem 'C:\Program Files\PowerShell' -Recurse -Name 'pwsh.exe' | ForEach-Object { Write-Host \"Found pwsh.exe at: $_\" } }; $psPath = Get-ChildItem 'C:\Program Files\PowerShell' -Recurse -Name 'pwsh.exe' -ErrorAction SilentlyContinue | Select-Object -First 1; if ($psPath) { $fullPath = Join-Path 'C:\Program Files\PowerShell' (Split-Path $psPath -Parent); Write-Host \"PowerShell 7 found at: $fullPath\"; $env:PATH = $env:PATH + \";$fullPath\"; [Environment]::SetEnvironmentVariable('PATH', $env:PATH, [EnvironmentVariableTarget]::Machine); & \"$fullPath\pwsh.exe\" -Command \"Write-Host 'PowerShell 7 verification successful'\" } else { throw 'PowerShell 7 installation failed - pwsh.exe not found' }"
 
 # === PHASE 2: CHOCOLATEY INSTALLATION ===
 RUN powershell -Command " \
