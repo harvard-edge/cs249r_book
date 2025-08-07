@@ -17,6 +17,24 @@ RUN setx PATH "%PATH%;C:\Program Files\PowerShell\7" /M && \
 # === MINIMAL SETUP ===
 RUN mkdir C:\temp
 
+# === CHOCOLATEY INSTALLATION (for alternative Ghostscript method) ===
+RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
+    Write-Host '🚀 === INSTALLING CHOCOLATEY ==='; \
+    try { \
+        Set-ExecutionPolicy Bypass -Scope Process -Force; \
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
+        iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1')); \
+        Write-Host '✅ Chocolatey installation complete'; \
+        # Test chocolatey installation \
+        $chocoVersion = & choco --version 2>&1; \
+        if ($LASTEXITCODE -ne 0) { throw 'Chocolatey test failed' }; \
+        Write-Host ('📊 Chocolatey version: ' + $chocoVersion); \
+    } catch { \
+        Write-Host ('❌ Chocolatey installation failed: ' + $_.Exception.Message); \
+        Write-Host '⚠️ Will skip Chocolatey method in Ghostscript testing'; \
+    } \
+    "
+
 # === GHOSTSCRIPT TESTING - MULTIPLE STRATEGIES ===
 RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     Write-Host '🚀 === GHOSTSCRIPT DOWNLOAD TESTING ==='; \
@@ -46,11 +64,12 @@ RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     $downloadSuccess = $false; \
     \
     foreach ($gsUrl in $gsUrls) { \
-        Write-Host ('🔄 WebClient trying: ' + $gsUrl); \
+        Write-Host ('🔄 WebClient trying: ' + $gsUrl + ' (3 minute timeout)'); \
         try { \
             [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
             $webClient = New-Object System.Net.WebClient; \
             $webClient.Headers.Add('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'); \
+            $webClient.Timeout = 180000; # 3 minutes in milliseconds \
             $webClient.DownloadFile($gsUrl, $gsInstaller); \
             $webClient.Dispose(); \
             \
@@ -73,7 +92,7 @@ RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
         $gsInstaller = 'C:/temp/gs_installer_method2.exe'; \
         \
         foreach ($gsUrl in $gsUrls) { \
-            Write-Host ('🔄 Invoke-WebRequest trying: ' + $gsUrl); \
+            Write-Host ('🔄 Invoke-WebRequest trying: ' + $gsUrl + ' (5 minute timeout)'); \
             try { \
                 Invoke-WebRequest -Uri $gsUrl -OutFile $gsInstaller -TimeoutSec 300 -UserAgent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' -UseBasicParsing; \
                 \
@@ -93,11 +112,11 @@ RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     } \
     \
     if (-not $downloadSuccess) { \
-        Write-Host '📦 === DOWNLOAD METHOD 3: curl (fallback) ==='; \
+        Write-Host '📦 === DOWNLOAD METHOD 3: curl (direct download fallback) ==='; \
         $gsInstaller = 'C:/temp/gs_installer_method3.exe'; \
         \
         foreach ($gsUrl in $gsUrls) { \
-            Write-Host ('🔄 curl trying: ' + $gsUrl); \
+            Write-Host ('🔄 curl trying: ' + $gsUrl + ' (5 minute timeout)'); \
             try { \
                 $curlResult = & curl -L -o $gsInstaller $gsUrl --user-agent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' --max-time 300 2>&1; \
                 \
@@ -116,33 +135,72 @@ RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
         } \
     } \
     \
-    if ($downloadSuccess) { \
-        Write-Host '🎉 === DOWNLOAD SUCCESSFUL ==='; \
-        Write-Host '🔄 Testing installation...'; \
-        \
-        $installProcess = Start-Process -FilePath $gsInstaller -ArgumentList '/S' -Wait -PassThru -NoNewWindow; \
-        if ($installProcess.ExitCode -eq 0) { \
-            Write-Host '✅ Ghostscript installation SUCCESS!'; \
-            \
-            # Test installation \
-            Write-Host '🧪 Testing Ghostscript functionality...'; \
-            $gsPath = Get-ChildItem 'C:/Program Files/gs' -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1; \
-            if ($gsPath) { \
-                $binPath = Join-Path $gsPath.FullName 'bin'; \
-                Write-Host ('📍 Found Ghostscript at: ' + $binPath); \
-                try { \
-                    $gsVersion = & \"$binPath/gs.exe\" --version 2>&1; \
-                    Write-Host ('✅ Ghostscript version: ' + $gsVersion); \
-                    Write-Host '🎉 === GHOSTSCRIPT FULLY WORKING ==='; \
-                } catch { \
-                    Write-Host '⚠️ Ghostscript installed but version test failed (may be normal in containers)'; \
+    if (-not $downloadSuccess) { \
+        Write-Host '📦 === DOWNLOAD METHOD 4: Chocolatey (package manager - most reliable) ==='; \
+        try { \
+            Write-Host '🔄 Testing Chocolatey availability...'; \
+            $chocoTest = & choco --version 2>&1; \
+            if ($LASTEXITCODE -eq 0) { \
+                Write-Host '✅ Chocolatey available, trying Ghostscript installation...'; \
+                Write-Host '📦 Installing Ghostscript via Chocolatey (5 minute timeout)...'; \
+                $chocoJob = Start-Job -ScriptBlock { choco install ghostscript -y --timeout 300 }; \
+                $chocoCompleted = Wait-Job -Job $chocoJob -Timeout 300; \
+                if ($chocoCompleted) { \
+                    $chocoResult = Receive-Job -Job $chocoJob; \
+                    Remove-Job -Job $chocoJob; \
+                    Write-Host '✅ Chocolatey Ghostscript installation SUCCESS!'; \
+                    $downloadSuccess = $true; \
+                } else { \
+                    Write-Host '❌ Chocolatey installation timed out after 5 minutes'; \
+                    Remove-Job -Job $chocoJob -Force; \
                 } \
             } else { \
-                Write-Host '⚠️ Installation succeeded but Ghostscript directory not found'; \
+                Write-Host '⚠️ Chocolatey not available, skipping this method'; \
+            } \
+        } catch { \
+            Write-Host ('❌ Chocolatey method failed: ' + $_.Exception.Message); \
+        } \
+    } \
+    \
+    if ($downloadSuccess) { \
+        Write-Host '🎉 === DOWNLOAD/INSTALL SUCCESSFUL ==='; \
+        \
+        # If we have an installer file, run it \
+        if ((Test-Path $gsInstaller) -and ($gsInstaller -ne '')) { \
+            Write-Host '🔄 Testing manual installation...'; \
+            $installProcess = Start-Process -FilePath $gsInstaller -ArgumentList '/S' -Wait -PassThru -NoNewWindow; \
+            if ($installProcess.ExitCode -ne 0) { \
+                Write-Host ('❌ Manual installation failed with exit code: ' + $installProcess.ExitCode); \
+                throw 'Ghostscript manual installation failed'; \
+            } \
+            Write-Host '✅ Manual installation SUCCESS!'; \
+        } else { \
+            Write-Host '📦 Chocolatey installation already completed, skipping manual install'; \
+        } \
+        \
+        # Test final installation \
+        Write-Host '🧪 Testing Ghostscript functionality...'; \
+        $gsPath = Get-ChildItem 'C:/Program Files/gs' -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1; \
+        if ($gsPath) { \
+            $binPath = Join-Path $gsPath.FullName 'bin'; \
+            Write-Host ('📍 Found Ghostscript at: ' + $binPath); \
+            try { \
+                $gsVersion = & \"$binPath/gs.exe\" --version 2>&1; \
+                Write-Host ('✅ Ghostscript version: ' + $gsVersion); \
+                Write-Host '🎉 === GHOSTSCRIPT FULLY WORKING ==='; \
+            } catch { \
+                Write-Host '⚠️ Ghostscript installed but version test failed (may be normal in containers)'; \
             } \
         } else { \
-            Write-Host ('❌ Installation failed with exit code: ' + $installProcess.ExitCode); \
-            throw 'Ghostscript installation failed'; \
+            Write-Host '⚠️ Installation succeeded but Ghostscript directory not found'; \
+            # Check alternative locations \
+            $altPaths = @('C:/Program Files (x86)/gs', 'C:/ProgramData/chocolatey/lib/ghostscript'); \
+            foreach ($altPath in $altPaths) { \
+                if (Test-Path $altPath) { \
+                    Write-Host ('📍 Found Ghostscript at alternative location: ' + $altPath); \
+                    break; \
+                } \
+            } \
         } \
     } else { \
         Write-Host '❌ === ALL DOWNLOAD METHODS FAILED ==='; \
