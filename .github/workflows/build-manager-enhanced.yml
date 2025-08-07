@@ -3,6 +3,14 @@ name: '🧠 Enhanced Build Manager'
 # Set retention period to 7 days
 env:
   GITHUB_ACTIONS_RETENTION_DAYS: 7
+  # Centralized Container Configuration - Single Source of Truth
+  CONTAINER_REGISTRY: ${{ inputs.container_registry || 'ghcr.io' }}
+  CONTAINER_TAG: ${{ inputs.container_tag || 'latest' }}
+  LINUX_CONTAINER_NAME: ${{ inputs.linux_container_name || 'quarto-build' }}
+  WINDOWS_CONTAINER_NAME: ${{ inputs.windows_container_name || 'quarto-build-windows' }}
+  # Computed full image names
+  LINUX_IMAGE: ${{ inputs.container_registry || 'ghcr.io' }}/${{ github.repository }}/${{ inputs.linux_container_name || 'quarto-build' }}:${{ inputs.container_tag || 'latest' }}
+  WINDOWS_IMAGE: ${{ inputs.container_registry || 'ghcr.io' }}/${{ github.repository }}/${{ inputs.windows_container_name || 'quarto-build-windows' }}:${{ inputs.container_tag || 'latest' }}
 
 # Cancel duplicate builds on same branch
 concurrency:
@@ -33,6 +41,26 @@ on:
           - html
           - pdf
           - all
+      linux_container_name:
+        description: 'Linux container image name'
+        required: false
+        default: 'quarto-build'
+        type: string
+      windows_container_name:
+        description: 'Windows container image name'
+        required: false
+        default: 'quarto-build-windows'
+        type: string
+      container_registry:
+        description: 'Container registry URL'
+        required: false
+        default: 'ghcr.io'
+        type: string
+      container_tag:
+        description: 'Container tag to use'
+        required: false
+        default: 'latest'
+        type: string
   push:
     branches: [main, dev]  # Auto-trigger for main workflow
 
@@ -46,6 +74,13 @@ jobs:
       windows-container-available: ${{ steps.check.outputs.windows-available }}
       containers-need-rebuild: ${{ steps.check.outputs.need-rebuild }}
       container-strategy: ${{ steps.check.outputs.strategy }}
+      # Container naming outputs for other jobs
+      linux-image-name: ${{ env.LINUX_IMAGE }}
+      windows-image-name: ${{ env.WINDOWS_IMAGE }}
+      container-registry: ${{ env.CONTAINER_REGISTRY }}
+      linux-container-name: ${{ env.LINUX_CONTAINER_NAME }}
+      windows-container-name: ${{ env.WINDOWS_CONTAINER_NAME }}
+      container-tag: ${{ env.CONTAINER_TAG }}
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
@@ -55,14 +90,16 @@ jobs:
 
       - name: 🔍 Check container availability and freshness
         id: check
+        env:
+          LINUX_IMAGE: ${{ env.LINUX_IMAGE }}
+          WINDOWS_IMAGE: ${{ env.WINDOWS_IMAGE }}
         run: |
           echo "🔍 Checking container availability..."
-          
-          # Container registry info
-          REGISTRY="ghcr.io"
-          REPO="${{ github.repository }}"
-          LINUX_IMAGE="$REGISTRY/$REPO/quarto-build:latest"
-          WINDOWS_IMAGE="$REGISTRY/$REPO/quarto-build-windows:latest"
+          echo "📊 Container Configuration:"
+          echo "  Registry: ${{ env.CONTAINER_REGISTRY }}"
+          echo "  Linux Image: $LINUX_IMAGE"
+          echo "  Windows Image: $WINDOWS_IMAGE"
+          echo "  Tag: ${{ env.CONTAINER_TAG }}"
           
           # Function to check if container exists and get its age
           check_container() {
@@ -142,6 +179,9 @@ jobs:
     uses: ./.github/workflows/build-linux-container.yml
     with:
       force_rebuild: ${{ inputs.force_container_rebuild }}
+      container_registry: ${{ needs.container-health-check.outputs.container-registry }}
+      container_name: ${{ needs.container-health-check.outputs.linux-container-name }}
+      container_tag: ${{ needs.container-health-check.outputs.container-tag }}
 
   ensure-windows-container:
     name: 🐳 Ensure Windows Container  
@@ -150,6 +190,9 @@ jobs:
     uses: ./.github/workflows/build-windows-container.yml
     with:
       force_rebuild: ${{ inputs.force_container_rebuild }}
+      container_registry: ${{ needs.container-health-check.outputs.container-registry }}
+      container_name: ${{ needs.container-health-check.outputs.windows-container-name }}
+      container_tag: ${{ needs.container-health-check.outputs.container-tag }}
 
   # Step 3: Pre-flight checks (keeping existing quality gates)
   pre-commit:
@@ -240,6 +283,10 @@ jobs:
           os: ${{ matrix.os }}
           format: ${{ matrix.format }}
           target: ${{ inputs.test_branch && 'dev' || (github.ref == 'refs/heads/main' && 'main' || 'dev') }}
+          # Pass container configuration for container-based builds
+          container_registry: ${{ needs.container-health-check.outputs.container-registry }}
+          linux_container_image: ${{ needs.container-health-check.outputs.linux-image-name }}
+          windows_container_image: ${{ needs.container-health-check.outputs.windows-image-name }}
 
   # Step 5: Results and reporting
   build-report:
