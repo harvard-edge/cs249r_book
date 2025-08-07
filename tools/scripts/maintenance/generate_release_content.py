@@ -498,22 +498,22 @@ def generate_demo_entry():
     
     # Get some real file paths from the repository
     real_files = [
-        "book/contents/frontmatter/about/about.qmd",
-        "book/contents/frontmatter/acknowledgements/acknowledgements.qmd",
-        "book/contents/core/dl_primer/dl_primer.qmd",
-        "book/contents/core/workflow/workflow.qmd",
-        "book/contents/core/training/training.qmd",
-        "book/contents/core/introduction/introduction.qmd",
-        "book/contents/core/benchmarking/benchmarking.qmd",
-        "book/contents/labs/arduino/nicla_vision/image_classification/image_classification.qmd",
-        "book/contents/labs/raspi/setup/setup.qmd",
-        "book/contents/backmatter/resources/phd_survival_guide.qmd"
+        "quarto/contents/frontmatter/about/about.qmd",
+        "quarto/contents/frontmatter/acknowledgements/acknowledgements.qmd",
+        "quarto/contents/core/dl_primer/dl_primer.qmd",
+        "quarto/contents/core/workflow/workflow.qmd",
+        "quarto/contents/core/training/training.qmd",
+        "quarto/contents/core/introduction/introduction.qmd",
+        "quarto/contents/core/benchmarking/benchmarking.qmd",
+        "quarto/contents/labs/arduino/nicla_vision/image_classification/image_classification.qmd",
+        "quarto/contents/labs/raspi/setup/setup.qmd",
+        "quarto/contents/backmatter/resources/phd_survival_guide.qmd"
     ]
     
     # Try to get some real commit data for more realistic content
     try:
         # Get recent commit messages for some files
-        recent_commits = run_git_command(["git", "log", "--oneline", "-5", "--", "book/contents/core/dl_primer/dl_primer.qmd"], verbose=False)
+        recent_commits = run_git_command(["git", "log", "--oneline", "-5", "--", "quarto/contents/core/dl_primer/dl_primer.qmd"], verbose=False)
         if recent_commits:
             # Use real commit data if available
             pass

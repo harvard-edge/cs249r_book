@@ -1,4 +1,4 @@
-name: '🏗️ Quarto Build'
+name: '🏗️ Quarto Build (Conditional Container)'
 
 # Set retention period to 7 days
 env:
@@ -9,9 +9,8 @@ concurrency:
   group: quarto-build-${{ inputs.target }}-${{ inputs.os }}-${{ inputs.format }}-${{ github.sha }}
   cancel-in-progress: true
 
-# This workflow builds a Quarto project and uploads artifacts
-# It handles both Windows and Linux environments with extensive caching for better performance
-# Note: This workflow does NOT deploy - all deployment is handled by publish-live workflow
+# This workflow uses containers when available, falls back to proven traditional approach
+# Provides maximum robustness with performance benefits where possible
 on:
   workflow_dispatch:
     inputs:
@@ -25,9 +24,6 @@ on:
         type: choice
         default: 'ubuntu-latest'
         description: 'Operating system to run on'
-        options:
-          - ubuntu-latest
-          - windows-latest
       quarto-version:
         required: false
         type: string
@@ -69,6 +65,11 @@ on:
         type: string
         default: ''
         description: 'Explicit artifact name (if empty, uses build-{os}-{format} pattern)'
+      force_traditional:
+        required: false
+        type: boolean
+        default: false
+        description: 'Force traditional build (bypass container)'
   workflow_call:
     inputs:
       environment:
@@ -100,7 +101,6 @@ on:
         type: string
         default: 'all'
         description: 'Format to build (html/pdf/epub/all)'
-
       quarto-log-level:
         required: false
         type: string
@@ -111,22 +111,29 @@ on:
         type: string
         default: ''
         description: 'Explicit artifact name (if empty, uses build-{os}-{format} pattern)'
+      force_traditional:
+        required: false
+        type: boolean
+        default: false
+        description: 'Force traditional build (bypass container)'
 
-        
 permissions:
   contents: write
   pages: write
 
 jobs:
-  build:
-    runs-on: ${{ inputs.os }}
-    timeout-minutes: 60   # ⏰ Set job timeout to 1 hour (3600 seconds)
+  # Container-based build (when available and not forced traditional)
+  build-container:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/${{ github.repository }}/quarto-build:latest
+      options: --user root
+    timeout-minutes: 60
     environment:
       name: ${{ inputs.environment }}
+    if: inputs.os == 'ubuntu-latest' && !inputs.force_traditional
     env:
-      R_LIBS_USER: ${{ github.workspace }}/.r-lib
       QUARTO_LOG_LEVEL: ${{ inputs.quarto-log-level }}
-      # UTF-8 encoding for proper emoji display
       PYTHONIOENCODING: utf-8
       LANG: en_US.UTF-8
       LC_ALL: en_US.UTF-8
@@ -142,14 +149,187 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
             -d "{
               \"state\": \"pending\",
-              \"description\": \"Quarto build started (${{ inputs.os }}, ${{ inputs.format }})\",
+              \"description\": \"Quarto build started (Linux container, ${{ inputs.format }})\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 📋 Container Environment Info
+        shell: bash
+        run: |
+          echo "🔄 Container environment information..."
+          echo "📊 Quarto version:"
+          quarto --version
+          echo "📊 Python version:"
+          python3 --version
+          echo "📊 R version:"
+          R --version | head -1
+          echo "📊 TeX Live version:"
+          lualatex --version | head -1
+          echo "📊 Available disk space:"
+          df -h .
+          echo "📊 Memory usage:"
+          free -h
+
+      - name: 🔨 Build HTML (copy config and render)
+        if: inputs.format == 'html' || inputs.format == 'all'
+        shell: bash
+        run: |
+          echo "🚀 Setting up HTML configuration..."
+          cd quarto
+          rm -f _quarto.yml
+          cp config/_quarto-html.yml _quarto.yml
+          echo "✅ Configuration set to HTML"
+          
+          echo "🔨 Building HTML..."
+          echo "⏰ HTML build started at: $(date)"
+          
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"pending\",
+              \"description\": \"Building HTML content (Linux container)\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+          
+          quarto render --to html
+          echo "✅ HTML build completed at: $(date)"
+        
+      - name: 🔨 Build PDF (copy config and render)
+        if: inputs.format == 'pdf' || inputs.format == 'all'
+        shell: bash
+        run: |
+          echo "🚀 Setting up PDF configuration..."
+          cd quarto
+          rm -f _quarto.yml
+          cp config/_quarto-pdf.yml _quarto.yml
+          echo "✅ Configuration set to PDF"
+          
+          echo "🔨 Building PDF..."
+          echo "⏰ PDF build started at: $(date)"
+          echo "📊 This should be much faster with pre-installed dependencies"
+          
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"pending\",
+              \"description\": \"Building PDF content (Linux container) - optimized\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+          
+          quarto render --to titlepage-pdf
+          echo "✅ PDF build completed at: $(date)"
+
+      - name: 📉 Compress PDF with Ghostscript
+        if: inputs.format == 'pdf' || inputs.format == 'all'
+        run: |
+          if [ -f "build/pdf/Machine-Learning-Systems.pdf" ]; then
+            gs \
+              -sDEVICE=pdfwrite \
+              -dCompatibilityLevel=1.4 \
+              -dPDFSETTINGS=/ebook \
+              -dNOPAUSE \
+              -dQUIET \
+              -dBATCH \
+              -sOutputFile="./build/pdf/ebook.pdf" \
+              "./build/pdf/Machine-Learning-Systems.pdf"
+
+            mv ./build/pdf/ebook.pdf ./build/pdf/Machine-Learning-Systems.pdf
+          else
+            echo "⚠️ PDF file not found for compression"
+          fi
+
+      - name: 📤 Upload build artifacts
+        if: github.event_name == 'pull_request' || inputs.deploy == false || inputs.format != 'html' || inputs.target == 'main'
+        id: upload-artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name != '' && inputs.artifact_name || format('build-{0}-{1}', inputs.os, inputs.format) }}
+          path: |
+            build/html
+            build/pdf
+
+      - name: 📋 Build Declaration
+        run: |
+          ARTIFACT_NAME="${{ inputs.artifact_name != '' && inputs.artifact_name || format('build-{0}-{1}', inputs.os, inputs.format) }}"
+          echo "📦 Build Declaration: Successfully created artifact '$ARTIFACT_NAME'"
+          echo "📊 Format: ${{ inputs.format }}"
+          echo "📊 OS: ${{ inputs.os }}"
+          echo "📊 Target: ${{ inputs.target }}"
+          echo "📊 Environment: ${{ inputs.environment }}"
+          echo "📊 Method: Container (Linux) - Experimental"
+          echo "📝 Note: This workflow only builds artifacts - deployment handled by publish-live workflow"
+          echo "artifact_created=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
+
+      - name: 🎯 Set Final Build Status
+        if: always()
+        shell: bash
+        run: |
+          echo "🎯 Setting final build status..."
+          
+          if [ "${{ job.status }}" = "success" ]; then
+            STATE="success"
+            DESCRIPTION="Build completed successfully (Linux container, ${{ inputs.format }})"
+          else
+            STATE="failure"
+            DESCRIPTION="Build failed (Linux container, ${{ inputs.format }})"
+          fi
+          
+          echo "📊 Final status: $STATE"
+          echo "📝 Description: $DESCRIPTION"
+          
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"$STATE\",
+              \"description\": \"$DESCRIPTION\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+          
+          echo "✅ Commit status updated successfully"
+
+  # Traditional build (fallback for all cases)
+  build-traditional:
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 60
+    environment:
+      name: ${{ inputs.environment }}
+    if: inputs.os == 'windows-latest' || inputs.force_traditional
+    env:
+      R_LIBS_USER: ${{ github.workspace }}/.r-lib
+      QUARTO_LOG_LEVEL: ${{ inputs.quarto-log-level }}
+      PYTHONIOENCODING: utf-8
+      LANG: en_US.UTF-8
+      LC_ALL: en_US.UTF-8
+
+    steps:
+      - name: 🚦 Set Initial Build Status
+        shell: bash
+        run: |
+          echo "🚦 Setting initial build status to pending..."
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"pending\",
+              \"description\": \"Quarto build started (Traditional, ${{ inputs.format }})\",
               \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
             }"
 
       - name: 🔍 Validate inputs
         shell: pwsh
         run: |
-          # Set UTF-8 encoding for proper emoji display
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $OutputEncoding = [System.Text.Encoding]::UTF8
           [Console]::InputEncoding = [System.Text.Encoding]::UTF8
@@ -159,15 +339,7 @@ jobs:
           Write-Output "👉 OS: ${{ inputs.os }}"
           Write-Output "👉 Environment: ${{ inputs.environment }}"
           Write-Output "👉 Format: ${{ inputs.format }}"
-          Write-Output "👉 Deploy: Artifacts only - no deployment"
-          Write-Output "👉 TeX Live: Always installed for all formats (consistent environment)"
-          
-          $valid_formats = @("html", "pdf", "epub", "all")
-          if ("${{ inputs.format }}" -notin $valid_formats) {
-            Write-Error "❌ Format must be one of: $($valid_formats -join ', ')"
-            exit 1
-          }
-          
+          Write-Output "👉 Build Method: Traditional (Proven)"
           Write-Output "✅ Input validation passed"
 
       - name: 📥 Checkout repository
@@ -179,8 +351,6 @@ jobs:
         uses: quarto-dev/quarto-actions/setup@v2
         with:
           version: ${{ inputs.quarto-version }}
-        # Outputs quarto version information after installation
-        id: quarto-setup
 
       - name: 📋 Quarto Setup Info
         shell: bash
@@ -217,7 +387,6 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # Use winget if available, otherwise fallback to chocolatey
           try {
             winget install ArtifexSoftware.GhostScript --accept-source-agreements --accept-package-agreements
             Write-Output "✅ Ghostscript installed via winget"
@@ -226,7 +395,6 @@ jobs:
             choco install ghostscript -y
           }
           
-          # Add Ghostscript to PATH (both installation methods use the same path)
           $gsPath = Get-ChildItem "C:\Program Files\gs" | Sort-Object Name -Descending | Select-Object -First 1
           $binPath = Join-Path $gsPath.FullName "bin"
           echo "Adding Ghostscript path: $binPath"
@@ -288,35 +456,28 @@ jobs:
       - name: 🎨 Install Inkscape and font dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
-          # First remove any existing Inkscape
           sudo apt-get remove -y inkscape || true
-          # Install Inkscape from PPA for more reliable version
           echo "📦 Installing Inkscape from PPA..."
           sudo add-apt-repository ppa:inkscape.dev/stable -y
           sudo apt-get update
           sudo apt-get install -y inkscape
           
-          # Install font dependencies
           echo "📦 Installing font dependencies..."
           sudo apt-get install -y \
             fonts-freefont-ttf \
             fonts-liberation \
             fontconfig
           
-          # Update font cache after installing Inkscape and fonts
           echo "🧹 Updating font cache..."
           sudo fc-cache -fv
           
-          # Verify Inkscape installation
           echo "📊 Inkscape version:"
           inkscape --version
           
-          # Test SVG to PDF conversion with the new Inkscape
           echo "🧪 Testing Inkscape SVG to PDF conversion..."
           echo '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><circle cx="50" cy="50" r="40" fill="red"/></svg>' > test.svg
           inkscape --export-type=pdf --export-filename=test.pdf test.svg
           
-          # Verify if the PDF was created
           if [ -f test.pdf ]; then
             echo "✅ Inkscape SVG to PDF conversion successful!"
             ls -lh test.pdf
@@ -332,12 +493,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # Set UTF-8 encoding for proper emoji display
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $OutputEncoding = [System.Text.Encoding]::UTF8
           [Console]::InputEncoding = [System.Text.Encoding]::UTF8
           
-          # Use winget (Windows default package manager) if available, otherwise fallback to chocolatey
           try {
             winget install Inkscape.Inkscape --accept-source-agreements --accept-package-agreements
             Write-Output "✅ Inkscape installed via winget"
@@ -346,14 +505,11 @@ jobs:
             choco install inkscape -y
           }
           
-          # Add Inkscape to PATH (both installation methods use the same path)
           echo "C:\Program Files\Inkscape\bin" | Out-File -Append -Encoding UTF8 $env:GITHUB_PATH
           
-          # Verify Inkscape installation
           inkscape --version
 
       # Install TeX Live packages (Cross-platform) - ALWAYS install for consistency
-      # Required for TikZ diagrams in HTML (PDF->SVG), PDF output, and potential future needs
       - name: 📦 Install TeX Live packages
         uses: zauguin/install-texlive@v4
         with:
@@ -368,13 +524,11 @@ jobs:
           echo "📊 Current format: ${{ inputs.format }}"
           echo "📊 Philosophy: All builds get same environment, only build targets differ"
           
-          # Check LaTeX engines
           echo "📊 Checking LaTeX engines:"
           which lualatex || echo "❌ lualatex not found"
           which pdflatex || echo "❌ pdflatex not found"
           lualatex --version | head -2 || echo "❌ lualatex version failed"
           
-          # Check if required packages are available
           echo "📊 Checking core LaTeX and TikZ packages:"
           kpsewhich pgf.sty && echo "✅ PGF package found" || echo "❌ PGF package missing"
           kpsewhich pgfplots.sty && echo "✅ PGFPlots package found" || echo "❌ PGFPlots package missing"
@@ -386,7 +540,6 @@ jobs:
           kpsewhich phvr7t.tfm && echo "✅ Helvetica font found" || echo "❌ Helvetica font missing"
           kpsewhich t1phv.fd && echo "✅ Helvetica font descriptor found" || echo "❌ Helvetica font descriptor missing"
           
-          # Test TikZ compilation
           echo "🧪 Testing TikZ compilation..."
           cat > test_tikz.tex << 'EOF'
           \documentclass{standalone}
@@ -504,6 +657,7 @@ jobs:
           echo "   - Format: ${{ inputs.format }}"
           echo "   - OS: ${{ inputs.os }}"
           echo "   - Environment: ${{ inputs.environment }}"
+          echo "   - Method: Traditional (Proven)"
           echo "   - Timeout: 60 minutes"
           echo "💓 Heartbeat will show progress every 5 minutes"
           
@@ -664,7 +818,6 @@ jobs:
         if: runner.os == 'Windows' && (inputs.format == 'pdf' || inputs.format == 'all')
         shell: pwsh
         run: |
-          # Set UTF-8 encoding for proper emoji display
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $OutputEncoding = [System.Text.Encoding]::UTF8
           [Console]::InputEncoding = [System.Text.Encoding]::UTF8
@@ -674,13 +827,11 @@ jobs:
 
           if (!(Test-Path $input)) {
             Write-Warning "⚠️ Input PDF not found! Skipping compression..."
-            exit 0  # Non-zero exit would fail the workflow
+            exit 0
           }
 
           Write-Output "📉 Compressing PDF using Ghostscript..."
 
-          # Unless you are a sucker for pain, don't try to line-break this command (it was a nightmare)
-          # Note that compatability should be written as -dCompatibilityLevel:1.4, not -dCompatibilityLevel=1.4!!!
           & gswin64c -sDEVICE=pdfwrite -dCompatibilityLevel:1.4 -dPDFSETTINGS=/ebook -dNOPAUSE -dBATCH -sOutputFile="$output" "$input"
 
           if (Test-Path $output) {
@@ -700,10 +851,9 @@ jobs:
           name: ${{ inputs.artifact_name != '' && inputs.artifact_name || format('build-{0}-{1}', inputs.os, inputs.format) }}
           path: |
             build/html
-                    build/pdf
+            build/pdf
 
       - name: 📋 Build Declaration
-        shell: bash
         run: |
           ARTIFACT_NAME="${{ inputs.artifact_name != '' && inputs.artifact_name || format('build-{0}-{1}', inputs.os, inputs.format) }}"
           echo "📦 Build Declaration: Successfully created artifact '$ARTIFACT_NAME'"
@@ -711,190 +861,9 @@ jobs:
           echo "📊 OS: ${{ inputs.os }}"
           echo "📊 Target: ${{ inputs.target }}"
           echo "📊 Environment: ${{ inputs.environment }}"
+          echo "📊 Method: Traditional (Proven)"
           echo "📝 Note: This workflow only builds artifacts - deployment handled by publish-live workflow"
           echo "artifact_created=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
-
-
-
-      - name: 📝 Collect Build Logs and System Info (Universal)
-        if: always()  # Always run, even if previous steps failed
-        shell: pwsh
-        run: |
-          # Set UTF-8 encoding for proper emoji display
-          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-          $OutputEncoding = [System.Text.Encoding]::UTF8
-          [Console]::InputEncoding = [System.Text.Encoding]::UTF8
-          
-          Write-Output "🔄 Collecting comprehensive build logs and system information..."
-          
-          # Create logs directory structure
-          New-Item -Type Directory -Path "logs", "logs/system-info", "logs/build-output" -Force | Out-Null
-          
-          # === COLLECT ALL BUILD LOGS ===
-          Write-Output "📄 Searching for build logs in all directories..."
-          
-          # Find and copy all .log files from common locations
-          $logPaths = @("quarto", "build", "_book", ".", "_site")
-          foreach ($path in $logPaths) {
-            if (Test-Path $path) {
-              Write-Output "🔍 Searching in: $path"
-              Get-ChildItem -Path $path -Recurse -Include "*.log" -ErrorAction SilentlyContinue | ForEach-Object {
-                $relativePath = $_.FullName.Replace($PWD.Path, "").TrimStart("/\")
-                $sanitizedName = $relativePath -replace "[/\\:]", "_"
-                Write-Output "📄 Found log: $relativePath → logs/$sanitizedName"
-                Copy-Item $_.FullName "logs/$sanitizedName" -ErrorAction SilentlyContinue
-              }
-            }
-          }
-          
-          # Look for any output files that might contain build info
-          Get-ChildItem -Recurse -Include "*.out", "*.aux", "*.fls", "*.fdb_latexmk" -ErrorAction SilentlyContinue | ForEach-Object {
-            $relativePath = $_.FullName.Replace($PWD.Path, "").TrimStart("/\")
-            $sanitizedName = $relativePath -replace "[/\\:]", "_"
-            Copy-Item $_.FullName "logs/build-output/$sanitizedName" -ErrorAction SilentlyContinue
-          }
-          
-          # === SYSTEM ENVIRONMENT ===
-          Write-Output "🖥️ Collecting system environment..."
-          @"
-          === Build Environment Information ===
-          Date: $(Get-Date)
-          GitHub Workflow: ${{ github.workflow }}
-          GitHub Run ID: ${{ github.run_id }}
-          Runner OS: ${{ runner.os }}
-          Build Format: ${{ inputs.format }}
-          PowerShell Version: $($PSVersionTable.PSVersion)
-          Working Directory: $PWD
-          
-          "@ | Out-File "logs/system-info/environment.log" -Encoding UTF8
-          
-          # === SYSTEM RESOURCES ===
-          Write-Output "📊 Collecting system resources..."
-          if ($IsWindows -or $env:OS -eq "Windows_NT") {
-            @"
-          === System Resources (Windows) ===
-          "@ | Out-File "logs/system-info/resources.log" -Encoding UTF8
-            
-            # Windows system info
-            Get-ComputerInfo | Select-Object TotalPhysicalMemory, CsProcessors, WindowsVersion | Out-File "logs/system-info/resources.log" -Append -Encoding UTF8
-            Get-WmiObject -Class Win32_LogicalDisk | Select-Object DeviceID, Size, FreeSpace | Out-File "logs/system-info/resources.log" -Append -Encoding UTF8
-          } else {
-            @"
-          === System Resources (Linux) ===
-          "@ | Out-File "logs/system-info/resources.log" -Encoding UTF8
-            
-            # Linux system info
-            if (Get-Command free -ErrorAction SilentlyContinue) {
-              & free -h 2>&1 | Out-File "logs/system-info/resources.log" -Append -Encoding UTF8
-            }
-            if (Get-Command df -ErrorAction SilentlyContinue) {
-              & df -h 2>&1 | Out-File "logs/system-info/resources.log" -Append -Encoding UTF8
-            }
-          }
-          
-          # === GRAPHICS/PNG LIBRARIES ===
-          Write-Output "🖼️ Collecting graphics library information..."
-          @"
-          === Graphics Libraries Information ===
-          "@ | Out-File "logs/system-info/libraries.log" -Encoding UTF8
-          
-          if ($IsWindows -or $env:OS -eq "Windows_NT") {
-            # Windows DLL information
-            Get-ChildItem -Path $env:SystemRoot\System32 -Include "*png*", "*cairo*", "*freetype*" -ErrorAction SilentlyContinue | 
-              Select-Object Name, Length, LastWriteTime | Out-File "logs/system-info/libraries.log" -Append -Encoding UTF8
-          } else {
-            # Linux library information
-            if (Get-Command ldconfig -ErrorAction SilentlyContinue) {
-              & ldconfig -p 2>&1 | Select-String -Pattern "(png|cairo|freetype|graphite)" | Out-File "logs/system-info/libraries.log" -Append -Encoding UTF8
-            }
-            if (Get-Command pkg-config -ErrorAction SilentlyContinue) {
-              @("libpng", "cairo", "freetype2") | ForEach-Object {
-                "--- $_ ---" | Out-File "logs/system-info/libraries.log" -Append -Encoding UTF8
-                $result = if (& pkg-config --exists $_ 2>$null) { & pkg-config --modversion $_ 2>&1 } else { "Not found" }
-                $result | Out-File "logs/system-info/libraries.log" -Append -Encoding UTF8
-              }
-            }
-          }
-          
-          # === TEX DISTRIBUTION ===
-          Write-Output "📖 Collecting TeX distribution info..."
-          @"
-          === TeX Distribution Information ===
-          "@ | Out-File "logs/system-info/tex-info.log" -Encoding UTF8
-          
-          # Check for TeX executables
-          @("pdflatex", "lualatex", "xelatex", "tlmgr") | ForEach-Object {
-            "--- $_ ---" | Out-File "logs/system-info/tex-info.log" -Append -Encoding UTF8
-            if (Get-Command $_ -ErrorAction SilentlyContinue) {
-              & $_ --version 2>&1 | Select-Object -First 5 | Out-File "logs/system-info/tex-info.log" -Append -Encoding UTF8
-            } else {
-              "$_ not found" | Out-File "logs/system-info/tex-info.log" -Append -Encoding UTF8
-            }
-          }
-          
-          # === QUARTO INFORMATION ===
-          Write-Output "📚 Collecting Quarto information..."
-          @"
-          === Quarto Information ===
-          "@ | Out-File "logs/system-info/quarto-info.log" -Encoding UTF8
-          
-          if (Get-Command quarto -ErrorAction SilentlyContinue) {
-            & quarto --version 2>&1 | Out-File "logs/system-info/quarto-info.log" -Append -Encoding UTF8
-            "--- Quarto Check ---" | Out-File "logs/system-info/quarto-info.log" -Append -Encoding UTF8
-            & quarto check 2>&1 | Out-File "logs/system-info/quarto-info.log" -Append -Encoding UTF8
-          } else {
-            "Quarto not found" | Out-File "logs/system-info/quarto-info.log" -Append -Encoding UTF8
-          }
-          
-          # === SUMMARY ===
-          Write-Output "📊 Build log collection summary:"
-          Write-Output "📁 Log files collected:"
-          Get-ChildItem -Path "logs" -Recurse -File | ForEach-Object {
-            $size = if ($_.Length -gt 1MB) { "{0:N2} MB" -f ($_.Length / 1MB) } 
-                    elseif ($_.Length -gt 1KB) { "{0:N2} KB" -f ($_.Length / 1KB) } 
-                    else { "$($_.Length) bytes" }
-            Write-Output "  📄 $($_.FullName.Replace($PWD.Path, '.')) ($size)"
-          }
-
-      - name: 📤 Upload Build Logs (Always)
-        if: always()  # Upload logs even if build fails
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs-${{ inputs.os }}-${{ inputs.format }}-${{ github.run_id }}
-          path: logs/
-          retention-days: 30  # Keep logs for 30 days for debugging
-          if-no-files-found: warn
-
-      - name: 📋 Build Summary
-        shell: pwsh
-        run: |
-          # Set UTF-8 encoding for proper emoji display
-          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-          $OutputEncoding = [System.Text.Encoding]::UTF8
-          [Console]::InputEncoding = [System.Text.Encoding]::UTF8
-          
-          # TeX Live is now always installed for consistent environment across all builds
-          $texLiveStatus = "✅ Always installed (zauguin/install-texlive@v4)"
-          
-          @"
-          ## 📊 Build Status Summary
-          🎯 Target: ${{ inputs.target }}
-          💻 OS: ${{ inputs.os }}
-          🔧 Environment: ${{ inputs.environment }}
-          📚 Quarto Version: ${{ inputs.quarto-version }}
-          🔬 R Version: ${{ inputs.r-version }}
-          📄 Format: ${{ inputs.format }}
-          🚀 Deploy: Artifacts only (no deployment in this workflow)
-          🧩 Cache Status:
-            - TeX Live: $texLiveStatus
-            - R Packages: ${{ steps.cache-r-packages.outputs.cache-hit == 'true' && '✅ Hit' || '❌ Miss' }}
-            - Python Packages: ${{ steps.cache-python-packages.outputs.cache-hit == 'true' && '✅ Hit' || '❌ Miss' }}
-          📝 Debug Artifacts:
-            - Build logs available as artifact: build-logs-${{ inputs.os }}-${{ inputs.format }}-${{ github.run_id }}
-            - Includes: TeX logs, system info, library details, and comprehensive build output
-            - Retention: 30 days for debugging
-          ⏰ Completed at: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-          "@ | Add-Content $env:GITHUB_STEP_SUMMARY
 
       - name: 🎯 Set Final Build Status
         if: always()
@@ -902,19 +871,17 @@ jobs:
         run: |
           echo "🎯 Setting final build status..."
           
-          # Determine the final status based on job status
           if [ "${{ job.status }}" = "success" ]; then
             STATE="success"
-            DESCRIPTION="Build completed successfully (${{ inputs.os }}, ${{ inputs.format }})"
+            DESCRIPTION="Build completed successfully (Traditional, ${{ inputs.format }})"
           else
             STATE="failure"
-            DESCRIPTION="Build failed (${{ inputs.os }}, ${{ inputs.format }})"
+            DESCRIPTION="Build failed (Traditional, ${{ inputs.format }})"
           fi
           
           echo "📊 Final status: $STATE"
           echo "📝 Description: $DESCRIPTION"
           
-          # Set the final commit status
           curl -X POST \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \

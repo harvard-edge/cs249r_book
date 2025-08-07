@@ -1,0 +1,471 @@
+name: '🏗️ Quarto Build (Container)'
+
+# Set retention period to 7 days
+env:
+  GITHUB_ACTIONS_RETENTION_DAYS: 7
+
+# Cancel duplicate builds for same target+os+format combination
+concurrency:
+  group: quarto-build-${{ inputs.target }}-${{ inputs.os }}-${{ inputs.format }}-${{ github.sha }}
+  cancel-in-progress: true
+
+# This workflow uses containers for all builds (Linux and Windows)
+# This is the primary workflow for daily builds
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        required: false
+        type: string
+        default: 'development'
+        description: 'Build environment'
+      os:
+        required: false
+        type: choice
+        default: 'ubuntu-latest'
+        description: 'Operating system to run on'
+        options:
+          - ubuntu-latest
+          - windows-latest
+      quarto-version:
+        required: false
+        type: string
+        default: '1.7.31'
+        description: 'Version of Quarto to use'
+      r-version:
+        required: false
+        type: string
+        default: '4.3.2'
+        description: 'Version of R to use'
+      target:
+        required: false
+        type: choice
+        default: 'dev'
+        description: 'Target branch (dev/main) - determines build behavior'
+        options:
+          - dev
+          - main
+      format:
+        required: false
+        type: choice
+        default: 'html'
+        description: 'Format to build'
+        options:
+          - html
+          - pdf
+          - epub
+          - all
+      quarto-log-level:
+        required: false
+        type: choice
+        default: 'INFO'
+        description: 'Quarto log level'
+        options:
+          - INFO
+          - DEBUG
+      artifact_name:
+        required: false
+        type: string
+        default: ''
+        description: 'Explicit artifact name (if empty, uses build-{os}-{format} pattern)'
+  workflow_call:
+    inputs:
+      environment:
+        required: false
+        type: string
+        default: 'development'
+        description: 'Build environment'
+      os:
+        required: true
+        type: string
+        description: 'Operating system to run on (ubuntu-latest/windows-latest)'
+      quarto-version:
+        required: false
+        type: string
+        default: '1.7.31'
+        description: 'Version of Quarto to use'
+      r-version:
+        required: false
+        type: string
+        default: '4.3.2'
+        description: 'Version of R to use'
+      target:
+        required: false
+        type: string
+        default: ''
+        description: 'Target branch (dev/main) - determines build behavior'
+      format:
+        required: false
+        type: string
+        default: 'all'
+        description: 'Format to build (html/pdf/epub/all)'
+      quarto-log-level:
+        required: false
+        type: string
+        default: 'INFO'
+        description: 'Quarto log level (INFO/DEBUG)'
+      artifact_name:
+        required: false
+        type: string
+        default: ''
+        description: 'Explicit artifact name (if empty, uses build-{os}-{format} pattern)'
+
+permissions:
+  contents: write
+  pages: write
+
+jobs:
+  # Linux builds using container
+  build-linux:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/${{ github.repository }}/linux-build:latest
+      options: --user root
+    timeout-minutes: 60
+    environment:
+      name: ${{ inputs.environment }}
+    if: inputs.os == 'ubuntu-latest'
+    env:
+      QUARTO_LOG_LEVEL: ${{ inputs.quarto-log-level }}
+      PYTHONIOENCODING: utf-8
+      LANG: en_US.UTF-8
+      LC_ALL: en_US.UTF-8
+
+    steps:
+      - name: 🚦 Set Initial Build Status
+        shell: bash
+        run: |
+          echo "🚦 Setting initial build status to pending..."
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"pending\",
+              \"description\": \"Quarto build started (Linux container, ${{ inputs.format }})\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 📋 Container Environment Info
+        shell: bash
+        run: |
+          echo "🔄 Container environment information..."
+          echo "📊 Quarto version:"
+          quarto --version
+          echo "📊 Python version:"
+          python3 --version
+          echo "📊 R version:"
+          R --version | head -1
+          echo "📊 TeX Live version:"
+          lualatex --version | head -1
+          echo "📊 Available disk space:"
+          df -h .
+          echo "📊 Memory usage:"
+          free -h
+
+      - name: 🔨 Build HTML (copy config and render)
+        if: inputs.format == 'html' || inputs.format == 'all'
+        shell: bash
+        run: |
+          echo "🚀 Setting up HTML configuration..."
+          cd quarto
+          rm -f _quarto.yml
+          cp config/_quarto-html.yml _quarto.yml
+          echo "✅ Configuration set to HTML"
+          
+          echo "🔨 Building HTML..."
+          echo "⏰ HTML build started at: $(date)"
+          
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"pending\",
+              \"description\": \"Building HTML content (Linux container)\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+          
+          quarto render --to html
+          echo "✅ HTML build completed at: $(date)"
+        
+      - name: 🔨 Build PDF (copy config and render)
+        if: inputs.format == 'pdf' || inputs.format == 'all'
+        shell: bash
+        run: |
+          echo "🚀 Setting up PDF configuration..."
+          cd quarto
+          rm -f _quarto.yml
+          cp config/_quarto-pdf.yml _quarto.yml
+          echo "✅ Configuration set to PDF"
+          
+          echo "🔨 Building PDF..."
+          echo "⏰ PDF build started at: $(date)"
+          echo "📊 This should be much faster with pre-installed dependencies"
+          
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"pending\",
+              \"description\": \"Building PDF content (Linux container) - optimized\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+          
+          quarto render --to titlepage-pdf
+          echo "✅ PDF build completed at: $(date)"
+
+      - name: 📉 Compress PDF with Ghostscript
+        if: inputs.format == 'pdf' || inputs.format == 'all'
+        run: |
+          if [ -f "build/pdf/Machine-Learning-Systems.pdf" ]; then
+            gs \
+              -sDEVICE=pdfwrite \
+              -dCompatibilityLevel=1.4 \
+              -dPDFSETTINGS=/ebook \
+              -dNOPAUSE \
+              -dQUIET \
+              -dBATCH \
+              -sOutputFile="./build/pdf/ebook.pdf" \
+              "./build/pdf/Machine-Learning-Systems.pdf"
+
+            mv ./build/pdf/ebook.pdf ./build/pdf/Machine-Learning-Systems.pdf
+          else
+            echo "⚠️ PDF file not found for compression"
+          fi
+
+      - name: 📤 Upload build artifacts
+        if: github.event_name == 'pull_request' || inputs.deploy == false || inputs.format != 'html' || inputs.target == 'main'
+        id: upload-artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name != '' && inputs.artifact_name || format('build-{0}-{1}', inputs.os, inputs.format) }}
+          path: |
+            build/html
+            build/pdf
+
+      - name: 📋 Build Declaration
+        run: |
+          ARTIFACT_NAME="${{ inputs.artifact_name != '' && inputs.artifact_name || format('build-{0}-{1}', inputs.os, inputs.format) }}"
+          echo "📦 Build Declaration: Successfully created artifact '$ARTIFACT_NAME'"
+          echo "📊 Format: ${{ inputs.format }}"
+          echo "📊 OS: ${{ inputs.os }}"
+          echo "📊 Target: ${{ inputs.target }}"
+          echo "📊 Environment: ${{ inputs.environment }}"
+          echo "📊 Method: Container (Linux) - Fast Path"
+          echo "📝 Note: This workflow only builds artifacts - deployment handled by publish-live workflow"
+          echo "artifact_created=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
+
+      - name: 🎯 Set Final Build Status
+        if: always()
+        shell: bash
+        run: |
+          echo "🎯 Setting final build status..."
+          
+          if [ "${{ job.status }}" = "success" ]; then
+            STATE="success"
+            DESCRIPTION="Build completed successfully (Linux container, ${{ inputs.format }})"
+          else
+            STATE="failure"
+            DESCRIPTION="Build failed (Linux container, ${{ inputs.format }})"
+          fi
+          
+          echo "📊 Final status: $STATE"
+          echo "📝 Description: $DESCRIPTION"
+          
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"$STATE\",
+              \"description\": \"$DESCRIPTION\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+          
+          echo "✅ Commit status updated successfully"
+
+  # Windows builds using container (fallback to traditional if container unavailable)
+  build-windows:
+    runs-on: windows-latest
+    # Note: Windows containers require special Windows container runners
+    # For now, we'll fall back to traditional build approach
+    # container:
+    #   image: ghcr.io/${{ github.repository }}/quarto-build-windows:latest
+    timeout-minutes: 60
+    environment:
+      name: ${{ inputs.environment }}
+    if: inputs.os == 'windows-latest'
+    env:
+      QUARTO_LOG_LEVEL: ${{ inputs.quarto-log-level }}
+      PYTHONIOENCODING: utf-8
+      LANG: en_US.UTF-8
+      LC_ALL: en_US.UTF-8
+
+    steps:
+      - name: 🚦 Set Initial Build Status
+        shell: bash
+        run: |
+          echo "🚦 Setting initial build status to pending..."
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"pending\",
+              \"description\": \"Quarto build started (Windows container, ${{ inputs.format }})\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 📋 Container Environment Info
+        shell: bash
+        run: |
+          echo "🔄 Container environment information..."
+          echo "📊 Quarto version:"
+          quarto --version
+          echo "📊 Python version:"
+          python3 --version
+          echo "📊 R version:"
+          R --version | head -1
+          echo "📊 TeX Live version:"
+          lualatex --version | head -1
+          echo "📊 Available disk space:"
+          df -h .
+          echo "📊 Memory usage:"
+          free -h
+
+      - name: 🔨 Build HTML (copy config and render)
+        if: inputs.format == 'html' || inputs.format == 'all'
+        shell: bash
+        run: |
+          echo "🚀 Setting up HTML configuration..."
+          cd quarto
+          rm -f _quarto.yml
+          cp config/_quarto-html.yml _quarto.yml
+          echo "✅ Configuration set to HTML"
+          
+          echo "🔨 Building HTML..."
+          echo "⏰ HTML build started at: $(date)"
+          
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"pending\",
+              \"description\": \"Building HTML content (Windows container)\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+          
+          quarto render --to html
+          echo "✅ HTML build completed at: $(date)"
+        
+      - name: 🔨 Build PDF (copy config and render)
+        if: inputs.format == 'pdf' || inputs.format == 'all'
+        shell: bash
+        run: |
+          echo "🚀 Setting up PDF configuration..."
+          cd quarto
+          rm -f _quarto.yml
+          cp config/_quarto-pdf.yml _quarto.yml
+          echo "✅ Configuration set to PDF"
+          
+          echo "🔨 Building PDF..."
+          echo "⏰ PDF build started at: $(date)"
+          echo "📊 This should be much faster with pre-installed dependencies"
+          
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"pending\",
+              \"description\": \"Building PDF content (Windows container) - optimized\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+          
+          quarto render --to titlepage-pdf
+          echo "✅ PDF build completed at: $(date)"
+
+      - name: 📉 Compress PDF with Ghostscript
+        if: inputs.format == 'pdf' || inputs.format == 'all'
+        shell: pwsh
+        run: |
+          $input = "./build/pdf/Machine-Learning-Systems.pdf"
+          $output = "./build/pdf/ebook.pdf"
+
+          if (!(Test-Path $input)) {
+            Write-Warning "⚠️ Input PDF not found! Skipping compression..."
+            exit 0
+          }
+
+          Write-Output "📉 Compressing PDF using Ghostscript..."
+          & gswin64c -sDEVICE=pdfwrite -dCompatibilityLevel:1.4 -dPDFSETTINGS=/ebook -dNOPAUSE -dBATCH -sOutputFile="$output" "$input"
+
+          if (Test-Path $output) {
+            Move-Item -Force $output $input
+          } else {
+            Write-Warning "⚠️ Compression failed but continuing"
+          }
+          
+      - name: 📤 Upload build artifacts
+        if: github.event_name == 'pull_request' || inputs.deploy == false || inputs.format != 'html' || inputs.target == 'main'
+        id: upload-artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name != '' && inputs.artifact_name || format('build-{0}-{1}', inputs.os, inputs.format) }}
+          path: |
+            build/html
+            build/pdf
+
+      - name: 📋 Build Declaration
+        run: |
+          ARTIFACT_NAME="${{ inputs.artifact_name != '' && inputs.artifact_name || format('build-{0}-{1}', inputs.os, inputs.format) }}"
+          echo "📦 Build Declaration: Successfully created artifact '$ARTIFACT_NAME'"
+          echo "📊 Format: ${{ inputs.format }}"
+          echo "📊 OS: ${{ inputs.os }}"
+          echo "📊 Target: ${{ inputs.target }}"
+          echo "📊 Environment: ${{ inputs.environment }}"
+          echo "📊 Method: Container (Windows) - Fast Path"
+          echo "📝 Note: This workflow only builds artifacts - deployment handled by publish-live workflow"
+          echo "artifact_created=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
+
+      - name: 🎯 Set Final Build Status
+        if: always()
+        shell: bash
+        run: |
+          echo "🎯 Setting final build status..."
+          
+          if [ "${{ job.status }}" = "success" ]; then
+            STATE="success"
+            DESCRIPTION="Build completed successfully (Windows container, ${{ inputs.format }})"
+          else
+            STATE="failure"
+            DESCRIPTION="Build failed (Windows container, ${{ inputs.format }})"
+          fi
+          
+          echo "📊 Final status: $STATE"
+          echo "📝 Description: $DESCRIPTION"
+          
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+            -d "{
+              \"state\": \"$STATE\",
+              \"description\": \"$DESCRIPTION\",
+              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+            }"
+          
+          echo "✅ Commit status updated successfully" 

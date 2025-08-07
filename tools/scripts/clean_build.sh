@@ -7,15 +7,15 @@ echo "🧹 Cleaning build artifacts..."
 
 # Remove generated TeX files
 echo "📄 Removing generated .tex files..."
-rm -f book/*.tex book/*.aux book/*.log
+rm -f quarto/*.tex quarto/*.aux quarto/*.log
 
 # Remove log files from content directories
 echo "📋 Removing log files..."
-find book/contents -name "*.log" -delete 2>/dev/null || true
+find quarto/contents -name "*.log" -delete 2>/dev/null || true
 
 # Remove build directories
 echo "📁 Removing build directories..."
-rm -rf book/_book book/build
+rm -rf quarto/_book quarto/build build
 
 # Remove Quarto cache
 echo "🗂️ Removing Quarto cache..."

@@ -52,7 +52,7 @@ The publish-live workflow is designed to handle the publication of your Machine 
 - ✅ **Clean History**: Git history doesn't bloat with PDF changes
 
 ### PDF Access Points
-1. **Direct Download**: `https://mlsysbook.ai/assets/Machine-Learning-Systems.pdf`
+1. **Direct Download**: `https://mlsysbook.ai/assets/downloads/Machine-Learning-Systems.pdf`
 2. **Release Assets**: `https://github.com/harvard-edge/cs249r_book/releases/download/vX.Y.Z/Machine-Learning-Systems.pdf`
 3. **GitHub Pages**: Available in the deployed site
 
@@ -178,7 +178,7 @@ python tools/scripts/test_publish_live.py
 git status
 
 # Check if PDF is tracked
-git ls-files assets/Machine-Learning-Systems.pdf
+git ls-files assets/downloads/Machine-Learning-Systems.pdf
 
 # Check .gitignore
 grep -n "Machine-Learning-Systems.pdf" .gitignore
