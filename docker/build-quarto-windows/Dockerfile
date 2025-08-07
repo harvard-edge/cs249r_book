@@ -21,19 +21,12 @@ ENV PYTHONIOENCODING="utf-8"
 ENV LANG="en_US.UTF-8"
 ENV LC_ALL="en_US.UTF-8"
 
-RUN New-Item -ItemType Directory -Force -Path 'C:\temp' | Out-Null; `
-    New-Item -ItemType Directory -Force -Path 'C:\r-lib' | Out-Null
+RUN powershell.exe -Command "New-Item -ItemType Directory -Force -Path 'C:\temp' | Out-Null; New-Item -ItemType Directory -Force -Path 'C:\r-lib' | Out-Null"
 
 # ------------------------------------------------------------
 # PHASE 1: PowerShell 7 (ZIP install, container-safe)
 # ------------------------------------------------------------
-RUN Write-Host '🚀 Installing PowerShell 7 (ZIP) ...'; `
-    $Url = 'https://github.com/PowerShell/PowerShell/releases/download/v7.4.1/PowerShell-7.4.1-win-x64.zip'; `
-    $Zip = 'C:\PowerShell-7.4.1.zip'; `
-    Invoke-WebRequest -Uri $Url -OutFile $Zip -UseBasicParsing; `
-    New-Item -ItemType Directory -Force -Path 'C:\Program Files\PowerShell\7' | Out-Null; `
-    Expand-Archive -Path $Zip -DestinationPath 'C:\Program Files\PowerShell\7' -Force; `
-    Remove-Item $Zip -Force
+RUN powershell.exe -Command "Write-Host '🚀 Installing PowerShell 7 (ZIP) ...'; $Url = 'https://github.com/PowerShell/PowerShell/releases/download/v7.4.1/PowerShell-7.4.1-win-x64.zip'; $Zip = 'C:\PowerShell-7.4.1.zip'; Invoke-WebRequest -Uri $Url -OutFile $Zip -UseBasicParsing; New-Item -ItemType Directory -Force -Path 'C:\Program Files\PowerShell\7' | Out-Null; Expand-Archive -Path $Zip -DestinationPath 'C:\Program Files\PowerShell\7' -Force; Remove-Item $Zip -Force"
 ENV PATH="C:\\Program Files\\PowerShell\\7;%PATH%"
 
 # Switch to PowerShell 7 for all subsequent commands
