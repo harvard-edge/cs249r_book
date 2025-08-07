@@ -1,3 +1,4 @@
+# escape=`
 # MLSysBook Windows Quarto Build Container (Windows Server 2022)
 # - PowerShell 7 via ZIP (no MSI)
 # - Quarto 1.7.31 via ZIP (no MSI)
@@ -39,7 +40,7 @@ RUN Write-Host 'Installing PowerShell 7 ZIP...' ; `
     & 'C:\Program Files\PowerShell\7\pwsh.exe' -NoLogo -Command '$PSVersionTable.PSVersion ; Write-Host ''PowerShell 7 installation verified ✅'''
 
 # Switch to PowerShell 7 for subsequent layers
-SHELL ["pwsh", "-NoLogo", "-ExecutionPolicy", "Bypass", "-Command"]
+SHELL ["C:\\Program Files\\PowerShell\\7\\pwsh.exe", "-NoLogo", "-ExecutionPolicy", "Bypass", "-Command"]
 
 # ------------------------------------------------------------
 # PHASE 2: Chocolatey
@@ -133,7 +134,7 @@ TEXMFSYSVAR C:/texlive/texmf-var
 TEXMFVAR C:/texlive/texmf-var
 '@ ; `
     $Profile | Set-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    Start-Process -FilePath $Installer -ArgumentList '-repository', $Repo, '-profile', 'C:\temp\texlive.profile' -Wait ; `
+    Start-Process -FilePath $Installer -ArgumentList '-repository', $Repo, '-profile', 'C:\temp\texlive.profile' -Wait -NoNewWindow ; `
     $tlbin = 'C:\texlive\bin\windows' ; `
     if (-not (Test-Path $tlbin)) { throw "TeX Live bin path missing: $tlbin" } ; `
     $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
@@ -141,8 +142,8 @@ TEXMFVAR C:/texlive/texmf-var
     & "$tlbin\tlmgr.bat" version
 
 RUN $tlmgr = 'C:\texlive\bin\windows\tlmgr.bat' ; `
-    $pkgs = Get-Content 'C:\temp\tl_packages' | Where-Object { $_.Trim() -ne '' } ; `
-    foreach ($p in $pkgs) { & $tlmgr install $p.Trim() } ; `
+    $pkgs = Get-Content 'C:\temp\tl_packages' | Where-Object { $_.Trim() -ne '' -and -not $_.Trim().StartsWith('#') } ; `
+    foreach ($p in $pkgs) { Write-Host "Installing TeX package: $p" ; & $tlmgr install $p.Trim() } ; `
     & $tlmgr install pgf pgfplots xcolor amsmath standalone psnfss collection-fontsrecommended ; `
     lualatex --version ; `
     pdflatex --version ; `
@@ -151,7 +152,22 @@ RUN $tlmgr = 'C:\texlive\bin\windows\tlmgr.bat' ; `
     if (-not (kpsewhich t1phv.fd))   { Write-Error "Missing Helvetica font descriptor (t1phv.fd)" -ErrorAction Stop }
 
 # TikZ smoke test (fast)
-RUN Set-Content -Path C:\temp\test_tikz.tex -Value @'`n\documentclass{standalone}`n\usepackage{tikz}`n\usepackage{pgfplots}`n\usepackage{amsmath}`n\usepackage{xcolor}`n\usepackage[T1]{fontenc}`n\usetikzlibrary{positioning,calc}`n\begin{document}`n\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]`n\node[draw, fill=blue!20] at (0,0) {TikZ Test};`n\node[draw, fill=red!20]  at (2,0) {Success};`n\draw[->] (0.8,0) -- (1.2,0);`n\end{tikzpicture}`n\end{document}`n'@ -Encoding ASCII ; `
+RUN Set-Content -Path C:\temp\test_tikz.tex -Value @'
+\documentclass{standalone}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\usepackage{amsmath}
+\usepackage{xcolor}
+\usepackage[T1]{fontenc}
+\usetikzlibrary{positioning,calc}
+\begin{document}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+\node[draw, fill=blue!20] at (0,0) {TikZ Test};
+\node[draw, fill=red!20]  at (2,0) {Success};
+\draw[->] (0.8,0) -- (1.2,0);
+\end{tikzpicture}
+\end{document}
+'@ -Encoding ASCII ; `
     Push-Location C:\temp ; `
     lualatex -interaction=nonstopmode test_tikz.tex ; `
     if (-not (Test-Path C:\temp\test_tikz.pdf)) { throw 'TikZ smoke test failed' } ; `

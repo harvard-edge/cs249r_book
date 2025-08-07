@@ -1,124 +1,171 @@
 # Windows Quarto Build Container
 
-This directory contains the Windows Docker container configuration for the MLSysBook build system.
+This directory contains the Windows Server 2022 container configuration for building the MLSysBook with Quarto.
 
-## Purpose
+## 🐳 Container Features
 
-The Windows container pre-installs all dependencies to eliminate the 30-45 minute setup time for Windows builds, reducing build times from 45 minutes to 5-10 minutes.
+- **Base Image**: Windows Server 2022 LTSC
+- **PowerShell**: 7.4.1 (ZIP install, container-safe)
+- **Quarto**: 1.7.31 (ZIP install)
+- **Python**: 3.13.1 + production dependencies
+- **TeX Live**: 2025 snapshot with required packages
+- **R**: 4.3.2 + R Markdown packages
+- **Graphics**: Ghostscript + Inkscape (via Chocolatey)
 
-## Structure
+## 🔧 Key Fixes Applied
 
+### 1. PowerShell 7 Path Issues
+- **Problem**: Using `pwsh` shorthand can fail in containers
+- **Fix**: Use full path `C:\Program Files\PowerShell\7\pwsh.exe`
+
+### 2. TeX Live Installation
+- **Problem**: `Start-Process` without `-NoNewWindow` can hang
+- **Fix**: Added `-NoNewWindow` flag for container compatibility
+- **Problem**: Comments in `tl_packages` file
+- **Fix**: Filter out comment lines when installing packages
+
+### 3. TikZ Test Document
+- **Problem**: Complex here-string with backticks
+- **Fix**: Simplified to standard multi-line string
+
+### 4. Package Installation
+- **Problem**: Silent failures in package installation
+- **Fix**: Added verbose output and better error handling
+
+## 🚀 Building the Container
+
+### Prerequisites
+- Windows Docker Desktop or Windows Server with Docker
+- At least 8GB RAM available for Docker
+- 20GB+ free disk space
+
+### Build Command
+```powershell
+# From project root
+docker build -f docker/build-quarto-windows/Dockerfile -t mlsysbook-windows .
 ```
-docker/quarto-build-windows/
-├── Dockerfile              # Container definition
-├── README.md               # This file
-├── .dockerignore          # Files to exclude from build
-└── verify_r_packages.R    # R package verification script
+
+### Test Before Building
+```powershell
+# Run validation script
+.\docker\build-quarto-windows\test_dockerfile.ps1
 ```
 
-## Container Contents
+## 📋 Build Phases
 
-- **Base**: Windows Server Core LTSC 2022
-- **TeX Live**: MikTeX distribution
-- **R**: R-base with all required packages
-- **Python**: Python 3.x with all requirements
-- **Quarto**: Version 1.7.31
-- **Tools**: Inkscape, Ghostscript, Git
-- **Package Manager**: Chocolatey
-- **Dependencies**: All from `tools/dependencies/`
+1. **Base Setup**: Directories, environment variables
+2. **PowerShell 7**: ZIP installation (container-safe)
+3. **Chocolatey**: Package manager installation
+4. **Dependencies**: Copy required files
+5. **Quarto**: ZIP installation with PATH setup
+6. **Python**: 3.13.1 + production requirements
+7. **Graphics**: Ghostscript + Inkscape
+8. **TeX Live**: 2025 snapshot + packages
+9. **R**: 4.3.2 + R Markdown packages
+10. **Cleanup**: Remove temporary files
 
-## Build Process
+## 🔍 Verification Steps
 
-The container is built and tested via GitHub Actions:
+The container includes comprehensive verification:
 
-```bash
-# Trigger Windows container build
-gh workflow run build-windows-container.yml
+- **PowerShell 7**: Version check
+- **Quarto**: Version and command availability
+- **Python**: Version and pip functionality
+- **TeX Live**: Package verification with `kpsewhich`
+- **Fonts**: Helvetica font files verification
+- **TikZ**: Smoke test with PDF generation
+- **R**: Package installation verification
+
+## ⚠️ Common Issues & Solutions
+
+### 1. Build Timeouts
+- **Cause**: Large downloads (TeX Live, Python packages)
+- **Solution**: Increased timeout values in Dockerfile
+
+### 2. PATH Issues
+- **Cause**: Windows PATH not properly updated
+- **Solution**: Explicit PATH manipulation with regex escaping
+
+### 3. Package Installation Failures
+- **Cause**: Network issues or missing dependencies
+- **Solution**: Added verbose output and error checking
+
+### 4. Memory Issues
+- **Cause**: TeX Live installation requires significant memory
+- **Solution**: Use `scheme-infraonly` for minimal installation
+
+## 🧪 Testing
+
+### Run Container
+```powershell
+docker run -it mlsysbook-windows pwsh
 ```
 
-## Usage
-
-The container is used in the Windows containerized build workflow:
-
-```yaml
-runs-on: windows-latest
-container:
-  image: ghcr.io/harvard-edge/cs249r_book/quarto-build-windows:latest
+### Test Quarto
+```powershell
+quarto --version
+quarto check
 ```
 
-## Key Differences from Linux Container
+### Test Python
+```powershell
+python --version
+python -c "import nltk; print('NLTK available')"
+```
 
-1. **Base Image**: Windows Server Core instead of Ubuntu
-2. **Package Manager**: Chocolatey instead of apt-get
-3. **Path Separators**: Backslashes instead of forward slashes
-4. **TeX Distribution**: MikTeX instead of TeX Live
-5. **Shell Commands**: PowerShell instead of bash
+### Test R
+```powershell
+R --version
+Rscript -e "library(rmarkdown); print('R Markdown available')"
+```
 
-## Testing
+### Test TeX Live
+```powershell
+lualatex --version
+kpsewhich pgf.sty
+```
 
-The container includes verification steps for:
-- Quarto functionality
-- Python packages installation
-- R packages installation
-- TeX distribution
-- Tool availability
+## 📊 Performance Notes
 
-## Registry
+- **Build Time**: ~45-60 minutes on typical hardware
+- **Image Size**: ~8-12GB (includes TeX Live, R, Python)
+- **Memory Usage**: 4-6GB during build, 2-3GB runtime
+- **Disk Space**: 15-20GB for build cache
 
-- **Registry**: GitHub Container Registry (ghcr.io)
-- **Image**: `ghcr.io/harvard-edge/cs249r_book/quarto-build-windows`
-- **Tags**: `latest`, `main`, `dev`, branch-specific tags
-- **Size**: ~4-5GB (larger than Linux due to Windows base)
+## 🔧 Troubleshooting
 
-## Performance
+### Build Fails on TeX Live
+```powershell
+# Check available memory
+docker system df
+docker system prune -f
+```
 
-The Windows container provides significant performance improvements:
-- **Traditional Windows build**: 45 minutes (including dependency installation)
-- **Containerized build**: 10-15 minutes (dependencies pre-installed)
-- **Container size**: ~4-5GB (larger than Linux due to Windows base)
-- **Build phases**: 12 optimized phases with progress tracking
+### PowerShell Issues
+```powershell
+# Verify PowerShell 7 installation
+docker run mlsysbook-windows pwsh -Command "Get-Host"
+```
 
-## Recent Improvements (2025)
+### Package Installation Issues
+```powershell
+# Check Chocolatey installation
+docker run mlsysbook-windows choco --version
+```
 
-- **CRITICAL FIX**: Replaced hanging Ghostscript direct download with reliable chocolatey installation (most stable for containers)
-- Fixed PowerShell command syntax and error handling
-- Updated to use PowerShell 7 consistently
-- Improved dependency path handling after repository restructuring
-- Enhanced testing with Windows-specific commands
-- Fixed container testing to use PowerShell instead of bash
-- Added comprehensive error checking and progress indicators
-- Optimized cleanup procedures
+## 📝 Maintenance
 
-## Build Phases
+### Updating Dependencies
+1. Update version numbers in Dockerfile
+2. Test with validation script
+3. Rebuild and verify all components
 
-1. **PowerShell 7 Installation** - Modern PowerShell for better scripting
-2. **Chocolatey Installation** - Package manager for Windows
-3. **Quarto Installation** - Latest Quarto CLI (v1.7.31)
-4. **Python 3.13 Installation** - Latest Python with full package support
-5. **Python Package Installation** - All production requirements
-6. **Ghostscript Installation** - PDF processing capabilities
-7. **Inkscape Installation** - SVG to PDF conversion capability
-8. **TeX Live Installation** - Complete LaTeX distribution for Windows
-9. **R Installation** - R base with development packages
-10. **R Package Installation** - All required R libraries
-11. **R Package Verification** - Validation of successful installation
-12. **Cleanup** - Temporary file removal and optimization
+### Adding New Packages
+1. Add to appropriate phase in Dockerfile
+2. Update verification steps
+3. Test thoroughly
 
-## Windows-Specific Considerations
-
-- Uses Windows Server Core LTSC 2022 as base image
-- PowerShell 7 for modern scripting capabilities
-- Chocolatey for reliable package management
-- Windows-style path handling (C:/ instead of /)
-- Container testing uses PowerShell commands instead of bash
-- Larger image size due to Windows base requirements
-
-- **Traditional Windows build**: 45+ minutes
-- **Containerized Windows build**: 10-15 minutes
-- **Improvement**: 70-80% time reduction
-
-## Known Limitations
-
-- Larger image size compared to Linux container
-- Windows containers require Windows host for optimal performance
-- Some tools may have different behavior compared to Linux equivalents
+### Security Updates
+- Regularly update base image
+- Monitor for CVE reports
+- Update package versions as needed
