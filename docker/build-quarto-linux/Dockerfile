@@ -265,7 +265,7 @@ RUN mkdir -p $R_LIBS_USER
 COPY tools/dependencies/requirements/ /tmp/requirements/
 COPY tools/dependencies/requirements-build.txt /tmp/requirements.txt
 COPY tools/dependencies/install_packages.R /tmp/install_packages.R
-COPY docker/quarto-build-linux/verify_r_packages.R /tmp/verify_r_packages.R
+COPY docker/build-quarto-linux/verify_r_packages.R /tmp/verify_r_packages.R
 
 # === PHASE 8: PYTHON PACKAGES ===
 RUN echo "🚀 === STARTING PYTHON PACKAGE INSTALLATION ===" && \

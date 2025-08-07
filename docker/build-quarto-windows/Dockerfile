@@ -24,7 +24,7 @@ COPY tools/dependencies/requirements/ C:/temp/requirements/
 COPY tools/dependencies/requirements-build.txt C:/temp/requirements.txt
 COPY tools/dependencies/install_packages.R C:/temp/install_packages.R
 COPY tools/dependencies/tl_packages C:/temp/tl_packages
-COPY docker/quarto-build-windows/verify_r_packages.R C:/temp/verify_r_packages.R
+COPY docker/build-quarto-windows/verify_r_packages.R C:/temp/verify_r_packages.R
 
 # Create R library directory
 RUN pwsh -Command "New-Item -ItemType Directory -Path 'C:/r-lib' -Force"

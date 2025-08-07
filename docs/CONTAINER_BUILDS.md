@@ -30,10 +30,10 @@ Containerized Linux Build (5-10 minutes):
 ## Files
 
 ### Core Files
-- `docker/quarto-build-linux/Dockerfile` - Linux container definition with all dependencies
-- `docker/quarto-build-linux/README.md` - Linux container documentation
-- `docker/quarto-build-linux/.dockerignore` - Build exclusions
-- `docker/quarto-build-windows/Dockerfile` - Windows container definition
+- `docker/build-quarto-linux/Dockerfile` - Linux container definition with all dependencies
+- `docker/build-quarto-linux/README.md` - Linux container documentation
+- `docker/build-quarto-linux/.dockerignore` - Build exclusions
+- `docker/build-quarto-windows/Dockerfile` - Windows container definition
 - `.github/workflows/build-linux-container.yml` - Builds and pushes Linux container
 - `.github/workflows/build-windows-container.yml` - Builds and pushes Windows container
 - `.github/workflows/quarto-build-container.yml` - Containerized build workflow
@@ -65,7 +65,7 @@ gh workflow run quarto-build-container.yml --field os=ubuntu-latest --field form
 
 ### Container Information
 - **Linux Registry**: `ghcr.io/harvard-edge/cs249r_book/quarto-build`
-- **Windows Registry**: `ghcr.io/harvard-edge/cs249r_book/quarto-build-windows`
+- **Windows Registry**: `ghcr.io/harvard-edge/cs249r_book/build-quarto-windows`
 - **Tags**: `latest`, `main`, `dev`, branch-specific tags
 - **Linux Size**: ~2-3GB (includes TeX Live, R, Python packages)
 - **Windows Size**: ~4-5GB (includes Windows Server Core + dependencies)

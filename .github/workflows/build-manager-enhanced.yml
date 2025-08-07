@@ -6,11 +6,11 @@ env:
   # Centralized Container Configuration - Single Source of Truth
   CONTAINER_REGISTRY: ${{ inputs.container_registry || 'ghcr.io' }}
   CONTAINER_TAG: ${{ inputs.container_tag || 'latest' }}
-  LINUX_CONTAINER_NAME: ${{ inputs.linux_container_name || 'quarto-build-linux' }}
-  WINDOWS_CONTAINER_NAME: ${{ inputs.windows_container_name || 'quarto-build-windows' }}
+  LINUX_CONTAINER_NAME: ${{ inputs.linux_container_name || 'quarto-linux' }}
+  WINDOWS_CONTAINER_NAME: ${{ inputs.windows_container_name || 'quarto-windows' }}
   # Computed full image names
-  LINUX_IMAGE: ${{ inputs.container_registry || 'ghcr.io' }}/${{ github.repository }}/${{ inputs.linux_container_name || 'quarto-build-linux' }}:${{ inputs.container_tag || 'latest' }}
-  WINDOWS_IMAGE: ${{ inputs.container_registry || 'ghcr.io' }}/${{ github.repository }}/${{ inputs.windows_container_name || 'quarto-build-windows' }}:${{ inputs.container_tag || 'latest' }}
+  LINUX_IMAGE: ${{ inputs.container_registry || 'ghcr.io' }}/${{ github.repository }}/${{ inputs.linux_container_name || 'quarto-linux' }}:${{ inputs.container_tag || 'latest' }}
+  WINDOWS_IMAGE: ${{ inputs.container_registry || 'ghcr.io' }}/${{ github.repository }}/${{ inputs.windows_container_name || 'quarto-windows' }}:${{ inputs.container_tag || 'latest' }}
 
 # Cancel duplicate builds on same branch
 concurrency:
@@ -44,12 +44,12 @@ on:
       linux_container_name:
         description: 'Linux container image name'
         required: false
-        default: 'quarto-build-linux'
+        default: 'quarto-linux'
         type: string
       windows_container_name:
         description: 'Windows container image name'
         required: false
-        default: 'quarto-build-windows'
+        default: 'quarto-windows'
         type: string
       container_registry:
         description: 'Container registry URL'
@@ -276,17 +276,32 @@ jobs:
           echo "  Type: $BUILD_TYPE"
           echo "  Container available: $LINUX_AVAILABLE (Linux), $WINDOWS_AVAILABLE (Windows)"
 
-      - name: 🏗️ Trigger selected build workflow
-        uses: ./.github/workflows/${{ steps.strategy.outputs.workflow }}.yml
+      - name: 🚀 Trigger Container Build (Linux)
+        if: matrix.os == 'ubuntu-latest' && needs.container-health-check.outputs.linux-container-available == 'true'
+        uses: ./.github/workflows/quarto-build-container.yml
         with:
           environment: development
           os: ${{ matrix.os }}
           format: ${{ matrix.format }}
           target: ${{ inputs.test_branch && 'dev' || (github.ref == 'refs/heads/main' && 'main' || 'dev') }}
-          # Pass container configuration for container-based builds
-          container_registry: ${{ needs.container-health-check.outputs.container-registry }}
-          linux_container_image: ${{ needs.container-health-check.outputs.linux-image-name }}
-          windows_container_image: ${{ needs.container-health-check.outputs.windows-image-name }}
+          
+      - name: 🚀 Trigger Container Build (Windows) 
+        if: matrix.os == 'windows-latest' && needs.container-health-check.outputs.windows-container-available == 'true'
+        uses: ./.github/workflows/quarto-build-container.yml
+        with:
+          environment: development
+          os: ${{ matrix.os }}
+          format: ${{ matrix.format }}
+          target: ${{ inputs.test_branch && 'dev' || (github.ref == 'refs/heads/main' && 'main' || 'dev') }}
+          
+      - name: 🐌 Trigger Traditional Build (Fallback)
+        if: (matrix.os == 'ubuntu-latest' && needs.container-health-check.outputs.linux-container-available != 'true') || (matrix.os == 'windows-latest' && needs.container-health-check.outputs.windows-container-available != 'true')
+        uses: ./.github/workflows/quarto-build.yml
+        with:
+          environment: development
+          os: ${{ matrix.os }}
+          format: ${{ matrix.format }}
+          target: ${{ inputs.test_branch && 'dev' || (github.ref == 'refs/heads/main' && 'main' || 'dev') }}
 
   # Step 5: Results and reporting
   build-report:
