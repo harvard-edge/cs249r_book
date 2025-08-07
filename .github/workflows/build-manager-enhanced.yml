@@ -46,6 +46,20 @@ on:
           - html
           - pdf
           - all
+      build_os:
+        description: 'Operating systems to build on'
+        required: false
+        default: 'linux'
+        type: choice
+        options:
+          - linux
+          - windows
+          - both
+      use_containers:
+        description: 'Use pre-built containers for faster builds'
+        required: false
+        default: false
+        type: boolean
       linux_container_name:
         description: 'Linux container image name'
         required: false
@@ -250,9 +264,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        format: ['${{ inputs.build_format || ''html'' }}']
+        include:
+          - os: ubuntu-latest
+            format: '${{ inputs.build_format || ''html'' }}'
+            enabled: ${{ inputs.build_os == 'linux' || inputs.build_os == 'both' }}
+          - os: windows-latest  
+            format: '${{ inputs.build_format || ''html'' }}'
+            enabled: ${{ inputs.build_os == 'windows' || inputs.build_os == 'both' }}
     runs-on: ubuntu-latest
+    if: matrix.enabled == 'true'
     steps:
       - name: 🎯 Determine build strategy
         id: strategy
@@ -284,7 +304,7 @@ jobs:
           echo "  Container available: $LINUX_AVAILABLE (Linux), $WINDOWS_AVAILABLE (Windows)"
 
       - name: 🚀 Trigger Container Build (Linux)
-        if: matrix.os == 'ubuntu-latest' && needs.container-health-check.outputs.linux-container-available == 'true'
+        if: matrix.os == 'ubuntu-latest' && inputs.use_containers == true && needs.container-health-check.outputs.linux-container-available == 'true'
         uses: ./.github/workflows/quarto-build-container.yml
         with:
           environment: development
@@ -293,7 +313,7 @@ jobs:
           target: ${{ inputs.test_branch && 'dev' || (github.ref == 'refs/heads/main' && 'main' || 'dev') }}
           
       - name: 🚀 Trigger Container Build (Windows) 
-        if: matrix.os == 'windows-latest' && needs.container-health-check.outputs.windows-container-available == 'true'
+        if: matrix.os == 'windows-latest' && inputs.use_containers == true && needs.container-health-check.outputs.windows-container-available == 'true'
         uses: ./.github/workflows/quarto-build-container.yml
         with:
           environment: development
@@ -302,7 +322,7 @@ jobs:
           target: ${{ inputs.test_branch && 'dev' || (github.ref == 'refs/heads/main' && 'main' || 'dev') }}
           
       - name: 🐌 Trigger Traditional Build (Fallback)
-        if: (matrix.os == 'ubuntu-latest' && needs.container-health-check.outputs.linux-container-available != 'true') || (matrix.os == 'windows-latest' && needs.container-health-check.outputs.windows-container-available != 'true')
+        if: inputs.use_containers != true || (matrix.os == 'ubuntu-latest' && needs.container-health-check.outputs.linux-container-available != 'true') || (matrix.os == 'windows-latest' && needs.container-health-check.outputs.windows-container-available != 'true')
         uses: ./.github/workflows/quarto-build.yml
         with:
           environment: development
