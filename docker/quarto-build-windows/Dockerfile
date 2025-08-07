@@ -29,89 +29,7 @@ COPY docker/quarto-build-windows/verify_r_packages.R C:/temp/verify_r_packages.R
 # Create R library directory
 RUN pwsh -Command "New-Item -ItemType Directory -Path 'C:/r-lib' -Force"
 
-# === PHASE 3: QUARTO INSTALLATION ===
-RUN pwsh -Command " \
-    Write-Host '🚀 === STARTING QUARTO INSTALLATION ==='; \
-    Write-Host '⏰ Estimated time: 1-2 minutes'; \
-    $startTime = Get-Date; \
-    \
-    Write-Host '📦 Downloading Quarto 1.7.31...'; \
-    Invoke-WebRequest -Uri 'https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.31/quarto-1.7.31-win.zip' -OutFile 'quarto.zip'; \
-    \
-    Write-Host '📦 Extracting Quarto...'; \
-    Expand-Archive -Path 'quarto.zip' -DestinationPath 'C:\quarto' -Force; \
-    \
-    Write-Host '🧹 Cleaning up installer...'; \
-    Remove-Item 'quarto.zip'; \
-    \
-    $endTime = Get-Date; \
-    $duration = ($endTime - $startTime).TotalMinutes; \
-    Write-Host ('✅ === QUARTO INSTALLATION COMPLETE === (' + $duration.ToString('F1') + ' minutes)'); \
-    " && \
-    setx PATH "%PATH%;C:\quarto\quarto-1.7.31\bin" /M
-
-# === PHASE 4: PYTHON 3.13 INSTALLATION ===
-RUN pwsh -Command " \
-    Write-Host '🚀 === STARTING PYTHON 3.13 INSTALLATION ==='; \
-    Write-Host '⏰ Estimated time: 2-3 minutes'; \
-    $startTime = Get-Date; \
-    Write-Host '📦 Installing Python 3.13.1 (exact version from workflow)...'; \
-    " && \
-    choco install -y python --version=3.13.1 && \
-    pwsh -Command " \
-    # Refresh environment variables to pick up Python PATH \
-    $env:PATH = [System.Environment]::GetEnvironmentVariable('PATH', [System.EnvironmentVariableTarget]::Machine) + ';' + [System.Environment]::GetEnvironmentVariable('PATH', [System.EnvironmentVariableTarget]::User); \
-    # Add common Python paths explicitly \
-    $env:PATH += ';C:\Python313;C:\Python313\Scripts;C:\ProgramData\chocolatey\bin'; \
-    \
-    $endTime = Get-Date; \
-    $duration = ($endTime - $startTime).TotalMinutes; \
-    Write-Host ('✅ === PYTHON 3.13 INSTALLATION COMPLETE === (' + $duration.ToString('F1') + ' minutes)'); \
-    \
-    # Test Python installation with explicit path handling \
-    try { \
-        $pythonVersion = & python --version 2>&1; \
-        Write-Host ('📊 Python version: ' + $pythonVersion); \
-        $pipVersion = & python -m pip --version 2>&1; \
-        Write-Host ('📊 Pip version: ' + $pipVersion); \
-    } catch { \
-        Write-Host '⚠️ Python installed but not immediately available in PATH (normal for containers)'; \
-        Write-Host 'Python will be available in subsequent RUN commands'; \
-    } \
-    "
-
-# === PHASE 5: PYTHON PACKAGE INSTALLATION ===
-RUN pwsh -Command " \
-    Write-Host '🚀 === STARTING PYTHON PACKAGE INSTALLATION ==='; \
-    Write-Host '⏰ Estimated time: 1-2 minutes'; \
-    $startTime = Get-Date; \
-    \
-    # Ensure Python is in PATH \
-    $env:PATH = [System.Environment]::GetEnvironmentVariable('PATH', [System.EnvironmentVariableTarget]::Machine) + ';C:\Python313;C:\Python313\Scripts;C:\ProgramData\chocolatey\bin'; \
-    \
-    Write-Host '🔄 Upgrading pip...'; \
-    & python -m pip install --upgrade pip; \
-    \
-    Write-Host '📊 Analyzing requirements.txt...'; \
-    $packageCount = (Get-Content 'C:/temp/requirements.txt' | Where-Object { $_ -notmatch '^#' -and $_ -ne '' }).Count; \
-    Write-Host ('📦 Found ' + $packageCount + ' Python packages to install'); \
-    \
-    Write-Host '🔄 Installing Python packages...'; \
-    & python -m pip install -r C:/temp/requirements.txt; \
-    \
-    $endTime = Get-Date; \
-    $duration = ($endTime - $startTime).TotalMinutes; \
-    Write-Host ('✅ === PYTHON PACKAGES COMPLETE === (' + $duration.ToString('F1') + ' minutes)'); \
-    \
-    try { \
-        $packageCount = (& python -m pip list | Measure-Object).Count; \
-        Write-Host ('📊 Total packages: ' + $packageCount); \
-    } catch { \
-        Write-Host '📊 Python packages installed successfully'; \
-    } \
-    "
-
-# === PHASE 6: GHOSTSCRIPT INSTALLATION ===
+# === PHASE 3: GHOSTSCRIPT INSTALLATION (EARLY - MOST PROBLEMATIC) ===
 RUN pwsh -Command " \
     Write-Host '🚀 === STARTING GHOSTSCRIPT INSTALLATION ==='; \
     Write-Host '⏰ Estimated time: 1-3 minutes (multiple fallback methods)'; \
@@ -248,6 +166,88 @@ RUN pwsh -Command " \
     $endTime = Get-Date; \
     $duration = ($endTime - $startTime).TotalMinutes; \
     Write-Host ('✅ === GHOSTSCRIPT INSTALLATION COMPLETE === (' + $duration.ToString('F1') + ' minutes)'); \
+    "
+
+# === PHASE 4: QUARTO INSTALLATION ===
+RUN pwsh -Command " \
+    Write-Host '🚀 === STARTING QUARTO INSTALLATION ==='; \
+    Write-Host '⏰ Estimated time: 1-2 minutes'; \
+    $startTime = Get-Date; \
+    \
+    Write-Host '📦 Downloading Quarto 1.7.31...'; \
+    Invoke-WebRequest -Uri 'https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.31/quarto-1.7.31-win.zip' -OutFile 'quarto.zip'; \
+    \
+    Write-Host '📦 Extracting Quarto...'; \
+    Expand-Archive -Path 'quarto.zip' -DestinationPath 'C:\quarto' -Force; \
+    \
+    Write-Host '🧹 Cleaning up installer...'; \
+    Remove-Item 'quarto.zip'; \
+    \
+    $endTime = Get-Date; \
+    $duration = ($endTime - $startTime).TotalMinutes; \
+    Write-Host ('✅ === QUARTO INSTALLATION COMPLETE === (' + $duration.ToString('F1') + ' minutes)'); \
+    " && \
+    setx PATH "%PATH%;C:\quarto\quarto-1.7.31\bin" /M
+
+# === PHASE 5: PYTHON 3.13 INSTALLATION ===
+RUN pwsh -Command " \
+    Write-Host '🚀 === STARTING PYTHON 3.13 INSTALLATION ==='; \
+    Write-Host '⏰ Estimated time: 2-3 minutes'; \
+    $startTime = Get-Date; \
+    Write-Host '📦 Installing Python 3.13.1 (exact version from workflow)...'; \
+    " && \
+    choco install -y python --version=3.13.1 && \
+    pwsh -Command " \
+    # Refresh environment variables to pick up Python PATH \
+    $env:PATH = [System.Environment]::GetEnvironmentVariable('PATH', [System.EnvironmentVariableTarget]::Machine) + ';' + [System.Environment]::GetEnvironmentVariable('PATH', [System.EnvironmentVariableTarget]::User); \
+    # Add common Python paths explicitly \
+    $env:PATH += ';C:\Python313;C:\Python313\Scripts;C:\ProgramData\chocolatey\bin'; \
+    \
+    $endTime = Get-Date; \
+    $duration = ($endTime - $startTime).TotalMinutes; \
+    Write-Host ('✅ === PYTHON 3.13 INSTALLATION COMPLETE === (' + $duration.ToString('F1') + ' minutes)'); \
+    \
+    # Test Python installation with explicit path handling \
+    try { \
+        $pythonVersion = & python --version 2>&1; \
+        Write-Host ('📊 Python version: ' + $pythonVersion); \
+        $pipVersion = & python -m pip --version 2>&1; \
+        Write-Host ('📊 Pip version: ' + $pipVersion); \
+    } catch { \
+        Write-Host '⚠️ Python installed but not immediately available in PATH (normal for containers)'; \
+        Write-Host 'Python will be available in subsequent RUN commands'; \
+    } \
+    "
+
+# === PHASE 6: PYTHON PACKAGE INSTALLATION ===
+RUN pwsh -Command " \
+    Write-Host '🚀 === STARTING PYTHON PACKAGE INSTALLATION ==='; \
+    Write-Host '⏰ Estimated time: 1-2 minutes'; \
+    $startTime = Get-Date; \
+    \
+    # Ensure Python is in PATH \
+    $env:PATH = [System.Environment]::GetEnvironmentVariable('PATH', [System.EnvironmentVariableTarget]::Machine) + ';C:\Python313;C:\Python313\Scripts;C:\ProgramData\chocolatey\bin'; \
+    \
+    Write-Host '🔄 Upgrading pip...'; \
+    & python -m pip install --upgrade pip; \
+    \
+    Write-Host '📊 Analyzing requirements.txt...'; \
+    $packageCount = (Get-Content 'C:/temp/requirements.txt' | Where-Object { $_ -notmatch '^#' -and $_ -ne '' }).Count; \
+    Write-Host ('📦 Found ' + $packageCount + ' Python packages to install'); \
+    \
+    Write-Host '🔄 Installing Python packages...'; \
+    & python -m pip install -r C:/temp/requirements.txt; \
+    \
+    $endTime = Get-Date; \
+    $duration = ($endTime - $startTime).TotalMinutes; \
+    Write-Host ('✅ === PYTHON PACKAGES COMPLETE === (' + $duration.ToString('F1') + ' minutes)'); \
+    \
+    try { \
+        $packageCount = (& python -m pip list | Measure-Object).Count; \
+        Write-Host ('📊 Total packages: ' + $packageCount); \
+    } catch { \
+        Write-Host '📊 Python packages installed successfully'; \
+    } \
     "
 
 # === PHASE 7: INKSCAPE INSTALLATION ===
