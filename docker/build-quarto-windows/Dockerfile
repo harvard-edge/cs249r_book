@@ -5,12 +5,29 @@
 FROM mcr.microsoft.com/windows/servercore:ltsc2022
 
 # === PHASE 1: POWERSHELL 7 INSTALLATION ===
-RUN curl -fSLo PowerShell.msi https://github.com/PowerShell/PowerShell/releases/download/v7.4.1/PowerShell-7.4.1-win-x64.msi && \
-    msiexec /i PowerShell.msi /quiet /norestart && \
+RUN curl -fSLo PowerShell.msi https://github.com/PowerShell/PowerShell/releases/download/v7.4.1/PowerShell-7.4.1-win-x64.msi; \
+    if not exist PowerShell.msi (echo ❌ PowerShell download failed - aborting build && exit 1); \
+    msiexec /i PowerShell.msi /quiet /norestart; \
+    if %ERRORLEVEL% neq 0 (echo ❌ PowerShell installation failed - aborting build && exit 1); \
     del PowerShell.msi
 
 # === PHASE 2: CHOCOLATEY INSTALLATION ===
-RUN pwsh -Command "Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))"
+RUN pwsh -Command " \
+    Write-Host '🚀 === STARTING CHOCOLATEY INSTALLATION ==='; \
+    try { \
+        Set-ExecutionPolicy Bypass -Scope Process -Force; \
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
+        iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1')); \
+        Write-Host '✅ Chocolatey installation complete'; \
+        # Test chocolatey installation \
+        $chocoVersion = & choco --version 2>&1; \
+        if ($LASTEXITCODE -ne 0) { throw 'Chocolatey test failed' }; \
+        Write-Host ('📊 Chocolatey version: ' + $chocoVersion); \
+    } catch { \
+        Write-Host ('❌ Chocolatey installation failed: ' + $_.Exception.Message); \
+        throw 'Chocolatey installation failed - aborting build'; \
+    } \
+    "
 
 # Set environment variables to match workflow
 ENV R_LIBS_USER=C:/r-lib
@@ -36,10 +53,26 @@ RUN pwsh -Command " \
     $startTime = Get-Date; \
     \
     Write-Host '📦 Downloading Quarto 1.7.31...'; \
-    Invoke-WebRequest -Uri 'https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.31/quarto-1.7.31-win.zip' -OutFile 'quarto.zip'; \
+    try { \
+        Invoke-WebRequest -Uri 'https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.31/quarto-1.7.31-win.zip' -OutFile 'quarto.zip' -TimeoutSec 300; \
+        if (-not (Test-Path 'quarto.zip') -or (Get-Item 'quarto.zip').Length -lt 10MB) { \
+            throw 'Quarto download failed or file is too small'; \
+        } \
+    } catch { \
+        Write-Host ('❌ Quarto download failed: ' + $_.Exception.Message); \
+        throw 'Quarto download failed - aborting build'; \
+    } \
     \
     Write-Host '📦 Extracting Quarto...'; \
-    Expand-Archive -Path 'quarto.zip' -DestinationPath 'C:\quarto' -Force; \
+    try { \
+        Expand-Archive -Path 'quarto.zip' -DestinationPath 'C:\quarto' -Force; \
+        if (-not (Test-Path 'C:\quarto\quarto-1.7.31\bin\quarto.cmd')) { \
+            throw 'Quarto extraction failed - quarto.cmd not found'; \
+        } \
+    } catch { \
+        Write-Host ('❌ Quarto extraction failed: ' + $_.Exception.Message); \
+        throw 'Quarto extraction failed - aborting build'; \
+    } \
     \
     Write-Host '🧹 Cleaning up installer...'; \
     Remove-Item 'quarto.zip'; \
@@ -58,6 +91,7 @@ RUN pwsh -Command " \
     Write-Host '📦 Installing Python 3.13.1 (exact version from workflow)...'; \
     " && \
     choco install -y python --version=3.13.1 && \
+    pwsh -Command "if ($LASTEXITCODE -ne 0) { throw 'Python 3.13.1 installation failed - aborting build' }" && \
     pwsh -Command " \
     # Refresh environment variables to pick up Python PATH \
     $env:PATH = [System.Environment]::GetEnvironmentVariable('PATH', [System.EnvironmentVariableTarget]::Machine) + ';' + [System.Environment]::GetEnvironmentVariable('PATH', [System.EnvironmentVariableTarget]::User); \
@@ -91,6 +125,7 @@ RUN pwsh -Command " \
     \
     Write-Host '🔄 Upgrading pip...'; \
     & python -m pip install --upgrade pip; \
+    if ($LASTEXITCODE -ne 0) { throw 'Pip upgrade failed - aborting build' }; \
     \
     Write-Host '📊 Analyzing requirements.txt...'; \
     $packageCount = (Get-Content 'C:/temp/requirements.txt' | Where-Object { $_ -notmatch '^#' -and $_ -ne '' }).Count; \
@@ -98,6 +133,7 @@ RUN pwsh -Command " \
     \
     Write-Host '🔄 Installing Python packages...'; \
     & python -m pip install -r C:/temp/requirements.txt; \
+    if ($LASTEXITCODE -ne 0) { throw 'Python packages installation failed - aborting build' }; \
     \
     $endTime = Get-Date; \
     $duration = ($endTime - $startTime).TotalMinutes; \
@@ -201,16 +237,41 @@ RUN pwsh -Command " \
     [Console]::InputEncoding = [System.Text.Encoding]::UTF8; \
     $startTime = Get-Date; \
     \
+    $inkscapeInstalled = $false; \
     try { \
-        Write-Host '🔄 Attempting winget installation (may be slow)...'; \
+        Write-Host '🔄 Attempting winget installation (primary method)...'; \
         Write-Host '📦 Downloading Inkscape package...'; \
-        winget install Inkscape.Inkscape --accept-source-agreements --accept-package-agreements; \
-        Write-Host '✅ Inkscape installed via winget'; \
+        $wingetProcess = Start-Process -FilePath 'winget' -ArgumentList 'install', 'Inkscape.Inkscape', '--accept-source-agreements', '--accept-package-agreements' -Wait -PassThru -NoNewWindow; \
+        if ($wingetProcess.ExitCode -eq 0) { \
+            Write-Host '✅ Inkscape installed via winget'; \
+            $inkscapeInstalled = $true; \
+        } else { \
+            Write-Host ('⚠️ winget failed with exit code: ' + $wingetProcess.ExitCode); \
+        } \
     } catch { \
-        Write-Host '🔄 winget failed or unavailable, using chocolatey...'; \
-        Write-Host '📦 Installing via chocolatey (alternative method)...'; \
-        choco install inkscape -y; \
-        Write-Host '✅ Inkscape installed via chocolatey'; \
+        Write-Host ('⚠️ winget failed: ' + $_.Exception.Message); \
+    } \
+    \
+    if (-not $inkscapeInstalled) { \
+        Write-Host '🔄 winget failed, using chocolatey fallback...'; \
+        try { \
+            Write-Host '📦 Installing via chocolatey (alternative method)...'; \
+            choco install inkscape -y; \
+            if ($LASTEXITCODE -eq 0) { \
+                Write-Host '✅ Inkscape installed via chocolatey'; \
+                $inkscapeInstalled = $true; \
+            } else { \
+                throw ('Chocolatey installation failed with exit code: ' + $LASTEXITCODE); \
+            } \
+        } catch { \
+            Write-Host ('❌ Chocolatey installation failed: ' + $_.Exception.Message); \
+        } \
+    } \
+    \
+    if (-not $inkscapeInstalled) { \
+        Write-Host '❌ CRITICAL: All Inkscape installation methods failed'; \
+        Write-Host '❌ Inkscape is required for SVG processing in Quarto'; \
+        throw 'Inkscape installation failed - aborting build'; \
     } \
     \
     Write-Host '🔧 Adding Inkscape to PATH...'; \
@@ -229,7 +290,15 @@ RUN pwsh -Command " \
     $startTime = Get-Date; \
     \
     Write-Host '🔄 Downloading TeX Live installer...'; \
-    Invoke-WebRequest -Uri 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' -OutFile 'C:/temp/install-tl-windows.exe'; \
+    try { \
+        Invoke-WebRequest -Uri 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' -OutFile 'C:/temp/install-tl-windows.exe' -TimeoutSec 600; \
+        if (-not (Test-Path 'C:/temp/install-tl-windows.exe') -or (Get-Item 'C:/temp/install-tl-windows.exe').Length -lt 1MB) { \
+            throw 'TeX Live installer download failed or file is too small'; \
+        } \
+    } catch { \
+        Write-Host ('❌ TeX Live installer download failed: ' + $_.Exception.Message); \
+        throw 'TeX Live installer download failed - aborting build'; \
+    } \
     \
     Write-Host '🔧 Creating TeX Live installation profile...'; \
     $profileContent = 'selected_scheme scheme-infraonly' + \"`n\" + \
@@ -245,7 +314,11 @@ RUN pwsh -Command " \
     $profileContent | Out-File -FilePath 'C:/temp/texlive.profile' -Encoding ASCII; \
     \
     Write-Host '📦 Installing TeX Live base system (this may take 3-5 minutes)...'; \
-    Start-Process -FilePath 'C:/temp/install-tl-windows.exe' -ArgumentList '-profile', 'C:/temp/texlive.profile' -Wait; \
+    $texInstallProcess = Start-Process -FilePath 'C:/temp/install-tl-windows.exe' -ArgumentList '-profile', 'C:/temp/texlive.profile' -Wait -PassThru; \
+    if ($texInstallProcess.ExitCode -ne 0) { \
+        Write-Host ('❌ TeX Live base installation failed with exit code: ' + $texInstallProcess.ExitCode); \
+        throw 'TeX Live base installation failed - aborting build'; \
+    } \
     \
     Write-Host '🔧 Adding TeX Live to PATH...'; \
     [Environment]::SetEnvironmentVariable('PATH', \"$env:PATH;C:\texlive\bin\windows\", [EnvironmentVariableTarget]::Machine); \
@@ -331,6 +404,7 @@ RUN pwsh -Command " \
     Write-Host '📦 Installing R 4.4.1 (exact version from workflow)...'; \
     " && \
     choco install -y r --version=4.4.1 && \
+    pwsh -Command "if ($LASTEXITCODE -ne 0) { throw 'R 4.4.1 installation failed - aborting build' }" && \
     pwsh -Command " \
     $endTime = Get-Date; \
     $duration = ($endTime - $startTime).TotalMinutes; \
@@ -345,28 +419,44 @@ RUN pwsh -Command " \
     $startTime = Get-Date; \
     " && \
     Rscript -e " \
-    options(repos = c(CRAN = 'https://cran.rstudio.com')); \
-    cat('📦 Starting R package installation...\n'); \
-    cat(paste('📍 R library path:', Sys.getenv('R_LIBS_USER'), '\n')); \
-    \
-    lib_path <- Sys.getenv('R_LIBS_USER'); \
-    dir.create(lib_path, showWarnings = FALSE, recursive = TRUE); \
-    .libPaths(lib_path); \
-    \
-    cat('📦 [1/2] Installing remotes package...\n'); \
-    install.packages('remotes'); \
-    \
-    if (file.exists('C:/temp/install_packages.R')) { \
-      cat('📦 [2/2] Installing packages from tools/dependencies/install_packages.R...\n'); \
-      source('C:/temp/install_packages.R'); \
-    } else { \
-      cat('⚠️ No install_packages.R found, installing basic packages\n'); \
-      install.packages(c('rmarkdown', 'knitr', 'ggplot2')); \
-    }; \
-    \
-    cat('✅ R package installation complete\n'); \
-    ip <- installed.packages()[, 'Package']; \
-    cat(paste('📊 Total R packages installed:', length(ip), '\n')); \
+    tryCatch({ \
+      options(repos = c(CRAN = 'https://cran.rstudio.com')); \
+      cat('📦 Starting R package installation...\n'); \
+      cat(paste('📍 R library path:', Sys.getenv('R_LIBS_USER'), '\n')); \
+      \
+      lib_path <- Sys.getenv('R_LIBS_USER'); \
+      dir.create(lib_path, showWarnings = FALSE, recursive = TRUE); \
+      .libPaths(lib_path); \
+      \
+      cat('📦 [1/2] Installing remotes package...\n'); \
+      install.packages('remotes'); \
+      if (!require(remotes, quietly = TRUE)) { \
+        stop('Failed to install or load remotes package'); \
+      } \
+      \
+      if (file.exists('C:/temp/install_packages.R')) { \
+        cat('📦 [2/2] Installing packages from tools/dependencies/install_packages.R...\n'); \
+        source('C:/temp/install_packages.R'); \
+      } else { \
+        cat('⚠️ No install_packages.R found, installing basic packages\n'); \
+        install.packages(c('rmarkdown', 'knitr', 'ggplot2')); \
+      } \
+      \
+      # Verify critical packages \
+      critical_packages <- c('rmarkdown', 'knitr'); \
+      for (pkg in critical_packages) { \
+        if (!require(pkg, character.only = TRUE, quietly = TRUE)) { \
+          stop(paste('Critical R package failed to install:', pkg)); \
+        } \
+      } \
+      \
+      cat('✅ R package installation complete\n'); \
+      ip <- installed.packages()[, 'Package']; \
+      cat(paste('📊 Total R packages installed:', length(ip), '\n')); \
+    }, error = function(e) { \
+      cat('❌ R package installation failed:', conditionMessage(e), '\n'); \
+      quit(status = 1); \
+    }) \
     " && \
     pwsh -Command " \
     $endTime = Get-Date; \
