@@ -121,19 +121,16 @@ RUN Write-Host 'Installing TeX Live 2025 snapshot...' ; `
     $Repo      = 'https://ftp.tug.org/historic/systems/texlive/2025/tlnet-final' ; `
     $Installer = 'C:\temp\install-tl-windows.exe' ; `
     Invoke-WebRequest -Uri 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' -OutFile $Installer -TimeoutSec 1800 ; `
-    $ProfileLines = @(
-        'selected_scheme scheme-infraonly',
-        'tlpdbopt_install_docfiles 0',
-        'tlpdbopt_install_srcfiles 0',
-        'TEXDIR C:/texlive',
-        'TEXMFCONFIG C:/texlive/texmf-config',
-        'TEXMFHOME C:/texlive/texmf-home',
-        'TEXMFLOCAL C:/texlive/texmf-local',
-        'TEXMFSYSCONFIG C:/texlive/texmf-config',
-        'TEXMFSYSVAR C:/texlive/texmf-var',
-        'TEXMFVAR C:/texlive/texmf-var'
-    ) ; `
-    $ProfileLines | Set-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'selected_scheme scheme-infraonly' | Set-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'tlpdbopt_install_docfiles 0' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'tlpdbopt_install_srcfiles 0' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'TEXDIR C:/texlive' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'TEXMFCONFIG C:/texlive/texmf-config' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'TEXMFHOME C:/texlive/texmf-home' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'TEXMFLOCAL C:/texlive/texmf-local' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'TEXMFSYSCONFIG C:/texlive/texmf-config' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'TEXMFSYSVAR C:/texlive/texmf-var' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'TEXMFVAR C:/texlive/texmf-var' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
     Start-Process -FilePath $Installer -ArgumentList '-repository', $Repo, '-profile', 'C:\temp\texlive.profile' -Wait -NoNewWindow ; `
     $tlbin = 'C:\texlive\bin\windows' ; `
     if (-not (Test-Path $tlbin)) { throw "TeX Live bin path missing: $tlbin" } ; `
@@ -152,22 +149,20 @@ RUN $tlmgr = 'C:\texlive\bin\windows\tlmgr.bat' ; `
     if (-not (kpsewhich t1phv.fd))   { Write-Error "Missing Helvetica font descriptor (t1phv.fd)" -ErrorAction Stop }
 
 # TikZ smoke test (fast)
-RUN $TikZContent = @(
-    '\documentclass{standalone}',
-    '\usepackage{tikz}',
-    '\usepackage{pgfplots}',
-    '\usepackage{amsmath}',
-    '\usepackage{xcolor}',
-    '\usepackage[T1]{fontenc}',
-    '\usetikzlibrary{positioning,calc}',
-    '\begin{document}',
-    '\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]',
-    '\node[draw, fill=blue!20] at (0,0) {TikZ Test};',
-    '\node[draw, fill=red!20]  at (2,0) {Success};',
-    '\draw[->] (0.8,0) -- (1.2,0);',
-    '\end{tikzpicture}',
-    '\end{document}'
-) ; $TikZContent | Set-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
+RUN '\documentclass{standalone}' | Set-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
+    '\usepackage{tikz}' | Add-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
+    '\usepackage{pgfplots}' | Add-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
+    '\usepackage{amsmath}' | Add-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
+    '\usepackage{xcolor}' | Add-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
+    '\usepackage[T1]{fontenc}' | Add-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
+    '\usetikzlibrary{positioning,calc}' | Add-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
+    '\begin{document}' | Add-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
+    '\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]' | Add-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
+    '\node[draw, fill=blue!20] at (0,0) {TikZ Test};' | Add-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
+    '\node[draw, fill=red!20]  at (2,0) {Success};' | Add-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
+    '\draw[->] (0.8,0) -- (1.2,0);' | Add-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
+    '\end{tikzpicture}' | Add-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
+    '\end{document}' | Add-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
     Push-Location C:\temp ; `
     lualatex -interaction=nonstopmode test_tikz.tex ; `
     if (-not (Test-Path C:\temp\test_tikz.pdf)) { throw 'TikZ smoke test failed' } ; `
