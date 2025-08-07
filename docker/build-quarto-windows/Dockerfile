@@ -26,7 +26,7 @@ RUN powershell.exe -Command "New-Item -ItemType Directory -Force -Path 'C:\temp'
 # ------------------------------------------------------------
 # PHASE 1: PowerShell 7 (ZIP install, container-safe)
 # ------------------------------------------------------------
-RUN powershell.exe -Command "Write-Host 'Installing PowerShell 7 (ZIP)...'; $Url = 'https://github.com/PowerShell/PowerShell/releases/download/v7.4.1/PowerShell-7.4.1-win-x64.zip'; $Zip = 'C:\PowerShell-7.4.1.zip'; Invoke-WebRequest -Uri $Url -OutFile $Zip -UseBasicParsing; New-Item -ItemType Directory -Force -Path 'C:\Program Files\PowerShell\7' | Out-Null; Expand-Archive -Path $Zip -DestinationPath 'C:\Program Files\PowerShell\7' -Force; Remove-Item $Zip -Force"
+RUN powershell.exe -Command "Write-Host 'Installing PowerShell 7 ZIP...'; $Url = 'https://github.com/PowerShell/PowerShell/releases/download/v7.4.1/PowerShell-7.4.1-win-x64.zip'; $Zip = 'C:\PowerShell-7.4.1.zip'; Invoke-WebRequest -Uri $Url -OutFile $Zip -UseBasicParsing; New-Item -ItemType Directory -Force -Path 'C:\Program Files\PowerShell\7' | Out-Null; Expand-Archive -Path $Zip -DestinationPath 'C:\Program Files\PowerShell\7' -Force; Remove-Item $Zip -Force"
 ENV PATH="C:\\Program Files\\PowerShell\\7;%PATH%"
 
 # Switch to PowerShell 7 for all subsequent commands
@@ -85,7 +85,7 @@ RUN pwsh.exe -Command "inkscape --version"
 # ------------------------------------------------------------
 # NOTE: We pin to the historic TL 2025 snapshot to mirror CI's texlive_version: 2025.
 # If that snapshot URL changes, update the $Repo accordingly.
-RUN pwsh.exe -Command "Write-Host 'Installing TeX Live (2025 snapshot)...'; $Repo = 'https://ftp.tug.org/historic/systems/texlive/2025/tlnet-final'; $Installer = 'C:\temp\install-tl-windows.exe'; Invoke-WebRequest -Uri 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' -OutFile $Installer -TimeoutSec 600; $Profile = @'selected_scheme scheme-infraonly`ntlpdbopt_install_docfiles 0`ntlpdbopt_install_srcfiles 0`nTEXDIR C:/texlive`nTEXMFCONFIG C:/texlive/texmf-config`nTEXMFHOME C:/texlive/texmf-home`nTEXMFLOCAL C:/texlive/texmf-local`nTEXMFSYSCONFIG C:/texlive/texmf-config`nTEXMFSYSVAR C:/texlive/texmf-var`nTEXMFVAR C:/texlive/texmf-var`n'@; $Profile | Set-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII; Start-Process -FilePath $Installer -ArgumentList '-repository', $Repo, '-profile', 'C:\temp\texlive.profile' -Wait; & 'C:\texlive\bin\windows\tlmgr.bat' version"
+RUN pwsh.exe -Command "Write-Host 'Installing TeX Live 2025 snapshot...'; $Repo = 'https://ftp.tug.org/historic/systems/texlive/2025/tlnet-final'; $Installer = 'C:\temp\install-tl-windows.exe'; Invoke-WebRequest -Uri 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' -OutFile $Installer -TimeoutSec 600; $Profile = @'selected_scheme scheme-infraonly`ntlpdbopt_install_docfiles 0`ntlpdbopt_install_srcfiles 0`nTEXDIR C:/texlive`nTEXMFCONFIG C:/texlive/texmf-config`nTEXMFHOME C:/texlive/texmf-home`nTEXMFLOCAL C:/texlive/texmf-local`nTEXMFSYSCONFIG C:/texlive/texmf-config`nTEXMFSYSVAR C:/texlive/texmf-var`nTEXMFVAR C:/texlive/texmf-var`n'@; $Profile | Set-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII; Start-Process -FilePath $Installer -ArgumentList '-repository', $Repo, '-profile', 'C:\temp\texlive.profile' -Wait; & 'C:\texlive\bin\windows\tlmgr.bat' version"
 ENV PATH="C:\\texlive\\bin\\windows;%PATH%"
 
 # Install collections from tl_packages
