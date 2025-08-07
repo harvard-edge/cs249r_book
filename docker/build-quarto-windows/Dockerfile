@@ -102,12 +102,7 @@ RUN pwsh.exe -Command "Set-Content -Path C:\temp\test_tikz.tex -Value @'`n\docum
 # ------------------------------------------------------------
 RUN pwsh.exe -Command "choco install -y r --version=4.3.2; R --version | Select-Object -First 1"
 
-RUN Rscript -e "options(repos=c(CRAN='https://cran.rstudio.com')); \
-                dir.create(Sys.getenv('R_LIBS_USER'), recursive=TRUE, showWarnings=FALSE); \
-                .libPaths(Sys.getenv('R_LIBS_USER')); \
-                install.packages('remotes'); \
-                if (file.exists('C:/temp/install_packages.R')) source('C:/temp/install_packages.R') else install.packages(c('rmarkdown','knitr','ggplot2')); \
-                for (p in c('rmarkdown','knitr')) if (!require(p, character.only=TRUE, quietly=TRUE)) stop('missing: ', p)"
+RUN pwsh.exe -Command "Rscript -e \"options(repos=c(CRAN='https://cran.rstudio.com')); dir.create(Sys.getenv('R_LIBS_USER'), recursive=TRUE, showWarnings=FALSE); .libPaths(Sys.getenv('R_LIBS_USER')); install.packages('remotes'); if (file.exists('C:/temp/install_packages.R')) source('C:/temp/install_packages.R') else install.packages(c('rmarkdown','knitr','ggplot2')); for (p in c('rmarkdown','knitr')) if (!require(p, character.only=TRUE, quietly=TRUE)) stop('missing: ', p)\""
 
 # Optional: your R verification script
 RUN pwsh.exe -Command "Write-Host 'Verifying R packages...'; Rscript C:/temp/verify_r_packages.R"
