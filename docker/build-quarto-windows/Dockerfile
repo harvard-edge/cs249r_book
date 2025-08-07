@@ -121,7 +121,7 @@ RUN Write-Host 'Installing TeX Live 2025 snapshot...' ; `
     $Repo      = 'https://ftp.tug.org/historic/systems/texlive/2025/tlnet-final' ; `
     $Installer = 'C:\temp\install-tl-windows.exe' ; `
     Invoke-WebRequest -Uri 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' -OutFile $Installer -TimeoutSec 1800 ; `
-    $Profile = @'
+    $Profile = @"
 selected_scheme scheme-infraonly
 tlpdbopt_install_docfiles 0
 tlpdbopt_install_srcfiles 0
@@ -132,7 +132,7 @@ TEXMFLOCAL C:/texlive/texmf-local
 TEXMFSYSCONFIG C:/texlive/texmf-config
 TEXMFSYSVAR C:/texlive/texmf-var
 TEXMFVAR C:/texlive/texmf-var
-'@ ; `
+"@ ; `
     $Profile | Set-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
     Start-Process -FilePath $Installer -ArgumentList '-repository', $Repo, '-profile', 'C:\temp\texlive.profile' -Wait -NoNewWindow ; `
     $tlbin = 'C:\texlive\bin\windows' ; `
@@ -152,7 +152,7 @@ RUN $tlmgr = 'C:\texlive\bin\windows\tlmgr.bat' ; `
     if (-not (kpsewhich t1phv.fd))   { Write-Error "Missing Helvetica font descriptor (t1phv.fd)" -ErrorAction Stop }
 
 # TikZ smoke test (fast)
-RUN Set-Content -Path C:\temp\test_tikz.tex -Value @'
+RUN Set-Content -Path C:\temp\test_tikz.tex -Value @"
 \documentclass{standalone}
 \usepackage{tikz}
 \usepackage{pgfplots}
@@ -167,7 +167,7 @@ RUN Set-Content -Path C:\temp\test_tikz.tex -Value @'
 \draw[->] (0.8,0) -- (1.2,0);
 \end{tikzpicture}
 \end{document}
-'@ -Encoding ASCII ; `
+"@ -Encoding ASCII ; `
     Push-Location C:\temp ; `
     lualatex -interaction=nonstopmode test_tikz.tex ; `
     if (-not (Test-Path C:\temp\test_tikz.pdf)) { throw 'TikZ smoke test failed' } ; `
