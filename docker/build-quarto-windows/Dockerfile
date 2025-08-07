@@ -4,7 +4,7 @@
 
 # Use full Windows instead of Server Core for better compatibility with package managers
 # This matches the GitHub Actions windows-latest environment more closely
-FROM mcr.microsoft.com/windows:ltsc2022
+FROM mcr.microsoft.com/windows/server:ltsc2022
 
 # === PHASE 1: POWERSHELL 7 INSTALLATION ===
 RUN curl -L -o PowerShell.msi https://github.com/PowerShell/PowerShell/releases/download/v7.4.1/PowerShell-7.4.1-win-x64.msi && \
@@ -13,9 +13,11 @@ RUN curl -L -o PowerShell.msi https://github.com/PowerShell/PowerShell/releases/
     if %ERRORLEVEL% neq 0 (echo ❌ PowerShell installation failed - aborting build && exit 1) && \
     del PowerShell.msi
 
-# Add PowerShell to PATH and test
-RUN setx PATH "%PATH%;C:\Program Files\PowerShell\7" /M && \
-    "C:\Program Files\PowerShell\7\pwsh.exe" -Command "Write-Host 'PowerShell 7 installation verified'"
+# Add PowerShell to PATH
+RUN setx PATH "%PATH%;C:\Program Files\PowerShell\7" /M
+
+# Verify PowerShell 7 installation (separate RUN command so PATH takes effect)
+RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command "Write-Host 'PowerShell 7 installation verified'"
 
 # === PHASE 2: CHOCOLATEY INSTALLATION ===
 RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
@@ -49,8 +51,8 @@ COPY tools/dependencies/install_packages.R C:/temp/install_packages.R
 COPY tools/dependencies/tl_packages C:/temp/tl_packages
 COPY docker/build-quarto-windows/verify_r_packages.R C:/temp/verify_r_packages.R
 
-# Create R library directory
-RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command "New-Item -ItemType Directory -Path 'C:/r-lib' -Force"
+# Create necessary directories
+RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command "New-Item -ItemType Directory -Path 'C:/r-lib' -Force; New-Item -ItemType Directory -Path 'C:/temp' -Force"
 
 # === PHASE 3: QUARTO INSTALLATION ===
 RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
@@ -97,8 +99,8 @@ RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     Write-Host '📦 Installing Python 3.13.1 (exact version from workflow)...'; \
     " && \
     choco install -y python --version=3.13.1 && \
-    pwsh -Command "if ($LASTEXITCODE -ne 0) { throw 'Python 3.13.1 installation failed - aborting build' }" && \
-    pwsh -Command " \
+    "C:\Program Files\PowerShell\7\pwsh.exe" -Command "if ($LASTEXITCODE -ne 0) { throw 'Python 3.13.1 installation failed - aborting build' }" && \
+    "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     # Refresh environment variables to pick up Python PATH \
     $env:PATH = [System.Environment]::GetEnvironmentVariable('PATH', [System.EnvironmentVariableTarget]::Machine) + ';' + [System.Environment]::GetEnvironmentVariable('PATH', [System.EnvironmentVariableTarget]::User); \
     # Add common Python paths explicitly \
@@ -162,8 +164,8 @@ RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     \
     Write-Host '📦 Installing Ghostscript via direct download (latest version)...'; \
     \
-                # Use same approach as working quarto-build.yml (with winget fallback to chocolatey) \
-            try { \
+    # Use same approach as working quarto-build.yml (with winget fallback to chocolatey) \
+    try { \
                 Write-Host '🔄 Trying winget installation (primary method from quarto-build.yml)...'; \
                 winget install ArtifexSoftware.GhostScript --accept-source-agreements --accept-package-agreements; \
                 Write-Host '✅ Ghostscript installed via winget'; \
@@ -391,8 +393,8 @@ RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     Write-Host '📦 Installing R 4.4.1 (exact version from workflow)...'; \
     " && \
     choco install -y r --version=4.4.1 && \
-    pwsh -Command "if ($LASTEXITCODE -ne 0) { throw 'R 4.4.1 installation failed - aborting build' }" && \
-    pwsh -Command " \
+    "C:\Program Files\PowerShell\7\pwsh.exe" -Command "if ($LASTEXITCODE -ne 0) { throw 'R 4.4.1 installation failed - aborting build' }" && \
+    "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     $endTime = Get-Date; \
     $duration = ($endTime - $startTime).TotalMinutes; \
     Write-Host ('✅ === R INSTALLATION COMPLETE === (' + $duration.ToString('F1') + ' minutes)'); \
@@ -445,7 +447,7 @@ RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
       quit(status = 1); \
     }) \
     " && \
-    pwsh -Command " \
+    "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
     $endTime = Get-Date; \
     $duration = ($endTime - $startTime).TotalMinutes; \
     Write-Host ('✅ === R PACKAGE INSTALLATION COMPLETE === (' + $duration.ToString('F1') + ' minutes)'); \
