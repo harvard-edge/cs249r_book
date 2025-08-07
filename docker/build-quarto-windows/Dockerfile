@@ -60,28 +60,25 @@ RUN quarto --version
 # ------------------------------------------------------------
 # PHASE 5: Python 3.13.1 + packages
 # ------------------------------------------------------------
-RUN choco install -y python --version=3.13.1; `
-    python --version; `
-    python -m pip --version
+RUN pwsh.exe -Command "choco install -y python --version=3.13.1; python --version; python -m pip --version"
 ENV PATH="C:\\Python313;C:\\Python313\\Scripts;%PATH%"
 
-RUN python -m pip install --upgrade pip; `
-    python -m pip install -r C:/temp/requirements.txt
+RUN pwsh.exe -Command "python -m pip install --upgrade pip; python -m pip install -r C:/temp/requirements.txt"
 
 # ------------------------------------------------------------
 # PHASE 6: Ghostscript (Chocolatey)
 # ------------------------------------------------------------
 RUN pwsh.exe -Command "choco install -y ghostscript; $gsDir = Get-ChildItem 'C:\Program Files\gs' -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1; if ($gsDir) { $bin = Join-Path $gsDir.FullName 'bin'; & cmd /c 'setx /M PATH \"%PATH%;$bin\"' | Out-Null } else { throw 'Ghostscript folder not found after install' }"
 # New layer to pick up PATH
-RUN gswin64c.exe -h | Select-String -Pattern '^GPL Ghostscript'
+RUN pwsh.exe -Command "gswin64c.exe -h | Select-String -Pattern '^GPL Ghostscript'"
 
 # ------------------------------------------------------------
 # PHASE 7: Inkscape (Chocolatey)
 # ------------------------------------------------------------
-RUN choco install -y inkscape
+RUN pwsh.exe -Command "choco install -y inkscape"
 ENV PATH="C:\\Program Files\\Inkscape\\bin;%PATH%"
 
-RUN inkscape --version
+RUN pwsh.exe -Command "inkscape --version"
 
 # ------------------------------------------------------------
 # PHASE 8: TeX Live 2025 (pinned) + packages
@@ -103,8 +100,7 @@ RUN pwsh.exe -Command "Set-Content -Path C:\temp\test_tikz.tex -Value @'`n\docum
 # ------------------------------------------------------------
 # PHASE 9: R 4.3.2 + packages
 # ------------------------------------------------------------
-RUN choco install -y r --version=4.3.2; `
-    R --version | Select-Object -First 1
+RUN pwsh.exe -Command "choco install -y r --version=4.3.2; R --version | Select-Object -First 1"
 
 RUN Rscript -e "options(repos=c(CRAN='https://cran.rstudio.com')); \
                 dir.create(Sys.getenv('R_LIBS_USER'), recursive=TRUE, showWarnings=FALSE); \
@@ -125,5 +121,5 @@ RUN pwsh.exe -Command "Write-Host '🧹 Cleaning temp files...'; Remove-Item C:/
 # Final checks and metadata
 # ------------------------------------------------------------
 WORKDIR C:/workspace
-RUN quarto --version; python --version; R --version; lualatex --version
+RUN pwsh.exe -Command "quarto --version; python --version; R --version; lualatex --version"
 RUN pwsh.exe -Command "Write-Host '✅ Windows container build completed successfully'"
