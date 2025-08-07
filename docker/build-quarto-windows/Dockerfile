@@ -4,7 +4,7 @@
 
 # Use full Windows instead of Server Core for better compatibility with package managers
 # This matches the GitHub Actions windows-latest environment more closely
-FROM mcr.microsoft.com/windows:ltsc2022
+FROM mcr.microsoft.com/windows/server:ltsc2022
 
 # === PHASE 1: POWERSHELL 7 INSTALLATION ===
 RUN curl -L -o PowerShell.msi https://github.com/PowerShell/PowerShell/releases/download/v7.4.1/PowerShell-7.4.1-win-x64.msi && \
