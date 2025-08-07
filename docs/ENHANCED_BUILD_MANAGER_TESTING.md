@@ -94,8 +94,8 @@ gh workflow run quarto-build.yml \
 
 The enhanced manager uses project-based naming:
 
-- **Linux Container**: `ghcr.io/harvard-edge/cs249r_book/mlsysbook-build-linux:latest`
-- **Windows Container**: `ghcr.io/harvard-edge/cs249r_book/mlsysbook-build-windows:latest`
+- **Linux Container**: `ghcr.io/harvard-edge/cs249r_book/quarto-build-linux:latest`
+- **Windows Container**: `ghcr.io/harvard-edge/cs249r_book/quarto-build-windows:latest`
 
 This clearly identifies containers as belonging to the ML Systems book project and scales well for future projects.
 
