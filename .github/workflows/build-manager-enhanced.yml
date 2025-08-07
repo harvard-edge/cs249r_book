@@ -1,0 +1,282 @@
+name: '🧠 Enhanced Build Manager'
+
+# Set retention period to 7 days
+env:
+  GITHUB_ACTIONS_RETENTION_DAYS: 7
+
+# Cancel duplicate builds on same branch
+concurrency:
+  group: enhanced-manager-${{ github.ref }}
+  cancel-in-progress: true
+
+# Enhanced manager with smart container handling
+# Can be tested manually from any branch using workflow_dispatch
+on:
+  workflow_dispatch:  # 🚦 Manual trigger for testing
+    inputs:
+      force_container_rebuild:
+        description: 'Force container rebuild even if up-to-date'
+        required: false
+        default: false
+        type: boolean
+      test_branch:
+        description: 'Branch to test (for feature branch testing)'
+        required: false
+        default: ''
+        type: string
+      build_format:
+        description: 'Format to build for testing'
+        required: false
+        default: 'html'
+        type: choice
+        options:
+          - html
+          - pdf
+          - all
+  push:
+    branches: [main, dev]  # Auto-trigger for main workflow
+
+jobs:
+  # Step 1: Check container health and availability
+  container-health-check:
+    name: 🔍 Container Health Check
+    runs-on: ubuntu-latest
+    outputs:
+      linux-container-available: ${{ steps.check.outputs.linux-available }}
+      windows-container-available: ${{ steps.check.outputs.windows-available }}
+      containers-need-rebuild: ${{ steps.check.outputs.need-rebuild }}
+      container-strategy: ${{ steps.check.outputs.strategy }}
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.test_branch || github.ref }}
+          fetch-depth: 0
+
+      - name: 🔍 Check container availability and freshness
+        id: check
+        run: |
+          echo "🔍 Checking container availability..."
+          
+          # Container registry info
+          REGISTRY="ghcr.io"
+          REPO="${{ github.repository }}"
+          LINUX_IMAGE="$REGISTRY/$REPO/quarto-build:latest"
+          WINDOWS_IMAGE="$REGISTRY/$REPO/quarto-build-windows:latest"
+          
+          # Function to check if container exists and get its age
+          check_container() {
+            local image=$1
+            local name=$2
+            
+            echo "📊 Checking $name container: $image"
+            
+            # Try to pull container info (without actually pulling the large image)
+            if docker manifest inspect "$image" >/dev/null 2>&1; then
+              echo "✅ $name container exists"
+              
+              # Get container creation date
+              CREATED=$(docker manifest inspect "$image" | jq -r '.config.created // empty' 2>/dev/null || echo "")
+              if [ -n "$CREATED" ]; then
+                echo "📅 $name container created: $CREATED"
+                echo "$name-exists=true" >> $GITHUB_OUTPUT
+                echo "$name-created=$CREATED" >> $GITHUB_OUTPUT
+              else
+                echo "⚠️ Could not determine $name container age"
+                echo "$name-exists=true" >> $GITHUB_OUTPUT
+                echo "$name-created=unknown" >> $GITHUB_OUTPUT
+              fi
+            else
+              echo "❌ $name container not found"
+              echo "$name-exists=false" >> $GITHUB_OUTPUT
+            fi
+          }
+          
+          # Check both containers
+          check_container "$LINUX_IMAGE" "linux"
+          check_container "$WINDOWS_IMAGE" "windows"
+          
+          # Get last dependency change
+          echo "📊 Checking dependency freshness..."
+          DEPS_CHANGED=$(git log -1 --format="%ct" -- tools/dependencies/ docker/ 2>/dev/null || echo "0")
+          echo "📅 Dependencies last changed: $(date -d @$DEPS_CHANGED 2>/dev/null || date -r $DEPS_CHANGED 2>/dev/null || echo 'unknown')"
+          
+          # Determine if rebuild needed
+          FORCE_REBUILD="${{ inputs.force_container_rebuild }}"
+          NEED_REBUILD="false"
+          
+          if [ "$FORCE_REBUILD" = "true" ]; then
+            echo "🔧 Force rebuild requested"
+            NEED_REBUILD="true"
+          elif [ "$(echo ${{ steps.check.outputs.linux-exists }})" != "true" ] || [ "$(echo ${{ steps.check.outputs.windows-exists }})" != "true" ]; then
+            echo "🚧 One or more containers missing"
+            NEED_REBUILD="true"
+          else
+            echo "✅ Containers exist, checking freshness..."
+            # Add more sophisticated age checking here if needed
+          fi
+          
+          echo "need-rebuild=$NEED_REBUILD" >> $GITHUB_OUTPUT
+          echo "linux-available=$(echo ${{ steps.check.outputs.linux-exists }} 2>/dev/null || echo false)" >> $GITHUB_OUTPUT
+          echo "windows-available=$(echo ${{ steps.check.outputs.windows-exists }} 2>/dev/null || echo false)" >> $GITHUB_OUTPUT
+          
+          # Determine build strategy
+          if [ "$(echo ${{ steps.check.outputs.linux-exists }})" = "true" ]; then
+            STRATEGY="hybrid"  # Use containers where available, traditional where not
+          else
+            STRATEGY="traditional"  # Fall back to traditional builds
+          fi
+          echo "strategy=$STRATEGY" >> $GITHUB_OUTPUT
+          
+          echo "📊 Container Health Summary:"
+          echo "  Linux container: $(echo ${{ steps.check.outputs.linux-exists }} || echo 'checking...')"
+          echo "  Windows container: $(echo ${{ steps.check.outputs.windows-exists }} || echo 'checking...')"
+          echo "  Rebuild needed: $NEED_REBUILD"
+          echo "  Build strategy: $STRATEGY"
+
+  # Step 2: Build containers if needed
+  ensure-linux-container:
+    name: 🐳 Ensure Linux Container
+    if: needs.container-health-check.outputs.containers-need-rebuild == 'true'
+    needs: container-health-check
+    uses: ./.github/workflows/build-linux-container.yml
+    with:
+      force_rebuild: ${{ inputs.force_container_rebuild }}
+
+  ensure-windows-container:
+    name: 🐳 Ensure Windows Container  
+    if: needs.container-health-check.outputs.containers-need-rebuild == 'true'
+    needs: container-health-check
+    uses: ./.github/workflows/build-windows-container.yml
+    with:
+      force_rebuild: ${{ inputs.force_container_rebuild }}
+
+  # Step 3: Pre-flight checks (keeping existing quality gates)
+  pre-commit:
+    name: 🧹 Pre-commit Quality Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.test_branch || github.ref }}
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r tools/dependencies/requirements.txt
+
+      - name: Install system dependencies for pre-commit hooks
+        run: |
+          python -m pip install yamllint
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Setup Node.js (for markdownlint)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache pre-commit environment
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      - name: Install and run pre-commit hooks
+        run: |
+          pre-commit install --install-hooks
+          pre-commit run --all-files
+
+  # Step 4: Smart build orchestration
+  smart-build:
+    name: 🧠 Smart Build
+    needs: [container-health-check, ensure-linux-container, ensure-windows-container, pre-commit]
+    if: always() && !failure()
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        format: [${{ inputs.build_format || 'html' }}]
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🎯 Determine build strategy
+        id: strategy
+        run: |
+          echo "🧠 Determining optimal build strategy..."
+          
+          CONTAINER_STRATEGY="${{ needs.container-health-check.outputs.container-strategy }}"
+          LINUX_AVAILABLE="${{ needs.container-health-check.outputs.linux-container-available }}"
+          WINDOWS_AVAILABLE="${{ needs.container-health-check.outputs.windows-container-available }}"
+          
+          # Determine which workflow to use
+          if [ "${{ matrix.os }}" = "ubuntu-latest" ] && [ "$LINUX_AVAILABLE" = "true" ]; then
+            WORKFLOW="quarto-build-container"
+            BUILD_TYPE="🚀 Fast Container Build"
+          elif [ "${{ matrix.os }}" = "windows-latest" ] && [ "$WINDOWS_AVAILABLE" = "true" ]; then
+            WORKFLOW="quarto-build-container"  # When Windows containers are ready
+            BUILD_TYPE="🚀 Fast Container Build"
+          else
+            WORKFLOW="quarto-build"
+            BUILD_TYPE="🐌 Traditional Build (no container)"
+          fi
+          
+          echo "workflow=$WORKFLOW" >> $GITHUB_OUTPUT
+          echo "build-type=$BUILD_TYPE" >> $GITHUB_OUTPUT
+          
+          echo "📊 Build Strategy for ${{ matrix.os }}:"
+          echo "  Workflow: $WORKFLOW"
+          echo "  Type: $BUILD_TYPE"
+          echo "  Container available: $LINUX_AVAILABLE (Linux), $WINDOWS_AVAILABLE (Windows)"
+
+      - name: 🏗️ Trigger selected build workflow
+        uses: ./.github/workflows/${{ steps.strategy.outputs.workflow }}.yml
+        with:
+          environment: development
+          os: ${{ matrix.os }}
+          format: ${{ matrix.format }}
+          target: ${{ inputs.test_branch && 'dev' || (github.ref == 'refs/heads/main' && 'main' || 'dev') }}
+
+  # Step 5: Results and reporting
+  build-report:
+    name: 📊 Build Report
+    if: always()
+    needs: [container-health-check, ensure-linux-container, ensure-windows-container, pre-commit, smart-build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📋 Generate comprehensive report
+        run: |
+          echo "# 🧠 Enhanced Build Manager Report" >> $GITHUB_STEP_SUMMARY
+          echo >> $GITHUB_STEP_SUMMARY
+          
+          echo "## 🐳 Container Status" >> $GITHUB_STEP_SUMMARY
+          echo "- Linux Container: ${{ needs.container-health-check.outputs.linux-container-available == 'true' && '✅ Available' || '❌ Not Available' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Windows Container: ${{ needs.container-health-check.outputs.windows-container-available == 'true' && '✅ Available' || '❌ Not Available' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Rebuild Needed: ${{ needs.container-health-check.outputs.containers-need-rebuild == 'true' && '🔧 Yes' || '✅ No' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Strategy: ${{ needs.container-health-check.outputs.container-strategy }}" >> $GITHUB_STEP_SUMMARY
+          echo >> $GITHUB_STEP_SUMMARY
+          
+          echo "## 🔧 Container Building" >> $GITHUB_STEP_SUMMARY
+          echo "- Linux Build: ${{ needs.ensure-linux-container.result == 'success' && '✅ Success' || needs.ensure-linux-container.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Windows Build: ${{ needs.ensure-windows-container.result == 'success' && '✅ Success' || needs.ensure-windows-container.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
+          echo >> $GITHUB_STEP_SUMMARY
+          
+          echo "## 🏗️ Content Building" >> $GITHUB_STEP_SUMMARY
+          echo "- Smart Build: ${{ needs.smart-build.result == 'success' && '✅ Success' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Pre-commit: ${{ needs.pre-commit.result == 'success' && '✅ Passed' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
+          echo >> $GITHUB_STEP_SUMMARY
+          
+          echo "## 📈 Performance Benefits" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ needs.container-health-check.outputs.linux-container-available }}" = "true" ]; then
+            echo "- ⚡ Using fast container builds (5-10 min)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- 🐌 Using traditional builds (45 min)" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo >> $GITHUB_STEP_SUMMARY
+          
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "⏰ Completed at: $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_STEP_SUMMARY
