@@ -30,25 +30,67 @@ jobs:
         with:
           fetch-depth: 0  # 📚 Full history for changelog
 
-  structure-check:
-    name: 🧱 Structure Check
+  pre-commit:
+    name: 🧹 Pre-commit Quality Checks
     needs: checkout
-    uses: ./.github/workflows/structure-check.yml
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Cache Python packages
+        uses: actions/cache@v4
+        id: cache-python-packages
+        with:
+          path: ~/.cache/pip
+          key: python-pkgs-${{ runner.os }}-${{ hashFiles('tools/dependencies/requirements.txt') }}
+          restore-keys: |
+            python-pkgs-${{ runner.os }}-
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r tools/dependencies/requirements.txt
+
+      - name: Install system dependencies for pre-commit hooks
+        run: |
+          # Install yamllint for YAML validation
+          python -m pip install yamllint
+          # Install additional tools if needed for other hooks
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Setup Node.js (for markdownlint)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache pre-commit environment
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+          restore-keys: pre-commit-${{ runner.os }}-
+
+      - name: Install pre-commit hooks
+        run: pre-commit install --install-hooks
+
+      - name: Run pre-commit hooks
+        run: pre-commit run --all-files
 
   link-check:
     name: 🔗 Link Check
     needs: checkout
     uses: ./.github/workflows/link-check.yml
 
-  lint-markdown:
-    name: 🧹 Markdown Lint
-    needs: checkout
-    uses: ./.github/workflows/lint-markdown.yml
-
   update-contributors:
     name: 👥 Update Contributors
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    needs: [structure-check, link-check, lint-markdown]
+    needs: [pre-commit, link-check]
     uses: ./.github/workflows/update-contributors.yml
 
   build-dev:
@@ -122,9 +164,8 @@ jobs:
     name: 📊 Final Status Report
     if: always()
     needs: [
-      structure-check, 
-      link-check, 
-      lint-markdown,
+      pre-commit, 
+      link-check,
       update-contributors,
       build-dev,
       build-main
@@ -137,9 +178,8 @@ jobs:
           echo "# 📊 Workflow Status Report" >> $GITHUB_STEP_SUMMARY
           echo >> $GITHUB_STEP_SUMMARY
           echo "## 🔍 Quality Checks" >> $GITHUB_STEP_SUMMARY
-          echo "- Structure Check: ${{ needs.structure-check.result == 'success' && '✅ Passed' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Pre-commit Checks: ${{ needs.pre-commit.result == 'success' && '✅ Passed' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
           echo "- Link Check: ${{ needs.link-check.result == 'success' && '✅ Passed' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Markdown Lint: ${{ needs.lint-markdown.result == 'success' && '✅ Passed' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
           echo >> $GITHUB_STEP_SUMMARY
 
           echo "## 🧪 Development Build" >> $GITHUB_STEP_SUMMARY
@@ -158,9 +198,8 @@ jobs:
           echo "⏰ Completed at: $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_STEP_SUMMARY
 
           FAILED=0
-          [[ "${{ needs.structure-check.result }}" != "success" ]] && FAILED=1
+          [[ "${{ needs.pre-commit.result }}" != "success" ]] && FAILED=1
           [[ "${{ needs.link-check.result }}" != "success" ]] && FAILED=1
-          [[ "${{ needs.lint-markdown.result }}" != "success" ]] && FAILED=1
           [[ "${{ needs.update-contributors.result }}" != "success" && "${{ needs.update-contributors.result }}" != "skipped" ]] && FAILED=1
           [[ "${{ needs.build-dev.result }}" != "success" && "${{ needs.build-dev.result }}" != "skipped" ]] && FAILED=1
           [[ "${{ needs.build-main.result }}" != "success" && "${{ needs.build-main.result }}" != "skipped" ]] && FAILED=1
