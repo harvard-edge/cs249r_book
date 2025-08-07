@@ -132,7 +132,7 @@ RUN pwsh -Command " \
         Write-Host ('🔄 Trying download from: ' + $gsUrl); \
         try { \
             Invoke-WebRequest -Uri $gsUrl -OutFile $gsInstaller -TimeoutSec 300 -UserAgent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'; \
-            if (Test-Path $gsInstaller -and (Get-Item $gsInstaller).Length -gt 1MB) { \
+            if ((Test-Path $gsInstaller) -and ((Get-Item $gsInstaller).Length -gt 1MB)) { \
                 Write-Host ('✅ Downloaded successfully (' + ((Get-Item $gsInstaller).Length / 1MB).ToString('F1') + ' MB)'); \
                 $downloadSuccess = $true; \
                 break; \
@@ -149,17 +149,16 @@ RUN pwsh -Command " \
             Write-Host '✅ Ghostscript installed successfully via direct download'; \
             $gsInstalled = $true; \
         } else { \
-            Write-Host ('⚠️ Installation failed with exit code: ' + $installProcess.ExitCode); \
+            Write-Host ('❌ Installation failed with exit code: ' + $installProcess.ExitCode); \
+            throw ('Ghostscript installation failed with exit code: ' + $installProcess.ExitCode); \
         } \
         # Clean up installer \
         Remove-Item $gsInstaller -ErrorAction SilentlyContinue; \
     } else { \
-        Write-Host '❌ Download failed from all URLs'; \
-    } \
-    \
-    if (-not $gsInstalled) { \
-        Write-Host '⚠️ Ghostscript installation failed - continuing build without it'; \
-        Write-Host '⚠️ Some PDF features may not work properly'; \
+        Write-Host '❌ CRITICAL: Download failed from all URLs'; \
+        Write-Host '❌ Ghostscript is required for PDF processing in Quarto'; \
+        Write-Host '❌ Container build cannot continue without essential dependencies'; \
+        throw 'Ghostscript download failed from all sources - aborting build'; \
     } \
     \
     Write-Host '🔧 Setting up Ghostscript PATH...'; \
