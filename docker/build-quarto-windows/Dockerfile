@@ -13,9 +13,11 @@ RUN curl -L -o PowerShell.msi https://github.com/PowerShell/PowerShell/releases/
     if %ERRORLEVEL% neq 0 (echo ❌ PowerShell installation failed - aborting build && exit 1) && \
     del PowerShell.msi
 
-# Add PowerShell to PATH and test (simple approach that works)
-RUN setx PATH "%PATH%;C:\Program Files\PowerShell\7" /M && \
-    "C:\Program Files\PowerShell\7\pwsh.exe" -Command "Write-Host 'PowerShell 7 installation verified'"
+# Add PowerShell to PATH
+RUN setx PATH "%PATH%;C:\Program Files\PowerShell\7" /M
+
+# Verify PowerShell 7 installation (separate RUN command so PATH takes effect)
+RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command "Write-Host 'PowerShell 7 installation verified'"
 
 # === PHASE 2: CHOCOLATEY INSTALLATION ===
 RUN "C:\Program Files\PowerShell\7\pwsh.exe" -Command " \
