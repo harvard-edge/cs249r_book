@@ -1,0 +1,115 @@
+name: '🔐 Test Container Registry Permissions'
+
+# Simple workflow to test if we can push to GitHub Container Registry
+# This will help identify permission issues before running the full build
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_tag:
+        description: 'Test tag for the container'
+        required: false
+        default: 'test-permissions'
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/test-permissions
+  CONTAINER_TAG: ${{ inputs.test_tag || 'test-permissions' }}
+
+jobs:
+  test-permissions:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔐 Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔍 Test registry access
+        run: |
+          set -euo pipefail
+          echo "🔍 Testing GitHub Container Registry permissions..."
+          echo "📊 Registry: ${{ env.REGISTRY }}"
+          echo "📊 Repository: ${{ github.repository }}"
+          echo "📊 Actor: ${{ github.actor }}"
+          
+          # Test 1: Docker daemon access
+          echo "🔍 Test 1: Docker daemon access..."
+          if docker info >/dev/null 2>&1; then
+            echo "✅ Docker daemon is accessible"
+          else
+            echo "❌ Docker daemon not accessible"
+            exit 1
+          fi
+          
+          # Test 2: Registry login
+          echo "🔍 Test 2: Registry login..."
+          if echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin; then
+            echo "✅ Successfully logged into container registry"
+          else
+            echo "❌ Failed to log into container registry"
+            exit 1
+          fi
+          
+          # Test 3: Push a simple test image
+          echo "🔍 Test 3: Pushing test image..."
+          TEST_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.CONTAINER_TAG }}"
+          
+          # Pull hello-world image
+          if docker pull hello-world:latest; then
+            echo "✅ Successfully pulled hello-world image"
+          else
+            echo "❌ Failed to pull hello-world image"
+            exit 1
+          fi
+          
+          # Tag it for our registry
+          if docker tag hello-world:latest $TEST_IMAGE; then
+            echo "✅ Successfully tagged test image"
+          else
+            echo "❌ Failed to tag test image"
+            exit 1
+          fi
+          
+          # Push to registry
+          if docker push $TEST_IMAGE; then
+            echo "✅ Successfully pushed test image to registry!"
+            echo "📊 Test image: $TEST_IMAGE"
+          else
+            echo "❌ Failed to push test image to registry"
+            echo "🔍 This indicates a permissions issue with GitHub Container Registry"
+            exit 1
+          fi
+          
+          # Test 4: Pull the image back to verify
+          echo "🔍 Test 4: Verifying image can be pulled back..."
+          if docker pull $TEST_IMAGE; then
+            echo "✅ Successfully pulled test image back from registry!"
+            echo "🎉 All permission tests passed!"
+          else
+            echo "❌ Failed to pull test image back from registry"
+            exit 1
+          fi
+
+      - name: 📋 Summary
+        run: |
+          echo "✅ Permission test completed successfully!"
+          echo "📊 Test image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.CONTAINER_TAG }}"
+          echo ""
+          echo "🔗 Next steps:"
+          echo "   1. Check if 'Packages' tab appears in your repository"
+          echo "   2. Run the full container build workflow"
+          echo "   3. If issues persist, check repository settings"
