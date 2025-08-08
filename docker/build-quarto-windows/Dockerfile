@@ -122,26 +122,44 @@ RUN Write-Host '=== STARTING INKSCAPE INSTALLATION ===' ; `
     Write-Host '✅ Inkscape installation complete'
 
 # ------------------------------------------------------------
-# PHASE 9: Install TeX Live (simple approach)
+# PHASE 9: Install TeX Live (one-shot profile approach)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
-    Write-Host 'Installing TeX Live via Chocolatey (minimal base)...' ; `
-    choco install texlive -y --no-progress --params="'/scheme:infraonly'" ; `
+    Write-Host 'Installing TeX Live using one-shot profile (cleanest approach)...' ; `
+    `
+    Write-Host 'Downloading TeX Live installer...' ; `
+    $installer = 'C:\temp\install-tl-windows.exe' ; `
+    Invoke-WebRequest -Uri 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' -OutFile $installer -UseBasicParsing ; `
+    `
+    Write-Host 'Creating one-shot install profile...' ; `
+    @'
+selected_scheme scheme-basic
+
+tlpdbopt_install_docfiles 0
+tlpdbopt_install_srcfiles 0
+
+# collections from tl_packages:
+collection-basic 1
+collection-fontsextra 1
+collection-fontsrecommended 1
+collection-fontutils 1
+collection-latex 1
+collection-latexextra 1
+collection-latexrecommended 1
+collection-luatex 1
+collection-pictures 1
+'@ | Out-File -FilePath 'C:\temp\install-tl.profile' -Encoding ASCII ; `
+    `
+    Write-Host 'Installing TeX Live with profile...' ; `
+    Start-Process -FilePath $installer -ArgumentList '-profile', 'C:\temp\install-tl.profile' -Wait -NoNewWindow ; `
     `
     Write-Host 'Adding TeX Live to PATH...' ; `
     $texLiveBin = 'C:\texlive\bin\windows' ; `
     $env:PATH = "$texLiveBin;$env:PATH" ; `
     [Environment]::SetEnvironmentVariable('PATH', $env:PATH, 'Machine') ; `
     `
-    Write-Host 'Installing additional packages from tl_packages...' ; `
-    $tlmgr = Join-Path $texLiveBin 'tlmgr.bat' ; `
-    $pkgs = Get-Content 'C:\temp\tl_packages' | Where-Object { $_.Trim() -ne '' -and -not $_.Trim().StartsWith('#') } ; `
-    foreach ($pkg in $pkgs) { `
-        Write-Host "Installing: $pkg" ; `
-        & $tlmgr install $pkg.Trim() ; `
-    } ; `
-    `
-    Write-Host 'Basic verification...' ; `
+    Write-Host 'Verifying installation...' ; `
+    tlmgr list --only-installed | Select-String 'collection-' ; `
     lualatex --version | Select-Object -First 1 ; `
     `
     Write-Host '✅ TeXLive installation complete'
