@@ -15,6 +15,14 @@ ENV PATH=/usr/local/texlive/bin/x86_64-linux:$PATH
 
 # Install and configure locales
 RUN echo "🚀 === STARTING LOCALE CONFIGURATION ===" && \
+    echo "🔍 Checking system readiness..." && \
+    if [ -f /etc/os-release ]; then \
+        echo "✅ OS release file found"; \
+        cat /etc/os-release | grep PRETTY_NAME; \
+    else \
+        echo "❌ OS release file not found"; \
+        exit 1; \
+    fi && \
     echo "📦 Installing locales package..." && \
     apt-get update && apt-get install -y locales && \
     echo "📦 Locales package installed" && \
@@ -89,6 +97,26 @@ RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
     curl \
     git && \
     echo "📦 All system packages installed successfully" && \
+    \
+    echo "🔍 Verifying critical packages..." && \
+    if command -v wget >/dev/null 2>&1; then \
+        echo "📦 wget available"; \
+    else \
+        echo "❌ wget not found"; \
+        exit 1; \
+    fi && \
+    if command -v curl >/dev/null 2>&1; then \
+        echo "📦 curl available"; \
+    else \
+        echo "❌ curl not found"; \
+        exit 1; \
+    fi && \
+    if command -v git >/dev/null 2>&1; then \
+        echo "📦 git available"; \
+    else \
+        echo "❌ git not found"; \
+        exit 1; \
+    fi && \
     \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
@@ -193,6 +221,27 @@ RUN echo "🚀 === STARTING TEX LIVE INSTALLATION ===" && \
     wget \
     xzdec && \
     echo "📦 Prerequisites installed" && \
+    \
+    echo "🔍 Verifying prerequisites..." && \
+    if command -v perl >/dev/null 2>&1; then \
+        echo "📦 perl available"; \
+    else \
+        echo "❌ perl not found"; \
+        exit 1; \
+    fi && \
+    if command -v wget >/dev/null 2>&1; then \
+        echo "📦 wget available"; \
+    else \
+        echo "❌ wget not found"; \
+        exit 1; \
+    fi && \
+    if command -v xzdec >/dev/null 2>&1; then \
+        echo "📦 xzdec available"; \
+    else \
+        echo "❌ xzdec not found"; \
+        exit 1; \
+    fi && \
+    \
     rm -rf /var/lib/apt/lists/* && \
     \
     echo "🔄 Downloading TeX Live installer (~4MB)..." && \
@@ -224,10 +273,12 @@ RUN echo "🚀 === STARTING TEX LIVE INSTALLATION ===" && \
     \
     echo "🔄 Installing TeX Live base system..." && \
     /tmp/install-tl-*/install-tl --profile=/tmp/texlive.profile && \
+    echo "📦 TeX Live base system installed" && \
     \
     echo "🔧 Setting up TeX Live PATH..." && \
     echo 'export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH' >> /etc/bash.bashrc && \
     export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH && \
+    echo "🔧 TeX Live PATH configured" && \
     \
     echo "📊 Analyzing tl_packages file..." && \
     collection_count=$(grep -c '^collection-' /tmp/tl_packages) && \
@@ -236,7 +287,13 @@ RUN echo "🚀 === STARTING TEX LIVE INSTALLATION ===" && \
     echo "🔄 Installing TeX Live collections..." && \
     export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH && \
     echo "📍 Checking if tlmgr is available..." && \
-    which tlmgr && tlmgr --version || echo "❌ tlmgr not found or not working" && \
+    if command -v tlmgr >/dev/null 2>&1; then \
+        echo "📦 tlmgr available"; \
+        tlmgr --version | head -1; \
+    else \
+        echo "❌ tlmgr not found or not working"; \
+        exit 1; \
+    fi && \
     i=1 && \
     while IFS= read -r collection; do \
         case "$collection" in \
