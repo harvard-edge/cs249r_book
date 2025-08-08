@@ -143,7 +143,8 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
     if (Test-Path $texLiveBin) { `
         $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
         if ($mach -notmatch [regex]::Escape($texLiveBin)) { `
-            [Environment]::SetEnvironmentVariable('PATH', "$texLiveBin;$mach", 'Machine') ; `
+            $newPath = "$texLiveBin;$mach" ; `
+            [Environment]::SetEnvironmentVariable('PATH', $newPath, 'Machine') ; `
             Write-Host "✅ Added TeX Live to PATH: $texLiveBin" ; `
         } ; `
     } ; `
