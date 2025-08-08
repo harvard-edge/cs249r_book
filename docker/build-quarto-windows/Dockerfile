@@ -227,11 +227,6 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
         & "$texLiveBin\tlmgr.bat" install $collection ; `
     } ; `
     `
-    Write-Host 'Adding TeX Live to PATH...' ; `
-    $texLiveBin = 'C:\texlive\bin\windows' ; `
-    $env:PATH = "$texLiveBin;$env:PATH" ; `
-    [Environment]::SetEnvironmentVariable('PATH', $env:PATH, 'Machine') ; `
-    `
     Write-Host 'Refreshing environment variables...' ; `
     $env:PATH = [Environment]::GetEnvironmentVariable('PATH', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('PATH', 'User') ; `
     `

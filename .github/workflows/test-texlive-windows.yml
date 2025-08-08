@@ -1,0 +1,72 @@
+name: '🧪 Test TeX Live Windows'
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-texlive:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐳 Test TeX Live installation
+        run: |
+          echo "🧪 Testing TeX Live installation only..."
+          
+          # Create a minimal Dockerfile for testing
+          $testDockerfile = @"
+FROM mcr.microsoft.com/windows/servercore:ltsc2022
+
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Copy tl_packages file
+COPY tools/dependencies/tl_packages C:/temp/tl_packages
+
+# Test TeX Live installation
+RUN Write-Host '=== TESTING TEX LIVE INSTALLATION ===' ; `
+    Write-Host 'Downloading TeX Live installer...' ; `
+    $installer = 'C:\temp\install-tl-windows.exe' ; `
+    Invoke-WebRequest -Uri 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' -OutFile $installer -UseBasicParsing ; `
+    Write-Host 'Creating basic profile...' ; `
+    'selected_scheme scheme-medium' | Set-Content -Path 'C:\temp\install-tl.profile' -Encoding ASCII ; `
+    '' | Add-Content -Path 'C:\temp\install-tl.profile' -Encoding ASCII ; `
+    'tlpdbopt_install_docfiles 0' | Add-Content -Path 'C:\temp\install-tl.profile' -Encoding ASCII ; `
+    'tlpdbopt_install_srcfiles 0' | Add-Content -Path 'C:\temp\install-tl.profile' -Encoding ASCII ; `
+    '' | Add-Content -Path 'C:\temp\install-tl.profile' -Encoding ASCII ; `
+    Write-Host 'Installing TeX Live base system...' ; `
+    Start-Process -FilePath $installer -ArgumentList '-profile', 'C:\temp\install-tl.profile' -Wait -NoNewWindow ; `
+    Write-Host 'TeX Live base system installed' ; `
+    Write-Host 'Adding TeX Live to PATH...' ; `
+    $texLiveBin = 'C:\texlive\bin\windows' ; `
+    $env:PATH = "$texLiveBin;$env:PATH" ; `
+    Write-Host 'Installing TeX Live collections...' ; `
+    $collections = Get-Content 'C:\temp\tl_packages' | Where-Object { $_.Trim() -ne '' -and -not $_.Trim().StartsWith('#') } ; `
+    Write-Host "Found $($collections.Count) collections to install:" ; `
+    foreach ($collection in $collections) { `
+        Write-Host "  - Installing $collection..." ; `
+        & "$texLiveBin\tlmgr.bat" install $collection ; `
+    } ; `
+    Write-Host '✅ TeX Live test complete'
+"@
+          
+          $testDockerfile | Out-File -FilePath "test-texlive.Dockerfile" -Encoding ASCII
+          
+          echo "📄 Created test Dockerfile"
+          echo "📄 Testing TeX Live installation..."
+          
+          # Build the test image
+          docker build -f test-texlive.Dockerfile -t test-texlive .
+          
+          echo "✅ TeX Live test completed successfully!"
+
+      - name: ✅ Test Complete
+        run: |
+          echo "✅ TeX Live installation test passed!"
+          echo "📊 The PowerShell syntax is working correctly"
