@@ -343,6 +343,13 @@ RUN echo "🚀 === STARTING QUARTO INSTALLATION ===" && \
     dpkg -i quarto-1.7.31-linux-amd64.deb && \
     echo "📦 Quarto installed" && \
     \
+    echo "🔍 Verifying Quarto installation..." && \
+    which quarto || echo "❌ quarto not found in PATH" && \
+    ls -la /usr/bin/quarto || echo "❌ quarto not in /usr/bin" && \
+    ls -la /usr/local/bin/quarto || echo "❌ quarto not in /usr/local/bin" && \
+    echo "📍 Checking if quarto is executable:" && \
+    find /usr -name "quarto" -type f -executable 2>/dev/null || echo "No executable quarto found" && \
+    \
     echo "🧹 Cleaning up installer..." && \
     rm quarto-1.7.31-linux-amd64.deb && \
     echo "🧹 Installer cleaned up" && \
@@ -484,17 +491,41 @@ WORKDIR /workspace
 RUN echo "🚀 === STARTING FINAL VERIFICATION ===" && \
     export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH && \
     echo "📊 Checking Quarto..." && \
-    quarto --version && \
-    echo "✅ Quarto verified" && \
+    if command -v quarto >/dev/null 2>&1; then \
+        quarto --version && \
+        echo "✅ Quarto verified"; \
+    else \
+        echo "❌ Quarto not found in PATH"; \
+        echo "📍 Checking for quarto in common locations:"; \
+        find /usr -name "quarto" -type f 2>/dev/null || echo "No quarto found"; \
+        exit 1; \
+    fi && \
     echo "📊 Checking Python..." && \
-    python3 --version && \
-    echo "✅ Python verified" && \
+    if command -v python3 >/dev/null 2>&1; then \
+        python3 --version && \
+        echo "✅ Python verified"; \
+    else \
+        echo "❌ Python3 not found"; \
+        exit 1; \
+    fi && \
     echo "📊 Checking R..." && \
-    R --version && \
-    echo "✅ R verified" && \
+    if command -v R >/dev/null 2>&1; then \
+        R --version && \
+        echo "✅ R verified"; \
+    else \
+        echo "❌ R not found"; \
+        exit 1; \
+    fi && \
     echo "📊 Checking LaTeX..." && \
-    lualatex --version && \
-    echo "✅ LaTeX verified" && \
+    if command -v lualatex >/dev/null 2>&1; then \
+        lualatex --version && \
+        echo "✅ LaTeX verified"; \
+    else \
+        echo "❌ lualatex not found"; \
+        echo "📍 Checking for lualatex in TeX Live:"; \
+        find /usr/local/texlive -name "lualatex" -type f 2>/dev/null || echo "No lualatex found"; \
+        exit 1; \
+    fi && \
     echo "✅ Final verification complete"
 
 # Health check
