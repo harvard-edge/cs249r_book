@@ -97,7 +97,16 @@ RUN Write-Host '=== STARTING PYTHON INSTALLATION ===' ; `
     Write-Host '✅ Python installation complete'
 
 # ------------------------------------------------------------
-# PHASE 6: Install Ghostscript (same as quarto-build workflow)
+# PHASE 6: Install Python packages (same as quarto-build workflow)
+# ------------------------------------------------------------
+RUN Write-Host '=== STARTING PYTHON PACKAGE INSTALLATION ===' ; `
+    Write-Host 'Installing Python packages from requirements.txt (same as quarto-build workflow)...' ; `
+    python -m pip install --upgrade pip ; `
+    python -m pip install -r C:/temp/requirements.txt ; `
+    Write-Host '✅ Python package installation complete'
+
+# ------------------------------------------------------------
+# PHASE 7: Install Ghostscript (same as quarto-build workflow)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING GHOSTSCRIPT INSTALLATION ===' ; `
     Write-Host 'Installing Ghostscript via Scoop (same as quarto-build workflow)...' ; `
@@ -105,7 +114,7 @@ RUN Write-Host '=== STARTING GHOSTSCRIPT INSTALLATION ===' ; `
     Write-Host '✅ Ghostscript installation complete'
 
 # ------------------------------------------------------------
-# PHASE 7: Install Inkscape (same as quarto-build workflow)
+# PHASE 8: Install Inkscape (same as quarto-build workflow)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING INKSCAPE INSTALLATION ===' ; `
     Write-Host 'Installing Inkscape via Scoop (same as quarto-build workflow)...' ; `
@@ -113,7 +122,7 @@ RUN Write-Host '=== STARTING INKSCAPE INSTALLATION ===' ; `
     Write-Host '✅ Inkscape installation complete'
 
 # ------------------------------------------------------------
-# PHASE 8: Install TeX Live (same as working quarto-build workflow)
+# PHASE 9: Install TeX Live (same as working quarto-build workflow)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
     Write-Host 'Using same approach as working quarto-build workflow' ; `
@@ -165,7 +174,7 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
     Write-Host "=== TEX LIVE INSTALLATION COMPLETE === ($($duration.ToString('F1')) minutes)"
 
 # ------------------------------------------------------------
-# PHASE 9: Install R (same as quarto-build workflow)
+# PHASE 10: Install R (same as quarto-build workflow)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING R INSTALLATION ===' ; `
     Write-Host 'Installing R via Scoop (same as quarto-build workflow)...' ; `
@@ -173,14 +182,8 @@ RUN Write-Host '=== STARTING R INSTALLATION ===' ; `
     Write-Host '✅ R installation complete'
 
 # ------------------------------------------------------------
-# PHASE 10: R 4.3.2 + packages (same as quarto-build workflow)
+# PHASE 11: R packages (same as quarto-build workflow)
 # ------------------------------------------------------------
-RUN Write-Host '=== STARTING R PACKAGE INSTALLATION ===' ; `
-    Write-Host 'Installing R packages (same as quarto-build workflow)...' ; `
-    choco install -y r --version=4.3.2 --no-progress ; `
-    R --version | Select-Object -First 1 ; `
-    Write-Host '✅ R base installation complete'
-
 RUN Write-Host '=== INSTALLING R PACKAGES ===' ; `
     Write-Host 'Installing R packages from install_packages.R (same as quarto-build workflow)...' ; `
     Rscript -e "options(repos=c(CRAN='https://cran.rstudio.com')); dir.create(Sys.getenv('R_LIBS_USER'), recursive=TRUE, showWarnings=FALSE); .libPaths(Sys.getenv('R_LIBS_USER')); install.packages('remotes'); if (file.exists('C:/temp/install_packages.R')) source('C:/temp/install_packages.R') else install.packages(c('rmarkdown','knitr','ggplot2')); for (p in c('rmarkdown','knitr')) if (!require(p, character.only=TRUE, quietly=TRUE)) stop('missing: ', p)" ; `
@@ -189,7 +192,7 @@ RUN Write-Host '=== INSTALLING R PACKAGES ===' ; `
     Write-Host '✅ R package installation complete'
 
 # ------------------------------------------------------------
-# PHASE 11: Cleanup (same as quarto-build workflow)
+# PHASE 12: Cleanup (same as quarto-build workflow)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING CLEANUP ===' ; `
     Write-Host 'Cleaning temporary files (same as quarto-build workflow)...' ; `
