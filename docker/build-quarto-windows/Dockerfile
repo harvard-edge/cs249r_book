@@ -126,7 +126,7 @@ RUN Write-Host '=== STARTING INKSCAPE INSTALLATION ===' ; `
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
     Write-Host 'Installing TeX Live via Chocolatey (simple approach)...' ; `
-    choco install texlive -y --no-progress ; `
+    choco install texlive -y --no-progress --params="'/scheme:basic'" ; `
     `
     Write-Host 'Adding TeX Live to PATH...' ; `
     $texLiveBin = 'C:\texlive\bin\windows' ; `
