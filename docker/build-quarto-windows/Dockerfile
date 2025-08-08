@@ -77,6 +77,8 @@ RUN [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 ; `
     scoop install git ; `
     Write-Host 'Adding r-bucket...' ; `
     scoop bucket add r-bucket https://github.com/cderv/r-bucket.git ; `
+    Write-Host 'Adding extras bucket...' ; `
+    scoop bucket add extras ; `
     Write-Host 'Installing Quarto (latest stable)...' ; `
     scoop install quarto ; `
     Write-Host 'Quarto installation completed!'
@@ -97,7 +99,7 @@ RUN Write-Host 'Installing Ghostscript...' ; `
 # PHASE 7: Install Inkscape
 # ------------------------------------------------------------
 RUN Write-Host 'Installing Inkscape...' ; `
-    scoop install extras/inkscape
+    scoop install inkscape
 
 # ------------------------------------------------------------
 # PHASE 8: Install R
