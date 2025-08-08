@@ -210,22 +210,22 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
     'tlpdbopt_install_srcfiles 0' | Add-Content -Path 'C:\temp\install-tl.profile' -Encoding ASCII ; `
     '' | Add-Content -Path 'C:\temp\install-tl.profile' -Encoding ASCII ; `
     `
-    # Add collections from tl_packages file
-    Write-Host 'Reading tl_packages file...' ; `
+    Write-Host 'Installing TeX Live base system...' ; `
+    Start-Process -FilePath $installer -ArgumentList '-profile', 'C:\temp\install-tl.profile' -Wait -NoNewWindow ; `
+    Write-Host 'TeX Live base system installed' ; `
+    `
+    Write-Host 'Adding TeX Live to PATH...' ; `
+    $texLiveBin = 'C:\texlive\bin\windows' ; `
+    $env:PATH = "$texLiveBin;$env:PATH" ; `
+    [Environment]::SetEnvironmentVariable('PATH', $env:PATH, 'Machine') ; `
+    `
+    Write-Host 'Installing TeX Live collections...' ; `
     $collections = Get-Content 'C:\temp\tl_packages' | Where-Object { $_.Trim() -ne '' -and -not $_.Trim().StartsWith('#') } ; `
     Write-Host "Found $($collections.Count) collections to install:" ; `
     foreach ($collection in $collections) { `
-        Write-Host "  - $collection" ; `
-        "$collection 1" | Add-Content -Path 'C:\temp\install-tl.profile' -Encoding ASCII ; `
+        Write-Host "  - Installing $collection..." ; `
+        & "$texLiveBin\tlmgr.bat" install $collection ; `
     } ; `
-    Write-Host '📄 Profile created successfully' ; `
-    `
-    Write-Host 'Installing TeX Live with profile...' ; `
-    Write-Host "Installer path: $installer" ; `
-    Write-Host "Profile path: C:\temp\install-tl.profile" ; `
-    Write-Host "Profile contents:" ; `
-    Get-Content 'C:\temp\install-tl.profile' | Write-Host ; `
-    Start-Process -FilePath $installer -ArgumentList '-profile', 'C:\temp\install-tl.profile' -Wait -NoNewWindow ; `
     `
     Write-Host 'Adding TeX Live to PATH...' ; `
     $texLiveBin = 'C:\texlive\bin\windows' ; `
