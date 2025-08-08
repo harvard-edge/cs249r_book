@@ -169,7 +169,7 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
     Write-Host 'Basic verification (same as quarto-build workflow)...' ; `
     lualatex --version | Select-Object -First 1 ; `
     `
-    Write-Host '=== TEX LIVE INSTALLATION COMPLETE ==='
+    Write-Host '✅ TeXLive installation complete'
 
 # ------------------------------------------------------------
 # PHASE 10: Install R (same as quarto-build workflow)
