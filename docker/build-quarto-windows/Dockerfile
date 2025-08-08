@@ -125,8 +125,8 @@ RUN Write-Host '=== STARTING INKSCAPE INSTALLATION ===' ; `
 # PHASE 9: Install TeX Live (simple approach)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
-    Write-Host 'Installing TeX Live via Chocolatey (matching zauguin action)...' ; `
-    choco install texlive -y --no-progress --params="'/scheme:infraonly'" ; `
+    Write-Host 'Installing TeX Live via Chocolatey with specific collections...' ; `
+    choco install texlive -y --no-progress --params="'/collections:basic,latex,latexextra,latexrecommended,luatex,pictures,fontsextra,fontsrecommended,fontutils'" ; `
     `
     Write-Host 'Adding TeX Live to PATH...' ; `
     $texLiveBin = 'C:\texlive\bin\windows' ; `
