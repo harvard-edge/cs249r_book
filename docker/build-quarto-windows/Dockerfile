@@ -125,38 +125,44 @@ RUN Write-Host '=== STARTING INKSCAPE INSTALLATION ===' ; `
 # PHASE 9: Install TeX Live (same as working quarto-build workflow)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
-    Write-Host 'Using same approach as working quarto-build workflow' ; `
-    $startTime = Get-Date ; `
+    Write-Host 'Using zauguin/install-texlive@v4 approach (same as quarto-build workflow)' ; `
     `
-    Write-Host 'Downloading TeX Live installer...' ; `
-    $Installer = 'C:\temp\install-tl-windows.exe' ; `
-    Invoke-WebRequest -Uri 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' -OutFile $Installer -TimeoutSec 1800 -UseBasicParsing ; `
+    Write-Host 'Installing TeX Live using tlmgr (same as zauguin action)...' ; `
+    # Download and install tlmgr directly (like the action does)
+    $texLiveDir = 'C:\texlive' ; `
+    $texLiveBin = Join-Path $texLiveDir 'bin\windows' ; `
     `
-    Write-Host 'Creating TeX Live installation profile (same as zauguin action)...' ; `
-    'selected_scheme scheme-infraonly' | Set-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    'tlpdbopt_install_docfiles 0' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    'tlpdbopt_install_srcfiles 0' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    'TEXDIR C:/texlive' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    'TEXMFCONFIG C:/texlive/texmf-config' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    'TEXMFHOME C:/texlive/texmf-home' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    'TEXMFLOCAL C:/texlive/texmf-local' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    'TEXMFSYSCONFIG C:/texlive/texmf-config' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    'TEXMFSYSVAR C:/texlive/texmf-var' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    'TEXMFVAR C:/texlive/texmf-var' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    # Create TeX Live directory structure
+    New-Item -ItemType Directory -Path $texLiveDir -Force | Out-Null ; `
+    New-Item -ItemType Directory -Path $texLiveBin -Force | Out-Null ; `
+    `
+    # Download tlmgr and install TeX Live base
+    Write-Host 'Downloading tlmgr...' ; `
+    $tlmgrUrl = 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' ; `
+    $installer = 'C:\temp\install-tl-windows.exe' ; `
+    Invoke-WebRequest -Uri $tlmgrUrl -OutFile $installer -UseBasicParsing ; `
     `
     Write-Host 'Installing TeX Live base system...' ; `
-    Start-Process -FilePath $Installer -ArgumentList '-profile', 'C:\temp\texlive.profile' -Wait -NoNewWindow ; `
+    # Use the same profile as zauguin action
+    @'
+selected_scheme scheme-basic
+tlpdbopt_install_docfiles 0
+tlpdbopt_install_srcfiles 0
+TEXDIR C:/texlive
+TEXMFCONFIG C:/texlive/texmf-config
+TEXMFHOME C:/texlive/texmf-home
+TEXMFLOCAL C:/texlive/texmf-local
+TEXMFSYSCONFIG C:/texlive/texmf-config
+TEXMFSYSVAR C:/texlive/texmf-var
+TEXMFVAR C:/texlive/texmf-var
+'@ | Out-File -FilePath 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    `
+    # Install TeX Live base
+    Start-Process -FilePath $installer -ArgumentList '-profile', 'C:\temp\texlive.profile' -Wait -NoNewWindow ; `
     `
     Write-Host 'Adding TeX Live to PATH...' ; `
-    $texLiveBin = 'C:\texlive\bin\windows' ; `
-    if (Test-Path $texLiveBin) { `
-        $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
-        if ($mach -notmatch [regex]::Escape($texLiveBin)) { `
-            $newPath = "$texLiveBin;$mach" ; `
-            [Environment]::SetEnvironmentVariable('PATH', $newPath, 'Machine') ; `
-            Write-Host "✅ Added TeX Live to PATH: $texLiveBin" ; `
-        } ; `
-    } ; `
+    $env:PATH = "$texLiveBin;$env:PATH" ; `
+    [Environment]::SetEnvironmentVariable('PATH', $env:PATH, 'Machine') ; `
     `
     Write-Host 'Installing packages from tl_packages (same as zauguin action)...' ; `
     $tlmgr = Join-Path $texLiveBin 'tlmgr.bat' ; `
