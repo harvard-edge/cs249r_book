@@ -131,24 +131,21 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
     $installer = 'C:\temp\install-tl-windows.exe' ; `
     Invoke-WebRequest -Uri 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' -OutFile $installer -UseBasicParsing ; `
     `
-    Write-Host 'Creating one-shot install profile...' ; `
+    Write-Host 'Creating one-shot install profile from tl_packages...' ; `
+    # Start with basic profile
     @'
 selected_scheme scheme-basic
 
 tlpdbopt_install_docfiles 0
 tlpdbopt_install_srcfiles 0
 
-# collections from tl_packages:
-collection-basic 1
-collection-fontsextra 1
-collection-fontsrecommended 1
-collection-fontutils 1
-collection-latex 1
-collection-latexextra 1
-collection-latexrecommended 1
-collection-luatex 1
-collection-pictures 1
 '@ | Out-File -FilePath 'C:\temp\install-tl.profile' -Encoding ASCII ; `
+    `
+    # Add collections from tl_packages file
+    $collections = Get-Content 'C:\temp\tl_packages' | Where-Object { $_.Trim() -ne '' -and -not $_.Trim().StartsWith('#') } ; `
+    foreach ($collection in $collections) { `
+        "$collection 1" | Add-Content -Path 'C:\temp\install-tl.profile' -Encoding ASCII ; `
+    } ; `
     `
     Write-Host 'Installing TeX Live with profile...' ; `
     Start-Process -FilePath $installer -ArgumentList '-profile', 'C:\temp\install-tl.profile' -Wait -NoNewWindow ; `
