@@ -122,49 +122,18 @@ RUN Write-Host '=== STARTING INKSCAPE INSTALLATION ===' ; `
     Write-Host '✅ Inkscape installation complete'
 
 # ------------------------------------------------------------
-# PHASE 9: Install TeX Live (same as working quarto-build workflow)
+# PHASE 9: Install TeX Live (simple approach)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
-    Write-Host 'Using zauguin/install-texlive@v4 approach (same as quarto-build workflow)' ; `
-    `
-    Write-Host 'Installing TeX Live using tlmgr (same as zauguin action)...' ; `
-    # Download and install tlmgr directly (like the action does)
-    $texLiveDir = 'C:\texlive' ; `
-    $texLiveBin = Join-Path $texLiveDir 'bin\windows' ; `
-    `
-    # Create TeX Live directory structure
-    New-Item -ItemType Directory -Path $texLiveDir -Force | Out-Null ; `
-    New-Item -ItemType Directory -Path $texLiveBin -Force | Out-Null ; `
-    `
-    # Download tlmgr and install TeX Live base
-    Write-Host 'Downloading tlmgr...' ; `
-    $tlmgrUrl = 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' ; `
-    $installer = 'C:\temp\install-tl-windows.exe' ; `
-    Invoke-WebRequest -Uri $tlmgrUrl -OutFile $installer -UseBasicParsing ; `
-    `
-    Write-Host 'Installing TeX Live base system...' ; `
-    # Use the same profile as zauguin action
-    @'
-selected_scheme scheme-basic
-tlpdbopt_install_docfiles 0
-tlpdbopt_install_srcfiles 0
-TEXDIR C:/texlive
-TEXMFCONFIG C:/texlive/texmf-config
-TEXMFHOME C:/texlive/texmf-home
-TEXMFLOCAL C:/texlive/texmf-local
-TEXMFSYSCONFIG C:/texlive/texmf-config
-TEXMFSYSVAR C:/texlive/texmf-var
-TEXMFVAR C:/texlive/texmf-var
-'@ | Out-File -FilePath 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    `
-    # Install TeX Live base
-    Start-Process -FilePath $installer -ArgumentList '-profile', 'C:\temp\texlive.profile' -Wait -NoNewWindow ; `
+    Write-Host 'Installing TeX Live via Chocolatey (simple approach)...' ; `
+    choco install texlive -y --no-progress ; `
     `
     Write-Host 'Adding TeX Live to PATH...' ; `
+    $texLiveBin = 'C:\texlive\bin\windows' ; `
     $env:PATH = "$texLiveBin;$env:PATH" ; `
     [Environment]::SetEnvironmentVariable('PATH', $env:PATH, 'Machine') ; `
     `
-    Write-Host 'Installing packages from tl_packages (same as zauguin action)...' ; `
+    Write-Host 'Installing additional packages from tl_packages...' ; `
     $tlmgr = Join-Path $texLiveBin 'tlmgr.bat' ; `
     $pkgs = Get-Content 'C:\temp\tl_packages' | Where-Object { $_.Trim() -ne '' -and -not $_.Trim().StartsWith('#') } ; `
     foreach ($pkg in $pkgs) { `
@@ -172,7 +141,7 @@ TEXMFVAR C:/texlive/texmf-var
         & $tlmgr install $pkg.Trim() ; `
     } ; `
     `
-    Write-Host 'Basic verification (same as quarto-build workflow)...' ; `
+    Write-Host 'Basic verification...' ; `
     lualatex --version | Select-Object -First 1 ; `
     `
     Write-Host '✅ TeXLive installation complete'
