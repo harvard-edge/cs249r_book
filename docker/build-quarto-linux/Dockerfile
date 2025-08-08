@@ -14,10 +14,19 @@ ENV LC_ALL=en_US.UTF-8
 ENV PATH=/usr/local/texlive/bin/x86_64-linux:$PATH
 
 # Install and configure locales
-RUN apt-get update && apt-get install -y locales && \
+RUN echo "🚀 === STARTING LOCALE CONFIGURATION ===" && \
+    echo "📦 Installing locales package..." && \
+    apt-get update && apt-get install -y locales && \
+    echo "✅ Locales package installed" && \
+    echo "🔧 Generating en_US.UTF-8 locale..." && \
     locale-gen en_US.UTF-8 && \
+    echo "✅ Locale generated" && \
+    echo "🔧 Updating system locale..." && \
     update-locale LANG=en_US.UTF-8 && \
-    rm -rf /var/lib/apt/lists/*
+    echo "✅ System locale updated" && \
+    echo "🧹 Cleaning package cache..." && \
+    rm -rf /var/lib/apt/lists/* && \
+    echo "✅ Locale configuration complete"
 
 # === PHASE 1: SYSTEM DEPENDENCIES ===
 RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
@@ -29,6 +38,31 @@ RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
     apt-get update && \
     \
     echo "📦 Installing core system packages (25 packages)..." && \
+    echo "📋 Package list:" && \
+    echo "  - fonts-dejavu" && \
+    echo "  - fonts-freefont-ttf" && \
+    echo "  - gdk-pixbuf2.0-bin" && \
+    echo "  - libcairo2" && \
+    echo "  - libfontconfig1" && \
+    echo "  - libfontconfig1-dev" && \
+    echo "  - libfreetype6" && \
+    echo "  - libfreetype6-dev" && \
+    echo "  - libpango-1.0-0" && \
+    echo "  - libpangocairo-1.0-0" && \
+    echo "  - libpangoft2-1.0-0" && \
+    echo "  - libxml2-dev" && \
+    echo "  - libcurl4-openssl-dev" && \
+    echo "  - libjpeg-dev" && \
+    echo "  - libtiff5-dev" && \
+    echo "  - libpng-dev" && \
+    echo "  - libharfbuzz-dev" && \
+    echo "  - libfribidi-dev" && \
+    echo "  - librsvg2-dev" && \
+    echo "  - libgdal-dev" && \
+    echo "  - libudunits2-dev" && \
+    echo "  - wget" && \
+    echo "  - curl" && \
+    echo "  - git" && \
     apt-get install -y \
     fonts-dejavu \
     fonts-freefont-ttf \
@@ -54,6 +88,7 @@ RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
     wget \
     curl \
     git && \
+    echo "✅ All system packages installed successfully" && \
     \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
@@ -70,12 +105,17 @@ RUN echo "🚀 === STARTING INKSCAPE INSTALLATION ===" && \
     \
     echo "🔄 Adding Inkscape PPA repository..." && \
     apt-get update && \
+    echo "📦 Installing software-properties-common..." && \
     apt-get install -y software-properties-common && \
+    echo "✅ software-properties-common installed" && \
+    echo "🔧 Adding Inkscape PPA..." && \
     add-apt-repository ppa:inkscape.dev/stable -y && \
+    echo "✅ Inkscape PPA added" && \
     \
     echo "📦 Installing Inkscape..." && \
     apt-get update && \
     apt-get install -y inkscape && \
+    echo "✅ Inkscape installed" && \
     \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
@@ -85,23 +125,38 @@ RUN echo "🚀 === STARTING INKSCAPE INSTALLATION ===" && \
     echo "✅ === INKSCAPE INSTALLATION COMPLETE === (${duration}s)"
 
 # Install font dependencies (note: fonts-freefont-ttf already installed above)
-RUN apt-get update && apt-get install -y \
+RUN echo "🚀 === STARTING FONT INSTALLATION ===" && \
+    echo "📦 Installing additional fonts..." && \
+    apt-get update && apt-get install -y \
     fonts-liberation \
     fontconfig && \
+    echo "✅ Fonts installed" && \
+    echo "🔧 Updating font cache..." && \
     fc-cache -fv && \
-    rm -rf /var/lib/apt/lists/*
+    echo "✅ Font cache updated" && \
+    echo "🧹 Cleaning package cache..." && \
+    rm -rf /var/lib/apt/lists/* && \
+    echo "✅ Font installation complete"
 
 # Test Inkscape SVG to PDF conversion (same as your workflow)
-RUN echo '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><circle cx="50" cy="50" r="40" fill="red"/></svg>' > test.svg && \
+RUN echo "🚀 === STARTING INKSCAPE TEST ===" && \
+    echo "📋 Creating test SVG file..." && \
+    echo '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><circle cx="50" cy="50" r="40" fill="red"/></svg>' > test.svg && \
+    echo "✅ Test SVG created" && \
+    echo "🔄 Converting SVG to PDF..." && \
     inkscape --export-type=pdf --export-filename=test.pdf test.svg && \
+    echo "✅ Conversion completed" && \
     if [ -f test.pdf ]; then \
         echo "✅ Inkscape SVG to PDF conversion successful!"; \
+        echo "📊 PDF file details:"; \
         ls -lh test.pdf; \
     else \
         echo "❌ Inkscape SVG to PDF conversion failed."; \
         exit 1; \
     fi && \
-    rm -f test.svg test.pdf
+    echo "🧹 Cleaning up test files..." && \
+    rm -f test.svg test.pdf && \
+    echo "✅ Inkscape test complete"
 
 # === PHASE 5: GHOSTSCRIPT INSTALLATION ===
 RUN echo "🚀 === STARTING GHOSTSCRIPT INSTALLATION ===" && \
@@ -110,6 +165,9 @@ RUN echo "🚀 === STARTING GHOSTSCRIPT INSTALLATION ===" && \
     \
     echo "📦 Installing Ghostscript..." && \
     apt-get update && apt-get install -y ghostscript && \
+    echo "✅ Ghostscript installed" && \
+    echo "📊 Ghostscript version:" && \
+    gs --version && \
     \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
@@ -126,17 +184,28 @@ RUN echo "🚀 === STARTING TEX LIVE INSTALLATION ===" && \
     start_time=$(date +%s) && \
     \
     echo "📦 Installing TeX Live prerequisites..." && \
+    echo "📋 Prerequisites:" && \
+    echo "  - perl" && \
+    echo "  - wget" && \
+    echo "  - xzdec" && \
     apt-get update && apt-get install -y \
     perl \
     wget \
     xzdec && \
+    echo "✅ Prerequisites installed" && \
     rm -rf /var/lib/apt/lists/* && \
     \
     echo "🔄 Downloading TeX Live installer (~4MB)..." && \
     wget -O /tmp/install-tl-unx.tar.gz "https://mirror.ctan.org/systems/texlive/tlnet/install-tl-unx.tar.gz" && \
+    echo "✅ Download completed" && \
+    echo "📊 Downloaded file size:" && \
+    ls -lh /tmp/install-tl-unx.tar.gz && \
     \
     echo "📦 Extracting TeX Live installer..." && \
     cd /tmp && tar -xzf install-tl-unx.tar.gz && \
+    echo "✅ Extraction completed" && \
+    echo "📊 Extracted files:" && \
+    ls -la /tmp/install-tl-* && \
     \
     echo "🔧 Creating TeX Live installation profile..." && \
     echo "selected_scheme scheme-infraonly" > /tmp/texlive.profile && \
@@ -149,6 +218,9 @@ RUN echo "🚀 === STARTING TEX LIVE INSTALLATION ===" && \
     echo "TEXMFSYSCONFIG /usr/local/texlive/texmf-config" >> /tmp/texlive.profile && \
     echo "TEXMFSYSVAR /usr/local/texlive/texmf-var" >> /tmp/texlive.profile && \
     echo "TEXMFVAR /usr/local/texlive/texmf-var" >> /tmp/texlive.profile && \
+    echo "✅ Profile created" && \
+    echo "📊 Profile contents:" && \
+    cat /tmp/texlive.profile && \
     \
     echo "🔄 Installing TeX Live base system..." && \
     /tmp/install-tl-*/install-tl --profile=/tmp/texlive.profile && \
@@ -211,10 +283,15 @@ RUN echo "🚀 === STARTING R INSTALLATION ===" && \
     start_time=$(date +%s) && \
     \
     echo "📦 Installing R and development packages..." && \
+    echo "📋 R packages:" && \
+    echo "  - r-base" && \
+    echo "  - r-base-dev" && \
+    echo "  - r-recommended" && \
     apt-get update && apt-get install -y \
     r-base \
     r-base-dev \
     r-recommended && \
+    echo "✅ R packages installed" && \
     \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
@@ -231,10 +308,15 @@ RUN echo "🚀 === STARTING PYTHON INSTALLATION ===" && \
     start_time=$(date +%s) && \
     \
     echo "📦 Installing Python 3 and development packages..." && \
+    echo "📋 Python packages:" && \
+    echo "  - python3" && \
+    echo "  - python3-pip" && \
+    echo "  - python3-dev" && \
     apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     python3-dev && \
+    echo "✅ Python packages installed" && \
     \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
@@ -253,21 +335,38 @@ RUN echo "🚀 === STARTING QUARTO INSTALLATION ===" && \
     \
     echo "📦 Downloading Quarto 1.7.31..." && \
     wget -q https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.31/quarto-1.7.31-linux-amd64.deb && \
+    echo "✅ Download completed" && \
+    echo "📊 Downloaded file size:" && \
+    ls -lh quarto-1.7.31-linux-amd64.deb && \
     \
     echo "📦 Installing Quarto..." && \
     dpkg -i quarto-1.7.31-linux-amd64.deb && \
+    echo "✅ Quarto installed" && \
     \
     echo "🧹 Cleaning up installer..." && \
     rm quarto-1.7.31-linux-amd64.deb && \
+    echo "✅ Installer cleaned up" && \
     \
     end_time=$(date +%s) && \
     duration=$((end_time - start_time)) && \
     echo "✅ === QUARTO INSTALLATION COMPLETE === (${duration}s)"
 
 # Create R library directory
-RUN mkdir -p $R_LIBS_USER
+RUN echo "🚀 === STARTING R LIBRARY SETUP ===" && \
+    echo "📁 Creating R library directory..." && \
+    mkdir -p $R_LIBS_USER && \
+    echo "✅ R library directory created: $R_LIBS_USER" && \
+    echo "✅ R library setup complete"
 
 # Copy dependency files
+RUN echo "🚀 === STARTING DEPENDENCY FILE COPY ===" && \
+    echo "📋 Files to copy:" && \
+    echo "  - tools/dependencies/requirements/ → /tmp/requirements/" && \
+    echo "  - tools/dependencies/requirements-build.txt → /tmp/requirements.txt" && \
+    echo "  - tools/dependencies/install_packages.R → /tmp/install_packages.R" && \
+    echo "  - docker/build-quarto-linux/verify_r_packages.R → /tmp/verify_r_packages.R" && \
+    echo "✅ Dependency file copy phase complete"
+
 COPY tools/dependencies/requirements/ /tmp/requirements/
 COPY tools/dependencies/requirements-build.txt /tmp/requirements.txt
 COPY tools/dependencies/install_packages.R /tmp/install_packages.R
@@ -382,11 +481,21 @@ RUN echo "🚀 === STARTING COMPREHENSIVE CLEANUP ===" && \
 WORKDIR /workspace
 
 # Verify installations
-RUN export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH && \
+RUN echo "🚀 === STARTING FINAL VERIFICATION ===" && \
+    export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH && \
+    echo "📊 Checking Quarto..." && \
     quarto --version && \
+    echo "✅ Quarto verified" && \
+    echo "📊 Checking Python..." && \
     python3 --version && \
+    echo "✅ Python verified" && \
+    echo "📊 Checking R..." && \
     R --version && \
-    lualatex --version
+    echo "✅ R verified" && \
+    echo "📊 Checking LaTeX..." && \
+    lualatex --version && \
+    echo "✅ LaTeX verified" && \
+    echo "✅ Final verification complete"
 
 # Health check
 RUN export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH && \
