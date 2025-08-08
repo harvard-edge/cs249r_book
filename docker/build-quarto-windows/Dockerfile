@@ -63,7 +63,9 @@ COPY docker/build-quarto-windows/install-quarto-windows.ps1 C:/temp/install-quar
 # ------------------------------------------------------------
 # PHASE 4: Install Scoop and Quarto
 # ------------------------------------------------------------
-RUN & 'C:\temp\install-quarto-windows.ps1' -version '1.7.31'
+RUN [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 ; `
+    $OutputEncoding = [System.Text.Encoding]::UTF8 ; `
+    & 'C:\temp\install-quarto-windows.ps1' -version '1.7.31'
 
 # ------------------------------------------------------------
 # PHASE 5: Install Python
@@ -111,7 +113,9 @@ RUN Write-Host 'Installing TeX Live 2025...' ; `
 # ------------------------------------------------------------
 # PHASE 10: Discover all installed tools
 # ------------------------------------------------------------
-RUN Write-Host '=== DISCOVERING ALL INSTALLED TOOLS ===' ; `
+RUN [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 ; `
+    $OutputEncoding = [System.Text.Encoding]::UTF8 ; `
+    Write-Host '=== DISCOVERING ALL INSTALLED TOOLS ===' ; `
     Write-Host 'Searching for Scoop-installed tools...' ; `
     $scoopRoot = (Resolve-Path ~).Path + '\scoop' ; `
     Write-Host "Scoop root: $scoopRoot" ; `
@@ -120,60 +124,60 @@ RUN Write-Host '=== DISCOVERING ALL INSTALLED TOOLS ===' ; `
     if ($quartoLocation) { `
         $quartoPath = $quartoLocation.Split([Environment]::NewLine)[0] ; `
         $quartoDir = Split-Path $quartoPath -Parent ; `
-        Write-Host "✅ Found Quarto at: $quartoDir" ; `
+        Write-Host "[SUCCESS] Found Quarto at: $quartoDir" ; `
         Write-Host "   Full path: $quartoPath" ; `
     } else { `
-        Write-Host '❌ Quarto not found' ; `
+        Write-Host '[ERROR] Quarto not found' ; `
     } ; `
     Write-Host 'Searching for Python...' ; `
     $pythonLocation = where.exe python 2>$null ; `
     if ($pythonLocation) { `
         $pythonPath = $pythonLocation.Split([Environment]::NewLine)[0] ; `
         $pythonDir = Split-Path $pythonPath -Parent ; `
-        Write-Host "✅ Found Python at: $pythonDir" ; `
+        Write-Host "[SUCCESS] Found Python at: $pythonDir" ; `
         Write-Host "   Full path: $pythonPath" ; `
     } else { `
-        Write-Host '❌ Python not found' ; `
+        Write-Host '[ERROR] Python not found' ; `
     } ; `
     Write-Host 'Searching for Ghostscript...' ; `
     $gsLocation = where.exe gswin64c 2>$null ; `
     if ($gsLocation) { `
         $gsPath = $gsLocation.Split([Environment]::NewLine)[0] ; `
         $gsDir = Split-Path $gsPath -Parent ; `
-        Write-Host "✅ Found Ghostscript at: $gsDir" ; `
+        Write-Host "[SUCCESS] Found Ghostscript at: $gsDir" ; `
         Write-Host "   Full path: $gsPath" ; `
     } else { `
-        Write-Host '❌ Ghostscript not found' ; `
+        Write-Host '[ERROR] Ghostscript not found' ; `
     } ; `
     Write-Host 'Searching for Inkscape...' ; `
     $inkLocation = where.exe inkscape 2>$null ; `
     if ($inkLocation) { `
         $inkPath = $inkLocation.Split([Environment]::NewLine)[0] ; `
         $inkDir = Split-Path $inkPath -Parent ; `
-        Write-Host "✅ Found Inkscape at: $inkDir" ; `
+        Write-Host "[SUCCESS] Found Inkscape at: $inkDir" ; `
         Write-Host "   Full path: $inkPath" ; `
     } else { `
-        Write-Host '❌ Inkscape not found' ; `
+        Write-Host '[ERROR] Inkscape not found' ; `
     } ; `
     Write-Host 'Searching for TeX Live...' ; `
     $texLocation = where.exe lualatex 2>$null ; `
     if ($texLocation) { `
         $texPath = $texLocation.Split([Environment]::NewLine)[0] ; `
         $texDir = Split-Path $texPath -Parent ; `
-        Write-Host "✅ Found TeX Live at: $texDir" ; `
+        Write-Host "[SUCCESS] Found TeX Live at: $texDir" ; `
         Write-Host "   Full path: $texPath" ; `
     } else { `
-        Write-Host '❌ TeX Live not found' ; `
+        Write-Host '[ERROR] TeX Live not found' ; `
     } ; `
     Write-Host 'Searching for R...' ; `
     $rLocation = where.exe R 2>$null ; `
     if ($rLocation) { `
         $rPath = $rLocation.Split([Environment]::NewLine)[0] ; `
         $rDir = Split-Path $rPath -Parent ; `
-        Write-Host "✅ Found R at: $rDir" ; `
+        Write-Host "[SUCCESS] Found R at: $rDir" ; `
         Write-Host "   Full path: $rPath" ; `
     } else { `
-        Write-Host '❌ R not found' ; `
+        Write-Host '[ERROR] R not found' ; `
     } ; `
     Write-Host '=== TOOL DISCOVERY COMPLETE ==='
 

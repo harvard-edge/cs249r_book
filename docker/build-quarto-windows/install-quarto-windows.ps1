@@ -19,6 +19,10 @@ param(
     [string]$version = ""
 )
 
+# Set console encoding to UTF-8 for proper emoji support
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 Write-Host "Installing Quarto via Scoop..."
 
 # Set execution policy
@@ -33,7 +37,7 @@ Invoke-WebRequest -useb get.scoop.sh -outfile 'install.ps1'
 $scoopShims = Join-Path (Resolve-Path ~).Path "scoop\shims"
 $mach = [Environment]::GetEnvironmentVariable('PATH','Machine')
 [Environment]::SetEnvironmentVariable('PATH', ($scoopShims + ';' + $mach), 'Machine')
-Write-Host "✅ Added Scoop shims to PATH: $scoopShims"
+Write-Host "CHECKMARK Added Scoop shims to PATH: $scoopShims"
 
 # Add r-bucket
 Write-Host "Adding r-bucket..."
@@ -51,4 +55,4 @@ if ([string]::IsNullOrEmpty($version)) {
     Invoke-Expression -Command "scoop install quarto@$version"
 }
 
-Write-Host "✅ Quarto installation completed!"
+Write-Host "CHECKMARK Quarto installation completed!"
