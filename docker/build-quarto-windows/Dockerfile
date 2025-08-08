@@ -204,13 +204,11 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
     `
     Write-Host 'Creating one-shot install profile from tl_packages...' ; `
     # Start with basic profile
-    @'
-selected_scheme scheme-basic
-
-tlpdbopt_install_docfiles 0
-tlpdbopt_install_srcfiles 0
-
-'@ | Out-File -FilePath 'C:\temp\install-tl.profile' -Encoding ASCII ; `
+    'selected_scheme scheme-medium' | Set-Content -FilePath 'C:\temp\install-tl.profile' -Encoding ASCII ; `
+    '' | Add-Content -Path 'C:\temp\install-tl.profile' -Encoding ASCII ; `
+    'tlpdbopt_install_docfiles 0' | Add-Content -Path 'C:\temp\install-tl.profile' -Encoding ASCII ; `
+    'tlpdbopt_install_srcfiles 0' | Add-Content -Path 'C:\temp\install-tl.profile' -Encoding ASCII ; `
+    '' | Add-Content -Path 'C:\temp\install-tl.profile' -Encoding ASCII ; `
     `
     # Add collections from tl_packages file
     Write-Host 'Reading tl_packages file...' ; `
