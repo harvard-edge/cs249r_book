@@ -66,13 +66,12 @@ RUN Write-Host 'Installing Quarto 1.7.31...' ; `
     Invoke-WebRequest -Uri 'https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.31/quarto-1.7.31-win.zip' -OutFile 'C:\quarto.zip' -TimeoutSec 900 ; `
     Expand-Archive -Path 'C:\quarto.zip' -DestinationPath 'C:\quarto' -Force ; `
     Remove-Item 'C:\quarto.zip' -Force ; `
-    $qDir = Get-ChildItem -Directory C:\quarto | Where-Object { Test-Path (Join-Path $_.FullName 'bin\quarto.exe') } | Select-Object -First 1 ; `
-    if (-not $qDir) { throw 'Quarto bin folder not found under C:\quarto' } ; `
+    $qDir = Get-ChildItem -Directory C:\quarto | Select-Object -First 1 ; `
+    if (-not $qDir) { throw 'Quarto folder not found under C:\quarto' } ; `
     Write-Host "Quarto located at: $($qDir.FullName)" ; `
     $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
     $qbin = Join-Path $qDir.FullName 'bin' ; `
     if ($mach -notmatch [regex]::Escape($qbin)) { [Environment]::SetEnvironmentVariable('PATH', ($qbin + ';' + $mach), 'Machine') } ; `
-    Get-Command quarto ; `
     quarto --version
 
 # ------------------------------------------------------------
