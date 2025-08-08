@@ -50,6 +50,11 @@ on:
         required: false
         default: false
         type: boolean
+      enable_fallback:
+        description: '🔄 Enable baremetal fallback if container fails'
+        required: false
+        default: false
+        type: boolean
       deploy_preview:
         description: '🚀 Deploy preview to staging'
         required: false
@@ -126,19 +131,21 @@ jobs:
           echo "format=$FORMAT" >> $GITHUB_OUTPUT
           echo "📊 Building format: $FORMAT"
 
-      - name: 🚀 Try Container Build
+      - name: 🚀 Container Build
         id: container-build
         if: github.event_name == 'push' || inputs.prefer_baremetal != true
-        continue-on-error: true
+        continue-on-error: ${{ github.event_name == 'push' || inputs.enable_fallback == true }}
         uses: ./.github/workflows/quarto-build-container.yml
         with:
           os: ubuntu-latest
           format: ${{ steps.format.outputs.format }}
           target: dev
 
-      - name: 🖥️ Baremetal Build
+      - name: 🖥️ Baremetal Build (Direct or Fallback)
         id: baremetal-build
-        if: (github.event_name == 'workflow_dispatch' && inputs.prefer_baremetal == true) || steps.container-build.outputs.build_success != 'true'
+        if: |
+          (github.event_name == 'workflow_dispatch' && inputs.prefer_baremetal == true) ||
+          (steps.container-build.outputs.build_success != 'true' && (github.event_name == 'push' || inputs.enable_fallback == true))
         uses: ./.github/workflows/quarto-build-baremetal.yml
         with:
           os: ubuntu-latest
@@ -185,19 +192,21 @@ jobs:
           echo "format=$FORMAT" >> $GITHUB_OUTPUT
           echo "📊 Building format: $FORMAT"
 
-      - name: 🚀 Try Container Build
+      - name: 🚀 Container Build
         id: container-build
         if: github.event_name == 'push' || inputs.prefer_baremetal != true
-        continue-on-error: true
+        continue-on-error: ${{ github.event_name == 'push' || inputs.enable_fallback == true }}
         uses: ./.github/workflows/quarto-build-container.yml
         with:
           os: windows-latest
           format: ${{ steps.format.outputs.format }}
           target: dev
 
-      - name: 🖥️ Baremetal Build
+      - name: 🖥️ Baremetal Build (Direct or Fallback)
         id: baremetal-build
-        if: (github.event_name == 'workflow_dispatch' && inputs.prefer_baremetal == true) || steps.container-build.outputs.build_success != 'true'
+        if: |
+          (github.event_name == 'workflow_dispatch' && inputs.prefer_baremetal == true) ||
+          (steps.container-build.outputs.build_success != 'true' && (github.event_name == 'push' || inputs.enable_fallback == true))
         uses: ./.github/workflows/quarto-build-baremetal.yml
         with:
           os: windows-latest
@@ -263,14 +272,21 @@ jobs:
             echo "- **Trigger**: Automatic (dev branch push)" >> $GITHUB_STEP_SUMMARY
             echo "- **Format**: HTML + PDF (mandatory)" >> $GITHUB_STEP_SUMMARY
             echo "- **OS**: Linux + Windows (mandatory)" >> $GITHUB_STEP_SUMMARY
-            echo "- **Method**: Container first, baremetal fallback" >> $GITHUB_STEP_SUMMARY
+            echo "- **Method**: Container first, baremetal fallback (auto-enabled)" >> $GITHUB_STEP_SUMMARY
           else
             echo "- **Trigger**: Manual workflow dispatch" >> $GITHUB_STEP_SUMMARY
             echo "- **HTML**: ${{ inputs.build_html }}" >> $GITHUB_STEP_SUMMARY
             echo "- **PDF**: ${{ inputs.build_pdf }}" >> $GITHUB_STEP_SUMMARY
             echo "- **Linux**: ${{ inputs.build_linux }}" >> $GITHUB_STEP_SUMMARY
             echo "- **Windows**: ${{ inputs.build_windows }}" >> $GITHUB_STEP_SUMMARY
-            echo "- **Method**: ${{ inputs.prefer_baremetal && 'Baremetal preferred' || 'Container first, baremetal fallback' }}" >> $GITHUB_STEP_SUMMARY
+            
+            if [ "${{ inputs.prefer_baremetal }}" = "true" ]; then
+              echo "- **Method**: Baremetal builds (preferred)" >> $GITHUB_STEP_SUMMARY
+            elif [ "${{ inputs.enable_fallback }}" = "true" ]; then
+              echo "- **Method**: Container first, baremetal fallback (enabled)" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- **Method**: Container only (no fallback)" >> $GITHUB_STEP_SUMMARY
+            fi
           fi
           echo "" >> $GITHUB_STEP_SUMMARY
           
