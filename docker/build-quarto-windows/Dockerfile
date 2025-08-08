@@ -169,9 +169,7 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
     Write-Host 'Basic verification (same as quarto-build workflow)...' ; `
     lualatex --version | Select-Object -First 1 ; `
     `
-    $endTime = Get-Date ; `
-    $duration = ($endTime - $startTime).TotalMinutes ; `
-    Write-Host "=== TEX LIVE INSTALLATION COMPLETE === $duration minutes"
+    Write-Host "=== TEX LIVE INSTALLATION COMPLETE ==="
 
 # ------------------------------------------------------------
 # PHASE 10: Install R (same as quarto-build workflow)
