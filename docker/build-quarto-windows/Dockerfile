@@ -278,7 +278,18 @@ RUN Write-Host '=== INSTALLING R PACKAGES ===' ; `
     Write-Host 'Setting up R environment...' ; `
     Write-Host "R_LIBS_USER: $env:R_LIBS_USER" ; `
     Write-Host 'Installing R packages...' ; `
-    Rscript -e "options(repos=c(CRAN='https://cran.rstudio.com')); dir.create(Sys.getenv('R_LIBS_USER'), recursive=TRUE, showWarnings=FALSE); .libPaths(Sys.getenv('R_LIBS_USER')); install.packages('remotes'); if (file.exists('C:/temp/install_packages.R')) source('C:/temp/install_packages.R') else install.packages(c('rmarkdown','knitr','ggplot2')); for (p in c('rmarkdown','knitr')) if (!require(p, character.only=TRUE, quietly=TRUE)) stop('missing: ', p)" ; `
+    Rscript -e 'options(repos=c(CRAN=\"https://cran.rstudio.com\"))' ; `
+    Rscript -e 'dir.create(Sys.getenv(\"R_LIBS_USER\"), recursive=TRUE, showWarnings=FALSE)' ; `
+    Rscript -e '.libPaths(Sys.getenv(\"R_LIBS_USER\"))' ; `
+    Rscript -e 'install.packages(\"remotes\")' ; `
+    if (Test-Path 'C:/temp/install_packages.R') { `
+        Write-Host 'Found install_packages.R, sourcing it...' ; `
+        Rscript 'C:/temp/install_packages.R' ; `
+    } else { `
+        Write-Host 'No install_packages.R found, installing basic packages...' ; `
+        Rscript -e 'install.packages(c(\"rmarkdown\",\"knitr\",\"ggplot2\"))' ; `
+    } ; `
+    Rscript -e 'for (p in c(\"rmarkdown\",\"knitr\")) if (!require(p, character.only=TRUE, quietly=TRUE)) stop(\"missing: \", p)' ; `
     Write-Host '📦 R packages installed' ; `
     Write-Host 'Verifying R packages...' ; `
     Rscript C:/temp/verify_r_packages.R ; `
