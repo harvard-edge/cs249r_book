@@ -73,10 +73,12 @@ RUN [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 ; `
     $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
     [Environment]::SetEnvironmentVariable('PATH', ($scoopShims + ';' + $mach), 'Machine') ; `
     Write-Host 'Added Scoop shims to PATH:' $scoopShims ; `
+    Write-Host 'Installing Git (required for buckets)...' ; `
+    scoop install git ; `
     Write-Host 'Adding r-bucket...' ; `
     scoop bucket add r-bucket https://github.com/cderv/r-bucket.git ; `
-    Write-Host 'Installing Quarto version 1.7.31...' ; `
-    scoop install quarto@1.7.31 ; `
+    Write-Host 'Installing Quarto (latest stable)...' ; `
+    scoop install quarto ; `
     Write-Host 'Quarto installation completed!'
 
 # ------------------------------------------------------------
