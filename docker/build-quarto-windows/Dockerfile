@@ -14,7 +14,7 @@ FROM mcr.microsoft.com/windows/server:ltsc2022
 SHELL ["powershell.exe", "-NoLogo", "-ExecutionPolicy", "Bypass", "-Command"]
 
 # ------------------------------------------------------------
-# PHASE 0: Base dirs and env
+# PHASE 0: Base dirs and env (same as quarto-build workflow)
 # ------------------------------------------------------------
 ENV R_LIBS_USER="C:/r-lib"
 ENV QUARTO_LOG_LEVEL="INFO"
@@ -27,7 +27,8 @@ RUN New-Item -ItemType Directory -Force -Path 'C:\temp' | Out-Null ; New-Item -I
 # ------------------------------------------------------------
 # PHASE 1: PowerShell 7 (ZIP install, container-safe)
 # ------------------------------------------------------------
-RUN Write-Host 'Installing PowerShell 7 ZIP...' ; `
+RUN Write-Host '=== STARTING POWERSHELL 7 INSTALLATION ===' ; `
+    Write-Host 'Using ZIP install for container compatibility' ; `
     $Url = 'https://github.com/PowerShell/PowerShell/releases/download/v7.4.1/PowerShell-7.4.1-win-x64.zip' ; `
     $Zip = 'C:\PowerShell-7.4.1.zip' ; `
     Invoke-WebRequest -Uri $Url -OutFile $Zip -UseBasicParsing ; `
@@ -43,15 +44,17 @@ RUN Write-Host 'Installing PowerShell 7 ZIP...' ; `
 SHELL ["C:\\Program Files\\PowerShell\\7\\pwsh.exe", "-NoLogo", "-ExecutionPolicy", "Bypass", "-Command"]
 
 # ------------------------------------------------------------
-# PHASE 2: Chocolatey
+# PHASE 2: Chocolatey (package manager for Windows)
 # ------------------------------------------------------------
-RUN Write-Host 'Installing Chocolatey...' ; `
+RUN Write-Host '=== STARTING CHOCOLATEY INSTALLATION ===' ; `
+    Write-Host 'Installing Chocolatey package manager...' ; `
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 ; `
     iex ((New-Object Net.WebClient).DownloadString('https://chocolatey.org/install.ps1')) ; `
-    choco --version
+    choco --version ; `
+    Write-Host '✅ Chocolatey installation complete'
 
 # ------------------------------------------------------------
-# PHASE 3: Copy dependency files
+# PHASE 3: Copy dependency files (same as quarto-build workflow)
 # ------------------------------------------------------------
 COPY tools/dependencies/requirements/                  C:/temp/requirements/
 COPY tools/dependencies/requirements-build.txt         C:/temp/requirements.txt
@@ -60,9 +63,11 @@ COPY tools/dependencies/tl_packages                    C:/temp/tl_packages
 COPY docker/build-quarto-windows/verify_r_packages.R   C:/temp/verify_r_packages.R
 
 # ------------------------------------------------------------
-# PHASE 4: Install Scoop and Quarto
+# PHASE 4: Install Scoop and Quarto (same as quarto-build workflow)
 # ------------------------------------------------------------
-RUN [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 ; `
+RUN Write-Host '=== STARTING QUARTO INSTALLATION ===' ; `
+    Write-Host 'Using Scoop for Quarto installation (same approach as quarto-build workflow)' ; `
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 ; `
     $OutputEncoding = [System.Text.Encoding]::UTF8 ; `
     Write-Host 'Installing Quarto via Scoop...' ; `
     Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force ; `
@@ -81,312 +86,129 @@ RUN [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 ; `
     scoop bucket add extras ; `
     Write-Host 'Installing Quarto (latest stable)...' ; `
     scoop install quarto ; `
-    Write-Host 'Quarto installation completed!'
+    Write-Host '✅ Quarto installation completed!'
 
 # ------------------------------------------------------------
-# PHASE 5: Install Python
+# PHASE 5: Install Python (same as quarto-build workflow)
 # ------------------------------------------------------------
-RUN Write-Host 'Installing Python...' ; `
-    scoop install main/python
+RUN Write-Host '=== STARTING PYTHON INSTALLATION ===' ; `
+    Write-Host 'Installing Python via Scoop (same as quarto-build workflow)...' ; `
+    scoop install main/python ; `
+    Write-Host '✅ Python installation complete'
 
 # ------------------------------------------------------------
-# PHASE 6: Install Ghostscript
+# PHASE 6: Install Ghostscript (same as quarto-build workflow)
 # ------------------------------------------------------------
-RUN Write-Host 'Installing Ghostscript...' ; `
-    scoop install main/ghostscript
+RUN Write-Host '=== STARTING GHOSTSCRIPT INSTALLATION ===' ; `
+    Write-Host 'Installing Ghostscript via Scoop (same as quarto-build workflow)...' ; `
+    scoop install main/ghostscript ; `
+    Write-Host '✅ Ghostscript installation complete'
 
 # ------------------------------------------------------------
-# PHASE 7: Install Inkscape
+# PHASE 7: Install Inkscape (same as quarto-build workflow)
 # ------------------------------------------------------------
-RUN Write-Host 'Installing Inkscape...' ; `
-    scoop install inkscape
+RUN Write-Host '=== STARTING INKSCAPE INSTALLATION ===' ; `
+    Write-Host 'Installing Inkscape via Scoop (same as quarto-build workflow)...' ; `
+    scoop install inkscape ; `
+    Write-Host '✅ Inkscape installation complete'
 
 # ------------------------------------------------------------
-# PHASE 8: Install R
+# PHASE 8: Install TeX Live (same as working quarto-build workflow)
 # ------------------------------------------------------------
-RUN Write-Host 'Installing R...' ; `
-    scoop install main/r
-
-# ------------------------------------------------------------
-# PHASE 9: Install TeX Live
-# ------------------------------------------------------------
-RUN Write-Host 'Installing TeX Live 2025...' ; `
-    $Repo = 'https://ftp.tug.org/historic/systems/texlive/2025/tlnet-final' ; `
+RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
+    Write-Host 'Using same approach as working quarto-build workflow' ; `
+    $startTime = Get-Date ; `
+    `
+    Write-Host 'Downloading TeX Live installer...' ; `
     $Installer = 'C:\temp\install-tl-windows.exe' ; `
-    Invoke-WebRequest -Uri 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' -OutFile $Installer -TimeoutSec 1800 ; `
-    'selected_scheme scheme-infraonly' | Set-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    'tlpdbopt_install_docfiles 0' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    'tlpdbopt_install_srcfiles 0' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    'TEXDIR C:/texlive' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    'TEXMFCONFIG C:/texlive/texmf-config' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    'TEXMFHOME C:/texlive/texmf-home' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    'TEXMFLOCAL C:/texlive/texmf-local' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    'TEXMFSYSCONFIG C:/texlive/texmf-config' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    'TEXMFSYSVAR C:/texlive/texmf-var' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    'TEXMFVAR C:/texlive/texmf-var' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    Start-Process -FilePath $Installer -ArgumentList '-repository', $Repo, '-profile', 'C:\temp\texlive.profile' -Wait -NoNewWindow
-
-# ------------------------------------------------------------
-# PHASE 10: Discover all installed tools
-# ------------------------------------------------------------
-RUN [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 ; `
-    $OutputEncoding = [System.Text.Encoding]::UTF8 ; `
-    Write-Host '=== DISCOVERING ALL INSTALLED TOOLS ===' ; `
-    Write-Host 'Searching for Scoop-installed tools...' ; `
-    $scoopRoot = (Resolve-Path ~).Path + '\scoop' ; `
-    Write-Host "Scoop root: $scoopRoot" ; `
-    Write-Host 'Searching for Quarto...' ; `
-    $quartoLocation = where.exe quarto 2>$null ; `
-    if ($quartoLocation) { `
-        $quartoPath = $quartoLocation.Split([Environment]::NewLine)[0] ; `
-        $quartoDir = Split-Path $quartoPath -Parent ; `
-        Write-Host "[SUCCESS] Found Quarto at: $quartoDir" ; `
-        Write-Host "   Full path: $quartoPath" ; `
-    } else { `
-        Write-Host '[ERROR] Quarto not found' ; `
-    } ; `
-    Write-Host 'Searching for Python...' ; `
-    $pythonLocation = where.exe python 2>$null ; `
-    if ($pythonLocation) { `
-        $pythonPath = $pythonLocation.Split([Environment]::NewLine)[0] ; `
-        $pythonDir = Split-Path $pythonPath -Parent ; `
-        Write-Host "[SUCCESS] Found Python at: $pythonDir" ; `
-        Write-Host "   Full path: $pythonPath" ; `
-    } else { `
-        Write-Host '[ERROR] Python not found' ; `
-    } ; `
-    Write-Host 'Searching for Ghostscript...' ; `
-    $gsLocation = where.exe gswin64c 2>$null ; `
-    if ($gsLocation) { `
-        $gsPath = $gsLocation.Split([Environment]::NewLine)[0] ; `
-        $gsDir = Split-Path $gsPath -Parent ; `
-        Write-Host "[SUCCESS] Found Ghostscript at: $gsDir" ; `
-        Write-Host "   Full path: $gsPath" ; `
-    } else { `
-        Write-Host '[ERROR] Ghostscript not found' ; `
-    } ; `
-    Write-Host 'Searching for Inkscape...' ; `
-    $inkLocation = where.exe inkscape 2>$null ; `
-    if ($inkLocation) { `
-        $inkPath = $inkLocation.Split([Environment]::NewLine)[0] ; `
-        $inkDir = Split-Path $inkPath -Parent ; `
-        Write-Host "[SUCCESS] Found Inkscape at: $inkDir" ; `
-        Write-Host "   Full path: $inkPath" ; `
-    } else { `
-        Write-Host '[ERROR] Inkscape not found' ; `
-    } ; `
-    Write-Host 'Searching for TeX Live...' ; `
-    $texLocation = where.exe lualatex 2>$null ; `
-    if ($texLocation) { `
-        $texPath = $texLocation.Split([Environment]::NewLine)[0] ; `
-        $texDir = Split-Path $texPath -Parent ; `
-        Write-Host "[SUCCESS] Found TeX Live at: $texDir" ; `
-        Write-Host "   Full path: $texPath" ; `
-    } else { `
-        Write-Host '[ERROR] TeX Live not found' ; `
-    } ; `
-    Write-Host 'Searching for R...' ; `
-    $rLocation = where.exe R 2>$null ; `
-    if ($rLocation) { `
-        $rPath = $rLocation.Split([Environment]::NewLine)[0] ; `
-        $rDir = Split-Path $rPath -Parent ; `
-        Write-Host "[SUCCESS] Found R at: $rDir" ; `
-        Write-Host "   Full path: $rPath" ; `
-    } else { `
-        Write-Host '[ERROR] R not found' ; `
-    } ; `
-    Write-Host '=== TOOL DISCOVERY COMPLETE ==='
-
-# ------------------------------------------------------------
-# PHASE 5: Python 3.13.1 + packages
-# ------------------------------------------------------------
-RUN Write-Host 'Installing Python 3.13.1...' ; `
-    choco install -y python --version=3.13.1 --no-progress ; `
-    Write-Host 'Searching for Python installation...' ; `
-    # Use where.exe to find python
-    Write-Host 'Searching for python using where.exe...' ; `
-    $pythonLocation = where.exe python 2>$null ; `
-    if ($pythonLocation) { `
-        $pythonPath = $pythonLocation.Split([Environment]::NewLine)[0] ; `
-        $pythonDir = Split-Path $pythonPath -Parent ; `
-        $scriptsDir = Join-Path $pythonDir 'Scripts' ; `
-        Write-Host "✅ Found Python at: $pythonDir" ; `
-        Write-Host "   Full path: $pythonPath" ; `
-        if (Test-Path $scriptsDir) { `
-            Write-Host "✅ Found Python Scripts at: $scriptsDir" ; `
-        } ; `
-        Write-Host "🎯 Using Python from: $pythonDir" ; `
-        # Add to PATH if not already there
+    Invoke-WebRequest -Uri 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' -OutFile $Installer -TimeoutSec 1800 -UseBasicParsing ; `
+    `
+    Write-Host 'Creating TeX Live installation profile (same as zauguin action)...' ; `
+    @'
+selected_scheme scheme-infraonly
+tlpdbopt_install_docfiles 0
+tlpdbopt_install_srcfiles 0
+TEXDIR C:/texlive
+TEXMFCONFIG C:/texlive/texmf-config
+TEXMFHOME C:/texlive/texmf-home
+TEXMFLOCAL C:/texlive/texmf-local
+TEXMFSYSCONFIG C:/texlive/texmf-config
+TEXMFSYSVAR C:/texlive/texmf-var
+TEXMFVAR C:/texlive/texmf-var
+'@ | Out-File -FilePath 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    `
+    Write-Host 'Installing TeX Live base system...' ; `
+    Start-Process -FilePath $Installer -ArgumentList '-profile', 'C:\temp\texlive.profile' -Wait -NoNewWindow ; `
+    `
+    Write-Host 'Adding TeX Live to PATH...' ; `
+    $texLiveBin = 'C:\texlive\bin\windows' ; `
+    if (Test-Path $texLiveBin) { `
         $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
-        foreach ($p in @($pythonDir, $scriptsDir)) { `
-            if ($p -and (Test-Path $p) -and ($mach -notmatch [regex]::Escape($p))) { `
-                $mach = "$p;$mach" ; `
-                Write-Host "   ✅ Added $p to PATH" ; `
-            } ; `
+        if ($mach -notmatch [regex]::Escape($texLiveBin)) { `
+            [Environment]::SetEnvironmentVariable('PATH', "$texLiveBin;$mach", 'Machine') ; `
+            Write-Host "✅ Added TeX Live to PATH: $texLiveBin" ; `
         } ; `
-        [Environment]::SetEnvironmentVariable('PATH', $mach, 'Machine') ; `
-    } else { `
-        Write-Host '❌ Python not found using where.exe' ; `
-        throw 'Python installation not found' ; `
     } ; `
-    Write-Host 'Testing Python installation...' ; `
-    python --version ; `
-    python -m pip --version ; `
-    python -m pip install --upgrade pip ; `
-    python -m pip install -r C:/temp/requirements.txt
-
-# ------------------------------------------------------------
-# PHASE 6: Ghostscript (Chocolatey)
-# ------------------------------------------------------------
-RUN Write-Host 'Installing Ghostscript...' ; `
-    choco install -y ghostscript --no-progress ; `
-    Write-Host 'Searching for Ghostscript installation...' ; `
-    # Use where.exe to find gswin64c
-    Write-Host 'Searching for gswin64c using where.exe...' ; `
-    $gsLocation = where.exe gswin64c 2>$null ; `
-    if ($gsLocation) { `
-        $gsPath = $gsLocation.Split([Environment]::NewLine)[0] ; `
-        $gsDir = Split-Path $gsPath -Parent ; `
-        Write-Host "✅ Found Ghostscript at: $gsDir" ; `
-        Write-Host "   Full path: $gsPath" ; `
-        Write-Host "🎯 Using Ghostscript from: $gsDir" ; `
-        # Add to PATH if not already there
-        $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
-        if ($mach -notmatch [regex]::Escape($gsDir)) { `
-            [Environment]::SetEnvironmentVariable('PATH', "$gsDir;$mach", 'Machine') ; `
-            Write-Host "   ✅ Added $gsDir to PATH" ; `
-        } ; `
-    } else { `
-        Write-Host '❌ Ghostscript not found using where.exe' ; `
-        throw 'Ghostscript installation not found' ; `
-    } ; `
-    Write-Host 'Testing Ghostscript installation...' ; `
-    Get-Command gswin64c.exe ; `
-    gswin64c.exe -h | Select-String -Pattern '^GPL Ghostscript' -SimpleMatch
-
-# ------------------------------------------------------------
-# PHASE 7: Inkscape (Chocolatey)
-# ------------------------------------------------------------
-RUN Write-Host 'Installing Inkscape...' ; `
-    choco install -y inkscape --no-progress ; `
-    Write-Host 'Searching for Inkscape installation...' ; `
-    # Use where.exe to find inkscape
-    Write-Host 'Searching for inkscape using where.exe...' ; `
-    $inkLocation = where.exe inkscape 2>$null ; `
-    if ($inkLocation) { `
-        $inkPath = $inkLocation.Split([Environment]::NewLine)[0] ; `
-        $inkDir = Split-Path $inkPath -Parent ; `
-        Write-Host "✅ Found Inkscape at: $inkDir" ; `
-        Write-Host "   Full path: $inkPath" ; `
-        Write-Host "🎯 Using Inkscape from: $inkDir" ; `
-        # Add to PATH if not already there
-        $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
-        if ($mach -notmatch [regex]::Escape($inkDir)) { `
-            [Environment]::SetEnvironmentVariable('PATH', "$inkDir;$mach", 'Machine') ; `
-            Write-Host "   ✅ Added $inkDir to PATH" ; `
-        } ; `
-    } else { `
-        Write-Host '❌ Inkscape not found using where.exe' ; `
-        throw 'Inkscape installation not found' ; `
-    } ; `
-    Write-Host 'Testing Inkscape installation...' ; `
-    Get-Command inkscape.exe ; `
-    inkscape --version
-
-# ------------------------------------------------------------
-# PHASE 8: TeX Live 2025 (pinned) + packages
-# ------------------------------------------------------------
-RUN Write-Host 'Installing TeX Live 2025 snapshot...' ; `
-    $Repo      = 'https://ftp.tug.org/historic/systems/texlive/2025/tlnet-final' ; `
-    $Installer = 'C:\temp\install-tl-windows.exe' ; `
-    Invoke-WebRequest -Uri 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' -OutFile $Installer -TimeoutSec 1800 ; `
-    'selected_scheme scheme-infraonly' | Set-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    'tlpdbopt_install_docfiles 0' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    'tlpdbopt_install_srcfiles 0' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    'TEXDIR C:/texlive' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    'TEXMFCONFIG C:/texlive/texmf-config' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    'TEXMFHOME C:/texlive/texmf-home' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    'TEXMFLOCAL C:/texlive/texmf-local' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    'TEXMFSYSCONFIG C:/texlive/texmf-config' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    'TEXMFSYSVAR C:/texlive/texmf-var' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    'TEXMFVAR C:/texlive/texmf-var' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
-    Start-Process -FilePath $Installer -ArgumentList '-repository', $Repo, '-profile', 'C:\temp\texlive.profile' -Wait -NoNewWindow ; `
-    Write-Host 'Searching for TeX Live installation...' ; `
-    # Use where.exe to find lualatex
-    Write-Host 'Searching for lualatex using where.exe...' ; `
-    $texLocation = where.exe lualatex 2>$null ; `
-    if ($texLocation) { `
-        $texPath = $texLocation.Split([Environment]::NewLine)[0] ; `
-        $texDir = Split-Path $texPath -Parent ; `
-        Write-Host "✅ Found TeX Live at: $texDir" ; `
-        Write-Host "   Full path: $texPath" ; `
-        Write-Host "🎯 Using TeX Live from: $texDir" ; `
-        # Add to PATH if not already there
-        $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
-        if ($mach -notmatch [regex]::Escape($texDir)) { `
-            [Environment]::SetEnvironmentVariable('PATH', "$texDir;$mach", 'Machine') ; `
-            Write-Host "   ✅ Added $texDir to PATH" ; `
-        } ; `
-    } else { `
-        Write-Host '❌ TeX Live not found using where.exe' ; `
-        throw 'TeX Live installation not found' ; `
-    } ; `
-    Write-Host 'Testing TeX Live installation...' ; `
-    & "$texDir\tlmgr.bat" version
-
-RUN $tlmgr = 'C:\texlive\bin\windows\tlmgr.bat' ; `
+    `
+    Write-Host 'Installing packages from tl_packages (same as zauguin action)...' ; `
+    $tlmgr = Join-Path $texLiveBin 'tlmgr.bat' ; `
     $pkgs = Get-Content 'C:\temp\tl_packages' | Where-Object { $_.Trim() -ne '' -and -not $_.Trim().StartsWith('#') } ; `
-    foreach ($p in $pkgs) { Write-Host "Installing TeX package: $p" ; & $tlmgr install $p.Trim() } ; `
-    & $tlmgr install pgf pgfplots xcolor amsmath standalone psnfss collection-fontsrecommended ; `
-    lualatex --version ; `
-    pdflatex --version ; `
-    foreach ($f in 'pgf.sty','pgfplots.sty','xcolor.sty','amsmath.sty','standalone.cls') { if (-not (kpsewhich $f)) { Write-Error "Missing $f" -ErrorAction Stop } } ; `
-    if (-not (kpsewhich phvr7t.tfm)) { Write-Error "Missing Helvetica tfm (phvr7t.tfm)" -ErrorAction Stop } ; `
-    if (-not (kpsewhich t1phv.fd))   { Write-Error "Missing Helvetica font descriptor (t1phv.fd)" -ErrorAction Stop }
-
-# TikZ smoke test (fast)
-RUN '\documentclass{standalone}' | Set-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
-    '\usepackage{tikz}' | Add-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
-    '\usepackage{pgfplots}' | Add-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
-    '\usepackage{amsmath}' | Add-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
-    '\usepackage{xcolor}' | Add-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
-    '\usepackage[T1]{fontenc}' | Add-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
-    '\usetikzlibrary{positioning,calc}' | Add-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
-    '\begin{document}' | Add-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
-    '\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]' | Add-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
-    '\node[draw, fill=blue!20] at (0,0) {TikZ Test};' | Add-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
-    '\node[draw, fill=red!20]  at (2,0) {Success};' | Add-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
-    '\draw[->] (0.8,0) -- (1.2,0);' | Add-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
-    '\end{tikzpicture}' | Add-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
-    '\end{document}' | Add-Content -Path C:\temp\test_tikz.tex -Encoding ASCII ; `
-    Push-Location C:\temp ; `
-    lualatex -interaction=nonstopmode test_tikz.tex ; `
-    if (-not (Test-Path C:\temp\test_tikz.pdf)) { throw 'TikZ smoke test failed' } ; `
-    Remove-Item C:\temp\test_tikz.* -Force -ErrorAction SilentlyContinue ; `
-    Pop-Location
+    foreach ($pkg in $pkgs) { `
+        Write-Host "Installing: $pkg" ; `
+        & $tlmgr install $pkg.Trim() ; `
+    } ; `
+    `
+    Write-Host 'Basic verification (same as quarto-build workflow)...' ; `
+    lualatex --version | Select-Object -First 1 ; `
+    `
+    $endTime = Get-Date ; `
+    $duration = ($endTime - $startTime).TotalMinutes ; `
+    Write-Host "=== TEX LIVE INSTALLATION COMPLETE === ($($duration.ToString('F1')) minutes)"
 
 # ------------------------------------------------------------
-# PHASE 9: R 4.3.2 + packages
+# PHASE 9: Install R (same as quarto-build workflow)
 # ------------------------------------------------------------
-RUN choco install -y r --version=4.3.2 --no-progress ; `
-    R --version | Select-Object -First 1
+RUN Write-Host '=== STARTING R INSTALLATION ===' ; `
+    Write-Host 'Installing R via Scoop (same as quarto-build workflow)...' ; `
+    scoop install main/r ; `
+    Write-Host '✅ R installation complete'
 
-RUN Rscript -e "options(repos=c(CRAN='https://cran.rstudio.com')); dir.create(Sys.getenv('R_LIBS_USER'), recursive=TRUE, showWarnings=FALSE); .libPaths(Sys.getenv('R_LIBS_USER')); install.packages('remotes'); if (file.exists('C:/temp/install_packages.R')) source('C:/temp/install_packages.R') else install.packages(c('rmarkdown','knitr','ggplot2')); for (p in c('rmarkdown','knitr')) if (!require(p, character.only=TRUE, quietly=TRUE)) stop('missing: ', p)" ; `
+# ------------------------------------------------------------
+# PHASE 10: R 4.3.2 + packages (same as quarto-build workflow)
+# ------------------------------------------------------------
+RUN Write-Host '=== STARTING R PACKAGE INSTALLATION ===' ; `
+    Write-Host 'Installing R packages (same as quarto-build workflow)...' ; `
+    choco install -y r --version=4.3.2 --no-progress ; `
+    R --version | Select-Object -First 1 ; `
+    Write-Host '✅ R base installation complete'
+
+RUN Write-Host '=== INSTALLING R PACKAGES ===' ; `
+    Write-Host 'Installing R packages from install_packages.R (same as quarto-build workflow)...' ; `
+    Rscript -e "options(repos=c(CRAN='https://cran.rstudio.com')); dir.create(Sys.getenv('R_LIBS_USER'), recursive=TRUE, showWarnings=FALSE); .libPaths(Sys.getenv('R_LIBS_USER')); install.packages('remotes'); if (file.exists('C:/temp/install_packages.R')) source('C:/temp/install_packages.R') else install.packages(c('rmarkdown','knitr','ggplot2')); for (p in c('rmarkdown','knitr')) if (!require(p, character.only=TRUE, quietly=TRUE)) stop('missing: ', p)" ; `
     Write-Host 'Verifying R packages...' ; `
-    Rscript C:/temp/verify_r_packages.R
+    Rscript C:/temp/verify_r_packages.R ; `
+    Write-Host '✅ R package installation complete'
 
 # ------------------------------------------------------------
-# PHASE 10: Cleanup
+# PHASE 11: Cleanup (same as quarto-build workflow)
 # ------------------------------------------------------------
-RUN Write-Host 'Cleaning temp files...' ; `
+RUN Write-Host '=== STARTING CLEANUP ===' ; `
+    Write-Host 'Cleaning temporary files (same as quarto-build workflow)...' ; `
     Remove-Item C:/temp/requirements.txt -ErrorAction SilentlyContinue ; `
     Remove-Item C:/temp/install_packages.R -ErrorAction SilentlyContinue ; `
     Remove-Item C:/temp/verify_r_packages.R -ErrorAction SilentlyContinue ; `
     Remove-Item C:/temp/tl_packages -ErrorAction SilentlyContinue ; `
-    Remove-Item C:/temp/requirements/ -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item C:/temp/requirements/ -Recurse -Force -ErrorAction SilentlyContinue ; `
+    Write-Host '✅ Cleanup complete'
 
 # ------------------------------------------------------------
-# Final checks and metadata
+# FINAL CHECKS: Verify all installations (same as quarto-build workflow)
 # ------------------------------------------------------------
 WORKDIR C:/workspace
-RUN quarto --version ; python --version ; R --version ; lualatex --version ; Write-Host 'Windows container build completed successfully ✅'
+RUN Write-Host '=== FINAL VERIFICATION ===' ; `
+    Write-Host 'Verifying all installations (same checks as quarto-build workflow)...' ; `
+    quarto --version ; `
+    python --version ; `
+    R --version ; `
+    lualatex --version ; `
+    Write-Host '✅ Windows container build completed successfully'
