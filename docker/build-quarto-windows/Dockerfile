@@ -58,14 +58,26 @@ COPY tools/dependencies/requirements-build.txt         C:/temp/requirements.txt
 COPY tools/dependencies/install_packages.R             C:/temp/install_packages.R
 COPY tools/dependencies/tl_packages                    C:/temp/tl_packages
 COPY docker/build-quarto-windows/verify_r_packages.R   C:/temp/verify_r_packages.R
-COPY docker/build-quarto-windows/install-quarto-windows.ps1 C:/temp/install-quarto-windows.ps1
 
 # ------------------------------------------------------------
 # PHASE 4: Install Scoop and Quarto
 # ------------------------------------------------------------
 RUN [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 ; `
     $OutputEncoding = [System.Text.Encoding]::UTF8 ; `
-    & 'C:\temp\install-quarto-windows.ps1' -version '1.7.31'
+    Write-Host 'Installing Quarto via Scoop...' ; `
+    Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force ; `
+    Write-Host 'Installing Scoop package manager...' ; `
+    Invoke-WebRequest -useb get.scoop.sh -outfile 'install.ps1' ; `
+    & .\install.ps1 -RunAsAdmin ; `
+    $scoopShims = Join-Path (Resolve-Path ~).Path 'scoop\shims' ; `
+    $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
+    [Environment]::SetEnvironmentVariable('PATH', ($scoopShims + ';' + $mach), 'Machine') ; `
+    Write-Host 'Added Scoop shims to PATH:' $scoopShims ; `
+    Write-Host 'Adding r-bucket...' ; `
+    scoop bucket add r-bucket https://github.com/cderv/r-bucket.git ; `
+    Write-Host 'Installing Quarto version 1.7.31...' ; `
+    scoop install quarto@1.7.31 ; `
+    Write-Host 'Quarto installation completed!'
 
 # ------------------------------------------------------------
 # PHASE 5: Install Python
