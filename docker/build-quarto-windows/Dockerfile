@@ -124,18 +124,16 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
     Invoke-WebRequest -Uri 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' -OutFile $Installer -TimeoutSec 1800 -UseBasicParsing ; `
     `
     Write-Host 'Creating TeX Live installation profile (same as zauguin action)...' ; `
-    @'
-selected_scheme scheme-infraonly
-tlpdbopt_install_docfiles 0
-tlpdbopt_install_srcfiles 0
-TEXDIR C:/texlive
-TEXMFCONFIG C:/texlive/texmf-config
-TEXMFHOME C:/texlive/texmf-home
-TEXMFLOCAL C:/texlive/texmf-local
-TEXMFSYSCONFIG C:/texlive/texmf-config
-TEXMFSYSVAR C:/texlive/texmf-var
-TEXMFVAR C:/texlive/texmf-var
-'@ | Out-File -FilePath 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'selected_scheme scheme-infraonly' | Set-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'tlpdbopt_install_docfiles 0' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'tlpdbopt_install_srcfiles 0' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'TEXDIR C:/texlive' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'TEXMFCONFIG C:/texlive/texmf-config' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'TEXMFHOME C:/texlive/texmf-home' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'TEXMFLOCAL C:/texlive/texmf-local' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'TEXMFSYSCONFIG C:/texlive/texmf-config' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'TEXMFSYSVAR C:/texlive/texmf-var' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'TEXMFVAR C:/texlive/texmf-var' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
     `
     Write-Host 'Installing TeX Live base system...' ; `
     Start-Process -FilePath $Installer -ArgumentList '-profile', 'C:\temp\texlive.profile' -Wait -NoNewWindow ; `
