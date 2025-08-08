@@ -60,23 +60,49 @@ COPY tools/dependencies/tl_packages                    C:/temp/tl_packages
 COPY docker/build-quarto-windows/verify_r_packages.R   C:/temp/verify_r_packages.R
 
 # ------------------------------------------------------------
-# PHASE 4: Quarto 1.7.31 (via Scoop - cleaner approach)
+# PHASE 4: Quarto 1.7.31 (via Scoop - following official script)
 # ------------------------------------------------------------
 RUN Write-Host 'Installing Quarto 1.7.31 via Scoop...' ; `
-    # Install Scoop package manager
+    # Install Scoop package manager (following official script)
     Write-Host 'Installing Scoop...' ; `
     Invoke-WebRequest -useb get.scoop.sh -outfile 'C:\temp\install.ps1' ; `
     .\C:\temp\install.ps1 -RunAsAdmin ; `
-    # Add Scoop shims to PATH
+    # Add Scoop shims to PATH (following official script)
     $scoopShims = Join-Path (Resolve-Path ~).Path "scoop\shims" ; `
     $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
     [Environment]::SetEnvironmentVariable('PATH', ($scoopShims + ';' + $mach), 'Machine') ; `
     Write-Host "✅ Added Scoop shims to PATH: $scoopShims" ; `
-    # Add r-bucket and install Quarto
+    # Add r-bucket and install Quarto (following official script)
     Write-Host 'Adding r-bucket and installing Quarto...' ; `
     scoop bucket add r-bucket https://github.com/cderv/r-bucket.git ; `
     scoop install quarto@1.7.31 ; `
-    # Verify installation
+    # Debug: Show Scoop installation structure
+    Write-Host '=== Scoop Installation Debug ===' ; `
+    $scoopRoot = (Resolve-Path ~).Path + '\scoop' ; `
+    Write-Host "Scoop root: $scoopRoot" ; `
+    $scoopApps = Join-Path $scoopRoot 'apps' ; `
+    Write-Host "Scoop apps: $scoopApps" ; `
+    $quartoScoopDir = Join-Path $scoopApps 'quarto' ; `
+    Write-Host "Quarto Scoop dir: $quartoScoopDir" ; `
+    if (Test-Path $quartoScoopDir) { `
+        Write-Host "✅ Quarto installed in Scoop at: $quartoScoopDir" ; `
+        # Show Scoop directory structure
+        Get-ChildItem $quartoScoopDir -Recurse -Name | ForEach-Object { Write-Host "  - $_" } ; `
+        $quartoCurrent = Join-Path $quartoScoopDir 'current' ; `
+        if (Test-Path $quartoCurrent) { `
+            Write-Host "✅ Quarto current symlink: $quartoCurrent" ; `
+            $quartoBin = Join-Path $quartoCurrent 'bin' ; `
+            if (Test-Path $quartoBin) { `
+                Write-Host "✅ Quarto bin found at: $quartoBin" ; `
+                $quartoExe = Join-Path $quartoBin 'quarto.exe' ; `
+                if (Test-Path $quartoExe) { `
+                    Write-Host "✅ Quarto executable found at: $quartoExe" ; `
+                } ; `
+            } ; `
+        } ; `
+    } ; `
+    Write-Host '=== End Scoop Debug ===' ; `
+    # Verify installation using where.exe
     Write-Host 'Searching for Quarto using where.exe...' ; `
     $quartoLocation = where.exe quarto 2>$null ; `
     if ($quartoLocation) { `
