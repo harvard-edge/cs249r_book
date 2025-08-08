@@ -3,6 +3,11 @@ name: '🐳 Build Windows Container'
 # This workflow builds the Windows Quarto build container
 # Windows containers are more complex but provide performance benefits
 
+# Prevent multiple builds running simultaneously
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
     inputs:
@@ -72,6 +77,7 @@ env:
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 120  # 2 hour timeout for Windows builds
     permissions:
       contents: read
       packages: write
@@ -79,6 +85,9 @@ jobs:
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
+
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: 🔐 Log in to Container Registry
         uses: docker/login-action@v3
@@ -95,66 +104,21 @@ jobs:
           tags: |
             type=raw,value=${{ env.CONTAINER_TAG }}
 
-      - name: 🐳 Build Windows container locally for testing
-        run: |
-          echo "🚀 Building Windows container locally..."
-          $useNoCache = "${{ inputs.no_cache }}" -eq "true"
-          if ($useNoCache) {
-            echo "📊 Cache mode: DISABLED (fresh build - manual trigger or no_cache=true)"
-            echo "🔄 Building with --no-cache flag (fresh build)..."
-            docker build --no-cache -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.CONTAINER_TAG }} -f ${{ env.DOCKERFILE_PATH }} ${{ env.CONTEXT_PATH }}
-          } else {
-            echo "📊 Cache mode: ENABLED (faster build - called via build manager)" 
-            echo "🔄 Building with cache enabled (faster build)..."
-            docker build -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.CONTAINER_TAG }} -f ${{ env.DOCKERFILE_PATH }} ${{ env.CONTEXT_PATH }}
-          }
-          
-          echo "✅ Local container build completed"
-          echo "📊 Verifying local image exists..."
-          docker images ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.CONTAINER_TAG }}
-
-      - name: 🐳 Push Windows container to registry
-        run: |
-          echo "📦 Pushing container to registry..."
-          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.CONTAINER_TAG }}
-          
-          echo "✅ Container push completed"
-
-      - name: Note: Make container public manually
-        run: |
-          echo "📝 Note: Container has been pushed to registry"
-          echo "📝 To make it public, visit: https://github.com/orgs/harvard-edge/packages"
-          echo "📝 Or run: gh api -X PATCH /orgs/harvard-edge/packages/container/${{ env.IMAGE_NAME }}/visibility -f visibility=public"
+      - name: 🐳 Build and push Windows container
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ env.CONTEXT_PATH }}
+          file: ${{ env.DOCKERFILE_PATH }}
+          load: true  # Keep local copy for testing
+          push: true  # Also push to registry
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          no-cache: ${{ inputs.no_cache }}
+          platforms: windows/amd64
+          provenance: false
+          sbom: false
 
       - name: Build Complete
         run: |
           echo "✅ Windows container build completed successfully!"
-          echo "📊 Container pushed to: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.CONTAINER_TAG }}"
-
-      - name: Container Info
-        run: |
-          echo "✅ Container built and tested successfully"
-          echo "📊 Registry: ${{ env.REGISTRY }}"
-          echo "📊 Image: ${{ env.IMAGE_NAME }}"
-          echo "📊 Tag: ${{ env.CONTAINER_TAG }}"
-          LOCAL_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.CONTAINER_TAG }}"
-          echo "📊 Size: $(docker images $LOCAL_IMAGE --format '{{.Size}}')"
-          
-          echo ""
-          echo "🚀 Usage in workflows:"
-          echo "container:"
-          echo "  image: $LOCAL_IMAGE"
-          echo "  options: --user root"
-          
-          echo ""
-          echo "🧪 Tests performed:"
-          echo "✅ Quarto functionality"
-          echo "✅ Python packages (all from requirements.txt)"
-          echo "✅ R packages (all from install_packages.R)"
-          echo "✅ TeX Live and LaTeX engines"
-          echo "✅ Inkscape SVG to PDF conversion"
-          echo "✅ Ghostscript PDF compression"
-          echo "✅ Fonts and graphics libraries"
-          echo "✅ Quarto render test"
-          echo "✅ TikZ compilation test"
-          echo "✅ System resources check"
+          echo "📊 Container: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.CONTAINER_TAG }}"
