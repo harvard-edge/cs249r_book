@@ -216,7 +216,8 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
     Write-Host "Found $($collections.Count) collections to install:" ; `
     foreach ($collection in $collections) { `
         Write-Host "  - $collection" ; `
-        "$collection 1" | Add-Content -Path 'C:\temp\install-tl.profile' -Encoding ASCII ; `
+        $line = "$collection 1" ; `
+        $line | Add-Content -Path 'C:\temp\install-tl.profile' -Encoding ASCII ; `
     } ; `
     Write-Host '📄 Profile created successfully' ; `
     `
