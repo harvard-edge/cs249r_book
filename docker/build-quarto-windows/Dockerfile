@@ -66,12 +66,36 @@ RUN Write-Host 'Installing Quarto 1.7.31...' ; `
     Invoke-WebRequest -Uri 'https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.31/quarto-1.7.31-win.zip' -OutFile 'C:\quarto.zip' -TimeoutSec 900 ; `
     Expand-Archive -Path 'C:\quarto.zip' -DestinationPath 'C:\quarto' -Force ; `
     Remove-Item 'C:\quarto.zip' -Force ; `
-    $qDir = Get-ChildItem -Directory C:\quarto | Select-Object -First 1 ; `
-    if (-not $qDir) { throw 'Quarto folder not found under C:\quarto' } ; `
-    Write-Host "Quarto located at: $($qDir.FullName)" ; `
-    $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
-    $qbin = Join-Path $qDir.FullName 'bin' ; `
-    if ($mach -notmatch [regex]::Escape($qbin)) { [Environment]::SetEnvironmentVariable('PATH', ($qbin + ';' + $mach), 'Machine') } ; `
+    Write-Host 'Searching for Quarto installation...' ; `
+    $quartoFound = $false ; `
+    $quartoPaths = @() ; `
+    # Check our extracted location first
+    $extractedDirs = Get-ChildItem -Directory C:\quarto -ErrorAction SilentlyContinue ; `
+    foreach ($dir in $extractedDirs) { $quartoPaths += Join-Path $dir.FullName 'bin' } ; `
+    # Check common Windows installation locations
+    $quartoPaths += 'C:\Program Files\Quarto\bin' ; `
+    $quartoPaths += 'C:\Program Files (x86)\Quarto\bin' ; `
+    $quartoPaths += 'C:\Users\ContainerAdministrator\AppData\Local\Programs\Quarto\bin' ; `
+    $quartoPaths += 'C:\Users\ContainerAdministrator\AppData\Roaming\Quarto\bin' ; `
+    # Check if quarto.exe exists in any of these paths
+    foreach ($path in $quartoPaths) { `
+        if (Test-Path (Join-Path $path 'quarto.exe')) { `
+            Write-Host "Found Quarto at: $path" ; `
+            $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
+            if ($mach -notmatch [regex]::Escape($path)) { `
+                [Environment]::SetEnvironmentVariable('PATH', ($path + ';' + $mach), 'Machine') ; `
+                Write-Host "Added $path to PATH" ; `
+            } ; `
+            $quartoFound = $true ; `
+            break ; `
+        } ; `
+    } ; `
+    if (-not $quartoFound) { `
+        Write-Host 'Quarto not found in common locations. Available paths:' ; `
+        foreach ($path in $quartoPaths) { Write-Host "  $path" } ; `
+        throw 'Quarto installation not found in any expected location' ; `
+    } ; `
+    Write-Host 'Testing Quarto installation...' ; `
     quarto --version
 
 # ------------------------------------------------------------
