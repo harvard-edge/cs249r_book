@@ -60,25 +60,24 @@ COPY tools/dependencies/tl_packages                    C:/temp/tl_packages
 COPY docker/build-quarto-windows/verify_r_packages.R   C:/temp/verify_r_packages.R
 
 # ------------------------------------------------------------
-# PHASE 4: Quarto 1.7.31 (ZIP, robust PATH)
+# PHASE 4: Quarto 1.7.31 (via Scoop - cleaner approach)
 # ------------------------------------------------------------
-RUN Write-Host 'Installing Quarto 1.7.31...' ; `
-    Invoke-WebRequest -Uri 'https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.31/quarto-1.7.31-win.zip' -OutFile 'C:\quarto.zip' -TimeoutSec 900 ; `
-    Expand-Archive -Path 'C:\quarto.zip' -DestinationPath 'C:\quarto' -Force ; `
-    Remove-Item 'C:\quarto.zip' -Force ; `
-    Write-Host 'Searching for Quarto installation...' ; `
-    # First, add our extracted location to PATH temporarily
-    $extractedDirs = Get-ChildItem -Directory C:\quarto -ErrorAction SilentlyContinue ; `
-    foreach ($dir in $extractedDirs) { `
-        $binPath = Join-Path $dir.FullName 'bin' ; `
-        if (Test-Path $binPath) { `
-            $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
-            [Environment]::SetEnvironmentVariable('PATH', ($binPath + ';' + $mach), 'Machine') ; `
-            Write-Host "✅ Added extracted Quarto to PATH: $binPath" ; `
-        } ; `
-    } ; `
-    # Now use where.exe to find quarto
-    Write-Host 'Searching for quarto using where.exe...' ; `
+RUN Write-Host 'Installing Quarto 1.7.31 via Scoop...' ; `
+    # Install Scoop package manager
+    Write-Host 'Installing Scoop...' ; `
+    Invoke-WebRequest -useb get.scoop.sh -outfile 'C:\temp\install.ps1' ; `
+    .\C:\temp\install.ps1 -RunAsAdmin ; `
+    # Add Scoop shims to PATH
+    $scoopShims = Join-Path (Resolve-Path ~).Path "scoop\shims" ; `
+    $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
+    [Environment]::SetEnvironmentVariable('PATH', ($scoopShims + ';' + $mach), 'Machine') ; `
+    Write-Host "✅ Added Scoop shims to PATH: $scoopShims" ; `
+    # Add r-bucket and install Quarto
+    Write-Host 'Adding r-bucket and installing Quarto...' ; `
+    scoop bucket add r-bucket https://github.com/cderv/r-bucket.git ; `
+    scoop install quarto@1.7.31 ; `
+    # Verify installation
+    Write-Host 'Searching for Quarto using where.exe...' ; `
     $quartoLocation = where.exe quarto 2>$null ; `
     if ($quartoLocation) { `
         $quartoPath = $quartoLocation.Split([Environment]::NewLine)[0] ; `
