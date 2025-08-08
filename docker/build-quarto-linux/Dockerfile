@@ -17,13 +17,13 @@ ENV PATH=/usr/local/texlive/bin/x86_64-linux:$PATH
 RUN echo "🚀 === STARTING LOCALE CONFIGURATION ===" && \
     echo "📦 Installing locales package..." && \
     apt-get update && apt-get install -y locales && \
-    echo "✅ Locales package installed" && \
+    echo "📦 Locales package installed" && \
     echo "🔧 Generating en_US.UTF-8 locale..." && \
     locale-gen en_US.UTF-8 && \
-    echo "✅ Locale generated" && \
+    echo "📄 Locale generated" && \
     echo "🔧 Updating system locale..." && \
     update-locale LANG=en_US.UTF-8 && \
-    echo "✅ System locale updated" && \
+    echo "🔧 System locale updated" && \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
     echo "✅ Locale configuration complete"
@@ -88,7 +88,7 @@ RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
     wget \
     curl \
     git && \
-    echo "✅ All system packages installed successfully" && \
+    echo "📦 All system packages installed successfully" && \
     \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
@@ -107,15 +107,15 @@ RUN echo "🚀 === STARTING INKSCAPE INSTALLATION ===" && \
     apt-get update && \
     echo "📦 Installing software-properties-common..." && \
     apt-get install -y software-properties-common && \
-    echo "✅ software-properties-common installed" && \
+    echo "📦 software-properties-common installed" && \
     echo "🔧 Adding Inkscape PPA..." && \
     add-apt-repository ppa:inkscape.dev/stable -y && \
-    echo "✅ Inkscape PPA added" && \
+    echo "📦 Inkscape PPA added" && \
     \
     echo "📦 Installing Inkscape..." && \
     apt-get update && \
     apt-get install -y inkscape && \
-    echo "✅ Inkscape installed" && \
+    echo "📦 Inkscape installed" && \
     \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
@@ -130,10 +130,10 @@ RUN echo "🚀 === STARTING FONT INSTALLATION ===" && \
     apt-get update && apt-get install -y \
     fonts-liberation \
     fontconfig && \
-    echo "✅ Fonts installed" && \
+    echo "📦 Fonts installed" && \
     echo "🔧 Updating font cache..." && \
     fc-cache -fv && \
-    echo "✅ Font cache updated" && \
+    echo "📄 Font cache updated" && \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
     echo "✅ Font installation complete"
@@ -142,10 +142,10 @@ RUN echo "🚀 === STARTING FONT INSTALLATION ===" && \
 RUN echo "🚀 === STARTING INKSCAPE TEST ===" && \
     echo "📋 Creating test SVG file..." && \
     echo '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><circle cx="50" cy="50" r="40" fill="red"/></svg>' > test.svg && \
-    echo "✅ Test SVG created" && \
+    echo "📄 Test SVG created" && \
     echo "🔄 Converting SVG to PDF..." && \
     inkscape --export-type=pdf --export-filename=test.pdf test.svg && \
-    echo "✅ Conversion completed" && \
+    echo "📦 Conversion completed" && \
     if [ -f test.pdf ]; then \
         echo "✅ Inkscape SVG to PDF conversion successful!"; \
         echo "📊 PDF file details:"; \
@@ -165,7 +165,7 @@ RUN echo "🚀 === STARTING GHOSTSCRIPT INSTALLATION ===" && \
     \
     echo "📦 Installing Ghostscript..." && \
     apt-get update && apt-get install -y ghostscript && \
-    echo "✅ Ghostscript installed" && \
+    echo "📦 Ghostscript installed" && \
     echo "📊 Ghostscript version:" && \
     gs --version && \
     \
@@ -192,18 +192,18 @@ RUN echo "🚀 === STARTING TEX LIVE INSTALLATION ===" && \
     perl \
     wget \
     xzdec && \
-    echo "✅ Prerequisites installed" && \
+    echo "📦 Prerequisites installed" && \
     rm -rf /var/lib/apt/lists/* && \
     \
     echo "🔄 Downloading TeX Live installer (~4MB)..." && \
     wget -O /tmp/install-tl-unx.tar.gz "https://mirror.ctan.org/systems/texlive/tlnet/install-tl-unx.tar.gz" && \
-    echo "✅ Download completed" && \
+    echo "📥 Download completed" && \
     echo "📊 Downloaded file size:" && \
     ls -lh /tmp/install-tl-unx.tar.gz && \
     \
     echo "📦 Extracting TeX Live installer..." && \
     cd /tmp && tar -xzf install-tl-unx.tar.gz && \
-    echo "✅ Extraction completed" && \
+    echo "📦 Extraction completed" && \
     echo "📊 Extracted files:" && \
     ls -la /tmp/install-tl-* && \
     \
@@ -218,7 +218,7 @@ RUN echo "🚀 === STARTING TEX LIVE INSTALLATION ===" && \
     echo "TEXMFSYSCONFIG /usr/local/texlive/texmf-config" >> /tmp/texlive.profile && \
     echo "TEXMFSYSVAR /usr/local/texlive/texmf-var" >> /tmp/texlive.profile && \
     echo "TEXMFVAR /usr/local/texlive/texmf-var" >> /tmp/texlive.profile && \
-    echo "✅ Profile created" && \
+    echo "📄 Profile created" && \
     echo "📊 Profile contents:" && \
     cat /tmp/texlive.profile && \
     \
@@ -291,7 +291,7 @@ RUN echo "🚀 === STARTING R INSTALLATION ===" && \
     r-base \
     r-base-dev \
     r-recommended && \
-    echo "✅ R packages installed" && \
+    echo "📦 R packages installed" && \
     \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
@@ -316,7 +316,7 @@ RUN echo "🚀 === STARTING PYTHON INSTALLATION ===" && \
     python3 \
     python3-pip \
     python3-dev && \
-    echo "✅ Python packages installed" && \
+    echo "📦 Python packages installed" && \
     \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
@@ -335,17 +335,17 @@ RUN echo "🚀 === STARTING QUARTO INSTALLATION ===" && \
     \
     echo "📦 Downloading Quarto 1.7.31..." && \
     wget -q https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.31/quarto-1.7.31-linux-amd64.deb && \
-    echo "✅ Download completed" && \
+    echo "📥 Download completed" && \
     echo "📊 Downloaded file size:" && \
     ls -lh quarto-1.7.31-linux-amd64.deb && \
     \
     echo "📦 Installing Quarto..." && \
     dpkg -i quarto-1.7.31-linux-amd64.deb && \
-    echo "✅ Quarto installed" && \
+    echo "📦 Quarto installed" && \
     \
     echo "🧹 Cleaning up installer..." && \
     rm quarto-1.7.31-linux-amd64.deb && \
-    echo "✅ Installer cleaned up" && \
+    echo "🧹 Installer cleaned up" && \
     \
     end_time=$(date +%s) && \
     duration=$((end_time - start_time)) && \

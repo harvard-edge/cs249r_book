@@ -25,9 +25,9 @@ ENV LC_ALL="en_US.UTF-8"
 RUN Write-Host '=== STARTING BASE SETUP ===' ; `
     Write-Host 'Creating base directories...' ; `
     New-Item -ItemType Directory -Force -Path 'C:\temp' | Out-Null ; `
-    Write-Host '✅ Created C:\temp' ; `
+    Write-Host '📁 Created C:\temp' ; `
     New-Item -ItemType Directory -Force -Path 'C:\r-lib' | Out-Null ; `
-    Write-Host '✅ Created C:\r-lib' ; `
+    Write-Host '📁 Created C:\r-lib' ; `
     Write-Host 'Environment variables set:' ; `
     Write-Host "  R_LIBS_USER: $env:R_LIBS_USER" ; `
     Write-Host "  QUARTO_LOG_LEVEL: $env:QUARTO_LOG_LEVEL" ; `
@@ -46,22 +46,22 @@ RUN Write-Host '=== STARTING POWERSHELL 7 INSTALLATION ===' ; `
     $Zip = 'C:\PowerShell-7.4.1.zip' ; `
     Write-Host "Downloading PowerShell 7 to: $Zip" ; `
     Invoke-WebRequest -Uri $Url -OutFile $Zip -UseBasicParsing ; `
-    Write-Host '✅ Download completed' ; `
+    Write-Host '📥 Download completed' ; `
     Write-Host 'Creating PowerShell directory...' ; `
     New-Item -ItemType Directory -Force -Path 'C:\Program Files\PowerShell\7' | Out-Null ; `
-    Write-Host '✅ Directory created' ; `
+    Write-Host '📁 Directory created' ; `
     Write-Host 'Extracting ZIP file...' ; `
     Expand-Archive -Path $Zip -DestinationPath 'C:\Program Files\PowerShell\7' -Force ; `
-    Write-Host '✅ Extraction completed' ; `
+    Write-Host '📦 Extraction completed' ; `
     Write-Host 'Cleaning up ZIP file...' ; `
     Remove-Item $Zip -Force ; `
-    Write-Host '✅ Cleanup completed' ; `
+    Write-Host '🧹 Cleanup completed' ; `
     Write-Host 'Adding PowerShell to PATH...' ; `
     $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
     Write-Host "Current PATH: $mach" ; `
     if ($mach -notmatch [regex]::Escape('C:\Program Files\PowerShell\7')) { `
       [Environment]::SetEnvironmentVariable('PATH', ('C:\Program Files\PowerShell\7;' + $mach), 'Machine') ; `
-      Write-Host '✅ PowerShell added to PATH' ; `
+      Write-Host '🔗 PowerShell added to PATH' ; `
     } else { `
       Write-Host '⚠️ PowerShell already in PATH' ; `
     } ; `
@@ -78,10 +78,10 @@ RUN Write-Host '=== STARTING CHOCOLATEY INSTALLATION ===' ; `
     Write-Host 'Installing Chocolatey package manager...' ; `
     Write-Host 'Setting TLS 1.2 for download...' ; `
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 ; `
-    Write-Host '✅ TLS 1.2 enabled' ; `
+    Write-Host '🔒 TLS 1.2 enabled' ; `
     Write-Host 'Downloading and executing Chocolatey install script...' ; `
     iex ((New-Object Net.WebClient).DownloadString('https://chocolatey.org/install.ps1')) ; `
-    Write-Host '✅ Chocolatey install script executed' ; `
+    Write-Host '📦 Chocolatey install script executed' ; `
     Write-Host 'Verifying Chocolatey installation...' ; `
     choco --version ; `
     Write-Host '✅ Chocolatey installation complete'
@@ -113,31 +113,31 @@ RUN Write-Host '=== STARTING QUARTO INSTALLATION ===' ; `
     Write-Host 'Setting UTF-8 encoding...' ; `
     [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 ; `
     $OutputEncoding = [System.Text.Encoding]::UTF8 ; `
-    Write-Host '✅ UTF-8 encoding set' ; `
+    Write-Host '🔤 UTF-8 encoding set' ; `
     Write-Host 'Installing Quarto via Scoop...' ; `
     Write-Host 'Setting execution policy...' ; `
     Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force ; `
-    Write-Host '✅ Execution policy set' ; `
+    Write-Host '🔐 Execution policy set' ; `
     Write-Host 'Installing Scoop package manager...' ; `
     Invoke-WebRequest -useb get.scoop.sh -outfile 'install.ps1' ; `
-    Write-Host '✅ Scoop install script downloaded' ; `
+    Write-Host '📥 Scoop install script downloaded' ; `
     & .\install.ps1 -RunAsAdmin ; `
-    Write-Host '✅ Scoop installed' ; `
+    Write-Host '📦 Scoop installed' ; `
     Write-Host 'Adding Scoop shims to PATH...' ; `
     $scoopShims = Join-Path (Resolve-Path ~).Path 'scoop\shims' ; `
     Write-Host "Scoop shims path: $scoopShims" ; `
     $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
     [Environment]::SetEnvironmentVariable('PATH', ($scoopShims + ';' + $mach), 'Machine') ; `
-    Write-Host '✅ Added Scoop shims to PATH' ; `
+    Write-Host '🔗 Added Scoop shims to PATH' ; `
     Write-Host 'Installing Git (required for buckets)...' ; `
     scoop install git ; `
-    Write-Host '✅ Git installed' ; `
+    Write-Host '📦 Git installed' ; `
     Write-Host 'Adding r-bucket...' ; `
     scoop bucket add r-bucket https://github.com/cderv/r-bucket.git ; `
-    Write-Host '✅ r-bucket added' ; `
+    Write-Host '📦 r-bucket added' ; `
     Write-Host 'Adding extras bucket...' ; `
     scoop bucket add extras ; `
-    Write-Host '✅ extras bucket added' ; `
+    Write-Host '📦 extras bucket added' ; `
     Write-Host 'Installing Quarto (latest stable)...' ; `
     scoop install quarto ; `
     Write-Host '✅ Quarto installation completed!'
@@ -149,7 +149,7 @@ RUN Write-Host '=== STARTING PYTHON INSTALLATION ===' ; `
     Write-Host 'Installing Python via Scoop (same as quarto-build workflow)...' ; `
     Write-Host 'Installing Python from main bucket...' ; `
     scoop install main/python ; `
-    Write-Host '✅ Python installed' ; `
+    Write-Host '📦 Python installed' ; `
     Write-Host 'Verifying Python installation...' ; `
     python --version ; `
     Write-Host '✅ Python installation complete'
@@ -161,7 +161,7 @@ RUN Write-Host '=== STARTING PYTHON PACKAGE INSTALLATION ===' ; `
     Write-Host 'Installing Python packages from requirements.txt (same as quarto-build workflow)...' ; `
     Write-Host 'Upgrading pip...' ; `
     python -m pip install --upgrade pip ; `
-    Write-Host '✅ pip upgraded' ; `
+    Write-Host '📦 pip upgraded' ; `
     Write-Host 'Installing packages from requirements.txt...' ; `
     Write-Host 'Requirements file contents:' ; `
     Get-Content C:/temp/requirements.txt | Write-Host ; `
@@ -175,7 +175,7 @@ RUN Write-Host '=== STARTING GHOSTSCRIPT INSTALLATION ===' ; `
     Write-Host 'Installing Ghostscript via Scoop (same as quarto-build workflow)...' ; `
     Write-Host 'Installing Ghostscript from main bucket...' ; `
     scoop install main/ghostscript ; `
-    Write-Host '✅ Ghostscript installed' ; `
+    Write-Host '📦 Ghostscript installed' ; `
     Write-Host 'Verifying Ghostscript installation...' ; `
     gs --version ; `
     Write-Host '✅ Ghostscript installation complete'
@@ -187,7 +187,7 @@ RUN Write-Host '=== STARTING INKSCAPE INSTALLATION ===' ; `
     Write-Host 'Installing Inkscape via Scoop (same as quarto-build workflow)...' ; `
     Write-Host 'Installing Inkscape...' ; `
     scoop install inkscape ; `
-    Write-Host '✅ Inkscape installed' ; `
+    Write-Host '📦 Inkscape installed' ; `
     Write-Host 'Verifying Inkscape installation...' ; `
     inkscape --version ; `
     Write-Host '✅ Inkscape installation complete'
@@ -220,7 +220,7 @@ tlpdbopt_install_srcfiles 0
         Write-Host "  - $collection" ; `
         "$collection 1" | Add-Content -Path 'C:\temp\install-tl.profile' -Encoding ASCII ; `
     } ; `
-    Write-Host 'Profile created successfully' ; `
+    Write-Host '📄 Profile created successfully' ; `
     `
     Write-Host 'Installing TeX Live with profile...' ; `
     Write-Host "Installer path: $installer" ; `
@@ -251,7 +251,7 @@ RUN Write-Host '=== STARTING R INSTALLATION ===' ; `
     Write-Host 'Installing R via Scoop (same as quarto-build workflow)...' ; `
     Write-Host 'Installing R from main bucket...' ; `
     scoop install main/r ; `
-    Write-Host '✅ R installed' ; `
+    Write-Host '📦 R installed' ; `
     Write-Host 'Verifying R installation...' ; `
     R --version ; `
     Write-Host '✅ R installation complete'
@@ -265,7 +265,7 @@ RUN Write-Host '=== INSTALLING R PACKAGES ===' ; `
     Write-Host "R_LIBS_USER: $env:R_LIBS_USER" ; `
     Write-Host 'Installing R packages...' ; `
     Rscript -e "options(repos=c(CRAN='https://cran.rstudio.com')); dir.create(Sys.getenv('R_LIBS_USER'), recursive=TRUE, showWarnings=FALSE); .libPaths(Sys.getenv('R_LIBS_USER')); install.packages('remotes'); if (file.exists('C:/temp/install_packages.R')) source('C:/temp/install_packages.R') else install.packages(c('rmarkdown','knitr','ggplot2')); for (p in c('rmarkdown','knitr')) if (!require(p, character.only=TRUE, quietly=TRUE)) stop('missing: ', p)" ; `
-    Write-Host '✅ R packages installed' ; `
+    Write-Host '📦 R packages installed' ; `
     Write-Host 'Verifying R packages...' ; `
     Rscript C:/temp/verify_r_packages.R ; `
     Write-Host '✅ R package installation complete'
@@ -277,15 +277,15 @@ RUN Write-Host '=== STARTING CLEANUP ===' ; `
     Write-Host 'Cleaning temporary files (same as quarto-build workflow)...' ; `
     Write-Host 'Removing temporary files...' ; `
     Remove-Item C:/temp/requirements.txt -ErrorAction SilentlyContinue ; `
-    Write-Host '✅ requirements.txt removed' ; `
+    Write-Host '🗑️ requirements.txt removed' ; `
     Remove-Item C:/temp/install_packages.R -ErrorAction SilentlyContinue ; `
-    Write-Host '✅ install_packages.R removed' ; `
+    Write-Host '🗑️ install_packages.R removed' ; `
     Remove-Item C:/temp/verify_r_packages.R -ErrorAction SilentlyContinue ; `
-    Write-Host '✅ verify_r_packages.R removed' ; `
+    Write-Host '🗑️ verify_r_packages.R removed' ; `
     Remove-Item C:/temp/tl_packages -ErrorAction SilentlyContinue ; `
-    Write-Host '✅ tl_packages removed' ; `
+    Write-Host '🗑️ tl_packages removed' ; `
     Remove-Item C:/temp/requirements/ -Recurse -Force -ErrorAction SilentlyContinue ; `
-    Write-Host '✅ requirements/ directory removed' ; `
+    Write-Host '🗑️ requirements/ directory removed' ; `
     Write-Host '✅ Cleanup complete'
 
 # ------------------------------------------------------------
