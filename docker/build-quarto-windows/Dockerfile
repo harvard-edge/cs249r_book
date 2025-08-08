@@ -234,13 +234,16 @@ tlpdbopt_install_srcfiles 0
     $env:PATH = "$texLiveBin;$env:PATH" ; `
     [Environment]::SetEnvironmentVariable('PATH', $env:PATH, 'Machine') ; `
     `
+    Write-Host 'Refreshing environment variables...' ; `
+    $env:PATH = [Environment]::GetEnvironmentVariable('PATH', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('PATH', 'User') ; `
+    `
     Write-Host 'Verifying installation...' ; `
     Write-Host 'Checking installed collections:' ; `
-    tlmgr list --only-installed | Select-String 'collection-' ; `
+    & "$texLiveBin\tlmgr.bat" list --only-installed | Select-String 'collection-' ; `
     Write-Host 'Checking lualatex:' ; `
-    lualatex --version | Select-Object -First 1 ; `
+    & "$texLiveBin\lualatex.exe" --version | Select-Object -First 1 ; `
     Write-Host 'Checking tlmgr path:' ; `
-    Get-Command tlmgr | Select-Object Source ; `
+    Get-Command "$texLiveBin\tlmgr.bat" | Select-Object Source ; `
     `
     Write-Host '✅ TeXLive installation complete'
 
@@ -304,6 +307,7 @@ RUN Write-Host '=== FINAL VERIFICATION ===' ; `
     R --version ; `
     Write-Host '✅ R verified' ; `
     Write-Host 'Checking LaTeX...' ; `
-    lualatex --version ; `
+    $texLiveBin = 'C:\texlive\bin\windows' ; `
+    & "$texLiveBin\lualatex.exe" --version ; `
     Write-Host '✅ LaTeX verified' ; `
     Write-Host '✅ Windows container build completed successfully'
