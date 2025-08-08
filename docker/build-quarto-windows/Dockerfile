@@ -78,37 +78,96 @@ RUN Write-Host 'Installing Quarto 1.7.31...' ; `
     $quartoPaths += 'C:\Users\ContainerAdministrator\AppData\Local\Programs\Quarto\bin' ; `
     $quartoPaths += 'C:\Users\ContainerAdministrator\AppData\Roaming\Quarto\bin' ; `
     # Check if quarto.exe exists in any of these paths
+    Write-Host 'Checking for Quarto installation in the following locations:' ; `
+    foreach ($path in $quartoPaths) { Write-Host "  - $path" } ; `
+    $foundPath = $null ; `
     foreach ($path in $quartoPaths) { `
-        if (Test-Path (Join-Path $path 'quarto.exe')) { `
-            Write-Host "Found Quarto at: $path" ; `
+        $quartoExe = Join-Path $path 'quarto.exe' ; `
+        if (Test-Path $quartoExe) { `
+            $foundPath = $path ; `
+            Write-Host "✅ Found Quarto at: $path" ; `
+            Write-Host "   Full path: $quartoExe" ; `
             $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
             if ($mach -notmatch [regex]::Escape($path)) { `
                 [Environment]::SetEnvironmentVariable('PATH', ($path + ';' + $mach), 'Machine') ; `
-                Write-Host "Added $path to PATH" ; `
+                Write-Host "   ✅ Added $path to PATH" ; `
+            } else { `
+                Write-Host "   ℹ️  $path already in PATH" ; `
             } ; `
             $quartoFound = $true ; `
             break ; `
+        } else { `
+            Write-Host "   ❌ Not found: $quartoExe" ; `
         } ; `
     } ; `
     if (-not $quartoFound) { `
-        Write-Host 'Quarto not found in common locations. Available paths:' ; `
-        foreach ($path in $quartoPaths) { Write-Host "  $path" } ; `
+        Write-Host '❌ Quarto not found in any of the checked locations:' ; `
+        foreach ($path in $quartoPaths) { Write-Host "  - $path" } ; `
         throw 'Quarto installation not found in any expected location' ; `
     } ; `
+    Write-Host "🎯 Using Quarto from: $foundPath" ; `
     Write-Host 'Testing Quarto installation...' ; `
     quarto --version
 
 # ------------------------------------------------------------
 # PHASE 5: Python 3.13.1 + packages
 # ------------------------------------------------------------
-RUN choco install -y python --version=3.13.1 --no-progress ; `
-    $py = (Get-Command python.exe -All | Select-Object -First 1).Path ; `
-    if (-not $py) { throw 'python.exe not found after installation' } ; `
-    $pyDir = Split-Path $py -Parent ; `
-    $scripts = Join-Path $pyDir 'Scripts' ; `
+RUN Write-Host 'Installing Python 3.13.1...' ; `
+    choco install -y python --version=3.13.1 --no-progress ; `
+    Write-Host 'Searching for Python installation...' ; `
+    $pythonFound = $false ; `
+    $pythonPaths = @() ; `
+    # Check common Python installation locations
+    $pythonPaths += 'C:\Python313' ; `
+    $pythonPaths += 'C:\Python313\Scripts' ; `
+    $pythonPaths += 'C:\Program Files\Python313' ; `
+    $pythonPaths += 'C:\Program Files\Python313\Scripts' ; `
+    $pythonPaths += 'C:\Program Files (x86)\Python313' ; `
+    $pythonPaths += 'C:\Program Files (x86)\Python313\Scripts' ; `
+    $pythonPaths += 'C:\Users\ContainerAdministrator\AppData\Local\Programs\Python\Python313' ; `
+    $pythonPaths += 'C:\Users\ContainerAdministrator\AppData\Local\Programs\Python\Python313\Scripts' ; `
+    # Also check via Get-Command
+    $py = (Get-Command python.exe -All -ErrorAction SilentlyContinue | Select-Object -First 1).Path ; `
+    if ($py) { `
+        $pyDir = Split-Path $py -Parent ; `
+        $scripts = Join-Path $pyDir 'Scripts' ; `
+        $pythonPaths += $pyDir ; `
+        $pythonPaths += $scripts ; `
+    } ; `
+    Write-Host 'Checking for Python installation in the following locations:' ; `
+    foreach ($path in $pythonPaths) { Write-Host "  - $path" } ; `
+    $foundPythonPath = $null ; `
+    $foundScriptsPath = $null ; `
+    foreach ($path in $pythonPaths) { `
+        if (Test-Path $path) { `
+            if ($path -like '*Scripts*') { `
+                $foundScriptsPath = $path ; `
+                Write-Host "✅ Found Python Scripts at: $path" ; `
+            } else { `
+                $foundPythonPath = $path ; `
+                Write-Host "✅ Found Python at: $path" ; `
+            } ; `
+        } else { `
+            Write-Host "   ❌ Not found: $path" ; `
+        } ; `
+    } ; `
+    if (-not $foundPythonPath) { `
+        Write-Host '❌ Python installation not found in expected locations' ; `
+        throw 'Python installation not found' ; `
+    } ; `
+    Write-Host "🎯 Using Python from: $foundPythonPath" ; `
+    if ($foundScriptsPath) { Write-Host "🎯 Using Python Scripts from: $foundScriptsPath" } ; `
     $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
-    foreach ($p in @($pyDir,$scripts)) { if ($p -and (Test-Path $p) -and ($mach -notmatch [regex]::Escape($p))) { $mach = "$p;$mach" } } ; `
+    foreach ($p in @($foundPythonPath, $foundScriptsPath)) { `
+        if ($p -and ($mach -notmatch [regex]::Escape($p))) { `
+            $mach = "$p;$mach" ; `
+            Write-Host "   ✅ Added $p to PATH" ; `
+        } else { `
+            Write-Host "   ℹ️  $p already in PATH" ; `
+        } ; `
+    } ; `
     [Environment]::SetEnvironmentVariable('PATH', $mach, 'Machine') ; `
+    Write-Host 'Testing Python installation...' ; `
     python --version ; `
     python -m pip --version ; `
     python -m pip install --upgrade pip ; `
@@ -117,23 +176,97 @@ RUN choco install -y python --version=3.13.1 --no-progress ; `
 # ------------------------------------------------------------
 # PHASE 6: Ghostscript (Chocolatey)
 # ------------------------------------------------------------
-RUN choco install -y ghostscript --no-progress ; `
-    $gsDir = Get-ChildItem 'C:\Program Files\gs' -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1 ; `
-    if (-not $gsDir) { throw 'Ghostscript folder not found after install' } ; `
-    $gsBin = Join-Path $gsDir.FullName 'bin' ; `
+RUN Write-Host 'Installing Ghostscript...' ; `
+    choco install -y ghostscript --no-progress ; `
+    Write-Host 'Searching for Ghostscript installation...' ; `
+    $gsFound = $false ; `
+    $gsPaths = @() ; `
+    # Check common Ghostscript installation locations
+    $gsPaths += 'C:\Program Files\gs' ; `
+    $gsPaths += 'C:\Program Files (x86)\gs' ; `
+    $gsPaths += 'C:\gs' ; `
+    # Also check via Get-Command
+    $gs = (Get-Command gswin64c.exe -All -ErrorAction SilentlyContinue | Select-Object -First 1).Path ; `
+    if ($gs) { `
+        $gsBin = Split-Path $gs -Parent ; `
+        $gsPaths += $gsBin ; `
+    } ; `
+    Write-Host 'Checking for Ghostscript installation in the following locations:' ; `
+    foreach ($path in $gsPaths) { Write-Host "  - $path" } ; `
+    $foundGsPath = $null ; `
+    foreach ($path in $gsPaths) { `
+        if (Test-Path $path) { `
+            $gsBin = Join-Path $path 'bin' ; `
+            if (Test-Path (Join-Path $gsBin 'gswin64c.exe')) { `
+                $foundGsPath = $gsBin ; `
+                Write-Host "✅ Found Ghostscript at: $gsBin" ; `
+                Write-Host "   Full path: $(Join-Path $gsBin 'gswin64c.exe')" ; `
+                $gsFound = $true ; `
+                break ; `
+            } ; `
+        } ; `
+    } ; `
+    if (-not $gsFound) { `
+        Write-Host '❌ Ghostscript not found in expected locations' ; `
+        throw 'Ghostscript installation not found' ; `
+    } ; `
+    Write-Host "🎯 Using Ghostscript from: $foundGsPath" ; `
     $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
-    if ($mach -notmatch [regex]::Escape($gsBin)) { [Environment]::SetEnvironmentVariable('PATH', "$gsBin;$mach", 'Machine') } ; `
+    if ($mach -notmatch [regex]::Escape($foundGsPath)) { `
+        [Environment]::SetEnvironmentVariable('PATH', "$foundGsPath;$mach", 'Machine') ; `
+        Write-Host "   ✅ Added $foundGsPath to PATH" ; `
+    } else { `
+        Write-Host "   ℹ️  $foundGsPath already in PATH" ; `
+    } ; `
+    Write-Host 'Testing Ghostscript installation...' ; `
     Get-Command gswin64c.exe ; `
     gswin64c.exe -h | Select-String -Pattern '^GPL Ghostscript' -SimpleMatch
 
 # ------------------------------------------------------------
 # PHASE 7: Inkscape (Chocolatey)
 # ------------------------------------------------------------
-RUN choco install -y inkscape --no-progress ; `
-    $ink = 'C:\Program Files\Inkscape\bin' ; `
-    if (-not (Test-Path $ink)) { throw 'Inkscape bin not found' } ; `
+RUN Write-Host 'Installing Inkscape...' ; `
+    choco install -y inkscape --no-progress ; `
+    Write-Host 'Searching for Inkscape installation...' ; `
+    $inkFound = $false ; `
+    $inkPaths = @() ; `
+    # Check common Inkscape installation locations
+    $inkPaths += 'C:\Program Files\Inkscape\bin' ; `
+    $inkPaths += 'C:\Program Files (x86)\Inkscape\bin' ; `
+    $inkPaths += 'C:\Inkscape\bin' ; `
+    # Also check via Get-Command
+    $ink = (Get-Command inkscape.exe -All -ErrorAction SilentlyContinue | Select-Object -First 1).Path ; `
+    if ($ink) { `
+        $inkBin = Split-Path $ink -Parent ; `
+        $inkPaths += $inkBin ; `
+    } ; `
+    Write-Host 'Checking for Inkscape installation in the following locations:' ; `
+    foreach ($path in $inkPaths) { Write-Host "  - $path" } ; `
+    $foundInkPath = $null ; `
+    foreach ($path in $inkPaths) { `
+        if (Test-Path $path) { `
+            if (Test-Path (Join-Path $path 'inkscape.exe')) { `
+                $foundInkPath = $path ; `
+                Write-Host "✅ Found Inkscape at: $path" ; `
+                Write-Host "   Full path: $(Join-Path $path 'inkscape.exe')" ; `
+                $inkFound = $true ; `
+                break ; `
+            } ; `
+        } ; `
+    } ; `
+    if (-not $inkFound) { `
+        Write-Host '❌ Inkscape not found in expected locations' ; `
+        throw 'Inkscape installation not found' ; `
+    } ; `
+    Write-Host "🎯 Using Inkscape from: $foundInkPath" ; `
     $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
-    if ($mach -notmatch [regex]::Escape($ink)) { [Environment]::SetEnvironmentVariable('PATH', "$ink;$mach", 'Machine') } ; `
+    if ($mach -notmatch [regex]::Escape($foundInkPath)) { `
+        [Environment]::SetEnvironmentVariable('PATH', "$foundInkPath;$mach", 'Machine') ; `
+        Write-Host "   ✅ Added $foundInkPath to PATH" ; `
+    } else { `
+        Write-Host "   ℹ️  $foundInkPath already in PATH" ; `
+    } ; `
+    Write-Host 'Testing Inkscape installation...' ; `
     Get-Command inkscape.exe ; `
     inkscape --version
 
@@ -155,11 +288,47 @@ RUN Write-Host 'Installing TeX Live 2025 snapshot...' ; `
     'TEXMFSYSVAR C:/texlive/texmf-var' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
     'TEXMFVAR C:/texlive/texmf-var' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
     Start-Process -FilePath $Installer -ArgumentList '-repository', $Repo, '-profile', 'C:\temp\texlive.profile' -Wait -NoNewWindow ; `
-    $tlbin = 'C:\texlive\bin\windows' ; `
-    if (-not (Test-Path $tlbin)) { throw "TeX Live bin path missing: $tlbin" } ; `
+    Write-Host 'Searching for TeX Live installation...' ; `
+    $texFound = $false ; `
+    $texPaths = @() ; `
+    # Check common TeX Live installation locations
+    $texPaths += 'C:\texlive\bin\windows' ; `
+    $texPaths += 'C:\Program Files\texlive\bin\windows' ; `
+    $texPaths += 'C:\Program Files (x86)\texlive\bin\windows' ; `
+    # Also check via Get-Command
+    $tex = (Get-Command lualatex.exe -All -ErrorAction SilentlyContinue | Select-Object -First 1).Path ; `
+    if ($tex) { `
+        $texBin = Split-Path $tex -Parent ; `
+        $texPaths += $texBin ; `
+    } ; `
+    Write-Host 'Checking for TeX Live installation in the following locations:' ; `
+    foreach ($path in $texPaths) { Write-Host "  - $path" } ; `
+    $foundTexPath = $null ; `
+    foreach ($path in $texPaths) { `
+        if (Test-Path $path) { `
+            if (Test-Path (Join-Path $path 'lualatex.exe')) { `
+                $foundTexPath = $path ; `
+                Write-Host "✅ Found TeX Live at: $path" ; `
+                Write-Host "   Full path: $(Join-Path $path 'lualatex.exe')" ; `
+                $texFound = $true ; `
+                break ; `
+            } ; `
+        } ; `
+    } ; `
+    if (-not $texFound) { `
+        Write-Host '❌ TeX Live not found in expected locations' ; `
+        throw 'TeX Live installation not found' ; `
+    } ; `
+    Write-Host "🎯 Using TeX Live from: $foundTexPath" ; `
     $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
-    if ($mach -notmatch [regex]::Escape($tlbin)) { [Environment]::SetEnvironmentVariable('PATH', "$tlbin;$mach", 'Machine') } ; `
-    & "$tlbin\tlmgr.bat" version
+    if ($mach -notmatch [regex]::Escape($foundTexPath)) { `
+        [Environment]::SetEnvironmentVariable('PATH', "$foundTexPath;$mach", 'Machine') ; `
+        Write-Host "   ✅ Added $foundTexPath to PATH" ; `
+    } else { `
+        Write-Host "   ℹ️  $foundTexPath already in PATH" ; `
+    } ; `
+    Write-Host 'Testing TeX Live installation...' ; `
+    & "$foundTexPath\tlmgr.bat" version
 
 RUN $tlmgr = 'C:\texlive\bin\windows\tlmgr.bat' ; `
     $pkgs = Get-Content 'C:\temp\tl_packages' | Where-Object { $_.Trim() -ne '' -and -not $_.Trim().StartsWith('#') } ; `
