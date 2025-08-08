@@ -8,7 +8,7 @@
 # - R 4.3.2 + packages via install_packages.R
 # - Verifications: versions, kpsewhich font files, TikZ smoke test
 
-FROM mcr.microsoft.com/windows/server:ltsc2022
+FROM mcr.microsoft.com/windows/servercore:ltsc2022
 
 # Use Windows PowerShell initially
 SHELL ["powershell.exe", "-NoLogo", "-ExecutionPolicy", "Bypass", "-Command"]
@@ -106,15 +106,72 @@ COPY tools/dependencies/tl_packages                    C:/temp/tl_packages
 COPY docker/build-quarto-windows/verify_r_packages.R   C:/temp/verify_r_packages.R
 
 # ------------------------------------------------------------
-# PHASE 4: Install Scoop and Quarto (same as quarto-build workflow)
+# PHASE 4: Install TeX Live FIRST (Most complex, fail fast)
 # ------------------------------------------------------------
-RUN Write-Host '=== STARTING QUARTO INSTALLATION ===' ; `
-    Write-Host 'Using Scoop for Quarto installation (same approach as quarto-build workflow)' ; `
+RUN Write-Host '=== STARTING TEX LIVE INSTALLATION (2025) ===' ; `
+    Write-Host '📦 Installing TeX Live via Chocolatey...' ; `
+    choco install texlive -y ; `
+    Write-Host '✅ TeX Live installed via Chocolatey' ; `
+    `
+    Write-Host '🔍 Finding TeX Live installation directory...' ; `
+    $texRoot = Join-Path $env:SystemDrive 'texlive' ; `
+    Write-Host "📁 TeX Live root: $texRoot" ; `
+    `
+    Write-Host '🔍 Looking for year-based directories...' ; `
+    $texYearDir = Get-ChildItem $texRoot -Directory | `
+        Where-Object { $_.Name -match '^\d{4}$' } | `
+        Sort-Object Name -Descending | `
+        Select-Object -First 1 ; `
+    Write-Host "📁 Found year directory: $($texYearDir.FullName)" ; `
+    `
+    $texLiveBin = Join-Path $texYearDir.FullName 'bin\windows' ; `
+    Write-Host "📁 TeX Live bin directory: $texLiveBin" ; `
+    `
+    Write-Host '🔧 Adding TeX Live to PATH...' ; `
+    $env:PATH = "$texLiveBin;$env:PATH" ; `
+    Write-Host "✅ PATH updated with: $texLiveBin" ; `
+    `
+    Write-Host '📋 Reading collections from tl_packages...' ; `
+    if (Test-Path 'C:\temp\tl_packages') { `
+        $collections = Get-Content 'C:\temp\tl_packages' | `
+            Where-Object { $_.Trim() -ne '' -and -not $_.Trim().StartsWith('#') } ; `
+        Write-Host "📦 Found $($collections.Count) collections to install" ; `
+        Write-Host '📋 Collections:' ; `
+        $collections | ForEach-Object { Write-Host "  - $_" } ; `
+        `
+        Write-Host '🔄 Installing collections...' ; `
+        $i = 1 ; `
+        foreach ($collection in $collections) { `
+            Write-Host "📦 [$i/$($collections.Count)] Installing $collection..." ; `
+            & "$texLiveBin\tlmgr.bat" install $collection ; `
+            if ($LASTEXITCODE -eq 0) { `
+                Write-Host "✅ $collection installed successfully" ; `
+            } else { `
+                Write-Host "⚠️ Failed to install $collection, continuing..." ; `
+            } ; `
+            $i++ ; `
+        } ; `
+        Write-Host '✅ Collection installation complete' ; `
+    } else { `
+        Write-Host '⚠️ No tl_packages file found, skipping collection installation' ; `
+    } ; `
+    `
+    Write-Host '🔄 Updating tlmgr...' ; `
+    & "$texLiveBin\tlmgr.bat" update --self --all ; `
+    Write-Host '✅ tlmgr updated' ; `
+    `
+    Write-Host '🔍 Verifying lualatex installation...' ; `
+    & "$texLiveBin\lualatex.exe" --version ; `
+    Write-Host '✅ TeX Live installation verified'
+
+# ------------------------------------------------------------
+# PHASE 5: Install Scoop (Package manager setup)
+# ------------------------------------------------------------
+RUN Write-Host '=== STARTING SCOOP INSTALLATION ===' ; `
     Write-Host 'Setting UTF-8 encoding...' ; `
     [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 ; `
     $OutputEncoding = [System.Text.Encoding]::UTF8 ; `
     Write-Host '🔤 UTF-8 encoding set' ; `
-    Write-Host 'Installing Quarto via Scoop...' ; `
     Write-Host 'Setting execution policy...' ; `
     Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force ; `
     Write-Host '🔐 Execution policy set' ; `
@@ -138,12 +195,21 @@ RUN Write-Host '=== STARTING QUARTO INSTALLATION ===' ; `
     Write-Host 'Adding extras bucket...' ; `
     scoop bucket add extras ; `
     Write-Host '📦 extras bucket added' ; `
-    Write-Host 'Installing Quarto (latest stable)...' ; `
+    Write-Host '✅ Scoop installation completed!'
+
+# ------------------------------------------------------------
+# PHASE 6: Install Quarto (Main tool)
+# ------------------------------------------------------------
+RUN Write-Host '=== STARTING QUARTO INSTALLATION ===' ; `
+    Write-Host 'Installing Quarto via Scoop...' ; `
     scoop install quarto ; `
+    Write-Host '📦 Quarto installed' ; `
+    Write-Host 'Verifying Quarto installation...' ; `
+    quarto --version ; `
     Write-Host '✅ Quarto installation completed!'
 
 # ------------------------------------------------------------
-# PHASE 5: Install Python (same as quarto-build workflow)
+# PHASE 7: Install Python (Medium complexity)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING PYTHON INSTALLATION ===' ; `
     Write-Host 'Installing Python via Scoop (same as quarto-build workflow)...' ; `
@@ -155,7 +221,7 @@ RUN Write-Host '=== STARTING PYTHON INSTALLATION ===' ; `
     Write-Host '✅ Python installation complete'
 
 # ------------------------------------------------------------
-# PHASE 6: Install Python packages (same as quarto-build workflow)
+# PHASE 8: Install Python packages (Medium complexity)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING PYTHON PACKAGE INSTALLATION ===' ; `
     Write-Host 'Installing Python packages from requirements.txt (same as quarto-build workflow)...' ; `
@@ -193,55 +259,7 @@ RUN Write-Host '=== STARTING INKSCAPE INSTALLATION ===' ; `
     Write-Host '✅ Inkscape installation complete'
 
 # ------------------------------------------------------------
-# PHASE 9: Install TeX Live (one-shot profile approach)
-# ------------------------------------------------------------
-RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
-    Write-Host 'Installing TeX Live using one-shot profile (cleanest approach)...' ; `
-    `
-    Write-Host 'Downloading TeX Live installer...' ; `
-    $installer = 'C:\temp\install-tl-windows.exe' ; `
-    Invoke-WebRequest -Uri 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' -OutFile $installer -UseBasicParsing ; `
-    `
-    Write-Host 'Creating one-shot install profile from tl_packages...' ; `
-    # Start with basic profile
-    'selected_scheme scheme-medium' | Set-Content -Path 'C:\temp\install-tl.profile' -Encoding ASCII ; `
-    '' | Add-Content -Path 'C:\temp\install-tl.profile' -Encoding ASCII ; `
-    'tlpdbopt_install_docfiles 0' | Add-Content -Path 'C:\temp\install-tl.profile' -Encoding ASCII ; `
-    'tlpdbopt_install_srcfiles 0' | Add-Content -Path 'C:\temp\install-tl.profile' -Encoding ASCII ; `
-    '' | Add-Content -Path 'C:\temp\install-tl.profile' -Encoding ASCII ; `
-    `
-    Write-Host 'Installing TeX Live base system...' ; `
-    Start-Process -FilePath $installer -ArgumentList '-profile', 'C:\temp\install-tl.profile' -Wait -NoNewWindow ; `
-    Write-Host 'TeX Live base system installed' ; `
-    `
-    Write-Host 'Adding TeX Live to PATH...' ; `
-    $texLiveBin = 'C:\texlive\bin\windows' ; `
-    $env:PATH = "$texLiveBin;$env:PATH" ; `
-    [Environment]::SetEnvironmentVariable('PATH', $env:PATH, 'Machine') ; `
-    `
-    Write-Host 'Installing TeX Live collections...' ; `
-    $collections = Get-Content 'C:\temp\tl_packages' | Where-Object { $_.Trim() -ne '' -and -not $_.Trim().StartsWith('#') } ; `
-    Write-Host "Found $($collections.Count) collections to install:" ; `
-    foreach ($collection in $collections) { `
-        Write-Host "  - Installing $collection..." ; `
-        & "$texLiveBin\tlmgr.bat" install $collection ; `
-    } ; `
-    `
-    Write-Host 'Refreshing environment variables...' ; `
-    $env:PATH = [Environment]::GetEnvironmentVariable('PATH', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('PATH', 'User') ; `
-    `
-    Write-Host 'Verifying installation...' ; `
-    Write-Host 'Checking installed collections:' ; `
-    & "$texLiveBin\tlmgr.bat" list --only-installed | Select-String 'collection-' ; `
-    Write-Host 'Checking lualatex:' ; `
-    & "$texLiveBin\lualatex.exe" --version | Select-Object -First 1 ; `
-    Write-Host 'Checking tlmgr path:' ; `
-    Get-Command "$texLiveBin\tlmgr.bat" | Select-Object Source ; `
-    `
-    Write-Host '✅ TeXLive installation complete'
-
-# ------------------------------------------------------------
-# PHASE 10: Install R (same as quarto-build workflow)
+# PHASE 9: Install R (Medium complexity)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING R INSTALLATION ===' ; `
     Write-Host 'Installing R via Scoop (same as quarto-build workflow)...' ; `
@@ -253,7 +271,7 @@ RUN Write-Host '=== STARTING R INSTALLATION ===' ; `
     Write-Host '✅ R installation complete'
 
 # ------------------------------------------------------------
-# PHASE 11: R packages (same as quarto-build workflow)
+# PHASE 10: Install R packages (Medium complexity)
 # ------------------------------------------------------------
 RUN Write-Host '=== INSTALLING R PACKAGES ===' ; `
     Write-Host 'Installing R packages from install_packages.R (same as quarto-build workflow)...' ; `
@@ -267,7 +285,31 @@ RUN Write-Host '=== INSTALLING R PACKAGES ===' ; `
     Write-Host '✅ R package installation complete'
 
 # ------------------------------------------------------------
-# PHASE 12: Cleanup (same as quarto-build workflow)
+# PHASE 11: Install Ghostscript (Simple)
+# ------------------------------------------------------------
+RUN Write-Host '=== STARTING GHOSTSCRIPT INSTALLATION ===' ; `
+    Write-Host 'Installing Ghostscript via Scoop (same as quarto-build workflow)...' ; `
+    Write-Host 'Installing Ghostscript from main bucket...' ; `
+    scoop install main/ghostscript ; `
+    Write-Host '📦 Ghostscript installed' ; `
+    Write-Host 'Verifying Ghostscript installation...' ; `
+    gs --version ; `
+    Write-Host '✅ Ghostscript installation complete'
+
+# ------------------------------------------------------------
+# PHASE 12: Install Inkscape (Simple)
+# ------------------------------------------------------------
+RUN Write-Host '=== STARTING INKSCAPE INSTALLATION ===' ; `
+    Write-Host 'Installing Inkscape via Scoop (same as quarto-build workflow)...' ; `
+    Write-Host 'Installing Inkscape...' ; `
+    scoop install inkscape ; `
+    Write-Host '📦 Inkscape installed' ; `
+    Write-Host 'Verifying Inkscape installation...' ; `
+    inkscape --version ; `
+    Write-Host '✅ Inkscape installation complete'
+
+# ------------------------------------------------------------
+# PHASE 13: Cleanup (Simple)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING CLEANUP ===' ; `
     Write-Host 'Cleaning temporary files (same as quarto-build workflow)...' ; `

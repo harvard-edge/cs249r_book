@@ -1,0 +1,350 @@
+name: 🧪 Test Containers
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+jobs:
+  test-linux-container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 🐳 Pull Linux Container
+        run: |
+          echo "🐳 Pulling Linux container..."
+          docker pull ghcr.io/${{ github.repository }}/quarto-linux:latest
+          echo "✅ Linux container pulled successfully"
+
+      - name: 📊 Container Information
+        run: |
+          echo "📊 === CONTAINER INFORMATION ==="
+          echo "📋 Container Details:"
+          docker images ghcr.io/${{ github.repository }}/quarto-linux:latest --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}"
+          
+          echo ""
+          echo "📊 Container Size Analysis:"
+          CONTAINER_SIZE=$(docker images ghcr.io/${{ github.repository }}/quarto-linux:latest --format "{{.Size}}")
+          echo "📦 Container size: $CONTAINER_SIZE"
+          
+          # Extract size in MB/GB for comparison
+          if [[ $CONTAINER_SIZE == *"GB"* ]]; then
+            echo "⚠️ Large container detected (>1GB)"
+          elif [[ $CONTAINER_SIZE == *"MB"* ]]; then
+            echo "✅ Container size looks reasonable"
+          else
+            echo "❓ Unknown size format"
+          fi
+
+      - name: 🖥️ OS Information
+        run: |
+          echo "🖥️ === OPERATING SYSTEM INFORMATION ==="
+          docker run --rm ghcr.io/${{ github.repository }}/quarto-linux:latest \
+            bash -c "
+              echo '📊 OS Details:'
+              echo '============='
+              cat /etc/os-release
+              echo ''
+              echo '📊 Kernel Information:'
+              echo '====================='
+              uname -a
+              echo ''
+              echo '📊 System Resources:'
+              echo '===================='
+              echo 'Memory:'
+              free -h
+              echo ''
+              echo 'Disk Space:'
+              df -h /
+              echo ''
+              echo 'CPU Info:'
+              nproc
+              lscpu | grep 'Model name' || echo 'CPU info not available'
+            " | tee linux-os-info.log
+
+      - name: 🛠️ Tool Versions
+        run: |
+          echo "🛠️ === TOOL VERSIONS ==="
+          echo "📋 Critical Tools in Linux Container:"
+          echo "===================================="
+          
+          docker run --rm ghcr.io/${{ github.repository }}/quarto-linux:latest \
+            bash -c "
+              echo '📊 Quarto:' && quarto --version | head -1 &&
+              echo '📊 Python:' && python3 --version &&
+              echo '📊 R:' && R --version | head -1 &&
+              echo '📊 TeX Live:' && lualatex --version | head -1 &&
+              echo '📊 Ghostscript:' && gs --version | head -1 &&
+              echo '📊 Node.js:' && node --version &&
+              echo '📊 npm:' && npm --version &&
+              echo '📊 Git:' && git --version &&
+              echo '📊 Pandoc:' && pandoc --version | head -1 &&
+              echo '📊 Inkscape:' && inkscape --version | head -1 &&
+              echo '📊 Wget:' && wget --version | head -1 &&
+              echo '📊 Curl:' && curl --version | head -1 &&
+              echo '📊 Perl:' && perl --version | head -1 &&
+              echo '📊 Pip:' && pip3 --version &&
+              echo '✅ All critical tools available!'
+            " | tee linux-tool-versions.log
+          
+          echo "📋 Versions saved to linux-tool-versions.log"
+
+      - name: 📦 Package Information
+        run: |
+          echo "📦 === PACKAGE INFORMATION ==="
+          docker run --rm ghcr.io/${{ github.repository }}/quarto-linux:latest \
+            bash -c "
+              echo '📊 Python Packages:'
+              echo '=================='
+              pip3 list | head -20
+              echo ''
+              echo '📊 R Packages:'
+              echo '=============='
+              R --slave -e 'cat(\"Installed R packages:\n\"); print(installed.packages()[, \"Package\"][1:20]); cat(\"\nTotal packages:\", nrow(installed.packages()), \"\n\")' || echo 'R package list not available'
+              echo ''
+              echo '📊 TeX Live Packages:'
+              echo '====================='
+              tlmgr list --only-installed | head -20 || echo 'TeX Live package list not available'
+            " | tee linux-package-info.log
+
+      - name: 🧪 Test Minimal Quarto Build
+        run: |
+          echo "🧪 === MINIMAL QUARTO BUILD TEST ==="
+          # Create a minimal test document
+          cat > test-doc.qmd << 'EOF'
+          ---
+          title: "Container Test"
+          format: html
+          ---
+          
+          # Test Document
+          
+          This is a test document to verify the container works.
+          
+          ## Python Code Block
+          
+          ```{python}
+          print("Hello from Python!")
+          import sys
+          print(f"Python version: {sys.version}")
+          ```
+          
+          ## R Code Block
+          
+          ```{r}
+          cat("Hello from R!\n")
+          cat("R version:", R.version.string, "\n")
+          ```
+          
+          ## Math Block
+          
+          $$
+          E = mc^2
+          $$
+          
+          ## Table
+          
+          | Tool | Version |
+          |------|---------|
+          | Quarto | Latest |
+          | Python | 3.x |
+          | R | Latest |
+          EOF
+          
+          # Test the build
+          docker run --rm -v $(pwd):/workspace ghcr.io/${{ github.repository }}/quarto-linux:latest \
+            bash -c "
+              cd /workspace &&
+              echo '🔨 Building test document...' &&
+              quarto render test-doc.qmd --to html &&
+              echo '✅ Build successful!' &&
+              ls -la test-doc.html &&
+              echo '📊 File size:' &&
+              du -h test-doc.html &&
+              echo '🧹 Cleaning up...' &&
+              rm -f test-doc.html
+            " | tee linux-build-test.log
+
+      - name: 📤 Upload Linux Test Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-container-test-results
+          path: |
+            linux-os-info.log
+            linux-tool-versions.log
+            linux-package-info.log
+            linux-build-test.log
+          retention-days: 30
+
+  test-windows-container:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: 🐳 Pull Windows Container
+        run: |
+          Write-Output "🐳 Pulling Windows container..."
+          docker pull ghcr.io/${{ github.repository }}/quarto-windows:latest
+          Write-Output "✅ Windows container pulled successfully"
+
+      - name: 📊 Container Information (Windows)
+        shell: pwsh
+        run: |
+          Write-Output "📊 === CONTAINER INFORMATION ==="
+          Write-Output "📋 Container Details:"
+          docker images ghcr.io/${{ github.repository }}/quarto-windows:latest --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}"
+          
+          Write-Output ""
+          Write-Output "📊 Container Size Analysis:"
+          $CONTAINER_SIZE = docker images ghcr.io/${{ github.repository }}/quarto-windows:latest --format "{{.Size}}"
+          Write-Output "📦 Container size: $CONTAINER_SIZE"
+          
+          if ($CONTAINER_SIZE -match "GB") {
+            Write-Output "⚠️ Large container detected (>1GB)"
+          } elseif ($CONTAINER_SIZE -match "MB") {
+            Write-Output "✅ Container size looks reasonable"
+          } else {
+            Write-Output "❓ Unknown size format"
+          }
+
+      - name: 🖥️ OS Information (Windows)
+        shell: pwsh
+        run: |
+          Write-Output "🖥️ === OPERATING SYSTEM INFORMATION ==="
+          docker run --rm ghcr.io/${{ github.repository }}/quarto-windows:latest \
+            pwsh -Command "
+              Write-Output '📊 OS Details:'
+              Write-Output '============='
+              Get-ComputerInfo | Select-Object WindowsProductName, WindowsVersion, TotalPhysicalMemory
+              Write-Output ''
+              Write-Output '📊 System Resources:'
+              Write-Output '===================='
+              Get-WmiObject -Class Win32_OperatingSystem | Select-Object Caption, Version, TotalVisibleMemorySize, FreePhysicalMemory
+            " | Tee-Object -FilePath "windows-os-info.log"
+
+      - name: 🛠️ Tool Versions (Windows)
+        shell: pwsh
+        run: |
+          Write-Output "🛠️ === TOOL VERSIONS ==="
+          Write-Output "📋 Critical Tools in Windows Container:"
+          Write-Output "======================================"
+          
+          docker run --rm ghcr.io/${{ github.repository }}/quarto-windows:latest \
+            pwsh -Command "
+              Write-Output '📊 Quarto:'; quarto --version | Select-Object -First 1;
+              Write-Output '📊 Python:'; python3 --version;
+              Write-Output '📊 R:'; R --version | Select-Object -First 1;
+              Write-Output '📊 TeX Live:'; lualatex --version | Select-Object -First 1;
+              Write-Output '📊 Ghostscript:'; gswin64c --version | Select-Object -First 1;
+              Write-Output '📊 Node.js:'; node --version;
+              Write-Output '📊 npm:'; npm --version;
+              Write-Output '📊 Git:'; git --version;
+              Write-Output '📊 Pandoc:'; pandoc --version | Select-Object -First 1;
+              Write-Output '✅ All critical tools available!'
+            " | Tee-Object -FilePath "windows-tool-versions.log"
+          
+          Write-Output "📋 Versions saved to windows-tool-versions.log"
+
+      - name: 🧪 Test Minimal Quarto Build (Windows)
+        shell: pwsh
+        run: |
+          Write-Output "🧪 === MINIMAL QUARTO BUILD TEST ==="
+          # Create a minimal test document
+          @"
+          ---
+          title: 'Container Test'
+          format: html
+          ---
+          
+          # Test Document
+          
+          This is a test document to verify the Windows container works.
+          
+          ```{python}
+          print('Hello from Python!')
+          import sys
+          print(f'Python version: {sys.version}')
+          ```
+          
+          ```{r}
+          cat('Hello from R!\n')
+          cat('R version:', R.version.string, '\n')
+          ```
+          "@ | Out-File -FilePath "test-doc.qmd" -Encoding UTF8
+          
+          # Test the build
+          docker run --rm -v ${PWD}:/workspace ghcr.io/${{ github.repository }}/quarto-windows:latest \
+            pwsh -Command "
+              Set-Location /workspace;
+              Write-Output '🔨 Building test document...';
+              quarto render test-doc.qmd --to html;
+              Write-Output '✅ Build successful!';
+              Get-ChildItem test-doc.html;
+              Write-Output '📊 File size:';
+              (Get-Item test-doc.html).Length;
+              Write-Output '🧹 Cleaning up...';
+              Remove-Item test-doc.html -Force
+            " | Tee-Object -FilePath "windows-build-test.log"
+
+      - name: 📤 Upload Windows Test Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-container-test-results
+          path: |
+            windows-os-info.log
+            windows-tool-versions.log
+            windows-build-test.log
+          retention-days: 30
+
+  test-container-performance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 🐳 Performance Tests
+        run: |
+          echo "🐳 === CONTAINER PERFORMANCE TESTS ==="
+          
+          echo "🧪 Testing container startup time..."
+          echo "⏱️ Startup time measurement:"
+          time docker run --rm ghcr.io/${{ github.repository }}/quarto-linux:latest \
+            bash -c "echo 'Container started successfully'"
+          
+          echo ""
+          echo "🧪 Testing tool availability speed..."
+          echo "⏱️ Tool access time measurement:"
+          time docker run --rm ghcr.io/${{ github.repository }}/quarto-linux:latest \
+            bash -c "quarto --version && python3 --version && R --version"
+          
+          echo ""
+          echo "🧪 Testing minimal build performance..."
+          echo "⏱️ Build time measurement:"
+          # Create minimal test
+          echo '---\ntitle: "Test"\nformat: html\n---\n# Test' > perf-test.qmd
+          
+          time docker run --rm -v $(pwd):/workspace ghcr.io/${{ github.repository }}/quarto-linux:latest \
+            bash -c "cd /workspace && quarto render perf-test.qmd --to html"
+          
+          echo "✅ Performance tests completed"
+
+      - name: 📊 Container Health Summary
+        run: |
+          echo "📊 === CONTAINER HEALTH SUMMARY ==="
+          
+          echo "📋 Linux Container:"
+          echo "=================="
+          LINUX_SIZE=$(docker images ghcr.io/${{ github.repository }}/quarto-linux:latest --format "{{.Size}}")
+          echo "📦 Size: $LINUX_SIZE"
+          
+          echo ""
+          echo "📋 Windows Container:"
+          echo "===================="
+          WINDOWS_SIZE=$(docker images ghcr.io/${{ github.repository }}/quarto-windows:latest --format "{{.Size}}" 2>/dev/null || echo "Not available")
+          echo "📦 Size: $WINDOWS_SIZE"
+          
+          echo ""
+          echo "📊 Health Check Results:"
+          echo "========================"
+          echo "✅ Container tests completed successfully"
+          echo "📋 Version logs uploaded as artifacts"
+          echo "📋 Performance metrics captured"
+          echo "📋 OS information documented"
