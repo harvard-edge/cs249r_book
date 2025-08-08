@@ -171,7 +171,7 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
     `
     $endTime = Get-Date ; `
     $duration = ($endTime - $startTime).TotalMinutes ; `
-    Write-Host "=== TEX LIVE INSTALLATION COMPLETE === ($($duration.ToString('F1')) minutes)"
+    Write-Host "=== TEX LIVE INSTALLATION COMPLETE === ($duration minutes)"
 
 # ------------------------------------------------------------
 # PHASE 10: Install R (same as quarto-build workflow)
