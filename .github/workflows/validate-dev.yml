@@ -22,17 +22,36 @@ on:
         required: false
         default: ''
         type: string
-      build_format:
-        description: 'Format to build'
+      # Format selection checkboxes
+      build_html:
+        description: '📄 Build HTML format'
         required: false
-        default: 'html'
-        type: choice
-        options:
-          - html
-          - pdf
-          - all
+        default: true
+        type: boolean
+      build_pdf:
+        description: '📑 Build PDF format'
+        required: false
+        default: true
+        type: boolean
+      # OS selection checkboxes  
+      build_linux:
+        description: '🐧 Build on Linux'
+        required: false
+        default: true
+        type: boolean
+      build_windows:
+        description: '🪟 Build on Windows'
+        required: false
+        default: true
+        type: boolean
+      # Build method selection
+      use_containers:
+        description: '🐳 Use containers (uncheck for baremetal)'
+        required: false
+        default: true
+        type: boolean
       deploy_preview:
-        description: 'Deploy preview to staging'
+        description: '🚀 Deploy preview to staging'
         required: false
         default: true
         type: boolean
@@ -67,43 +86,132 @@ jobs:
           pre-commit install --install-hooks
           pre-commit run --all-files
 
-  # Step 2: Build HTML for preview (smart fallback strategy)
-  build-html-preview:
-    name: '🔨 Build HTML Preview'
+  # Step 2a: Build Linux - conditional based on inputs
+  build-linux:
+    name: '🐧 Build Linux'
     needs: [pre-commit]
+    if: github.event_name == 'push' || inputs.build_linux == true
     runs-on: ubuntu-latest
     outputs:
       build_success: ${{ steps.container-build.outputs.build_success || steps.baremetal-build.outputs.build_success }}
       html_artifact: ${{ steps.container-build.outputs.html_artifact || steps.baremetal-build.outputs.html_artifact }}
+      pdf_artifact: ${{ steps.container-build.outputs.pdf_artifact || steps.baremetal-build.outputs.pdf_artifact }}
       build_method: ${{ steps.container-build.outputs.build_success && 'container' || 'baremetal' }}
     
     steps:
-      - name: 🚀 Try Container Build First
+      - name: 🎯 Determine build format
+        id: format
+        run: |
+          # Determine format based on inputs (default to 'all' for push events)
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # Auto-trigger: build everything
+            FORMAT="all"
+          else
+            # Manual trigger: respect checkboxes
+            BUILD_HTML="${{ inputs.build_html }}"
+            BUILD_PDF="${{ inputs.build_pdf }}"
+            
+            if [ "$BUILD_HTML" = "true" ] && [ "$BUILD_PDF" = "true" ]; then
+              FORMAT="all"
+            elif [ "$BUILD_HTML" = "true" ]; then
+              FORMAT="html"
+            elif [ "$BUILD_PDF" = "true" ]; then
+              FORMAT="pdf"
+            else
+              echo "❌ No formats selected!"
+              exit 1
+            fi
+          fi
+          
+          echo "format=$FORMAT" >> $GITHUB_OUTPUT
+          echo "📊 Building format: $FORMAT"
+
+      - name: 🚀 Try Container Build
         id: container-build
+        if: github.event_name == 'push' || inputs.use_containers == true
         continue-on-error: true
         uses: ./.github/workflows/quarto-build-container.yml
         with:
           os: ubuntu-latest
-          format: ${{ inputs.build_format || 'html' }}
+          format: ${{ steps.format.outputs.format }}
           target: dev
 
-      - name: 🖥️ Fallback to Baremetal Build
+      - name: 🖥️ Baremetal Build
         id: baremetal-build
-        if: steps.container-build.outputs.build_success != 'true'
+        if: (github.event_name == 'workflow_dispatch' && inputs.use_containers != true) || steps.container-build.outputs.build_success != 'true'
         uses: ./.github/workflows/quarto-build-baremetal.yml
         with:
           os: ubuntu-latest
-          format: ${{ inputs.build_format || 'html' }}
+          format: ${{ steps.format.outputs.format }}
+          target: dev
+
+  # Step 2b: Build Windows - conditional based on inputs
+  build-windows:
+    name: '🪟 Build Windows'
+    needs: [pre-commit]
+    if: github.event_name == 'push' || inputs.build_windows == true
+    runs-on: ubuntu-latest
+    outputs:
+      build_success: ${{ steps.container-build.outputs.build_success || steps.baremetal-build.outputs.build_success }}
+      html_artifact: ${{ steps.container-build.outputs.html_artifact || steps.baremetal-build.outputs.html_artifact }}
+      pdf_artifact: ${{ steps.container-build.outputs.pdf_artifact || steps.baremetal-build.outputs.pdf_artifact }}
+      build_method: ${{ steps.container-build.outputs.build_success && 'container' || 'baremetal' }}
+    
+    steps:
+      - name: 🎯 Determine build format
+        id: format
+        run: |
+          # Determine format based on inputs (default to 'all' for push events)
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # Auto-trigger: build everything
+            FORMAT="all"
+          else
+            # Manual trigger: respect checkboxes
+            BUILD_HTML="${{ inputs.build_html }}"
+            BUILD_PDF="${{ inputs.build_pdf }}"
+            
+            if [ "$BUILD_HTML" = "true" ] && [ "$BUILD_PDF" = "true" ]; then
+              FORMAT="all"
+            elif [ "$BUILD_HTML" = "true" ]; then
+              FORMAT="html"
+            elif [ "$BUILD_PDF" = "true" ]; then
+              FORMAT="pdf"
+            else
+              echo "❌ No formats selected!"
+              exit 1
+            fi
+          fi
+          
+          echo "format=$FORMAT" >> $GITHUB_OUTPUT
+          echo "📊 Building format: $FORMAT"
+
+      - name: 🚀 Try Container Build
+        id: container-build
+        if: github.event_name == 'push' || inputs.use_containers == true
+        continue-on-error: true
+        uses: ./.github/workflows/quarto-build-container.yml
+        with:
+          os: windows-latest
+          format: ${{ steps.format.outputs.format }}
+          target: dev
+
+      - name: 🖥️ Baremetal Build
+        id: baremetal-build
+        if: (github.event_name == 'workflow_dispatch' && inputs.use_containers != true) || steps.container-build.outputs.build_success != 'true'
+        uses: ./.github/workflows/quarto-build-baremetal.yml
+        with:
+          os: windows-latest
+          format: ${{ steps.format.outputs.format }}
           target: dev
 
   # Step 3: Deploy preview to staging (dev branch only)
   deploy-preview:
     name: '🚀 Deploy Preview'
-    needs: [build-html-preview]
+    needs: [build-linux, build-windows]
     if: |
       always() && 
-      needs.build-html-preview.outputs.build_success == 'true' && 
-      needs.build-html-preview.outputs.html_artifact != '' &&
+      needs.build-linux.outputs.build_success == 'true' && 
+      needs.build-linux.outputs.html_artifact != '' &&
       (github.ref == 'refs/heads/dev' || inputs.deploy_preview == true)
     runs-on: ubuntu-latest
     environment:
@@ -111,10 +219,10 @@ jobs:
       url: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/dev/
       
     steps:
-      - name: 📥 Download HTML artifacts
+      - name: 📥 Download HTML artifacts (Linux)
         uses: actions/download-artifact@v4
         with:
-          name: ${{ needs.build-html-preview.outputs.html_artifact }}
+          name: ${{ needs.build-linux.outputs.html_artifact }}
           path: ./preview-site
           
       - name: 🚀 Deploy to GitHub Pages (dev staging)
@@ -127,15 +235,15 @@ jobs:
           commit_message: |
             🚀 Deploy dev preview from ${{ github.sha }}
             
-            Built using: ${{ needs.build-html-preview.outputs.build_method }}
-            Artifact: ${{ needs.build-html-preview.outputs.html_artifact }}
+            Built using: ${{ needs.build-linux.outputs.build_method }}
+            Artifact: ${{ needs.build-linux.outputs.html_artifact }}
             Branch: ${{ github.ref_name }}
 
   # Step 4: Results and summary
   build-report:
     name: '📊 Build Report'
     if: always()
-    needs: [pre-commit, build-html-preview, deploy-preview]
+    needs: [pre-commit, build-linux, build-windows, deploy-preview]
     runs-on: ubuntu-latest
     
     steps:
@@ -145,24 +253,55 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## 📊 Build Results" >> $GITHUB_STEP_SUMMARY
           echo "- **Pre-commit**: ${{ needs.pre-commit.result }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Build**: ${{ needs.build-html-preview.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Linux Build**: ${{ needs.build-linux.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Windows Build**: ${{ needs.build-windows.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Preview Deploy**: ${{ needs.deploy-preview.result }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
-          if [ "${{ needs.build-html-preview.outputs.build_success }}" = "true" ]; then
-            echo "## ✅ Build Details" >> $GITHUB_STEP_SUMMARY
-            echo "- **Method**: ${{ needs.build-html-preview.outputs.build_method }}" >> $GITHUB_STEP_SUMMARY
-            echo "- **HTML Artifact**: ${{ needs.build-html-preview.outputs.html_artifact }}" >> $GITHUB_STEP_SUMMARY
-            
-            if [ "${{ needs.deploy-preview.result }}" = "success" ]; then
-              echo "- **Preview URL**: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/dev/" >> $GITHUB_STEP_SUMMARY
-            fi
+          echo "## 🔧 Build Configuration" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "- **Trigger**: Automatic (dev branch push)" >> $GITHUB_STEP_SUMMARY
+            echo "- **Format**: HTML + PDF (mandatory)" >> $GITHUB_STEP_SUMMARY
+            echo "- **OS**: Linux + Windows (mandatory)" >> $GITHUB_STEP_SUMMARY
+            echo "- **Method**: Container (default)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Trigger**: Manual workflow dispatch" >> $GITHUB_STEP_SUMMARY
+            echo "- **HTML**: ${{ inputs.build_html }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **PDF**: ${{ inputs.build_pdf }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Linux**: ${{ inputs.build_linux }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Windows**: ${{ inputs.build_windows }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Method**: ${{ inputs.use_containers && 'Container' || 'Baremetal' }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.build-linux.outputs.build_success }}" = "true" ]; then
+            echo "## ✅ Linux Build Details" >> $GITHUB_STEP_SUMMARY
+            echo "- **Method**: ${{ needs.build-linux.outputs.build_method }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **HTML Artifact**: ${{ needs.build-linux.outputs.html_artifact }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **PDF Artifact**: ${{ needs.build-linux.outputs.pdf_artifact }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ needs.build-windows.outputs.build_success }}" = "true" ]; then
+            echo "## ✅ Windows Build Details" >> $GITHUB_STEP_SUMMARY
+            echo "- **Method**: ${{ needs.build-windows.outputs.build_method }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **HTML Artifact**: ${{ needs.build-windows.outputs.html_artifact }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **PDF Artifact**: ${{ needs.build-windows.outputs.pdf_artifact }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ needs.deploy-preview.result }}" = "success" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "## 🚀 Preview Deployment" >> $GITHUB_STEP_SUMMARY
+            echo "- **URL**: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/dev/" >> $GITHUB_STEP_SUMMARY
+            echo "- **Source**: Linux HTML build" >> $GITHUB_STEP_SUMMARY
           fi
           
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## 🎯 Summary" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ needs.pre-commit.result }}" = "success" ] && [ "${{ needs.build-html-preview.result }}" = "success" ]; then
-            echo "✅ **Validation Passed** - Ready for development work" >> $GITHUB_STEP_SUMMARY
+          LINUX_OK="${{ needs.build-linux.result == 'success' || needs.build-linux.result == 'skipped' }}"
+          WINDOWS_OK="${{ needs.build-windows.result == 'success' || needs.build-windows.result == 'skipped' }}"
+          
+          if [ "${{ needs.pre-commit.result }}" = "success" ] && [ "$LINUX_OK" = "true" ] && [ "$WINDOWS_OK" = "true" ]; then
+            echo "✅ **Validation Passed** - All enabled builds successful" >> $GITHUB_STEP_SUMMARY
             if [ "${{ needs.deploy-preview.result }}" = "success" ]; then
               echo "🚀 **Preview Deployed** - Check the staging site" >> $GITHUB_STEP_SUMMARY
             fi
