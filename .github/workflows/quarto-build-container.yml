@@ -60,52 +60,101 @@ on:
         required: true
         type: string
         description: 'Operating system to run on (ubuntu-latest/windows-latest)'
+      format:
+        required: false
+        type: string
+        default: 'html'
+        description: 'Format to build (html/pdf/all)'
       target:
         required: false
         type: string
         default: ''
         description: 'Target branch (dev/main) - determines build behavior'
+      # Container configuration (optional overrides)
+      container_registry:
+        required: false
+        type: string
+        default: 'ghcr.io'
+        description: 'Container registry URL'
+      container_tag:
+        required: false
+        type: string
+        default: 'latest'
+        description: 'Container tag to use'
+      # Legacy inputs for backward compatibility (if needed)
       html_format:
         required: false
         type: boolean
-        default: true
-        description: 'Build HTML format'
+        default: false
+        description: 'Build HTML format (legacy - use format instead)'
       pdf_format:
         required: false
         type: boolean
         default: false
-        description: 'Build PDF format'
-      quarto-log-level:
-        required: false
-        type: string
-        default: 'INFO'
-        description: 'Quarto log level (INFO/DEBUG)'
-      artifact_name_template:
-        required: false
-        type: string
-        default: '{prefix}-{format}-{os}'
-        description: 'Artifact name template. Use {prefix}, {format} for html/pdf, and {os} for linux/windows'
+        description: 'Build PDF format (legacy - use format instead)'
 
 permissions:
   contents: write
   pages: write
 
 jobs:
-  # Linux builds using container
-  build-linux:
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/${{ github.repository }}/quarto-linux:latest
-      options: --user root
+  # Unified build job using matrix strategy (filtered by input)
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            os_name: linux
+            container_name: quarto-linux
+          - os: windows-latest
+            os_name: windows
+            container_name: quarto-windows
+    container: ${{ format('{0}/{1}/{2}:{3}', inputs.container_registry, github.repository, matrix.container_name, inputs.container_tag) }}
     timeout-minutes: 60
-    if: inputs.os == 'ubuntu-latest'
+    if: inputs.os == matrix.os  # Only run the matrix entry that matches the input OS
     env:
-      QUARTO_LOG_LEVEL: ${{ inputs.quarto-log-level }}
+      QUARTO_LOG_LEVEL: ${{ inputs.quarto-log-level || 'INFO' }}
+      OS_NAME: ${{ matrix.os_name }}
       PYTHONIOENCODING: utf-8
       LANG: en_US.UTF-8
       LC_ALL: en_US.UTF-8
 
     steps:
+      - name: 🔧 Convert Format Input to Flags
+        id: format-flags
+        shell: bash
+        run: |
+          echo "🔧 Converting format input to build flags..."
+          
+          # Determine which formats to build based on input
+          if [ "${{ inputs.format }}" = "html" ] || [ "${{ inputs.html_format }}" = "true" ]; then
+            BUILD_HTML="true"
+          else
+            BUILD_HTML="false"
+          fi
+          
+          if [ "${{ inputs.format }}" = "pdf" ] || [ "${{ inputs.pdf_format }}" = "true" ]; then
+            BUILD_PDF="true"
+          else
+            BUILD_PDF="false"
+          fi
+          
+          if [ "${{ inputs.format }}" = "all" ]; then
+            BUILD_HTML="true"
+            BUILD_PDF="true"
+          fi
+          
+          echo "📊 Build configuration:"
+          echo "  Format input: '${{ inputs.format }}'"
+          echo "  HTML format: $BUILD_HTML"
+          echo "  PDF format: $BUILD_PDF"
+          echo "  OS: ${{ matrix.os_name }}"
+          
+          echo "html_format=$BUILD_HTML" >> $GITHUB_OUTPUT
+          echo "pdf_format=$BUILD_PDF" >> $GITHUB_OUTPUT
+
       - name: 🚦 Set Initial Build Status
         shell: bash
         run: |
@@ -116,8 +165,8 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
             -d "{
               \"state\": \"pending\",
-              \"description\": \"Quarto build started (Linux container, ${{ inputs.format }})\",
-              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+              \"description\": \"Quarto build started (${{ matrix.os_name }} container)\",
+              \"context\": \"ci/quarto-build-${{ matrix.os }}-${{ inputs.format }}\"
             }"
 
       - name: 📥 Checkout repository
@@ -128,7 +177,15 @@ jobs:
       - name: 📋 Container Environment Info
         shell: bash
         run: |
-          echo "🔄 Pre-built container environment information..."
+          echo "🔄 Container build environment information..."
+          echo "📊 Container Configuration:"
+          echo "  Registry: ${{ inputs.container_registry }}"
+          echo "  Repository: ${{ github.repository }}"
+          echo "  Container: ${{ matrix.container_name }}"
+          echo "  Tag: ${{ inputs.container_tag }}"
+          echo "  Full Image: ${{ format('{0}/{1}/{2}:{3}', inputs.container_registry, github.repository, matrix.container_name, inputs.container_tag) }}"
+          echo "  OS: ${{ matrix.os_name }}"
+          echo ""
           echo "📊 Pre-installed versions:"
           echo "  Quarto: $(quarto --version)"
           echo "  Python: $(python3 --version)"
@@ -139,7 +196,7 @@ jobs:
           echo "  Memory: $(free -h | grep Mem)"
 
       - name: 🔨 Build HTML (copy config and render)
-        if: inputs.html_format
+        if: steps.format-flags.outputs.html_format == 'true'
         shell: bash
         run: |
           echo "🚀 Setting up HTML configuration..."
@@ -157,15 +214,15 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
             -d "{
               \"state\": \"pending\",
-              \"description\": \"Building HTML content (Linux container)\",
-              \"context\": \"ci/quarto-build-${{ inputs.os }}-html\"
+              \"description\": \"Building HTML content (${{ matrix.os_name }} container)\",
+              \"context\": \"ci/quarto-build-${{ matrix.os }}-html\"
             }"
           
           quarto render --to html
           echo "✅ HTML build completed at: $(date)"
         
       - name: 🔨 Build PDF (copy config and render)
-        if: inputs.pdf_format
+        if: steps.format-flags.outputs.pdf_format == 'true'
         shell: bash
         run: |
           echo "🚀 Setting up PDF configuration..."
@@ -184,17 +241,19 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
             -d "{
               \"state\": \"pending\",
-              \"description\": \"Building PDF content (Linux container) - optimized\",
+              \"description\": \"Building PDF content (${{ matrix.os_name }} container) - optimized\",
               \"context\": \"ci/quarto-build-${{ inputs.os }}-pdf\"
             }"
           
           quarto render --to titlepage-pdf
           echo "✅ PDF build completed at: $(date)"
 
-      - name: 📉 Compress PDF with Ghostscript
-        if: inputs.pdf_format
+      - name: 📉 Compress PDF with Ghostscript (Linux)
+        if: steps.format-flags.outputs.pdf_format == 'true' && runner.os == 'Linux'
+        shell: bash
         run: |
           if [ -f "build/pdf/Machine-Learning-Systems.pdf" ]; then
+            echo "📉 Compressing PDF using Ghostscript (Linux)..."
             gs \
               -sDEVICE=pdfwrite \
               -dCompatibilityLevel=1.4 \
@@ -210,32 +269,53 @@ jobs:
             echo "⚠️ PDF file not found for compression"
           fi
 
+      - name: 📉 Compress PDF with Ghostscript (Windows)
+        if: steps.format-flags.outputs.pdf_format == 'true' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $input = "./build/pdf/Machine-Learning-Systems.pdf"
+          $output = "./build/pdf/ebook.pdf"
+
+          if (!(Test-Path $input)) {
+            Write-Warning "⚠️ Input PDF not found! Skipping compression..."
+            exit 0
+          }
+
+          Write-Output "📉 Compressing PDF using Ghostscript (Windows)..."
+          & gswin64c -sDEVICE=pdfwrite -dCompatibilityLevel:1.4 -dPDFSETTINGS=/ebook -dNOPAUSE -dBATCH -sOutputFile="$output" "$input"
+
+          if (Test-Path $output) {
+            Move-Item -Force $output $input
+          } else {
+            Write-Warning "⚠️ Compression failed but continuing"
+          }
+
       - name: 📤 Upload HTML artifacts
-        if: inputs.html_format
+        if: steps.format-flags.outputs.html_format == 'true'
         id: upload-html-artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.artifact_name_template.replace('{format}', 'html').replace('{os}', 'linux') }}
+          name: ${{ format('{0}-html-{1}', inputs.target, env.OS_NAME) }}
           path: build/html
 
       - name: 📤 Upload PDF artifacts
-        if: inputs.pdf_format
+        if: steps.format-flags.outputs.pdf_format == 'true'
         id: upload-pdf-artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.artifact_name_template.replace('{format}', 'pdf').replace('{os}', 'linux') }}
+          name: ${{ format('{0}-pdf-{1}', inputs.target, env.OS_NAME) }}
           path: build/pdf
 
       - name: 📋 Build Declaration
         run: |
-          HTML_ARTIFACT="${{ inputs.artifact_name_template.replace('{format}', 'html').replace('{os}', 'linux') }}"
-          PDF_ARTIFACT="${{ inputs.artifact_name_template.replace('{format}', 'pdf').replace('{os}', 'linux') }}"
+          HTML_ARTIFACT="${{ format('{0}-html-{1}', inputs.target, env.OS_NAME) }}"
+          PDF_ARTIFACT="${{ format('{0}-pdf-{1}', inputs.target, env.OS_NAME) }}"
           echo "📦 Build Declaration: Successfully created artifacts"
-          echo "📊 HTML Artifact: '$HTML_ARTIFACT' (enabled: ${{ inputs.html_format }})"
-          echo "📊 PDF Artifact: '$PDF_ARTIFACT' (enabled: ${{ inputs.pdf_format }})"
+          echo "📊 HTML Artifact: '$HTML_ARTIFACT' (enabled: ${{ steps.format-flags.outputs.html_format }})"
+          echo "📊 PDF Artifact: '$PDF_ARTIFACT' (enabled: ${{ steps.format-flags.outputs.pdf_format }})"
           echo "📊 OS: ${{ inputs.os }}"
           echo "📊 Target: ${{ inputs.target }}"
-          echo "📊 Method: Fast Container Build (Linux)"
+          echo "📊 Method: Fast Container Build ($OS_NAME)"
           echo "📝 Note: This workflow only builds artifacts - deployment handled by publish-live workflow"
           echo "html_artifact=$HTML_ARTIFACT" >> $GITHUB_OUTPUT
           echo "pdf_artifact=$PDF_ARTIFACT" >> $GITHUB_OUTPUT
@@ -248,10 +328,10 @@ jobs:
           
           if [ "${{ job.status }}" = "success" ]; then
             STATE="success"
-            DESCRIPTION="Build completed successfully (Linux container, ${{ inputs.format }})"
+            DESCRIPTION="Build completed successfully (${{ matrix.os_name }} container)"
           else
             STATE="failure"
-            DESCRIPTION="Build failed (Linux container, ${{ inputs.format }})"
+            DESCRIPTION="Build failed (${{ matrix.os_name }} container)"
           fi
           
           echo "📊 Final status: $STATE"
@@ -269,184 +349,4 @@ jobs:
           
           echo "✅ Commit status updated successfully"
 
-  # Windows builds using container approach
-  # Note: Windows containers require Windows Server runners which have limitations
-  # This job uses the same build logic but without container isolation
-  build-windows:
-    runs-on: windows-latest
-    # TODO: Enable Windows containers when runners support them
-    # container:
-    #   image: ghcr.io/${{ github.repository }}/quarto-build-windows:latest
-    timeout-minutes: 60
-    if: inputs.os == 'windows-latest'
-    env:
-      QUARTO_LOG_LEVEL: ${{ inputs.quarto-log-level }}
-      PYTHONIOENCODING: utf-8
-      LANG: en_US.UTF-8
-      LC_ALL: en_US.UTF-8
-
-    steps:
-      - name: 🚦 Set Initial Build Status
-        shell: bash
-        run: |
-          echo "🚦 Setting initial build status to pending..."
-          curl -X POST \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
-            -d "{
-              \"state\": \"pending\",
-              \"description\": \"Quarto build started (Windows container, ${{ inputs.format }})\",
-              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
-            }"
-
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: 📋 Container Environment Info
-        shell: bash
-        run: |
-          echo "🔄 Pre-built container environment information..."
-          echo "📊 Pre-installed versions:"
-          echo "  Quarto: $(quarto --version)"
-          echo "  Python: $(python3 --version)"
-          echo "  R: $(R --version | head -1)"
-          echo "  TeX Live: $(lualatex --version | head -1)"
-          echo "📊 System resources:"
-          echo "  Disk space: $(df -h . | tail -1)"
-          echo "  Memory: $(free -h | grep Mem)"
-
-      - name: 🔨 Build HTML (copy config and render)
-        if: inputs.html_format
-        shell: bash
-        run: |
-          echo "🚀 Setting up HTML configuration..."
-          cd quarto
-          rm -f _quarto.yml
-          cp config/_quarto-html.yml _quarto.yml
-          echo "✅ Configuration set to HTML"
-          
-          echo "🔨 Building HTML..."
-          echo "⏰ HTML build started at: $(date)"
-          
-          curl -X POST \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
-            -d "{
-              \"state\": \"pending\",
-              \"description\": \"Building HTML content (Windows container)\",
-              \"context\": \"ci/quarto-build-${{ inputs.os }}-html\"
-            }"
-          
-          quarto render --to html
-          echo "✅ HTML build completed at: $(date)"
-        
-      - name: 🔨 Build PDF (copy config and render)
-        if: inputs.pdf_format
-        shell: bash
-        run: |
-          echo "🚀 Setting up PDF configuration..."
-          cd quarto
-          rm -f _quarto.yml
-          cp config/_quarto-pdf.yml _quarto.yml
-          echo "✅ Configuration set to PDF"
-          
-          echo "🔨 Building PDF..."
-          echo "⏰ PDF build started at: $(date)"
-          echo "📊 This should be much faster with pre-installed dependencies"
-          
-          curl -X POST \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
-            -d "{
-              \"state\": \"pending\",
-              \"description\": \"Building PDF content (Windows container) - optimized\",
-              \"context\": \"ci/quarto-build-${{ inputs.os }}-pdf\"
-            }"
-          
-          quarto render --to titlepage-pdf
-          echo "✅ PDF build completed at: $(date)"
-
-      - name: 📉 Compress PDF with Ghostscript
-        if: inputs.pdf_format
-        shell: pwsh
-        run: |
-          $input = "./build/pdf/Machine-Learning-Systems.pdf"
-          $output = "./build/pdf/ebook.pdf"
-
-          if (!(Test-Path $input)) {
-            Write-Warning "⚠️ Input PDF not found! Skipping compression..."
-            exit 0
-          }
-
-          Write-Output "📉 Compressing PDF using Ghostscript..."
-          & gswin64c -sDEVICE=pdfwrite -dCompatibilityLevel:1.4 -dPDFSETTINGS=/ebook -dNOPAUSE -dBATCH -sOutputFile="$output" "$input"
-
-          if (Test-Path $output) {
-            Move-Item -Force $output $input
-          } else {
-            Write-Warning "⚠️ Compression failed but continuing"
-          }
-          
-      - name: 📤 Upload HTML artifacts
-        if: inputs.html_format
-        id: upload-html-artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ inputs.artifact_name_template.replace('{format}', 'html').replace('{os}', 'windows') }}
-          path: build/html
-
-      - name: 📤 Upload PDF artifacts
-        if: inputs.pdf_format
-        id: upload-pdf-artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ inputs.artifact_name_template.replace('{format}', 'pdf').replace('{os}', 'windows') }}
-          path: build/pdf
-
-      - name: 📋 Build Declaration
-        run: |
-          HTML_ARTIFACT="${{ inputs.artifact_name_template.replace('{format}', 'html').replace('{os}', 'windows') }}"
-          PDF_ARTIFACT="${{ inputs.artifact_name_template.replace('{format}', 'pdf').replace('{os}', 'windows') }}"
-          echo "📦 Build Declaration: Successfully created artifacts"
-          echo "📊 HTML Artifact: '$HTML_ARTIFACT' (enabled: ${{ inputs.html_format }})"
-          echo "📊 PDF Artifact: '$PDF_ARTIFACT' (enabled: ${{ inputs.pdf_format }})"
-          echo "📊 OS: ${{ inputs.os }}"
-          echo "📊 Target: ${{ inputs.target }}"
-          echo "📊 Method: Fast Container Build (Windows)"
-          echo "📝 Note: This workflow only builds artifacts - deployment handled by publish-live workflow"
-          echo "html_artifact=$HTML_ARTIFACT" >> $GITHUB_OUTPUT
-          echo "pdf_artifact=$PDF_ARTIFACT" >> $GITHUB_OUTPUT
-
-      - name: 🎯 Set Final Build Status
-        if: always()
-        shell: bash
-        run: |
-          echo "🎯 Setting final build status..."
-          
-          if [ "${{ job.status }}" = "success" ]; then
-            STATE="success"
-            DESCRIPTION="Build completed successfully (Windows container, ${{ inputs.format }})"
-          else
-            STATE="failure"
-            DESCRIPTION="Build failed (Windows container, ${{ inputs.format }})"
-          fi
-          
-          echo "📊 Final status: $STATE"
-          echo "📝 Description: $DESCRIPTION"
-          
-          curl -X POST \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
-            -d "{
-              \"state\": \"$STATE\",
-              \"description\": \"$DESCRIPTION\",
-              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
-            }"
-          
-          echo "✅ Commit status updated successfully" 
+ 
