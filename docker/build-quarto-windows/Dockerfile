@@ -60,7 +60,7 @@ COPY tools/dependencies/tl_packages                    C:/temp/tl_packages
 COPY docker/build-quarto-windows/verify_r_packages.R   C:/temp/verify_r_packages.R
 
 # ------------------------------------------------------------
-# PHASE 4: Install Scoop and all tools
+# PHASE 4: Install Scoop
 # ------------------------------------------------------------
 RUN Write-Host 'Installing Scoop...' ; `
     Invoke-WebRequest -useb get.scoop.sh -outfile 'C:\temp\install.ps1' ; `
@@ -69,14 +69,42 @@ RUN Write-Host 'Installing Scoop...' ; `
     $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
     [Environment]::SetEnvironmentVariable('PATH', ($scoopShims + ';' + $mach), 'Machine') ; `
     Write-Host "✅ Added Scoop shims to PATH: $scoopShims" ; `
-    Write-Host 'Installing all tools via Scoop...' ; `
-    scoop bucket add r-bucket https://github.com/cderv/r-bucket.git ; `
-    scoop install quarto@1.7.31 ; `
-    scoop install main/python ; `
-    scoop install main/ghostscript ; `
-    scoop install versions/inkscape-dev ; `
-    scoop install main/r ; `
-    Write-Host 'Installing TeX Live via installer...' ; `
+    scoop bucket add r-bucket https://github.com/cderv/r-bucket.git
+
+# ------------------------------------------------------------
+# PHASE 5: Install Quarto
+# ------------------------------------------------------------
+RUN Write-Host 'Installing Quarto 1.7.31...' ; `
+    scoop install quarto@1.7.31
+
+# ------------------------------------------------------------
+# PHASE 6: Install Python
+# ------------------------------------------------------------
+RUN Write-Host 'Installing Python...' ; `
+    scoop install main/python
+
+# ------------------------------------------------------------
+# PHASE 7: Install Ghostscript
+# ------------------------------------------------------------
+RUN Write-Host 'Installing Ghostscript...' ; `
+    scoop install main/ghostscript
+
+# ------------------------------------------------------------
+# PHASE 8: Install Inkscape
+# ------------------------------------------------------------
+RUN Write-Host 'Installing Inkscape...' ; `
+    scoop install versions/inkscape-dev
+
+# ------------------------------------------------------------
+# PHASE 9: Install R
+# ------------------------------------------------------------
+RUN Write-Host 'Installing R...' ; `
+    scoop install main/r
+
+# ------------------------------------------------------------
+# PHASE 10: Install TeX Live
+# ------------------------------------------------------------
+RUN Write-Host 'Installing TeX Live 2025...' ; `
     $Repo = 'https://ftp.tug.org/historic/systems/texlive/2025/tlnet-final' ; `
     $Installer = 'C:\temp\install-tl-windows.exe' ; `
     Invoke-WebRequest -Uri 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' -OutFile $Installer -TimeoutSec 1800 ; `
@@ -93,7 +121,7 @@ RUN Write-Host 'Installing Scoop...' ; `
     Start-Process -FilePath $Installer -ArgumentList '-repository', $Repo, '-profile', 'C:\temp\texlive.profile' -Wait -NoNewWindow
 
 # ------------------------------------------------------------
-# PHASE 5: Discover all installed tools
+# PHASE 11: Discover all installed tools
 # ------------------------------------------------------------
 RUN Write-Host '=== DISCOVERING ALL INSTALLED TOOLS ===' ; `
     Write-Host 'Searching for Scoop-installed tools...' ; `
