@@ -63,6 +63,7 @@ COPY docker/build-quarto-windows/verify_r_packages.R   C:/temp/verify_r_packages
 # PHASE 4: Install Scoop
 # ------------------------------------------------------------
 RUN Write-Host 'Installing Scoop...' ; `
+    Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force ; `
     Invoke-WebRequest -useb get.scoop.sh -outfile 'C:\temp\install.ps1' ; `
     & 'C:\temp\install.ps1' -RunAsAdmin ; `
     $scoopShims = Join-Path (Resolve-Path ~).Path "scoop\shims" ; `
