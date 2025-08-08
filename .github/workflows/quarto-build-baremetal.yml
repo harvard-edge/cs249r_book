@@ -116,9 +116,37 @@ permissions:
   contents: write
   pages: write
 
+# Standardized outputs for calling workflows
+outputs:
+  build_success:
+    description: "Whether the build completed successfully"
+    value: ${{ jobs.build.outputs.build_success }}
+  html_artifact:
+    description: "HTML artifact name (empty if not built)"
+    value: ${{ jobs.build.outputs.html_artifact }}
+  pdf_artifact:
+    description: "PDF artifact name (empty if not built)"
+    value: ${{ jobs.build.outputs.pdf_artifact }}
+  os_name:
+    description: "Operating system name (linux/windows)"
+    value: ${{ jobs.build.outputs.os_name }}
+  target:
+    description: "Build target (dev/main)"
+    value: ${{ jobs.build.outputs.target }}
+  formats_built:
+    description: "Comma-separated list of formats built"
+    value: ${{ jobs.build.outputs.formats_built }}
+
 jobs:
   build:
     runs-on: ${{ inputs.os }}
+    outputs:
+      build_success: ${{ steps.outputs.outputs.build_success }}
+      html_artifact: ${{ steps.outputs.outputs.html_artifact }}
+      pdf_artifact: ${{ steps.outputs.outputs.pdf_artifact }}
+      os_name: ${{ steps.outputs.outputs.os_name }}
+      target: ${{ steps.outputs.outputs.target }}
+      formats_built: ${{ steps.outputs.outputs.formats_built }}
     timeout-minutes: 60   # ⏰ Set job timeout to 1 hour (3600 seconds)
     environment:
       name: ${{ inputs.environment }}
@@ -702,15 +730,59 @@ jobs:
                     build/pdf
 
       - name: 📋 Build Declaration
+        id: outputs
         shell: bash
         run: |
+          # Determine OS name from runner.os
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            OS_NAME="linux"
+          elif [ "${{ runner.os }}" = "Windows" ]; then
+            OS_NAME="windows"
+          else
+            OS_NAME="unknown"
+          fi
+          
+          # Determine artifact names based on formats built
+          HTML_ARTIFACT=""
+          PDF_ARTIFACT=""
+          FORMATS_BUILT=""
+          
+          if [[ "${{ inputs.format }}" == "html" || "${{ inputs.format }}" == "all" ]]; then
+            HTML_ARTIFACT="${{ inputs.target }}-html-${OS_NAME}"
+            FORMATS_BUILT="html"
+          fi
+          
+          if [[ "${{ inputs.format }}" == "pdf" || "${{ inputs.format }}" == "all" ]]; then
+            PDF_ARTIFACT="${{ inputs.target }}-pdf-${OS_NAME}"
+            if [ -n "$FORMATS_BUILT" ]; then
+              FORMATS_BUILT="$FORMATS_BUILT,pdf"
+            else
+              FORMATS_BUILT="pdf"
+            fi
+          fi
+          
+          # Legacy artifact name for backward compatibility
           ARTIFACT_NAME="${{ inputs.artifact_name != '' && inputs.artifact_name || format('build-{0}-{1}', inputs.os, inputs.format) }}"
-          echo "📦 Build Declaration: Successfully created artifact '$ARTIFACT_NAME'"
+          
+          echo "📦 Build Declaration: Successfully created artifacts"
+          echo "📊 HTML Artifact: '$HTML_ARTIFACT'"
+          echo "📊 PDF Artifact: '$PDF_ARTIFACT'"
           echo "📊 Format: ${{ inputs.format }}"
           echo "📊 OS: ${{ inputs.os }}"
           echo "📊 Target: ${{ inputs.target }}"
-          echo "📊 Environment: ${{ inputs.environment }}"
+          echo "📊 Method: Baremetal Build ($OS_NAME)"
+          echo "📊 Formats Built: $FORMATS_BUILT"
           echo "📝 Note: This workflow only builds artifacts - deployment handled by publish-live workflow"
+          
+          # Standardized outputs
+          echo "build_success=true" >> $GITHUB_OUTPUT
+          echo "html_artifact=$HTML_ARTIFACT" >> $GITHUB_OUTPUT
+          echo "pdf_artifact=$PDF_ARTIFACT" >> $GITHUB_OUTPUT
+          echo "os_name=$OS_NAME" >> $GITHUB_OUTPUT
+          echo "target=${{ inputs.target }}" >> $GITHUB_OUTPUT
+          echo "formats_built=$FORMATS_BUILT" >> $GITHUB_OUTPUT
+          
+          # Legacy output for backward compatibility
           echo "artifact_created=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
 
 

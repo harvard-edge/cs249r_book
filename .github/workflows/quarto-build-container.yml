@@ -97,10 +97,38 @@ permissions:
   contents: write
   pages: write
 
+# Standardized outputs for calling workflows
+outputs:
+  build_success:
+    description: "Whether the build completed successfully"
+    value: ${{ jobs.build.outputs.build_success }}
+  html_artifact:
+    description: "HTML artifact name (empty if not built)"
+    value: ${{ jobs.build.outputs.html_artifact }}
+  pdf_artifact:
+    description: "PDF artifact name (empty if not built)"
+    value: ${{ jobs.build.outputs.pdf_artifact }}
+  os_name:
+    description: "Operating system name (linux/windows)"
+    value: ${{ jobs.build.outputs.os_name }}
+  target:
+    description: "Build target (dev/main)"
+    value: ${{ jobs.build.outputs.target }}
+  formats_built:
+    description: "Comma-separated list of formats built"
+    value: ${{ jobs.build.outputs.formats_built }}
+
 jobs:
   # Unified build job using matrix strategy (filtered by input)
   build:
     runs-on: ${{ matrix.os }}
+    outputs:
+      build_success: ${{ steps.outputs.outputs.build_success }}
+      html_artifact: ${{ steps.outputs.outputs.html_artifact }}
+      pdf_artifact: ${{ steps.outputs.outputs.pdf_artifact }}
+      os_name: ${{ steps.outputs.outputs.os_name }}
+      target: ${{ steps.outputs.outputs.target }}
+      formats_built: ${{ steps.outputs.outputs.formats_built }}
     strategy:
       fail-fast: false
       matrix:
@@ -307,18 +335,50 @@ jobs:
           path: build/pdf
 
       - name: 📋 Build Declaration
+        id: outputs
         run: |
-          HTML_ARTIFACT="${{ format('{0}-html-{1}', inputs.target, env.OS_NAME) }}"
-          PDF_ARTIFACT="${{ format('{0}-pdf-{1}', inputs.target, env.OS_NAME) }}"
+          # Determine artifact names (empty if not built)
+          if [ "${{ steps.format-flags.outputs.html_format }}" = "true" ]; then
+            HTML_ARTIFACT="${{ format('{0}-html-{1}', inputs.target, env.OS_NAME) }}"
+          else
+            HTML_ARTIFACT=""
+          fi
+          
+          if [ "${{ steps.format-flags.outputs.pdf_format }}" = "true" ]; then
+            PDF_ARTIFACT="${{ format('{0}-pdf-{1}', inputs.target, env.OS_NAME) }}"
+          else
+            PDF_ARTIFACT=""
+          fi
+          
+          # Determine formats built
+          FORMATS_BUILT=""
+          if [ "${{ steps.format-flags.outputs.html_format }}" = "true" ]; then
+            FORMATS_BUILT="html"
+          fi
+          if [ "${{ steps.format-flags.outputs.pdf_format }}" = "true" ]; then
+            if [ -n "$FORMATS_BUILT" ]; then
+              FORMATS_BUILT="$FORMATS_BUILT,pdf"
+            else
+              FORMATS_BUILT="pdf"
+            fi
+          fi
+          
           echo "📦 Build Declaration: Successfully created artifacts"
           echo "📊 HTML Artifact: '$HTML_ARTIFACT' (enabled: ${{ steps.format-flags.outputs.html_format }})"
           echo "📊 PDF Artifact: '$PDF_ARTIFACT' (enabled: ${{ steps.format-flags.outputs.pdf_format }})"
           echo "📊 OS: ${{ inputs.os }}"
           echo "📊 Target: ${{ inputs.target }}"
           echo "📊 Method: Fast Container Build ($OS_NAME)"
+          echo "📊 Formats Built: $FORMATS_BUILT"
           echo "📝 Note: This workflow only builds artifacts - deployment handled by publish-live workflow"
+          
+          # Standardized outputs
+          echo "build_success=true" >> $GITHUB_OUTPUT
           echo "html_artifact=$HTML_ARTIFACT" >> $GITHUB_OUTPUT
           echo "pdf_artifact=$PDF_ARTIFACT" >> $GITHUB_OUTPUT
+          echo "os_name=$OS_NAME" >> $GITHUB_OUTPUT
+          echo "target=${{ inputs.target }}" >> $GITHUB_OUTPUT
+          echo "formats_built=$FORMATS_BUILT" >> $GITHUB_OUTPUT
 
       - name: 🎯 Set Final Build Status
         if: always()
