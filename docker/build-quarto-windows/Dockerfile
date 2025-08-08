@@ -60,7 +60,7 @@ COPY tools/dependencies/tl_packages                    C:/temp/tl_packages
 COPY docker/build-quarto-windows/verify_r_packages.R   C:/temp/verify_r_packages.R
 
 # ------------------------------------------------------------
-# PHASE 4: Quarto 1.7.31 (via Scoop)
+# PHASE 4: Install Scoop and all tools
 # ------------------------------------------------------------
 RUN Write-Host 'Installing Scoop...' ; `
     Invoke-WebRequest -useb get.scoop.sh -outfile 'C:\temp\install.ps1' ; `
@@ -69,32 +69,14 @@ RUN Write-Host 'Installing Scoop...' ; `
     $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
     [Environment]::SetEnvironmentVariable('PATH', ($scoopShims + ';' + $mach), 'Machine') ; `
     Write-Host "✅ Added Scoop shims to PATH: $scoopShims" ; `
-    Write-Host 'Installing Quarto via Scoop...' ; `
+    Write-Host 'Installing all tools via Scoop...' ; `
     scoop bucket add r-bucket https://github.com/cderv/r-bucket.git ; `
-    scoop install quarto@1.7.31
-
-# ------------------------------------------------------------
-# PHASE 5: Python 3.13.1
-# ------------------------------------------------------------
-RUN Write-Host 'Installing Python 3.13.1...' ; `
-    choco install -y python --version=3.13.1 --no-progress
-
-# ------------------------------------------------------------
-# PHASE 6: Ghostscript
-# ------------------------------------------------------------
-RUN Write-Host 'Installing Ghostscript...' ; `
-    choco install -y ghostscript --no-progress
-
-# ------------------------------------------------------------
-# PHASE 7: Inkscape
-# ------------------------------------------------------------
-RUN Write-Host 'Installing Inkscape...' ; `
-    choco install -y inkscape --no-progress
-
-# ------------------------------------------------------------
-# PHASE 8: TeX Live 2025
-# ------------------------------------------------------------
-RUN Write-Host 'Installing TeX Live 2025...' ; `
+    scoop install quarto@1.7.31 ; `
+    scoop install main/python ; `
+    scoop install main/ghostscript ; `
+    scoop install versions/inkscape-dev ; `
+    scoop install main/r ; `
+    Write-Host 'Installing TeX Live via installer...' ; `
     $Repo = 'https://ftp.tug.org/historic/systems/texlive/2025/tlnet-final' ; `
     $Installer = 'C:\temp\install-tl-windows.exe' ; `
     Invoke-WebRequest -Uri 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' -OutFile $Installer -TimeoutSec 1800 ; `
@@ -111,15 +93,12 @@ RUN Write-Host 'Installing TeX Live 2025...' ; `
     Start-Process -FilePath $Installer -ArgumentList '-repository', $Repo, '-profile', 'C:\temp\texlive.profile' -Wait -NoNewWindow
 
 # ------------------------------------------------------------
-# PHASE 9: R 4.3.2
-# ------------------------------------------------------------
-RUN Write-Host 'Installing R 4.3.2...' ; `
-    choco install -y r --version=4.3.2 --no-progress
-
-# ------------------------------------------------------------
-# PHASE 10: Discover all installed tools
+# PHASE 5: Discover all installed tools
 # ------------------------------------------------------------
 RUN Write-Host '=== DISCOVERING ALL INSTALLED TOOLS ===' ; `
+    Write-Host 'Searching for Scoop-installed tools...' ; `
+    $scoopRoot = (Resolve-Path ~).Path + '\scoop' ; `
+    Write-Host "Scoop root: $scoopRoot" ; `
     Write-Host 'Searching for Quarto...' ; `
     $quartoLocation = where.exe quarto 2>$null ; `
     if ($quartoLocation) { `
