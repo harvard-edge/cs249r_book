@@ -58,52 +58,39 @@ COPY tools/dependencies/requirements-build.txt         C:/temp/requirements.txt
 COPY tools/dependencies/install_packages.R             C:/temp/install_packages.R
 COPY tools/dependencies/tl_packages                    C:/temp/tl_packages
 COPY docker/build-quarto-windows/verify_r_packages.R   C:/temp/verify_r_packages.R
+COPY docker/build-quarto-windows/install-quarto-windows.ps1 C:/temp/install-quarto-windows.ps1
 
 # ------------------------------------------------------------
-# PHASE 4: Install Scoop
+# PHASE 4: Install Scoop and Quarto
 # ------------------------------------------------------------
-RUN Write-Host 'Installing Scoop...' ; `
-    Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force ; `
-    Invoke-WebRequest -useb get.scoop.sh -outfile 'C:\temp\install.ps1' ; `
-    & 'C:\temp\install.ps1' -RunAsAdmin ; `
-    $scoopShims = Join-Path (Resolve-Path ~).Path "scoop\shims" ; `
-    $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
-    [Environment]::SetEnvironmentVariable('PATH', ($scoopShims + ';' + $mach), 'Machine') ; `
-    Write-Host "✅ Added Scoop shims to PATH: $scoopShims" ; `
-    scoop bucket add r-bucket https://github.com/cderv/r-bucket.git
+RUN & 'C:\temp\install-quarto-windows.ps1' -version '1.7.31'
 
 # ------------------------------------------------------------
-# PHASE 5: Install Quarto
-# ------------------------------------------------------------
-RUN Write-Host 'Installing Quarto 1.7.31...' ; `
-    scoop install quarto@1.7.31
-
-# ------------------------------------------------------------
-# PHASE 6: Install Python
+# PHASE 5: Install Python
 # ------------------------------------------------------------
 RUN Write-Host 'Installing Python...' ; `
     scoop install main/python
 
 # ------------------------------------------------------------
-# PHASE 7: Install Ghostscript
+# PHASE 6: Install Ghostscript
 # ------------------------------------------------------------
 RUN Write-Host 'Installing Ghostscript...' ; `
     scoop install main/ghostscript
 
 # ------------------------------------------------------------
-# PHASE 8: Install Inkscape
+# PHASE 7: Install Inkscape
 # ------------------------------------------------------------
 RUN Write-Host 'Installing Inkscape...' ; `
     scoop install extras/inkscape
 
 # ------------------------------------------------------------
-# PHASE 9: Install R
+# PHASE 8: Install R
 # ------------------------------------------------------------
 RUN Write-Host 'Installing R...' ; `
     scoop install main/r
 
 # ------------------------------------------------------------
-# PHASE 10: Install TeX Live
+# PHASE 9: Install TeX Live
 # ------------------------------------------------------------
 RUN Write-Host 'Installing TeX Live 2025...' ; `
     $Repo = 'https://ftp.tug.org/historic/systems/texlive/2025/tlnet-final' ; `
@@ -122,7 +109,7 @@ RUN Write-Host 'Installing TeX Live 2025...' ; `
     Start-Process -FilePath $Installer -ArgumentList '-repository', $Repo, '-profile', 'C:\temp\texlive.profile' -Wait -NoNewWindow
 
 # ------------------------------------------------------------
-# PHASE 11: Discover all installed tools
+# PHASE 10: Discover all installed tools
 # ------------------------------------------------------------
 RUN Write-Host '=== DISCOVERING ALL INSTALLED TOOLS ===' ; `
     Write-Host 'Searching for Scoop-installed tools...' ; `
