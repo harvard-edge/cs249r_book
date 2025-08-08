@@ -1,4 +1,4 @@
-name: '🧠 Enhanced Build Manager'
+name: '✅ Validate Dev'
 
 # Set retention period to 7 days
 env:
@@ -17,9 +17,12 @@ concurrency:
   group: enhanced-manager-${{ github.ref }}
   cancel-in-progress: true
 
-# Enhanced manager with smart container handling
+# Development validation with smart container handling
+# Triggers automatically on dev branch pushes
 # Can be tested manually from any branch using workflow_dispatch
 on:
+  push:
+    branches: [dev]  # 🚀 Auto-trigger for dev branch validation
   workflow_dispatch:  # 🚦 Manual trigger for testing
     inputs:
       force_container_rebuild:
@@ -80,8 +83,58 @@ on:
         required: false
         default: 'latest'
         type: string
-  push:
-    branches: [main, dev]  # Auto-trigger for main workflow
+  workflow_call:  # 📞 Called by publish-live workflow
+    inputs:
+      build_format:
+        required: false
+        type: string
+        default: 'all'
+        description: 'Format to build (html/pdf/all)'
+      build_os:
+        required: false
+        type: string
+        default: 'linux'
+        description: 'Operating systems to build on (linux/windows/both)'
+      use_containers:
+        required: false
+        type: boolean
+        default: true
+        description: 'Use pre-built containers for faster builds'
+      test_branch:
+        required: false
+        type: string
+        default: ''
+        description: 'Branch to test (empty for current branch)'
+      force_container_rebuild:
+        required: false
+        type: boolean
+        default: false
+        description: 'Force container rebuild even if up-to-date'
+      no_cache:
+        required: false
+        type: boolean
+        default: false
+        description: 'Disable Docker build cache (fresh container builds)'
+      linux_container_name:
+        required: false
+        type: string
+        default: 'quarto-linux'
+        description: 'Linux container image name'
+      windows_container_name:
+        required: false
+        type: string
+        default: 'quarto-windows'
+        description: 'Windows container image name'
+      container_registry:
+        required: false
+        type: string
+        default: 'ghcr.io'
+        description: 'Container registry URL'
+      container_tag:
+        required: false
+        type: string
+        default: 'latest'
+        description: 'Container tag to use'
 
 jobs:
   # Step 1: Check container health and availability
@@ -260,7 +313,7 @@ jobs:
   smart-build:
     name: 🧠 Smart Build
     needs: [container-health-check, ensure-linux-container, ensure-windows-container, pre-commit]
-    if: always() && !failure() && matrix.enabled == 'true'
+    if: always() && !failure()
     strategy:
       fail-fast: false
       matrix:
@@ -275,6 +328,7 @@ jobs:
     steps:
       - name: 🎯 Determine build strategy
         id: strategy
+        if: matrix.enabled == 'true'
         run: |
           echo "🧠 Determining optimal build strategy..."
           
@@ -285,13 +339,13 @@ jobs:
           # Determine which workflow to use
           if [ "${{ matrix.os }}" = "ubuntu-latest" ] && [ "$LINUX_AVAILABLE" = "true" ]; then
             WORKFLOW="quarto-build-container"
-            BUILD_TYPE="🚀 Fast Container Build"
+            BUILD_TYPE="🐳 Container Build"
           elif [ "${{ matrix.os }}" = "windows-latest" ] && [ "$WINDOWS_AVAILABLE" = "true" ]; then
             WORKFLOW="quarto-build-container"  # When Windows containers are ready
-            BUILD_TYPE="🚀 Fast Container Build"
+            BUILD_TYPE="🐳 Container Build"
           else
-            WORKFLOW="quarto-build"
-            BUILD_TYPE="🐌 Traditional Build (no container)"
+            WORKFLOW="quarto-build-baremetal"
+            BUILD_TYPE="🖥️ Baremetal Build (no container)"
           fi
           
           echo "workflow=$WORKFLOW" >> $GITHUB_OUTPUT
@@ -303,26 +357,30 @@ jobs:
           echo "  Container available: $LINUX_AVAILABLE (Linux), $WINDOWS_AVAILABLE (Windows)"
 
       - name: 🚀 Trigger Container Build (Linux)
-        if: matrix.os == 'ubuntu-latest' && inputs.use_containers == true && needs.container-health-check.outputs.linux-container-available == 'true'
+        if: matrix.enabled == 'true' && matrix.os == 'ubuntu-latest' && inputs.use_containers == true && needs.container-health-check.outputs.linux-container-available == 'true'
         uses: ./.github/workflows/quarto-build-container.yml
         with:
           environment: development
           os: ${{ matrix.os }}
           format: ${{ matrix.format }}
           target: ${{ inputs.test_branch && 'dev' || (github.ref == 'refs/heads/main' && 'main' || 'dev') }}
+          html_artifact_name: mlsysbook-html-linux
+          pdf_artifact_name: mlsysbook-pdf-linux
           
       - name: 🚀 Trigger Container Build (Windows) 
-        if: matrix.os == 'windows-latest' && inputs.use_containers == true && needs.container-health-check.outputs.windows-container-available == 'true'
+        if: matrix.enabled == 'true' && matrix.os == 'windows-latest' && inputs.use_containers == true && needs.container-health-check.outputs.windows-container-available == 'true'
         uses: ./.github/workflows/quarto-build-container.yml
         with:
           environment: development
           os: ${{ matrix.os }}
           format: ${{ matrix.format }}
           target: ${{ inputs.test_branch && 'dev' || (github.ref == 'refs/heads/main' && 'main' || 'dev') }}
+          html_artifact_name: mlsysbook-html-windows
+          pdf_artifact_name: mlsysbook-pdf-windows
           
-      - name: 🐌 Trigger Traditional Build (Fallback)
-        if: inputs.use_containers != true || (matrix.os == 'ubuntu-latest' && needs.container-health-check.outputs.linux-container-available != 'true') || (matrix.os == 'windows-latest' && needs.container-health-check.outputs.windows-container-available != 'true')
-        uses: ./.github/workflows/quarto-build.yml
+      - name: 🖥️ Trigger Baremetal Build (Fallback)
+        if: matrix.enabled == 'true' && (inputs.use_containers != true || (matrix.os == 'ubuntu-latest' && needs.container-health-check.outputs.linux-container-available != 'true') || (matrix.os == 'windows-latest' && needs.container-health-check.outputs.windows-container-available != 'true'))
+        uses: ./.github/workflows/quarto-build-baremetal.yml
         with:
           environment: development
           os: ${{ matrix.os }}

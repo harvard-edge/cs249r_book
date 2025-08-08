@@ -722,100 +722,23 @@ jobs:
           echo "✅ Main branch updated successfully!"
           echo "📋 Next step: Monitor production build, then create release tag"
 
-  monitor-build:
-    name: '⏳ Monitor Production Build'
+  trigger-production-build:
+    name: '🚀 Trigger Production Build'
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 10
     needs: merge-to-main
     if: github.event.inputs.confirm == 'PUBLISH'
     
     steps:
-      - name: ⏳ Wait for Production Build (Commit Status Monitoring)
-        run: |
-          echo "⏳ Waiting for production build to complete (max 3 hours)..."
-          echo "🔍 Monitoring commit status checks in real-time..."
-          
-          # Get the latest commit SHA from main branch
-          COMMIT_SHA=$(curl -s \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${{ github.repository }}/commits/main" \
-            | jq -r '.sha')
-          
-          echo "📌 Monitoring commit: $COMMIT_SHA"
-          echo "🎯 Required status checks: ci/quarto-build-ubuntu-latest-html, ci/quarto-build-ubuntu-latest-pdf"
-          echo "📋 Note: Status checks still use old naming during transition period"
-          
-          # Check if quarto-build workflow is running
-          echo "🔍 Checking for quarto-build workflow runs..."
-          WORKFLOW_RUNS=$(curl -s \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/runs?head_sha=$COMMIT_SHA&per_page=10")
-          
-          echo "📊 Workflow runs for this commit:"
-          echo "$WORKFLOW_RUNS" | jq -r '.workflow_runs[] | "  - \(.name): \(.status) (\(.conclusion)) - \(.created_at)"' | head -5
-          
-          # Find quarto-build workflow runs
-          QUARTO_BUILD_RUNS=$(echo "$WORKFLOW_RUNS" | jq -r '.workflow_runs[] | select(.name == "🏗️ Quarto Build") | .id' | head -2)
-          
-          if [ -n "$QUARTO_BUILD_RUNS" ]; then
-            echo "🔍 Found quarto-build workflow runs: $QUARTO_BUILD_RUNS"
-            
-            # Get the latest quarto-build run
-            LATEST_QUARTO_RUN=$(echo "$QUARTO_BUILD_RUNS" | head -1)
-            echo "📊 Latest quarto-build run ID: $LATEST_QUARTO_RUN"
-            
-            # Get workflow run details
-            RUN_DETAILS=$(curl -s \
-              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              -H "Accept: application/vnd.github.v3+json" \
-              "https://api.github.com/repos/${{ github.repository }}/actions/runs/$LATEST_QUARTO_RUN")
-            
-            RUN_STATUS=$(echo "$RUN_DETAILS" | jq -r '.status')
-            RUN_CONCLUSION=$(echo "$RUN_DETAILS" | jq -r '.conclusion')
-            RUN_CREATED=$(echo "$RUN_DETAILS" | jq -r '.created_at')
-            
-            echo "📋 Quarto-build status: $RUN_STATUS ($RUN_CONCLUSION) - Started: $RUN_CREATED"
-            
-            # Get jobs from the workflow run
-            JOBS_RESPONSE=$(curl -s \
-              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              -H "Accept: application/vnd.github.v3+json" \
-              "https://api.github.com/repos/${{ github.repository }}/actions/runs/$LATEST_QUARTO_RUN/jobs")
-            
-            echo "📋 Quarto-build jobs:"
-            echo "$JOBS_RESPONSE" | jq -r '.jobs[] | "  - \(.name): \(.status) (\(.conclusion)) - \(.started_at)"' | head -5
-          else
-            echo "⚠️ No quarto-build workflow runs found for this commit"
-            
-            # Check if Build Manager workflow was cancelled (which would prevent build from running)
-            echo "🔍 Checking if Build Manager workflow was cancelled..."
-            MANAGER_RUNS=$(curl -s \
-              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              -H "Accept: application/vnd.github.v3+json" \
-              "https://api.github.com/repos/${{ github.repository }}/actions/workflows/build-manager.yml/runs?head_sha=$COMMIT_SHA&per_page=5")
-            
-            MANAGER_STATUS=$(echo "$MANAGER_RUNS" | jq -r '.workflow_runs[0].conclusion // "null"')
-            MANAGER_NAME=$(echo "$MANAGER_RUNS" | jq -r '.workflow_runs[0].name // "unknown"')
-            
-            if [ "$MANAGER_STATUS" = "cancelled" ]; then
-              echo "🚫 Build Manager workflow was cancelled - build never triggered"
-              echo "📊 Build Manager status: $MANAGER_NAME ($MANAGER_STATUS)"
-              echo "❌ Cannot proceed with release - build was cancelled"
-              echo "🔗 Check workflow: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
-              exit 1
-            elif [ "$MANAGER_STATUS" = "failure" ]; then
-              echo "❌ Build Manager workflow failed - build never triggered"
-              echo "📊 Build Manager status: $MANAGER_NAME ($MANAGER_STATUS)"
-              echo "❌ Cannot proceed with release - build manager failed"
-              echo "🔗 Check workflow: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
-              exit 1
-            else
-              echo "📊 Build Manager status: $MANAGER_NAME ($MANAGER_STATUS)"
-              echo "⏳ Will continue monitoring for build to start..."
-            fi
-          fi
+      - name: 🚀 Trigger Production Build
+        uses: ./.github/workflows/quarto-build-container.yml
+        with:
+          environment: production
+          os: ubuntu-latest
+          format: all  # HTML + PDF
+          target: main
+          html_artifact_name: mlsysbook-html-linux
+          pdf_artifact_name: mlsysbook-pdf-linux
           
           sleep 30  # Give the build a moment to start
           
@@ -1008,7 +931,7 @@ jobs:
     name: '🏷️ Create Release Tag (Final Step)'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [validate-inputs, download-and-deploy-artifacts]
+    needs: [validate-inputs, trigger-production-build, download-and-deploy-artifacts]
     if: github.event.inputs.confirm == 'PUBLISH'
     
     steps:
@@ -1067,7 +990,7 @@ jobs:
     name: '📦 Download Artifacts & Deploy to GitHub Pages'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: monitor-build
+    needs: trigger-production-build
     if: github.event.inputs.confirm == 'PUBLISH'
     
     steps:
@@ -1313,7 +1236,7 @@ jobs:
     name: '📝 Generate Release Notes'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [validate-inputs, download-and-deploy-artifacts]
+    needs: [validate-inputs, trigger-production-build, download-and-deploy-artifacts]
     if: github.event.inputs.confirm == 'PUBLISH'
     
     steps:
@@ -1764,8 +1687,8 @@ jobs:
     name: '⏰ Cleanup Timed Out Release'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [validate-inputs, monitor-build]
-    if: always() && github.event.inputs.confirm == 'PUBLISH' && (needs.monitor-build.result == 'failure' || needs.monitor-build.result == 'timeout')
+    needs: [validate-inputs, trigger-production-build]
+    if: always() && github.event.inputs.confirm == 'PUBLISH' && (needs.trigger-production-build.result == 'failure' || needs.trigger-production-build.result == 'timeout')
     
     steps:
       - name: 📥 Checkout repository
