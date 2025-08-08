@@ -208,7 +208,7 @@ RUN echo "🚀 === STARTING TEX LIVE INSTALLATION ===" && \
     ls -la /tmp/install-tl-* && \
     \
     echo "🔧 Creating TeX Live installation profile..." && \
-    echo "selected_scheme scheme-infraonly" > /tmp/texlive.profile && \
+    echo "selected_scheme scheme-medium" > /tmp/texlive.profile && \
     echo "tlpdbopt_install_docfiles 0" >> /tmp/texlive.profile && \
     echo "tlpdbopt_install_srcfiles 0" >> /tmp/texlive.profile && \
     echo "TEXDIR /usr/local/texlive" >> /tmp/texlive.profile && \
@@ -342,13 +342,6 @@ RUN echo "🚀 === STARTING QUARTO INSTALLATION ===" && \
     echo "📦 Installing Quarto..." && \
     dpkg -i quarto-1.7.31-linux-amd64.deb && \
     echo "📦 Quarto installed" && \
-    \
-    echo "🔍 Verifying Quarto installation..." && \
-    which quarto || echo "❌ quarto not found in PATH" && \
-    ls -la /usr/bin/quarto || echo "❌ quarto not in /usr/bin" && \
-    ls -la /usr/local/bin/quarto || echo "❌ quarto not in /usr/local/bin" && \
-    echo "📍 Checking if quarto is executable:" && \
-    find /usr -name "quarto" -type f -executable 2>/dev/null || echo "No executable quarto found" && \
     \
     echo "🧹 Cleaning up installer..." && \
     rm quarto-1.7.31-linux-amd64.deb && \
