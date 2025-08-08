@@ -60,63 +60,127 @@ COPY tools/dependencies/tl_packages                    C:/temp/tl_packages
 COPY docker/build-quarto-windows/verify_r_packages.R   C:/temp/verify_r_packages.R
 
 # ------------------------------------------------------------
-# PHASE 4: Quarto 1.7.31 (via Scoop - following official script)
+# PHASE 4: Quarto 1.7.31 (via Scoop)
 # ------------------------------------------------------------
-RUN Write-Host 'Installing Quarto 1.7.31 via Scoop...' ; `
-    # Install Scoop package manager (following official script)
-    Write-Host 'Installing Scoop...' ; `
+RUN Write-Host 'Installing Scoop...' ; `
     Invoke-WebRequest -useb get.scoop.sh -outfile 'C:\temp\install.ps1' ; `
     .\C:\temp\install.ps1 -RunAsAdmin ; `
-    # Add Scoop shims to PATH (following official script)
     $scoopShims = Join-Path (Resolve-Path ~).Path "scoop\shims" ; `
     $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
     [Environment]::SetEnvironmentVariable('PATH', ($scoopShims + ';' + $mach), 'Machine') ; `
     Write-Host "✅ Added Scoop shims to PATH: $scoopShims" ; `
-    # Add r-bucket and install Quarto (following official script)
-    Write-Host 'Adding r-bucket and installing Quarto...' ; `
+    Write-Host 'Installing Quarto via Scoop...' ; `
     scoop bucket add r-bucket https://github.com/cderv/r-bucket.git ; `
-    scoop install quarto@1.7.31 ; `
-    # Debug: Show Scoop installation structure
-    Write-Host '=== Scoop Installation Debug ===' ; `
-    $scoopRoot = (Resolve-Path ~).Path + '\scoop' ; `
-    Write-Host "Scoop root: $scoopRoot" ; `
-    $scoopApps = Join-Path $scoopRoot 'apps' ; `
-    Write-Host "Scoop apps: $scoopApps" ; `
-    $quartoScoopDir = Join-Path $scoopApps 'quarto' ; `
-    Write-Host "Quarto Scoop dir: $quartoScoopDir" ; `
-    if (Test-Path $quartoScoopDir) { `
-        Write-Host "✅ Quarto installed in Scoop at: $quartoScoopDir" ; `
-        # Show Scoop directory structure
-        Get-ChildItem $quartoScoopDir -Recurse -Name | ForEach-Object { Write-Host "  - $_" } ; `
-        $quartoCurrent = Join-Path $quartoScoopDir 'current' ; `
-        if (Test-Path $quartoCurrent) { `
-            Write-Host "✅ Quarto current symlink: $quartoCurrent" ; `
-            $quartoBin = Join-Path $quartoCurrent 'bin' ; `
-            if (Test-Path $quartoBin) { `
-                Write-Host "✅ Quarto bin found at: $quartoBin" ; `
-                $quartoExe = Join-Path $quartoBin 'quarto.exe' ; `
-                if (Test-Path $quartoExe) { `
-                    Write-Host "✅ Quarto executable found at: $quartoExe" ; `
-                } ; `
-            } ; `
-        } ; `
-    } ; `
-    Write-Host '=== End Scoop Debug ===' ; `
-    # Verify installation using where.exe
-    Write-Host 'Searching for Quarto using where.exe...' ; `
+    scoop install quarto@1.7.31
+
+# ------------------------------------------------------------
+# PHASE 5: Python 3.13.1
+# ------------------------------------------------------------
+RUN Write-Host 'Installing Python 3.13.1...' ; `
+    choco install -y python --version=3.13.1 --no-progress
+
+# ------------------------------------------------------------
+# PHASE 6: Ghostscript
+# ------------------------------------------------------------
+RUN Write-Host 'Installing Ghostscript...' ; `
+    choco install -y ghostscript --no-progress
+
+# ------------------------------------------------------------
+# PHASE 7: Inkscape
+# ------------------------------------------------------------
+RUN Write-Host 'Installing Inkscape...' ; `
+    choco install -y inkscape --no-progress
+
+# ------------------------------------------------------------
+# PHASE 8: TeX Live 2025
+# ------------------------------------------------------------
+RUN Write-Host 'Installing TeX Live 2025...' ; `
+    $Repo = 'https://ftp.tug.org/historic/systems/texlive/2025/tlnet-final' ; `
+    $Installer = 'C:\temp\install-tl-windows.exe' ; `
+    Invoke-WebRequest -Uri 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' -OutFile $Installer -TimeoutSec 1800 ; `
+    'selected_scheme scheme-infraonly' | Set-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'tlpdbopt_install_docfiles 0' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'tlpdbopt_install_srcfiles 0' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'TEXDIR C:/texlive' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'TEXMFCONFIG C:/texlive/texmf-config' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'TEXMFHOME C:/texlive/texmf-home' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'TEXMFLOCAL C:/texlive/texmf-local' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'TEXMFSYSCONFIG C:/texlive/texmf-config' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'TEXMFSYSVAR C:/texlive/texmf-var' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    'TEXMFVAR C:/texlive/texmf-var' | Add-Content -Path 'C:\temp\texlive.profile' -Encoding ASCII ; `
+    Start-Process -FilePath $Installer -ArgumentList '-repository', $Repo, '-profile', 'C:\temp\texlive.profile' -Wait -NoNewWindow
+
+# ------------------------------------------------------------
+# PHASE 9: R 4.3.2
+# ------------------------------------------------------------
+RUN Write-Host 'Installing R 4.3.2...' ; `
+    choco install -y r --version=4.3.2 --no-progress
+
+# ------------------------------------------------------------
+# PHASE 10: Discover all installed tools
+# ------------------------------------------------------------
+RUN Write-Host '=== DISCOVERING ALL INSTALLED TOOLS ===' ; `
+    Write-Host 'Searching for Quarto...' ; `
     $quartoLocation = where.exe quarto 2>$null ; `
     if ($quartoLocation) { `
         $quartoPath = $quartoLocation.Split([Environment]::NewLine)[0] ; `
         $quartoDir = Split-Path $quartoPath -Parent ; `
         Write-Host "✅ Found Quarto at: $quartoDir" ; `
         Write-Host "   Full path: $quartoPath" ; `
-        Write-Host "🎯 Using Quarto from: $quartoDir" ; `
     } else { `
-        Write-Host '❌ Quarto not found using where.exe' ; `
-        throw 'Quarto installation not found' ; `
+        Write-Host '❌ Quarto not found' ; `
     } ; `
-    Write-Host 'Testing Quarto installation...' ; `
-    quarto --version
+    Write-Host 'Searching for Python...' ; `
+    $pythonLocation = where.exe python 2>$null ; `
+    if ($pythonLocation) { `
+        $pythonPath = $pythonLocation.Split([Environment]::NewLine)[0] ; `
+        $pythonDir = Split-Path $pythonPath -Parent ; `
+        Write-Host "✅ Found Python at: $pythonDir" ; `
+        Write-Host "   Full path: $pythonPath" ; `
+    } else { `
+        Write-Host '❌ Python not found' ; `
+    } ; `
+    Write-Host 'Searching for Ghostscript...' ; `
+    $gsLocation = where.exe gswin64c 2>$null ; `
+    if ($gsLocation) { `
+        $gsPath = $gsLocation.Split([Environment]::NewLine)[0] ; `
+        $gsDir = Split-Path $gsPath -Parent ; `
+        Write-Host "✅ Found Ghostscript at: $gsDir" ; `
+        Write-Host "   Full path: $gsPath" ; `
+    } else { `
+        Write-Host '❌ Ghostscript not found' ; `
+    } ; `
+    Write-Host 'Searching for Inkscape...' ; `
+    $inkLocation = where.exe inkscape 2>$null ; `
+    if ($inkLocation) { `
+        $inkPath = $inkLocation.Split([Environment]::NewLine)[0] ; `
+        $inkDir = Split-Path $inkPath -Parent ; `
+        Write-Host "✅ Found Inkscape at: $inkDir" ; `
+        Write-Host "   Full path: $inkPath" ; `
+    } else { `
+        Write-Host '❌ Inkscape not found' ; `
+    } ; `
+    Write-Host 'Searching for TeX Live...' ; `
+    $texLocation = where.exe lualatex 2>$null ; `
+    if ($texLocation) { `
+        $texPath = $texLocation.Split([Environment]::NewLine)[0] ; `
+        $texDir = Split-Path $texPath -Parent ; `
+        Write-Host "✅ Found TeX Live at: $texDir" ; `
+        Write-Host "   Full path: $texPath" ; `
+    } else { `
+        Write-Host '❌ TeX Live not found' ; `
+    } ; `
+    Write-Host 'Searching for R...' ; `
+    $rLocation = where.exe R 2>$null ; `
+    if ($rLocation) { `
+        $rPath = $rLocation.Split([Environment]::NewLine)[0] ; `
+        $rDir = Split-Path $rPath -Parent ; `
+        Write-Host "✅ Found R at: $rDir" ; `
+        Write-Host "   Full path: $rPath" ; `
+    } else { `
+        Write-Host '❌ R not found' ; `
+    } ; `
+    Write-Host '=== TOOL DISCOVERY COMPLETE ==='
 
 # ------------------------------------------------------------
 # PHASE 5: Python 3.13.1 + packages
