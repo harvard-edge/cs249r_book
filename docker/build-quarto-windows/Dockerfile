@@ -93,7 +93,7 @@ RUN Write-Host 'Installing Ghostscript...' ; `
 # PHASE 8: Install Inkscape
 # ------------------------------------------------------------
 RUN Write-Host 'Installing Inkscape...' ; `
-    scoop install versions/inkscape-dev
+    scoop install extras/inkscape
 
 # ------------------------------------------------------------
 # PHASE 9: Install R
