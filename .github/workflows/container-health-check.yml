@@ -179,14 +179,12 @@ jobs:
             echo "available=${{ steps.availability-windows.outputs.available }}" >> $GITHUB_OUTPUT
           fi
 
-      - name: 🛠️ Test critical tools
-        id: tool-check
-        if: steps.availability.outputs.available == 'true'
+      - name: 🛠️ Test critical tools (Linux)
+        id: tool-check-linux
+        if: steps.availability.outputs.available == 'true' && matrix.platform == 'linux'
         shell: bash
         timeout-minutes: 15
         run: |
-          # Linux/Bash version
-          if [ "${{ matrix.platform }}" = "linux" ]; then
             echo "🛠️ Testing critical tools in Linux container..."
             
             # Test actual build commands used in workflows
@@ -294,11 +292,14 @@ jobs:
               
               echo '✅ All Quarto ecosystem tools are working!'
             " && echo "status=healthy" >> $GITHUB_OUTPUT || echo "status=unhealthy" >> $GITHUB_OUTPUT
-          fi
-          
-          # Windows/PowerShell version  
-          if [ "${{ matrix.platform }}" = "windows" ]; then
-            Write-Output "🛠️ Testing critical tools in Windows container..."
+
+      - name: 🛠️ Test critical tools (Windows)
+        id: tool-check-windows
+        if: steps.availability.outputs.available == 'true' && matrix.platform == 'windows'
+        shell: pwsh
+        timeout-minutes: 15
+        run: |
+          Write-Output "🛠️ Testing critical tools in Windows container..."
             
             try {
               docker run --rm ${{ env.WINDOWS_IMAGE }} pwsh -Command "
@@ -404,6 +405,15 @@ jobs:
             } catch {
               "status=unhealthy" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
             }
+
+      - name: 📊 Set tool check output
+        id: tool-check
+        shell: bash
+        run: |
+          if [ "${{ matrix.platform }}" = "linux" ]; then
+            echo "status=${{ steps.tool-check-linux.outputs.status }}" >> $GITHUB_OUTPUT
+          else
+            echo "status=${{ steps.tool-check-windows.outputs.status }}" >> $GITHUB_OUTPUT
           fi
 
       - name: 🎯 ${{ matrix.platform_name }} container health summary
@@ -422,15 +432,15 @@ jobs:
             fi
           fi
           
-          # Windows/PowerShell version
+          # Windows version (using bash syntax)
           if [ "${{ matrix.platform }}" = "windows" ]; then
-            if ("${{ steps.availability.outputs.available }}" -eq "true" -and "${{ steps.tool-check.outputs.status }}" -eq "healthy") {
-              "healthy=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-              Write-Output "✅ Windows container is healthy and ready"
-            } else {
-              "healthy=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-              Write-Output "❌ Windows container health check failed"
-            }
+            if [ "${{ steps.availability.outputs.available }}" = "true" ] && [ "${{ steps.tool-check.outputs.status }}" = "healthy" ]; then
+              echo "healthy=true" >> $GITHUB_OUTPUT
+              echo "✅ Windows container is healthy and ready"
+            else
+              echo "healthy=false" >> $GITHUB_OUTPUT
+              echo "❌ Windows container health check failed"
+            fi
           fi
 
   health-summary:
