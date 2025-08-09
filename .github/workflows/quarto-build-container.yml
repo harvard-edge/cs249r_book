@@ -136,7 +136,8 @@ jobs:
             os: windows-latest
             os_name: windows
             container_name: quarto-windows
-    container: ${{ format('{0}/{1}/{2}:{3}', inputs.container_registry, github.repository, matrix.container_name, inputs.container_tag) }}
+    # Container directive only works on Linux runners - Windows containers handled in steps
+    container: ${{ matrix.os_name == 'linux' && format('{0}/{1}/{2}:{3}', inputs.container_registry || 'ghcr.io', github.repository, matrix.container_name, inputs.container_tag || 'latest') || '' }}
     timeout-minutes: 120
     # Matrix job will run for both OS options, filtering handled in steps
     outputs:
@@ -208,6 +209,34 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: 🐳 Setup Windows Container (Manual)
+        if: steps.should-run.outputs.should-run == 'true' && matrix.os_name == 'windows'
+        shell: pwsh
+        run: |
+          # Windows containers must be handled manually since GitHub Actions container: only works on Linux
+          $CONTAINER_REGISTRY = "${{ inputs.container_registry || 'ghcr.io' }}"
+          $CONTAINER_IMAGE = "$CONTAINER_REGISTRY/${{ github.repository }}/${{ matrix.container_name }}:${{ inputs.container_tag || 'latest' }}"
+          
+          Write-Output "🐳 Setting up Windows container manually..."
+          Write-Output "📊 Container Image: $CONTAINER_IMAGE"
+          
+          # Login to container registry
+          Write-Output "🔐 Logging into container registry..."
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login $CONTAINER_REGISTRY -u ${{ github.actor }} --password-stdin
+          
+          # Pull the container
+          Write-Output "📦 Pulling Windows container (this may take a while)..."
+          docker pull $CONTAINER_IMAGE
+          
+          # Test the container
+          Write-Output "🧪 Testing Windows container..."
+          docker run --rm $CONTAINER_IMAGE cmd /c "echo Container is working"
+          
+          Write-Output "✅ Windows container setup complete"
+          
+          # Store container image for later steps
+          echo "WINDOWS_CONTAINER_IMAGE=$CONTAINER_IMAGE" >> $env:GITHUB_ENV
+
       - name: 📋 Container Environment Info
         if: steps.should-run.outputs.should-run == 'true'
         shell: bash
@@ -230,17 +259,18 @@ jobs:
           echo "  Disk space: $(df -h . | tail -1)"
           echo "  Memory: $(free -h | grep Mem)"
 
-      - name: 🔨 Build HTML (copy config and render)
-        if: steps.should-run.outputs.should-run == 'true' && matrix.format == 'html'
+      - name: 🔨 Build HTML (Linux Container)
+        if: steps.should-run.outputs.should-run == 'true' && matrix.format == 'html' && matrix.os_name == 'linux'
         shell: bash
         run: |
-          echo "🚀 Setting up HTML configuration..."
+          # Linux: Already running in container
+          echo "🚀 Setting up HTML configuration (Linux container)..."
           cd quarto
           rm -f _quarto.yml
           cp config/_quarto-html.yml _quarto.yml
           echo "✅ Configuration set to HTML"
           
-          echo "🔨 Building HTML..."
+          echo "🔨 Building HTML in Linux container..."
           echo "⏰ HTML build started at: $(date)"
           
           curl -X POST \
@@ -255,18 +285,48 @@ jobs:
           
           quarto render --to html
           echo "✅ HTML build completed at: $(date)"
+
+      - name: 🔨 Build HTML (Windows Container)
+        if: steps.should-run.outputs.should-run == 'true' && matrix.format == 'html' && matrix.os_name == 'windows'
+        shell: pwsh
+        run: |
+          # Windows: Use docker run with mounted volumes
+          Write-Output "🚀 Setting up HTML configuration (Windows container)..."
+          Set-Location quarto
+          Remove-Item -Force _quarto.yml -ErrorAction SilentlyContinue
+          Copy-Item config/_quarto-html.yml _quarto.yml
+          Write-Output "✅ Configuration set to HTML"
+          Set-Location ..
+          
+          Write-Output "🔨 Building HTML in Windows container..."
+          Write-Output "⏰ HTML build started at: $(Get-Date)"
+          
+          curl -X POST `
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" `
+            -H "Accept: application/vnd.github.v3+json" `
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" `
+            -d "{
+              `"state`": `"pending`",
+              `"description`": `"Building HTML content (${{ matrix.os_name }} container)`",
+              `"context`": `"ci/quarto-build-${{ matrix.os_name }}-${{ matrix.format }}`"
+            }"
+          
+          # Run Quarto in Windows container with volume mount
+          docker run --rm -v "${PWD}:C:/workspace" -w "C:/workspace/quarto" $env:WINDOWS_CONTAINER_IMAGE quarto render --to html
+          Write-Output "✅ HTML build completed at: $(Get-Date)"
         
-      - name: 🔨 Build PDF (copy config and render)
-        if: steps.should-run.outputs.should-run == 'true' && matrix.format == 'pdf'
+      - name: 🔨 Build PDF (Linux Container)
+        if: steps.should-run.outputs.should-run == 'true' && matrix.format == 'pdf' && matrix.os_name == 'linux'
         shell: bash
         run: |
-          echo "🚀 Setting up PDF configuration..."
+          # Linux: Already running in container
+          echo "🚀 Setting up PDF configuration (Linux container)..."
           cd quarto
           rm -f _quarto.yml
           cp config/_quarto-pdf.yml _quarto.yml
           echo "✅ Configuration set to PDF"
           
-          echo "🔨 Building PDF..."
+          echo "🔨 Building PDF in Linux container..."
           echo "⏰ PDF build started at: $(date)"
           echo "📊 This should be much faster with pre-installed dependencies"
           
@@ -283,12 +343,43 @@ jobs:
           quarto render --to titlepage-pdf
           echo "✅ PDF build completed at: $(date)"
 
+      - name: 🔨 Build PDF (Windows Container)
+        if: steps.should-run.outputs.should-run == 'true' && matrix.format == 'pdf' && matrix.os_name == 'windows'
+        shell: pwsh
+        run: |
+          # Windows: Use docker run with mounted volumes
+          Write-Output "🚀 Setting up PDF configuration (Windows container)..."
+          Set-Location quarto
+          Remove-Item -Force _quarto.yml -ErrorAction SilentlyContinue
+          Copy-Item config/_quarto-pdf.yml _quarto.yml
+          Write-Output "✅ Configuration set to PDF"
+          Set-Location ..
+          
+          Write-Output "🔨 Building PDF in Windows container..."
+          Write-Output "⏰ PDF build started at: $(Get-Date)"
+          Write-Output "📊 This should be much faster with pre-installed dependencies"
+          
+          curl -X POST `
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" `
+            -H "Accept: application/vnd.github.v3+json" `
+            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" `
+            -d "{
+              `"state`": `"pending`",
+              `"description`": `"Building PDF content (${{ matrix.os_name }} container) - optimized`",
+              `"context`": `"ci/quarto-build-${{ matrix.os_name }}-${{ matrix.format }}`"
+            }"
+          
+          # Run Quarto in Windows container with volume mount
+          docker run --rm -v "${PWD}:C:/workspace" -w "C:/workspace/quarto" $env:WINDOWS_CONTAINER_IMAGE quarto render --to titlepage-pdf
+          Write-Output "✅ PDF build completed at: $(Get-Date)"
+
       - name: 📉 Compress PDF with Ghostscript (Linux)
-        if: steps.should-run.outputs.should-run == 'true' && matrix.format == 'pdf' && runner.os == 'Linux'
+        if: steps.should-run.outputs.should-run == 'true' && matrix.format == 'pdf' && matrix.os_name == 'linux'
         shell: bash
         run: |
+          # Linux: Already running in container with Ghostscript pre-installed
           if [ -f "build/pdf/Machine-Learning-Systems.pdf" ]; then
-            echo "📉 Compressing PDF using Ghostscript (Linux)..."
+            echo "📉 Compressing PDF using Ghostscript (Linux container)..."
             gs \
               -sDEVICE=pdfwrite \
               -dCompatibilityLevel=1.4 \
@@ -300,14 +391,16 @@ jobs:
               "./build/pdf/Machine-Learning-Systems.pdf"
 
             mv ./build/pdf/ebook.pdf ./build/pdf/Machine-Learning-Systems.pdf
+            echo "✅ PDF compression completed"
           else
             echo "⚠️ PDF file not found for compression"
           fi
 
       - name: 📉 Compress PDF with Ghostscript (Windows)
-        if: steps.should-run.outputs.should-run == 'true' && matrix.format == 'pdf' && runner.os == 'Windows'
+        if: steps.should-run.outputs.should-run == 'true' && matrix.format == 'pdf' && matrix.os_name == 'windows'
         shell: pwsh
         run: |
+          # Windows: Use Ghostscript in Windows container
           $input = "./build/pdf/Machine-Learning-Systems.pdf"
           $output = "./build/pdf/ebook.pdf"
 
@@ -316,11 +409,13 @@ jobs:
             exit 0
           }
 
-          Write-Output "📉 Compressing PDF using Ghostscript (Windows)..."
-          & gswin64c -sDEVICE=pdfwrite -dCompatibilityLevel:1.4 -dPDFSETTINGS=/ebook -dNOPAUSE -dBATCH -sOutputFile="$output" "$input"
+          Write-Output "📉 Compressing PDF using Ghostscript (Windows container)..."
+          # Run Ghostscript in Windows container with volume mount
+          docker run --rm -v "${PWD}:C:/workspace" -w "C:/workspace" $env:WINDOWS_CONTAINER_IMAGE gswin64c -sDEVICE=pdfwrite -dCompatibilityLevel:1.4 -dPDFSETTINGS=/ebook -dNOPAUSE -dBATCH -sOutputFile="C:/workspace/build/pdf/ebook.pdf" "C:/workspace/build/pdf/Machine-Learning-Systems.pdf"
 
           if (Test-Path $output) {
             Move-Item -Force $output $input
+            Write-Output "✅ PDF compression completed"
           } else {
             Write-Warning "⚠️ Compression failed but continuing"
           }
