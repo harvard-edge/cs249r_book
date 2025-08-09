@@ -6,16 +6,15 @@ env:
 
 # Cancel duplicate builds on same branch
 concurrency:
-  group: enhanced-manager-${{ github.ref }}
+  group: validate-dev-${{ github.ref }}
   cancel-in-progress: true
 
-# Development validation with smart container handling
+# Simplified development validation without container dependencies
 # Triggers automatically on dev branch pushes
 # Can be tested manually from any branch using workflow_dispatch
 on:
-  # DISABLED: Auto-trigger while working on containers
-  # push:
-  #   branches: [dev]  # 🚀 Auto-trigger for dev branch validation
+  push:
+    branches: [dev]  # 🚀 Auto-trigger for dev branch validation
   workflow_dispatch:  # 🚦 Manual trigger for testing
     inputs:
       build_format:
@@ -53,51 +52,12 @@ on:
       validation-status:
         description: "Overall validation status (success/failure)"
         value: ${{ jobs.validation-summary.outputs.status }}
-      container-strategy:
-        description: "Container strategy used (container/baremetal/hybrid)"
-        value: ${{ jobs.container-health-check.outputs.container-strategy }}
       build-results:
         description: "Build results summary"
         value: ${{ jobs.validation-summary.outputs.build-results }}
-      containers-healthy:
-        description: "Whether containers are healthy and usable"
-        value: ${{ jobs.container-health-check.outputs.containers-need-rebuild == 'false' }}
 
 jobs:
-  # Step 1: Check container health and availability
-  container-health-check:
-    name: 🔍 Container Health Check
-    uses: ./.github/workflows/container-health-check.yml
-    with:
-      test_linux: true
-      test_windows: true
-
-  # Step 2: Build containers if needed
-  ensure-linux-container:
-    name: 🐳 Ensure Linux Container
-    if: needs.container-health-check.outputs.containers-need-rebuild == 'true'
-    needs: container-health-check
-    uses: ./.github/workflows/build-linux-container.yml
-    with:
-      force_rebuild: ${{ inputs.force_container_rebuild }}
-      no_cache: ${{ inputs.no_cache }}
-      container_registry: ghcr.io
-      container_name: quarto-linux
-      container_tag: latest
-
-  ensure-windows-container:
-    name: 🐳 Ensure Windows Container  
-    if: needs.container-health-check.outputs.containers-need-rebuild == 'true'
-    needs: container-health-check
-    uses: ./.github/workflows/build-windows-container.yml
-    with:
-      force_rebuild: ${{ inputs.force_container_rebuild }}
-      no_cache: ${{ inputs.no_cache }}
-      container_registry: ghcr.io
-      container_name: quarto-windows
-      container_tag: latest
-
-  # Step 3: Pre-flight checks (keeping existing quality gates)
+  # Step 1: Pre-commit quality checks
   pre-commit:
     name: 🧹 Pre-commit Quality Checks
     runs-on: ubuntu-latest
@@ -136,10 +96,18 @@ jobs:
           pre-commit install --install-hooks
           pre-commit run --all-files
 
-  # Step 4: Matrix validation builds
+  # Step 2: Link checks
+  link-check:
+    name: 🔗 Link Check
+    uses: ./.github/workflows/link-check.yml
+    with:
+      path_pattern: './contents/**/*.qmd'
+      max_concurrency: 10
+
+  # Step 3: Matrix validation builds
   validation-builds:
     name: 🚀 Validate ${{ matrix.format }} on ${{ matrix.os_name }}
-    needs: [container-health-check, ensure-linux-container, ensure-windows-container]
+    needs: [pre-commit, link-check]
     if: always() && !failure()
     strategy:
       fail-fast: false
@@ -158,20 +126,21 @@ jobs:
           - format: pdf
             os: windows-latest  
             os_name: windows
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     steps:
       - name: 🔍 Check if this matrix job should run
         id: should-run
+        shell: bash
         run: |
           # Check if format is enabled
           FORMAT_ENABLED=false
-          if [ "${{ inputs.build_format }}" = "${{ matrix.format }}" ] || [ "${{ inputs.build_format }}" = "both" ]; then
+          if [ "${{ inputs.build_format }}" = "${{ matrix.format }}" ] || [ "${{ inputs.build_format }}" = "both" ] || [ "${{ inputs.build_format }}" = "" ]; then
             FORMAT_ENABLED=true
           fi
           
           # Check if OS is enabled
           OS_ENABLED=false
-          if [ "${{ inputs.build_os }}" = "${{ matrix.os_name }}" ] || [ "${{ inputs.build_os }}" = "both" ]; then
+          if [ "${{ inputs.build_os }}" = "${{ matrix.os_name }}" ] || [ "${{ inputs.build_os }}" = "both" ] || [ "${{ inputs.build_os }}" = "" ]; then
             OS_ENABLED=true
           fi
           
@@ -184,45 +153,15 @@ jobs:
             echo "⏭️ Skipping: ${{ matrix.format }} on ${{ matrix.os_name }}"
           fi
 
-      - name: 🎯 Determine build strategy  
-        id: strategy
-        if: steps.should-run.outputs.enabled == 'true'
-        run: |
-          # Choose workflow based on container availability
-          LINUX_HEALTHY="${{ needs.container-health-check.outputs.linux-container-healthy }}"
-          WINDOWS_HEALTHY="${{ needs.container-health-check.outputs.windows-container-healthy }}"
-          
-          if [ "${{ matrix.os_name }}" = "linux" ] && [ "$LINUX_HEALTHY" = "true" ]; then
-            WORKFLOW="container"
-            echo "🐳 Using Linux container for fast build"
-          elif [ "${{ matrix.os_name }}" = "windows" ] && [ "$WINDOWS_HEALTHY" = "true" ]; then
-            WORKFLOW="container" 
-            echo "🐳 Using Windows container for fast build"
-          else
-            WORKFLOW="baremetal"
-            echo "🖥️ Using baremetal build (container not available)"
-          fi
-          
-          echo "workflow=$WORKFLOW" >> $GITHUB_OUTPUT
-          echo "📊 ${{ matrix.format }} on ${{ matrix.os_name }}: $WORKFLOW build"
-
-      - name: 🚀 Build with Container
-        if: steps.should-run.outputs.enabled == 'true' && steps.strategy.outputs.workflow == 'container'
-        uses: ./.github/workflows/quarto-build-container.yml
-        with:
-          os: ${{ matrix.os }}
-          format: ${{ matrix.format }}
-          target: dev
-          
       - name: 🖥️ Build with Baremetal  
-        if: steps.should-run.outputs.enabled == 'true' && steps.strategy.outputs.workflow == 'baremetal'
+        if: steps.should-run.outputs.enabled == 'true'
         uses: ./.github/workflows/quarto-build-baremetal.yml
         with:
           os: ${{ matrix.os }}
           format: ${{ matrix.format }}
           target: dev
 
-  # Step 5: Deploy Linux HTML to gh-pages
+  # Step 4: Deploy Linux HTML to gh-pages
   deploy-gh-pages:
     name: 🚀 Deploy to GitHub Pages
     needs: [validation-builds]
@@ -243,45 +182,26 @@ jobs:
           # Deploy the Linux HTML artifact (will be available from matrix build)
           artifact_name: dev-html-linux
 
-  # Step 6: Results and reporting
+  # Step 5: Build report
   build-report:
     name: 📊 Build Report
     if: always()
-    needs: [container-health-check, ensure-linux-container, ensure-windows-container, validation-builds, pre-commit]
+    needs: [pre-commit, link-check, validation-builds]
     runs-on: ubuntu-latest
     steps:
       - name: 📋 Generate comprehensive report
         run: |
-          echo "# 🧠 Enhanced Build Manager Report" >> $GITHUB_STEP_SUMMARY
+          echo "# 📊 Validation Report" >> $GITHUB_STEP_SUMMARY
           echo >> $GITHUB_STEP_SUMMARY
           
-          echo "## 🐳 Container Health Status" >> $GITHUB_STEP_SUMMARY
-          echo "- Linux Container: ${{ needs.container-health-check.outputs.linux-container-healthy == 'true' && '✅ Healthy' || '❌ Unhealthy' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Windows Container: ${{ needs.container-health-check.outputs.windows-container-healthy == 'true' && '✅ Healthy' || '❌ Unhealthy' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Rebuild Needed: ${{ needs.container-health-check.outputs.containers-need-rebuild == 'true' && '🔧 Yes' || '✅ No' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Strategy: ${{ needs.container-health-check.outputs.container-strategy }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Linux Tools: ${{ needs.container-health-check.outputs.linux-tools-status }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Windows Tools: ${{ needs.container-health-check.outputs.windows-tools-status }}" >> $GITHUB_STEP_SUMMARY
-          echo >> $GITHUB_STEP_SUMMARY
-          
-          echo "## 🔧 Container Building" >> $GITHUB_STEP_SUMMARY
-          echo "- Linux Build: ${{ needs.ensure-linux-container.result == 'success' && '✅ Success' || needs.ensure-linux-container.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Windows Build: ${{ needs.ensure-windows-container.result == 'success' && '✅ Success' || needs.ensure-windows-container.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
-          echo >> $GITHUB_STEP_SUMMARY
-          
-          echo "## 🏗️ Content Building" >> $GITHUB_STEP_SUMMARY
-          echo "- Smart Build: ${{ needs.smart-build.result == 'success' && '✅ Success' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
+          echo "## 🧹 Quality Checks" >> $GITHUB_STEP_SUMMARY
           echo "- Pre-commit: ${{ needs.pre-commit.result == 'success' && '✅ Passed' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Link Check: ${{ needs.link-check.result == 'success' && '✅ Passed' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
           echo >> $GITHUB_STEP_SUMMARY
           
-          echo "## 📈 Performance Benefits" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ needs.container-health-check.outputs.linux-container-healthy }}" = "true" ]; then
-            echo "- ⚡ Using fast container builds (5-10 min)" >> $GITHUB_STEP_SUMMARY
-            echo "- 🛠️ All critical tools verified and working" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "- 🐌 Using traditional builds (45 min)" >> $GITHUB_STEP_SUMMARY
-            echo "- 🔧 Container health check failed - rebuilding containers" >> $GITHUB_STEP_SUMMARY
-          fi
+          echo "## 🏗️ Build Results" >> $GITHUB_STEP_SUMMARY
+          echo "- Matrix Builds: ${{ needs.validation-builds.result == 'success' && '✅ Success' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Build Strategy: Baremetal (simplified workflow)" >> $GITHUB_STEP_SUMMARY
           echo >> $GITHUB_STEP_SUMMARY
           
           echo "---" >> $GITHUB_STEP_SUMMARY
@@ -290,7 +210,7 @@ jobs:
   # Final validation summary with outputs
   validation-summary:
     name: 📊 Validation Summary
-    needs: [container-health-check, ensure-linux-container, ensure-windows-container, validation-builds, pre-commit]
+    needs: [pre-commit, link-check, validation-builds]
     if: always()
     runs-on: ubuntu-latest
     outputs:
@@ -302,12 +222,12 @@ jobs:
         id: summary
         run: |
           # Determine overall validation status
-          CONTAINER_CHECK="${{ needs.container-health-check.result }}"
           VALIDATION_BUILDS="${{ needs.validation-builds.result }}"
           PRECOMMIT="${{ needs.pre-commit.result }}"
+          LINK_CHECK="${{ needs.link-check.result }}"
           
           # Overall status logic
-          if [ "$VALIDATION_BUILDS" = "success" ] && [ "$PRECOMMIT" = "success" ]; then
+          if [ "$VALIDATION_BUILDS" = "success" ] && [ "$PRECOMMIT" = "success" ] && [ "$LINK_CHECK" = "success" ]; then
             STATUS="success"
           else
             STATUS="failure"
@@ -325,6 +245,12 @@ jobs:
             BUILD_RESULTS="${BUILD_RESULTS}, ✅ Pre-commit: Passed"
           else
             BUILD_RESULTS="${BUILD_RESULTS}, ❌ Pre-commit: Failed"
+          fi
+
+          if [ "$LINK_CHECK" = "success" ]; then
+            BUILD_RESULTS="${BUILD_RESULTS}, ✅ Link Check: Passed"
+          else
+            BUILD_RESULTS="${BUILD_RESULTS}, ❌ Link Check: Failed"
           fi
           
           echo "status=$STATUS" >> $GITHUB_OUTPUT
