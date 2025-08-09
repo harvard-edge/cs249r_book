@@ -101,8 +101,8 @@ jobs:
     name: 🔍 ${{ matrix.platform_name }} Container Health Check
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
-    # Run check if called by workflow_call OR if manual dispatch with respective platform enabled
-    if: github.event_name == 'workflow_call' || (github.event_name == 'workflow_dispatch' && ((matrix.platform == 'linux' && inputs.test_linux == true) || (matrix.platform == 'windows' && inputs.test_windows == true)))
+    # Run check if called by workflow_call OR if manual dispatch (platform filtering happens at step level)
+    if: github.event_name == 'workflow_call' || github.event_name == 'workflow_dispatch'
     
     strategy:
       fail-fast: false
@@ -129,9 +129,34 @@ jobs:
       platform: ${{ matrix.platform }}
 
     steps:
+      - name: 🎯 Check if platform should run
+        id: should-run
+        shell: bash
+        run: |
+          # For workflow_call, always run
+          if [ "${{ github.event_name }}" = "workflow_call" ]; then
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "✅ Running via workflow_call - all platforms enabled"
+          # For workflow_dispatch, check platform-specific inputs
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ matrix.platform }}" = "linux" ] && [ "${{ inputs.test_linux }}" = "true" ]; then
+              echo "should_run=true" >> $GITHUB_OUTPUT
+              echo "✅ Linux platform enabled for manual dispatch"
+            elif [ "${{ matrix.platform }}" = "windows" ] && [ "${{ inputs.test_windows }}" = "true" ]; then
+              echo "should_run=true" >> $GITHUB_OUTPUT
+              echo "✅ Windows platform enabled for manual dispatch"
+            else
+              echo "should_run=false" >> $GITHUB_OUTPUT
+              echo "⏭️ ${{ matrix.platform }} platform disabled for manual dispatch"
+            fi
+          else
+            echo "should_run=false" >> $GITHUB_OUTPUT
+            echo "❌ Unsupported event type: ${{ github.event_name }}"
+          fi
+
       - name: 🔍 Check Linux container availability
         id: availability-linux
-        if: matrix.platform == 'linux'
+        if: steps.should-run.outputs.should_run == 'true' && matrix.platform == 'linux'
         shell: bash
         timeout-minutes: 15
         run: |
@@ -148,7 +173,7 @@ jobs:
 
       - name: 🔍 Check Windows container availability
         id: availability-windows
-        if: matrix.platform == 'windows'
+        if: steps.should-run.outputs.should_run == 'true' && matrix.platform == 'windows'
         shell: pwsh
         timeout-minutes: 15
         run: |
@@ -171,6 +196,7 @@ jobs:
 
       - name: 📊 Set availability output
         id: availability
+        if: steps.should-run.outputs.should_run == 'true'
         shell: bash
         run: |
           if [ "${{ matrix.platform }}" = "linux" ]; then
@@ -181,7 +207,7 @@ jobs:
 
       - name: 🛠️ Test critical tools (Linux)
         id: tool-check-linux
-        if: steps.availability.outputs.available == 'true' && matrix.platform == 'linux'
+        if: steps.should-run.outputs.should_run == 'true' && steps.availability.outputs.available == 'true' && matrix.platform == 'linux'
         shell: bash
         timeout-minutes: 15
         run: |
@@ -295,7 +321,7 @@ jobs:
 
       - name: 🛠️ Test critical tools (Windows)
         id: tool-check-windows
-        if: steps.availability.outputs.available == 'true' && matrix.platform == 'windows'
+        if: steps.should-run.outputs.should_run == 'true' && steps.availability.outputs.available == 'true' && matrix.platform == 'windows'
         shell: pwsh
         timeout-minutes: 15
         run: |
@@ -408,6 +434,7 @@ jobs:
 
       - name: 📊 Set tool check output
         id: tool-check
+        if: steps.should-run.outputs.should_run == 'true'
         shell: bash
         run: |
           if [ "${{ matrix.platform }}" = "linux" ]; then
@@ -421,6 +448,13 @@ jobs:
         if: always()
         shell: bash
         run: |
+          # Check if platform should run
+          if [ "${{ steps.should-run.outputs.should_run }}" != "true" ]; then
+            echo "healthy=skipped" >> $GITHUB_OUTPUT
+            echo "⏭️ ${{ matrix.platform_name }} platform was skipped"
+            exit 0
+          fi
+          
           # Linux/Bash version
           if [ "${{ matrix.platform }}" = "linux" ]; then
             if [ "${{ steps.availability.outputs.available }}" = "true" ] && [ "${{ steps.tool-check.outputs.status }}" = "healthy" ]; then
