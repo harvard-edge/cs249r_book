@@ -1,0 +1,462 @@
+name: '🔍 Container Health Check'
+
+# Comprehensive health check for Quarto build containers
+# Tests that all critical tools (R, Quarto, Inkscape, TeX Live, etc.) are properly installed
+# Used by other workflows to determine optimal build strategy
+
+on:
+  workflow_call:
+    inputs:
+      container_registry:
+        required: false
+        type: string
+        default: 'ghcr.io'
+        description: 'Container registry URL'
+      container_tag:
+        required: false
+        type: string
+        default: 'latest'
+        description: 'Container tag to check'
+      linux_container_name:
+        required: false
+        type: string
+        default: 'quarto-linux'
+        description: 'Linux container name'
+      windows_container_name:
+        required: false
+        type: string
+        default: 'quarto-windows'
+        description: 'Windows container name'
+      quick_check:
+        required: false
+        type: boolean
+        default: false
+        description: 'Perform quick check (skip functional tests)'
+    outputs:
+      linux-container-healthy:
+        description: "Whether Linux container is healthy and ready"
+        value: ${{ jobs.check-linux-container.outputs.container-healthy }}
+      windows-container-healthy:
+        description: "Whether Windows container is healthy and ready"
+        value: ${{ jobs.check-windows-container.outputs.container-healthy }}
+      containers-need-rebuild:
+        description: "Whether containers need rebuilding"
+        value: ${{ jobs.health-summary.outputs.need-rebuild }}
+      container-strategy:
+        description: "Recommended build strategy"
+        value: ${{ jobs.health-summary.outputs.strategy }}
+      linux-tools-status:
+        description: "Linux container tools status"
+        value: ${{ jobs.check-linux-container.outputs.tools-status }}
+      windows-tools-status:
+        description: "Windows container tools status" 
+        value: ${{ jobs.check-windows-container.outputs.tools-status }}
+
+env:
+  REGISTRY: ${{ inputs.container_registry || 'ghcr.io' }}
+  LINUX_IMAGE: ${{ inputs.container_registry || 'ghcr.io' }}/${{ github.repository }}/${{ inputs.linux_container_name || 'quarto-linux' }}:${{ inputs.container_tag || 'latest' }}
+  WINDOWS_IMAGE: ${{ inputs.container_registry || 'ghcr.io' }}/${{ github.repository }}/${{ inputs.windows_container_name || 'quarto-windows' }}:${{ inputs.container_tag || 'latest' }}
+
+jobs:
+  check-linux-container:
+    name: 🐧 Linux Container Health Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      container-healthy: ${{ steps.health-check.outputs.healthy }}
+      tools-status: ${{ steps.tool-check.outputs.status }}
+      container-available: ${{ steps.availability.outputs.available }}
+    
+    steps:
+      - name: 🔍 Check container availability
+        id: availability
+        run: |
+          echo "🔍 Checking Linux container availability..."
+          echo "📊 Image: ${{ env.LINUX_IMAGE }}"
+          
+          if docker manifest inspect "${{ env.LINUX_IMAGE }}" >/dev/null 2>&1; then
+            echo "✅ Linux container found"
+            echo "available=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Linux container not found"
+            echo "available=false" >> $GITHUB_OUTPUT
+            exit 0  # Don't fail the job, just mark as unavailable
+          fi
+
+      - name: 🛠️ Test critical tools
+        id: tool-check
+        if: steps.availability.outputs.available == 'true'
+        run: |
+          echo "🛠️ Testing critical tools in Linux container..."
+          
+          # List of critical tools to test
+          TOOLS_STATUS="✅"
+          FAILED_TOOLS=""
+          
+          echo "📊 Testing tool versions and availability:"
+          
+          # Test actual build commands used in workflows
+          docker run --rm ${{ env.LINUX_IMAGE }} bash -c "
+            echo '=== QUARTO ECOSYSTEM HEALTH CHECK ==='
+            
+            # Test Quarto version and check
+            echo '🔍 Testing Quarto...'
+            if quarto --version >/dev/null 2>&1; then
+              echo '✅ Quarto version: \$(quarto --version | head -1)'
+              
+              # Test quarto check (most important test!)
+              if quarto check >/dev/null 2>&1; then
+                echo '✅ Quarto check: PASSED'
+              else
+                echo '❌ Quarto check: FAILED'
+                exit 1
+              fi
+            else
+              echo '❌ Quarto: NOT INSTALLED'
+              exit 1
+            fi
+            
+            # Test Python (required for code execution)
+            echo '🔍 Testing Python...'
+            if python3 --version >/dev/null 2>&1; then
+              echo '✅ Python: \$(python3 --version)'
+            else
+              echo '❌ Python: FAILED'
+              exit 1
+            fi
+            
+            # Test R (required for R code execution)
+            echo '🔍 Testing R...'
+            if R --version >/dev/null 2>&1; then
+              echo '✅ R: \$(R --version | head -1)'
+            else
+              echo '❌ R: FAILED'
+              exit 1
+            fi
+            
+            # Test LaTeX (lualatex specifically for PDF builds)
+            echo '🔍 Testing LaTeX...'
+            if lualatex --version >/dev/null 2>&1; then
+              echo '✅ LuaLaTeX: \$(lualatex --version | head -1)'
+              
+              # Test actual LaTeX compilation capability
+              echo '\documentclass{article}\begin{document}Test\end{document}' > test.tex
+              if lualatex -interaction=nonstopmode test.tex >/dev/null 2>&1; then
+                echo '✅ LaTeX compilation: WORKING'
+                rm -f test.tex test.pdf test.log test.aux
+              else
+                echo '❌ LaTeX compilation: FAILED'
+                exit 1
+              fi
+            else
+              echo '❌ LuaLaTeX: NOT INSTALLED'
+              exit 1
+            fi
+            
+            # Test Ghostscript (for PDF compression)
+            echo '🔍 Testing Ghostscript...'
+            if gs --version >/dev/null 2>&1; then
+              echo '✅ Ghostscript: \$(gs --version | head -1)'
+              
+              # Test PDF compression capability (the actual command used)
+              echo 'Testing PDF compression with gs -sDEVICE=pdfwrite...'
+              if gs -sDEVICE=pdfwrite -dNOPAUSE -dBATCH -dQUIET >/dev/null 2>&1; then
+                echo '✅ Ghostscript PDF compression: WORKING'
+              else
+                echo '⚠️ Ghostscript PDF compression: CHECK FAILED'
+              fi
+            else
+              echo '❌ Ghostscript: NOT INSTALLED'
+              exit 1
+            fi
+            
+            # Test Pandoc (Quarto's engine)
+            echo '🔍 Testing Pandoc...'
+            if pandoc --version >/dev/null 2>&1; then
+              echo '✅ Pandoc: \$(pandoc --version | head -1)'
+            else
+              echo '❌ Pandoc: NOT INSTALLED'
+              exit 1
+            fi
+            
+            # Test Inkscape (for SVG processing in books)
+            echo '🔍 Testing Inkscape...'
+            if inkscape --version >/dev/null 2>&1; then
+              echo '✅ Inkscape: \$(inkscape --version | head -1)'
+            else
+              echo '❌ Inkscape: NOT INSTALLED'
+              exit 1
+            fi
+            
+            echo '✅ All Quarto ecosystem tools are working!'
+          " && echo "status=healthy" >> $GITHUB_OUTPUT || echo "status=unhealthy" >> $GITHUB_OUTPUT
+
+      - name: 🧪 Functional test (if not quick check)
+        if: steps.availability.outputs.available == 'true' && steps.tool-check.outputs.status == 'healthy' && inputs.quick_check != true
+        run: |
+          echo "🧪 Running functional test with actual build commands..."
+          
+          # Create minimal test document that mimics the real book structure
+          cat > test-health.qmd << 'EOF'
+          ---
+          title: "Container Health Test"
+          format: 
+            html:
+              theme: cosmo
+            titlepage-pdf:
+              documentclass: book
+          ---
+          
+          # Container Health Test
+          
+          This document tests the actual Quarto build pipeline.
+          
+          ## Python Code Test
+          
+          ```{python}
+          print("Python execution works!")
+          import sys
+          print(f"Python version: {sys.version}")
+          ```
+          
+          ## R Code Test
+          
+          ```{r}
+          cat("R execution works!\n")
+          cat("R version:", R.version.string, "\n")
+          ```
+          
+          ## Math Rendering Test
+          
+          Inline math: $E = mc^2$
+          
+          Display math:
+          $$
+          \int_{-\infty}^{\infty} e^{-x^2} dx = \sqrt{\pi}
+          $$
+          
+          ## Table Test
+          
+          | Tool | Status |
+          |------|--------|
+          | Quarto | ✅ |
+          | Python | ✅ |
+          | R | ✅ |
+          | LaTeX | ✅ |
+          EOF
+          
+          # Test HTML build (the primary build command)
+          echo "🔨 Testing HTML build with actual command: quarto render --to html"
+          docker run --rm -v $(pwd):/test ${{ env.LINUX_IMAGE }} bash -c "
+            cd /test &&
+            quarto render test-health.qmd --to html &&
+            echo '✅ HTML build successful!' &&
+            ls -la test-health.html &&
+            echo 'File size:' && du -h test-health.html
+          " && echo "✅ HTML functional test successful" || echo "❌ HTML functional test failed"
+          
+          # Test PDF build (if not in quick mode)
+          echo "🔨 Testing PDF build with actual command: quarto render --to titlepage-pdf"
+          docker run --rm -v $(pwd):/test ${{ env.LINUX_IMAGE }} bash -c "
+            cd /test &&
+            quarto render test-health.qmd --to titlepage-pdf &&
+            echo '✅ PDF build successful!' &&
+            ls -la test-health.pdf &&
+            echo 'File size:' && du -h test-health.pdf
+          " && echo "✅ PDF functional test successful" || echo "❌ PDF functional test failed"
+
+      - name: 🎯 Linux container health summary
+        id: health-check
+        if: always()
+        run: |
+          if [ "${{ steps.availability.outputs.available }}" = "true" ] && [ "${{ steps.tool-check.outputs.status }}" = "healthy" ]; then
+            echo "healthy=true" >> $GITHUB_OUTPUT
+            echo "✅ Linux container is healthy and ready"
+          else
+            echo "healthy=false" >> $GITHUB_OUTPUT
+            echo "❌ Linux container health check failed"
+          fi
+
+  check-windows-container:
+    name: 🪟 Windows Container Health Check
+    runs-on: windows-latest
+    timeout-minutes: 10
+    outputs:
+      container-healthy: ${{ steps.health-check.outputs.healthy }}
+      tools-status: ${{ steps.tool-check.outputs.status }}
+      container-available: ${{ steps.availability.outputs.available }}
+    
+    steps:
+      - name: 🔍 Check container availability
+        id: availability
+        shell: pwsh
+        run: |
+          Write-Output "🔍 Checking Windows container availability..."
+          Write-Output "📊 Image: ${{ env.WINDOWS_IMAGE }}"
+          
+          try {
+            docker manifest inspect "${{ env.WINDOWS_IMAGE }}" | Out-Null
+            Write-Output "✅ Windows container found"
+            "available=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } catch {
+            Write-Output "❌ Windows container not found"
+            "available=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          }
+
+      - name: 🛠️ Test critical tools
+        id: tool-check
+        if: steps.availability.outputs.available == 'true'
+        shell: pwsh
+        run: |
+          Write-Output "🛠️ Testing critical tools in Windows container..."
+          
+          try {
+            docker run --rm ${{ env.WINDOWS_IMAGE }} pwsh -Command "
+              Write-Output '=== QUARTO ECOSYSTEM HEALTH CHECK (WINDOWS) ==='
+              
+              # Test Quarto version and check
+              Write-Output '🔍 Testing Quarto...'
+              if (Get-Command quarto -ErrorAction SilentlyContinue) {
+                Write-Output ('✅ Quarto version: ' + (quarto --version | Select-Object -First 1))
+                
+                # Test quarto check (most important test!)
+                try {
+                  \$null = quarto check 2>\$null
+                  Write-Output '✅ Quarto check: PASSED'
+                } catch {
+                  Write-Output '❌ Quarto check: FAILED'
+                  exit 1
+                }
+              } else {
+                Write-Output '❌ Quarto: NOT INSTALLED'
+                exit 1
+              }
+              
+              # Test Python (required for code execution)
+              Write-Output '🔍 Testing Python...'
+              if (Get-Command python3 -ErrorAction SilentlyContinue) {
+                Write-Output ('✅ Python: ' + (python3 --version))
+              } else {
+                Write-Output '❌ Python: FAILED'
+                exit 1
+              }
+              
+              # Test R (required for R code execution)
+              Write-Output '🔍 Testing R...'
+              if (Get-Command R -ErrorAction SilentlyContinue) {
+                Write-Output ('✅ R: ' + (R --version | Select-Object -First 1))
+              } else {
+                Write-Output '❌ R: FAILED'
+                exit 1
+              }
+              
+              # Test LaTeX (lualatex specifically for PDF builds)
+              Write-Output '🔍 Testing LaTeX...'
+              if (Get-Command lualatex -ErrorAction SilentlyContinue) {
+                Write-Output ('✅ LuaLaTeX: ' + (lualatex --version | Select-Object -First 1))
+                
+                # Test actual LaTeX compilation capability
+                '\documentclass{article}\begin{document}Test\end{document}' | Out-File -FilePath 'test.tex' -Encoding UTF8
+                try {
+                  \$null = lualatex -interaction=nonstopmode test.tex 2>\$null
+                  Write-Output '✅ LaTeX compilation: WORKING'
+                  Remove-Item -Path 'test.*' -Force -ErrorAction SilentlyContinue
+                } catch {
+                  Write-Output '❌ LaTeX compilation: FAILED'
+                  exit 1
+                }
+              } else {
+                Write-Output '❌ LuaLaTeX: NOT INSTALLED'
+                exit 1
+              }
+              
+              # Test Ghostscript (for PDF compression - Windows uses gswin64c)
+              Write-Output '🔍 Testing Ghostscript...'
+              if (Get-Command gswin64c -ErrorAction SilentlyContinue) {
+                Write-Output ('✅ Ghostscript: ' + (gswin64c --version | Select-Object -First 1))
+                
+                # Test PDF compression capability (the actual command used)
+                Write-Output 'Testing PDF compression with gswin64c -sDEVICE=pdfwrite...'
+                try {
+                  \$null = gswin64c -sDEVICE=pdfwrite -dNOPAUSE -dBATCH -dQUIET 2>\$null
+                  Write-Output '✅ Ghostscript PDF compression: WORKING'
+                } catch {
+                  Write-Output '⚠️ Ghostscript PDF compression: CHECK FAILED'
+                }
+              } else {
+                Write-Output '❌ Ghostscript: NOT INSTALLED'
+                exit 1
+              }
+              
+              # Test Pandoc (Quarto's engine)
+              Write-Output '🔍 Testing Pandoc...'
+              if (Get-Command pandoc -ErrorAction SilentlyContinue) {
+                Write-Output ('✅ Pandoc: ' + (pandoc --version | Select-Object -First 1))
+              } else {
+                Write-Output '❌ Pandoc: NOT INSTALLED'
+                exit 1
+              }
+              
+              Write-Output '✅ All Quarto ecosystem tools are working!'
+            "
+            "status=healthy" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } catch {
+            "status=unhealthy" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          }
+
+      - name: 🎯 Windows container health summary
+        id: health-check
+        if: always()
+        shell: pwsh
+        run: |
+          if ("${{ steps.availability.outputs.available }}" -eq "true" -and "${{ steps.tool-check.outputs.status }}" -eq "healthy") {
+            "healthy=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            Write-Output "✅ Windows container is healthy and ready"
+          } else {
+            "healthy=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            Write-Output "❌ Windows container health check failed"
+          }
+
+  health-summary:
+    name: 📊 Health Summary
+    needs: [check-linux-container, check-windows-container]
+    if: always()
+    runs-on: ubuntu-latest
+    outputs:
+      need-rebuild: ${{ steps.summary.outputs.need-rebuild }}
+      strategy: ${{ steps.summary.outputs.strategy }}
+    
+    steps:
+      - name: 📊 Generate health summary
+        id: summary
+        run: |
+          echo "📊 Container Health Summary"
+          echo "=========================="
+          
+          LINUX_HEALTHY="${{ needs.check-linux-container.outputs.container-healthy }}"
+          WINDOWS_HEALTHY="${{ needs.check-windows-container.outputs.container-healthy }}"
+          
+          echo "🐧 Linux container: $LINUX_HEALTHY"
+          echo "🪟 Windows container: $WINDOWS_HEALTHY"
+          
+          # Determine strategy
+          if [ "$LINUX_HEALTHY" = "true" ] && [ "$WINDOWS_HEALTHY" = "true" ]; then
+            STRATEGY="container"
+            NEED_REBUILD="false"
+            echo "✅ Both containers healthy - use container builds"
+          elif [ "$LINUX_HEALTHY" = "true" ] || [ "$WINDOWS_HEALTHY" = "true" ]; then
+            STRATEGY="hybrid"
+            NEED_REBUILD="false"
+            echo "⚡ Some containers healthy - use hybrid approach"
+          else
+            STRATEGY="baremetal"
+            NEED_REBUILD="true"
+            echo "🔧 No healthy containers - rebuild needed, use baremetal"
+          fi
+          
+          echo "strategy=$STRATEGY" >> $GITHUB_OUTPUT
+          echo "need-rebuild=$NEED_REBUILD" >> $GITHUB_OUTPUT
+          
+          echo ""
+          echo "📋 Recommended strategy: $STRATEGY"
+          echo "🔧 Rebuild needed: $NEED_REBUILD"

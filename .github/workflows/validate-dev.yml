@@ -141,108 +141,13 @@ jobs:
   # Step 1: Check container health and availability
   container-health-check:
     name: 🔍 Container Health Check
-    runs-on: ubuntu-latest
-    outputs:
-      linux-container-available: ${{ steps.check.outputs.linux-available }}
-      windows-container-available: ${{ steps.check.outputs.windows-available }}
-      containers-need-rebuild: ${{ steps.check.outputs.need-rebuild }}
-      container-strategy: ${{ steps.check.outputs.strategy }}
-      # Container naming outputs for other jobs
-      linux-image-name: ${{ env.LINUX_IMAGE }}
-      windows-image-name: ${{ env.WINDOWS_IMAGE }}
-      container-registry: ${{ env.CONTAINER_REGISTRY }}
-      linux-container-name: ${{ env.LINUX_CONTAINER_NAME }}
-      windows-container-name: ${{ env.WINDOWS_CONTAINER_NAME }}
-      container-tag: ${{ env.CONTAINER_TAG }}
-    steps:
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.test_branch || github.ref }}
-          fetch-depth: 0
-
-      - name: 🔍 Check container availability and freshness
-        id: check
-        env:
-          LINUX_IMAGE: ${{ env.LINUX_IMAGE }}
-          WINDOWS_IMAGE: ${{ env.WINDOWS_IMAGE }}
-        run: |
-          echo "🔍 Checking container availability..."
-          echo "📊 Container Configuration:"
-          echo "  Registry: ${{ env.CONTAINER_REGISTRY }}"
-          echo "  Linux Image: $LINUX_IMAGE"
-          echo "  Windows Image: $WINDOWS_IMAGE"
-          echo "  Tag: ${{ env.CONTAINER_TAG }}"
-          
-          # Function to check if container exists and get its age
-          check_container() {
-            local image=$1
-            local name=$2
-            
-            echo "📊 Checking $name container: $image"
-            
-            # Try to pull container info (without actually pulling the large image)
-            if docker manifest inspect "$image" >/dev/null 2>&1; then
-              echo "✅ $name container exists"
-              
-              # Get container creation date
-              CREATED=$(docker manifest inspect "$image" | jq -r '.config.created // empty' 2>/dev/null || echo "")
-              if [ -n "$CREATED" ]; then
-                echo "📅 $name container created: $CREATED"
-                echo "$name-exists=true" >> $GITHUB_OUTPUT
-                echo "$name-created=$CREATED" >> $GITHUB_OUTPUT
-              else
-                echo "⚠️ Could not determine $name container age"
-                echo "$name-exists=true" >> $GITHUB_OUTPUT
-                echo "$name-created=unknown" >> $GITHUB_OUTPUT
-              fi
-            else
-              echo "❌ $name container not found"
-              echo "$name-exists=false" >> $GITHUB_OUTPUT
-            fi
-          }
-          
-          # Check both containers
-          check_container "$LINUX_IMAGE" "linux"
-          check_container "$WINDOWS_IMAGE" "windows"
-          
-          # Get last dependency change
-          echo "📊 Checking dependency freshness..."
-          DEPS_CHANGED=$(git log -1 --format="%ct" -- tools/dependencies/ docker/ 2>/dev/null || echo "0")
-          echo "📅 Dependencies last changed: $(date -d @$DEPS_CHANGED 2>/dev/null || date -r $DEPS_CHANGED 2>/dev/null || echo 'unknown')"
-          
-          # Determine if rebuild needed
-          FORCE_REBUILD="${{ inputs.force_container_rebuild }}"
-          NEED_REBUILD="false"
-          
-          if [ "$FORCE_REBUILD" = "true" ]; then
-            echo "🔧 Force rebuild requested"
-            NEED_REBUILD="true"
-          elif [ "$(echo ${{ steps.check.outputs.linux-exists }})" != "true" ] || [ "$(echo ${{ steps.check.outputs.windows-exists }})" != "true" ]; then
-            echo "🚧 One or more containers missing"
-            NEED_REBUILD="true"
-          else
-            echo "✅ Containers exist, checking freshness..."
-            # Add more sophisticated age checking here if needed
-          fi
-          
-          echo "need-rebuild=$NEED_REBUILD" >> $GITHUB_OUTPUT
-          echo "linux-available=$(echo ${{ steps.check.outputs.linux-exists }} 2>/dev/null || echo false)" >> $GITHUB_OUTPUT
-          echo "windows-available=$(echo ${{ steps.check.outputs.windows-exists }} 2>/dev/null || echo false)" >> $GITHUB_OUTPUT
-          
-          # Determine build strategy
-          if [ "$(echo ${{ steps.check.outputs.linux-exists }})" = "true" ]; then
-            STRATEGY="hybrid"  # Use containers where available, traditional where not
-          else
-            STRATEGY="traditional"  # Fall back to traditional builds
-          fi
-          echo "strategy=$STRATEGY" >> $GITHUB_OUTPUT
-          
-          echo "📊 Container Health Summary:"
-          echo "  Linux container: $(echo ${{ steps.check.outputs.linux-exists }} || echo 'checking...')"
-          echo "  Windows container: $(echo ${{ steps.check.outputs.windows-exists }} || echo 'checking...')"
-          echo "  Rebuild needed: $NEED_REBUILD"
-          echo "  Build strategy: $STRATEGY"
+    uses: ./.github/workflows/container-health-check.yml
+    with:
+      container_registry: ${{ inputs.container_registry || 'ghcr.io' }}
+      container_tag: ${{ inputs.container_tag || 'latest' }}
+      linux_container_name: ${{ inputs.linux_container_name || 'quarto-linux' }}
+      windows_container_name: ${{ inputs.windows_container_name || 'quarto-windows' }}
+      quick_check: false  # Run full health check including functional tests
 
   # Step 2: Build containers if needed
   ensure-linux-container:
@@ -253,9 +158,9 @@ jobs:
     with:
       force_rebuild: ${{ inputs.force_container_rebuild }}
       no_cache: ${{ inputs.no_cache }}
-      container_registry: ${{ needs.container-health-check.outputs.container-registry }}
-      container_name: ${{ needs.container-health-check.outputs.linux-container-name }}
-      container_tag: ${{ needs.container-health-check.outputs.container-tag }}
+      container_registry: ${{ inputs.container_registry || 'ghcr.io' }}
+      container_name: ${{ inputs.linux_container_name || 'quarto-linux' }}
+      container_tag: ${{ inputs.container_tag || 'latest' }}
 
   ensure-windows-container:
     name: 🐳 Ensure Windows Container  
@@ -265,9 +170,9 @@ jobs:
     with:
       force_rebuild: ${{ inputs.force_container_rebuild }}
       no_cache: ${{ inputs.no_cache }}
-      container_registry: ${{ needs.container-health-check.outputs.container-registry }}
-      container_name: ${{ needs.container-health-check.outputs.windows-container-name }}
-      container_tag: ${{ needs.container-health-check.outputs.container-tag }}
+      container_registry: ${{ inputs.container_registry || 'ghcr.io' }}
+      container_name: ${{ inputs.windows_container_name || 'quarto-windows' }}
+      container_tag: ${{ inputs.container_tag || 'latest' }}
 
   # Step 3: Pre-flight checks (keeping existing quality gates)
   pre-commit:
@@ -334,8 +239,8 @@ jobs:
           echo "🧠 Determining optimal build strategy..."
           
           CONTAINER_STRATEGY="${{ needs.container-health-check.outputs.container-strategy }}"
-          LINUX_AVAILABLE="${{ needs.container-health-check.outputs.linux-container-available }}"
-          WINDOWS_AVAILABLE="${{ needs.container-health-check.outputs.windows-container-available }}"
+          LINUX_AVAILABLE="${{ needs.container-health-check.outputs.linux-container-healthy }}"
+          WINDOWS_AVAILABLE="${{ needs.container-health-check.outputs.windows-container-healthy }}"
           
           # Determine which workflow to use
           if [ "${{ matrix.os }}" = "ubuntu-latest" ] && [ "$LINUX_AVAILABLE" = "true" ]; then
@@ -358,7 +263,7 @@ jobs:
           echo "  Container available: $LINUX_AVAILABLE (Linux), $WINDOWS_AVAILABLE (Windows)"
 
       - name: 🚀 Trigger Container Build (Linux)
-        if: matrix.enabled == 'true' && matrix.os == 'ubuntu-latest' && inputs.use_containers == true && needs.container-health-check.outputs.linux-container-available == 'true'
+        if: matrix.enabled == 'true' && matrix.os == 'ubuntu-latest' && inputs.use_containers == true && needs.container-health-check.outputs.linux-container-healthy == 'true'
         uses: ./.github/workflows/quarto-build-container.yml
         with:
           environment: development
@@ -369,7 +274,7 @@ jobs:
           pdf_artifact_name: mlsysbook-pdf-linux
           
       - name: 🚀 Trigger Container Build (Windows) 
-        if: matrix.enabled == 'true' && matrix.os == 'windows-latest' && inputs.use_containers == true && needs.container-health-check.outputs.windows-container-available == 'true'
+        if: matrix.enabled == 'true' && matrix.os == 'windows-latest' && inputs.use_containers == true && needs.container-health-check.outputs.windows-container-healthy == 'true'
         uses: ./.github/workflows/quarto-build-container.yml
         with:
           environment: development
@@ -380,7 +285,7 @@ jobs:
           pdf_artifact_name: mlsysbook-pdf-windows
           
       - name: 🖥️ Trigger Baremetal Build (Fallback)
-        if: matrix.enabled == 'true' && (inputs.use_containers != true || (matrix.os == 'ubuntu-latest' && needs.container-health-check.outputs.linux-container-available != 'true') || (matrix.os == 'windows-latest' && needs.container-health-check.outputs.windows-container-available != 'true'))
+        if: matrix.enabled == 'true' && (inputs.use_containers != true || (matrix.os == 'ubuntu-latest' && needs.container-health-check.outputs.linux-container-healthy != 'true') || (matrix.os == 'windows-latest' && needs.container-health-check.outputs.windows-container-healthy != 'true'))
         uses: ./.github/workflows/quarto-build-baremetal.yml
         with:
           environment: development
@@ -400,11 +305,13 @@ jobs:
           echo "# 🧠 Enhanced Build Manager Report" >> $GITHUB_STEP_SUMMARY
           echo >> $GITHUB_STEP_SUMMARY
           
-          echo "## 🐳 Container Status" >> $GITHUB_STEP_SUMMARY
-          echo "- Linux Container: ${{ needs.container-health-check.outputs.linux-container-available == 'true' && '✅ Available' || '❌ Not Available' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Windows Container: ${{ needs.container-health-check.outputs.windows-container-available == 'true' && '✅ Available' || '❌ Not Available' }}" >> $GITHUB_STEP_SUMMARY
+          echo "## 🐳 Container Health Status" >> $GITHUB_STEP_SUMMARY
+          echo "- Linux Container: ${{ needs.container-health-check.outputs.linux-container-healthy == 'true' && '✅ Healthy' || '❌ Unhealthy' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Windows Container: ${{ needs.container-health-check.outputs.windows-container-healthy == 'true' && '✅ Healthy' || '❌ Unhealthy' }}" >> $GITHUB_STEP_SUMMARY
           echo "- Rebuild Needed: ${{ needs.container-health-check.outputs.containers-need-rebuild == 'true' && '🔧 Yes' || '✅ No' }}" >> $GITHUB_STEP_SUMMARY
           echo "- Strategy: ${{ needs.container-health-check.outputs.container-strategy }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Linux Tools: ${{ needs.container-health-check.outputs.linux-tools-status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Windows Tools: ${{ needs.container-health-check.outputs.windows-tools-status }}" >> $GITHUB_STEP_SUMMARY
           echo >> $GITHUB_STEP_SUMMARY
           
           echo "## 🔧 Container Building" >> $GITHUB_STEP_SUMMARY
@@ -418,10 +325,12 @@ jobs:
           echo >> $GITHUB_STEP_SUMMARY
           
           echo "## 📈 Performance Benefits" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ needs.container-health-check.outputs.linux-container-available }}" = "true" ]; then
+          if [ "${{ needs.container-health-check.outputs.linux-container-healthy }}" = "true" ]; then
             echo "- ⚡ Using fast container builds (5-10 min)" >> $GITHUB_STEP_SUMMARY
+            echo "- 🛠️ All critical tools verified and working" >> $GITHUB_STEP_SUMMARY
           else
             echo "- 🐌 Using traditional builds (45 min)" >> $GITHUB_STEP_SUMMARY
+            echo "- 🔧 Container health check failed - rebuilding containers" >> $GITHUB_STEP_SUMMARY
           fi
           echo >> $GITHUB_STEP_SUMMARY
           
