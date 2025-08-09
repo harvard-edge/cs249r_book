@@ -32,11 +32,16 @@ on:
         type: boolean
         default: false
         description: 'Perform quick check (skip functional tests)'
-      test_both_platforms:
+      test_linux:
         required: false
         type: boolean
         default: true
-        description: 'Test both Linux and Windows containers'
+        description: '✅ Test Linux container'
+      test_windows:
+        required: false
+        type: boolean
+        default: true
+        description: '✅ Test Windows container'
   workflow_call:  # 📞 Called by other workflows
     inputs:
       container_registry:
@@ -94,6 +99,8 @@ jobs:
     name: 🐧 Linux Container Health Check
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Run Linux check if called by workflow_call OR if manual dispatch with test_linux enabled
+    if: github.event_name == 'workflow_call' || (github.event_name == 'workflow_dispatch' && inputs.test_linux == true)
     outputs:
       container-healthy: ${{ steps.health-check.outputs.healthy }}
       tools-status: ${{ steps.tool-check.outputs.status }}
@@ -313,8 +320,8 @@ jobs:
     name: 🪟 Windows Container Health Check
     runs-on: windows-latest
     timeout-minutes: 10
-    # Skip Windows check if manual run with test_both_platforms = false
-    if: github.event_name == 'workflow_call' || (github.event_name == 'workflow_dispatch' && inputs.test_both_platforms == true)
+    # Run Windows check if called by workflow_call OR if manual dispatch with test_windows enabled
+    if: github.event_name == 'workflow_call' || (github.event_name == 'workflow_dispatch' && inputs.test_windows == true)
     outputs:
       container-healthy: ${{ steps.health-check.outputs.healthy }}
       tools-status: ${{ steps.tool-check.outputs.status }}
@@ -469,29 +476,60 @@ jobs:
           
           LINUX_HEALTHY="${{ needs.check-linux-container.outputs.container-healthy }}"
           WINDOWS_HEALTHY="${{ needs.check-windows-container.outputs.container-healthy }}"
+          LINUX_SKIPPED="${{ needs.check-linux-container.result == 'skipped' }}"
           WINDOWS_SKIPPED="${{ needs.check-windows-container.result == 'skipped' }}"
           
-          echo "🐧 Linux container: $LINUX_HEALTHY"
+          # Display Linux status
+          if [ "$LINUX_SKIPPED" = "true" ]; then
+            echo "🐧 Linux container: ⏭️ SKIPPED (unchecked in manual run)"
+            LINUX_HEALTHY="skipped"
+          else
+            echo "🐧 Linux container: $LINUX_HEALTHY"
+          fi
+          
+          # Display Windows status  
           if [ "$WINDOWS_SKIPPED" = "true" ]; then
-            echo "🪟 Windows container: ⏭️ SKIPPED (manual run with test_both_platforms = false)"
+            echo "🪟 Windows container: ⏭️ SKIPPED (unchecked in manual run)"
             WINDOWS_HEALTHY="skipped"
           else
             echo "🪟 Windows container: $WINDOWS_HEALTHY"
           fi
           
+          # Determine strategy based on what was tested and results
+          HEALTHY_COUNT=0
+          TOTAL_TESTED=0
+          
+          # Count healthy and tested containers
+          if [ "$LINUX_HEALTHY" = "true" ]; then
+            HEALTHY_COUNT=$((HEALTHY_COUNT + 1))
+          fi
+          if [ "$WINDOWS_HEALTHY" = "true" ]; then
+            HEALTHY_COUNT=$((HEALTHY_COUNT + 1))
+          fi
+          if [ "$LINUX_HEALTHY" != "skipped" ]; then
+            TOTAL_TESTED=$((TOTAL_TESTED + 1))
+          fi
+          if [ "$WINDOWS_HEALTHY" != "skipped" ]; then
+            TOTAL_TESTED=$((TOTAL_TESTED + 1))
+          fi
+          
           # Determine strategy
-          if [ "$LINUX_HEALTHY" = "true" ] && ([ "$WINDOWS_HEALTHY" = "true" ] || [ "$WINDOWS_HEALTHY" = "skipped" ]); then
+          if [ "$HEALTHY_COUNT" -gt 0 ] && [ "$TOTAL_TESTED" -gt 0 ] && [ "$HEALTHY_COUNT" -eq "$TOTAL_TESTED" ]; then
             STRATEGY="container"
             NEED_REBUILD="false"
-            if [ "$WINDOWS_HEALTHY" = "skipped" ]; then
-              echo "✅ Linux container healthy, Windows skipped - use container builds for Linux"
+            if [ "$TOTAL_TESTED" -eq 1 ]; then
+              echo "✅ Tested container is healthy - use container builds"
             else
-              echo "✅ Both containers healthy - use container builds"
+              echo "✅ All tested containers healthy - use container builds"
             fi
-          elif [ "$LINUX_HEALTHY" = "true" ] || [ "$WINDOWS_HEALTHY" = "true" ]; then
+          elif [ "$HEALTHY_COUNT" -gt 0 ]; then
             STRATEGY="hybrid"
             NEED_REBUILD="false"
-            echo "⚡ Some containers healthy - use hybrid approach"
+            echo "⚡ Some tested containers healthy - use hybrid approach"
+          elif [ "$TOTAL_TESTED" -eq 0 ]; then
+            STRATEGY="unknown"
+            NEED_REBUILD="true"
+            echo "❓ No containers tested - cannot determine strategy"
           else
             STRATEGY="baremetal"
             NEED_REBUILD="true"
