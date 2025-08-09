@@ -4,6 +4,7 @@
 <div align="center">
   
 [![Build](https://github.com/harvard-edge/cs249r_book/actions/workflows/validate-dev.yml/badge.svg?label=Build)](https://github.com/harvard-edge/cs249r_book/actions/workflows/validate-dev.yml)
+
 [![Website](https://img.shields.io/website?url=https%3A%2F%2Fmlsysbook.ai&label=Website&logo=readthedocs)](https://mlsysbook.ai)
 [![Ecosystem](https://img.shields.io/website?url=https%3A%2F%2Fmlsysbook.org&label=Ecosystem&logo=internet-explorer)](https://mlsysbook.org)
 [![License](https://img.shields.io/badge/License-CC--BY--NC--SA%204.0-blue.svg)](https://github.com/harvard-edge/cs249r_book/blob/dev/LICENSE)
