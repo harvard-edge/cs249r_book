@@ -6,7 +6,7 @@ env:
 
 # Cancel duplicate builds for same target+os+format combination
 concurrency:
-  group: quarto-build-${{ inputs.target }}-${{ inputs.os }}-${{ inputs.format }}-${{ github.sha }}
+  group: quarto-build-${{ inputs.target }}-${{ inputs.build_os }}-${{ inputs.build_format }}-${{ github.sha }}
   cancel-in-progress: true
 
 # This workflow uses pre-built containers with all dependencies installed
@@ -15,14 +15,24 @@ concurrency:
 on:
   workflow_dispatch:
     inputs:
-      os:
+      build_format:
         required: false
         type: choice
-        default: 'ubuntu-latest'
-        description: 'Operating system to run on'
+        default: 'both'
+        description: 'Formats to build'
         options:
-          - ubuntu-latest
-          - windows-latest
+          - html
+          - pdf
+          - both
+      build_os:
+        required: false
+        type: choice
+        default: 'both'
+        description: 'Operating systems to build on'
+        options:
+          - linux
+          - windows
+          - both
       target:
         required: false
         type: choice
@@ -31,16 +41,6 @@ on:
         options:
           - dev
           - main
-      html_format:
-        required: false
-        type: boolean
-        default: true
-        description: 'Build HTML format'
-      pdf_format:
-        required: false
-        type: boolean
-        default: false
-        description: 'Build PDF format'
       quarto-log-level:
         required: false
         type: choice
@@ -56,15 +56,16 @@ on:
         description: 'Artifact naming pattern. Example: "book-html-linux" (prefix=book, format=html, os=linux)'
   workflow_call:
     inputs:
-      os:
-        required: true
-        type: string
-        description: 'Operating system to run on (ubuntu-latest/windows-latest)'
-      format:
+      build_format:
         required: false
         type: string
-        default: 'html'
-        description: 'Format to build (html/pdf/all)'
+        default: 'both'
+        description: 'Formats to build (html/pdf/both)'
+      build_os:
+        required: false
+        type: string
+        default: 'both'
+        description: 'Operating systems to build on (linux/windows/both)'
       target:
         required: false
         type: string
@@ -82,16 +83,16 @@ on:
         default: 'latest'
         description: 'Container tag to use'
       # Legacy inputs for backward compatibility (if needed)
-      html_format:
+      format:
         required: false
-        type: boolean
-        default: false
-        description: 'Build HTML format (legacy - use format instead)'
-      pdf_format:
+        type: string
+        default: ''
+        description: 'Legacy format input - use build_format instead'
+      os:
         required: false
-        type: boolean
-        default: false
-        description: 'Build PDF format (legacy - use format instead)'
+        type: string
+        default: ''
+        description: 'Legacy OS input - use build_os instead'
 
     outputs:
       html-artifact-name:
@@ -119,10 +120,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - format: html
+            os: ubuntu-latest
             os_name: linux
             container_name: quarto-linux
-          - os: windows-latest
+          - format: pdf
+            os: ubuntu-latest
+            os_name: linux
+            container_name: quarto-linux
+          - format: html
+            os: windows-latest
+            os_name: windows
+            container_name: quarto-windows
+          - format: pdf
+            os: windows-latest
             os_name: windows
             container_name: quarto-windows
     container: ${{ format('{0}/{1}/{2}:{3}', inputs.container_registry, github.repository, matrix.container_name, inputs.container_tag) }}
@@ -145,48 +156,36 @@ jobs:
         id: should-run
         shell: bash
         run: |
-          # Only run if inputs.os matches matrix.os or if inputs.os is empty
-          if [ "${{ inputs.os }}" = "${{ matrix.os }}" ] || [ "${{ inputs.os }}" = "" ]; then
+          # Check if format is enabled
+          FORMAT_ENABLED=false
+          if [ "${{ inputs.build_format }}" = "${{ matrix.format }}" ] || [ "${{ inputs.build_format }}" = "both" ] || [ "${{ inputs.build_format }}" = "" ]; then
+            FORMAT_ENABLED=true
+          fi
+          
+          # Check if OS is enabled
+          OS_ENABLED=false
+          if [ "${{ inputs.build_os }}" = "${{ matrix.os_name }}" ] || [ "${{ inputs.build_os }}" = "both" ] || [ "${{ inputs.build_os }}" = "" ]; then
+            OS_ENABLED=true
+          fi
+          
+          # Only run if both format and OS are enabled
+          if [ "$FORMAT_ENABLED" = "true" ] && [ "$OS_ENABLED" = "true" ]; then
             echo "should-run=true" >> $GITHUB_OUTPUT
-            echo "✅ Running build for ${{ matrix.os_name }} (matches input: '${{ inputs.os }}')"
+            echo "✅ Running build: ${{ matrix.format }} on ${{ matrix.os_name }}"
           else
             echo "should-run=false" >> $GITHUB_OUTPUT
-            echo "⏭️ Skipping build for ${{ matrix.os_name }} (input specified: '${{ inputs.os }}')"
+            echo "⏭️ Skipping: ${{ matrix.format }} on ${{ matrix.os_name }}"
           fi
 
-      - name: 🔧 Convert Format Input to Flags
-        id: format-flags
+      - name: 📊 Build Configuration Summary
         if: steps.should-run.outputs.should-run == 'true'
         shell: bash
         run: |
-          echo "🔧 Converting format input to build flags..."
-          
-          # Determine which formats to build based on input
-          if [ "${{ inputs.format }}" = "html" ] || [ "${{ inputs.html_format }}" = "true" ]; then
-            BUILD_HTML="true"
-          else
-            BUILD_HTML="false"
-          fi
-          
-          if [ "${{ inputs.format }}" = "pdf" ] || [ "${{ inputs.pdf_format }}" = "true" ]; then
-            BUILD_PDF="true"
-          else
-            BUILD_PDF="false"
-          fi
-          
-          if [ "${{ inputs.format }}" = "all" ]; then
-            BUILD_HTML="true"
-            BUILD_PDF="true"
-          fi
-          
           echo "📊 Build configuration:"
-          echo "  Format input: '${{ inputs.format }}'"
-          echo "  HTML format: $BUILD_HTML"
-          echo "  PDF format: $BUILD_PDF"
+          echo "  Format: ${{ matrix.format }}"
           echo "  OS: ${{ matrix.os_name }}"
-          
-          echo "html_format=$BUILD_HTML" >> $GITHUB_OUTPUT
-          echo "pdf_format=$BUILD_PDF" >> $GITHUB_OUTPUT
+          echo "  Container: ${{ matrix.container_name }}"
+          echo "  Target: ${{ inputs.target }}"
 
       - name: 🚦 Set Initial Build Status
         if: steps.should-run.outputs.should-run == 'true'
@@ -200,7 +199,7 @@ jobs:
             -d "{
               \"state\": \"pending\",
               \"description\": \"Quarto build started (${{ matrix.os_name }} container)\",
-              \"context\": \"ci/quarto-build-${{ matrix.os }}-${{ inputs.format }}\"
+              \"context\": \"ci/quarto-build-${{ matrix.os_name }}-${{ matrix.format }}\"
             }"
 
       - name: 📥 Checkout repository
@@ -232,7 +231,7 @@ jobs:
           echo "  Memory: $(free -h | grep Mem)"
 
       - name: 🔨 Build HTML (copy config and render)
-        if: steps.should-run.outputs.should-run == 'true' && steps.format-flags.outputs.html_format == 'true'
+        if: steps.should-run.outputs.should-run == 'true' && matrix.format == 'html'
         shell: bash
         run: |
           echo "🚀 Setting up HTML configuration..."
@@ -251,14 +250,14 @@ jobs:
             -d "{
               \"state\": \"pending\",
               \"description\": \"Building HTML content (${{ matrix.os_name }} container)\",
-              \"context\": \"ci/quarto-build-${{ matrix.os }}-html\"
+              \"context\": \"ci/quarto-build-${{ matrix.os_name }}-${{ matrix.format }}\"
             }"
           
           quarto render --to html
           echo "✅ HTML build completed at: $(date)"
         
       - name: 🔨 Build PDF (copy config and render)
-        if: steps.should-run.outputs.should-run == 'true' && steps.format-flags.outputs.pdf_format == 'true'
+        if: steps.should-run.outputs.should-run == 'true' && matrix.format == 'pdf'
         shell: bash
         run: |
           echo "🚀 Setting up PDF configuration..."
@@ -278,14 +277,14 @@ jobs:
             -d "{
               \"state\": \"pending\",
               \"description\": \"Building PDF content (${{ matrix.os_name }} container) - optimized\",
-              \"context\": \"ci/quarto-build-${{ inputs.os }}-pdf\"
+              \"context\": \"ci/quarto-build-${{ matrix.os_name }}-${{ matrix.format }}\"
             }"
           
           quarto render --to titlepage-pdf
           echo "✅ PDF build completed at: $(date)"
 
       - name: 📉 Compress PDF with Ghostscript (Linux)
-        if: steps.should-run.outputs.should-run == 'true' && steps.format-flags.outputs.pdf_format == 'true' && runner.os == 'Linux'
+        if: steps.should-run.outputs.should-run == 'true' && matrix.format == 'pdf' && runner.os == 'Linux'
         shell: bash
         run: |
           if [ -f "build/pdf/Machine-Learning-Systems.pdf" ]; then
@@ -306,7 +305,7 @@ jobs:
           fi
 
       - name: 📉 Compress PDF with Ghostscript (Windows)
-        if: steps.should-run.outputs.should-run == 'true' && steps.format-flags.outputs.pdf_format == 'true' && runner.os == 'Windows'
+        if: steps.should-run.outputs.should-run == 'true' && matrix.format == 'pdf' && runner.os == 'Windows'
         shell: pwsh
         run: |
           $input = "./build/pdf/Machine-Learning-Systems.pdf"
@@ -327,7 +326,7 @@ jobs:
           }
 
       - name: 📤 Upload HTML artifacts
-        if: steps.should-run.outputs.should-run == 'true' && steps.format-flags.outputs.html_format == 'true'
+        if: steps.should-run.outputs.should-run == 'true' && matrix.format == 'html'
         id: upload-html-artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -335,7 +334,7 @@ jobs:
           path: build/html
 
       - name: 📤 Upload PDF artifacts
-        if: steps.should-run.outputs.should-run == 'true' && steps.format-flags.outputs.pdf_format == 'true'
+        if: steps.should-run.outputs.should-run == 'true' && matrix.format == 'pdf'
         id: upload-pdf-artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -348,9 +347,9 @@ jobs:
           HTML_ARTIFACT="${{ format('{0}-html-{1}', inputs.target, env.OS_NAME) }}"
           PDF_ARTIFACT="${{ format('{0}-pdf-{1}', inputs.target, env.OS_NAME) }}"
           echo "📦 Build Declaration: Successfully created artifacts"
-          echo "📊 HTML Artifact: '$HTML_ARTIFACT' (enabled: ${{ steps.format-flags.outputs.html_format }})"
-          echo "📊 PDF Artifact: '$PDF_ARTIFACT' (enabled: ${{ steps.format-flags.outputs.pdf_format }})"
-          echo "📊 OS: ${{ inputs.os }}"
+          echo "📊 Format: ${{ matrix.format }}"
+          echo "📊 OS: ${{ matrix.os_name }}"
+          echo "📊 Artifact: ${HTML_ARTIFACT}${PDF_ARTIFACT}"
           echo "📊 Target: ${{ inputs.target }}"
           echo "📊 Method: Fast Container Build ($OS_NAME)"
           echo "📝 Note: This workflow only builds artifacts - deployment handled by publish-live workflow"
@@ -383,7 +382,7 @@ jobs:
               -d "{
                 \"state\": \"$STATE\",
                 \"description\": \"$DESCRIPTION\",
-                \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+                \"context\": \"ci/quarto-build-${{ matrix.os_name }}-${{ matrix.format }}\"
               }"
             
             echo "✅ Commit status updated successfully"
@@ -398,27 +397,13 @@ jobs:
         run: |
           # Determine build status and formats built
           if [ "${{ steps.should-run.outputs.should-run }}" = "true" ]; then
-            # Check if builds were successful
-            HTML_SUCCESS="${{ steps.build-html.outcome }}"
-            PDF_SUCCESS="${{ steps.build-pdf.outcome }}"
-            
-            FORMATS_BUILT=""
-            if [ "${{ steps.format-flags.outputs.html_format }}" = "true" ] && [ "$HTML_SUCCESS" = "success" ]; then
-              FORMATS_BUILT="html"
-            fi
-            if [ "${{ steps.format-flags.outputs.pdf_format }}" = "true" ] && [ "$PDF_SUCCESS" = "success" ]; then
-              if [ -n "$FORMATS_BUILT" ]; then
-                FORMATS_BUILT="${FORMATS_BUILT},pdf"
-              else
-                FORMATS_BUILT="pdf"
-              fi
-            fi
-            
-            # Overall status
-            if [ -n "$FORMATS_BUILT" ]; then
+            # Check if the build was successful for this matrix combination
+            if [ "${{ job.status }}" = "success" ]; then
               BUILD_STATUS="success"
+              FORMATS_BUILT="${{ matrix.format }}"
             else
               BUILD_STATUS="failure"
+              FORMATS_BUILT=""
             fi
           else
             BUILD_STATUS="skipped"
