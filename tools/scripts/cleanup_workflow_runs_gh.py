@@ -107,16 +107,31 @@ class GitHubCLIWorkflowCleaner:
     
     def get_workflow_runs(self, workflow_id: str) -> List[Dict]:
         """Get all runs for a specific workflow."""
-        result = self._run_gh_command([
-            'api',
-            f'/repos/{self.repo}/actions/workflows/{workflow_id}/runs',
-            '--paginate'
+        # Use gh run list to get all runs, then filter by workflow
+        all_runs = self._run_gh_command([
+            'run', 'list',
+            '--limit', '1000',
+            '--json', 'databaseId,displayTitle,createdAt,workflowName,status,conclusion,number'
         ])
         
-        if not result:
+        if not all_runs:
             return []
         
-        return result.get('workflow_runs', [])
+        # Filter runs for this specific workflow
+        workflow_runs = []
+        for run in all_runs:
+            # Get workflow info to match by ID
+            if str(workflow_id) in str(run.get('workflowName', '')):
+                # Convert to match expected format
+                workflow_runs.append({
+                    'id': run['databaseId'],
+                    'run_number': run.get('number', 0),
+                    'status': run.get('status', ''),
+                    'conclusion': run.get('conclusion', ''),
+                    'created_at': run['createdAt']
+                })
+        
+        return workflow_runs
     
     def delete_workflow_run(self, run_id: str) -> bool:
         """Delete a specific workflow run."""
@@ -146,34 +161,42 @@ class GitHubCLIWorkflowCleaner:
         Returns:
             Tuple of (total_runs_found, runs_to_delete)
         """
-        workflows = self.get_workflows()
-        if not workflows:
+        # Get all runs directly using gh run list
+        all_runs = self._run_gh_command([
+            'run', 'list',
+            '--limit', '1000',
+            '--json', 'databaseId,displayTitle,createdAt,workflowName,status,conclusion,number'
+        ])
+        
+        if not all_runs:
             return 0, 0
-            
-        total_runs = 0
+        
+        # Group runs by workflow name
+        workflow_groups = {}
+        for run in all_runs:
+            workflow_name = run.get('workflowName', 'Unknown')
+            if workflow_name not in workflow_groups:
+                workflow_groups[workflow_name] = []
+            workflow_groups[workflow_name].append(run)
+        
+        total_runs = len(all_runs)
         total_to_delete = 0
         
-        for workflow in workflows:
-            workflow_name = workflow['name']
-            workflow_path = workflow['path'].split('/')[-1]  # Get filename
-            workflow_id = workflow['id']
-            
+        print(f"📋 Found {len(workflow_groups)} unique workflows with {total_runs} total runs")
+        
+        for workflow_name, runs in workflow_groups.items():
             # Apply filter if specified
-            if workflow_filter and workflow_filter not in [workflow_name, workflow_path]:
+            if workflow_filter and workflow_filter not in workflow_name:
                 continue
                 
-            print(f"\n🔍 Processing workflow: {workflow_name} ({workflow_path})")
-            
-            # Get all runs for this workflow
-            runs = self.get_workflow_runs(workflow_id)
-            total_runs += len(runs)
+            print(f"\n🔍 Processing workflow: {workflow_name}")
             
             if len(runs) <= keep_count:
                 print(f"   ✅ Only {len(runs)} runs found, keeping all")
                 continue
             
             # Sort runs by creation date (newest first)
-            runs.sort(key=lambda x: x['created_at'], reverse=True)
+            runs.sort(key=lambda x: x['createdAt'], reverse=True)
             
             # Identify runs to delete (everything after keep_count)
             runs_to_keep = runs[:keep_count]
@@ -191,11 +214,11 @@ class GitHubCLIWorkflowCleaner:
             # Delete old runs
             deleted_count = 0
             for run in runs_to_delete:
-                run_id = run['id']
-                run_number = run['run_number']
-                status = run['status']
-                conclusion = run['conclusion']
-                created_at = run['created_at']
+                run_id = run['databaseId']
+                run_number = run.get('number', 'N/A')
+                status = run.get('status', 'unknown')
+                conclusion = run.get('conclusion', 'unknown')
+                created_at = run['createdAt']
                 
                 print(f"   🗑️  Deleting run #{run_number} ({status}/{conclusion}) from {created_at}")
                 
@@ -211,30 +234,38 @@ class GitHubCLIWorkflowCleaner:
     
     def show_workflow_summary(self):
         """Show a summary of all workflows and their run counts."""
-        workflows = self.get_workflows()
-        if not workflows:
+        # Get all runs directly using gh run list
+        all_runs = self._run_gh_command([
+            'run', 'list',
+            '--limit', '1000',
+            '--json', 'databaseId,displayTitle,createdAt,workflowName,status,conclusion,number'
+        ])
+        
+        if not all_runs:
             return
+        
+        # Group runs by workflow name
+        workflow_groups = {}
+        for run in all_runs:
+            workflow_name = run.get('workflowName', 'Unknown')
+            if workflow_name not in workflow_groups:
+                workflow_groups[workflow_name] = []
+            workflow_groups[workflow_name].append(run)
             
         print(f"\n📊 Workflow Summary for {self.repo}")
         print("=" * 60)
         
-        total_runs = 0
-        for workflow in workflows:
-            workflow_name = workflow['name']
-            workflow_path = workflow['path'].split('/')[-1]
-            workflow_id = workflow['id']
-            
-            runs = self.get_workflow_runs(workflow_id)
+        total_runs = len(all_runs)
+        for workflow_name, runs in sorted(workflow_groups.items()):
             run_count = len(runs)
-            total_runs += run_count
             
             # Count by status
             statuses = {}
             for run in runs:
-                status = f"{run['status']}/{run.get('conclusion', 'N/A')}"
+                status = f"{run.get('status', 'unknown')}/{run.get('conclusion', 'N/A')}"
                 statuses[status] = statuses.get(status, 0) + 1
             
-            print(f"{workflow_name} ({workflow_path}): {run_count} runs")
+            print(f"{workflow_name}: {run_count} runs")
             for status, count in sorted(statuses.items()):
                 print(f"  - {status}: {count}")
         
