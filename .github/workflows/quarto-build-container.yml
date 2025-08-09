@@ -113,7 +113,7 @@ jobs:
             container_name: quarto-windows
     container: ${{ format('{0}/{1}/{2}:{3}', inputs.container_registry, github.repository, matrix.container_name, inputs.container_tag) }}
     timeout-minutes: 60
-    if: inputs.os == matrix.os || inputs.os == ''  # Only run the matrix entry that matches the input OS
+    # Matrix job will run for both OS options, filtering handled in steps
     env:
       QUARTO_LOG_LEVEL: ${{ inputs.quarto-log-level || 'INFO' }}
       OS_NAME: ${{ matrix.os_name }}
@@ -122,8 +122,22 @@ jobs:
       LC_ALL: en_US.UTF-8
 
     steps:
+      - name: 🎯 Check if this matrix job should run
+        id: should-run
+        shell: bash
+        run: |
+          # Only run if inputs.os matches matrix.os or if inputs.os is empty
+          if [ "${{ inputs.os }}" = "${{ matrix.os }}" ] || [ "${{ inputs.os }}" = "" ]; then
+            echo "should-run=true" >> $GITHUB_OUTPUT
+            echo "✅ Running build for ${{ matrix.os_name }} (matches input: '${{ inputs.os }}')"
+          else
+            echo "should-run=false" >> $GITHUB_OUTPUT
+            echo "⏭️ Skipping build for ${{ matrix.os_name }} (input specified: '${{ inputs.os }}')"
+          fi
+
       - name: 🔧 Convert Format Input to Flags
         id: format-flags
+        if: steps.should-run.outputs.should-run == 'true'
         shell: bash
         run: |
           echo "🔧 Converting format input to build flags..."
@@ -156,6 +170,7 @@ jobs:
           echo "pdf_format=$BUILD_PDF" >> $GITHUB_OUTPUT
 
       - name: 🚦 Set Initial Build Status
+        if: steps.should-run.outputs.should-run == 'true'
         shell: bash
         run: |
           echo "🚦 Setting initial build status to pending..."
@@ -170,11 +185,13 @@ jobs:
             }"
 
       - name: 📥 Checkout repository
+        if: steps.should-run.outputs.should-run == 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: 📋 Container Environment Info
+        if: steps.should-run.outputs.should-run == 'true'
         shell: bash
         run: |
           echo "🔄 Container build environment information..."
@@ -196,7 +213,7 @@ jobs:
           echo "  Memory: $(free -h | grep Mem)"
 
       - name: 🔨 Build HTML (copy config and render)
-        if: steps.format-flags.outputs.html_format == 'true'
+        if: steps.should-run.outputs.should-run == 'true' && steps.format-flags.outputs.html_format == 'true'
         shell: bash
         run: |
           echo "🚀 Setting up HTML configuration..."
@@ -222,7 +239,7 @@ jobs:
           echo "✅ HTML build completed at: $(date)"
         
       - name: 🔨 Build PDF (copy config and render)
-        if: steps.format-flags.outputs.pdf_format == 'true'
+        if: steps.should-run.outputs.should-run == 'true' && steps.format-flags.outputs.pdf_format == 'true'
         shell: bash
         run: |
           echo "🚀 Setting up PDF configuration..."
@@ -249,7 +266,7 @@ jobs:
           echo "✅ PDF build completed at: $(date)"
 
       - name: 📉 Compress PDF with Ghostscript (Linux)
-        if: steps.format-flags.outputs.pdf_format == 'true' && runner.os == 'Linux'
+        if: steps.should-run.outputs.should-run == 'true' && steps.format-flags.outputs.pdf_format == 'true' && runner.os == 'Linux'
         shell: bash
         run: |
           if [ -f "build/pdf/Machine-Learning-Systems.pdf" ]; then
@@ -270,7 +287,7 @@ jobs:
           fi
 
       - name: 📉 Compress PDF with Ghostscript (Windows)
-        if: steps.format-flags.outputs.pdf_format == 'true' && runner.os == 'Windows'
+        if: steps.should-run.outputs.should-run == 'true' && steps.format-flags.outputs.pdf_format == 'true' && runner.os == 'Windows'
         shell: pwsh
         run: |
           $input = "./build/pdf/Machine-Learning-Systems.pdf"
@@ -291,7 +308,7 @@ jobs:
           }
 
       - name: 📤 Upload HTML artifacts
-        if: steps.format-flags.outputs.html_format == 'true'
+        if: steps.should-run.outputs.should-run == 'true' && steps.format-flags.outputs.html_format == 'true'
         id: upload-html-artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -299,7 +316,7 @@ jobs:
           path: build/html
 
       - name: 📤 Upload PDF artifacts
-        if: steps.format-flags.outputs.pdf_format == 'true'
+        if: steps.should-run.outputs.should-run == 'true' && steps.format-flags.outputs.pdf_format == 'true'
         id: upload-pdf-artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -307,6 +324,7 @@ jobs:
           path: build/pdf
 
       - name: 📋 Build Declaration
+        if: steps.should-run.outputs.should-run == 'true'
         run: |
           HTML_ARTIFACT="${{ format('{0}-html-{1}', inputs.target, env.OS_NAME) }}"
           PDF_ARTIFACT="${{ format('{0}-pdf-{1}', inputs.target, env.OS_NAME) }}"
@@ -326,27 +344,32 @@ jobs:
         run: |
           echo "🎯 Setting final build status..."
           
-          if [ "${{ job.status }}" = "success" ]; then
-            STATE="success"
-            DESCRIPTION="Build completed successfully (${{ matrix.os_name }} container)"
+          # Check if this job was supposed to run
+          if [ "${{ steps.should-run.outputs.should-run }}" = "true" ]; then
+            if [ "${{ job.status }}" = "success" ]; then
+              STATE="success"
+              DESCRIPTION="Build completed successfully (${{ matrix.os_name }} container)"
+            else
+              STATE="failure"
+              DESCRIPTION="Build failed (${{ matrix.os_name }} container)"
+            fi
+            
+            echo "📊 Final status: $STATE"
+            echo "📝 Description: $DESCRIPTION"
+            
+            curl -X POST \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
+              -d "{
+                \"state\": \"$STATE\",
+                \"description\": \"$DESCRIPTION\",
+                \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+              }"
+            
+            echo "✅ Commit status updated successfully"
           else
-            STATE="failure"
-            DESCRIPTION="Build failed (${{ matrix.os_name }} container)"
+            echo "⏭️ Skipped matrix job for ${{ matrix.os_name }} (not requested)"
           fi
-          
-          echo "📊 Final status: $STATE"
-          echo "📝 Description: $DESCRIPTION"
-          
-          curl -X POST \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
-            -d "{
-              \"state\": \"$STATE\",
-              \"description\": \"$DESCRIPTION\",
-              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
-            }"
-          
-          echo "✅ Commit status updated successfully"
 
  
