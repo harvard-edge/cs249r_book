@@ -203,18 +203,44 @@ jobs:
       pages: write
       id-token: write
     steps:
+      - name: 🔍 Determine HTML artifact to deploy
+        id: select-artifact
+        run: |
+          # Artifact naming patterns by workflow:
+          # Container: {target}-html-{os} = "dev-html-linux"
+          # Baremetal: build-{os}-{format} = "build-ubuntu-latest-html"
+          
+          # Prefer container build (faster, more consistent), fallback to baremetal
+          if [ "${{ needs.validation-builds-container.result }}" = "success" ]; then
+            ARTIFACT_NAME="dev-html-linux"
+            BUILD_METHOD="container"
+            echo "📦 Using container HTML artifact: $ARTIFACT_NAME"
+          elif [ "${{ needs.validation-builds-baremetal.result }}" = "success" ]; then
+            ARTIFACT_NAME="build-ubuntu-latest-html"
+            BUILD_METHOD="baremetal"
+            echo "📦 Using baremetal HTML artifact: $ARTIFACT_NAME"
+          else
+            echo "❌ No successful validation builds available for deployment"
+            echo "Container result: ${{ needs.validation-builds-container.result }}"
+            echo "Baremetal result: ${{ needs.validation-builds-baremetal.result }}"
+            exit 1
+          fi
+          
+          echo "🎯 Selected: $ARTIFACT_NAME (from $BUILD_METHOD build)"
+          echo "artifact-name=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
+          echo "build-method=$BUILD_METHOD" >> $GITHUB_OUTPUT
+
       - name: 📄 Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
         with:
-          # Deploy the Linux HTML artifact (will be available from matrix build)
-          artifact_name: dev-html-linux
+          artifact_name: ${{ steps.select-artifact.outputs.artifact-name }}
 
   # Step 5: Build report
   build-report:
     name: 📊 Build Report
     if: always()
-    needs: [pre-commit, link-check, validation-builds]
+    needs: [pre-commit, link-check, validation-builds-baremetal, validation-builds-container]
     runs-on: ubuntu-latest
     steps:
       - name: 📋 Generate comprehensive report
@@ -228,8 +254,9 @@ jobs:
           echo >> $GITHUB_STEP_SUMMARY
           
           echo "## 🏗️ Build Results" >> $GITHUB_STEP_SUMMARY
-          echo "- Matrix Builds: ${{ needs.validation-builds.result == 'success' && '✅ Success' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Build Strategy: Baremetal (simplified workflow)" >> $GITHUB_STEP_SUMMARY
+          echo "- Baremetal Builds: ${{ needs.validation-builds-baremetal.result == 'success' && '✅ Success' || needs.validation-builds-baremetal.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Container Builds: ${{ needs.validation-builds-container.result == 'success' && '✅ Success' || needs.validation-builds-container.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Build Strategy: Dual validation (baremetal + container)" >> $GITHUB_STEP_SUMMARY
           echo >> $GITHUB_STEP_SUMMARY
           
           echo "---" >> $GITHUB_STEP_SUMMARY
