@@ -1,4 +1,4 @@
-name: '💯 Validate Dev'
+name: '💯 Validate (Dev) Branch'
 
 # Set retention period to 7 days
 env:
@@ -42,100 +42,49 @@ on:
         default: ''
         type: string
       build_format:
-        description: 'Format to build for testing'
+        description: 'Format to validate'
         required: false
-        default: 'html'
+        default: 'both'
         type: choice
         options:
           - html
           - pdf
-          - all
+          - both
       build_os:
-        description: 'Operating systems to build on'
+        description: 'Platforms to validate (linux for fast debugging)'
         required: false
-        default: 'linux'
+        default: 'both'
         type: choice
         options:
           - linux
           - windows
           - both
-      use_containers:
-        description: 'Use pre-built containers for faster builds'
-        required: false
-        default: false
-        type: boolean
-      linux_container_name:
-        description: 'Linux container image name'
-        required: false
-        default: 'quarto-linux'
-        type: string
-      windows_container_name:
-        description: 'Windows container image name'
-        required: false
-        default: 'quarto-windows'
-        type: string
-      container_registry:
-        description: 'Container registry URL'
-        required: false
-        default: 'ghcr.io'
-        type: string
-      container_tag:
-        description: 'Container tag to use'
-        required: false
-        default: 'latest'
-        type: string
   workflow_call:  # 📞 Called by publish-live workflow
     inputs:
       build_format:
         required: false
         type: string
-        default: 'all'
-        description: 'Format to build (html/pdf/all)'
+        default: 'both'
+        description: 'Format to validate (html/pdf/both)'
       build_os:
         required: false
         type: string
-        default: 'linux'
-        description: 'Operating systems to build on (linux/windows/both)'
-      use_containers:
-        required: false
-        type: boolean
-        default: true
-        description: 'Use pre-built containers for faster builds'
-      test_branch:
-        required: false
-        type: string
-        default: ''
-        description: 'Branch to test (empty for current branch)'
-      force_container_rebuild:
-        required: false
-        type: boolean
-        default: false
-        description: 'Force container rebuild even if up-to-date'
-      no_cache:
-        required: false
-        type: boolean
-        default: false
-        description: 'Disable Docker build cache (fresh container builds)'
-      linux_container_name:
-        required: false
-        type: string
-        default: 'quarto-linux'
-        description: 'Linux container image name'
-      windows_container_name:
-        required: false
-        type: string
-        default: 'quarto-windows'
-        description: 'Windows container image name'
-      container_registry:
-        required: false
-        type: string
-        default: 'ghcr.io'
-        description: 'Container registry URL'
-      container_tag:
-        required: false
-        type: string
-        default: 'latest'
-        description: 'Container tag to use'
+        default: 'both'
+        description: 'Platforms to validate (linux/windows/both)'
+
+    outputs:
+      validation-status:
+        description: "Overall validation status (success/failure)"
+        value: ${{ jobs.validation-summary.outputs.status }}
+      container-strategy:
+        description: "Container strategy used (container/baremetal/hybrid)"
+        value: ${{ jobs.container-health-check.outputs.container-strategy }}
+      build-results:
+        description: "Build results summary"
+        value: ${{ jobs.validation-summary.outputs.build-results }}
+      containers-healthy:
+        description: "Whether containers are healthy and usable"
+        value: ${{ jobs.container-health-check.outputs.containers-need-rebuild == 'false' }}
 
 jobs:
   # Step 1: Check container health and availability
@@ -215,89 +164,140 @@ jobs:
           pre-commit install --install-hooks
           pre-commit run --all-files
 
-  # Step 4: Smart build orchestration
-  smart-build:
-    name: 🧠 Smart Build
-    needs: [container-health-check, ensure-linux-container, ensure-windows-container, pre-commit]
+  # Step 4: Matrix validation builds
+  validation-builds:
+    name: 🚀 Validate ${{ matrix.format }} on ${{ matrix.os_name }}
+    needs: [container-health-check, ensure-linux-container, ensure-windows-container]
     if: always() && !failure()
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            format: '${{ inputs.build_format || ''html'' }}'
-            enabled: ${{ inputs.build_os == 'linux' || inputs.build_os == 'both' }}
-          - os: windows-latest  
-            format: '${{ inputs.build_format || ''html'' }}'
-            enabled: ${{ inputs.build_os == 'windows' || inputs.build_os == 'both' }}
+          # Generate matrix based on inputs
+          - format: html
+            os: ubuntu-latest
+            os_name: linux
+            enabled: ${{ inputs.build_format == 'html' || inputs.build_format == 'both' }}
+            os_enabled: ${{ inputs.build_os == 'linux' || inputs.build_os == 'both' }}
+          - format: pdf  
+            os: ubuntu-latest
+            os_name: linux
+            enabled: ${{ inputs.build_format == 'pdf' || inputs.build_format == 'both' }}
+            os_enabled: ${{ inputs.build_os == 'linux' || inputs.build_os == 'both' }}
+          - format: html
+            os: windows-latest
+            os_name: windows
+            enabled: ${{ inputs.build_format == 'html' || inputs.build_format == 'both' }}
+            os_enabled: ${{ inputs.build_os == 'windows' || inputs.build_os == 'both' }}
+          - format: pdf
+            os: windows-latest  
+            os_name: windows
+            enabled: ${{ inputs.build_format == 'pdf' || inputs.build_format == 'both' }}
+            os_enabled: ${{ inputs.build_os == 'windows' || inputs.build_os == 'both' }}
     runs-on: ubuntu-latest
     steps:
-      - name: 🎯 Determine build strategy
-        id: strategy
-        if: matrix.enabled == 'true'
+      - name: 🔍 Check if this matrix job should run
+        id: should-run
         run: |
-          echo "🧠 Determining optimal build strategy..."
-          
-          CONTAINER_STRATEGY="${{ needs.container-health-check.outputs.container-strategy }}"
-          LINUX_AVAILABLE="${{ needs.container-health-check.outputs.linux-container-healthy }}"
-          WINDOWS_AVAILABLE="${{ needs.container-health-check.outputs.windows-container-healthy }}"
-          
-          # Determine which workflow to use
-          if [ "${{ matrix.os }}" = "ubuntu-latest" ] && [ "$LINUX_AVAILABLE" = "true" ]; then
-            WORKFLOW="quarto-build-container"
-            BUILD_TYPE="🐳 Container Build"
-          elif [ "${{ matrix.os }}" = "windows-latest" ] && [ "$WINDOWS_AVAILABLE" = "true" ]; then
-            WORKFLOW="quarto-build-container"  # When Windows containers are ready
-            BUILD_TYPE="🐳 Container Build"
+          # Only run if both format and OS are enabled
+          if [ "${{ matrix.enabled }}" = "true" ] && [ "${{ matrix.os_enabled }}" = "true" ]; then
+            echo "enabled=true" >> $GITHUB_OUTPUT
+            echo "✅ Running validation: ${{ matrix.format }} on ${{ matrix.os_name }}"
           else
-            WORKFLOW="quarto-build-baremetal"
-            BUILD_TYPE="🖥️ Baremetal Build (no container)"
+            echo "enabled=false" >> $GITHUB_OUTPUT
+            echo "⏭️ Skipping: ${{ matrix.format }} on ${{ matrix.os_name }}"
+          fi
+
+      - name: 🎯 Determine build strategy  
+        id: strategy
+        if: steps.should-run.outputs.enabled == 'true'
+        run: |
+          # Choose workflow based on container availability
+          LINUX_HEALTHY="${{ needs.container-health-check.outputs.linux-container-healthy }}"
+          WINDOWS_HEALTHY="${{ needs.container-health-check.outputs.windows-container-healthy }}"
+          
+          if [ "${{ matrix.os_name }}" = "linux" ] && [ "$LINUX_HEALTHY" = "true" ]; then
+            WORKFLOW="container"
+            echo "🐳 Using Linux container for fast build"
+          elif [ "${{ matrix.os_name }}" = "windows" ] && [ "$WINDOWS_HEALTHY" = "true" ]; then
+            WORKFLOW="container" 
+            echo "🐳 Using Windows container for fast build"
+          else
+            WORKFLOW="baremetal"
+            echo "🖥️ Using baremetal build (container not available)"
           fi
           
           echo "workflow=$WORKFLOW" >> $GITHUB_OUTPUT
-          echo "build-type=$BUILD_TYPE" >> $GITHUB_OUTPUT
-          
-          echo "📊 Build Strategy for ${{ matrix.os }}:"
-          echo "  Workflow: $WORKFLOW"
-          echo "  Type: $BUILD_TYPE"
-          echo "  Container available: $LINUX_AVAILABLE (Linux), $WINDOWS_AVAILABLE (Windows)"
+          echo "📊 ${{ matrix.format }} on ${{ matrix.os_name }}: $WORKFLOW build"
 
-      - name: 🚀 Trigger Container Build (Linux)
-        if: matrix.enabled == 'true' && matrix.os == 'ubuntu-latest' && inputs.use_containers == true && needs.container-health-check.outputs.linux-container-healthy == 'true'
+      - name: 🚀 Build with Container
+        if: steps.should-run.outputs.enabled == 'true' && steps.strategy.outputs.workflow == 'container'
         uses: ./.github/workflows/quarto-build-container.yml
         with:
-          environment: development
           os: ${{ matrix.os }}
           format: ${{ matrix.format }}
-          target: ${{ inputs.test_branch && 'dev' || (github.ref == 'refs/heads/main' && 'main' || 'dev') }}
-          html_artifact_name: mlsysbook-html-linux
-          pdf_artifact_name: mlsysbook-pdf-linux
+          target: dev
           
-      - name: 🚀 Trigger Container Build (Windows) 
-        if: matrix.enabled == 'true' && matrix.os == 'windows-latest' && inputs.use_containers == true && needs.container-health-check.outputs.windows-container-healthy == 'true'
-        uses: ./.github/workflows/quarto-build-container.yml
-        with:
-          environment: development
-          os: ${{ matrix.os }}
-          format: ${{ matrix.format }}
-          target: ${{ inputs.test_branch && 'dev' || (github.ref == 'refs/heads/main' && 'main' || 'dev') }}
-          html_artifact_name: mlsysbook-html-windows
-          pdf_artifact_name: mlsysbook-pdf-windows
-          
-      - name: 🖥️ Trigger Baremetal Build (Fallback)
-        if: matrix.enabled == 'true' && (inputs.use_containers != true || (matrix.os == 'ubuntu-latest' && needs.container-health-check.outputs.linux-container-healthy != 'true') || (matrix.os == 'windows-latest' && needs.container-health-check.outputs.windows-container-healthy != 'true'))
+      - name: 🖥️ Build with Baremetal  
+        if: steps.should-run.outputs.enabled == 'true' && steps.strategy.outputs.workflow == 'baremetal'
         uses: ./.github/workflows/quarto-build-baremetal.yml
         with:
-          environment: development
           os: ${{ matrix.os }}
           format: ${{ matrix.format }}
-          target: ${{ inputs.test_branch && 'dev' || (github.ref == 'refs/heads/main' && 'main' || 'dev') }}
+          target: dev
 
-  # Step 5: Results and reporting
+  # Step 5: Deploy Linux HTML to gh-pages
+  deploy-gh-pages:
+    name: 🚀 Deploy to GitHub Pages
+    needs: [validation-builds]
+    # Only deploy Linux HTML build when it succeeds
+    if: github.ref == 'refs/heads/dev' && needs.validation-builds.result == 'success'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - name: 📄 Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+        with:
+          # Deploy the Linux HTML artifact (will be available from matrix build)
+          artifact_name: dev-html-linux
+
+  # Step 6: Pre-commit checks
+  pre-commit:
+    name: 🔍 Pre-commit Checks
+    needs: [validation-builds]
+    if: always() && !failure()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install pre-commit
+        run: pip install pre-commit
+
+      - name: Cache pre-commit hooks
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      - name: Install and run pre-commit hooks
+        run: |
+          pre-commit install --install-hooks
+          pre-commit run --all-files
+
+  # Step 7: Results and reporting
   build-report:
     name: 📊 Build Report
     if: always()
-    needs: [container-health-check, ensure-linux-container, ensure-windows-container, pre-commit, smart-build]
+    needs: [container-health-check, ensure-linux-container, ensure-windows-container, validation-builds, pre-commit]
     runs-on: ubuntu-latest
     steps:
       - name: 📋 Generate comprehensive report
@@ -336,3 +336,49 @@ jobs:
           
           echo "---" >> $GITHUB_STEP_SUMMARY
           echo "⏰ Completed at: $(date '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_STEP_SUMMARY
+
+  # Final validation summary with outputs
+  validation-summary:
+    name: 📊 Validation Summary
+    needs: [container-health-check, ensure-linux-container, ensure-windows-container, validation-builds, pre-commit]
+    if: always()
+    runs-on: ubuntu-latest
+    outputs:
+      status: ${{ steps.summary.outputs.status }}
+      build-results: ${{ steps.summary.outputs.build-results }}
+    
+    steps:
+      - name: 📊 Generate validation summary
+        id: summary
+        run: |
+          # Determine overall validation status
+          CONTAINER_CHECK="${{ needs.container-health-check.result }}"
+          VALIDATION_BUILDS="${{ needs.validation-builds.result }}"
+          PRECOMMIT="${{ needs.pre-commit.result }}"
+          
+          # Overall status logic
+          if [ "$VALIDATION_BUILDS" = "success" ] && [ "$PRECOMMIT" = "success" ]; then
+            STATUS="success"
+          else
+            STATUS="failure"
+          fi
+          
+          # Build results summary
+          BUILD_RESULTS=""
+          if [ "$VALIDATION_BUILDS" = "success" ]; then
+            BUILD_RESULTS="${BUILD_RESULTS}✅ Matrix Builds: Success"
+          else
+            BUILD_RESULTS="${BUILD_RESULTS}❌ Matrix Builds: Failed"
+          fi
+          
+          if [ "$PRECOMMIT" = "success" ]; then
+            BUILD_RESULTS="${BUILD_RESULTS}, ✅ Pre-commit: Passed"
+          else
+            BUILD_RESULTS="${BUILD_RESULTS}, ❌ Pre-commit: Failed"
+          fi
+          
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
+          echo "build-results=$BUILD_RESULTS" >> $GITHUB_OUTPUT
+          
+          echo "📊 Validation Status: $STATUS"
+          echo "📋 Build Results: $BUILD_RESULTS"

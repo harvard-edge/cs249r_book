@@ -53,7 +53,7 @@ on:
         required: false
         type: string
         default: '{prefix}-{format}-{os}'
-        description: 'Artifact name template. Use {prefix}, {format} for html/pdf, and {os} for linux/windows'
+        description: 'Artifact naming pattern. Example: "book-html-linux" (prefix=book, format=html, os=linux)'
   workflow_call:
     inputs:
       os:
@@ -93,6 +93,20 @@ on:
         default: false
         description: 'Build PDF format (legacy - use format instead)'
 
+    outputs:
+      html-artifact-name:
+        description: "Name of uploaded HTML artifact (if built)"
+        value: ${{ jobs.build.outputs.html-artifact-name }}
+      pdf-artifact-name:
+        description: "Name of uploaded PDF artifact (if built)"
+        value: ${{ jobs.build.outputs.pdf-artifact-name }}
+      build-status:
+        description: "Overall build status (success/failure/skipped)"
+        value: ${{ jobs.build.outputs.build-status }}
+      formats-built:
+        description: "Comma-separated list of formats that were built"
+        value: ${{ jobs.build.outputs.formats-built }}
+
 permissions:
   contents: write
   pages: write
@@ -112,8 +126,13 @@ jobs:
             os_name: windows
             container_name: quarto-windows
     container: ${{ format('{0}/{1}/{2}:{3}', inputs.container_registry, github.repository, matrix.container_name, inputs.container_tag) }}
-    timeout-minutes: 60
+    timeout-minutes: 120
     # Matrix job will run for both OS options, filtering handled in steps
+    outputs:
+      html-artifact-name: ${{ steps.upload-html-artifacts.outputs.artifact-id }}
+      pdf-artifact-name: ${{ steps.upload-pdf-artifacts.outputs.artifact-id }}
+      build-status: ${{ steps.build-summary.outputs.status }}
+      formats-built: ${{ steps.build-summary.outputs.formats }}
     env:
       QUARTO_LOG_LEVEL: ${{ inputs.quarto-log-level || 'INFO' }}
       OS_NAME: ${{ matrix.os_name }}
@@ -371,5 +390,45 @@ jobs:
           else
             echo "⏭️ Skipped matrix job for ${{ matrix.os_name }} (not requested)"
           fi
+
+      - name: 📋 Build summary outputs
+        id: build-summary
+        if: always()
+        shell: bash
+        run: |
+          # Determine build status and formats built
+          if [ "${{ steps.should-run.outputs.should-run }}" = "true" ]; then
+            # Check if builds were successful
+            HTML_SUCCESS="${{ steps.build-html.outcome }}"
+            PDF_SUCCESS="${{ steps.build-pdf.outcome }}"
+            
+            FORMATS_BUILT=""
+            if [ "${{ steps.format-flags.outputs.html_format }}" = "true" ] && [ "$HTML_SUCCESS" = "success" ]; then
+              FORMATS_BUILT="html"
+            fi
+            if [ "${{ steps.format-flags.outputs.pdf_format }}" = "true" ] && [ "$PDF_SUCCESS" = "success" ]; then
+              if [ -n "$FORMATS_BUILT" ]; then
+                FORMATS_BUILT="${FORMATS_BUILT},pdf"
+              else
+                FORMATS_BUILT="pdf"
+              fi
+            fi
+            
+            # Overall status
+            if [ -n "$FORMATS_BUILT" ]; then
+              BUILD_STATUS="success"
+            else
+              BUILD_STATUS="failure"
+            fi
+          else
+            BUILD_STATUS="skipped"
+            FORMATS_BUILT=""
+          fi
+          
+          echo "status=$BUILD_STATUS" >> $GITHUB_OUTPUT
+          echo "formats=$FORMATS_BUILT" >> $GITHUB_OUTPUT
+          
+          echo "📊 Build Status: $BUILD_STATUS"
+          echo "📦 Formats Built: $FORMATS_BUILT"
 
  

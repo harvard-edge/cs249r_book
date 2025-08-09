@@ -104,7 +104,28 @@ on:
         required: false
         type: string
         default: ''
-        description: 'Explicit artifact name (if empty, uses build-{os}-{format} pattern)'
+        description: 'Artifact naming pattern. Example: "book-html-linux" (default: "build-linux-html")'
+
+    outputs:
+      html-artifact-name:
+        description: "Name of uploaded HTML artifact (if built)"
+        value: ${{ jobs.build.outputs.html-artifact-name }}
+      pdf-artifact-name:
+        description: "Name of uploaded PDF artifact (if built)" 
+        value: ${{ jobs.build.outputs.pdf-artifact-name }}
+      epub-artifact-name:
+        description: "Name of uploaded EPUB artifact (if built)"
+        value: ${{ jobs.build.outputs.epub-artifact-name }}
+      build-status:
+        description: "Overall build status (success/failure/skipped)"
+        value: ${{ jobs.build.outputs.build-status }}
+      formats-built:
+        description: "Comma-separated list of formats that were built"
+        value: ${{ jobs.build.outputs.formats-built }}
+      artifact-name:
+        description: "Final artifact name used for upload"
+        value: ${{ jobs.build.outputs.artifact-name }}
+
       deploy:
         required: false
         type: boolean
@@ -119,9 +140,16 @@ permissions:
 jobs:
   build:
     runs-on: ${{ inputs.os }}
-    timeout-minutes: 60   # ⏰ Set job timeout to 1 hour (3600 seconds)
+    timeout-minutes: 120   # ⏰ Set job timeout to 2 hours (7200 seconds)
     environment:
       name: ${{ inputs.environment }}
+    outputs:
+      html-artifact-name: ${{ steps.upload-html.outputs.artifact-id }}
+      pdf-artifact-name: ${{ steps.upload-pdf.outputs.artifact-id }}
+      epub-artifact-name: ${{ steps.upload-epub.outputs.artifact-id }}
+      build-status: ${{ steps.build-summary.outputs.status }}
+      formats-built: ${{ steps.build-summary.outputs.formats }}
+      artifact-name: ${{ steps.build-declaration.outputs.artifact_created }}
     env:
       R_LIBS_USER: ${{ github.workspace }}/.r-lib
       QUARTO_LOG_LEVEL: ${{ inputs.quarto-log-level || 'INFO' }}
@@ -702,6 +730,7 @@ jobs:
                     build/pdf
 
       - name: 📋 Build Declaration
+        id: build-declaration
         shell: bash
         run: |
           ARTIFACT_NAME="${{ inputs.artifact_name != '' && inputs.artifact_name || format('build-{0}-{1}', inputs.os, inputs.format) }}"
@@ -712,6 +741,64 @@ jobs:
           echo "📊 Environment: ${{ inputs.environment }}"
           echo "📝 Note: This workflow only builds artifacts - deployment handled by publish-live workflow"
           echo "artifact_created=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
+
+      - name: 📋 Build summary outputs
+        id: build-summary
+        if: always()
+        shell: bash
+        run: |
+          # Determine build status and formats built
+          FORMAT="${{ inputs.format }}"
+          FORMATS_BUILT=""
+          BUILD_STATUS="success"
+          
+          # Check which formats were built successfully
+          if [ "$FORMAT" = "all" ]; then
+            # Check individual format steps
+            HTML_SUCCESS="${{ steps.build-html.outcome }}"
+            PDF_SUCCESS="${{ steps.build-pdf.outcome }}"
+            EPUB_SUCCESS="${{ steps.build-epub.outcome }}"
+            
+            if [ "$HTML_SUCCESS" = "success" ]; then
+              FORMATS_BUILT="html"
+            fi
+            if [ "$PDF_SUCCESS" = "success" ]; then
+              if [ -n "$FORMATS_BUILT" ]; then
+                FORMATS_BUILT="${FORMATS_BUILT},pdf"
+              else
+                FORMATS_BUILT="pdf"
+              fi
+            fi
+            if [ "$EPUB_SUCCESS" = "success" ]; then
+              if [ -n "$FORMATS_BUILT" ]; then
+                FORMATS_BUILT="${FORMATS_BUILT},epub"
+              else
+                FORMATS_BUILT="epub"
+              fi
+            fi
+            
+            # Overall status for 'all' format
+            if [ -n "$FORMATS_BUILT" ]; then
+              BUILD_STATUS="success"
+            else
+              BUILD_STATUS="failure"
+            fi
+          else
+            # Single format build
+            BUILD_SUCCESS="${{ steps.build-output.outcome }}"
+            if [ "$BUILD_SUCCESS" = "success" ]; then
+              FORMATS_BUILT="$FORMAT"
+              BUILD_STATUS="success"
+            else
+              BUILD_STATUS="failure"
+            fi
+          fi
+          
+          echo "status=$BUILD_STATUS" >> $GITHUB_OUTPUT
+          echo "formats=$FORMATS_BUILT" >> $GITHUB_OUTPUT
+          
+          echo "📊 Build Status: $BUILD_STATUS"
+          echo "📦 Formats Built: $FORMATS_BUILT"
 
 
 
