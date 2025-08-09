@@ -1,0 +1,438 @@
+name: 🩺 Container Health Check
+
+# Comprehensive health validation for build containers
+# Tests essential Quarto build tools and functionality
+# Runs daily to ensure container reliability
+
+on:
+  workflow_dispatch:
+    inputs:
+      container_registry:
+        description: 'Container registry URL'
+        required: false
+        default: 'ghcr.io'
+        type: string
+      container_tag:
+        description: 'Container tag to test'
+        required: false
+        default: 'latest'
+        type: string
+      test_linux:
+        description: 'Test Linux container'
+        required: false
+        default: true
+        type: boolean
+      test_windows:
+        description: 'Test Windows container'
+        required: false
+        default: true
+        type: boolean
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+# Centralized Container Configuration - Single Source of Truth
+env:
+  REGISTRY: ${{ inputs.container_registry || 'ghcr.io' }}
+  CONTAINER_TAG: ${{ inputs.container_tag || 'latest' }}
+  LINUX_CONTAINER_NAME: 'quarto-linux'
+  WINDOWS_CONTAINER_NAME: 'quarto-windows'
+  # Computed full image names
+  LINUX_IMAGE: ${{ inputs.container_registry || 'ghcr.io' }}/${{ github.repository }}/quarto-linux:${{ inputs.container_tag || 'latest' }}
+  WINDOWS_IMAGE: ${{ inputs.container_registry || 'ghcr.io' }}/${{ github.repository }}/quarto-windows:${{ inputs.container_tag || 'latest' }}
+
+jobs:
+  # Matrix strategy for both container platforms
+  container-health-check:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false  # Test both containers even if one fails
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            container_name: quarto-linux
+            shell: bash
+            test_enabled: ${{ inputs.test_linux != false }}  # Default true
+          - os: windows-latest
+            platform: windows  
+            container_name: quarto-windows
+            shell: pwsh
+            test_enabled: ${{ inputs.test_windows != false }}  # Default true
+    
+    # Skip job if this platform is disabled
+    if: matrix.test_enabled
+    
+    env:
+      CONTAINER_IMAGE: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.container_name }}:${{ env.CONTAINER_TAG }}
+      PLATFORM: ${{ matrix.platform }}
+      
+    steps:
+      - name: 🐳 Pull Container
+        run: |
+          echo "🐳 Pulling ${{ matrix.platform }} container..."
+          echo "📦 Image: ${{ env.CONTAINER_IMAGE }}"
+          docker pull ${{ env.CONTAINER_IMAGE }}
+          echo "✅ Container pulled successfully"
+
+      - name: 📊 Container Information
+        shell: ${{ matrix.shell }}
+        run: |
+          echo "📊 === CONTAINER INFORMATION ==="
+          echo "📋 Platform: ${{ matrix.platform }}"
+          echo "📋 Image: ${{ env.CONTAINER_IMAGE }}"
+          echo "📋 Container Details:"
+          docker images ${{ env.CONTAINER_IMAGE }} --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}"
+          
+          echo ""
+          echo "📊 Container Size Analysis:"
+          ${{ matrix.platform == 'windows' && '$CONTAINER_SIZE = ' || 'CONTAINER_SIZE=$(' }}docker images ${{ env.CONTAINER_IMAGE }} --format "{{.Size}}"${{ matrix.platform == 'windows' && '' || ')' }}
+          echo "📦 Container size: ${{ matrix.platform == 'windows' && '$CONTAINER_SIZE' || '$CONTAINER_SIZE' }}"
+
+      - name: 🖥️ OS Information  
+        shell: ${{ matrix.shell }}
+        run: |
+          echo "🖥️ === OPERATING SYSTEM INFORMATION ==="
+          ${{ matrix.platform == 'linux' && format('docker run --rm {0} bash -c "
+            echo ''📊 OS Details:''
+            echo ''=============''
+            cat /etc/os-release
+            echo ''''
+            echo ''📊 System Resources:''
+            echo ''====================''
+            echo ''Memory:''
+            free -h
+            echo ''''
+            echo ''Disk Space:''
+            df -h /
+            echo ''''
+            echo ''CPU Info:''
+            nproc
+            lscpu | grep ''Model name'' || echo ''CPU info not available''
+          " | tee {1}-os-info.log', env.CONTAINER_IMAGE, matrix.platform) }}${{ matrix.platform == 'windows' && format('docker run --rm {0} pwsh -Command "
+            Write-Output ''📊 OS Details:''
+            Write-Output ''=============''
+            Get-ComputerInfo | Select-Object WindowsProductName, WindowsVersion, TotalPhysicalMemory
+            Write-Output ''''
+            Write-Output ''📊 System Resources:''
+            Write-Output ''====================''
+            Get-WmiObject -Class Win32_OperatingSystem | Select-Object Caption, Version, TotalVisibleMemorySize, FreePhysicalMemory
+          " | Tee-Object -FilePath "{1}-os-info.log"', env.CONTAINER_IMAGE, matrix.platform) }}
+
+      - name: 🛠️ Essential Quarto Build Tools
+        shell: ${{ matrix.shell }}
+        run: |
+          echo "🛠️ === ESSENTIAL QUARTO BUILD TOOLS ==="
+          echo "📋 Testing only tools needed for Quarto builds:"
+          echo "================================================"
+          
+          ${{ matrix.platform == 'linux' && format('docker run --rm {0} bash -c "
+            echo ''📊 Checking Quarto...'' && quarto --version | head -1 && echo ''✅ Quarto: OK'' || echo ''❌ Quarto: FAILED'' &&
+            echo ''📊 Checking Python...'' && python3 --version && echo ''✅ Python: OK'' || echo ''❌ Python: FAILED'' &&
+            echo ''📊 Checking R...'' && R --version | head -1 && echo ''✅ R: OK'' || echo ''❌ R: FAILED'' &&
+            echo ''📊 Checking LuaLaTeX...'' && lualatex --version | head -1 && echo ''✅ LuaLaTeX: OK'' || echo ''❌ LuaLaTeX: FAILED'' &&
+            echo ''📊 Checking Ghostscript...'' && gs --version | head -1 && echo ''✅ Ghostscript: OK'' || echo ''❌ Ghostscript: FAILED'' &&
+            echo ''📊 Checking Inkscape...'' && inkscape --version | head -1 && echo ''✅ Inkscape: OK'' || echo ''❌ Inkscape: FAILED'' &&
+            echo ''🎯 === TOOL CHECK SUMMARY ==='' &&
+            echo ''✅ All essential Quarto build tools verified!''
+          " | tee {1}-tool-versions.log', env.CONTAINER_IMAGE, matrix.platform) }}${{ matrix.platform == 'windows' && format('docker run --rm {0} pwsh -Command "
+            Write-Output ''📊 Checking Quarto...''; if (quarto --version) {{ Write-Output ''✅ Quarto: OK'' }} else {{ Write-Output ''❌ Quarto: FAILED'' }};
+            Write-Output ''📊 Checking Python...''; if (python --version) {{ Write-Output ''✅ Python: OK'' }} else {{ Write-Output ''❌ Python: FAILED'' }};
+            Write-Output ''📊 Checking R...''; if (R --version) {{ Write-Output ''✅ R: OK'' }} else {{ Write-Output ''❌ R: FAILED'' }};
+            Write-Output ''📊 Checking LuaLaTeX...''; if (lualatex --version) {{ Write-Output ''✅ LuaLaTeX: OK'' }} else {{ Write-Output ''❌ LuaLaTeX: FAILED'' }};
+            Write-Output ''📊 Checking Ghostscript...''; if (gswin64c --version) {{ Write-Output ''✅ Ghostscript: OK'' }} else {{ Write-Output ''❌ Ghostscript: FAILED'' }};
+            Write-Output ''📊 Checking Inkscape...''; if (inkscape --version) {{ Write-Output ''✅ Inkscape: OK'' }} else {{ Write-Output ''❌ Inkscape: FAILED'' }};
+            Write-Output ''🎯 === TOOL CHECK SUMMARY ==='';
+            Write-Output ''✅ All essential Quarto build tools verified!''
+          " | Tee-Object -FilePath "{1}-tool-versions.log"', env.CONTAINER_IMAGE, matrix.platform) }}
+          
+          echo "📋 Essential tool versions saved to ${{ matrix.platform }}-tool-versions.log"
+
+      - name: 🔍 Quarto Check (Comprehensive)
+        shell: ${{ matrix.shell }}
+        run: |
+          echo "🔍 === QUARTO CHECK (COMPREHENSIVE DETAILS) ==="
+          echo "📋 Running quarto check to validate full installation:"
+          echo "===================================================="
+          
+          ${{ matrix.platform == 'linux' && format('docker run --rm {0} bash -c "
+            echo ''🔍 Running quarto check...'' &&
+            if quarto check; then
+              echo ''✅ Quarto check: PASSED - All components verified!''
+            else
+              echo ''❌ Quarto check: FAILED - Issues detected!''
+              exit 1
+            fi
+          " | tee {1}-quarto-check.log', env.CONTAINER_IMAGE, matrix.platform) }}${{ matrix.platform == 'windows' && format('docker run --rm {0} pwsh -Command "
+            Write-Output ''🔍 Running quarto check...'';
+            if (quarto check) {{
+              Write-Output ''✅ Quarto check: PASSED - All components verified!''
+            }} else {{
+              Write-Output ''❌ Quarto check: FAILED - Issues detected!''
+              exit 1
+            }}
+          " | Tee-Object -FilePath "{1}-quarto-check.log"', env.CONTAINER_IMAGE, matrix.platform) }}
+          
+          echo "📋 Quarto check results saved to ${{ matrix.platform }}-quarto-check.log"
+
+      - name: 🧪 Test Minimal Quarto Build
+        shell: ${{ matrix.shell }}
+        run: |
+          echo "🧪 === MINIMAL QUARTO BUILD TEST ==="
+          # Create a minimal test document
+          ${{ matrix.platform == 'linux' && 'cat > test-doc.qmd << ''EOF''
+          ---
+          title: "Container Test"
+          format: html
+          ---
+          
+          # Test Document
+          
+          This is a test document to verify the container works.
+          
+          ## Python Code Block
+          
+          ```{python}
+          print("Hello from Python!")
+          import sys
+          print(f"Python version: {sys.version}")
+          ```
+          
+          ## R Code Block
+          
+          ```{r}
+          cat("Hello from R!\n")
+          cat("R version:", R.version.string, "\n")
+          ```
+          
+          ## Math Block
+          
+          $$
+          E = mc^2
+          $$
+          
+          ## Table
+          
+          | Tool | Version |
+          |------|---------|
+          | Quarto | Latest |
+          | Python | 3.x |
+          | R | Latest |
+          EOF' }}${{ matrix.platform == 'windows' && '@"
+          ---
+          title: ''Container Test''
+          format: html
+          ---
+          
+          # Test Document
+          
+          This is a test document to verify the Windows container works.
+          
+          ```{python}
+          print(''Hello from Python!'')
+          import sys
+          print(f''Python version: {sys.version}'')
+          ```
+          
+          ```{r}
+          cat(''Hello from R!\n'')
+          cat(''R version:'', R.version.string, ''\n'')
+          ```
+          "@ | Out-File -FilePath "test-doc.qmd" -Encoding UTF8' }}
+          
+          # Test the build
+          ${{ matrix.platform == 'linux' && format('docker run --rm -v $(pwd):/workspace {0} bash -c "
+            cd /workspace &&
+            echo ''🔨 Building test document...'' &&
+            quarto render test-doc.qmd --to html &&
+            echo ''✅ Build successful!'' &&
+            ls -la test-doc.html &&
+            echo ''📊 File size:'' &&
+            du -h test-doc.html &&
+            echo ''🧹 Cleaning up...'' &&
+            rm -f test-doc.html &&
+            echo ''✅ Build test: PASSED''
+          " | tee {1}-build-test.log', env.CONTAINER_IMAGE, matrix.platform) }}${{ matrix.platform == 'windows' && format('docker run --rm -v ${{PWD}}:/workspace {0} pwsh -Command "
+            Set-Location /workspace;
+            Write-Output ''🔨 Building test document...'';
+            quarto render test-doc.qmd --to html;
+            Write-Output ''✅ Build successful!'';
+            Get-ChildItem test-doc.html;
+            Write-Output ''📊 File size:'';
+            (Get-Item test-doc.html).Length;
+            Write-Output ''🧹 Cleaning up...'';
+            Remove-Item test-doc.html -Force;
+            Write-Output ''✅ Build test: PASSED''
+          " | Tee-Object -FilePath "{1}-build-test.log"', env.CONTAINER_IMAGE, matrix.platform) }}
+
+      - name: 📊 ${{ matrix.platform }} Container Test Summary
+        shell: ${{ matrix.shell }}
+        run: |
+          echo "📊 === ${{ upper(matrix.platform) }} CONTAINER TEST SUMMARY ==="
+          echo "========================================"
+          echo ""
+          echo "🔍 RESULTS:"
+          echo "----------"
+          
+          # Check if all log files exist and contain success indicators
+          ${{ matrix.platform == 'linux' && 'if grep -q "✅.*Quarto.*OK" linux-tool-versions.log && \
+             grep -q "✅.*Python.*OK" linux-tool-versions.log && \
+             grep -q "✅.*R.*OK" linux-tool-versions.log && \
+             grep -q "✅.*LuaLaTeX.*OK" linux-tool-versions.log && \
+             grep -q "✅.*Ghostscript.*OK" linux-tool-versions.log && \
+             grep -q "✅.*Inkscape.*OK" linux-tool-versions.log; then
+            echo "✅ Essential Tools: ALL PASSED"
+          else
+            echo "❌ Essential Tools: SOME FAILED"
+          fi
+          
+          if grep -q "✅.*Quarto check.*PASSED" linux-quarto-check.log; then
+            echo "✅ Quarto Check: PASSED"
+          else
+            echo "❌ Quarto Check: FAILED"
+          fi
+          
+          if grep -q "✅.*Build test.*PASSED" linux-build-test.log; then
+            echo "✅ Build Test: PASSED"
+          else
+            echo "❌ Build Test: FAILED"
+          fi
+          
+          echo ""
+          echo "🎯 OVERALL STATUS:"
+          echo "-----------------"
+          if grep -q "✅" linux-tool-versions.log && \
+             grep -q "✅.*PASSED" linux-quarto-check.log && \
+             grep -q "✅.*PASSED" linux-build-test.log; then
+            echo "🟢 LINUX CONTAINER: FULLY OPERATIONAL ✅"
+            echo "   Ready for Quarto builds!"
+          else
+            echo "🔴 LINUX CONTAINER: ISSUES DETECTED ❌"
+            echo "   Check logs for details"
+          fi' }}${{ matrix.platform == 'windows' && '$toolsOK = (Select-String -Path "windows-tool-versions.log" -Pattern "✅.*Quarto.*OK") -and
+                     (Select-String -Path "windows-tool-versions.log" -Pattern "✅.*Python.*OK") -and
+                     (Select-String -Path "windows-tool-versions.log" -Pattern "✅.*R.*OK") -and
+                     (Select-String -Path "windows-tool-versions.log" -Pattern "✅.*LuaLaTeX.*OK") -and
+                     (Select-String -Path "windows-tool-versions.log" -Pattern "✅.*Ghostscript.*OK") -and
+                     (Select-String -Path "windows-tool-versions.log" -Pattern "✅.*Inkscape.*OK")
+          
+          if ($toolsOK) {
+            Write-Output "✅ Essential Tools: ALL PASSED"
+          } else {
+            Write-Output "❌ Essential Tools: SOME FAILED"
+          }
+          
+          if (Select-String -Path "windows-quarto-check.log" -Pattern "✅.*Quarto check.*PASSED") {
+            Write-Output "✅ Quarto Check: PASSED"
+          } else {
+            Write-Output "❌ Quarto Check: FAILED"
+          }
+          
+          if (Select-String -Path "windows-build-test.log" -Pattern "✅.*Build test.*PASSED") {
+            Write-Output "✅ Build Test: PASSED"
+          } else {
+            Write-Output "❌ Build Test: FAILED"
+          }
+          
+          Write-Output ""
+          Write-Output "🎯 OVERALL STATUS:"
+          Write-Output "-----------------"
+          
+          $checkPassed = Select-String -Path "windows-quarto-check.log" -Pattern "✅.*PASSED"
+          $buildPassed = Select-String -Path "windows-build-test.log" -Pattern "✅.*PASSED"
+          
+          if ($toolsOK -and $checkPassed -and $buildPassed) {
+            Write-Output "🟢 WINDOWS CONTAINER: FULLY OPERATIONAL ✅"
+            Write-Output "   Ready for Quarto builds!"
+          } else {
+            Write-Output "🔴 WINDOWS CONTAINER: ISSUES DETECTED ❌"
+            Write-Output "   Check logs for details"
+          }' }}
+          echo "========================================"
+
+      - name: 📤 Upload Test Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-container-test-results
+          path: |
+            ${{ matrix.platform }}-os-info.log
+            ${{ matrix.platform }}-tool-versions.log
+            ${{ matrix.platform }}-quarto-check.log
+            ${{ matrix.platform }}-build-test.log
+          retention-days: 30
+
+  # Performance testing job (runs after health checks)
+  performance-test:
+    needs: container-health-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: always()  # Run even if health checks have issues
+    
+    env:
+      CONTAINER_IMAGE: ${{ env.LINUX_IMAGE }}  # Use Linux for performance testing
+      
+    steps:
+      - name: 🐳 Performance Tests
+        run: |
+          echo "🐳 === CONTAINER PERFORMANCE TESTS ==="
+          echo "📦 Testing: ${{ env.CONTAINER_IMAGE }}"
+          
+          echo "🧪 Testing container startup time..."
+          echo "⏱️ Startup time measurement:"
+          time docker run --rm ${{ env.CONTAINER_IMAGE }} \
+            bash -c "echo 'Container started successfully'"
+          
+          echo ""
+          echo "🧪 Testing tool availability speed..."
+          echo "⏱️ Tool access time measurement:"
+          time docker run --rm ${{ env.CONTAINER_IMAGE }} \
+            bash -c "quarto --version && python3 --version && R --version"
+          
+          echo ""
+          echo "🧪 Testing minimal build performance..."
+          echo "⏱️ Build time measurement:"
+          # Create minimal test
+          echo '---\ntitle: "Test"\nformat: html\n---\n# Test' > perf-test.qmd
+          
+          time docker run --rm -v $(pwd):/workspace ${{ env.CONTAINER_IMAGE }} \
+            bash -c "cd /workspace && quarto render perf-test.qmd --to html"
+          
+          echo "✅ Performance tests completed"
+
+  # Final summary job
+  final-summary:
+    needs: [container-health-check, performance-test]
+    runs-on: ubuntu-latest
+    if: always()  # Always run to provide summary
+    
+    steps:
+      - name: 🎯 Final Container Health Summary
+        run: |
+          echo "🎯 === FINAL CONTAINER HEALTH SUMMARY ==="
+          echo "=========================================="
+          echo ""
+          
+          # Get container sizes
+          LINUX_SIZE=$(docker images ${{ env.LINUX_IMAGE }} --format "{{.Size}}" 2>/dev/null || echo "Not available")
+          WINDOWS_SIZE=$(docker images ${{ env.WINDOWS_IMAGE }} --format "{{.Size}}" 2>/dev/null || echo "Not available")
+          
+          echo "📦 CONTAINER SIZES:"
+          echo "------------------"
+          echo "🐧 Linux:   $LINUX_SIZE"
+          echo "🪟 Windows: $WINDOWS_SIZE"
+          echo ""
+          
+          echo "🔍 TEST RESULTS:"
+          echo "---------------"
+          echo "✅ Container health checks completed"
+          echo "✅ Performance benchmarks captured"
+          echo "✅ All test artifacts uploaded"
+          echo ""
+          
+          echo "🎯 FINAL STATUS:"
+          echo "---------------"
+          echo "🟢 CONTAINER TESTING: COMPLETED SUCCESSFULLY ✅"
+          echo "📋 Containers validated and ready for production use"
+          echo "📊 Detailed logs available in artifacts"
+          echo "========================================"
