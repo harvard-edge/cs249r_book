@@ -76,9 +76,10 @@ on:
         default: 'development'
         description: 'Build environment'
       os:
-        required: true
+        required: false
         type: string
-        description: 'Operating system to run on (ubuntu-latest/windows-latest)'
+        default: ''
+        description: 'Operating system to run on (ubuntu-latest/windows-latest) - legacy, use build_os instead'
       quarto-version:
         required: false
         type: string
@@ -98,7 +99,18 @@ on:
         required: false
         type: string
         default: 'both'
-        description: 'Format to build (html/pdf/both)'
+        description: 'Format to build (html/pdf/both) - legacy, use build_format instead'
+      # New matrix-style inputs (same as container workflow)
+      build_format:
+        required: false
+        type: string
+        default: 'both'
+        description: 'Formats to build (html/pdf/both)'
+      build_os:
+        required: false
+        type: string
+        default: 'both'
+        description: 'Operating systems to build on (linux/windows/both)'
       artifact_name:
         required: false
         type: string
@@ -134,7 +146,23 @@ permissions:
 
 jobs:
   build:
-    runs-on: ${{ inputs.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - format: html
+            os: ubuntu-latest
+            os_name: linux
+          - format: pdf
+            os: ubuntu-latest
+            os_name: linux
+          - format: html
+            os: windows-latest
+            os_name: windows
+          - format: pdf
+            os: windows-latest
+            os_name: windows
     timeout-minutes: 120   # ⏰ Set job timeout to 2 hours (7200 seconds)
     environment:
       name: ${{ inputs.environment }}
@@ -154,7 +182,46 @@ jobs:
       LC_ALL: en_US.UTF-8
 
     steps:
+      - name: 🎯 Check if this matrix job should run
+        id: should-run
+        shell: bash
+        run: |
+          # Determine which inputs to use (new matrix inputs or legacy inputs)
+          EFFECTIVE_FORMAT="${{ inputs.build_format || inputs.format || 'both' }}"
+          EFFECTIVE_OS="${{ inputs.build_os || (inputs.os && (inputs.os == 'ubuntu-latest' && 'linux' || 'windows')) || 'both' }}"
+          
+          # Check if format is enabled
+          FORMAT_ENABLED=false
+          if [ "$EFFECTIVE_FORMAT" = "${{ matrix.format }}" ] || [ "$EFFECTIVE_FORMAT" = "both" ] || [ "$EFFECTIVE_FORMAT" = "" ]; then
+            FORMAT_ENABLED=true
+          fi
+          
+          # Check if OS is enabled
+          OS_ENABLED=false
+          if [ "$EFFECTIVE_OS" = "${{ matrix.os_name }}" ] || [ "$EFFECTIVE_OS" = "both" ] || [ "$EFFECTIVE_OS" = "" ]; then
+            OS_ENABLED=true
+          fi
+          
+          # Only run if both format and OS are enabled
+          if [ "$FORMAT_ENABLED" = "true" ] && [ "$OS_ENABLED" = "true" ]; then
+            echo "should-run=true" >> $GITHUB_OUTPUT
+            echo "✅ Running build: ${{ matrix.format }} on ${{ matrix.os_name }}"
+          else
+            echo "should-run=false" >> $GITHUB_OUTPUT
+            echo "⏭️ Skipping: ${{ matrix.format }} on ${{ matrix.os_name }}"
+          fi
+
+      - name: 📊 Build Configuration Summary
+        if: steps.should-run.outputs.should-run == 'true'
+        shell: bash
+        run: |
+          echo "📊 Build configuration:"
+          echo "  Format: ${{ matrix.format }}"
+          echo "  OS: ${{ matrix.os_name }}"
+          echo "  Target: ${{ inputs.target }}"
+
       - name: 🚦 Set Initial Build Status
+        if: steps.should-run.outputs.should-run == 'true'
         shell: bash
         run: |
           echo "🚦 Setting initial build status to pending..."
