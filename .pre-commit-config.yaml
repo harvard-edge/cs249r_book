@@ -2,23 +2,13 @@ ci:
   skip: true
 
 repos:
-  # --- Spellchecking and Linting ---
-  - repo: https://github.com/codespell-project/codespell
-    rev: v2.3.0
-    hooks:
-      - id: codespell
-        name: "Check for common misspellings"
-        args: ["--ignore-words", "config/linting/.codespell-ignore"]
-        files: \.qmd$
-        exclude: ".venv|_book|_site|node_modules|images"
-
+  # =============================================================================
+  # PHASE 1: AUTO-FORMATTERS (Fix basic formatting issues first)
+  # =============================================================================
+  
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
-      - id: check-yaml
-        name: "Validate _quarto.yml"
-        files: ^_quarto\.yml$
-
       - id: trailing-whitespace
         name: "Trim trailing whitespace"
         files: ^quarto/contents/.*\.qmd$
@@ -29,16 +19,7 @@ repos:
         files: ^quarto/contents/.*\.qmd$
         verbose: false
 
-  # - repo: https://github.com/igorshubovych/markdownlint-cli
-  #  rev: v0.45.0
-  #  hooks:
-  #    - id: markdownlint
-  #      name: "Lint quarto markdown"
-  #      types: [text]
-  #      files: ^book/contents/.*\.qmd$
-  #      args: ["--quiet", "-c", "config/linting/.mdlintconfig.yml"]
-  #      entry: bash -c 'markdownlint "$@" || true'
-
+  # --- Content Formatters ---
   - repo: https://github.com/executablebooks/mdformat
     rev: 0.7.9
     hooks:
@@ -48,7 +29,6 @@ repos:
         files: ^quarto/contents/.*\.qmd$
         pass_filenames: true
 
-  # --- Bibliography ---
   - repo: https://github.com/FlamingTempura/bibtex-tidy
     rev: v1.14.0
     hooks:
@@ -69,50 +49,9 @@ repos:
         ]
         files: ^quarto/contents/.*\.bib$
 
-  # --- Local Custom Hooks ---
   - repo: local
     hooks:
-      # --- Structural & Reference Validation ---
-      - id: check-unreferenced-labels
-        name: "Check for unreferenced labels"
-        entry: python ./tools/scripts/content/find_unreferenced_labels.py ./quarto/contents/core
-        language: python
-        additional_dependencies: []
-        pass_filenames: false
-        files: ''
-
-      - id: check-duplicate-labels
-        name: "Check for duplicate labels"
-        entry: python3 tools/scripts/content/find_duplicate_labels.py
-        args: ['-d', 'quarto/contents/', '--figures', '--tables', '--listings', '--quiet', '--strict']
-        language: system
-        pass_filenames: false
-        files: ^quarto/contents/.*\.qmd$
-        description: "Ensure all figure, table, and listing labels are unique across the book"
-
-      # - id: check-section-ids
-      #   name: "Check section IDs"
-      #   entry: python tools/scripts/content/manage_section_ids.py -d book/contents/ --verify --yes
-      #   language: python
-      #   additional_dependencies: [nltk>=3.8]
-      #   pass_filenames: false
-      #   files: ^book/contents/.*\.qmd$
-
-      - id: header-inline-check
-        name: "Detect inline-style Markdown headers"
-        entry: bash -c 'find . -name "*.qmd" -exec grep -nE "^[^#\n]*\\.[#]{1,6} " {} + && exit 1 || exit 0'
-        language: system
-        pass_filenames: false
-        files: ^quarto/contents/.*\.qmd$
-
-      - id: grep-forbidden-phrases
-        name: "Check for forbidden words"
-        entry: bash -c 'grep --color=always -n -E "Retry" "$@" && exit 1 || exit 0'
-        language: system
-        pass_filenames: true
-        files: ^quarto/contents/.*\.qmd$
-
-      # --- Formatting and Cleanup ---
+      # --- Content Formatting ---
       - id: collapse-extra-blank-lines
         name: "Collapse extra blank lines"
         entry: python tools/scripts/content/collapse_blank_lines.py
@@ -120,68 +59,19 @@ repos:
         pass_filenames: true
         files: ^quarto/contents/.*\.qmd$
 
-      # --- Image Validation ---
-      - id: validate-images
-        name: "Validate image files"
-        entry: python tools/scripts/utilities/check_images.py
-        language: python
-        additional_dependencies:
-          - pillow
-          - rich
-        pass_filenames: true
-        files: ^quarto/contents/.*\.(png|jpg|jpeg|gif)$
+  # =============================================================================
+  # PHASE 2: BASIC VALIDATORS (Structure and syntax)
+  # =============================================================================
 
-      - id: validate-external-images
-        name: "Check for external images in Quarto files"
-        entry: python3 tools/scripts/download_external_images.py --validate quarto/contents/
-        language: system
-        pass_filenames: false
-        files: ^quarto/contents/.*\.qmd$
-        description: "Ensure all images are local for build reliability"
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-yaml
+        name: "Validate _quarto.yml"
+        files: ^_quarto\.yml$
 
-      - id: validate-image-references
-        name: "Check that all image references exist on disk"
-        entry: python3 tools/scripts/validate_image_references.py -d quarto/contents/ --quiet
-        language: system
-        pass_filenames: false
-        files: ^quarto/contents/.*\.qmd$
-        description: "Ensure all referenced images exist on disk"
-
-      # --- Auto-cleanup with Book Binder ---
-      - id: auto-cleanup-artifacts
-        name: "Auto-cleanup build artifacts (Book Binder)"
-        entry: ./binder clean
-        language: system
-        pass_filenames: false
-        files: ''
-        stages: [pre-commit]
-
-      # --- Part Key Validation ---
-      - id: validate-part-keys
-        name: "Validate part keys in .qmd files"
-        entry: python tools/scripts/validate_part_keys.py
-        language: python
-        additional_dependencies:
-          - pyyaml
-        pass_filenames: false
-        files: ''
-
-      # --- Locked File Check (macOS specific) ---
-      - id: check-locked-files
-        name: "Detect locked files (uchg flag on macOS)"
-        entry: bash -c 'find quarto/contents/ -type f -exec ls -lO {} + | grep -q " uchg " && { echo "❌ Locked files detected (uchg). Please unlock them before commit."; exit 1; } || exit 0'
-        language: system
-        pass_filenames: false
-
-      # --- Workflow File Check ---
-      - id: check-workflow-changes
-        name: "Check for workflow file changes"
-        entry: tools/scripts/check_workflow_changes.sh
-        language: system
-        pass_filenames: false
-        files: ''
-        description: "Warn about workflow file changes that may cause publish issues"
-
+  - repo: local
+    hooks:
       # --- Project Structure Check ---
       - id: check-project-structure
         name: "Check required project files exist"
@@ -218,3 +108,146 @@ repos:
         args: [--config-file=.yamllint]
         files: ^\.github/workflows/.*\.(yml|yaml)$
         description: "Validate GitHub workflow YAML syntax and structure"
+
+  # =============================================================================
+  # PHASE 3: CONTENT VALIDATORS (After formatting is complete)
+  # =============================================================================
+
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.3.0
+    hooks:
+      - id: codespell
+        name: "Check for common misspellings"
+        args: ["--ignore-words", "config/linting/.codespell-ignore"]
+        files: \.qmd$
+        exclude: ".venv|_book|_site|node_modules|images"
+
+  - repo: local
+    hooks:
+      # --- Structural & Reference Validation ---
+      - id: check-unreferenced-labels
+        name: "Check for unreferenced labels"
+        entry: python ./tools/scripts/content/find_unreferenced_labels.py ./quarto/contents/core
+        language: python
+        additional_dependencies: []
+        pass_filenames: false
+        files: ''
+
+      - id: check-duplicate-labels
+        name: "Check for duplicate labels"
+        entry: python3 tools/scripts/content/find_duplicate_labels.py
+        args: ['-d', 'quarto/contents/', '--figures', '--tables', '--listings', '--quiet', '--strict']
+        language: system
+        pass_filenames: false
+        files: ^quarto/contents/.*\.qmd$
+        description: "Ensure all figure, table, and listing labels are unique across the book"
+
+      - id: header-inline-check
+        name: "Detect inline-style Markdown headers"
+        entry: bash -c 'find . -name "*.qmd" -exec grep -nE "^[^#\n]*\\.[#]{1,6} " {} + && exit 1 || exit 0'
+        language: system
+        pass_filenames: false
+        files: ^quarto/contents/.*\.qmd$
+
+      - id: grep-forbidden-phrases
+        name: "Check for forbidden words"
+        entry: bash -c 'grep --color=always -n -E "Retry" "$@" && exit 1 || exit 0'
+        language: system
+        pass_filenames: true
+        files: ^quarto/contents/.*\.qmd$
+
+      # --- Part Key Validation ---
+      - id: validate-part-keys
+        name: "Validate part keys in .qmd files"
+        entry: python tools/scripts/validate_part_keys.py
+        language: python
+        additional_dependencies:
+          - pyyaml
+        pass_filenames: false
+        files: ''
+
+  # =============================================================================
+  # PHASE 4: ASSET VALIDATORS (Images and external resources)
+  # =============================================================================
+
+  - repo: local
+    hooks:
+      # --- Image Validation ---
+      - id: validate-images
+        name: "Validate image files"
+        entry: python tools/scripts/utilities/check_images.py
+        language: python
+        additional_dependencies:
+          - pillow
+          - rich
+        pass_filenames: true
+        files: ^quarto/contents/.*\.(png|jpg|jpeg|gif)$
+
+      - id: validate-external-images
+        name: "Check for external images in Quarto files"
+        entry: python3 tools/scripts/download_external_images.py --validate quarto/contents/
+        language: system
+        pass_filenames: false
+        files: ^quarto/contents/.*\.qmd$
+        description: "Ensure all images are local for build reliability"
+
+      - id: validate-image-references
+        name: "Check that all image references exist on disk"
+        entry: python3 tools/scripts/validate_image_references.py -d quarto/contents/ --quiet
+        language: system
+        pass_filenames: false
+        files: ^quarto/contents/.*\.qmd$
+        description: "Ensure all referenced images exist on disk"
+
+  # =============================================================================
+  # PHASE 5: SYSTEM & WORKFLOW CHECKS (Final validation)
+  # =============================================================================
+
+  - repo: local
+    hooks:
+      # --- Auto-cleanup with Book Binder ---
+      - id: auto-cleanup-artifacts
+        name: "Auto-cleanup build artifacts (Book Binder)"
+        entry: ./binder clean
+        language: system
+        pass_filenames: false
+        files: ''
+        stages: [pre-commit]
+
+      # --- Locked File Check (macOS specific) ---
+      - id: check-locked-files
+        name: "Detect locked files (uchg flag on macOS)"
+        entry: bash -c 'find quarto/contents/ -type f -exec ls -lO {} + | grep -q " uchg " && { echo "❌ Locked files detected (uchg). Please unlock them before commit."; exit 1; } || exit 0'
+        language: system
+        pass_filenames: false
+
+      # --- Workflow File Check ---
+      - id: check-workflow-changes
+        name: "Check for workflow file changes"
+        entry: tools/scripts/check_workflow_changes.sh
+        language: system
+        pass_filenames: false
+        files: ''
+        description: "Warn about workflow file changes that may cause publish issues"
+
+  # =============================================================================
+  # DISABLED/COMMENTED HOOKS
+  # =============================================================================
+  
+  # - repo: https://github.com/igorshubovych/markdownlint-cli
+  #  rev: v0.45.0
+  #  hooks:
+  #    - id: markdownlint
+  #      name: "Lint quarto markdown"
+  #      types: [text]
+  #      files: ^book/contents/.*\.qmd$
+  #      args: ["--quiet", "-c", "config/linting/.mdlintconfig.yml"]
+  #      entry: bash -c 'markdownlint "$@" || true'
+
+  # - id: check-section-ids
+  #   name: "Check section IDs"
+  #   entry: python tools/scripts/content/manage_section_ids.py -d book/contents/ --verify --yes
+  #   language: python
+  #   additional_dependencies: [nltk>=3.8]
+  #   pass_filenames: false
+  #   files: ^book/contents/.*\.qmd$
