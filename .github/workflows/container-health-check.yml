@@ -129,49 +129,60 @@ jobs:
       platform: ${{ matrix.platform }}
 
     steps:
-      - name: 🔍 Check container availability  
-        id: availability
-        shell: ${{ matrix.shell }}
+      - name: 🔍 Check Linux container availability
+        id: availability-linux
+        if: matrix.platform == 'linux'
+        shell: bash
         timeout-minutes: 15
         run: |
-          # Linux/Bash version
-          if [ "${{ matrix.platform }}" = "linux" ]; then
-            echo "🔍 Checking Linux container availability..."
-            echo "📊 Image: ${{ env[matrix.container_image_env] }}"
-            
-            if docker manifest inspect "${{ env.LINUX_IMAGE }}" >/dev/null 2>&1; then
-              echo "✅ Linux container found"
-              echo "available=true" >> $GITHUB_OUTPUT
-            else
-              echo "❌ Linux container not found"
-              echo "available=false" >> $GITHUB_OUTPUT
-            fi
-          fi
+          echo "🔍 Checking Linux container availability..."
+          echo "📊 Image: ${{ env.LINUX_IMAGE }}"
           
-          # Windows/PowerShell version
-          if [ "${{ matrix.platform }}" = "windows" ]; then
-            Write-Output "🔍 Checking Windows container availability..."
-            Write-Output "📊 Image: ${{ env.WINDOWS_IMAGE }}"
+          if docker manifest inspect "${{ env.LINUX_IMAGE }}" >/dev/null 2>&1; then
+            echo "✅ Linux container found"
+            echo "available=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Linux container not found"
+            echo "available=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 🔍 Check Windows container availability
+        id: availability-windows
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        timeout-minutes: 15
+        run: |
+          Write-Output "🔍 Checking Windows container availability..."
+          Write-Output "📊 Image: ${{ env.WINDOWS_IMAGE }}"
+          
+          try {
+            docker manifest inspect "${{ env.WINDOWS_IMAGE }}" | Out-Null
+            Write-Output "✅ Windows container manifest found"
             
-            try {
-              docker manifest inspect "${{ env.WINDOWS_IMAGE }}" | Out-Null
-              Write-Output "✅ Windows container manifest found"
-              
-              # Pre-pull the container to avoid timeout during tool testing
-              Write-Output "📦 Pre-pulling Windows container (this may take a while for large containers)..."
-              docker pull "${{ env.WINDOWS_IMAGE }}"
-              Write-Output "✅ Windows container pulled successfully"
-              "available=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-            } catch {
-              Write-Output "❌ Windows container not available or pull failed: $_"
-              "available=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-            }
+            # Pre-pull the container to avoid timeout during tool testing
+            Write-Output "📦 Pre-pulling Windows container (this may take a while for large containers)..."
+            docker pull "${{ env.WINDOWS_IMAGE }}"
+            Write-Output "✅ Windows container pulled successfully"
+            "available=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } catch {
+            Write-Output "❌ Windows container not available or pull failed: $_"
+            "available=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          }
+
+      - name: 📊 Set availability output
+        id: availability
+        shell: bash
+        run: |
+          if [ "${{ matrix.platform }}" = "linux" ]; then
+            echo "available=${{ steps.availability-linux.outputs.available }}" >> $GITHUB_OUTPUT
+          else
+            echo "available=${{ steps.availability-windows.outputs.available }}" >> $GITHUB_OUTPUT
           fi
 
       - name: 🛠️ Test critical tools
         id: tool-check
         if: steps.availability.outputs.available == 'true'
-        shell: ${{ matrix.shell }}
+        shell: bash
         timeout-minutes: 15
         run: |
           # Linux/Bash version
@@ -398,7 +409,7 @@ jobs:
       - name: 🎯 ${{ matrix.platform_name }} container health summary
         id: health-check
         if: always()
-        shell: ${{ matrix.shell }}
+        shell: bash
         run: |
           # Linux/Bash version
           if [ "${{ matrix.platform }}" = "linux" ]; then
