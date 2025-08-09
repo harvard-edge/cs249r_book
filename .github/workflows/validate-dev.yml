@@ -108,12 +108,17 @@ jobs:
   validation-builds:
     name: 🚀 Validate ${{ matrix.format }} on ${{ matrix.os_name }}
     needs: [pre-commit, link-check]
-    if: always() && !failure()
+    if: |
+      always() && !failure() && 
+      (
+        (inputs.build_format == matrix.format || inputs.build_format == 'both' || inputs.build_format == '') &&
+        (inputs.build_os == matrix.os || inputs.build_os == 'both' || inputs.build_os == '')
+      )
     strategy:
       fail-fast: false
       matrix:
         include:
-          # All possible combinations - filtering handled in steps
+          # All possible combinations - filtering handled by if condition
           - format: html
             os: ubuntu-latest
             os_name: linux
@@ -126,44 +131,16 @@ jobs:
           - format: pdf
             os: windows-latest  
             os_name: windows
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: 🔍 Check if this matrix job should run
-        id: should-run
-        shell: bash
-        run: |
-          # Check if format is enabled
-          FORMAT_ENABLED=false
-          if [ "${{ inputs.build_format }}" = "${{ matrix.format }}" ] || [ "${{ inputs.build_format }}" = "both" ] || [ "${{ inputs.build_format }}" = "" ]; then
-            FORMAT_ENABLED=true
-          fi
-          
-          # Check if OS is enabled
-          OS_ENABLED=false
-          if [ "${{ inputs.build_os }}" = "${{ matrix.os_name }}" ] || [ "${{ inputs.build_os }}" = "both" ] || [ "${{ inputs.build_os }}" = "" ]; then
-            OS_ENABLED=true
-          fi
-          
-          # Only run if both format and OS are enabled
-          if [ "$FORMAT_ENABLED" = "true" ] && [ "$OS_ENABLED" = "true" ]; then
-            echo "enabled=true" >> $GITHUB_OUTPUT
-            echo "✅ Running validation: ${{ matrix.format }} on ${{ matrix.os_name }}"
-          else
-            echo "enabled=false" >> $GITHUB_OUTPUT
-            echo "⏭️ Skipping: ${{ matrix.format }} on ${{ matrix.os_name }}"
-          fi
-
-      - name: 🖥️ Build with Baremetal  
-        if: steps.should-run.outputs.enabled == 'true'
-        uses: ./.github/workflows/quarto-build-baremetal.yml
-        with:
-          os: ${{ matrix.os }}
-          format: ${{ matrix.format }}
-          target: dev
+    uses: ./.github/workflows/quarto-build-baremetal.yml
+    with:
+      os: ${{ matrix.os }}
+      format: ${{ matrix.format }}
+      target: dev
+      environment: development
 
   # Step 4: Deploy Linux HTML to gh-pages
   deploy-gh-pages:
-    name: 🚀 Deploy to GitHub Pages
+    name: 🚀 Deploy to GitHub Pages (Staging)
     needs: [validation-builds]
     # Only deploy Linux HTML build when it succeeds
     if: github.ref == 'refs/heads/dev' && needs.validation-builds.result == 'success'
