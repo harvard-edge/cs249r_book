@@ -54,8 +54,7 @@ on:
         options:
           - html
           - pdf
-          - epub
-          - all
+          - both
       quarto-log-level:
         required: false
         type: choice
@@ -98,8 +97,8 @@ on:
       format:
         required: false
         type: string
-        default: 'all'
-        description: 'Format to build (html/pdf/epub/all)'
+        default: 'both'
+        description: 'Format to build (html/pdf/both)'
       artifact_name:
         required: false
         type: string
@@ -118,9 +117,7 @@ on:
       pdf-artifact-name:
         description: "Name of uploaded PDF artifact (if built)"
         value: ${{ jobs.build.outputs.pdf-artifact-name }}
-      epub-artifact-name:
-        description: "Name of uploaded EPUB artifact (if built)"
-        value: ${{ jobs.build.outputs.epub-artifact-name }}
+
       build-status:
         description: "Overall build status (success/failure/skipped)"
         value: ${{ jobs.build.outputs.build-status }}
@@ -144,7 +141,7 @@ jobs:
     outputs:
       html-artifact-name: ${{ steps.upload-html.outputs.artifact-id }}
       pdf-artifact-name: ${{ steps.upload-pdf.outputs.artifact-id }}
-      epub-artifact-name: ${{ steps.upload-epub.outputs.artifact-id }}
+
       build-status: ${{ steps.build-summary.outputs.status }}
       formats-built: ${{ steps.build-summary.outputs.formats }}
       artifact-name: ${{ steps.build-declaration.outputs.artifact_created }}
@@ -520,6 +517,8 @@ jobs:
             cat("✅ All required R packages installed successfully\n")
           }
 
+
+
       - name: 💓 Start Build Heartbeat
         shell: bash
         run: |
@@ -551,7 +550,8 @@ jobs:
           echo "✅ Heartbeat started (PID: $HEARTBEAT_PID)"
 
       - name: 🔨 Build HTML (copy config and render)
-        if: inputs.format == 'html' || inputs.format == 'all'
+        if: inputs.format == 'html' || inputs.format == 'both'
+        id: build-html
         shell: bash
         run: |
           echo "🚀 Setting up HTML configuration..."
@@ -559,6 +559,18 @@ jobs:
           rm -f _quarto.yml
           cp config/_quarto-html.yml _quarto.yml
           echo "✅ Configuration set to HTML"
+          
+          # Detect output directory from configuration
+          echo "🔍 Detecting HTML output directory..."
+          HTML_OUTPUT_DIR=$(grep -E "^\s*output-dir:" _quarto.yml | sed -E 's/^\s*output-dir:\s*(.+)$/\1/' | tr -d '"' | tr -d "'")
+          if [ -n "$HTML_OUTPUT_DIR" ]; then
+            echo "✅ HTML output directory: $HTML_OUTPUT_DIR"
+            echo "html_output_path=$HTML_OUTPUT_DIR" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ Could not detect HTML output directory, using default"
+            HTML_OUTPUT_DIR="_site"
+            echo "html_output_path=$HTML_OUTPUT_DIR" >> $GITHUB_OUTPUT
+          fi
           
           echo "🔨 Building HTML..."
           echo "⏰ HTML build started at: $(date)"
@@ -577,9 +589,11 @@ jobs:
           # Enable verbose logging for debugging
           quarto render --to html
           echo "✅ HTML build completed at: $(date)"
+          echo "📊 Output available in: $HTML_OUTPUT_DIR"
         
       - name: 🔨 Build PDF (copy config and render)
-        if: inputs.format == 'pdf' || inputs.format == 'all'
+        if: inputs.format == 'pdf' || inputs.format == 'both'
+        id: build-pdf
         shell: bash
         run: |
           echo "🚀 Setting up PDF configuration..."
@@ -587,6 +601,18 @@ jobs:
           rm -f _quarto.yml
           cp config/_quarto-pdf.yml _quarto.yml
           echo "✅ Configuration set to PDF"
+          
+          # Detect output directory from configuration
+          echo "🔍 Detecting PDF output directory..."
+          PDF_OUTPUT_DIR=$(grep -E "^\s*output-dir:" _quarto.yml | sed -E 's/^\s*output-dir:\s*(.+)$/\1/' | tr -d '"' | tr -d "'")
+          if [ -n "$PDF_OUTPUT_DIR" ]; then
+            echo "✅ PDF output directory: $PDF_OUTPUT_DIR"
+            echo "pdf_output_path=$PDF_OUTPUT_DIR" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ Could not detect PDF output directory, using default"
+            PDF_OUTPUT_DIR="_site"
+            echo "pdf_output_path=$PDF_OUTPUT_DIR" >> $GITHUB_OUTPUT
+          fi
           
           echo "🔨 Building PDF..."
           echo "⏰ PDF build started at: $(date)"
@@ -607,6 +633,7 @@ jobs:
           # Enable verbose logging for debugging
           quarto render --to titlepage-pdf
           echo "✅ PDF build completed at: $(date)"
+          echo "📊 Output available in: $PDF_OUTPUT_DIR"
       
       - name: 💓 Stop Build Heartbeat
         shell: bash
@@ -632,43 +659,53 @@ jobs:
           echo "🔄 Checking Quarto build output..."
 
           # HTML check
-          if [[ "${{ inputs.format }}" == "html" || "${{ inputs.format }}" == "all" ]]; then
-            if [ -d "build/html" ]; then
-              echo "✅ build/html directory exists"
-              echo "📊 Files in build/html directory:"
-              ls -la build/html | head -n 20
-              echo "📊 Total files in build/html:"
-              find build/html -type f | wc -l
+          if [[ "${{ inputs.format }}" == "html" || "${{ inputs.format }}" == "both" ]]; then
+            HTML_PATH="${{ steps.build-html.outputs.html_output_path }}"
+            if [ -n "$HTML_PATH" ] && [ -d "$HTML_PATH" ]; then
+              echo "✅ HTML directory exists: $HTML_PATH"
+              echo "📊 Files in $HTML_PATH directory:"
+              ls -la "$HTML_PATH" | head -n 20
+              echo "📊 Total files in $HTML_PATH:"
+              find "$HTML_PATH" -type f | wc -l
             else
-              echo "❌ build/html directory not found!"
+              echo "❌ HTML directory not found: $HTML_PATH"
+              echo "🔍 Available directories:"
+              find . -type d -name "*html*" -o -name "_build" -o -name "_site" | head -10
             fi
           fi
 
           # PDF check
-          if [[ "${{ inputs.format }}" == "pdf" || "${{ inputs.format }}" == "all" ]]; then
-            if [ -d "build/pdf" ]; then
-              echo "✅ build/pdf directory exists"
-              echo "📊 Files in build/pdf directory:"
-              ls -la build/pdf | head -n 20
-              echo "📊 Total files in build/pdf:"
-              find build/pdf -type f | wc -l
+          if [[ "${{ inputs.format }}" == "pdf" || "${{ inputs.format }}" == "both" ]]; then
+            PDF_PATH="${{ steps.build-pdf.outputs.pdf_output_path }}"
+            if [ -n "$PDF_PATH" ] && [ -d "$PDF_PATH" ]; then
+              echo "✅ PDF directory exists: $PDF_PATH"
+              echo "📊 Files in $PDF_PATH directory:"
+              ls -la "$PDF_PATH" | head -n 20
+              echo "📊 Total files in $PDF_PATH:"
+              find "$PDF_PATH" -type f | wc -l
               
-              if [ -f "build/pdf/Machine-Learning-Systems.pdf" ]; then
+              if [ -f "$PDF_PATH/Machine-Learning-Systems.pdf" ]; then
                 echo "✅ PDF file exists"
                 echo "📊 PDF file size:"
-                du -h "build/pdf/Machine-Learning-Systems.pdf"
+                du -h "$PDF_PATH/Machine-Learning-Systems.pdf"
               else
-                echo "⚠️ PDF file not found!"
+                echo "⚠️ PDF file not found in $PDF_PATH!"
+                echo "🔍 Looking for PDF files:"
+                find "$PDF_PATH" -name "*.pdf" | head -5
               fi
             else
-              echo "❌ build/pdf directory not found!"
+              echo "❌ PDF directory not found: $PDF_PATH"
+              echo "🔍 Available directories:"
+              find . -type d -name "*pdf*" -o -name "_build" -o -name "_site" | head -10
             fi
           fi
 
       - name: 📉 Compress PDF with Ghostscript (Linux)
-        if: runner.os == 'Linux' && (inputs.format == 'pdf' || inputs.format == 'all')
+        if: runner.os == 'Linux' && (inputs.format == 'pdf' || inputs.format == 'both')
         run: |
-          if [ -f "build/pdf/Machine-Learning-Systems.pdf" ]; then
+          PDF_PATH="${{ steps.build-pdf.outputs.pdf_output_path }}"
+          if [ -n "$PDF_PATH" ] && [ -f "$PDF_PATH/Machine-Learning-Systems.pdf" ]; then
+            echo "📉 Compressing PDF in: $PDF_PATH"
             gs \
               -sDEVICE=pdfwrite \
               -dCompatibilityLevel=1.4 \
@@ -676,17 +713,18 @@ jobs:
               -dNOPAUSE \
               -dQUIET \
               -dBATCH \
-              -sOutputFile="./build/pdf/ebook.pdf" \
-              "./build/pdf/Machine-Learning-Systems.pdf"
+              -sOutputFile="$PDF_PATH/ebook.pdf" \
+              "$PDF_PATH/Machine-Learning-Systems.pdf"
 
             # Replace original with compressed
-            mv ./build/pdf/ebook.pdf ./build/pdf/Machine-Learning-Systems.pdf
+            mv "$PDF_PATH/ebook.pdf" "$PDF_PATH/Machine-Learning-Systems.pdf"
+            echo "✅ PDF compression completed"
           else
-            echo "⚠️ PDF file not found for compression"
+            echo "⚠️ PDF file not found for compression in: $PDF_PATH"
           fi
 
       - name: 📉 Compress PDF with Ghostscript (Windows)
-        if: runner.os == 'Windows' && (inputs.format == 'pdf' || inputs.format == 'all')
+        if: runner.os == 'Windows' && (inputs.format == 'pdf' || inputs.format == 'both')
         shell: pwsh
         run: |
           # Set UTF-8 encoding for proper emoji display
@@ -694,15 +732,16 @@ jobs:
           $OutputEncoding = [System.Text.Encoding]::UTF8
           [Console]::InputEncoding = [System.Text.Encoding]::UTF8
           
-          $input = "./build/pdf/Machine-Learning-Systems.pdf"
-          $output = "./build/pdf/ebook.pdf"
+          $pdfPath = "${{ steps.build-pdf.outputs.pdf_output_path }}"
+          $input = "$pdfPath/Machine-Learning-Systems.pdf"
+          $output = "$pdfPath/ebook.pdf"
 
           if (!(Test-Path $input)) {
-            Write-Warning "⚠️ Input PDF not found! Skipping compression..."
+            Write-Warning "⚠️ Input PDF not found in: $pdfPath! Skipping compression..."
             exit 0  # Non-zero exit would fail the workflow
           }
 
-          Write-Output "📉 Compressing PDF using Ghostscript..."
+          Write-Output "📉 Compressing PDF in: $pdfPath"
 
           # Unless you are a sucker for pain, don't try to line-break this command (it was a nightmare)
           # Note that compatability should be written as -dCompatibilityLevel:1.4, not -dCompatibilityLevel=1.4!!!
@@ -722,16 +761,16 @@ jobs:
         id: upload-artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.artifact_name != '' && inputs.artifact_name || format('build-{0}-{1}', inputs.os, inputs.format) }}
+          name: ${{ inputs.artifact_name != '' && inputs.artifact_name || format('{0}-{1}-{2}', inputs.target, inputs.format, inputs.os == 'ubuntu-latest' && 'linux' || 'windows') }}
           path: |
-            build/html
-                    build/pdf
+            ${{ steps.build-html.outputs.html_output_path }}
+            ${{ steps.build-pdf.outputs.pdf_output_path }}
 
       - name: 📋 Build Declaration
         id: build-declaration
         shell: bash
         run: |
-          ARTIFACT_NAME="${{ inputs.artifact_name != '' && inputs.artifact_name || format('build-{0}-{1}', inputs.os, inputs.format) }}"
+          ARTIFACT_NAME="${{ inputs.artifact_name != '' && inputs.artifact_name || format('{0}-{1}-{2}', inputs.target, inputs.format, inputs.os == 'ubuntu-latest' && 'linux' || 'windows') }}"
           echo "📦 Build Declaration: Successfully created artifact '$ARTIFACT_NAME'"
           echo "📊 Format: ${{ inputs.format }}"
           echo "📊 OS: ${{ inputs.os }}"
@@ -751,11 +790,10 @@ jobs:
           BUILD_STATUS="success"
           
           # Check which formats were built successfully
-          if [ "$FORMAT" = "all" ]; then
+          if [ "$FORMAT" = "both" ]; then
             # Check individual format steps
             HTML_SUCCESS="${{ steps.build-html.outcome }}"
             PDF_SUCCESS="${{ steps.build-pdf.outcome }}"
-            EPUB_SUCCESS="${{ steps.build-epub.outcome }}"
             
             if [ "$HTML_SUCCESS" = "success" ]; then
               FORMATS_BUILT="html"
@@ -767,15 +805,8 @@ jobs:
                 FORMATS_BUILT="pdf"
               fi
             fi
-            if [ "$EPUB_SUCCESS" = "success" ]; then
-              if [ -n "$FORMATS_BUILT" ]; then
-                FORMATS_BUILT="${FORMATS_BUILT},epub"
-              else
-                FORMATS_BUILT="epub"
-              fi
-            fi
             
-            # Overall status for 'all' format
+            # Overall status for 'both' format
             if [ -n "$FORMATS_BUILT" ]; then
               BUILD_STATUS="success"
             else

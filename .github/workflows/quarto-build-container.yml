@@ -312,6 +312,37 @@ jobs:
             }"
           
           # Run Quarto in Windows container with volume mount
+          Write-Output "🔍 Debugging container setup..."
+          Write-Output "Current directory: ${PWD}"
+          Write-Output "Container image: $env:WINDOWS_CONTAINER_IMAGE"
+          
+          # First, test the volume mount and directory structure
+          docker run --rm -v "${PWD}:C:/workspace" $env:WINDOWS_CONTAINER_IMAGE pwsh -Command "
+            Write-Output '=== CONTAINER DIRECTORY DIAGNOSTICS ==='
+            Write-Output '📂 Current working directory:'
+            Get-Location
+            Write-Output '📂 Container C:/ contents:'
+            Get-ChildItem C:/ | Format-Table Name, Length, LastWriteTime
+            Write-Output '📂 Workspace mount contents:'
+            if (Test-Path 'C:/workspace') {
+              Get-ChildItem 'C:/workspace' | Format-Table Name, Length, LastWriteTime
+              Write-Output '📂 Quarto directory contents:'
+              if (Test-Path 'C:/workspace/quarto') {
+                Get-ChildItem 'C:/workspace/quarto' | Format-Table Name, Length, LastWriteTime
+                Write-Output '📄 Quarto config files:'
+                Get-ChildItem 'C:/workspace/quarto' -Filter '*.yml' | Format-Table Name, Length
+              } else {
+                Write-Output '❌ C:/workspace/quarto does not exist'
+              }
+            } else {
+              Write-Output '❌ C:/workspace mount failed'
+            }
+            Write-Output '📍 Quarto location:'
+            where.exe quarto
+            Write-Output '🔍 Quarto check:'
+            quarto check
+          "
+          
           docker run --rm -v "${PWD}:C:/workspace" -w "C:/workspace/quarto" $env:WINDOWS_CONTAINER_IMAGE quarto render --to html
           Write-Output "✅ HTML build completed at: $(Get-Date)"
         
@@ -378,7 +409,7 @@ jobs:
         shell: bash
         run: |
           # Linux: Already running in container with Ghostscript pre-installed
-          if [ -f "build/pdf/Machine-Learning-Systems.pdf" ]; then
+          if [ -f "_build/pdf/Machine-Learning-Systems.pdf" ]; then
             echo "📉 Compressing PDF using Ghostscript (Linux container)..."
             gs \
               -sDEVICE=pdfwrite \
@@ -387,10 +418,10 @@ jobs:
               -dNOPAUSE \
               -dQUIET \
               -dBATCH \
-              -sOutputFile="./build/pdf/ebook.pdf" \
-              "./build/pdf/Machine-Learning-Systems.pdf"
+              -sOutputFile="./_build/pdf/ebook.pdf" \
+              "./_build/pdf/Machine-Learning-Systems.pdf"
 
-            mv ./build/pdf/ebook.pdf ./build/pdf/Machine-Learning-Systems.pdf
+            mv ./_build/pdf/ebook.pdf ./_build/pdf/Machine-Learning-Systems.pdf
             echo "✅ PDF compression completed"
           else
             echo "⚠️ PDF file not found for compression"
@@ -401,8 +432,8 @@ jobs:
         shell: pwsh
         run: |
           # Windows: Use Ghostscript in Windows container
-          $input = "./build/pdf/Machine-Learning-Systems.pdf"
-          $output = "./build/pdf/ebook.pdf"
+          $input = "./_build/pdf/Machine-Learning-Systems.pdf"
+          $output = "./_build/pdf/ebook.pdf"
 
           if (!(Test-Path $input)) {
             Write-Warning "⚠️ Input PDF not found! Skipping compression..."
@@ -411,7 +442,7 @@ jobs:
 
           Write-Output "📉 Compressing PDF using Ghostscript (Windows container)..."
           # Run Ghostscript in Windows container with volume mount
-          docker run --rm -v "${PWD}:C:/workspace" -w "C:/workspace" $env:WINDOWS_CONTAINER_IMAGE gswin64c -sDEVICE=pdfwrite -dCompatibilityLevel:1.4 -dPDFSETTINGS=/ebook -dNOPAUSE -dBATCH -sOutputFile="C:/workspace/build/pdf/ebook.pdf" "C:/workspace/build/pdf/Machine-Learning-Systems.pdf"
+          docker run --rm -v "${PWD}:C:/workspace" -w "C:/workspace" $env:WINDOWS_CONTAINER_IMAGE gswin64c -sDEVICE=pdfwrite -dCompatibilityLevel:1.4 -dPDFSETTINGS=/ebook -dNOPAUSE -dBATCH -sOutputFile="C:/workspace/_build/pdf/ebook.pdf" "C:/workspace/_build/pdf/Machine-Learning-Systems.pdf"
 
           if (Test-Path $output) {
             Move-Item -Force $output $input
@@ -426,7 +457,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ format('{0}-html-{1}', inputs.target, env.OS_NAME) }}
-          path: build/html
+          path: _build/html
 
       - name: 📤 Upload PDF artifacts
         if: steps.should-run.outputs.should-run == 'true' && matrix.format == 'pdf'
@@ -434,7 +465,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ format('{0}-pdf-{1}', inputs.target, env.OS_NAME) }}
-          path: build/pdf
+          path: _build/pdf
 
       - name: 📋 Build Declaration
         if: steps.should-run.outputs.should-run == 'true'
