@@ -35,6 +35,15 @@ on:
           - ubuntu-latest
           - windows-latest
           - both
+      build_method:
+        description: 'Build method to validate'
+        required: false
+        default: 'both'
+        type: choice
+        options:
+          - baremetal
+          - container
+          - both
   workflow_call:  # 📞 Called by publish-live workflow
     inputs:
       build_format:
@@ -47,6 +56,11 @@ on:
         type: string
         default: 'both'
         description: 'Platforms to validate (linux/windows/both)'
+      build_method:
+        required: false
+        type: string
+        default: 'both'
+        description: 'Build method to validate (baremetal/container/both)'
 
     outputs:
       validation-status:
@@ -104,12 +118,13 @@ jobs:
       path_pattern: './contents/**/*.qmd'
       max_concurrency: 10
 
-  # Step 3: Matrix validation builds
-  validation-builds:
-    name: 🚀 Validate ${{ matrix.format }} on ${{ matrix.os_name }}
+  # Step 3a: Baremetal validation builds
+  validation-builds-baremetal:
+    name: 🖥️ Validate ${{ matrix.format }} on ${{ matrix.os_name }} (Baremetal)
     needs: [pre-commit, link-check]
     if: |
       always() && !failure() && 
+      (inputs.build_method == 'baremetal' || inputs.build_method == 'both' || inputs.build_method == '') &&
       (
         (inputs.build_format == matrix.format || inputs.build_format == 'both' || inputs.build_format == '') &&
         (inputs.build_os == matrix.os || inputs.build_os == 'both' || inputs.build_os == '')
@@ -138,12 +153,48 @@ jobs:
       target: dev
       environment: development
 
+  # Step 3b: Container validation builds  
+  validation-builds-container:
+    name: 🐳 Validate ${{ matrix.format }} on ${{ matrix.os_name }} (Container)
+    needs: [pre-commit, link-check]
+    if: |
+      always() && !failure() && 
+      (inputs.build_method == 'container' || inputs.build_method == 'both' || inputs.build_method == '') &&
+      (
+        (inputs.build_format == matrix.format || inputs.build_format == 'both' || inputs.build_format == '') &&
+        (inputs.build_os == matrix.os_name || inputs.build_os == 'both' || inputs.build_os == '')
+      )
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # All possible combinations - filtering handled by if condition  
+          - format: html
+            os: ubuntu-latest
+            os_name: linux
+          - format: pdf  
+            os: ubuntu-latest
+            os_name: linux
+          - format: html
+            os: windows-latest
+            os_name: windows
+          - format: pdf
+            os: windows-latest  
+            os_name: windows
+    uses: ./.github/workflows/quarto-build-container.yml
+    with:
+      build_format: ${{ matrix.format }}
+      build_os: ${{ matrix.os_name }}
+      target: dev
+
   # Step 4: Deploy Linux HTML to gh-pages
   deploy-gh-pages:
     name: 🚀 Deploy to GitHub Pages (Staging)
-    needs: [validation-builds]
-    # Only deploy Linux HTML build when it succeeds
-    if: github.ref == 'refs/heads/dev' && needs.validation-builds.result == 'success'
+    needs: [validation-builds-baremetal, validation-builds-container]
+    # Only deploy Linux HTML build when at least one validation method succeeds
+    if: |
+      github.ref == 'refs/heads/dev' && 
+      (needs.validation-builds-baremetal.result == 'success' || needs.validation-builds-container.result == 'success')
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -187,7 +238,7 @@ jobs:
   # Final validation summary with outputs
   validation-summary:
     name: 📊 Validation Summary
-    needs: [pre-commit, link-check, validation-builds]
+    needs: [pre-commit, link-check, validation-builds-baremetal, validation-builds-container]
     if: always()
     runs-on: ubuntu-latest
     outputs:
@@ -199,12 +250,13 @@ jobs:
         id: summary
         run: |
           # Determine overall validation status
-          VALIDATION_BUILDS="${{ needs.validation-builds.result }}"
+          VALIDATION_BAREMETAL="${{ needs.validation-builds-baremetal.result }}"
+          VALIDATION_CONTAINER="${{ needs.validation-builds-container.result }}"
           PRECOMMIT="${{ needs.pre-commit.result }}"
           LINK_CHECK="${{ needs.link-check.result }}"
           
-          # Overall status logic
-          if [ "$VALIDATION_BUILDS" = "success" ] && [ "$PRECOMMIT" = "success" ] && [ "$LINK_CHECK" = "success" ]; then
+          # Overall status logic - at least one validation method must succeed
+          if ([ "$VALIDATION_BAREMETAL" = "success" ] || [ "$VALIDATION_CONTAINER" = "success" ]) && [ "$PRECOMMIT" = "success" ] && [ "$LINK_CHECK" = "success" ]; then
             STATUS="success"
           else
             STATUS="failure"
@@ -212,10 +264,20 @@ jobs:
           
           # Build results summary
           BUILD_RESULTS=""
-          if [ "$VALIDATION_BUILDS" = "success" ]; then
-            BUILD_RESULTS="${BUILD_RESULTS}✅ Matrix Builds: Success"
+          if [ "$VALIDATION_BAREMETAL" = "success" ]; then
+            BUILD_RESULTS="${BUILD_RESULTS}✅ Baremetal Builds: Success\n"
+          elif [ "$VALIDATION_BAREMETAL" = "failure" ]; then
+            BUILD_RESULTS="${BUILD_RESULTS}❌ Baremetal Builds: Failed\n"
           else
-            BUILD_RESULTS="${BUILD_RESULTS}❌ Matrix Builds: Failed"
+            BUILD_RESULTS="${BUILD_RESULTS}⏭️ Baremetal Builds: Skipped\n"
+          fi
+          
+          if [ "$VALIDATION_CONTAINER" = "success" ]; then
+            BUILD_RESULTS="${BUILD_RESULTS}✅ Container Builds: Success"
+          elif [ "$VALIDATION_CONTAINER" = "failure" ]; then
+            BUILD_RESULTS="${BUILD_RESULTS}❌ Container Builds: Failed"
+          else
+            BUILD_RESULTS="${BUILD_RESULTS}⏭️ Container Builds: Skipped"
           fi
           
           if [ "$PRECOMMIT" = "success" ]; then
