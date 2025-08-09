@@ -129,6 +129,14 @@ jobs:
       platform: ${{ matrix.platform }}
 
     steps:
+      - name: 🐳 Setup Docker cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.docker-cache
+          key: docker-cache-${{ matrix.platform }}-${{ hashFiles('docker/**') }}
+          restore-keys: |
+            docker-cache-${{ matrix.platform }}-
+      
       - name: 🎯 Check if platform should run
         id: should-run
         shell: bash
@@ -184,10 +192,22 @@ jobs:
             docker manifest inspect "${{ env.WINDOWS_IMAGE }}" | Out-Null
             Write-Output "✅ Windows container manifest found"
             
-            # Pre-pull the container to avoid timeout during tool testing
-            Write-Output "📦 Pre-pulling Windows container (this may take a while for large containers)..."
-            docker pull "${{ env.WINDOWS_IMAGE }}"
-            Write-Output "✅ Windows container pulled successfully"
+            # Check if container is already present locally
+            Write-Output "🔍 Checking if Windows container is cached locally..."
+            try {
+              \$localImages = docker images --format "table {{.Repository}}:{{.Tag}}" | Select-String "${{ env.WINDOWS_IMAGE }}"
+              if (\$localImages) {
+                Write-Output "✅ Windows container found in local cache, skipping pull"
+              } else {
+                Write-Output "📦 Windows container not cached, pulling (this may take a while)..."
+                docker pull "${{ env.WINDOWS_IMAGE }}"
+                Write-Output "✅ Windows container pulled and cached successfully"
+              }
+            } catch {
+              Write-Output "⚠️ Cache check failed, attempting pull anyway..."
+              docker pull "${{ env.WINDOWS_IMAGE }}"
+              Write-Output "✅ Windows container pulled successfully"
+            }
             "available=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           } catch {
             Write-Output "❌ Windows container not available or pull failed: $_"

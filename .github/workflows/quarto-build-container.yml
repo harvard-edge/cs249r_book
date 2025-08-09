@@ -209,6 +209,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: 🐳 Setup Docker cache  
+        if: steps.should-run.outputs.should-run == 'true'
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.docker-cache
+          key: docker-build-cache-${{ matrix.os_name }}-${{ hashFiles('docker/**') }}
+          restore-keys: |
+            docker-build-cache-${{ matrix.os_name }}-
+
       - name: 🐳 Setup Windows Container (Manual)
         if: steps.should-run.outputs.should-run == 'true' && matrix.os_name == 'windows'
         shell: pwsh
@@ -224,9 +233,16 @@ jobs:
           Write-Output "🔐 Logging into container registry..."
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login $CONTAINER_REGISTRY -u ${{ github.actor }} --password-stdin
           
-          # Pull the container
-          Write-Output "📦 Pulling Windows container (this may take a while)..."
-          docker pull $CONTAINER_IMAGE
+          # Check if container is already cached locally
+          Write-Output "🔍 Checking if Windows container is cached locally..."
+          $existingImage = docker images --format "table {{.Repository}}:{{.Tag}}" | Select-String "$CONTAINER_IMAGE"
+          if ($existingImage) {
+            Write-Output "✅ Windows container found in local cache, skipping pull"
+          } else {
+            Write-Output "📦 Windows container not cached, pulling (this may take a while)..."
+            docker pull $CONTAINER_IMAGE
+            Write-Output "✅ Windows container pulled and cached"
+          }
           
           # Test the container
           Write-Output "🧪 Testing Windows container..."
