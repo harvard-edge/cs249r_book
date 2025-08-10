@@ -235,7 +235,7 @@ RUN Write-Host '=== STARTING PYTHON PACKAGE INSTALLATION ===' ; `
     Write-Host '✅ Python package installation complete'
 
 # ------------------------------------------------------------
-# PHASE 7: Install Visual C++ Redistributable (Required for Quarto DLLs)
+# PHASE 9: Install Visual C++ Redistributable (Required for Quarto DLLs)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING VISUAL C++ REDISTRIBUTABLE INSTALLATION ===' ; `
     Write-Host 'Installing Microsoft Visual C++ Redistributable...' ; `
@@ -245,7 +245,7 @@ RUN Write-Host '=== STARTING VISUAL C++ REDISTRIBUTABLE INSTALLATION ===' ; `
     Write-Host '✅ Visual C++ Redistributable installation complete'
 
 # ------------------------------------------------------------
-# PHASE 8: Install Ghostscript (required for PDF generation)
+# PHASE 10: Install Ghostscript (required for PDF generation)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING GHOSTSCRIPT INSTALLATION ===' ; `
     Write-Host 'Installing Ghostscript via Scoop...' ; `
@@ -256,7 +256,7 @@ RUN Write-Host '=== STARTING GHOSTSCRIPT INSTALLATION ===' ; `
     Write-Host '✅ Ghostscript installation complete'
 
 # ------------------------------------------------------------
-# PHASE 9: Install Inkscape (required for SVG processing)
+# PHASE 11: Install Inkscape (required for SVG processing)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING INKSCAPE INSTALLATION ===' ; `
     Write-Host 'Installing Inkscape via Scoop...' ; `
@@ -267,7 +267,7 @@ RUN Write-Host '=== STARTING INKSCAPE INSTALLATION ===' ; `
     Write-Host '✅ Inkscape installation complete'
 
 # ------------------------------------------------------------
-# PHASE 10: Install R (Medium complexity)
+# PHASE 12: Install R (Medium complexity)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING R INSTALLATION ===' ; `
     Write-Host 'Installing R via Scoop (same as quarto-build workflow)...' ; `
@@ -279,7 +279,7 @@ RUN Write-Host '=== STARTING R INSTALLATION ===' ; `
     Write-Host '✅ R installation complete'
 
 # ------------------------------------------------------------
-# PHASE 11: Install R packages (Medium complexity)
+# PHASE 13: Install R packages (Medium complexity)
 # ------------------------------------------------------------
 RUN Write-Host '=== INSTALLING R PACKAGES ===' ; `
     Write-Host 'Installing R packages from install_packages.R (same as quarto-build workflow)...' ; `
@@ -304,7 +304,7 @@ RUN Write-Host '=== INSTALLING R PACKAGES ===' ; `
     Write-Host '✅ R package installation complete'
 
 # ------------------------------------------------------------
-# PHASE 12: Cleanup and Environment Setup
+# PHASE 14: Cleanup and Environment Setup
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING CLEANUP AND ENVIRONMENT SETUP ===' ; `
     Write-Host 'Cleaning temporary files and setting up environment...' ; `
