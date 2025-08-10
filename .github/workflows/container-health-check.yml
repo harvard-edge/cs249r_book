@@ -86,6 +86,21 @@ jobs:
       PLATFORM: ${{ matrix.platform }}
       
     steps:
+      - name: 💾 Cache Docker Images
+        if: |
+          (matrix.platform == 'linux' && inputs.test_linux != false) ||
+          (matrix.platform == 'windows' && inputs.test_windows != false)
+        uses: actions/cache@v4
+        id: cache-docker-images
+        with:
+          path: |
+            ~/.docker
+            ~/AppData/Local/Docker/wsl/data
+          key: docker-${{ matrix.platform }}-${{ env.CONTAINER_IMAGE }}-${{ hashFiles('docker/**') }}
+          restore-keys: |
+            docker-${{ matrix.platform }}-${{ env.CONTAINER_IMAGE }}-
+            docker-${{ matrix.platform }}-
+
       - name: 🐳 Pull Container
         if: |
           (matrix.platform == 'linux' && inputs.test_linux != false) ||
@@ -93,8 +108,16 @@ jobs:
         run: |
           echo "🐳 Pulling ${{ matrix.platform }} container..."
           echo "📦 Image: ${{ env.CONTAINER_IMAGE }}"
-          docker pull ${{ env.CONTAINER_IMAGE }}
-          echo "✅ Container pulled successfully"
+          echo "💾 Cache Status: ${{ steps.cache-docker-images.outputs.cache-hit == 'true' && '✅ HIT - faster pull expected' || '❌ MISS - full pull required' }}"
+          
+          # Check if image already exists locally (from cache)
+          if docker image inspect ${{ env.CONTAINER_IMAGE }} >/dev/null 2>&1; then
+            echo "✅ Container image found locally - skipping pull"
+          else
+            echo "📥 Pulling container image..."
+            docker pull ${{ env.CONTAINER_IMAGE }}
+            echo "✅ Container pulled successfully"
+          fi
 
       - name: 📊 Container Information
         if: |
@@ -580,78 +603,90 @@ jobs:
           Write-Output "🪟 === WINDOWS QUARTO CHECK (COMPREHENSIVE) ==="
           Write-Output "📋 Running quarto check to validate full installation:"
           Write-Output "====================================================="
-          
-          docker run --rm ${{ env.CONTAINER_IMAGE }} pwsh -Command "
-            Write-Output '🔍 Running enhanced Quarto diagnostics...'
-            Write-Output '📋 Capturing comprehensive diagnostic information...'
-            Write-Output ''
-            
-            # Enhanced diagnostics for DLL issues
-            Write-Output '--- SYSTEM DIAGNOSTIC INFO START ---'
-            Write-Output '🔧 Environment Variables:'
-            Write-Output \"PATH: `$env:PATH\"
-            Write-Output \"QUARTO_LOG_LEVEL: `$env:QUARTO_LOG_LEVEL\"
-            Write-Output ''
-            Write-Output '🔧 Visual C++ Redistributable DLLs:'
-            Get-ChildItem 'C:\Windows\System32' -Filter 'msvcp*.dll' -ErrorAction SilentlyContinue | Select-Object Name, Length | Format-Table -AutoSize | Out-String | Write-Output
-            Get-ChildItem 'C:\Windows\System32' -Filter 'vcruntime*.dll' -ErrorAction SilentlyContinue | Select-Object Name, Length | Format-Table -AutoSize | Out-String | Write-Output
-            Write-Output ''
-            Write-Output '🔧 Quarto Installation Info:'
-            try {
-              `$quartoCmd = Get-Command quarto.exe -ErrorAction Stop
-              Write-Output \"Quarto.exe location: `$(`$quartoCmd.Source)\"
-              Write-Output \"Quarto.exe file size: `$((Get-Item `$quartoCmd.Source).Length) bytes\"
-            } catch {
-              Write-Output 'quarto.exe not found in PATH'
-            }
-            Write-Output '--- SYSTEM DIAGNOSTIC INFO END ---'
-            Write-Output ''
-            
-            # Run quarto check with enhanced error handling
-            `$quartoExitCode = 0
-            try {
-              Write-Output '--- QUARTO CHECK OUTPUT START ---'
-              # Set debug logging for maximum verbosity
-              `$env:QUARTO_LOG_LEVEL = 'DEBUG'
-              & quarto.exe check 2>&1 | ForEach-Object { Write-Output `$_ }
-              `$quartoExitCode = `$LASTEXITCODE
-              Write-Output '--- QUARTO CHECK OUTPUT END ---'
-            } catch {
-              Write-Output '--- QUARTO CHECK EXCEPTION ---'
-              Write-Output \"Exception Type: `$(`$_.Exception.GetType().FullName)\"
-              Write-Output \"Exception Message: `$(`$_.Exception.Message)\"
-              if (`$_.Exception.InnerException) {
-                Write-Output \"Inner Exception: `$(`$_.Exception.InnerException.Message)\"
-              }
-              Write-Output '--- QUARTO CHECK EXCEPTION END ---'
-              `$quartoExitCode = 1
-            }
-            
-            Write-Output ''
-            # Enhanced exit code analysis
-            if (`$quartoExitCode -eq 0) {
-              Write-Output '✅ Quarto check: PASSED - All components verified!'
-              `$QuartoStatus = 'PASSED'
-            } else {
-              Write-Output '❌ Quarto check: FAILED - Issues detected!'
-              Write-Output '🔍 This indicates potential container configuration issues.'
-              Write-Output '📋 Check the diagnostic information above for details.'
-              Write-Output \"📊 Exit Code: `$quartoExitCode\"
-              # Specific analysis for common exit codes
-              switch (`$quartoExitCode) {
-                -1073741515 { Write-Output '🔍 Exit code -1073741515 (0xC0000135): DLL not found - Missing Visual C++ Runtime or dependencies' }
-                1 { Write-Output '🔍 Exit code 1: General error - Check Quarto dependencies' }
-                default { Write-Output \"🔍 Exit code `$quartoExitCode: Unknown error - Check logs above\" }
-              }
-              `$QuartoStatus = 'FAILED'
-            }
-            
-            Write-Output ''
-            Write-Output \"📊 QUARTO CHECK SUMMARY: `$QuartoStatus\"
-          " | Tee-Object -FilePath "windows-quarto-check.log"
-          
-          Write-Output "📋 Windows quarto check results saved to windows-quarto-check.log"
 
+          # 1) Emit the inner script to a file (no escaping headaches)
+          $inner = @'
+          Write-Output "🔍 Running enhanced Quarto diagnostics..."
+          Write-Output "📋 Capturing comprehensive diagnostic information..."
+          Write-Output ""
+
+          Write-Output '--- SYSTEM DIAGNOSTIC INFO START ---'
+          Write-Output '🔧 Environment Variables:'
+          Write-Output ("PATH: {0}" -f $env:PATH)
+          Write-Output ("QUARTO_LOG_LEVEL: {0}" -f $env:QUARTO_LOG_LEVEL)
+          Write-Output ""
+
+          Write-Output '🔧 Visual C++ Redistributable DLLs:'
+          Get-ChildItem 'C:\Windows\System32' -Filter 'msvcp*.dll' -ErrorAction SilentlyContinue |
+            Select-Object Name, Length |
+            Format-Table -AutoSize | Out-String | Write-Output
+          Get-ChildItem 'C:\Windows\System32' -Filter 'vcruntime*.dll' -ErrorAction SilentlyContinue |
+            Select-Object Name, Length |
+            Format-Table -AutoSize | Out-String | Write-Output
+          Write-Output ""
+
+          Write-Output '🔧 Quarto Installation Info:'
+          try {
+            $quartoCmd = Get-Command quarto.exe -ErrorAction Stop
+            Write-Output ("Quarto.exe location: {0}" -f $quartoCmd.Source)
+            Write-Output ("Quarto.exe file size: {0} bytes" -f (Get-Item $quartoCmd.Source).Length)
+          } catch {
+            Write-Output 'quarto.exe not found in PATH'
+          }
+          Write-Output '--- SYSTEM DIAGNOSTIC INFO END ---'
+          Write-Output ""
+
+          # Run quarto check with enhanced error handling
+          $quartoExitCode = 0
+          try {
+            Write-Output '--- QUARTO CHECK OUTPUT START ---'
+            $env:QUARTO_LOG_LEVEL = 'DEBUG'
+            & quarto.exe check 2>&1 | ForEach-Object { $_ | Out-String } | Write-Output
+            $quartoExitCode = $LASTEXITCODE
+            Write-Output '--- QUARTO CHECK OUTPUT END ---'
+          } catch {
+            Write-Output '--- QUARTO CHECK EXCEPTION ---'
+            Write-Output ("Exception Type: {0}" -f $($_.Exception.GetType().FullName))
+            Write-Output ("Exception Message: {0}" -f $($_.Exception.Message))
+            if ($_.Exception.InnerException) {
+              Write-Output ("Inner Exception: {0}" -f $($_.Exception.InnerException.Message))
+            }
+            Write-Output '--- QUARTO CHECK EXCEPTION END ---'
+            $quartoExitCode = 1
+          }
+
+          Write-Output ""
+          if ($quartoExitCode -eq 0) {
+            Write-Output '✅ Quarto check: PASSED - All components verified!'
+            $QuartoStatus = 'PASSED'
+          } else {
+            Write-Output '❌ Quarto check: FAILED - Issues detected!'
+            Write-Output '🔍 This indicates potential container configuration issues.'
+            Write-Output '📋 Check the diagnostic information above for details.'
+            Write-Output ("📊 Exit Code: {0}" -f $quartoExitCode)
+            switch ($quartoExitCode) {
+              -1073741515 { Write-Output '🔍 Exit code -1073741515 (0xC0000135): DLL not found - Missing Visual C++ Runtime or dependencies' }
+              1            { Write-Output '🔍 Exit code 1: General error - Check Quarto dependencies' }
+              default      { Write-Output ("🔍 Exit code {0}: Unknown error - Check logs above" -f $quartoExitCode) }
+            }
+            $QuartoStatus = 'FAILED'
+          }
+
+          Write-Output ""
+          Write-Output ("📊 QUARTO CHECK SUMMARY: {0}" -f $QuartoStatus)
+          '@
+
+          $scriptPath = Join-Path $PWD 'windows-quarto-check.ps1'
+          Set-Content -Path $scriptPath -Value $inner -Encoding UTF8
+
+          # 2) Run it inside the Windows container and tee the output
+          docker run --rm `
+            -v "${PWD}:C:\work" `
+            ${{ env.CONTAINER_IMAGE }} `
+            pwsh -NoProfile -ExecutionPolicy Bypass -File "C:\work\windows-quarto-check.ps1" `
+          | Tee-Object -FilePath "windows-quarto-check.log"
+
+          Write-Output "📋 Windows quarto check results saved to windows-quarto-check.log"
 
       - name: 📊 Linux Container Analysis
         if: matrix.platform == 'linux' && inputs.test_linux != false
