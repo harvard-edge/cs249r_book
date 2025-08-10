@@ -595,12 +595,32 @@ jobs:
           echo "===================================================="
           
           docker run --rm ${{ env.CONTAINER_IMAGE }} bash -c "
-            echo '🔍 Running quarto check...'
+            echo '🔍 Running quarto check with enhanced raw output capture...'
             echo '📋 Capturing full output for debugging...'
             echo ''
             
-            # Run quarto check and capture all output
-            if quarto check 2>&1; then
+            # Set maximum verbosity for raw output
+            export QUARTO_LOG_LEVEL=DEBUG
+            export QUARTO_PRINT_STACK=true
+            
+            echo '⏰ Quarto check started at:' \$(date '+%Y-%m-%d %H:%M:%S')
+            echo '--- RAW QUARTO CHECK OUTPUT START ---'
+            echo '┌─────────────────────────────────────────────────────────────────────────────┐'
+            
+            # Capture and display raw output with error handling
+            if quarto check 2>&1 | while IFS= read -r line; do echo \"│ \$line\"; done; then
+              QUARTO_EXIT_CODE=0
+            else
+              QUARTO_EXIT_CODE=\$?
+            fi
+            
+            echo '└─────────────────────────────────────────────────────────────────────────────┘'
+            echo '--- RAW QUARTO CHECK OUTPUT END ---'
+            echo '⏰ Quarto check completed at:' \$(date '+%Y-%m-%d %H:%M:%S')
+            echo ''
+            
+            # Determine final status
+            if [ \$QUARTO_EXIT_CODE -eq 0 ]; then
               echo ''
               echo '✅ Quarto check: PASSED - All components verified!'
               QUARTO_STATUS='PASSED'
@@ -617,6 +637,20 @@ jobs:
           " | tee linux-quarto-check.log
           
           echo "📋 Linux quarto check results saved to linux-quarto-check.log"
+          
+          # Also extract just the raw quarto check output for easy viewing
+          if [ -f "linux-quarto-check.log" ]; then
+            echo "📄 Extracting raw Quarto output..."
+            grep -A 1000 "RAW QUARTO CHECK OUTPUT START" linux-quarto-check.log | \
+            grep -B 1000 "RAW QUARTO CHECK OUTPUT END" | \
+            sed '1d;$d' > linux-quarto-raw-output.txt || echo "Could not extract raw output"
+            
+            if [ -f "linux-quarto-raw-output.txt" ]; then
+              echo "📄 Raw Quarto output extracted to linux-quarto-raw-output.txt"
+              echo "📊 Raw output preview (first 10 lines):"
+              head -10 linux-quarto-raw-output.txt | sed 's/^/    /'
+            fi
+          fi
 
       - name: 🪟 Windows Container - Quarto Check
         if: matrix.platform == 'windows' && inputs.test_windows != false
@@ -658,15 +692,30 @@ jobs:
           Write-Output '--- SYSTEM DIAGNOSTIC INFO END ---'
           Write-Output ""
 
-          # Run quarto check with enhanced error handling
-          $quartoExitCode = 0
-          try {
-            Write-Output '--- QUARTO CHECK OUTPUT START ---'
-            $env:QUARTO_LOG_LEVEL = 'DEBUG'
-            & quarto.exe check 2>&1 | ForEach-Object { $_ | Out-String } | Write-Output
-            $quartoExitCode = $LASTEXITCODE
-            Write-Output '--- QUARTO CHECK OUTPUT END ---'
-          } catch {
+                      # Run quarto check with enhanced error handling and raw output capture
+            $quartoExitCode = 0
+            try {
+              Write-Output '--- QUARTO CHECK OUTPUT START ---'
+              Write-Output '🔍 Setting maximum verbosity for raw output capture...'
+              $env:QUARTO_LOG_LEVEL = 'DEBUG'
+              $env:QUARTO_PRINT_STACK = 'true'
+              
+              # Capture raw output with timestamps
+              Write-Output "⏰ Quarto check started at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+              $rawOutput = & quarto.exe check 2>&1
+              $quartoExitCode = $LASTEXITCODE
+              Write-Output "⏰ Quarto check completed at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+              
+              # Display raw output line by line with prefixes for clarity
+              Write-Output '📋 RAW QUARTO CHECK OUTPUT:'
+              Write-Output '┌─────────────────────────────────────────────────────────────────────────────┐'
+              foreach ($line in $rawOutput) {
+                Write-Output "│ $line"
+              }
+              Write-Output '└─────────────────────────────────────────────────────────────────────────────┘'
+              
+              Write-Output '--- QUARTO CHECK OUTPUT END ---'
+            } catch {
             Write-Output '--- QUARTO CHECK EXCEPTION ---'
             Write-Output ("Exception Type: {0}" -f $($_.Exception.GetType().FullName))
             Write-Output ("Exception Message: {0}" -f $($_.Exception.Message))
@@ -709,6 +758,16 @@ jobs:
           | Tee-Object -FilePath "windows-quarto-check.log"
 
           Write-Output "📋 Windows quarto check results saved to windows-quarto-check.log"
+          
+          # Also save just the raw quarto check output to a separate file for easy viewing
+          if (Test-Path "windows-quarto-check.log") {
+            $logContent = Get-Content "windows-quarto-check.log" -Raw
+            if ($logContent -match '📋 RAW QUARTO CHECK OUTPUT:(.*?)--- QUARTO CHECK OUTPUT END ---') {
+              $rawOutput = $matches[1].Trim()
+              $rawOutput | Out-File "windows-quarto-raw-output.txt" -Encoding UTF8
+              Write-Output "📄 Raw Quarto output extracted to windows-quarto-raw-output.txt"
+            }
+          }
 
       - name: 📊 Linux Container Analysis
         if: matrix.platform == 'linux' && inputs.test_linux != false
@@ -740,7 +799,10 @@ jobs:
           path: |
             ${{ matrix.platform == 'linux' && 'linux-tool-versions.log' || 'windows-tool-versions.log' }}
             ${{ matrix.platform == 'linux' && 'linux-quarto-check.log' || 'windows-quarto-check.log' }}
+            ${{ matrix.platform == 'linux' && 'linux-quarto-raw-output.txt' || 'windows-quarto-raw-output.txt' }}
+            ${{ matrix.platform == 'windows' && 'windows-quarto-check.ps1' || '' }}
           retention-days: 30
+          if-no-files-found: warn
 
   # Final summary job
   final-summary:
