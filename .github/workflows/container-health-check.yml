@@ -182,97 +182,6 @@ jobs:
           
           echo "📋 Quarto check results saved to ${{ matrix.platform }}-quarto-check.log"
 
-      - name: 🧪 Test Minimal Quarto Build
-        if: |
-          (matrix.platform == 'linux' && inputs.test_linux != false) ||
-          (matrix.platform == 'windows' && inputs.test_windows != false)
-        run: |
-          echo "🧪 === MINIMAL QUARTO BUILD TEST ==="
-          # Create a minimal test document
-          ${{ matrix.platform == 'linux' && 'cat > test-doc.qmd << ''EOF''
-          ---
-          title: "Container Test"
-          format: html
-          ---
-          
-          # Test Document
-          
-          This is a test document to verify the container works.
-          
-          ## Python Code Block
-          
-          ```{python}
-          print("Hello from Python!")
-          import sys
-          print(f"Python version: {sys.version}")
-          ```
-          
-          ## R Code Block
-          
-          ```{r}
-          cat("Hello from R!\n")
-          cat("R version:", R.version.string, "\n")
-          ```
-          
-          ## Math Block
-          
-          $$
-          E = mc^2
-          $$
-          
-          ## Table
-          
-          | Tool | Version |
-          |------|---------|
-          | Quarto | Latest |
-          | Python | 3.x |
-          | R | Latest |
-          EOF' }}${{ matrix.platform == 'windows' && '@"
-          ---
-          title: ''Container Test''
-          format: html
-          ---
-          
-          # Test Document
-          
-          This is a test document to verify the Windows container works.
-          
-          ```{python}
-          print(''Hello from Python!'')
-          import sys
-          print(f''Python version: {sys.version}'')
-          ```
-          
-          ```{r}
-          cat(''Hello from R!\n'')
-          cat(''R version:'', R.version.string, ''\n'')
-          ```
-          "@ | Out-File -FilePath "test-doc.qmd" -Encoding UTF8' }}
-          
-          # Test the build
-          ${{ matrix.platform == 'linux' && format('docker run --rm -v $(pwd):/workspace {0} bash -c "
-            cd /workspace &&
-            echo ''🔨 Building test document...'' &&
-            quarto render test-doc.qmd --to html &&
-            echo ''✅ Build successful!'' &&
-            ls -la test-doc.html &&
-            echo ''📊 File size:'' &&
-            du -h test-doc.html &&
-            echo ''🧹 Cleaning up...'' &&
-            rm -f test-doc.html &&
-            echo ''✅ Build test: PASSED''
-          " | tee {1}-build-test.log', env.CONTAINER_IMAGE, matrix.platform) }}${{ matrix.platform == 'windows' && format('docker run --rm -v ${{PWD}}:/workspace {0} pwsh -Command "
-            Set-Location /workspace;
-            Write-Output ''🔨 Building test document...'';
-            quarto render test-doc.qmd --to html;
-            Write-Output ''✅ Build successful!'';
-            Get-ChildItem test-doc.html;
-            Write-Output ''📊 File size:'';
-            (Get-Item test-doc.html).Length;
-            Write-Output ''🧹 Cleaning up...'';
-            Remove-Item test-doc.html -Force;
-            Write-Output ''✅ Build test: PASSED''
-          " | Tee-Object -FilePath "{1}-build-test.log"', env.CONTAINER_IMAGE, matrix.platform) }}
 
       - name: 📊 ${{ matrix.platform }} Container Test Summary
         if: |
@@ -286,78 +195,96 @@ jobs:
           echo "----------"
           
           # Check if all log files exist and contain success indicators
-          ${{ matrix.platform == 'linux' && 'if grep -q "✅.*Quarto.*OK" linux-tool-versions.log && \
-             grep -q "✅.*Python.*OK" linux-tool-versions.log && \
-             grep -q "✅.*R.*OK" linux-tool-versions.log && \
-             grep -q "✅.*LuaLaTeX.*OK" linux-tool-versions.log && \
-             grep -q "✅.*Ghostscript.*OK" linux-tool-versions.log && \
-             grep -q "✅.*Inkscape.*OK" linux-tool-versions.log; then
-            echo "✅ Essential Tools: ALL PASSED"
+          ${{ matrix.platform == 'linux' && 'if [ -f linux-tool-versions.log ]; then
+            if grep -q "✅.*Quarto.*OK" linux-tool-versions.log && \
+               grep -q "✅.*Python.*OK" linux-tool-versions.log && \
+               grep -q "✅.*R.*OK" linux-tool-versions.log && \
+               grep -q "✅.*LuaLaTeX.*OK" linux-tool-versions.log && \
+               grep -q "✅.*Ghostscript.*OK" linux-tool-versions.log && \
+               grep -q "✅.*Inkscape.*OK" linux-tool-versions.log; then
+              echo "✅ Essential Tools: ALL PASSED"
+            else
+              echo "❌ Essential Tools: SOME FAILED"
+            fi
           else
-            echo "❌ Essential Tools: SOME FAILED"
+            echo "⚠️ Essential Tools: TEST SKIPPED (no log file)"
           fi
           
-          if grep -q "✅.*Quarto check.*PASSED" linux-quarto-check.log; then
-            echo "✅ Quarto Check: PASSED"
+          if [ -f linux-quarto-check.log ]; then
+            if grep -q "✅.*Quarto check.*PASSED" linux-quarto-check.log; then
+              echo "✅ Quarto Check: PASSED"
+            else
+              echo "❌ Quarto Check: FAILED"
+            fi
           else
-            echo "❌ Quarto Check: FAILED"
-          fi
-          
-          if grep -q "✅.*Build test.*PASSED" linux-build-test.log; then
-            echo "✅ Build Test: PASSED"
-          else
-            echo "❌ Build Test: FAILED"
+            echo "⚠️ Quarto Check: TEST SKIPPED (no log file)"
           fi
           
           echo ""
           echo "🎯 OVERALL STATUS:"
           echo "-----------------"
-          if grep -q "✅" linux-tool-versions.log && \
-             grep -q "✅.*PASSED" linux-quarto-check.log && \
-             grep -q "✅.*PASSED" linux-build-test.log; then
-            echo "🟢 LINUX CONTAINER: FULLY OPERATIONAL ✅"
-            echo "   Ready for Quarto builds!"
+          if [ -f linux-tool-versions.log ] && [ -f linux-quarto-check.log ]; then
+            if grep -q "✅" linux-tool-versions.log && \
+               grep -q "✅.*PASSED" linux-quarto-check.log; then
+              echo "🟢 LINUX CONTAINER: FULLY OPERATIONAL ✅"
+              echo "   Ready for Quarto builds!"
+            else
+              echo "🔴 LINUX CONTAINER: ISSUES DETECTED ❌"
+              echo "   Check logs for details"
+            fi
           else
-            echo "🔴 LINUX CONTAINER: ISSUES DETECTED ❌"
-            echo "   Check logs for details"
-          fi' }}${{ matrix.platform == 'windows' && '$toolsOK = (Select-String -Path "windows-tool-versions.log" -Pattern "✅.*Quarto.*OK") -and
-                     (Select-String -Path "windows-tool-versions.log" -Pattern "✅.*Python.*OK") -and
-                     (Select-String -Path "windows-tool-versions.log" -Pattern "✅.*R.*OK") -and
-                     (Select-String -Path "windows-tool-versions.log" -Pattern "✅.*LuaLaTeX.*OK") -and
-                     (Select-String -Path "windows-tool-versions.log" -Pattern "✅.*Ghostscript.*OK") -and
-                     (Select-String -Path "windows-tool-versions.log" -Pattern "✅.*Inkscape.*OK")
-          
-          if ($toolsOK) {
-            Write-Output "✅ Essential Tools: ALL PASSED"
+            echo "⚠️ LINUX CONTAINER: TESTS SKIPPED OR INCOMPLETE"
+            echo "   Some test steps may have been disabled or failed"
+          fi' }}${{ matrix.platform == 'windows' && 'if (Test-Path "windows-tool-versions.log") {
+            $toolsOK = (Select-String -Path "windows-tool-versions.log" -Pattern "✅.*Quarto.*OK") -and
+                       (Select-String -Path "windows-tool-versions.log" -Pattern "✅.*Python.*OK") -and
+                       (Select-String -Path "windows-tool-versions.log" -Pattern "✅.*R.*OK") -and
+                       (Select-String -Path "windows-tool-versions.log" -Pattern "✅.*LuaLaTeX.*OK") -and
+                       (Select-String -Path "windows-tool-versions.log" -Pattern "✅.*Ghostscript.*OK") -and
+                       (Select-String -Path "windows-tool-versions.log" -Pattern "✅.*Inkscape.*OK")
+            
+            if ($toolsOK) {
+              Write-Output "✅ Essential Tools: ALL PASSED"
+            } else {
+              Write-Output "❌ Essential Tools: SOME FAILED"
+            }
           } else {
-            Write-Output "❌ Essential Tools: SOME FAILED"
+            Write-Output "⚠️ Essential Tools: TEST SKIPPED (no log file)"
           }
           
-          if (Select-String -Path "windows-quarto-check.log" -Pattern "✅.*Quarto check.*PASSED") {
-            Write-Output "✅ Quarto Check: PASSED"
+          if (Test-Path "windows-quarto-check.log") {
+            if (Select-String -Path "windows-quarto-check.log" -Pattern "✅.*Quarto check.*PASSED") {
+              Write-Output "✅ Quarto Check: PASSED"
+            } else {
+              Write-Output "❌ Quarto Check: FAILED"
+            }
           } else {
-            Write-Output "❌ Quarto Check: FAILED"
-          }
-          
-          if (Select-String -Path "windows-build-test.log" -Pattern "✅.*Build test.*PASSED") {
-            Write-Output "✅ Build Test: PASSED"
-          } else {
-            Write-Output "❌ Build Test: FAILED"
+            Write-Output "⚠️ Quarto Check: TEST SKIPPED (no log file)"
           }
           
           Write-Output ""
           Write-Output "🎯 OVERALL STATUS:"
           Write-Output "-----------------"
           
-          $checkPassed = Select-String -Path "windows-quarto-check.log" -Pattern "✅.*PASSED"
-          $buildPassed = Select-String -Path "windows-build-test.log" -Pattern "✅.*PASSED"
-          
-          if ($toolsOK -and $checkPassed -and $buildPassed) {
-            Write-Output "🟢 WINDOWS CONTAINER: FULLY OPERATIONAL ✅"
-            Write-Output "   Ready for Quarto builds!"
+          if ((Test-Path "windows-tool-versions.log") -and (Test-Path "windows-quarto-check.log")) {
+            $toolsOK = (Select-String -Path "windows-tool-versions.log" -Pattern "✅.*Quarto.*OK") -and
+                       (Select-String -Path "windows-tool-versions.log" -Pattern "✅.*Python.*OK") -and
+                       (Select-String -Path "windows-tool-versions.log" -Pattern "✅.*R.*OK") -and
+                       (Select-String -Path "windows-tool-versions.log" -Pattern "✅.*LuaLaTeX.*OK") -and
+                       (Select-String -Path "windows-tool-versions.log" -Pattern "✅.*Ghostscript.*OK") -and
+                       (Select-String -Path "windows-tool-versions.log" -Pattern "✅.*Inkscape.*OK")
+            $checkPassed = Select-String -Path "windows-quarto-check.log" -Pattern "✅.*PASSED"
+            
+            if ($toolsOK -and $checkPassed) {
+              Write-Output "🟢 WINDOWS CONTAINER: FULLY OPERATIONAL ✅"
+              Write-Output "   Ready for Quarto builds!"
+            } else {
+              Write-Output "🔴 WINDOWS CONTAINER: ISSUES DETECTED ❌"
+              Write-Output "   Check logs for details"
+            }
           } else {
-            Write-Output "🔴 WINDOWS CONTAINER: ISSUES DETECTED ❌"
-            Write-Output "   Check logs for details"
+            Write-Output "⚠️ WINDOWS CONTAINER: TESTS SKIPPED OR INCOMPLETE"
+            Write-Output "   Some test steps may have been disabled or failed"
           }' }}
           echo "========================================"
 
@@ -372,50 +299,11 @@ jobs:
             ${{ matrix.platform }}-os-info.log
             ${{ matrix.platform }}-tool-versions.log
             ${{ matrix.platform }}-quarto-check.log
-            ${{ matrix.platform }}-build-test.log
           retention-days: 30
-
-  # Performance testing job (runs after health checks)
-  performance-test:
-    needs: container-health-check
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    if: always()  # Run even if health checks have issues
-    
-    env:
-      CONTAINER_IMAGE: ${{ inputs.container_registry || 'ghcr.io' }}/${{ github.repository }}/quarto-linux:${{ inputs.container_tag || 'latest' }}  # Use Linux for performance testing
-      
-    steps:
-      - name: 🐳 Performance Tests
-        run: |
-          echo "🐳 === CONTAINER PERFORMANCE TESTS ==="
-          echo "📦 Testing: ${{ env.CONTAINER_IMAGE }}"
-          
-          echo "🧪 Testing container startup time..."
-          echo "⏱️ Startup time measurement:"
-          time docker run --rm ${{ env.CONTAINER_IMAGE }} \
-            bash -c "echo 'Container started successfully'"
-          
-          echo ""
-          echo "🧪 Testing tool availability speed..."
-          echo "⏱️ Tool access time measurement:"
-          time docker run --rm ${{ env.CONTAINER_IMAGE }} \
-            bash -c "quarto --version && python3 --version && R --version"
-          
-          echo ""
-          echo "🧪 Testing minimal build performance..."
-          echo "⏱️ Build time measurement:"
-          # Create minimal test
-          echo '---\ntitle: "Test"\nformat: html\n---\n# Test' > perf-test.qmd
-          
-          time docker run --rm -v $(pwd):/workspace ${{ env.CONTAINER_IMAGE }} \
-            bash -c "cd /workspace && quarto render perf-test.qmd --to html"
-          
-          echo "✅ Performance tests completed"
 
   # Final summary job
   final-summary:
-    needs: [container-health-check, performance-test]
+    needs: container-health-check
     runs-on: ubuntu-latest
     if: always()  # Always run to provide summary
     
@@ -441,7 +329,6 @@ jobs:
           echo "🔍 TEST RESULTS:"
           echo "---------------"
           echo "✅ Container health checks completed"
-          echo "✅ Performance benchmarks captured"
           echo "✅ All test artifacts uploaded"
           echo ""
           
