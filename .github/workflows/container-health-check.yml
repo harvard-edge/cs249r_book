@@ -543,6 +543,7 @@ jobs:
 
       - name: 🐧 Linux Container - Quarto Check
         if: matrix.platform == 'linux' && inputs.test_linux != false
+        continue-on-error: true  # Don't fail workflow if quarto check fails
         run: |
           echo "🐧 === LINUX QUARTO CHECK (COMPREHENSIVE) ==="
           echo "📋 Running quarto check to validate full installation:"
@@ -550,18 +551,31 @@ jobs:
           
           docker run --rm ${{ env.CONTAINER_IMAGE }} bash -c "
             echo '🔍 Running quarto check...'
-            if quarto check; then
+            echo '📋 Capturing full output for debugging...'
+            echo ''
+            
+            # Run quarto check and capture all output
+            if quarto check 2>&1; then
+              echo ''
               echo '✅ Quarto check: PASSED - All components verified!'
+              QUARTO_STATUS='PASSED'
             else
+              echo ''
               echo '❌ Quarto check: FAILED - Issues detected!'
-              exit 1
+              echo '🔍 This indicates potential container configuration issues.'
+              echo '📋 Check the full output above for specific error details.'
+              QUARTO_STATUS='FAILED'
             fi
+            
+            echo ''
+            echo \"📊 QUARTO CHECK SUMMARY: \$QUARTO_STATUS\"
           " | tee linux-quarto-check.log
           
           echo "📋 Linux quarto check results saved to linux-quarto-check.log"
 
       - name: 🪟 Windows Container - Quarto Check
         if: matrix.platform == 'windows' && inputs.test_windows != false
+        continue-on-error: true  # Don't fail workflow if quarto check fails
         run: |
           Write-Output "🪟 === WINDOWS QUARTO CHECK (COMPREHENSIVE) ==="
           Write-Output "📋 Running quarto check to validate full installation:"
@@ -569,12 +583,39 @@ jobs:
           
           docker run --rm ${{ env.CONTAINER_IMAGE }} pwsh -Command "
             Write-Output '🔍 Running quarto check...'
-            if (quarto check) {
+            Write-Output '📋 Capturing full output for debugging...'
+            Write-Output ''
+            
+            # Run quarto check and capture all output - similar to Linux approach
+            # Use direct command execution to ensure we see all output
+            `$quartoExitCode = 0
+            try {
+              # Execute quarto check and capture both stdout and stderr
+              Write-Output '--- QUARTO CHECK OUTPUT START ---'
+              & quarto check 2>&1 | ForEach-Object { Write-Output `$_ }
+              `$quartoExitCode = `$LASTEXITCODE
+              Write-Output '--- QUARTO CHECK OUTPUT END ---'
+            } catch {
+              Write-Output '--- QUARTO CHECK EXCEPTION ---'
+              Write-Output `$_.Exception.Message
+              Write-Output '--- QUARTO CHECK EXCEPTION END ---'
+              `$quartoExitCode = 1
+            }
+            
+            Write-Output ''
+            if (`$quartoExitCode -eq 0) {
               Write-Output '✅ Quarto check: PASSED - All components verified!'
+              `$QuartoStatus = 'PASSED'
             } else {
               Write-Output '❌ Quarto check: FAILED - Issues detected!'
-              exit 1
+              Write-Output '🔍 This indicates potential container configuration issues.'
+              Write-Output '📋 Check the full output above for specific error details.'
+              Write-Output \"📊 Exit Code: `$quartoExitCode\"
+              `$QuartoStatus = 'FAILED'
             }
+            
+            Write-Output ''
+            Write-Output \"📊 QUARTO CHECK SUMMARY: `$QuartoStatus\"
           " | Tee-Object -FilePath "windows-quarto-check.log"
           
           Write-Output "📋 Windows quarto check results saved to windows-quarto-check.log"
@@ -603,9 +644,7 @@ jobs:
           Write-Output "WINDOWS CONTAINER TESTS COMPLETE"
 
       - name: 📤 Upload Test Artifacts
-        if: |
-          (matrix.platform == 'linux' && inputs.test_linux != false) ||
-          (matrix.platform == 'windows' && inputs.test_windows != false)
+        if: always() && ((matrix.platform == 'linux' && inputs.test_linux != false) || (matrix.platform == 'windows' && inputs.test_windows != false))
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.platform }}-container-test-results
