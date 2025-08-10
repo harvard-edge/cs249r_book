@@ -13,6 +13,22 @@ ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 ENV PATH=/usr/local/texlive/bin/x86_64-linux:$PATH
 
+# === PHASE 0: COPY DEPENDENCY FILES EARLY (for better cache efficiency) ===
+RUN echo "🚀 === STARTING DEPENDENCY FILE COPY ===" && \
+    echo "📋 Files to copy (early for cache efficiency):" && \
+    echo "  - tools/dependencies/requirements/ → /tmp/requirements/" && \
+    echo "  - tools/dependencies/requirements-build.txt → /tmp/requirements.txt" && \
+    echo "  - tools/dependencies/install_packages.R → /tmp/install_packages.R" && \
+    echo "  - tools/dependencies/tl_packages → /tmp/tl_packages" && \
+    echo "  - docker/build-quarto-linux/verify_r_packages.R → /tmp/verify_r_packages.R" && \
+    echo "✅ Dependency file copy phase complete"
+
+COPY tools/dependencies/requirements/ /tmp/requirements/
+COPY tools/dependencies/requirements-build.txt /tmp/requirements.txt
+COPY tools/dependencies/install_packages.R /tmp/install_packages.R
+COPY tools/dependencies/tl_packages /tmp/tl_packages
+COPY docker/build-quarto-linux/verify_r_packages.R /tmp/verify_r_packages.R
+
 # Install and configure locales
 RUN echo "🚀 === STARTING LOCALE CONFIGURATION ===" && \
     echo "🔍 Checking system readiness..." && \
@@ -36,7 +52,7 @@ RUN echo "🚀 === STARTING LOCALE CONFIGURATION ===" && \
     rm -rf /var/lib/apt/lists/* && \
     echo "✅ Locale configuration complete"
 
-# === PHASE 1: SYSTEM DEPENDENCIES ===
+# === PHASE 1: LOCALE CONFIGURATION ===
 RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
     echo "⏰ Estimated time: 2-3 minutes" && \
     echo "📊 Free disk space: $(df -h / | tail -1 | awk '{print $4}')" && \
@@ -126,7 +142,7 @@ RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
     echo "✅ === SYSTEM DEPENDENCIES COMPLETE === (${duration}s)" && \
     echo "📊 Free disk space: $(df -h / | tail -1 | awk '{print $4}')"
 
-# === PHASE 2: INKSCAPE INSTALLATION ===
+# === PHASE 2: SYSTEM DEPENDENCIES ===
 RUN echo "🚀 === STARTING INKSCAPE INSTALLATION ===" && \
     echo "⏰ Estimated time: 1-2 minutes" && \
     start_time=$(date +%s) && \
@@ -186,7 +202,7 @@ RUN echo "🚀 === STARTING INKSCAPE TEST ===" && \
     rm -f test.svg test.pdf && \
     echo "✅ Inkscape test complete"
 
-# === PHASE 5: GHOSTSCRIPT INSTALLATION ===
+# === PHASE 3: GHOSTSCRIPT INSTALLATION ===
 RUN echo "🚀 === STARTING GHOSTSCRIPT INSTALLATION ===" && \
     echo "⏰ Estimated time: 30 seconds" && \
     start_time=$(date +%s) && \
@@ -205,7 +221,6 @@ RUN echo "🚀 === STARTING GHOSTSCRIPT INSTALLATION ===" && \
     echo "✅ === GHOSTSCRIPT INSTALLATION COMPLETE === (${duration}s)"
 
 # === PHASE 4: TEX LIVE INSTALLATION ===
-COPY tools/dependencies/tl_packages /tmp/tl_packages
 RUN echo "🚀 === STARTING TEX LIVE INSTALLATION ===" && \
     echo "⏰ Estimated time: 8-12 minutes (largest phase)" && \
     echo "📊 Free disk space before: $(df -h / | tail -1 | awk '{print $4}')" && \
@@ -348,12 +363,20 @@ RUN echo "🚀 === STARTING R INSTALLATION ===" && \
     r-base \
     r-base-dev \
     r-recommended && \
+    if [ $? -ne 0 ]; then \
+        echo "❌ Failed to install R packages"; \
+        exit 1; \
+    fi && \
     echo "📦 R packages installed" && \
     \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
     \
     echo "📊 R version: $(R --version | head -1)" && \
+    if [ $? -ne 0 ]; then \
+        echo "❌ Failed to verify R installation"; \
+        exit 1; \
+    fi && \
     \
     end_time=$(date +%s) && \
     duration=$((end_time - start_time)) && \
@@ -373,31 +396,51 @@ RUN echo "🚀 === STARTING PYTHON INSTALLATION ===" && \
     python3 \
     python3-pip \
     python3-dev && \
+    if [ $? -ne 0 ]; then \
+        echo "❌ Failed to install Python packages"; \
+        exit 1; \
+    fi && \
     echo "📦 Python packages installed" && \
     \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
     \
     echo "📊 Python version: $(python3 --version)" && \
+    if [ $? -ne 0 ]; then \
+        echo "❌ Failed to verify Python installation"; \
+        exit 1; \
+    fi && \
     echo "📊 Pip version: $(pip3 --version)" && \
+    if [ $? -ne 0 ]; then \
+        echo "❌ Failed to verify pip installation"; \
+        exit 1; \
+    fi && \
     \
     end_time=$(date +%s) && \
     duration=$((end_time - start_time)) && \
     echo "✅ === PYTHON INSTALLATION COMPLETE === (${duration}s)"
 
-# === PHASE 3: QUARTO INSTALLATION ===
+# === PHASE 5: QUARTO INSTALLATION ===
 RUN echo "🚀 === STARTING QUARTO INSTALLATION ===" && \
     echo "⏰ Estimated time: 1 minute" && \
     start_time=$(date +%s) && \
     \
     echo "📦 Downloading Quarto 1.7.31..." && \
     wget -q https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.31/quarto-1.7.31-linux-amd64.deb && \
+    if [ $? -ne 0 ]; then \
+        echo "❌ Failed to download Quarto"; \
+        exit 1; \
+    fi && \
     echo "📥 Download completed" && \
     echo "📊 Downloaded file size:" && \
     ls -lh quarto-1.7.31-linux-amd64.deb && \
     \
     echo "📦 Installing Quarto..." && \
     dpkg -i quarto-1.7.31-linux-amd64.deb && \
+    if [ $? -ne 0 ]; then \
+        echo "❌ Failed to install Quarto"; \
+        exit 1; \
+    fi && \
     echo "📦 Quarto installed" && \
     \
     echo "🧹 Cleaning up installer..." && \
@@ -415,19 +458,7 @@ RUN echo "🚀 === STARTING R LIBRARY SETUP ===" && \
     echo "✅ R library directory created: $R_LIBS_USER" && \
     echo "✅ R library setup complete"
 
-# Copy dependency files
-RUN echo "🚀 === STARTING DEPENDENCY FILE COPY ===" && \
-    echo "📋 Files to copy:" && \
-    echo "  - tools/dependencies/requirements/ → /tmp/requirements/" && \
-    echo "  - tools/dependencies/requirements-build.txt → /tmp/requirements.txt" && \
-    echo "  - tools/dependencies/install_packages.R → /tmp/install_packages.R" && \
-    echo "  - docker/build-quarto-linux/verify_r_packages.R → /tmp/verify_r_packages.R" && \
-    echo "✅ Dependency file copy phase complete"
 
-COPY tools/dependencies/requirements/ /tmp/requirements/
-COPY tools/dependencies/requirements-build.txt /tmp/requirements.txt
-COPY tools/dependencies/install_packages.R /tmp/install_packages.R
-COPY docker/build-quarto-linux/verify_r_packages.R /tmp/verify_r_packages.R
 
 # === PHASE 8: PYTHON PACKAGES ===
 RUN echo "🚀 === STARTING PYTHON PACKAGE INSTALLATION ===" && \
@@ -443,6 +474,10 @@ RUN echo "🚀 === STARTING PYTHON PACKAGE INSTALLATION ===" && \
     \
     echo "🔄 Installing Python packages with space optimization..." && \
     pip3 install --no-cache-dir -r /tmp/requirements.txt && \
+    if [ $? -ne 0 ]; then \
+        echo "❌ Failed to install Python packages"; \
+        exit 1; \
+    fi && \
     \
     echo "🧹 Cleaning Python installation caches..." && \
     pip3 cache purge && \
@@ -458,23 +493,31 @@ RUN echo "🚀 === STARTING PYTHON PACKAGE INSTALLATION ===" && \
     echo "✅ === PYTHON PACKAGES COMPLETE === (${duration}s)"
 
 # === PHASE 9: R PACKAGES ===
-# Install R packages (using same process as successful workflow)
-RUN R --slave -e " \
-    # Set options for better package installation \
+# Step 9.1: Set up R environment and install remotes
+RUN echo "🚀 === STEP 9.1: SETTING UP R ENVIRONMENT ===" && \
+    R --slave -e " \
     options(repos = c(CRAN = 'https://cran.rstudio.com')); \
-    \
-    cat('🔄 Installing R packages...\n'); \
+    cat('🔄 Setting up R environment...\n'); \
     cat(paste('R library path:', Sys.getenv('R_LIBS_USER'), '\n')); \
-    \
-    # Create and set library path \
     lib_path <- Sys.getenv('R_LIBS_USER'); \
     dir.create(lib_path, showWarnings = FALSE, recursive = TRUE); \
     .libPaths(lib_path); \
-    \
-    # Install packages \
     cat('📦 Installing remotes package...\n'); \
     install.packages('remotes'); \
-    \
+    cat('✅ R environment setup complete\n'); \
+    " && \
+    if [ $? -ne 0 ]; then \
+        echo "❌ Failed to set up R environment"; \
+        exit 1; \
+    fi && \
+    echo "✅ R environment setup successful"
+
+# Step 9.2: Install R packages from install_packages.R or fallback
+RUN echo "🚀 === STEP 9.2: INSTALLING R PACKAGES ===" && \
+    R --slave -e " \
+    options(repos = c(CRAN = 'https://cran.rstudio.com')); \
+    lib_path <- Sys.getenv('R_LIBS_USER'); \
+    .libPaths(lib_path); \
     if (file.exists('/tmp/install_packages.R')) { \
       cat('📦 Installing packages from tools/dependencies/install_packages.R...\n'); \
       source('/tmp/install_packages.R'); \
@@ -484,17 +527,38 @@ RUN R --slave -e " \
       cat(paste('📦 Installing packages:', paste(pkgs, collapse=', '), '\n')); \
       install.packages(pkgs); \
     }; \
-    \
     cat('✅ R package installation complete\n'); \
+    " && \
+    if [ $? -ne 0 ]; then \
+        echo "❌ Failed to install R packages"; \
+        exit 1; \
+    fi && \
+    echo "✅ R packages installed successfully"
+
+# Step 9.3: Verify R package installation
+RUN echo "🚀 === STEP 9.3: VERIFYING R PACKAGES ===" && \
+    R --slave -e " \
+    lib_path <- Sys.getenv('R_LIBS_USER'); \
+    .libPaths(lib_path); \
     cat('📊 Installed packages:\n'); \
     ip <- installed.packages()[, 'Package']; \
     print(head(ip, 10)); \
     cat(paste('Total packages installed:', nrow(ip), '\n')); \
-    "
+    " && \
+    if [ $? -ne 0 ]; then \
+        echo "❌ Failed to verify R packages"; \
+        exit 1; \
+    fi && \
+    echo "✅ R package verification successful"
 
 # === PHASE 10: R PACKAGE VERIFICATION ===
 RUN echo "🔍 Verifying R package installation..." && \
-    Rscript /tmp/verify_r_packages.R
+    Rscript /tmp/verify_r_packages.R && \
+    if [ $? -ne 0 ]; then \
+        echo "❌ R package verification failed"; \
+        exit 1; \
+    fi && \
+    echo "✅ R package verification successful"
 
 # === PHASE 11: COMPREHENSIVE CLEANUP ===
 RUN echo "🚀 === STARTING COMPREHENSIVE CLEANUP ===" && \
