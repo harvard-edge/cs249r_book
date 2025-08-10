@@ -235,11 +235,20 @@ RUN Write-Host '=== STARTING PYTHON PACKAGE INSTALLATION ===' ; `
     Write-Host '✅ Python package installation complete'
 
 # ------------------------------------------------------------
-# PHASE 7: Install Ghostscript (same as quarto-build workflow)
+# PHASE 7: Install Visual C++ Redistributable (Required for Quarto DLLs)
+# ------------------------------------------------------------
+RUN Write-Host '=== STARTING VISUAL C++ REDISTRIBUTABLE INSTALLATION ===' ; `
+    Write-Host 'Installing Microsoft Visual C++ Redistributable...' ; `
+    Write-Host 'This is required for Quarto DLL dependencies on Windows' ; `
+    choco install vcredist-all -y ; `
+    Write-Host '📦 Visual C++ Redistributable installed' ; `
+    Write-Host '✅ Visual C++ Redistributable installation complete'
+
+# ------------------------------------------------------------
+# PHASE 8: Install Ghostscript (required for PDF generation)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING GHOSTSCRIPT INSTALLATION ===' ; `
-    Write-Host 'Installing Ghostscript via Scoop (same as quarto-build workflow)...' ; `
-    Write-Host 'Installing Ghostscript from main bucket...' ; `
+    Write-Host 'Installing Ghostscript via Scoop...' ; `
     scoop install main/ghostscript ; `
     Write-Host '📦 Ghostscript installed' ; `
     Write-Host 'Verifying Ghostscript installation...' ; `
@@ -247,11 +256,10 @@ RUN Write-Host '=== STARTING GHOSTSCRIPT INSTALLATION ===' ; `
     Write-Host '✅ Ghostscript installation complete'
 
 # ------------------------------------------------------------
-# PHASE 8: Install Inkscape (same as quarto-build workflow)
+# PHASE 9: Install Inkscape (required for SVG processing)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING INKSCAPE INSTALLATION ===' ; `
-    Write-Host 'Installing Inkscape via Scoop (same as quarto-build workflow)...' ; `
-    Write-Host 'Installing Inkscape...' ; `
+    Write-Host 'Installing Inkscape via Scoop...' ; `
     scoop install inkscape ; `
     Write-Host '📦 Inkscape installed' ; `
     Write-Host 'Verifying Inkscape installation...' ; `
@@ -259,7 +267,7 @@ RUN Write-Host '=== STARTING INKSCAPE INSTALLATION ===' ; `
     Write-Host '✅ Inkscape installation complete'
 
 # ------------------------------------------------------------
-# PHASE 9: Install R (Medium complexity)
+# PHASE 10: Install R (Medium complexity)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING R INSTALLATION ===' ; `
     Write-Host 'Installing R via Scoop (same as quarto-build workflow)...' ; `
@@ -271,7 +279,7 @@ RUN Write-Host '=== STARTING R INSTALLATION ===' ; `
     Write-Host '✅ R installation complete'
 
 # ------------------------------------------------------------
-# PHASE 10: Install R packages (Medium complexity)
+# PHASE 11: Install R packages (Medium complexity)
 # ------------------------------------------------------------
 RUN Write-Host '=== INSTALLING R PACKAGES ===' ; `
     Write-Host 'Installing R packages from install_packages.R (same as quarto-build workflow)...' ; `
@@ -296,34 +304,10 @@ RUN Write-Host '=== INSTALLING R PACKAGES ===' ; `
     Write-Host '✅ R package installation complete'
 
 # ------------------------------------------------------------
-# PHASE 11: Install Ghostscript (Simple)
+# PHASE 12: Cleanup and Environment Setup
 # ------------------------------------------------------------
-RUN Write-Host '=== STARTING GHOSTSCRIPT INSTALLATION ===' ; `
-    Write-Host 'Installing Ghostscript via Scoop (same as quarto-build workflow)...' ; `
-    Write-Host 'Installing Ghostscript from main bucket...' ; `
-    scoop install main/ghostscript ; `
-    Write-Host '📦 Ghostscript installed' ; `
-    Write-Host 'Verifying Ghostscript installation...' ; `
-    gs --version ; `
-    Write-Host '✅ Ghostscript installation complete'
-
-# ------------------------------------------------------------
-# PHASE 12: Install Inkscape (Simple)
-# ------------------------------------------------------------
-RUN Write-Host '=== STARTING INKSCAPE INSTALLATION ===' ; `
-    Write-Host 'Installing Inkscape via Scoop (same as quarto-build workflow)...' ; `
-    Write-Host 'Installing Inkscape...' ; `
-    scoop install inkscape ; `
-    Write-Host '📦 Inkscape installed' ; `
-    Write-Host 'Verifying Inkscape installation...' ; `
-    inkscape --version ; `
-    Write-Host '✅ Inkscape installation complete'
-
-# ------------------------------------------------------------
-# PHASE 13: Cleanup (Simple)
-# ------------------------------------------------------------
-RUN Write-Host '=== STARTING CLEANUP ===' ; `
-    Write-Host 'Cleaning temporary files (same as quarto-build workflow)...' ; `
+RUN Write-Host '=== STARTING CLEANUP AND ENVIRONMENT SETUP ===' ; `
+    Write-Host 'Cleaning temporary files and setting up environment...' ; `
     Write-Host 'Removing temporary files...' ; `
     Remove-Item C:/temp/requirements.txt -ErrorAction SilentlyContinue ; `
     Write-Host '🗑️ requirements.txt removed' ; `
@@ -335,17 +319,45 @@ RUN Write-Host '=== STARTING CLEANUP ===' ; `
     Write-Host '🗑️ tl_packages removed' ; `
     Remove-Item C:/temp/requirements/ -Recurse -Force -ErrorAction SilentlyContinue ; `
     Write-Host '🗑️ requirements/ directory removed' ; `
-    Write-Host '✅ Cleanup complete'
+    Write-Host 'Setting up environment variables for Quarto...' ; `
+    $env:QUARTO_LOG_LEVEL = 'DEBUG' ; `
+    [Environment]::SetEnvironmentVariable('QUARTO_LOG_LEVEL', 'DEBUG', 'Machine') ; `
+    Write-Host '🔧 QUARTO_LOG_LEVEL set to DEBUG' ; `
+    Write-Host '✅ Cleanup and environment setup complete'
 
 # ------------------------------------------------------------
-# FINAL CHECKS: Verify all installations (same as quarto-build workflow)
+# FINAL CHECKS: Comprehensive verification with diagnostics
 # ------------------------------------------------------------
 WORKDIR C:/workspace
-RUN Write-Host '=== FINAL VERIFICATION ===' ; `
-    Write-Host 'Verifying all installations (same checks as quarto-build workflow)...' ; `
+RUN Write-Host '=== FINAL VERIFICATION WITH ENHANCED DIAGNOSTICS ===' ; `
+    Write-Host 'Verifying all installations with comprehensive checks...' ; `
+    Write-Host '' ; `
+    Write-Host '🔍 SYSTEM DIAGNOSTICS:' ; `
+    Write-Host '----------------------' ; `
+    Write-Host 'PATH environment variable:' ; `
+    Write-Host $env:PATH ; `
+    Write-Host '' ; `
+    Write-Host 'Visual C++ Redistributable check:' ; `
+    Get-ChildItem 'C:\Windows\System32' -Filter 'msvcp*.dll' | Select-Object Name, Length, LastWriteTime ; `
+    Write-Host '' ; `
+    Write-Host '📊 TOOL VERIFICATION:' ; `
+    Write-Host '---------------------' ; `
     Write-Host 'Checking Quarto...' ; `
-    quarto --version ; `
-    Write-Host '✅ Quarto verified' ; `
+    try { `
+        quarto --version ; `
+        Write-Host '✅ Quarto version check: PASSED' ; `
+        Write-Host 'Running Quarto check for comprehensive validation...' ; `
+        & quarto check 2>&1 | Write-Host ; `
+        if ($LASTEXITCODE -eq 0) { `
+            Write-Host '✅ Quarto check: PASSED' ; `
+        } else { `
+            Write-Host '⚠️ Quarto check: ISSUES DETECTED' ; `
+            Write-Host "Exit code: $LASTEXITCODE" ; `
+        } ; `
+    } catch { `
+        Write-Host '❌ Quarto verification failed:' ; `
+        Write-Host $_.Exception.Message ; `
+    } ; `
     Write-Host 'Checking Python...' ; `
     python --version ; `
     Write-Host '✅ Python verified' ; `
@@ -356,4 +368,13 @@ RUN Write-Host '=== FINAL VERIFICATION ===' ; `
     $texLiveBin = 'C:\texlive\bin\windows' ; `
     & "$texLiveBin\lualatex.exe" --version ; `
     Write-Host '✅ LaTeX verified' ; `
-    Write-Host '✅ Windows container build completed successfully'
+    Write-Host 'Checking Ghostscript...' ; `
+    gs --version ; `
+    Write-Host '✅ Ghostscript verified' ; `
+    Write-Host 'Checking Inkscape...' ; `
+    inkscape --version ; `
+    Write-Host '✅ Inkscape verified' ; `
+    Write-Host '' ; `
+    Write-Host '🎯 FINAL STATUS:' ; `
+    Write-Host '----------------' ; `
+    Write-Host '✅ Windows container build completed with enhanced diagnostics'
