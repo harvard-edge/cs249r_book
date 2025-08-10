@@ -582,35 +582,109 @@ jobs:
           Write-Output "====================================================="
           
           docker run --rm ${{ env.CONTAINER_IMAGE }} pwsh -Command "
-            Write-Output '🔍 Running quarto check...'
-            Write-Output '📋 Capturing full output for debugging...'
+            Write-Output '🔍 Running enhanced Quarto diagnostics...'
+            Write-Output '📋 Capturing comprehensive diagnostic information...'
             Write-Output ''
             
-            # Run quarto check and capture all output - similar to Linux approach
-            # Use direct command execution to ensure we see all output
+            # Enhanced diagnostics for DLL issues
+            Write-Output '--- SYSTEM DIAGNOSTIC INFO START ---'
+            Write-Output '🔧 Environment Variables:'
+            Write-Output \"PATH: `$env:PATH\"
+            Write-Output \"QUARTO_LOG_LEVEL: `$env:QUARTO_LOG_LEVEL\"
+            Write-Output ''
+            Write-Output '🔧 Visual C++ Redistributable DLLs:'
+            Get-ChildItem 'C:\Windows\System32' -Filter 'msvcp*.dll' -ErrorAction SilentlyContinue | Select-Object Name, Length | Format-Table -AutoSize | Out-String | Write-Output
+            Get-ChildItem 'C:\Windows\System32' -Filter 'vcruntime*.dll' -ErrorAction SilentlyContinue | Select-Object Name, Length | Format-Table -AutoSize | Out-String | Write-Output
+            Write-Output ''
+            Write-Output '🔧 Quarto Installation Info:'
+            try {
+              `$quartoCmd = Get-Command quarto -ErrorAction Stop
+              Write-Output \"Quarto location: `$(`$quartoCmd.Source)\"
+              Write-Output \"Quarto file size: `$((Get-Item `$quartoCmd.Source).Length) bytes\"
+              
+              # Check if it's a Scoop shim and find the actual executable
+              if (`$quartoCmd.Source -like '*scoop\shims*') {
+                Write-Output 'Quarto is a Scoop shim, checking actual executable...'
+                try {
+                  `$quartoExeCmd = Get-Command quarto.exe -ErrorAction Stop
+                  Write-Output \"Quarto.exe location: `$(`$quartoExeCmd.Source)\"
+                  Write-Output \"Quarto.exe file size: `$((Get-Item `$quartoExeCmd.Source).Length) bytes\"
+                } catch {
+                  Write-Output 'quarto.exe not found in PATH'
+                }
+                
+                # Check the actual Scoop installation
+                `$scoopQuartoPath = 'C:\Users\ContainerAdministrator\scoop\apps\quarto\current\bin\quarto.exe'
+                if (Test-Path `$scoopQuartoPath) {
+                  Write-Output \"Scoop Quarto executable: `$scoopQuartoPath\"
+                  Write-Output \"Scoop Quarto size: `$((Get-Item `$scoopQuartoPath).Length) bytes\"
+                } else {
+                  Write-Output 'Scoop Quarto executable not found at expected location'
+                }
+              }
+            } catch {
+              Write-Output 'Quarto command not found in PATH'
+            }
+            Write-Output '--- SYSTEM DIAGNOSTIC INFO END ---'
+            Write-Output ''
+            
+            # Run quarto check with enhanced error handling
             `$quartoExitCode = 0
             try {
-              # Execute quarto check and capture both stdout and stderr
               Write-Output '--- QUARTO CHECK OUTPUT START ---'
+              # Set debug logging for maximum verbosity
+              `$env:QUARTO_LOG_LEVEL = 'DEBUG'
+              # Try both quarto and quarto.exe to diagnose shim vs executable issues
+              Write-Output 'Attempting quarto check...'
               & quarto check 2>&1 | ForEach-Object { Write-Output `$_ }
               `$quartoExitCode = `$LASTEXITCODE
+              Write-Output \"quarto check exit code: `$quartoExitCode\"
+              
+              if (`$quartoExitCode -ne 0) {
+                Write-Output 'quarto check failed, trying quarto.exe check...'
+                & quarto.exe check 2>&1 | ForEach-Object { Write-Output `$_ }
+                `$quartoExitCode = `$LASTEXITCODE
+                Write-Output \"quarto.exe check exit code: `$quartoExitCode\"
+                
+                # If quarto.exe also fails, try the direct Scoop path
+                if (`$quartoExitCode -ne 0) {
+                  `$scoopQuartoPath = 'C:\Users\ContainerAdministrator\scoop\apps\quarto\current\bin\quarto.exe'
+                  if (Test-Path `$scoopQuartoPath) {
+                    Write-Output 'Both quarto and quarto.exe failed, trying direct Scoop path...'
+                    & `$scoopQuartoPath check 2>&1 | ForEach-Object { Write-Output `$_ }
+                    `$quartoExitCode = `$LASTEXITCODE
+                    Write-Output \"Direct Scoop quarto.exe check exit code: `$quartoExitCode\"
+                  }
+                }
+              }
               Write-Output '--- QUARTO CHECK OUTPUT END ---'
             } catch {
               Write-Output '--- QUARTO CHECK EXCEPTION ---'
-              Write-Output `$_.Exception.Message
+              Write-Output \"Exception Type: `$(`$_.Exception.GetType().FullName)\"
+              Write-Output \"Exception Message: `$(`$_.Exception.Message)\"
+              if (`$_.Exception.InnerException) {
+                Write-Output \"Inner Exception: `$(`$_.Exception.InnerException.Message)\"
+              }
               Write-Output '--- QUARTO CHECK EXCEPTION END ---'
               `$quartoExitCode = 1
             }
             
             Write-Output ''
+            # Enhanced exit code analysis
             if (`$quartoExitCode -eq 0) {
               Write-Output '✅ Quarto check: PASSED - All components verified!'
               `$QuartoStatus = 'PASSED'
             } else {
               Write-Output '❌ Quarto check: FAILED - Issues detected!'
               Write-Output '🔍 This indicates potential container configuration issues.'
-              Write-Output '📋 Check the full output above for specific error details.'
+              Write-Output '📋 Check the diagnostic information above for details.'
               Write-Output \"📊 Exit Code: `$quartoExitCode\"
+              # Specific analysis for common exit codes
+              switch (`$quartoExitCode) {
+                -1073741515 { Write-Output '🔍 Exit code -1073741515 (0xC0000135): DLL not found - Missing Visual C++ Runtime or dependencies' }
+                1 { Write-Output '🔍 Exit code 1: General error - Check Quarto dependencies' }
+                default { Write-Output \"🔍 Exit code `$quartoExitCode: Unknown error - Check logs above\" }
+              }
               `$QuartoStatus = 'FAILED'
             }
             
