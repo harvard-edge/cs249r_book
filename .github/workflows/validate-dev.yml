@@ -49,11 +49,12 @@ on:
       build_method:
         description: 'Build method to use'
         required: false
-        default: 'container'
+        default: 'both'
         type: choice
         options:
+          - both
           - container
-          - baremetal_legacy
+          - baremetal
       # Container configuration (consistent with other workflows)
       container_registry:
         description: 'Container registry URL'
@@ -132,11 +133,11 @@ jobs:
             FORMAT="all"
             BUILD_LINUX="true"
             BUILD_WINDOWS="true"
-            BUILD_METHOD="container"
+            BUILD_METHOD="both"
             echo "📊 Trigger: Automatic (dev branch push)"
             echo "📊 Format: HTML + PDF (mandatory)"
             echo "📊 OS: Linux + Windows (mandatory)"
-            echo "📊 Method: Container builds (default)"
+            echo "📊 Method: Both container and baremetal builds (default)"
           else
             # Manual trigger: respect checkboxes
             BUILD_HTML="${{ inputs.build_html }}"
@@ -229,7 +230,7 @@ jobs:
 
       - name: 🚀 Container Build
         id: container-build
-        if: needs.build-config.outputs.build_method == 'container'
+        if: needs.build-config.outputs.build_method == 'container' || needs.build-config.outputs.build_method == 'both'
         uses: ./.github/workflows/quarto-build-container.yml
         with:
           os: ${{ matrix.os }}
@@ -240,7 +241,7 @@ jobs:
 
       - name: ⚠️ LEGACY Baremetal Build
         id: baremetal-build
-        if: needs.build-config.outputs.build_method == 'baremetal_legacy'
+        if: needs.build-config.outputs.build_method == 'baremetal' || needs.build-config.outputs.build_method == 'both'
         uses: ./.github/workflows/quarto-build-baremetal.yml
         with:
           os: ${{ matrix.os }}
@@ -253,16 +254,27 @@ jobs:
           echo "📊 === ${{ upper(matrix.platform) }} BUILD RESULT ==="
           
           # Determine which build method was used and get results
-          if [ "${{ needs.build-config.outputs.build_method }}" = "container" ]; then
+          BUILD_METHOD="${{ needs.build-config.outputs.build_method }}"
+          
+          if [ "$BUILD_METHOD" = "container" ]; then
             BUILD_SUCCESS="${{ steps.container-build.outputs.build_success }}"
             HTML_ARTIFACT="${{ steps.container-build.outputs.html_artifact }}"
             PDF_ARTIFACT="${{ steps.container-build.outputs.pdf_artifact }}"
-            BUILD_METHOD="container"
-          else
+          elif [ "$BUILD_METHOD" = "baremetal" ]; then
             BUILD_SUCCESS="${{ steps.baremetal-build.outputs.build_success }}"
             HTML_ARTIFACT="${{ steps.baremetal-build.outputs.html_artifact }}"
             PDF_ARTIFACT="${{ steps.baremetal-build.outputs.pdf_artifact }}"
-            BUILD_METHOD="baremetal"
+          elif [ "$BUILD_METHOD" = "both" ]; then
+            # For 'both', prefer container results, fallback to baremetal
+            if [ "${{ steps.container-build.outputs.build_success }}" = "true" ]; then
+              BUILD_SUCCESS="true"
+              HTML_ARTIFACT="${{ steps.container-build.outputs.html_artifact }}"
+              PDF_ARTIFACT="${{ steps.container-build.outputs.pdf_artifact }}"
+            else
+              BUILD_SUCCESS="${{ steps.baremetal-build.outputs.build_success }}"
+              HTML_ARTIFACT="${{ steps.baremetal-build.outputs.html_artifact }}"
+              PDF_ARTIFACT="${{ steps.baremetal-build.outputs.pdf_artifact }}"
+            fi
           fi
           
           # Visual status reporting
@@ -476,7 +488,7 @@ jobs:
             echo "- **Trigger**: Automatic (dev branch push)" >> $GITHUB_STEP_SUMMARY
             echo "- **Format**: HTML + PDF (mandatory)" >> $GITHUB_STEP_SUMMARY
             echo "- **OS**: Linux + Windows (mandatory)" >> $GITHUB_STEP_SUMMARY
-            echo "- **Method**: ✅ Container builds (default for auto-push)" >> $GITHUB_STEP_SUMMARY
+            echo "- **Method**: 🔄 Both container and baremetal builds (default for auto-push)" >> $GITHUB_STEP_SUMMARY
           else
             echo "- **Trigger**: Manual workflow dispatch" >> $GITHUB_STEP_SUMMARY
             echo "- **HTML**: ${{ inputs.build_html }}" >> $GITHUB_STEP_SUMMARY
@@ -484,8 +496,10 @@ jobs:
             echo "- **Linux**: ${{ inputs.build_linux }}" >> $GITHUB_STEP_SUMMARY
             echo "- **Windows**: ${{ inputs.build_windows }}" >> $GITHUB_STEP_SUMMARY
             
-            if [ "${{ inputs.build_method }}" = "baremetal_legacy" ]; then
+            if [ "${{ inputs.build_method }}" = "baremetal" ]; then
               echo "- **Method**: ⚠️ Baremetal builds (LEGACY - deprecated)" >> $GITHUB_STEP_SUMMARY
+            elif [ "${{ inputs.build_method }}" = "both" ]; then
+              echo "- **Method**: 🔄 Both container and baremetal builds" >> $GITHUB_STEP_SUMMARY
             else
               echo "- **Method**: ✅ Container builds (recommended)" >> $GITHUB_STEP_SUMMARY
             fi
