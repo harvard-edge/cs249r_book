@@ -156,6 +156,7 @@ jobs:
       platform: ${{ matrix.platform }}
       format: ${{ matrix.format_name }}
       artifact_name: ${{ matrix.artifact_name }}
+      output_dir: ${{ steps.get_output_dir.outputs.dir }}
 
     # Only Linux runs in containers
     container: ${{ matrix.platform == 'linux' && format('{0}/{1}/quarto-{2}:{3}', inputs.container_registry || 'ghcr.io', github.repository, matrix.platform, inputs.container_tag || 'latest') || null }}
@@ -173,6 +174,31 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: ⚙️ Get Quarto output directory
+        id: get_output_dir
+        if: matrix.enabled
+        working-directory: quarto
+        run: |
+          CONFIG_FILE="config/${{ matrix.config }}"
+          echo "📝 Reading output directory from: $CONFIG_FILE"
+          OUTPUT_DIR=$(grep -oP 'output-dir: \K.*' "$CONFIG_FILE" || echo "")
+          
+          # Fallback logic if output-dir is not found
+          if [ -z "$OUTPUT_DIR" ]; then
+            echo "⚠️ 'output-dir' not found in $CONFIG_FILE. Defaulting based on format."
+            if [ "${{ matrix.format_name }}" = "HTML" ]; then
+              OUTPUT_DIR="_build/html"
+            elif [ "${{ matrix.format_name }}" = "PDF" ]; then
+              OUTPUT_DIR="_build/pdf"
+            else
+              echo "❌ Unknown format. Cannot determine default output directory."
+              exit 1
+            fi
+          fi
+          
+          echo "✅ Output directory: $OUTPUT_DIR"
+          echo "dir=$OUTPUT_DIR" >> "$GITHUB_OUTPUT"
 
       - name: 💾 Cache Docker Images
         if: matrix.enabled
@@ -234,8 +260,8 @@ jobs:
           Write-Host "✅ ${{ matrix.format }} build completed"
 
       - name: 📉 Compress PDF (Linux)
-        if: matrix.platform == 'linux' && matrix.format == 'pdf' && matrix.enabled
-        working-directory: build/pdf
+        if: matrix.platform == 'linux' && matrix.format_name == 'PDF' && matrix.enabled
+        working-directory: quarto/${{ steps.get_output_dir.outputs.dir }}
         run: |
           if [ -f "Machine-Learning-Systems.pdf" ]; then
             echo "📉 Compressing PDF..."
@@ -246,9 +272,9 @@ jobs:
           fi
 
       - name: 📉 Compress PDF (Windows)
-        if: matrix.platform == 'windows' && matrix.format == 'pdf' && matrix.enabled
+        if: matrix.platform == 'windows' && matrix.format_name == 'PDF' && matrix.enabled
         shell: pwsh
-        working-directory: build/pdf
+        working-directory: quarto/${{ steps.get_output_dir.outputs.dir }}
         run: |
           if (Test-Path "Machine-Learning-Systems.pdf") {
             Write-Host "📉 Compressing PDF..."
@@ -265,7 +291,7 @@ jobs:
         if: matrix.enabled
         with:
           name: ${{ matrix.artifact_name }}
-          path: build/${{ matrix.format }}
+          path: quarto/${{ steps.get_output_dir.outputs.dir }}
 
   collect-outputs:
     name: '📊 Collect Outputs'

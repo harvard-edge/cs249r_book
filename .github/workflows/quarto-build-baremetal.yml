@@ -188,6 +188,7 @@ jobs:
       format: ${{ matrix.format }}
       artifact_name: ${{ steps.build-declaration.outputs.artifact_name }}
       status: ${{ job.status }}
+      output_dir: ${{ steps.get_output_dir.outputs.dir }}
 
     env:
       R_LIBS_USER: ${{ github.workspace }}/.r-lib
@@ -207,6 +208,31 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: ⚙️ Get Quarto output directory
+        id: get_output_dir
+        if: matrix.enabled
+        working-directory: quarto
+        run: |
+          CONFIG_FILE="config/${{ matrix.config }}"
+          echo "📝 Reading output directory from: $CONFIG_FILE"
+          OUTPUT_DIR=$(grep -oP 'output-dir: \K.*' "$CONFIG_FILE" || echo "")
+          
+          # Fallback logic if output-dir is not found
+          if [ -z "$OUTPUT_DIR" ]; then
+            echo "⚠️ 'output-dir' not found in $CONFIG_FILE. Defaulting based on format."
+            if [ "${{ matrix.format }}" = "HTML" ]; then
+              OUTPUT_DIR="_build/html"
+            elif [ "${{ matrix.format }}" = "PDF" ]; then
+              OUTPUT_DIR="_build/pdf"
+            else
+              echo "❌ Unknown format. Cannot determine default output directory."
+              exit 1
+            fi
+          fi
+          
+          echo "✅ Output directory: $OUTPUT_DIR"
+          echo "dir=$OUTPUT_DIR" >> "$GITHUB_OUTPUT"
 
       - name: 📦 Setup Quarto
         if: matrix.enabled
@@ -569,21 +595,22 @@ jobs:
         shell: bash
         run: |
           echo "🔄 Checking Quarto build output for ${{ matrix.format }}..."
-          if [ -d "build/${{ matrix.format }}" ]; then
-            echo "✅ build/${{ matrix.format }} directory exists"
-            echo "📊 Files in build/${{ matrix.format }} directory:"
-            ls -la build/${{ matrix.format }} | head -n 20
-            echo "📊 Total files in build/${{ matrix.format }}:"
-            find build/${{ matrix.format }} -type f | wc -l
+          if [ -d "quarto/${{ steps.get_output_dir.outputs.dir }}" ]; then
+            echo "✅ quarto/${{ steps.get_output_dir.outputs.dir }} directory exists"
+            echo "📊 Files in quarto/${{ steps.get_output_dir.outputs.dir }} directory:"
+            ls -la quarto/${{ steps.get_output_dir.outputs.dir }} | head -n 20
+            echo "📊 Total files in quarto/${{ steps.get_output_dir.outputs.dir }}:"
+            find quarto/${{ steps.get_output_dir.outputs.dir }} -type f | wc -l
           else
-            echo "❌ build/${{ matrix.format }} directory not found!"
+            echo "❌ quarto/${{ steps.get_output_dir.outputs.dir }} directory not found!"
             exit 1
           fi
 
       - name: 📉 Compress PDF with Ghostscript (Linux)
-        if: matrix.enabled && matrix.format == 'pdf' && runner.os == 'Linux'
+        if: matrix.enabled && matrix.format == 'PDF' && runner.os == 'Linux'
+        working-directory: quarto/${{ steps.get_output_dir.outputs.dir }}
         run: |
-          if [ -f "build/pdf/Machine-Learning-Systems.pdf" ]; then
+          if [ -f "Machine-Learning-Systems.pdf" ]; then
             gs \
               -sDEVICE=pdfwrite \
               -dCompatibilityLevel=1.4 \
@@ -591,26 +618,27 @@ jobs:
               -dNOPAUSE \
               -dQUIET \
               -dBATCH \
-              -sOutputFile="./build/pdf/ebook.pdf" \
-              "./build/pdf/Machine-Learning-Systems.pdf"
+              -sOutputFile="ebook.pdf" \
+              "Machine-Learning-Systems.pdf"
 
             # Replace original with compressed
-            mv ./build/pdf/ebook.pdf ./build/pdf/Machine-Learning-Systems.pdf
+            mv ebook.pdf Machine-Learning-Systems.pdf
           else
             echo "⚠️ PDF file not found for compression"
           fi
 
       - name: 📉 Compress PDF with Ghostscript (Windows)
-        if: matrix.enabled && matrix.format == 'pdf' && runner.os == 'Windows'
+        if: matrix.enabled && matrix.format == 'PDF' && runner.os == 'Windows'
         shell: pwsh
+        working-directory: quarto/${{ steps.get_output_dir.outputs.dir }}
         run: |
           # Set UTF-8 encoding for proper emoji display
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $OutputEncoding = [System.Text.Encoding]::UTF8
           [Console]::InputEncoding = [System.Text.Encoding]::UTF8
           
-          $input = "./build/pdf/Machine-Learning-Systems.pdf"
-          $output = "./build/pdf/ebook.pdf"
+          $input = "Machine-Learning-Systems.pdf"
+          $output = "ebook.pdf"
 
           if (!(Test-Path $input)) {
             Write-Warning "⚠️ Input PDF not found! Skipping compression..."
@@ -644,7 +672,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.build-declaration.outputs.artifact_name }}
-          path: build/${{ matrix.format }}
+          path: quarto/${{ steps.get_output_dir.outputs.dir }}
 
       - name: 📝 Collect Build Logs and System Info (Universal)
         if: matrix.enabled && always()  # Always run, even if previous steps failed
