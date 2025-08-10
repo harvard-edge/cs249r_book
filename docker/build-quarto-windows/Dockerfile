@@ -89,21 +89,12 @@ RUN Write-Host '=== STARTING CHOCOLATEY INSTALLATION ===' ; `
 # ------------------------------------------------------------
 # PHASE 3: Copy dependency files (same as quarto-build workflow)
 # ------------------------------------------------------------
-RUN Write-Host '=== STARTING DEPENDENCY FILE COPY ===' ; `
-    Write-Host 'Copying dependency files to container...' ; `
-    Write-Host 'Files to copy:' ; `
-    Write-Host '  - tools/dependencies/requirements/ → C:/temp/requirements/' ; `
-    Write-Host '  - tools/dependencies/requirements-build.txt → C:/temp/requirements.txt' ; `
-    Write-Host '  - tools/dependencies/install_packages.R → C:/temp/install_packages.R' ; `
-    Write-Host '  - tools/dependencies/tl_packages → C:/temp/tl_packages' ; `
-    Write-Host '  - docker/build-quarto-windows/verify_r_packages.R → C:/temp/verify_r_packages.R' ; `
-    Write-Host '✅ Dependency file copy phase complete'
-
-COPY tools/dependencies/requirements/                  C:/temp/requirements/
-COPY tools/dependencies/requirements-build.txt         C:/temp/requirements.txt
-COPY tools/dependencies/install_packages.R             C:/temp/install_packages.R
-COPY tools/dependencies/tl_packages                    C:/temp/tl_packages
-COPY docker/build-quarto-windows/verify_r_packages.R   C:/temp/verify_r_packages.R
+RUN Write-Host '=== STARTING DEPENDENCY FILE COPY ===' ; \
+    Write-Host 'Copying dependency files...' ; \
+    Copy-Item "tools/dependencies/requirements.txt" -Destination "C:/temp/requirements.txt" ; \
+    Copy-Item "tools/dependencies/install_packages.R" -Destination "C:/temp/install_packages.R" ; \
+    Copy-Item "tools/dependencies/tl_packages" -Destination "C:/temp/tl_packages" ; \
+    Write-Host '✅ Dependency file copy complete'
 
 # ------------------------------------------------------------
 # PHASE 4: Install TeX Live FIRST (Most complex, fail fast)

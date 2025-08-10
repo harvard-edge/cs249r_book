@@ -152,8 +152,8 @@ Converted from bash to PowerShell with proper Windows paths:
 ## Files Modified
 
 ### Container Definitions:
-- `docker/build-quarto-linux/Dockerfile` - Complete rebuild with 11 optimized phases
-- `docker/build-quarto-windows/Dockerfile` - Enhanced with PowerShell 7 and better error handling
+- `docker/build-quarto-linux/Dockerfile` - A single, unified Dockerfile for Linux builds.
+- `docker/build-quarto-windows/Dockerfile` - A single, unified Dockerfile for Windows builds.
 
 ### Workflow Files:
 - `.github/workflows/build-linux-container.yml` - Updated tests and platform specification

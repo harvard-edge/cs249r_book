@@ -3,7 +3,13 @@
 # Test script for Windows Dockerfile validation
 # Run this before building to catch common issues
 
-Write-Host "🔍 Testing Windows Dockerfile configuration..." -ForegroundColor Green
+# Variables
+$headline = "🚀 Testing Dockerfile: Windows"
+$dockerfile = "docker/build-quarto-windows/Dockerfile"
+$image_name = "mlsysbook-windows-test"
+$container_name = "mlsysbook-windows-test-container"
+
+Write-Host $headline -ForegroundColor Green
 
 # Check if required files exist
 $requiredFiles = @(
@@ -26,7 +32,6 @@ foreach ($file in $requiredFiles) {
 
 # Check Dockerfile syntax
 Write-Host "🐳 Validating Dockerfile syntax..." -ForegroundColor Yellow
-$dockerfile = "docker/build-quarto-windows/Dockerfile"
 if (Test-Path $dockerfile) {
     $content = Get-Content $dockerfile -Raw
     

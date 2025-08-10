@@ -30,10 +30,10 @@ Containerized Linux Build (5-10 minutes):
 ## Files
 
 ### Core Files
-- `docker/build-quarto-linux/Dockerfile` - Linux container definition with all dependencies
+- `docker/build-quarto-linux/Dockerfile` - A single Dockerfile for Linux builds.
 - `docker/build-quarto-linux/README.md` - Linux container documentation
 - `docker/build-quarto-linux/.dockerignore` - Build exclusions
-- `docker/build-quarto-windows/Dockerfile` - Windows container definition
+- `docker/build-quarto-windows/Dockerfile` - A single Dockerfile for Windows builds.
 - `.github/workflows/build-linux-container.yml` - Builds and pushes Linux container
 - `.github/workflows/build-windows-container.yml` - Builds and pushes Windows container
 - `.github/workflows/quarto-build-container.yml` - Containerized build workflow
@@ -163,3 +163,15 @@ If issues arise:
 - Container registry access via GitHub Actions
 - No external dependencies
 - All builds run in isolated containers 
+
+### Building the Containers
+
+To build the containers, use the standard `docker build` command:
+
+```bash
+# For Linux
+docker build -f docker/build-quarto-linux/Dockerfile -t mlsysbook-linux .
+
+# For Windows
+docker build -f docker/build-quarto-windows/Dockerfile -t mlsysbook-windows .
+``` 

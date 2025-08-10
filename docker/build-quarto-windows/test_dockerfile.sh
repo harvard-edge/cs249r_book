@@ -3,7 +3,13 @@
 # Test script for Windows Dockerfile validation (bash version)
 # Run this before building to catch common issues
 
-echo "🔍 Testing Windows Dockerfile configuration..."
+# Variables
+headline="🚀 Testing Dockerfile: Windows"
+dockerfile="docker/build-quarto-windows/Dockerfile"
+image_name="mlsysbook-windows-test"
+container_name="mlsysbook-windows-test-container"
+
+echo "$headline"
 
 # Check if required files exist
 required_files=(
@@ -26,7 +32,6 @@ done
 
 # Check Dockerfile syntax
 echo "🐳 Validating Dockerfile syntax..."
-dockerfile="docker/build-quarto-windows/Dockerfile"
 if [ -f "$dockerfile" ]; then
     issues=()
     

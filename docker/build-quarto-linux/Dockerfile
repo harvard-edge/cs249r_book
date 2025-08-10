@@ -23,11 +23,12 @@ RUN echo "🚀 === STARTING DEPENDENCY FILE COPY ===" && \
     echo "  - docker/build-quarto-linux/verify_r_packages.R → /tmp/verify_r_packages.R" && \
     echo "✅ Dependency file copy phase complete"
 
-COPY tools/dependencies/requirements/ /tmp/requirements/
-COPY tools/dependencies/requirements-build.txt /tmp/requirements.txt
+FROM build-base AS builder
+
+# Copy dependency files
+COPY tools/dependencies/requirements.txt /tmp/requirements.txt
 COPY tools/dependencies/install_packages.R /tmp/install_packages.R
 COPY tools/dependencies/tl_packages /tmp/tl_packages
-COPY docker/build-quarto-linux/verify_r_packages.R /tmp/verify_r_packages.R
 
 # Install and configure locales
 RUN echo "🚀 === STARTING LOCALE CONFIGURATION ===" && \
