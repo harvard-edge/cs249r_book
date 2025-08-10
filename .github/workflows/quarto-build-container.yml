@@ -1,21 +1,15 @@
 name: '📚 Quarto Build (Container)'
 
-# Set retention period to 7 days
-env:
-  GITHUB_ACTIONS_RETENTION_DAYS: 7
-
 # Cancel duplicate builds for same target+ref combination
 concurrency:
-  group: quarto-build-container-${{ inputs.target }}-${{ github.ref }}-${{ github.workflow }}
+  group: quarto-build-container-${{ inputs.target }}-${{ github.ref }}
   cancel-in-progress: true
 
 # This workflow uses pre-built containers with all dependencies installed
-# Containers include fixed versions of Quarto, R, Python, TeX Live, etc.
-# This is the primary workflow for fast, consistent builds
+# Matrix approach: 4 parallel jobs for maximum speed
 on:
   workflow_dispatch:
     inputs:
-      # Platform selection checkboxes
       build_linux:
         description: '🐧 Build on Linux'
         required: false
@@ -26,7 +20,6 @@ on:
         required: false
         default: true
         type: boolean
-      # Format selection checkboxes
       build_html:
         description: '📄 Build HTML format'
         required: false
@@ -37,7 +30,6 @@ on:
         required: false
         default: true
         type: boolean
-      # Build configuration
       target:
         description: 'Target branch (dev/main)'
         required: false
@@ -46,373 +38,168 @@ on:
         options:
           - dev
           - main
-      # Advanced options
-      quarto-log-level:
-        description: 'Quarto log level'
-        required: false
-        type: choice
-        default: 'INFO'
-        options:
-          - INFO
-          - DEBUG
-      artifact_name_template:
-        description: 'Artifact name template (optional)'
-        required: false
-        type: string
-        default: '{prefix}-{format}-{os}'
   workflow_call:
     inputs:
-      # Matrix configuration inputs - determines what gets built
       build_linux:
         required: false
         type: boolean
         default: true
-        description: 'Build on Linux'
       build_windows:
         required: false
         type: boolean
         default: true
-        description: 'Build on Windows'
       build_html:
         required: false
         type: boolean
         default: true
-        description: 'Build HTML format'
       build_pdf:
         required: false
         type: boolean
         default: true
-        description: 'Build PDF format'
-      
-      # Build configuration
       target:
         required: false
         type: string
         default: 'dev'
-        description: 'Target branch (dev/main) - determines build behavior'
-      
-      # Container configuration
       container_registry:
         required: false
         type: string
         default: 'ghcr.io'
-        description: 'Container registry URL'
       container_tag:
         required: false
         type: string
         default: 'latest'
-        description: 'Container tag to use'
-      
-      # Legacy inputs for backward compatibility
-      os:
-        required: false
-        type: string
-        default: ''
-        description: 'LEGACY: Operating system (use build_linux/build_windows instead)'
-      format:
-        required: false
-        type: string
-        default: ''
-        description: 'LEGACY: Format to build (use build_html/build_pdf instead)'
-      html_format:
-        required: false
-        type: boolean
-        default: false
-        description: 'LEGACY: Build HTML format'
-      pdf_format:
-        required: false
-        type: boolean
-        default: false
-        description: 'LEGACY: Build PDF format'
-    # Matrix-aware outputs for calling workflows
     outputs:
       build_success:
         description: "Whether all builds completed successfully"
-        value: ${{ jobs.collect-results.outputs.build_success }}
+        value: ${{ jobs.collect-outputs.outputs.build_success }}
       linux_html_artifact:
         description: "Linux HTML artifact name"
-        value: ${{ jobs.collect-results.outputs.linux_html_artifact }}
+        value: ${{ jobs.collect-outputs.outputs.linux_html_artifact }}
       linux_pdf_artifact:
         description: "Linux PDF artifact name"
-        value: ${{ jobs.collect-results.outputs.linux_pdf_artifact }}
+        value: ${{ jobs.collect-outputs.outputs.linux_pdf_artifact }}
       windows_html_artifact:
         description: "Windows HTML artifact name"
-        value: ${{ jobs.collect-results.outputs.windows_html_artifact }}
+        value: ${{ jobs.collect-outputs.outputs.windows_html_artifact }}
       windows_pdf_artifact:
         description: "Windows PDF artifact name"
-        value: ${{ jobs.collect-results.outputs.windows_pdf_artifact }}
-      target:
-        description: "Build target (dev/main)"
-        value: ${{ inputs.target }}
-      formats_built:
-        description: "Comma-separated list of formats built"
-        value: ${{ jobs.collect-results.outputs.formats_built }}
+        value: ${{ jobs.collect-outputs.outputs.windows_pdf_artifact }}
 
 permissions:
-  contents: write
-  pages: write
+  contents: read
+  packages: read
 
 jobs:
-  # Generate dynamic matrix based on inputs
-  generate-matrix:
-    name: '🎯 Generate Build Matrix'
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.generate.outputs.matrix }}
-      
-    steps:
-      - name: 🎯 Generate Build Matrix
-        id: generate
-        run: |
-          echo "🎯 Generating build matrix from inputs..."
-          
-          # Get platform and format selections directly from inputs
-          BUILD_LINUX="${{ inputs.build_linux }}"
-          BUILD_WINDOWS="${{ inputs.build_windows }}"
-          BUILD_HTML="${{ inputs.build_html }}"
-          BUILD_PDF="${{ inputs.build_pdf }}"
-          
-          # Start with empty matrix
-          MATRIX='{"include":[]}'
-          
-          # Linux builds
-          if [ "$BUILD_LINUX" = "true" ]; then
-            if [ "$BUILD_HTML" = "true" ]; then
-              MATRIX=$(echo "$MATRIX" | jq '.include += [{"os": "ubuntu-latest", "os_name": "linux", "container_name": "quarto-linux", "format": "html", "artifact": "${{ inputs.target }}-html-linux"}]')
-            fi
-            if [ "$BUILD_PDF" = "true" ]; then
-              MATRIX=$(echo "$MATRIX" | jq '.include += [{"os": "ubuntu-latest", "os_name": "linux", "container_name": "quarto-linux", "format": "pdf", "artifact": "${{ inputs.target }}-pdf-linux"}]')
-            fi
-          fi
-          
-          # Windows builds  
-          if [ "$BUILD_WINDOWS" = "true" ]; then
-            if [ "$BUILD_HTML" = "true" ]; then
-              MATRIX=$(echo "$MATRIX" | jq '.include += [{"os": "windows-latest", "os_name": "windows", "container_name": "quarto-windows", "format": "html", "artifact": "${{ inputs.target }}-html-windows"}]')
-            fi
-            if [ "$BUILD_PDF" = "true" ]; then
-              MATRIX=$(echo "$MATRIX" | jq '.include += [{"os": "windows-latest", "os_name": "windows", "container_name": "quarto-windows", "format": "pdf", "artifact": "${{ inputs.target }}-pdf-windows"}]')
-            fi
-          fi
-          
-          echo "📊 Generated matrix:"
-          echo "$MATRIX" | jq '.'
-          
-          # Check if matrix is empty
-          BUILD_COUNT=$(echo "$MATRIX" | jq '.include | length')
-          if [ "$BUILD_COUNT" -eq 0 ]; then
-            echo "❌ No builds selected! At least one OS and format must be enabled."
-            exit 1
-          fi
-          
-          echo "✅ Matrix generated with $BUILD_COUNT build jobs"
-          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
-
-  # Dynamic matrix build job
   build:
-    name: '🚀 ${{ matrix.os_name }} ${{ matrix.format }}'
-    needs: generate-matrix
-    runs-on: ${{ matrix.os }}
-    if: needs.generate-matrix.outputs.matrix != ''
+    name: '🚀 ${{ matrix.platform }} ${{ matrix.format }}'
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     
     strategy:
       fail-fast: false
-      matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
+      matrix:
+        include:
+          # Linux builds
+          - platform: linux
+            runner: ubuntu-latest
+            format: html
+            config: _quarto-html.yml
+            render_target: html
+            enabled: ${{ inputs.build_linux && inputs.build_html }}
+            artifact_name: ${{ inputs.target }}-html-linux
+          - platform: linux
+            runner: ubuntu-latest
+            format: pdf
+            config: _quarto-pdf.yml
+            render_target: titlepage-pdf
+            enabled: ${{ inputs.build_linux && inputs.build_pdf }}
+            artifact_name: ${{ inputs.target }}-pdf-linux
+          # Windows builds  
+          - platform: windows
+            runner: windows-latest
+            format: html
+            config: _quarto-html.yml
+            render_target: html
+            enabled: ${{ inputs.build_windows && inputs.build_html }}
+            artifact_name: ${{ inputs.target }}-html-windows
+          - platform: windows
+            runner: windows-latest
+            format: pdf
+            config: _quarto-pdf.yml
+            render_target: titlepage-pdf
+            enabled: ${{ inputs.build_windows && inputs.build_pdf }}
+            artifact_name: ${{ inputs.target }}-pdf-windows
     
-    container: ${{ format('{0}/{1}/{2}:{3}', inputs.container_registry, github.repository, matrix.container_name, inputs.container_tag) }}
-    env:
-      QUARTO_LOG_LEVEL: ${{ inputs.quarto-log-level || 'INFO' }}
-      OS_NAME: ${{ matrix.os_name }}
-      PYTHONIOENCODING: utf-8
-      LANG: en_US.UTF-8
-      LC_ALL: en_US.UTF-8
-
+    # Only Linux runs in containers
+    container: ${{ matrix.platform == 'linux' && format('{0}/{1}/quarto-{2}:{3}', inputs.container_registry, github.repository, matrix.platform, inputs.container_tag) || null }}
+    
+    # Skip builds that are disabled
+    if: ${{ matrix.enabled }}
+    
     steps:
-      - name: 🚀 Build Matrix Job
-        shell: bash
-        run: |
-          echo "🚀 Building ${{ matrix.format }} on ${{ matrix.os_name }}..."
-          echo "📊 Build configuration:"
-          echo "  OS: ${{ matrix.os_name }}"
-          echo "  Format: ${{ matrix.format }}"
-          echo "  Container: ${{ matrix.container_name }}"
-          echo "  Artifact: ${{ matrix.artifact }}"
-
-      - name: 🚦 Set Initial Build Status
-        shell: bash
-        run: |
-          echo "🚦 Setting initial build status to pending..."
-          curl -X POST \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
-            -d "{
-              \"state\": \"pending\",
-              \"description\": \"Quarto build started (${{ matrix.os_name }} container)\",
-              \"context\": \"ci/quarto-build-${{ matrix.os }}-${{ inputs.format }}\"
-            }"
-
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: 📋 Container Environment Info
-        shell: bash
+      - name: 🔨 Build ${{ matrix.format }} (Linux)
+        if: matrix.platform == 'linux'
+        working-directory: quarto
         run: |
-          echo "🔄 Container build environment information..."
-          echo "📊 Container Configuration:"
-          echo "  Registry: ${{ inputs.container_registry }}"
-          echo "  Repository: ${{ github.repository }}"
-          echo "  Container: ${{ matrix.container_name }}"
-          echo "  Tag: ${{ inputs.container_tag }}"
-          echo "  Full Image: ${{ format('{0}/{1}/{2}:{3}', inputs.container_registry, github.repository, matrix.container_name, inputs.container_tag) }}"
-          echo "  OS: ${{ matrix.os_name }}"
-          echo ""
-          echo "📊 Pre-installed versions:"
-          echo "  Quarto: $(quarto --version)"
-          echo "  Python: $(python3 --version)"
-          echo "  R: $(R --version | head -1)"
-          echo "  TeX Live: $(lualatex --version | head -1)"
-          echo "📊 System resources:"
-          echo "  Disk space: $(df -h . | tail -1)"
-          echo "  Memory: $(free -h | grep Mem)"
+          echo "🔨 Building ${{ matrix.format }} on Linux container..."
+          cp config/${{ matrix.config }} _quarto.yml
+          quarto render --to ${{ matrix.render_target }}
+          echo "✅ ${{ matrix.format }} build completed"
 
-      - name: 🔨 Build HTML (copy config and render)
-        if: matrix.format == 'html'
-        shell: bash
+      - name: 🔨 Build ${{ matrix.format }} (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        working-directory: quarto
         run: |
-          echo "🚀 Setting up HTML configuration..."
-          cd quarto
-          rm -f _quarto.yml
-          cp config/_quarto-html.yml _quarto.yml
-          echo "✅ Configuration set to HTML"
-          
-          echo "🔨 Building HTML..."
-          echo "⏰ HTML build started at: $(date)"
-          
-          curl -X POST \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
-            -d "{
-              \"state\": \"pending\",
-              \"description\": \"Building HTML content (${{ matrix.os_name }} container)\",
-              \"context\": \"ci/quarto-build-${{ matrix.os }}-html\"
-            }"
-          
-          quarto render --to html
-          echo "✅ HTML build completed at: $(date)"
-        
-      - name: 🔨 Build PDF (copy config and render)
-        if: matrix.format == 'pdf'
-        shell: bash
-        run: |
-          echo "🚀 Setting up PDF configuration..."
-          cd quarto
-          rm -f _quarto.yml
-          cp config/_quarto-pdf.yml _quarto.yml
-          echo "✅ Configuration set to PDF"
-          
-          echo "🔨 Building PDF..."
-          echo "⏰ PDF build started at: $(date)"
-          echo "📊 This should be much faster with pre-installed dependencies"
-          
-          curl -X POST \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
-            -d "{
-              \"state\": \"pending\",
-              \"description\": \"Building PDF content (${{ matrix.os_name }} container) - optimized\",
-              \"context\": \"ci/quarto-build-${{ inputs.os }}-pdf\"
-            }"
-          
-          quarto render --to titlepage-pdf
-          echo "✅ PDF build completed at: $(date)"
+          Write-Host "🔨 Building ${{ matrix.format }} on Windows container..."
+          $ImageName = "${{ format('{0}/{1}/quarto-{2}:{3}', inputs.container_registry, github.repository, matrix.platform, inputs.container_tag) }}"
+          docker run --rm -v "${PWD}:C:\workspace" -w "C:\workspace" $ImageName powershell -Command "
+            Copy-Item 'config\${{ matrix.config }}' '_quarto.yml'
+            quarto render --to ${{ matrix.render_target }}
+          "
+          Write-Host "✅ ${{ matrix.format }} build completed"
 
-      - name: 📉 Compress PDF with Ghostscript (Linux)
-        if: matrix.format == 'pdf' && runner.os == 'Linux'
-        shell: bash
+      - name: 📉 Compress PDF (Linux)
+        if: matrix.platform == 'linux' && matrix.format == 'pdf'
+        working-directory: build/pdf
         run: |
-          if [ -f "build/pdf/Machine-Learning-Systems.pdf" ]; then
-            echo "📉 Compressing PDF using Ghostscript (Linux)..."
-            gs \
-              -sDEVICE=pdfwrite \
-              -dCompatibilityLevel=1.4 \
-              -dPDFSETTINGS=/ebook \
-              -dNOPAUSE \
-              -dQUIET \
-              -dBATCH \
-              -sOutputFile="./build/pdf/ebook.pdf" \
-              "./build/pdf/Machine-Learning-Systems.pdf"
-
-            mv ./build/pdf/ebook.pdf ./build/pdf/Machine-Learning-Systems.pdf
-          else
-            echo "⚠️ PDF file not found for compression"
+          if [ -f "Machine-Learning-Systems.pdf" ]; then
+            echo "📉 Compressing PDF..."
+            gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 -dPDFSETTINGS=/ebook \
+               -dNOPAUSE -dQUIET -dBATCH \
+               -sOutputFile="compressed.pdf" "Machine-Learning-Systems.pdf"
+            mv compressed.pdf Machine-Learning-Systems.pdf
           fi
 
-      - name: 📉 Compress PDF with Ghostscript (Windows)
-        if: matrix.format == 'pdf' && runner.os == 'Windows'
+      - name: 📉 Compress PDF (Windows)
+        if: matrix.platform == 'windows' && matrix.format == 'pdf'
         shell: pwsh
+        working-directory: build/pdf
         run: |
-          $input = "./build/pdf/Machine-Learning-Systems.pdf"
-          $output = "./build/pdf/ebook.pdf"
-
-          if (!(Test-Path $input)) {
-            Write-Warning "⚠️ Input PDF not found! Skipping compression..."
-            exit 0
+          if (Test-Path "Machine-Learning-Systems.pdf") {
+            Write-Host "📉 Compressing PDF..."
+            & gswin64c -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 -dPDFSETTINGS=/ebook `
+                       -dNOPAUSE -dBATCH `
+                       -sOutputFile="compressed.pdf" "Machine-Learning-Systems.pdf"
+            if (Test-Path "compressed.pdf") { 
+              Move-Item -Force "compressed.pdf" "Machine-Learning-Systems.pdf" 
+            }
           }
 
-          Write-Output "📉 Compressing PDF using Ghostscript (Windows)..."
-          & gswin64c -sDEVICE=pdfwrite -dCompatibilityLevel:1.4 -dPDFSETTINGS=/ebook -dNOPAUSE -dBATCH -sOutputFile="$output" "$input"
-
-          if (Test-Path $output) {
-            Move-Item -Force $output $input
-          } else {
-            Write-Warning "⚠️ Compression failed but continuing"
-          }
-
-      - name: 📤 Upload artifacts
+      - name: 📤 Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
+          name: ${{ matrix.artifact_name }}
           path: build/${{ matrix.format }}
 
-      - name: 🎯 Set Final Build Status
-        if: always()
-        shell: bash
-        run: |
-          echo "🎯 Setting final build status..."
-          
-          if [ "${{ job.status }}" = "success" ]; then
-            STATE="success"
-            DESCRIPTION="${{ matrix.format }} build completed successfully (${{ matrix.os_name }} container)"
-          else
-            STATE="failure"
-            DESCRIPTION="${{ matrix.format }} build failed (${{ matrix.os_name }} container)"
-          fi
-          
-          echo "📊 Final status: $STATE"
-          echo "📝 Description: $DESCRIPTION"
-          
-          curl -X POST \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
-            -d "{
-              \"state\": \"$STATE\",
-              \"description\": \"$DESCRIPTION\",
-              \"context\": \"ci/quarto-build-${{ matrix.os_name }}-${{ matrix.format }}\"
-            }"
-          
-          echo "✅ Commit status updated successfully"
-
-  # Collect results from all matrix builds
-  collect-results:
-    name: '📊 Collect Results'
-    needs: [generate-matrix, build]
+  collect-outputs:
+    name: '📊 Collect Outputs'
+    needs: build
     runs-on: ubuntu-latest
     if: always()
     outputs:
@@ -421,61 +208,38 @@ jobs:
       linux_pdf_artifact: ${{ steps.collect.outputs.linux_pdf_artifact }}
       windows_html_artifact: ${{ steps.collect.outputs.windows_html_artifact }}
       windows_pdf_artifact: ${{ steps.collect.outputs.windows_pdf_artifact }}
-      formats_built: ${{ steps.collect.outputs.formats_built }}
-      
+    
     steps:
-      - name: 📊 Collect Matrix Results
+      - name: 📊 Collect results
         id: collect
         run: |
-          echo "📊 Collecting results from matrix builds..."
+          # Check overall success - all enabled builds must succeed
+          BUILD_SUCCESS="true"
           
-          # Parse the matrix to determine what was built
-          MATRIX='${{ needs.generate-matrix.outputs.matrix }}'
-          echo "📋 Matrix: $MATRIX"
-          
-          # Initialize outputs
-          LINUX_HTML=""
-          LINUX_PDF=""
-          WINDOWS_HTML=""
-          WINDOWS_PDF=""
-          FORMATS_BUILT=()
-          
-          # Collect artifact names based on successful builds
-          echo "$MATRIX" | jq -r '.include[] | "\(.os_name) \(.format) \(.artifact)"' | while IFS=' ' read -r OS_NAME FORMAT ARTIFACT; do
-            if [ "${{ needs.build.result }}" = "success" ]; then
-              case "${OS_NAME}_${FORMAT}" in
-                "linux_html")
-                  echo "linux_html_artifact=$ARTIFACT" >> $GITHUB_OUTPUT
-                  ;;
-                "linux_pdf")
-                  echo "linux_pdf_artifact=$ARTIFACT" >> $GITHUB_OUTPUT
-                  ;;
-                "windows_html")
-                  echo "windows_html_artifact=$ARTIFACT" >> $GITHUB_OUTPUT
-                  ;;
-                "windows_pdf")
-                  echo "windows_pdf_artifact=$ARTIFACT" >> $GITHUB_OUTPUT
-                  ;;
-              esac
-              FORMATS_BUILT+=("$FORMAT")
-            fi
-          done
-          
-          # Determine overall success
-          if [ "${{ needs.build.result }}" = "success" ]; then
-            BUILD_SUCCESS="true"
-          else
+          # Check each possible build combination
+          if [ "${{ needs.build.result }}" != "success" ]; then
             BUILD_SUCCESS="false"
           fi
           
-          # Join formats built (remove duplicates)
-          FORMATS_LIST=$(printf '%s\n' "${FORMATS_BUILT[@]}" | sort -u | tr '\n' ',' | sed 's/,$//')
-          
           echo "build_success=$BUILD_SUCCESS" >> $GITHUB_OUTPUT
-          echo "formats_built=$FORMATS_LIST" >> $GITHUB_OUTPUT
           
-          echo "✅ Results collected:"
-          echo "  Success: $BUILD_SUCCESS"
-          echo "  Formats: $FORMATS_LIST"
-
- 
+          # Set artifact names for requested builds
+          TARGET="${{ inputs.target }}"
+          
+          if [ "${{ inputs.build_linux }}" = "true" ] && [ "${{ inputs.build_html }}" = "true" ]; then
+            echo "linux_html_artifact=${TARGET}-html-linux" >> $GITHUB_OUTPUT
+          fi
+          
+          if [ "${{ inputs.build_linux }}" = "true" ] && [ "${{ inputs.build_pdf }}" = "true" ]; then
+            echo "linux_pdf_artifact=${TARGET}-pdf-linux" >> $GITHUB_OUTPUT
+          fi
+          
+          if [ "${{ inputs.build_windows }}" = "true" ] && [ "${{ inputs.build_html }}" = "true" ]; then
+            echo "windows_html_artifact=${TARGET}-html-windows" >> $GITHUB_OUTPUT
+          fi
+          
+          if [ "${{ inputs.build_windows }}" = "true" ] && [ "${{ inputs.build_pdf }}" = "true" ]; then
+            echo "windows_pdf_artifact=${TARGET}-pdf-windows" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "✅ Results collected - Success: $BUILD_SUCCESS"
