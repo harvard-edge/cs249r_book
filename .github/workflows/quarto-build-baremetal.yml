@@ -54,7 +54,8 @@ on:
         options:
           - html
           - pdf
-          - both
+          - epub
+          - all
       quarto-log-level:
         required: false
         type: choice
@@ -76,10 +77,9 @@ on:
         default: 'development'
         description: 'Build environment'
       os:
-        required: false
+        required: true
         type: string
-        default: ''
-        description: 'Operating system to run on (ubuntu-latest/windows-latest) - legacy, use build_os instead'
+        description: 'Operating system to run on (ubuntu-latest/windows-latest)'
       quarto-version:
         required: false
         type: string
@@ -98,47 +98,39 @@ on:
       format:
         required: false
         type: string
-        default: 'both'
-        description: 'Format to build (html/pdf/both) - legacy, use build_format instead'
-      # New matrix-style inputs (same as container workflow)
-      build_format:
-        required: false
-        type: string
-        default: 'both'
-        description: 'Formats to build (html/pdf/both)'
-      build_os:
-        required: false
-        type: string
-        default: 'both'
-        description: 'Operating systems to build on (linux/windows/both)'
+        default: 'all'
+        description: 'Format to build (html/pdf/epub/all)'
       artifact_name:
         required: false
         type: string
         default: ''
-        description: 'Artifact naming pattern. Example: "book-html-linux" (default: "build-linux-html")'
+        description: 'Explicit artifact name (if empty, uses build-{os}-{format} pattern)'
       deploy:
         required: false
         type: boolean
         default: false
         description: 'Whether to deploy artifacts (used by publish-live workflow)'
 
-    outputs:
-      html-artifact-name:
-        description: "Name of uploaded HTML artifact (if built)"
-        value: ${{ jobs.build.outputs.html-artifact-name }}
-      pdf-artifact-name:
-        description: "Name of uploaded PDF artifact (if built)"
-        value: ${{ jobs.build.outputs.pdf-artifact-name }}
-
-      build-status:
-        description: "Overall build status (success/failure/skipped)"
-        value: ${{ jobs.build.outputs.build-status }}
-      formats-built:
-        description: "Comma-separated list of formats that were built"
-        value: ${{ jobs.build.outputs.formats-built }}
-      artifact-name:
-        description: "Final artifact name used for upload"
-        value: ${{ jobs.build.outputs.artifact-name }}
+# Standardized outputs for calling workflows
+outputs:
+  build_success:
+    description: "Whether the build completed successfully"
+    value: ${{ jobs.build.outputs.build_success }}
+  html_artifact:
+    description: "HTML artifact name (empty if not built)"
+    value: ${{ jobs.build.outputs.html_artifact }}
+  pdf_artifact:
+    description: "PDF artifact name (empty if not built)"
+    value: ${{ jobs.build.outputs.pdf_artifact }}
+  os_name:
+    description: "Operating system name (linux/windows)"
+    value: ${{ jobs.build.outputs.os_name }}
+  target:
+    description: "Build target (dev/main)"
+    value: ${{ jobs.build.outputs.target }}
+  formats_built:
+    description: "Comma-separated list of formats built"
+    value: ${{ jobs.build.outputs.formats_built }}
 
 permissions:
   contents: write
@@ -146,33 +138,17 @@ permissions:
 
 jobs:
   build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - format: html
-            os: ubuntu-latest
-            os_name: linux
-          - format: pdf
-            os: ubuntu-latest
-            os_name: linux
-          - format: html
-            os: windows-latest
-            os_name: windows
-          - format: pdf
-            os: windows-latest
-            os_name: windows
-    timeout-minutes: 120   # ⏰ Set job timeout to 2 hours (7200 seconds)
+    runs-on: ${{ inputs.os }}
+    outputs:
+      build_success: ${{ steps.outputs.outputs.build_success }}
+      html_artifact: ${{ steps.outputs.outputs.html_artifact }}
+      pdf_artifact: ${{ steps.outputs.outputs.pdf_artifact }}
+      os_name: ${{ steps.outputs.outputs.os_name }}
+      target: ${{ steps.outputs.outputs.target }}
+      formats_built: ${{ steps.outputs.outputs.formats_built }}
+    timeout-minutes: 60   # ⏰ Set job timeout to 1 hour (3600 seconds)
     environment:
       name: ${{ inputs.environment }}
-    outputs:
-      html-artifact-name: ${{ steps.upload-html.outputs.artifact-id }}
-      pdf-artifact-name: ${{ steps.upload-pdf.outputs.artifact-id }}
-
-      build-status: ${{ steps.build-summary.outputs.status }}
-      formats-built: ${{ steps.build-summary.outputs.formats }}
-      artifact-name: ${{ steps.build-declaration.outputs.artifact_created }}
     env:
       R_LIBS_USER: ${{ github.workspace }}/.r-lib
       QUARTO_LOG_LEVEL: ${{ inputs.quarto-log-level || 'INFO' }}
@@ -182,46 +158,7 @@ jobs:
       LC_ALL: en_US.UTF-8
 
     steps:
-      - name: 🎯 Check if this matrix job should run
-        id: should-run
-        shell: bash
-        run: |
-          # Determine which inputs to use (new matrix inputs or legacy inputs)
-          EFFECTIVE_FORMAT="${{ inputs.build_format || inputs.format || 'both' }}"
-          EFFECTIVE_OS="${{ inputs.build_os || (inputs.os && (inputs.os == 'ubuntu-latest' && 'linux' || 'windows')) || 'both' }}"
-          
-          # Check if format is enabled
-          FORMAT_ENABLED=false
-          if [ "$EFFECTIVE_FORMAT" = "${{ matrix.format }}" ] || [ "$EFFECTIVE_FORMAT" = "both" ] || [ "$EFFECTIVE_FORMAT" = "" ]; then
-            FORMAT_ENABLED=true
-          fi
-          
-          # Check if OS is enabled
-          OS_ENABLED=false
-          if [ "$EFFECTIVE_OS" = "${{ matrix.os_name }}" ] || [ "$EFFECTIVE_OS" = "both" ] || [ "$EFFECTIVE_OS" = "" ]; then
-            OS_ENABLED=true
-          fi
-          
-          # Only run if both format and OS are enabled
-          if [ "$FORMAT_ENABLED" = "true" ] && [ "$OS_ENABLED" = "true" ]; then
-            echo "should-run=true" >> $GITHUB_OUTPUT
-            echo "✅ Running build: ${{ matrix.format }} on ${{ matrix.os_name }}"
-          else
-            echo "should-run=false" >> $GITHUB_OUTPUT
-            echo "⏭️ Skipping: ${{ matrix.format }} on ${{ matrix.os_name }}"
-          fi
-
-      - name: 📊 Build Configuration Summary
-        if: steps.should-run.outputs.should-run == 'true'
-        shell: bash
-        run: |
-          echo "📊 Build configuration:"
-          echo "  Format: ${{ matrix.format }}"
-          echo "  OS: ${{ matrix.os_name }}"
-          echo "  Target: ${{ inputs.target }}"
-
       - name: 🚦 Set Initial Build Status
-        if: steps.should-run.outputs.should-run == 'true'
         shell: bash
         run: |
           echo "🚦 Setting initial build status to pending..."
@@ -251,7 +188,7 @@ jobs:
           Write-Output "👉 Deploy: Artifacts only - no deployment"
           Write-Output "👉 TeX Live: Always installed for all formats (consistent environment)"
           
-          $valid_formats = @("html", "pdf", "both")
+          $valid_formats = @("html", "pdf", "epub", "all")
           if ("${{ inputs.format }}" -notin $valid_formats) {
             Write-Error "❌ Format must be one of: $($valid_formats -join ', ')"
             exit 1
@@ -260,13 +197,11 @@ jobs:
           Write-Output "✅ Input validation passed"
 
       - name: 📥 Checkout repository
-        if: steps.should-run.outputs.should-run == 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: 📦 Setup Quarto
-        if: steps.should-run.outputs.should-run == 'true'
         uses: quarto-dev/quarto-actions/setup@v2
         with:
           version: ${{ inputs.quarto-version }}
@@ -274,7 +209,6 @@ jobs:
         id: quarto-setup
 
       - name: 📋 Quarto Setup Info
-        if: steps.should-run.outputs.should-run == 'true'
         shell: bash
         run: |
           echo "🔄 Checking Quarto installation..."
@@ -587,8 +521,6 @@ jobs:
             cat("✅ All required R packages installed successfully\n")
           }
 
-
-
       - name: 💓 Start Build Heartbeat
         shell: bash
         run: |
@@ -620,8 +552,7 @@ jobs:
           echo "✅ Heartbeat started (PID: $HEARTBEAT_PID)"
 
       - name: 🔨 Build HTML (copy config and render)
-        if: inputs.format == 'html' || inputs.format == 'both'
-        id: build-html
+        if: inputs.format == 'html' || inputs.format == 'all'
         shell: bash
         run: |
           echo "🚀 Setting up HTML configuration..."
@@ -629,18 +560,6 @@ jobs:
           rm -f _quarto.yml
           cp config/_quarto-html.yml _quarto.yml
           echo "✅ Configuration set to HTML"
-          
-          # Detect output directory from configuration
-          echo "🔍 Detecting HTML output directory..."
-          HTML_OUTPUT_DIR=$(grep -E "^\s*output-dir:" _quarto.yml | sed -E 's/^\s*output-dir:\s*(.+)$/\1/' | tr -d '"' | tr -d "'")
-          if [ -n "$HTML_OUTPUT_DIR" ]; then
-            echo "✅ HTML output directory: $HTML_OUTPUT_DIR"
-            echo "html_output_path=$HTML_OUTPUT_DIR" >> $GITHUB_OUTPUT
-          else
-            echo "⚠️ Could not detect HTML output directory, using default"
-            HTML_OUTPUT_DIR="_site"
-            echo "html_output_path=$HTML_OUTPUT_DIR" >> $GITHUB_OUTPUT
-          fi
           
           echo "🔨 Building HTML..."
           echo "⏰ HTML build started at: $(date)"
@@ -659,11 +578,9 @@ jobs:
           # Enable verbose logging for debugging
           quarto render --to html
           echo "✅ HTML build completed at: $(date)"
-          echo "📊 Output available in: $HTML_OUTPUT_DIR"
         
       - name: 🔨 Build PDF (copy config and render)
-        if: inputs.format == 'pdf' || inputs.format == 'both'
-        id: build-pdf
+        if: inputs.format == 'pdf' || inputs.format == 'all'
         shell: bash
         run: |
           echo "🚀 Setting up PDF configuration..."
@@ -671,18 +588,6 @@ jobs:
           rm -f _quarto.yml
           cp config/_quarto-pdf.yml _quarto.yml
           echo "✅ Configuration set to PDF"
-          
-          # Detect output directory from configuration
-          echo "🔍 Detecting PDF output directory..."
-          PDF_OUTPUT_DIR=$(grep -E "^\s*output-dir:" _quarto.yml | sed -E 's/^\s*output-dir:\s*(.+)$/\1/' | tr -d '"' | tr -d "'")
-          if [ -n "$PDF_OUTPUT_DIR" ]; then
-            echo "✅ PDF output directory: $PDF_OUTPUT_DIR"
-            echo "pdf_output_path=$PDF_OUTPUT_DIR" >> $GITHUB_OUTPUT
-          else
-            echo "⚠️ Could not detect PDF output directory, using default"
-            PDF_OUTPUT_DIR="_site"
-            echo "pdf_output_path=$PDF_OUTPUT_DIR" >> $GITHUB_OUTPUT
-          fi
           
           echo "🔨 Building PDF..."
           echo "⏰ PDF build started at: $(date)"
@@ -703,7 +608,6 @@ jobs:
           # Enable verbose logging for debugging
           quarto render --to titlepage-pdf
           echo "✅ PDF build completed at: $(date)"
-          echo "📊 Output available in: $PDF_OUTPUT_DIR"
       
       - name: 💓 Stop Build Heartbeat
         shell: bash
@@ -729,53 +633,43 @@ jobs:
           echo "🔄 Checking Quarto build output..."
 
           # HTML check
-          if [[ "${{ inputs.format }}" == "html" || "${{ inputs.format }}" == "both" ]]; then
-            HTML_PATH="${{ steps.build-html.outputs.html_output_path }}"
-            if [ -n "$HTML_PATH" ] && [ -d "$HTML_PATH" ]; then
-              echo "✅ HTML directory exists: $HTML_PATH"
-              echo "📊 Files in $HTML_PATH directory:"
-              ls -la "$HTML_PATH" | head -n 20
-              echo "📊 Total files in $HTML_PATH:"
-              find "$HTML_PATH" -type f | wc -l
+          if [[ "${{ inputs.format }}" == "html" || "${{ inputs.format }}" == "all" ]]; then
+            if [ -d "build/html" ]; then
+              echo "✅ build/html directory exists"
+              echo "📊 Files in build/html directory:"
+              ls -la build/html | head -n 20
+              echo "📊 Total files in build/html:"
+              find build/html -type f | wc -l
             else
-              echo "❌ HTML directory not found: $HTML_PATH"
-              echo "🔍 Available directories:"
-              find . -type d -name "*html*" -o -name "_build" -o -name "_site" | head -10
+              echo "❌ build/html directory not found!"
             fi
           fi
 
           # PDF check
-          if [[ "${{ inputs.format }}" == "pdf" || "${{ inputs.format }}" == "both" ]]; then
-            PDF_PATH="${{ steps.build-pdf.outputs.pdf_output_path }}"
-            if [ -n "$PDF_PATH" ] && [ -d "$PDF_PATH" ]; then
-              echo "✅ PDF directory exists: $PDF_PATH"
-              echo "📊 Files in $PDF_PATH directory:"
-              ls -la "$PDF_PATH" | head -n 20
-              echo "📊 Total files in $PDF_PATH:"
-              find "$PDF_PATH" -type f | wc -l
+          if [[ "${{ inputs.format }}" == "pdf" || "${{ inputs.format }}" == "all" ]]; then
+            if [ -d "build/pdf" ]; then
+              echo "✅ build/pdf directory exists"
+              echo "📊 Files in build/pdf directory:"
+              ls -la build/pdf | head -n 20
+              echo "📊 Total files in build/pdf:"
+              find build/pdf -type f | wc -l
               
-              if [ -f "$PDF_PATH/Machine-Learning-Systems.pdf" ]; then
+              if [ -f "build/pdf/Machine-Learning-Systems.pdf" ]; then
                 echo "✅ PDF file exists"
                 echo "📊 PDF file size:"
-                du -h "$PDF_PATH/Machine-Learning-Systems.pdf"
+                du -h "build/pdf/Machine-Learning-Systems.pdf"
               else
-                echo "⚠️ PDF file not found in $PDF_PATH!"
-                echo "🔍 Looking for PDF files:"
-                find "$PDF_PATH" -name "*.pdf" | head -5
+                echo "⚠️ PDF file not found!"
               fi
             else
-              echo "❌ PDF directory not found: $PDF_PATH"
-              echo "🔍 Available directories:"
-              find . -type d -name "*pdf*" -o -name "_build" -o -name "_site" | head -10
+              echo "❌ build/pdf directory not found!"
             fi
           fi
 
       - name: 📉 Compress PDF with Ghostscript (Linux)
-        if: runner.os == 'Linux' && (inputs.format == 'pdf' || inputs.format == 'both')
+        if: runner.os == 'Linux' && (inputs.format == 'pdf' || inputs.format == 'all')
         run: |
-          PDF_PATH="${{ steps.build-pdf.outputs.pdf_output_path }}"
-          if [ -n "$PDF_PATH" ] && [ -f "$PDF_PATH/Machine-Learning-Systems.pdf" ]; then
-            echo "📉 Compressing PDF in: $PDF_PATH"
+          if [ -f "build/pdf/Machine-Learning-Systems.pdf" ]; then
             gs \
               -sDEVICE=pdfwrite \
               -dCompatibilityLevel=1.4 \
@@ -783,18 +677,17 @@ jobs:
               -dNOPAUSE \
               -dQUIET \
               -dBATCH \
-              -sOutputFile="$PDF_PATH/ebook.pdf" \
-              "$PDF_PATH/Machine-Learning-Systems.pdf"
+              -sOutputFile="./build/pdf/ebook.pdf" \
+              "./build/pdf/Machine-Learning-Systems.pdf"
 
             # Replace original with compressed
-            mv "$PDF_PATH/ebook.pdf" "$PDF_PATH/Machine-Learning-Systems.pdf"
-            echo "✅ PDF compression completed"
+            mv ./build/pdf/ebook.pdf ./build/pdf/Machine-Learning-Systems.pdf
           else
-            echo "⚠️ PDF file not found for compression in: $PDF_PATH"
+            echo "⚠️ PDF file not found for compression"
           fi
 
       - name: 📉 Compress PDF with Ghostscript (Windows)
-        if: runner.os == 'Windows' && (inputs.format == 'pdf' || inputs.format == 'both')
+        if: runner.os == 'Windows' && (inputs.format == 'pdf' || inputs.format == 'all')
         shell: pwsh
         run: |
           # Set UTF-8 encoding for proper emoji display
@@ -802,16 +695,15 @@ jobs:
           $OutputEncoding = [System.Text.Encoding]::UTF8
           [Console]::InputEncoding = [System.Text.Encoding]::UTF8
           
-          $pdfPath = "${{ steps.build-pdf.outputs.pdf_output_path }}"
-          $input = "$pdfPath/Machine-Learning-Systems.pdf"
-          $output = "$pdfPath/ebook.pdf"
+          $input = "./build/pdf/Machine-Learning-Systems.pdf"
+          $output = "./build/pdf/ebook.pdf"
 
           if (!(Test-Path $input)) {
-            Write-Warning "⚠️ Input PDF not found in: $pdfPath! Skipping compression..."
+            Write-Warning "⚠️ Input PDF not found! Skipping compression..."
             exit 0  # Non-zero exit would fail the workflow
           }
 
-          Write-Output "📉 Compressing PDF in: $pdfPath"
+          Write-Output "📉 Compressing PDF using Ghostscript..."
 
           # Unless you are a sucker for pain, don't try to line-break this command (it was a nightmare)
           # Note that compatability should be written as -dCompatibilityLevel:1.4, not -dCompatibilityLevel=1.4!!!
@@ -831,73 +723,66 @@ jobs:
         id: upload-artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.artifact_name != '' && inputs.artifact_name || format('{0}-{1}-{2}', inputs.target, inputs.format, inputs.os == 'ubuntu-latest' && 'linux' || 'windows') }}
+          name: ${{ inputs.artifact_name != '' && inputs.artifact_name || format('build-{0}-{1}', inputs.os, inputs.format) }}
           path: |
-            ${{ steps.build-html.outputs.html_output_path }}
-            ${{ steps.build-pdf.outputs.pdf_output_path }}
+            build/html
+                    build/pdf
 
       - name: 📋 Build Declaration
-        id: build-declaration
+        id: outputs
         shell: bash
         run: |
-          ARTIFACT_NAME="${{ inputs.artifact_name != '' && inputs.artifact_name || format('{0}-{1}-{2}', inputs.target, inputs.format, inputs.os == 'ubuntu-latest' && 'linux' || 'windows') }}"
-          echo "📦 Build Declaration: Successfully created artifact '$ARTIFACT_NAME'"
-          echo "📊 Format: ${{ inputs.format }}"
-          echo "📊 OS: ${{ inputs.os }}"
-          echo "📊 Target: ${{ inputs.target }}"
-          echo "📊 Environment: ${{ inputs.environment }}"
-          echo "📝 Note: This workflow only builds artifacts - deployment handled by publish-live workflow"
-          echo "artifact_created=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
-
-      - name: 📋 Build summary outputs
-        id: build-summary
-        if: always()
-        shell: bash
-        run: |
-          # Determine build status and formats built
-          FORMAT="${{ inputs.format }}"
-          FORMATS_BUILT=""
-          BUILD_STATUS="success"
-          
-          # Check which formats were built successfully
-          if [ "$FORMAT" = "both" ]; then
-            # Check individual format steps
-            HTML_SUCCESS="${{ steps.build-html.outcome }}"
-            PDF_SUCCESS="${{ steps.build-pdf.outcome }}"
-            
-            if [ "$HTML_SUCCESS" = "success" ]; then
-              FORMATS_BUILT="html"
-            fi
-            if [ "$PDF_SUCCESS" = "success" ]; then
-              if [ -n "$FORMATS_BUILT" ]; then
-                FORMATS_BUILT="${FORMATS_BUILT},pdf"
-              else
-                FORMATS_BUILT="pdf"
-              fi
-            fi
-            
-            # Overall status for 'both' format
-            if [ -n "$FORMATS_BUILT" ]; then
-              BUILD_STATUS="success"
-            else
-              BUILD_STATUS="failure"
-            fi
+          # Determine OS name from runner.os
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            OS_NAME="linux"
+          elif [ "${{ runner.os }}" = "Windows" ]; then
+            OS_NAME="windows"
           else
-            # Single format build
-            BUILD_SUCCESS="${{ steps.build-output.outcome }}"
-            if [ "$BUILD_SUCCESS" = "success" ]; then
-              FORMATS_BUILT="$FORMAT"
-              BUILD_STATUS="success"
+            OS_NAME="unknown"
+          fi
+          
+          # Determine artifact names based on formats built
+          HTML_ARTIFACT=""
+          PDF_ARTIFACT=""
+          FORMATS_BUILT=""
+          
+          if [[ "${{ inputs.format }}" == "html" || "${{ inputs.format }}" == "all" ]]; then
+            HTML_ARTIFACT="${{ inputs.target }}-html-${OS_NAME}"
+            FORMATS_BUILT="html"
+          fi
+          
+          if [[ "${{ inputs.format }}" == "pdf" || "${{ inputs.format }}" == "all" ]]; then
+            PDF_ARTIFACT="${{ inputs.target }}-pdf-${OS_NAME}"
+            if [ -n "$FORMATS_BUILT" ]; then
+              FORMATS_BUILT="$FORMATS_BUILT,pdf"
             else
-              BUILD_STATUS="failure"
+              FORMATS_BUILT="pdf"
             fi
           fi
           
-          echo "status=$BUILD_STATUS" >> $GITHUB_OUTPUT
-          echo "formats=$FORMATS_BUILT" >> $GITHUB_OUTPUT
+          # Legacy artifact name for backward compatibility
+          ARTIFACT_NAME="${{ inputs.artifact_name != '' && inputs.artifact_name || format('build-{0}-{1}', inputs.os, inputs.format) }}"
           
-          echo "📊 Build Status: $BUILD_STATUS"
-          echo "📦 Formats Built: $FORMATS_BUILT"
+          echo "📦 Build Declaration: Successfully created artifacts"
+          echo "📊 HTML Artifact: '$HTML_ARTIFACT'"
+          echo "📊 PDF Artifact: '$PDF_ARTIFACT'"
+          echo "📊 Format: ${{ inputs.format }}"
+          echo "📊 OS: ${{ inputs.os }}"
+          echo "📊 Target: ${{ inputs.target }}"
+          echo "📊 Method: Baremetal Build ($OS_NAME)"
+          echo "📊 Formats Built: $FORMATS_BUILT"
+          echo "📝 Note: This workflow only builds artifacts - deployment handled by publish-live workflow"
+          
+          # Standardized outputs
+          echo "build_success=true" >> $GITHUB_OUTPUT
+          echo "html_artifact=$HTML_ARTIFACT" >> $GITHUB_OUTPUT
+          echo "pdf_artifact=$PDF_ARTIFACT" >> $GITHUB_OUTPUT
+          echo "os_name=$OS_NAME" >> $GITHUB_OUTPUT
+          echo "target=${{ inputs.target }}" >> $GITHUB_OUTPUT
+          echo "formats_built=$FORMATS_BUILT" >> $GITHUB_OUTPUT
+          
+          # Legacy output for backward compatibility
+          echo "artifact_created=$ARTIFACT_NAME" >> $GITHUB_OUTPUT
 
 
 

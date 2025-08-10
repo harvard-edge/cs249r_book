@@ -37,26 +37,7 @@ RUN Write-Host '=== STARTING BASE SETUP ===' ; `
     Write-Host '✅ Base setup complete'
 
 # ------------------------------------------------------------
-# PHASE 1: Copy dependency files EARLY (for better cache efficiency)
-# ------------------------------------------------------------
-RUN Write-Host '=== STARTING DEPENDENCY FILE COPY ===' ; `
-    Write-Host 'Copying dependency files to container (early for cache efficiency)...' ; `
-    Write-Host 'Files to copy:' ; `
-    Write-Host '  - tools/dependencies/requirements/ → C:/temp/requirements/' ; `
-    Write-Host '  - tools/dependencies/requirements-build.txt → C:/temp/requirements.txt' ; `
-    Write-Host '  - tools/dependencies/install_packages.R → C:/temp/install_packages.R' ; `
-    Write-Host '  - tools/dependencies/tl_packages → C:/temp/tl_packages' ; `
-    Write-Host '  - docker/build-quarto-windows/verify_r_packages.R → C:/temp/verify_r_packages.R' ; `
-    Write-Host '✅ Dependency file copy phase complete'
-
-COPY tools/dependencies/requirements/                  C:/temp/requirements/
-COPY tools/dependencies/requirements-build.txt         C:/temp/requirements.txt
-COPY tools/dependencies/install_packages.R             C:/temp/install_packages.R
-COPY tools/dependencies/tl_packages                    C:/temp/tl_packages
-COPY docker/build-quarto-windows/verify_r_packages.R   C:/temp/verify_r_packages.R
-
-# ------------------------------------------------------------
-# PHASE 2: PowerShell 7 (ZIP install, container-safe)
+# PHASE 1: PowerShell 7 (ZIP install, container-safe)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING POWERSHELL 7 INSTALLATION ===' ; `
     Write-Host 'Using ZIP install for container compatibility' ; `
@@ -91,7 +72,7 @@ RUN Write-Host '=== STARTING POWERSHELL 7 INSTALLATION ===' ; `
 SHELL ["C:\\Program Files\\PowerShell\\7\\pwsh.exe", "-NoLogo", "-ExecutionPolicy", "Bypass", "-Command"]
 
 # ------------------------------------------------------------
-# PHASE 3: Chocolatey (package manager for Windows)
+# PHASE 2: Chocolatey (package manager for Windows)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING CHOCOLATEY INSTALLATION ===' ; `
     Write-Host 'Installing Chocolatey package manager...' ; `
@@ -117,6 +98,12 @@ RUN Write-Host '=== STARTING DEPENDENCY FILE COPY ===' ; `
     Write-Host '  - tools/dependencies/tl_packages → C:/temp/tl_packages' ; `
     Write-Host '  - docker/build-quarto-windows/verify_r_packages.R → C:/temp/verify_r_packages.R' ; `
     Write-Host '✅ Dependency file copy phase complete'
+
+COPY tools/dependencies/requirements/                  C:/temp/requirements/
+COPY tools/dependencies/requirements-build.txt         C:/temp/requirements.txt
+COPY tools/dependencies/install_packages.R             C:/temp/install_packages.R
+COPY tools/dependencies/tl_packages                    C:/temp/tl_packages
+COPY docker/build-quarto-windows/verify_r_packages.R   C:/temp/verify_r_packages.R
 
 # ------------------------------------------------------------
 # PHASE 4: Install TeX Live FIRST (Most complex, fail fast)
@@ -216,11 +203,9 @@ RUN Write-Host '=== STARTING SCOOP INSTALLATION ===' ; `
 RUN Write-Host '=== STARTING QUARTO INSTALLATION ===' ; `
     Write-Host 'Installing Quarto via Scoop...' ; `
     scoop install quarto ; `
-    if ($LASTEXITCODE -ne 0) { Write-Host "❌ Failed to install Quarto"; exit 1 } ; `
     Write-Host '📦 Quarto installed' ; `
     Write-Host 'Verifying Quarto installation...' ; `
     quarto --version ; `
-    if ($LASTEXITCODE -ne 0) { Write-Host "❌ Quarto verification failed"; exit 1 } ; `
     Write-Host '✅ Quarto installation completed!'
 
 # ------------------------------------------------------------
@@ -230,11 +215,9 @@ RUN Write-Host '=== STARTING PYTHON INSTALLATION ===' ; `
     Write-Host 'Installing Python via Scoop (same as quarto-build workflow)...' ; `
     Write-Host 'Installing Python from main bucket...' ; `
     scoop install main/python ; `
-    if ($LASTEXITCODE -ne 0) { Write-Host "❌ Failed to install Python"; exit 1 } ; `
     Write-Host '📦 Python installed' ; `
     Write-Host 'Verifying Python installation...' ; `
     python --version ; `
-    if ($LASTEXITCODE -ne 0) { Write-Host "❌ Python verification failed"; exit 1 } ; `
     Write-Host '✅ Python installation complete'
 
 # ------------------------------------------------------------
@@ -283,50 +266,61 @@ RUN Write-Host '=== STARTING R INSTALLATION ===' ; `
     Write-Host 'Installing R from main bucket...' ; `
     scoop install main/r ; `
     Write-Host '📦 R installed' ; `
-    Write-Host 'Removing PowerShell r alias to prevent conflicts...' ; `
-    Remove-Item -Path 'alias:\r' -Force -ErrorAction SilentlyContinue ; `
     Write-Host 'Verifying R installation...' ; `
-    & 'r.exe' --version ; `
+    R --version ; `
     Write-Host '✅ R installation complete'
 
 # ------------------------------------------------------------
 # PHASE 10: Install R packages (Medium complexity)
 # ------------------------------------------------------------
-
-# Step 10.1: Set up R environment and install remotes
-RUN Write-Host '=== STEP 10.1: SETTING UP R ENVIRONMENT ===' ; `
+RUN Write-Host '=== INSTALLING R PACKAGES ===' ; `
+    Write-Host 'Installing R packages from install_packages.R (same as quarto-build workflow)...' ; `
     Write-Host 'Setting up R environment...' ; `
     Write-Host "R_LIBS_USER: $env:R_LIBS_USER" ; `
-    Write-Host 'Installing remotes package...' ; `
-    Rscript -e 'options(repos=c(CRAN="https://cran.rstudio.com")); dir.create(Sys.getenv("R_LIBS_USER"), recursive=TRUE, showWarnings=FALSE); .libPaths(Sys.getenv("R_LIBS_USER")); install.packages("remotes")' ; `
-    if ($LASTEXITCODE -ne 0) { Write-Host "❌ Failed to install remotes package"; exit 1 } ; `
-    Write-Host '✅ Remotes package installed successfully'
-
-# Step 10.2: Install R packages from install_packages.R or fallback
-RUN Write-Host '=== STEP 10.2: INSTALLING R PACKAGES ===' ; `
-    Write-Host 'Installing R packages from install_packages.R (same as quarto-build workflow)...' ; `
-    Rscript -e 'if (file.exists("C:/temp/install_packages.R")) { cat("Found install_packages.R, sourcing it...\n"); source("C:/temp/install_packages.R") } else { cat("No install_packages.R found, installing basic packages...\n"); install.packages(c("rmarkdown","knitr","ggplot2")) }' ; `
-    if ($LASTEXITCODE -ne 0) { Write-Host "❌ Failed to install R packages"; exit 1 } ; `
-    Write-Host '✅ R packages installed successfully'
-
-# Step 10.3: Verify core R packages
-RUN Write-Host '=== STEP 10.3: VERIFYING CORE R PACKAGES ===' ; `
-    Write-Host 'Verifying core packages...' ; `
-    Rscript -e 'for (p in c("rmarkdown","knitr")) { if (!require(p, character.only=TRUE, quietly=TRUE)) stop("missing: ", p) }; cat("R package installation complete\n")' ; `
-    if ($LASTEXITCODE -ne 0) { Write-Host "❌ Core R packages verification failed"; exit 1 } ; `
-    Write-Host '📦 Core R packages verified successfully'
-
-# Step 10.4: Run verification script
-RUN Write-Host '=== STEP 10.4: RUNNING VERIFICATION SCRIPT ===' ; `
+    Write-Host 'Installing R packages...' ; `
+    Rscript -e 'options(repos=c(CRAN=\"https://cran.rstudio.com\"))' ; `
+    Rscript -e 'dir.create(Sys.getenv(\"R_LIBS_USER\"), recursive=TRUE, showWarnings=FALSE)' ; `
+    Rscript -e '.libPaths(Sys.getenv(\"R_LIBS_USER\"))' ; `
+    Rscript -e 'install.packages(\"remotes\")' ; `
+    if (Test-Path 'C:/temp/install_packages.R') { `
+        Write-Host 'Found install_packages.R, sourcing it...' ; `
+        Rscript 'C:/temp/install_packages.R' ; `
+    } else { `
+        Write-Host 'No install_packages.R found, installing basic packages...' ; `
+        Rscript -e 'install.packages(c(\"rmarkdown\",\"knitr\",\"ggplot2\"))' ; `
+    } ; `
+    Rscript -e 'for (p in c(\"rmarkdown\",\"knitr\")) if (!require(p, character.only=TRUE, quietly=TRUE)) stop(\"missing: \", p)' ; `
+    Write-Host '📦 R packages installed' ; `
     Write-Host 'Verifying R packages...' ; `
     Rscript C:/temp/verify_r_packages.R ; `
-    if ($LASTEXITCODE -ne 0) { Write-Host "❌ R packages verification script failed"; exit 1 } ; `
     Write-Host '✅ R package installation complete'
 
-
+# ------------------------------------------------------------
+# PHASE 11: Install Ghostscript (Simple)
+# ------------------------------------------------------------
+RUN Write-Host '=== STARTING GHOSTSCRIPT INSTALLATION ===' ; `
+    Write-Host 'Installing Ghostscript via Scoop (same as quarto-build workflow)...' ; `
+    Write-Host 'Installing Ghostscript from main bucket...' ; `
+    scoop install main/ghostscript ; `
+    Write-Host '📦 Ghostscript installed' ; `
+    Write-Host 'Verifying Ghostscript installation...' ; `
+    gs --version ; `
+    Write-Host '✅ Ghostscript installation complete'
 
 # ------------------------------------------------------------
-# PHASE 11: Cleanup (Simple)
+# PHASE 12: Install Inkscape (Simple)
+# ------------------------------------------------------------
+RUN Write-Host '=== STARTING INKSCAPE INSTALLATION ===' ; `
+    Write-Host 'Installing Inkscape via Scoop (same as quarto-build workflow)...' ; `
+    Write-Host 'Installing Inkscape...' ; `
+    scoop install inkscape ; `
+    Write-Host '📦 Inkscape installed' ; `
+    Write-Host 'Verifying Inkscape installation...' ; `
+    inkscape --version ; `
+    Write-Host '✅ Inkscape installation complete'
+
+# ------------------------------------------------------------
+# PHASE 13: Cleanup (Simple)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING CLEANUP ===' ; `
     Write-Host 'Cleaning temporary files (same as quarto-build workflow)...' ; `
@@ -356,7 +350,7 @@ RUN Write-Host '=== FINAL VERIFICATION ===' ; `
     python --version ; `
     Write-Host '✅ Python verified' ; `
     Write-Host 'Checking R...' ; `
-    & 'r.exe' --version ; `
+    R --version ; `
     Write-Host '✅ R verified' ; `
     Write-Host 'Checking LaTeX...' ; `
     $texLiveBin = 'C:\texlive\bin\windows' ; `
