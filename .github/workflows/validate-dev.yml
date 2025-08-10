@@ -114,7 +114,8 @@ jobs:
     name: '🎯 Build Configuration'
     runs-on: ubuntu-latest
     outputs:
-      format: ${{ steps.config.outputs.format }}
+      build_html: ${{ steps.config.outputs.build_html }}
+      build_pdf: ${{ steps.config.outputs.build_pdf }}
       build_linux: ${{ steps.config.outputs.build_linux }}
       build_windows: ${{ steps.config.outputs.build_windows }}
       build_method: ${{ steps.config.outputs.build_method }}
@@ -127,17 +128,20 @@ jobs:
         run: |
           echo "🎯 === BUILD CONFIGURATION ==="
           
-          # Determine format based on inputs (default to 'all' for push events)
+          # Determine what to build based on inputs (individual format flags)
           if [ "${{ github.event_name }}" = "push" ]; then
             # Auto-trigger: build everything
-            FORMAT="all"
+            BUILD_HTML="true"
+            BUILD_PDF="true"
             BUILD_LINUX="true"
             BUILD_WINDOWS="true"
             BUILD_METHOD="both"
             echo "📊 Trigger: Automatic (dev branch push)"
-            echo "📊 Format: HTML + PDF (mandatory)"
-            echo "📊 OS: Linux + Windows (mandatory)"
-            echo "📊 Method: Both container and baremetal builds (default)"
+            echo "📊 HTML: $BUILD_HTML (mandatory)"
+            echo "📊 PDF: $BUILD_PDF (mandatory)"
+            echo "📊 Linux: $BUILD_LINUX (mandatory)"
+            echo "📊 Windows: $BUILD_WINDOWS (mandatory)"
+            echo "📊 Method: $BUILD_METHOD (default)"
           else
             # Manual trigger: respect checkboxes
             BUILD_HTML="${{ inputs.build_html }}"
@@ -153,14 +157,13 @@ jobs:
             echo "📊 Windows: $BUILD_WINDOWS"
             echo "📊 Method: $BUILD_METHOD"
             
-            if [ "$BUILD_HTML" = "true" ] && [ "$BUILD_PDF" = "true" ]; then
-              FORMAT="all"
-            elif [ "$BUILD_HTML" = "true" ]; then
-              FORMAT="html"
-            elif [ "$BUILD_PDF" = "true" ]; then
-              FORMAT="pdf"
-            else
+            # Validate at least one format and OS is selected
+            if [ "$BUILD_HTML" != "true" ] && [ "$BUILD_PDF" != "true" ]; then
               echo "❌ No formats selected!"
+              exit 1
+            fi
+            if [ "$BUILD_LINUX" != "true" ] && [ "$BUILD_WINDOWS" != "true" ]; then
+              echo "❌ No operating systems selected!"
               exit 1
             fi
           fi
@@ -170,131 +173,55 @@ jobs:
           CONTAINER_TAG="${{ inputs.container_tag || 'latest' }}"
           
           echo "📊 Final Configuration:"
-          echo "  Format: $FORMAT"
+          echo "  HTML: $BUILD_HTML"
+          echo "  PDF: $BUILD_PDF"
           echo "  Linux: $BUILD_LINUX"
           echo "  Windows: $BUILD_WINDOWS"  
           echo "  Method: $BUILD_METHOD"
           echo "  Registry: $CONTAINER_REGISTRY"
           echo "  Tag: $CONTAINER_TAG"
           
-          # Set outputs
-          echo "format=$FORMAT" >> $GITHUB_OUTPUT
+          # Set outputs (individual format flags for matrix-driven approach)
+          echo "build_html=$BUILD_HTML" >> $GITHUB_OUTPUT
+          echo "build_pdf=$BUILD_PDF" >> $GITHUB_OUTPUT
           echo "build_linux=$BUILD_LINUX" >> $GITHUB_OUTPUT
           echo "build_windows=$BUILD_WINDOWS" >> $GITHUB_OUTPUT
           echo "build_method=$BUILD_METHOD" >> $GITHUB_OUTPUT
           echo "container_registry=$CONTAINER_REGISTRY" >> $GITHUB_OUTPUT
           echo "container_tag=$CONTAINER_TAG" >> $GITHUB_OUTPUT
 
-  # Step 3: Matrix build strategy (eliminates duplication)
-  build:
-    name: '🚀 Build ${{ matrix.platform }}'
+
+  # Step 3: Matrix-driven build calls (clean and simple!)
+  build-container:
+    name: '🐳 Container Build Matrix'
     needs: [pre-commit, build-config]
-    runs-on: ubuntu-latest
-    if: matrix.enabled == 'true'
-    
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: Linux
-            os: ubuntu-latest
-            enabled: ${{ needs.build-config.outputs.build_linux }}
-            emoji: 🐧
-          - platform: Windows
-            os: windows-latest
-            enabled: ${{ needs.build-config.outputs.build_windows }}
-            emoji: 🪟
-    
-    outputs:
-      build_success_linux: ${{ matrix.platform == 'Linux' && steps.build-result.outputs.build_success || '' }}
-      build_success_windows: ${{ matrix.platform == 'Windows' && steps.build-result.outputs.build_success || '' }}
-      html_artifact_linux: ${{ matrix.platform == 'Linux' && steps.build-result.outputs.html_artifact || '' }}
-      html_artifact_windows: ${{ matrix.platform == 'Windows' && steps.build-result.outputs.html_artifact || '' }}
-      pdf_artifact_linux: ${{ matrix.platform == 'Linux' && steps.build-result.outputs.pdf_artifact || '' }}
-      pdf_artifact_windows: ${{ matrix.platform == 'Windows' && steps.build-result.outputs.pdf_artifact || '' }}
-      build_method: ${{ steps.build-result.outputs.build_method }}
-    
-    steps:
-      - name: ${{ matrix.emoji }} Building ${{ matrix.platform }}
-        run: |
-          echo "${{ matrix.emoji }} === BUILDING ${{ upper(matrix.platform) }} ==="
-          echo "📊 Platform: ${{ matrix.platform }}"
-          echo "📊 OS: ${{ matrix.os }}"
-          echo "📊 Format: ${{ needs.build-config.outputs.format }}"
-          echo "📊 Method: ${{ needs.build-config.outputs.build_method }}"
-          echo "📊 Registry: ${{ needs.build-config.outputs.container_registry }}"
-          echo "📊 Tag: ${{ needs.build-config.outputs.container_tag }}"
+    if: needs.build-config.outputs.build_method == 'container' || needs.build-config.outputs.build_method == 'both'
+    uses: ./.github/workflows/quarto-build-container.yml
+    with:
+      build_linux: ${{ needs.build-config.outputs.build_linux == 'true' }}
+      build_windows: ${{ needs.build-config.outputs.build_windows == 'true' }}
+      build_html: ${{ needs.build-config.outputs.build_html == 'true' }}
+      build_pdf: ${{ needs.build-config.outputs.build_pdf == 'true' }}
+      target: dev
+      container_registry: ${{ needs.build-config.outputs.container_registry }}
+      container_tag: ${{ needs.build-config.outputs.container_tag }}
 
-      - name: 🚀 Container Build
-        id: container-build
-        if: needs.build-config.outputs.build_method == 'container' || needs.build-config.outputs.build_method == 'both'
-        uses: ./.github/workflows/quarto-build-container.yml
-        with:
-          os: ${{ matrix.os }}
-          format: ${{ needs.build-config.outputs.format }}
-          target: dev
-          container_registry: ${{ needs.build-config.outputs.container_registry }}
-          container_tag: ${{ needs.build-config.outputs.container_tag }}
-
-      - name: ⚠️ LEGACY Baremetal Build
-        id: baremetal-build
-        if: needs.build-config.outputs.build_method == 'baremetal' || needs.build-config.outputs.build_method == 'both'
-        uses: ./.github/workflows/quarto-build-baremetal.yml
-        with:
-          os: ${{ matrix.os }}
-          format: ${{ needs.build-config.outputs.format }}
-          target: dev
-
-      - name: 📊 Build Result Summary
-        id: build-result
-        run: |
-          echo "📊 === ${{ upper(matrix.platform) }} BUILD RESULT ==="
-          
-          # Determine which build method was used and get results
-          BUILD_METHOD="${{ needs.build-config.outputs.build_method }}"
-          
-          if [ "$BUILD_METHOD" = "container" ]; then
-            BUILD_SUCCESS="${{ steps.container-build.outputs.build_success }}"
-            HTML_ARTIFACT="${{ steps.container-build.outputs.html_artifact }}"
-            PDF_ARTIFACT="${{ steps.container-build.outputs.pdf_artifact }}"
-          elif [ "$BUILD_METHOD" = "baremetal" ]; then
-            BUILD_SUCCESS="${{ steps.baremetal-build.outputs.build_success }}"
-            HTML_ARTIFACT="${{ steps.baremetal-build.outputs.html_artifact }}"
-            PDF_ARTIFACT="${{ steps.baremetal-build.outputs.pdf_artifact }}"
-          elif [ "$BUILD_METHOD" = "both" ]; then
-            # For 'both', prefer container results, fallback to baremetal
-            if [ "${{ steps.container-build.outputs.build_success }}" = "true" ]; then
-              BUILD_SUCCESS="true"
-              HTML_ARTIFACT="${{ steps.container-build.outputs.html_artifact }}"
-              PDF_ARTIFACT="${{ steps.container-build.outputs.pdf_artifact }}"
-            else
-              BUILD_SUCCESS="${{ steps.baremetal-build.outputs.build_success }}"
-              HTML_ARTIFACT="${{ steps.baremetal-build.outputs.html_artifact }}"
-              PDF_ARTIFACT="${{ steps.baremetal-build.outputs.pdf_artifact }}"
-            fi
-          fi
-          
-          # Visual status reporting
-          if [ "$BUILD_SUCCESS" = "true" ]; then
-            echo "✅ ${{ matrix.platform }} Build: PASSED"
-          else
-            echo "❌ ${{ matrix.platform }} Build: FAILED"
-          fi
-          
-          echo "📦 HTML Artifact: $HTML_ARTIFACT"
-          echo "📦 PDF Artifact: $PDF_ARTIFACT"
-          echo "🔧 Build Method: $BUILD_METHOD"
-          
-          # Set outputs
-          echo "build_success=$BUILD_SUCCESS" >> $GITHUB_OUTPUT
-          echo "html_artifact=$HTML_ARTIFACT" >> $GITHUB_OUTPUT
-          echo "pdf_artifact=$PDF_ARTIFACT" >> $GITHUB_OUTPUT
-          echo "build_method=$BUILD_METHOD" >> $GITHUB_OUTPUT
+  build-baremetal:
+    name: '⚠️ Baremetal Build Matrix (Legacy)'
+    needs: [pre-commit, build-config]
+    if: needs.build-config.outputs.build_method == 'baremetal' || needs.build-config.outputs.build_method == 'both'
+    uses: ./.github/workflows/quarto-build-baremetal.yml
+    with:
+      build_linux: ${{ needs.build-config.outputs.build_linux == 'true' }}
+      build_windows: ${{ needs.build-config.outputs.build_windows == 'true' }}
+      build_html: ${{ needs.build-config.outputs.build_html == 'true' }}
+      build_pdf: ${{ needs.build-config.outputs.build_pdf == 'true' }}
+      target: dev
 
   # Step 4: Collect build results (needed for outputs)
   collect-results:
     name: '📊 Collect Results'
-    needs: [build-config, build]
+    needs: [build-config, build-container, build-baremetal]
     runs-on: ubuntu-latest
     if: always()
     outputs:
@@ -311,7 +238,7 @@ jobs:
         run: |
           echo "📊 === COLLECTING BUILD RESULTS ==="
           
-          # Extract results from matrix build outputs
+          # Collect results from individual build jobs
           LINUX_SUCCESS="false"
           WINDOWS_SUCCESS="false"
           LINUX_HTML=""
@@ -319,29 +246,27 @@ jobs:
           LINUX_PDF=""
           WINDOWS_PDF=""
           
-          # Check each job result from the matrix strategy
-          # (GitHub Actions doesn't directly support matrix outputs, so we parse from needs)
-          if [ "${{ needs.build-config.outputs.build_linux }}" = "true" ]; then
-            if [ "${{ needs.build.result }}" = "success" ]; then
-              LINUX_SUCCESS="true"
-              # Note: These would need to be passed through the build job outputs
-              echo "✅ Linux build completed successfully"
-            else
-              echo "❌ Linux build failed"
-            fi
+          # Collect results from matrix-driven builds (prefer container over baremetal)
+          if [ "${{ needs.build-container.result }}" = "success" ]; then
+            LINUX_SUCCESS="${{ needs.build-container.outputs.build_success == 'true' }}"
+            WINDOWS_SUCCESS="${{ needs.build-container.outputs.build_success == 'true' }}"
+            LINUX_HTML="${{ needs.build-container.outputs.linux_html_artifact }}"
+            LINUX_PDF="${{ needs.build-container.outputs.linux_pdf_artifact }}"
+            WINDOWS_HTML="${{ needs.build-container.outputs.windows_html_artifact }}"
+            WINDOWS_PDF="${{ needs.build-container.outputs.windows_pdf_artifact }}"
+            echo "✅ Container builds completed successfully"
+          elif [ "${{ needs.build-baremetal.result }}" = "success" ]; then
+            LINUX_SUCCESS="${{ needs.build-baremetal.outputs.build_success == 'true' }}"
+            WINDOWS_SUCCESS="${{ needs.build-baremetal.outputs.build_success == 'true' }}"
+            LINUX_HTML="${{ needs.build-baremetal.outputs.linux_html_artifact }}"
+            LINUX_PDF="${{ needs.build-baremetal.outputs.linux_pdf_artifact }}"
+            WINDOWS_HTML="${{ needs.build-baremetal.outputs.windows_html_artifact }}"
+            WINDOWS_PDF="${{ needs.build-baremetal.outputs.windows_pdf_artifact }}"
+            echo "✅ Baremetal builds completed successfully"
           else
-            echo "⏭️ Linux build skipped"
-          fi
-          
-          if [ "${{ needs.build-config.outputs.build_windows }}" = "true" ]; then
-            if [ "${{ needs.build.result }}" = "success" ]; then
-              WINDOWS_SUCCESS="true"
-              echo "✅ Windows build completed successfully"
-            else
-              echo "❌ Windows build failed"
-            fi
-          else
-            echo "⏭️ Windows build skipped"
+            echo "❌ All builds failed"
+            LINUX_SUCCESS="false"
+            WINDOWS_SUCCESS="false"
           fi
           
           # Set outputs

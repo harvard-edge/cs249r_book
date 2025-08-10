@@ -728,19 +728,56 @@ jobs:
     timeout-minutes: 10
     needs: merge-to-main
     if: github.event.inputs.confirm == 'PUBLISH'
+    outputs:
+      commit_sha: ${{ steps.commit.outputs.commit_sha }}
     
     steps:
-      - name: 🚀 Trigger Production Build
-        uses: ./.github/workflows/quarto-build-container.yml
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
         with:
-          os: ubuntu-latest
-          format: all  # HTML + PDF
-          target: main
-          container_registry: 'ghcr.io'
-          container_tag: 'latest'
-      
-      - name: ⏳ Wait for Build Completion
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🚀 Get Current Commit SHA
+        id: commit
         run: |
+          # Get the latest commit SHA from main branch
+          COMMIT_SHA=$(git rev-parse HEAD)
+          echo "commit_sha=$COMMIT_SHA" >> $GITHUB_OUTPUT
+          echo "📌 Current commit SHA: $COMMIT_SHA"
+
+  # Matrix-driven production build (clean and simple!)
+  call-production-build:
+    name: '🚀 Call Production Build Matrix'
+    needs: [merge-to-main, trigger-production-build]
+    uses: ./.github/workflows/quarto-build-container.yml
+    with:
+      build_linux: true    # Production builds Linux only for now
+      build_windows: false
+      build_html: true     # HTML + PDF for production
+      build_pdf: true
+      target: main
+      container_registry: 'ghcr.io'
+      container_tag: 'latest'
+
+  # Wait for build completion job
+  wait-for-build:
+    name: '⏳ Wait for Build Completion'
+    needs: [trigger-production-build, call-production-build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 180  # 3 hours
+
+    steps:
+      - name: ⏳ Monitor Build Status
+        run: |
+          # Get the commit SHA from previous job
+          COMMIT_SHA="${{ needs.trigger-production-build.outputs.commit_sha }}"
+          if [ -z "$COMMIT_SHA" ]; then
+            echo "🔍 Getting commit SHA from git..."
+            COMMIT_SHA=$(git rev-parse HEAD)
+          fi
+          echo "📌 Monitoring commit: $COMMIT_SHA"
+          
           sleep 30  # Give the build a moment to start
           
           # Wait for all required status checks to complete
@@ -933,7 +970,7 @@ jobs:
     name: '🏷️ Create Release Tag (Final Step)'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [validate-inputs, trigger-production-build, download-and-deploy-artifacts]
+    needs: [validate-inputs, wait-for-build, download-and-deploy-artifacts]
     if: github.event.inputs.confirm == 'PUBLISH'
     
     steps:
@@ -992,7 +1029,7 @@ jobs:
     name: '📦 Download Artifacts & Deploy to GitHub Pages'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: trigger-production-build
+    needs: wait-for-build
     if: github.event.inputs.confirm == 'PUBLISH'
     
     steps:
@@ -1238,7 +1275,7 @@ jobs:
     name: '📝 Generate Release Notes'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [validate-inputs, trigger-production-build, download-and-deploy-artifacts]
+    needs: [validate-inputs, wait-for-build, download-and-deploy-artifacts]
     if: github.event.inputs.confirm == 'PUBLISH'
     
     steps:

@@ -56,21 +56,36 @@ on:
         description: 'Artifact name template. Use {prefix}, {format} for html/pdf, and {os} for linux/windows'
   workflow_call:
     inputs:
-      os:
-        required: true
-        type: string
-        description: 'Operating system to run on (ubuntu-latest/windows-latest)'
-      format:
+      # Matrix configuration inputs - determines what gets built
+      build_linux:
         required: false
-        type: string
-        default: 'html'
-        description: 'Format to build (html/pdf/all)'
+        type: boolean
+        default: true
+        description: 'Build on Linux'
+      build_windows:
+        required: false
+        type: boolean
+        default: false
+        description: 'Build on Windows'
+      build_html:
+        required: false
+        type: boolean
+        default: true
+        description: 'Build HTML format'
+      build_pdf:
+        required: false
+        type: boolean
+        default: false
+        description: 'Build PDF format'
+      
+      # Build configuration
       target:
         required: false
         type: string
-        default: ''
+        default: 'dev'
         description: 'Target branch (dev/main) - determines build behavior'
-      # Container configuration (optional overrides)
+      
+      # Container configuration
       container_registry:
         required: false
         type: string
@@ -81,67 +96,149 @@ on:
         type: string
         default: 'latest'
         description: 'Container tag to use'
-      # Legacy inputs for backward compatibility (if needed)
+      
+      # Legacy inputs for backward compatibility
+      os:
+        required: false
+        type: string
+        default: ''
+        description: 'LEGACY: Operating system (use build_linux/build_windows instead)'
+      format:
+        required: false
+        type: string
+        default: ''
+        description: 'LEGACY: Format to build (use build_html/build_pdf instead)'
       html_format:
         required: false
         type: boolean
         default: false
-        description: 'Build HTML format (legacy - use format instead)'
+        description: 'LEGACY: Build HTML format'
       pdf_format:
         required: false
         type: boolean
         default: false
-        description: 'Build PDF format (legacy - use format instead)'
+        description: 'LEGACY: Build PDF format'
 
-# Standardized outputs for calling workflows
+# Matrix-aware outputs for calling workflows
 outputs:
   build_success:
-    description: "Whether the build completed successfully"
-    value: ${{ jobs.build.outputs.build_success }}
-  html_artifact:
-    description: "HTML artifact name (empty if not built)"
-    value: ${{ jobs.build.outputs.html_artifact }}
-  pdf_artifact:
-    description: "PDF artifact name (empty if not built)"
-    value: ${{ jobs.build.outputs.pdf_artifact }}
-  os_name:
-    description: "Operating system name (linux/windows)"
-    value: ${{ jobs.build.outputs.os_name }}
+    description: "Whether all builds completed successfully"
+    value: ${{ jobs.collect-results.outputs.build_success }}
+  linux_html_artifact:
+    description: "Linux HTML artifact name"
+    value: ${{ jobs.collect-results.outputs.linux_html_artifact }}
+  linux_pdf_artifact:
+    description: "Linux PDF artifact name"
+    value: ${{ jobs.collect-results.outputs.linux_pdf_artifact }}
+  windows_html_artifact:
+    description: "Windows HTML artifact name"
+    value: ${{ jobs.collect-results.outputs.windows_html_artifact }}
+  windows_pdf_artifact:
+    description: "Windows PDF artifact name"
+    value: ${{ jobs.collect-results.outputs.windows_pdf_artifact }}
   target:
     description: "Build target (dev/main)"
-    value: ${{ jobs.build.outputs.target }}
+    value: ${{ inputs.target }}
   formats_built:
     description: "Comma-separated list of formats built"
-    value: ${{ jobs.build.outputs.formats_built }}
+    value: ${{ jobs.collect-results.outputs.formats_built }}
 
 permissions:
   contents: write
   pages: write
 
 jobs:
-  # Unified build job using matrix strategy (filtered by input)
-  build:
-    runs-on: ${{ matrix.os }}
+  # Generate dynamic matrix based on inputs
+  generate-matrix:
+    name: '🎯 Generate Build Matrix'
+    runs-on: ubuntu-latest
     outputs:
-      build_success: ${{ steps.outputs.outputs.build_success }}
-      html_artifact: ${{ steps.outputs.outputs.html_artifact }}
-      pdf_artifact: ${{ steps.outputs.outputs.pdf_artifact }}
-      os_name: ${{ steps.outputs.outputs.os_name }}
-      target: ${{ steps.outputs.outputs.target }}
-      formats_built: ${{ steps.outputs.outputs.formats_built }}
+      matrix: ${{ steps.generate.outputs.matrix }}
+      
+    steps:
+      - name: 🎯 Generate Build Matrix
+        id: generate
+        run: |
+          echo "🎯 Generating build matrix from inputs..."
+          
+          # Handle legacy inputs for backward compatibility
+          BUILD_LINUX="${{ inputs.build_linux }}"
+          BUILD_WINDOWS="${{ inputs.build_windows }}"
+          BUILD_HTML="${{ inputs.build_html }}"
+          BUILD_PDF="${{ inputs.build_pdf }}"
+          
+          # Legacy format input conversion
+          if [ -n "${{ inputs.format }}" ] && [ "${{ inputs.format }}" != "" ]; then
+            echo "🔄 Converting legacy format input: ${{ inputs.format }}"
+            case "${{ inputs.format }}" in
+              "html") BUILD_HTML="true"; BUILD_PDF="false" ;;
+              "pdf") BUILD_HTML="false"; BUILD_PDF="true" ;;
+              "all") BUILD_HTML="true"; BUILD_PDF="true" ;;
+            esac
+          fi
+          
+          # Legacy OS input conversion
+          if [ -n "${{ inputs.os }}" ] && [ "${{ inputs.os }}" != "" ]; then
+            echo "🔄 Converting legacy OS input: ${{ inputs.os }}"
+            case "${{ inputs.os }}" in
+              "ubuntu-latest") BUILD_LINUX="true"; BUILD_WINDOWS="false" ;;
+              "windows-latest") BUILD_LINUX="false"; BUILD_WINDOWS="true" ;;
+            esac
+          fi
+          
+          # Legacy boolean format inputs
+          if [ "${{ inputs.html_format }}" = "true" ]; then BUILD_HTML="true"; fi
+          if [ "${{ inputs.pdf_format }}" = "true" ]; then BUILD_PDF="true"; fi
+          
+          # Start with empty matrix
+          MATRIX='{"include":[]}'
+          
+          # Linux builds
+          if [ "$BUILD_LINUX" = "true" ]; then
+            if [ "$BUILD_HTML" = "true" ]; then
+              MATRIX=$(echo "$MATRIX" | jq '.include += [{"os": "ubuntu-latest", "os_name": "linux", "container_name": "quarto-linux", "format": "html", "artifact": "${{ inputs.target }}-html-linux"}]')
+            fi
+            if [ "$BUILD_PDF" = "true" ]; then
+              MATRIX=$(echo "$MATRIX" | jq '.include += [{"os": "ubuntu-latest", "os_name": "linux", "container_name": "quarto-linux", "format": "pdf", "artifact": "${{ inputs.target }}-pdf-linux"}]')
+            fi
+          fi
+          
+          # Windows builds  
+          if [ "$BUILD_WINDOWS" = "true" ]; then
+            if [ "$BUILD_HTML" = "true" ]; then
+              MATRIX=$(echo "$MATRIX" | jq '.include += [{"os": "windows-latest", "os_name": "windows", "container_name": "quarto-windows", "format": "html", "artifact": "${{ inputs.target }}-html-windows"}]')
+            fi
+            if [ "$BUILD_PDF" = "true" ]; then
+              MATRIX=$(echo "$MATRIX" | jq '.include += [{"os": "windows-latest", "os_name": "windows", "container_name": "quarto-windows", "format": "pdf", "artifact": "${{ inputs.target }}-pdf-windows"}]')
+            fi
+          fi
+          
+          echo "📊 Generated matrix:"
+          echo "$MATRIX" | jq '.'
+          
+          # Check if matrix is empty
+          BUILD_COUNT=$(echo "$MATRIX" | jq '.include | length')
+          if [ "$BUILD_COUNT" -eq 0 ]; then
+            echo "❌ No builds selected! At least one OS and format must be enabled."
+            exit 1
+          fi
+          
+          echo "✅ Matrix generated with $BUILD_COUNT build jobs"
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+
+  # Dynamic matrix build job
+  build:
+    name: '🚀 ${{ matrix.os_name }} ${{ matrix.format }}'
+    needs: generate-matrix
+    runs-on: ${{ matrix.os }}
+    if: needs.generate-matrix.outputs.matrix != ''
+    timeout-minutes: 60
+    
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            os_name: linux
-            container_name: quarto-linux
-          - os: windows-latest
-            os_name: windows
-            container_name: quarto-windows
+      matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
+    
     container: ${{ format('{0}/{1}/{2}:{3}', inputs.container_registry, github.repository, matrix.container_name, inputs.container_tag) }}
-    timeout-minutes: 60
-    if: inputs.os == matrix.os  # Only run the matrix entry that matches the input OS
     env:
       QUARTO_LOG_LEVEL: ${{ inputs.quarto-log-level || 'INFO' }}
       OS_NAME: ${{ matrix.os_name }}
@@ -150,38 +247,15 @@ jobs:
       LC_ALL: en_US.UTF-8
 
     steps:
-      - name: 🔧 Convert Format Input to Flags
-        id: format-flags
+      - name: 🚀 Build Matrix Job
         shell: bash
         run: |
-          echo "🔧 Converting format input to build flags..."
-          
-          # Determine which formats to build based on input
-          if [ "${{ inputs.format }}" = "html" ] || [ "${{ inputs.html_format }}" = "true" ]; then
-            BUILD_HTML="true"
-          else
-            BUILD_HTML="false"
-          fi
-          
-          if [ "${{ inputs.format }}" = "pdf" ] || [ "${{ inputs.pdf_format }}" = "true" ]; then
-            BUILD_PDF="true"
-          else
-            BUILD_PDF="false"
-          fi
-          
-          if [ "${{ inputs.format }}" = "all" ]; then
-            BUILD_HTML="true"
-            BUILD_PDF="true"
-          fi
-          
+          echo "🚀 Building ${{ matrix.format }} on ${{ matrix.os_name }}..."
           echo "📊 Build configuration:"
-          echo "  Format input: '${{ inputs.format }}'"
-          echo "  HTML format: $BUILD_HTML"
-          echo "  PDF format: $BUILD_PDF"
           echo "  OS: ${{ matrix.os_name }}"
-          
-          echo "html_format=$BUILD_HTML" >> $GITHUB_OUTPUT
-          echo "pdf_format=$BUILD_PDF" >> $GITHUB_OUTPUT
+          echo "  Format: ${{ matrix.format }}"
+          echo "  Container: ${{ matrix.container_name }}"
+          echo "  Artifact: ${{ matrix.artifact }}"
 
       - name: 🚦 Set Initial Build Status
         shell: bash
@@ -224,7 +298,7 @@ jobs:
           echo "  Memory: $(free -h | grep Mem)"
 
       - name: 🔨 Build HTML (copy config and render)
-        if: steps.format-flags.outputs.html_format == 'true'
+        if: matrix.format == 'html'
         shell: bash
         run: |
           echo "🚀 Setting up HTML configuration..."
@@ -250,7 +324,7 @@ jobs:
           echo "✅ HTML build completed at: $(date)"
         
       - name: 🔨 Build PDF (copy config and render)
-        if: steps.format-flags.outputs.pdf_format == 'true'
+        if: matrix.format == 'pdf'
         shell: bash
         run: |
           echo "🚀 Setting up PDF configuration..."
@@ -277,7 +351,7 @@ jobs:
           echo "✅ PDF build completed at: $(date)"
 
       - name: 📉 Compress PDF with Ghostscript (Linux)
-        if: steps.format-flags.outputs.pdf_format == 'true' && runner.os == 'Linux'
+        if: matrix.format == 'pdf' && runner.os == 'Linux'
         shell: bash
         run: |
           if [ -f "build/pdf/Machine-Learning-Systems.pdf" ]; then
@@ -298,7 +372,7 @@ jobs:
           fi
 
       - name: 📉 Compress PDF with Ghostscript (Windows)
-        if: steps.format-flags.outputs.pdf_format == 'true' && runner.os == 'Windows'
+        if: matrix.format == 'pdf' && runner.os == 'Windows'
         shell: pwsh
         run: |
           $input = "./build/pdf/Machine-Learning-Systems.pdf"
@@ -318,67 +392,11 @@ jobs:
             Write-Warning "⚠️ Compression failed but continuing"
           }
 
-      - name: 📤 Upload HTML artifacts
-        if: steps.format-flags.outputs.html_format == 'true'
-        id: upload-html-artifacts
+      - name: 📤 Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ format('{0}-html-{1}', inputs.target, env.OS_NAME) }}
-          path: build/html
-
-      - name: 📤 Upload PDF artifacts
-        if: steps.format-flags.outputs.pdf_format == 'true'
-        id: upload-pdf-artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ format('{0}-pdf-{1}', inputs.target, env.OS_NAME) }}
-          path: build/pdf
-
-      - name: 📋 Build Declaration
-        id: outputs
-        run: |
-          # Determine artifact names (empty if not built)
-          if [ "${{ steps.format-flags.outputs.html_format }}" = "true" ]; then
-            HTML_ARTIFACT="${{ format('{0}-html-{1}', inputs.target, env.OS_NAME) }}"
-          else
-            HTML_ARTIFACT=""
-          fi
-          
-          if [ "${{ steps.format-flags.outputs.pdf_format }}" = "true" ]; then
-            PDF_ARTIFACT="${{ format('{0}-pdf-{1}', inputs.target, env.OS_NAME) }}"
-          else
-            PDF_ARTIFACT=""
-          fi
-          
-          # Determine formats built
-          FORMATS_BUILT=""
-          if [ "${{ steps.format-flags.outputs.html_format }}" = "true" ]; then
-            FORMATS_BUILT="html"
-          fi
-          if [ "${{ steps.format-flags.outputs.pdf_format }}" = "true" ]; then
-            if [ -n "$FORMATS_BUILT" ]; then
-              FORMATS_BUILT="$FORMATS_BUILT,pdf"
-            else
-              FORMATS_BUILT="pdf"
-            fi
-          fi
-          
-          echo "📦 Build Declaration: Successfully created artifacts"
-          echo "📊 HTML Artifact: '$HTML_ARTIFACT' (enabled: ${{ steps.format-flags.outputs.html_format }})"
-          echo "📊 PDF Artifact: '$PDF_ARTIFACT' (enabled: ${{ steps.format-flags.outputs.pdf_format }})"
-          echo "📊 OS: ${{ inputs.os }}"
-          echo "📊 Target: ${{ inputs.target }}"
-          echo "📊 Method: Fast Container Build ($OS_NAME)"
-          echo "📊 Formats Built: $FORMATS_BUILT"
-          echo "📝 Note: This workflow only builds artifacts - deployment handled by publish-live workflow"
-          
-          # Standardized outputs
-          echo "build_success=true" >> $GITHUB_OUTPUT
-          echo "html_artifact=$HTML_ARTIFACT" >> $GITHUB_OUTPUT
-          echo "pdf_artifact=$PDF_ARTIFACT" >> $GITHUB_OUTPUT
-          echo "os_name=$OS_NAME" >> $GITHUB_OUTPUT
-          echo "target=${{ inputs.target }}" >> $GITHUB_OUTPUT
-          echo "formats_built=$FORMATS_BUILT" >> $GITHUB_OUTPUT
+          name: ${{ matrix.artifact }}
+          path: build/${{ matrix.format }}
 
       - name: 🎯 Set Final Build Status
         if: always()
@@ -388,10 +406,10 @@ jobs:
           
           if [ "${{ job.status }}" = "success" ]; then
             STATE="success"
-            DESCRIPTION="Build completed successfully (${{ matrix.os_name }} container)"
+            DESCRIPTION="${{ matrix.format }} build completed successfully (${{ matrix.os_name }} container)"
           else
             STATE="failure"
-            DESCRIPTION="Build failed (${{ matrix.os_name }} container)"
+            DESCRIPTION="${{ matrix.format }} build failed (${{ matrix.os_name }} container)"
           fi
           
           echo "📊 Final status: $STATE"
@@ -404,9 +422,78 @@ jobs:
             -d "{
               \"state\": \"$STATE\",
               \"description\": \"$DESCRIPTION\",
-              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+              \"context\": \"ci/quarto-build-${{ matrix.os_name }}-${{ matrix.format }}\"
             }"
           
           echo "✅ Commit status updated successfully"
+
+  # Collect results from all matrix builds
+  collect-results:
+    name: '📊 Collect Results'
+    needs: [generate-matrix, build]
+    runs-on: ubuntu-latest
+    if: always()
+    outputs:
+      build_success: ${{ steps.collect.outputs.build_success }}
+      linux_html_artifact: ${{ steps.collect.outputs.linux_html_artifact }}
+      linux_pdf_artifact: ${{ steps.collect.outputs.linux_pdf_artifact }}
+      windows_html_artifact: ${{ steps.collect.outputs.windows_html_artifact }}
+      windows_pdf_artifact: ${{ steps.collect.outputs.windows_pdf_artifact }}
+      formats_built: ${{ steps.collect.outputs.formats_built }}
+      
+    steps:
+      - name: 📊 Collect Matrix Results
+        id: collect
+        run: |
+          echo "📊 Collecting results from matrix builds..."
+          
+          # Parse the matrix to determine what was built
+          MATRIX='${{ needs.generate-matrix.outputs.matrix }}'
+          echo "📋 Matrix: $MATRIX"
+          
+          # Initialize outputs
+          LINUX_HTML=""
+          LINUX_PDF=""
+          WINDOWS_HTML=""
+          WINDOWS_PDF=""
+          FORMATS_BUILT=()
+          
+          # Collect artifact names based on successful builds
+          echo "$MATRIX" | jq -r '.include[] | "\(.os_name) \(.format) \(.artifact)"' | while IFS=' ' read -r OS_NAME FORMAT ARTIFACT; do
+            if [ "${{ needs.build.result }}" = "success" ]; then
+              case "${OS_NAME}_${FORMAT}" in
+                "linux_html")
+                  echo "linux_html_artifact=$ARTIFACT" >> $GITHUB_OUTPUT
+                  ;;
+                "linux_pdf")
+                  echo "linux_pdf_artifact=$ARTIFACT" >> $GITHUB_OUTPUT
+                  ;;
+                "windows_html")
+                  echo "windows_html_artifact=$ARTIFACT" >> $GITHUB_OUTPUT
+                  ;;
+                "windows_pdf")
+                  echo "windows_pdf_artifact=$ARTIFACT" >> $GITHUB_OUTPUT
+                  ;;
+              esac
+              FORMATS_BUILT+=("$FORMAT")
+            fi
+          done
+          
+          # Determine overall success
+          if [ "${{ needs.build.result }}" = "success" ]; then
+            BUILD_SUCCESS="true"
+          else
+            BUILD_SUCCESS="false"
+          fi
+          
+          # Join formats built (remove duplicates)
+          FORMATS_LIST=$(printf '%s\n' "${FORMATS_BUILT[@]}" | sort -u | tr '\n' ',' | sed 's/,$//')
+          
+          echo "build_success=$BUILD_SUCCESS" >> $GITHUB_OUTPUT
+          echo "formats_built=$FORMATS_LIST" >> $GITHUB_OUTPUT
+          
+          echo "✅ Results collected:"
+          echo "  Success: $BUILD_SUCCESS"
+          echo "  Formats: $FORMATS_LIST"
 
  
