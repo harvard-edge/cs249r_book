@@ -1,5 +1,11 @@
 #!/bin/bash
 
+# Allow bypassing the check with an environment variable
+if [ "$ALLOW_WORKFLOW_CHANGES" = "true" ]; then
+    echo "✅ Bypassing workflow change check due to ALLOW_WORKFLOW_CHANGES flag"
+    exit 0
+fi
+
 # Check if any workflow files are being committed
 if git diff --cached --name-only | grep -q "\.github/workflows/"; then
     echo "⚠️  Workflow files detected in commit!"
