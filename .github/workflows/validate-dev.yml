@@ -31,28 +31,25 @@ on:
         options:
           - dev
           - main
-      # Format selection checkboxes
-      build_html:
-        description: '📄 Build HTML format'
-        required: false
-        default: true
-        type: boolean
-      build_pdf:
-        description: '📑 Build PDF format'
-        required: false
-        default: true
-        type: boolean
-      # OS selection checkboxes  
-      build_linux:
-        description: '🐧 Build on Linux'
-        required: false
-        default: true
-        type: boolean
-      build_windows:
-        description: '🪟 Build on Windows'
-        required: false
-        default: true
-        type: boolean
+      # Format & OS selection
+      build_formats:
+        description: '📦 Build formats (both, html, pdf)'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - both
+          - html
+          - pdf
+      build_os:
+        description: '⚙️ Build OS (both, linux, windows)'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - both
+          - linux
+          - windows
       # Container validation
       run_health_check:
         description: '💊 Run container health check'
@@ -172,31 +169,33 @@ jobs:
             echo "📊 Method: $BUILD_METHOD (default)"
             echo "📊 Target: $TARGET"
           else
-            # Manual trigger: respect checkboxes
-            BUILD_HTML="${{ inputs.build_html }}"
-            BUILD_PDF="${{ inputs.build_pdf }}"
-            BUILD_LINUX="${{ inputs.build_linux }}"
-            BUILD_WINDOWS="${{ inputs.build_windows }}"
+            # Manual trigger: respect choices
+            echo "📊 Trigger: Manual workflow dispatch"
+            BUILD_HTML="false"
+            if [[ "${{ inputs.build_formats }}" == "both" || "${{ inputs.build_formats }}" == "html" ]]; then
+              BUILD_HTML="true"
+            fi
+            BUILD_PDF="false"
+            if [[ "${{ inputs.build_formats }}" == "both" || "${{ inputs.build_formats }}" == "pdf" ]]; then
+              BUILD_PDF="true"
+            fi
+            
+            BUILD_LINUX="false"
+            if [[ "${{ inputs.build_os }}" == "both" || "${{ inputs.build_os }}" == "linux" ]]; then
+              BUILD_LINUX="true"
+            fi
+            BUILD_WINDOWS="false"
+            if [[ "${{ inputs.build_os }}" == "both" || "${{ inputs.build_os }}" == "windows" ]]; then
+              BUILD_WINDOWS="true"
+            fi
+            
             BUILD_METHOD="${{ inputs.build_method }}"
             TARGET="${{ inputs.target }}"
             
-            echo "📊 Trigger: Manual workflow dispatch"
-            echo "📊 HTML: $BUILD_HTML"
-            echo "📊 PDF: $BUILD_PDF"
-            echo "📊 Linux: $BUILD_LINUX"
-            echo "📊 Windows: $BUILD_WINDOWS"
+            echo "📊 Formats: ${{ inputs.build_formats }} (HTML: $BUILD_HTML, PDF: $BUILD_PDF)"
+            echo "📊 OS: ${{ inputs.build_os }} (Linux: $BUILD_LINUX, Windows: $BUILD_WINDOWS)"
             echo "📊 Method: $BUILD_METHOD"
             echo "📊 Target: $TARGET"
-            
-            # Validate at least one format and OS is selected
-            if [ "$BUILD_HTML" != "true" ] && [ "$BUILD_PDF" != "true" ]; then
-              echo "❌ No formats selected!"
-              exit 1
-            fi
-            if [ "$BUILD_LINUX" != "true" ] && [ "$BUILD_WINDOWS" != "true" ]; then
-              echo "❌ No operating systems selected!"
-              exit 1
-            fi
           fi
           
           # Container configuration
@@ -334,55 +333,11 @@ jobs:
           echo "linux_pdf_artifact=$LINUX_PDF" >> $GITHUB_OUTPUT
           echo "windows_pdf_artifact=$WINDOWS_PDF" >> $GITHUB_OUTPUT
 
-  # Step 5: Deploy preview to staging (dev branch only)
-  deploy-preview:
-    name: '🚀 Deploy Preview'
-    needs: [build-config, collect-results]
-    if: |
-      always() && 
-      needs.collect-results.outputs.linux_success == 'true' && 
-      needs.collect-results.outputs.linux_html_artifact != '' &&
-      (github.ref == 'refs/heads/dev' || (inputs.deploy_preview == true && inputs.target == 'dev'))
-    runs-on: ubuntu-latest
-    environment:
-      name: development
-      url: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/dev/
-      
-    steps:
-      - name: 📥 Download HTML artifacts (Linux)
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ needs.collect-results.outputs.linux_html_artifact }}
-          path: ./preview-site
-          
-      - name: 🚀 Deploy to GitHub Pages (dev staging)
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./preview-site
-          destination_dir: dev
-          keep_files: false
-          commit_message: |
-            🚀 Deploy dev preview from ${{ github.sha }}
-            
-            Built using: ${{ needs.build-config.outputs.build_method }}
-            Registry: ${{ needs.build-config.outputs.container_registry }}
-            Tag: ${{ needs.build-config.outputs.container_tag }}
-            Branch: ${{ github.ref_name }}
-            Target: ${{ needs.build-config.outputs.target }}
-
-      - name: ✅ Deployment Success
-        run: |
-          echo "✅ === DEPLOYMENT SUCCESSFUL ==="
-          echo "🚀 Preview URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/dev/"
-          echo "📦 Source: Linux HTML build"
-          echo "🔧 Method: ${{ needs.build-config.outputs.build_method }}"
-
-  # Step 6: Final results and summary
+  # Step 5: Final results and summary
   validation-summary:
     name: '🎯 Validation Summary'
     if: always()
-    needs: [pre-commit, build-config, collect-results, deploy-preview]
+    needs: [pre-commit, build-config, collect-results]
     runs-on: ubuntu-latest
     
     steps:
@@ -422,14 +377,6 @@ jobs:
             echo "⏭️ Windows build: SKIPPED"
           fi
           
-          if [ "${{ needs.deploy-preview.result }}" = "success" ]; then
-            echo "✅ Preview deployment: PASSED"
-          elif [ "${{ needs.deploy-preview.result }}" = "skipped" ]; then
-            echo "⏭️ Preview deployment: SKIPPED"
-          else
-            echo "❌ Preview deployment: FAILED"
-          fi
-          
           echo ""
           echo "🎯 OVERALL STATUS:"
           echo "-----------------"
@@ -442,10 +389,8 @@ jobs:
           if [ "$PRECOMMIT_OK" = "true" ] && [ "$LINUX_OK" = "true" ] && [ "$WINDOWS_OK" = "true" ]; then
             echo "🟢 VALIDATION: FULLY OPERATIONAL ✅"
             echo "   All enabled checks passed successfully!"
-            if [ "${{ needs.deploy-preview.result }}" = "success" ]; then
-              echo "🚀 PREVIEW: DEPLOYED ✅"
-              echo "   Check the staging site: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/dev/"
-            fi
+            echo "🚀 PREVIEW: DEPLOYMENT TRIGGERED ✅"
+            echo "   A separate workflow will deploy the preview to the staging site."
           else
             echo "🔴 VALIDATION: ISSUES DETECTED ❌"
             echo "   Check the logs above for details"
@@ -460,7 +405,6 @@ jobs:
           echo "- **Pre-commit**: ${{ needs.pre-commit.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Linux Build**: ${{ needs.collect-results.outputs.linux_success == 'true' && '✅ success' || '❌ failed' }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Windows Build**: ${{ needs.collect-results.outputs.windows_success == 'true' && '✅ success' || '❌ failed' }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Preview Deploy**: ${{ needs.deploy-preview.result }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
           echo "## 🔧 Build Configuration" >> $GITHUB_STEP_SUMMARY
@@ -471,10 +415,8 @@ jobs:
             echo "- **Method**: 🔄 Both container and baremetal builds (default for auto-push)" >> $GITHUB_STEP_SUMMARY
           else
             echo "- **Trigger**: Manual workflow dispatch" >> $GITHUB_STEP_SUMMARY
-            echo "- **HTML**: ${{ inputs.build_html }}" >> $GITHUB_STEP_SUMMARY
-            echo "- **PDF**: ${{ inputs.build_pdf }}" >> $GITHUB_STEP_SUMMARY
-            echo "- **Linux**: ${{ inputs.build_linux }}" >> $GITHUB_STEP_SUMMARY
-            echo "- **Windows**: ${{ inputs.build_windows }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Formats**: ${{ inputs.build_formats }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **OS**: ${{ inputs.build_os }}" >> $GITHUB_STEP_SUMMARY
             
             if [ "${{ inputs.build_method }}" = "baremetal" ]; then
               echo "- **Method**: ⚠️ Baremetal builds (LEGACY - deprecated)" >> $GITHUB_STEP_SUMMARY
@@ -490,10 +432,12 @@ jobs:
           fi
           echo "" >> $GITHUB_STEP_SUMMARY
           
-          if [ "${{ needs.deploy-preview.result }}" = "success" ]; then
-            echo "## 🚀 Preview Deployment" >> $GITHUB_STEP_SUMMARY
-            echo "- **URL**: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/dev/" >> $GITHUB_STEP_SUMMARY
-            echo "- **Source**: Linux HTML build" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚀 Preview Deployment" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ needs.collect-results.outputs.linux_success }}" = "true" ]; then
+            echo "Deployment will be handled by a separate workflow." >> $GITHUB_STEP_SUMMARY
+            echo "Check the 'Actions' tab for the '🚀 Deploy Preview' workflow run." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Deployment skipped due to build failure." >> $GITHUB_STEP_SUMMARY
           fi
           
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -503,9 +447,7 @@ jobs:
           
           if [ "${{ needs.pre-commit.result }}" = "success" ] && [ "$LINUX_OK" = "true" ] && [ "$WINDOWS_OK" = "true" ]; then
             echo "✅ **Validation Passed** - All enabled builds successful" >> $GITHUB_STEP_SUMMARY
-            if [ "${{ needs.deploy-preview.result }}" = "success" ]; then
-              echo "🚀 **Preview Deployed** - Check the staging site" >> $GITHUB_STEP_SUMMARY
-            fi
+            echo "🚀 **Preview Deployment Triggered** - A separate workflow is handling the deployment." >> $GITHUB_STEP_SUMMARY
           else
             echo "❌ **Validation Failed** - Check the logs above" >> $GITHUB_STEP_SUMMARY
           fi
