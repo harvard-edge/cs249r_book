@@ -45,6 +45,12 @@ on:
         required: false
         default: true
         type: boolean
+      # Container validation
+      run_health_check:
+        description: '💊 Run container health check'
+        required: false
+        default: true
+        type: boolean
       # Build method selection
       build_method:
         description: 'Build method to use'
@@ -109,7 +115,23 @@ jobs:
             exit 1
           fi
 
-  # Step 2: Determine build configuration (shared logic)
+  # Step 2: Container Health Check (validate containers before builds)
+  container-health-check:
+    name: '💊 Container Health Check'
+    needs: [pre-commit]
+    if: |
+      (inputs.run_health_check != false) && (
+        (inputs.build_method == 'container' || inputs.build_method == 'both') ||
+        (github.event_name == 'push' && github.ref == 'refs/heads/dev')
+      )
+    uses: ./.github/workflows/container-health-check.yml
+    with:
+      test_linux: true
+      test_windows: true
+      container_registry: 'ghcr.io'
+      container_tag: 'latest'
+
+  # Step 3: Determine build configuration (shared logic)
   build-config:
     name: '🎯 Build Configuration'
     runs-on: ubuntu-latest
@@ -191,10 +213,10 @@ jobs:
           echo "container_tag=$CONTAINER_TAG" >> $GITHUB_OUTPUT
 
 
-  # Step 3: Matrix-driven build calls (clean and simple!)
+  # Step 4: Matrix-driven build calls (clean and simple!)
   build-container:
     name: '🐳 Container Build Matrix'
-    needs: [pre-commit, build-config]
+    needs: [pre-commit, container-health-check, build-config]
     if: needs.build-config.outputs.build_method == 'container' || needs.build-config.outputs.build_method == 'both'
     uses: ./.github/workflows/quarto-build-container.yml
     with:
