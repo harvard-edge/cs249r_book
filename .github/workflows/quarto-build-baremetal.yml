@@ -209,6 +209,27 @@ jobs:
             echo "⏭️ Skipping build for ${{ matrix.os_name }}"
           fi
 
+      - name: 📝 Determine Formats to Build
+        id: determine-formats
+        if: steps.should-run.outputs.should-run == 'true'
+        shell: bash
+        run: |
+          FORMATS=""
+          if [ "${{ steps.should-run.outputs.build-html }}" = "true" ]; then
+            FORMATS="html"
+          fi
+          if [ "${{ steps.should-run.outputs.build-pdf }}" = "true" ]; then
+            if [ -n "$FORMATS" ]; then
+              FORMATS="$FORMATS,pdf"
+            else
+              FORMATS="pdf"
+            fi
+          fi
+          if [ -z "$FORMATS" ]; then
+            FORMATS="none"
+          fi
+          echo "FORMATS_TO_BUILD=$FORMATS" >> $GITHUB_OUTPUT
+
       - name: 🚦 Set Initial Build Status
         if: steps.should-run.outputs.should-run == 'true'
         shell: bash
@@ -220,8 +241,8 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
             -d "{
               \"state\": \"pending\",
-              \"description\": \"Quarto build started (${{ inputs.os }}, ${{ inputs.format }})\",
-              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+              \"description\": \"Quarto build started (${{ matrix.os_name }}, ${{ steps.determine-formats.outputs.FORMATS_TO_BUILD }})\",
+              \"context\": \"ci/quarto-build-${{ matrix.os_name }}-${{ steps.determine-formats.outputs.FORMATS_TO_BUILD }}\"
             }"
 
       - name: 🔍 Validate inputs
@@ -235,15 +256,13 @@ jobs:
           
           Write-Output "🔄 Validating workflow inputs..."
           Write-Output "👉 Target: ${{ inputs.target }}"
-          Write-Output "👉 OS: ${{ inputs.os }}"
-          Write-Output "👉 Environment: ${{ inputs.environment }}"
-          Write-Output "👉 Format: ${{ inputs.format }}"
+          Write-Output "👉 OS: ${{ matrix.os_name }}"
+          Write-Output "👉 Formats: ${{ steps.determine-formats.outputs.FORMATS_TO_BUILD }}"
           Write-Output "👉 Deploy: Artifacts only - no deployment"
           Write-Output "👉 TeX Live: Always installed for all formats (consistent environment)"
           
-          $valid_formats = @("html", "pdf", "epub", "all")
-          if ("${{ inputs.format }}" -notin $valid_formats) {
-            Write-Error "❌ Format must be one of: $($valid_formats -join ', ')"
+          if ("${{ steps.determine-formats.outputs.FORMATS_TO_BUILD }}" -eq "none") {
+            Write-Error "❌ No build format selected. Please select at least one format (HTML/PDF)."
             exit 1
           }
           
@@ -449,7 +468,7 @@ jobs:
         shell: bash
         run: |
           echo "🔄 Verifying TeX Live installation (installed for all builds)..."
-          echo "📊 Current format: ${{ inputs.format }}"
+          echo "📊 Current format: ${{ steps.determine-formats.outputs.FORMATS_TO_BUILD }}"
           echo "📊 Philosophy: All builds get same environment, only build targets differ"
           
           # Check LaTeX engines
@@ -585,8 +604,8 @@ jobs:
           echo "💓 Starting build heartbeat system..."
           echo "⏰ Build started at: $(date)"
           echo "📊 Build configuration:"
-          echo "   - Format: ${{ inputs.format }}"
-          echo "   - OS: ${{ inputs.os }}"
+          echo "   - Format: ${{ steps.determine-formats.outputs.FORMATS_TO_BUILD }}"
+          echo "   - OS: ${{ matrix.os_name }}"
           echo "   - Environment: ${{ inputs.environment }}"
           echo "   - Timeout: 60 minutes"
           echo "💓 Heartbeat will show progress every 5 minutes"
@@ -610,6 +629,7 @@ jobs:
           echo "✅ Heartbeat started (PID: $HEARTBEAT_PID)"
 
       - name: 🔨 Build HTML (copy config and render)
+        id: build-html
         if: steps.should-run.outputs.should-run == 'true' && steps.should-run.outputs.build-html == 'true'
         shell: bash
         run: |
@@ -629,8 +649,8 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
             -d "{
               \"state\": \"pending\",
-              \"description\": \"Building HTML content (${{ inputs.os }})\",
-              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+              \"description\": \"Building HTML content (${{ matrix.os_name }})\",
+              \"context\": \"ci/quarto-build-${{ matrix.os_name }}-html\"
             }"
           
           # Enable verbose logging for debugging
@@ -638,6 +658,7 @@ jobs:
           echo "✅ HTML build completed at: $(date)"
         
       - name: 🔨 Build PDF (copy config and render)
+        id: build-pdf
         if: steps.should-run.outputs.should-run == 'true' && steps.should-run.outputs.build-pdf == 'true'
         shell: bash
         run: |
@@ -659,8 +680,8 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
             -d "{
               \"state\": \"pending\",
-              \"description\": \"Building PDF content (${{ inputs.os }}) - this takes 30-45min\",
-              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+              \"description\": \"Building PDF content (${{ matrix.os_name }}) - this takes 30-45min\",
+              \"context\": \"ci/quarto-build-${{ matrix.os_name }}-pdf\"
             }"
           
           # Enable verbose logging for debugging
@@ -691,7 +712,7 @@ jobs:
           echo "🔄 Checking Quarto build output..."
 
           # HTML check
-          if [[ "${{ inputs.format }}" == "html" || "${{ inputs.format }}" == "all" ]]; then
+          if [[ "${{ steps.should-run.outputs.build-html }}" == "true" ]]; then
             if [ -d "build/html" ]; then
               echo "✅ build/html directory exists"
               echo "📊 Files in build/html directory:"
@@ -704,7 +725,7 @@ jobs:
           fi
 
           # PDF check
-          if [[ "${{ inputs.format }}" == "pdf" || "${{ inputs.format }}" == "all" ]]; then
+          if [[ "${{ steps.should-run.outputs.build-pdf }}" == "true" ]]; then
             if [ -d "build/pdf" ]; then
               echo "✅ build/pdf directory exists"
               echo "📊 Files in build/pdf directory:"
@@ -725,7 +746,7 @@ jobs:
           fi
 
       - name: 📉 Compress PDF with Ghostscript (Linux)
-        if: runner.os == 'Linux' && (inputs.format == 'pdf' || inputs.format == 'all')
+        if: runner.os == 'Linux' && steps.should-run.outputs.build-pdf == 'true'
         run: |
           if [ -f "build/pdf/Machine-Learning-Systems.pdf" ]; then
             gs \
@@ -745,7 +766,7 @@ jobs:
           fi
 
       - name: 📉 Compress PDF with Ghostscript (Windows)
-        if: runner.os == 'Windows' && (inputs.format == 'pdf' || inputs.format == 'all')
+        if: runner.os == 'Windows' && steps.should-run.outputs.build-pdf == 'true'
         shell: pwsh
         run: |
           # Set UTF-8 encoding for proper emoji display
@@ -805,48 +826,34 @@ jobs:
         shell: bash
         run: |
           # Determine build status and formats built
-          FORMAT="${{ inputs.format }}"
           FORMATS_BUILT=""
           BUILD_STATUS="success"
           
-          # Check which formats were built successfully
-          if [ "$FORMAT" = "all" ]; then
-            # Check individual format steps
-            HTML_SUCCESS="${{ steps.build-html.outcome }}"
-            PDF_SUCCESS="${{ steps.build-pdf.outcome }}"
-            EPUB_SUCCESS="${{ steps.build-epub.outcome }}"
-            
-            if [ "$HTML_SUCCESS" = "success" ]; then
+          if [ "${{ steps.should-run.outputs.build-html }}" = "true" ]; then
+            if [ "${{ steps.build-html.outcome }}" = "success" ]; then
               FORMATS_BUILT="html"
+            else
+              BUILD_STATUS="failure"
             fi
-            if [ "$PDF_SUCCESS" = "success" ]; then
+          fi
+          
+          if [ "${{ steps.should-run.outputs.build-pdf }}" = "true" ]; then
+            if [ "${{ steps.build-pdf.outcome }}" = "success" ]; then
               if [ -n "$FORMATS_BUILT" ]; then
                 FORMATS_BUILT="${FORMATS_BUILT},pdf"
               else
                 FORMATS_BUILT="pdf"
               fi
-            fi
-            if [ "$EPUB_SUCCESS" = "success" ]; then
-              if [ -n "$FORMATS_BUILT" ]; then
-                FORMATS_BUILT="${FORMATS_BUILT},epub"
-              else
-                FORMATS_BUILT="epub"
-              fi
-            fi
-            
-            # Overall status for 'all' format
-            if [ -n "$FORMATS_BUILT" ]; then
-              BUILD_STATUS="success"
             else
               BUILD_STATUS="failure"
             fi
-          else
-            # Single format build
-            BUILD_SUCCESS="${{ steps.build-output.outcome }}"
-            if [ "$BUILD_SUCCESS" = "success" ]; then
-              FORMATS_BUILT="$FORMAT"
-              BUILD_STATUS="success"
-            else
+          fi
+
+          if [ "${{ steps.should-run.outputs.should-run }}" = "false" ]; then
+            BUILD_STATUS="skipped"
+          elif [ -z "$FORMATS_BUILT" ] && [ "${{ steps.should-run.outputs.should-run }}" = "true" ]; then
+            # This case handles when formats were selected but all failed.
+            if [ "${{ steps.determine-formats.outputs.FORMATS_TO_BUILD }}" != "none" ]; then
               BUILD_STATUS="failure"
             fi
           fi
@@ -905,7 +912,7 @@ jobs:
           GitHub Workflow: ${{ github.workflow }}
           GitHub Run ID: ${{ github.run_id }}
           Runner OS: ${{ runner.os }}
-          Build Format: ${{ inputs.format }}
+          Build Format: ${{ steps.determine-formats.outputs.FORMATS_TO_BUILD }}
           PowerShell Version: $($PSVersionTable.PSVersion)
           Working Directory: $PWD
           
@@ -1003,7 +1010,7 @@ jobs:
         if: always()  # Upload logs even if build fails
         uses: actions/upload-artifact@v4
         with:
-          name: build-logs-${{ inputs.os }}-${{ inputs.format }}-${{ github.run_id }}
+          name: build-logs-${{ matrix.os_name }}-${{ steps.determine-formats.outputs.FORMATS_TO_BUILD }}-${{ github.run_id }}
           path: logs/
           retention-days: 30  # Keep logs for 30 days for debugging
           if-no-files-found: warn
@@ -1022,18 +1029,18 @@ jobs:
           @"
           ## 📊 Build Status Summary
           🎯 Target: ${{ inputs.target }}
-          💻 OS: ${{ inputs.os }}
+          💻 OS: ${{ matrix.os_name }}
           🔧 Environment: ${{ inputs.environment }}
           📚 Quarto Version: ${{ inputs.quarto-version }}
           🔬 R Version: ${{ inputs.r-version }}
-          📄 Format: ${{ inputs.format }}
+          📄 Format: ${{ steps.determine-formats.outputs.FORMATS_TO_BUILD }}
           🚀 Deploy: Artifacts only (no deployment in this workflow)
           🧩 Cache Status:
             - TeX Live: $texLiveStatus
             - R Packages: ${{ steps.cache-r-packages.outputs.cache-hit == 'true' && '✅ Hit' || '❌ Miss' }}
             - Python Packages: ${{ steps.cache-python-packages.outputs.cache-hit == 'true' && '✅ Hit' || '❌ Miss' }}
           📝 Debug Artifacts:
-            - Build logs available as artifact: build-logs-${{ inputs.os }}-${{ inputs.format }}-${{ github.run_id }}
+            - Build logs available as artifact: build-logs-${{ matrix.os_name }}-${{ steps.determine-formats.outputs.FORMATS_TO_BUILD }}-${{ github.run_id }}
             - Includes: TeX logs, system info, library details, and comprehensive build output
             - Retention: 30 days for debugging
           ⏰ Completed at: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
@@ -1048,10 +1055,10 @@ jobs:
           # Determine the final status based on job status
           if [ "${{ job.status }}" = "success" ]; then
             STATE="success"
-            DESCRIPTION="Build completed successfully (${{ inputs.os }}, ${{ inputs.format }})"
+            DESCRIPTION="Build completed successfully (${{ matrix.os_name }}, ${{ steps.determine-formats.outputs.FORMATS_TO_BUILD }})"
           else
             STATE="failure"
-            DESCRIPTION="Build failed (${{ inputs.os }}, ${{ inputs.format }})"
+            DESCRIPTION="Build failed (${{ matrix.os_name }}, ${{ steps.determine-formats.outputs.FORMATS_TO_BUILD }})"
           fi
           
           echo "📊 Final status: $STATE"
@@ -1065,7 +1072,7 @@ jobs:
             -d "{
               \"state\": \"$STATE\",
               \"description\": \"$DESCRIPTION\",
-              \"context\": \"ci/quarto-build-${{ inputs.os }}-${{ inputs.format }}\"
+              \"context\": \"ci/quarto-build-${{ matrix.os_name }}-${{ steps.determine-formats.outputs.FORMATS_TO_BUILD }}\"
             }"
           
           echo "✅ Commit status updated successfully" 
