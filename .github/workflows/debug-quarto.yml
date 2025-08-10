@@ -8,14 +8,49 @@ on:
         required: false
         default: 'quarto.exe check'
         type: string
+      use_local:
+        description: 'Try local Quarto instead of container'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   quick-test:
     runs-on: windows-latest
-    timeout-minutes: 5
+    timeout-minutes: 3
     
     steps:
-      - name: 🧪 Quick Quarto Test
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        
+      - name: 📦 Check if container exists locally
+        id: check-local
         run: |
-          Write-Output "Testing command: ${{ inputs.command }}"
+          $imageExists = docker images ghcr.io/harvard-edge/cs249r_book/quarto-windows:latest --format "{{.Repository}}"
+          if ($imageExists) {
+            Write-Output "📦 Container already cached locally"
+            Write-Output "exists=true" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Output "📥 Container not cached, need to pull"
+            Write-Output "exists=false" >> $env:GITHUB_OUTPUT
+          }
+          
+      - name: 🐳 Pull Container (only if needed)
+        if: steps.check-local.outputs.exists == 'false'
+        run: |
+          Write-Output "📥 Pulling container..."
+          docker pull ghcr.io/harvard-edge/cs249r_book/quarto-windows:latest
+          
+      - name: 🧪 Quick Quarto Test (Container)
+        if: inputs.use_local == false
+        run: |
+          Write-Output "Testing command in container: ${{ inputs.command }}"
           docker run --rm ghcr.io/harvard-edge/cs249r_book/quarto-windows:latest pwsh -Command "${{ inputs.command }}"
+          
+      - name: 🧪 Quick Quarto Test (Local)
+        if: inputs.use_local == true  
+        run: |
+          Write-Output "Testing command locally: ${{ inputs.command }}"
+          Write-Output "Installing Quarto locally for comparison..."
+          choco install quarto -y
+          & ${{ inputs.command }}
