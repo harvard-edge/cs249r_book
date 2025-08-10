@@ -130,6 +130,11 @@ jobs:
             enabled: ${{ inputs.build_windows && inputs.build_pdf }}
             artifact_name: ${{ inputs.target }}-pdf-windows
     
+    outputs:
+      platform: ${{ matrix.platform }}
+      format: ${{ matrix.format }}
+      artifact_name: ${{ matrix.artifact_name }}
+
     # Only Linux runs in containers
     container: ${{ matrix.platform == 'linux' && format('{0}/{1}/quarto-{2}:{3}', inputs.container_registry, github.repository, matrix.platform, inputs.container_tag) || null }}
     
@@ -267,33 +272,43 @@ jobs:
       - name: 📊 Collect results
         id: collect
         run: |
-          # Check overall success - all enabled builds must succeed
-          BUILD_SUCCESS="true"
+          # Determine overall build success
+          if [[ "${{ needs.build.result }}" == "success" || "${{ needs.build.result }}" == "skipped" ]]; then
+            echo "build_success=true" >> $GITHUB_OUTPUT
+            BUILD_SUCCESS_MSG="✅ Success"
+          else
+            echo "build_success=false" >> $GITHUB_OUTPUT
+            BUILD_SUCCESS_MSG="❌ Failure"
+          fi
+
+          # Extract artifact names from build job outputs using jq
+          outputs_json='${{ toJSON(needs.build.outputs) }}'
           
-          # Check each possible build combination
-          if [ "${{ needs.build.result }}" != "success" ]; then
-            BUILD_SUCCESS="false"
+          # Helper function to extract artifact name
+          extract_artifact() {
+            local platform=$1
+            local format=$2
+            # The .[] iterates over the values of the top-level object
+            echo "$outputs_json" | jq -r --arg p "$platform" --arg f "$format" \
+              '.[] | select(.platform==$p and .format==$f) | .artifact_name'
+          }
+
+          # Set artifact names for requested builds if they were generated
+          if [[ "${{ inputs.build_linux && inputs.build_html }}" == "true" ]]; then
+            artifact_name=$(extract_artifact "linux" "html")
+            echo "linux_html_artifact=$artifact_name" >> $GITHUB_OUTPUT
+          fi
+          if [[ "${{ inputs.build_linux && inputs.build_pdf }}" == "true" ]]; then
+            artifact_name=$(extract_artifact "linux" "pdf")
+            echo "linux_pdf_artifact=$artifact_name" >> $GITHUB_OUTPUT
+          fi
+          if [[ "${{ inputs.build_windows && inputs.build_html }}" == "true" ]]; then
+            artifact_name=$(extract_artifact "windows" "html")
+            echo "windows_html_artifact=$artifact_name" >> $GITHUB_OUTPUT
+          fi
+          if [[ "${{ inputs.build_windows && inputs.build_pdf }}" == "true" ]]; then
+            artifact_name=$(extract_artifact "windows" "pdf")
+            echo "windows_pdf_artifact=$artifact_name" >> $GITHUB_OUTPUT
           fi
           
-          echo "build_success=$BUILD_SUCCESS" >> $GITHUB_OUTPUT
-          
-          # Set artifact names for requested builds
-          TARGET="${{ inputs.target }}"
-          
-          if [ "${{ inputs.build_linux }}" = "true" ] && [ "${{ inputs.build_html }}" = "true" ]; then
-            echo "linux_html_artifact=${TARGET}-html-linux" >> $GITHUB_OUTPUT
-          fi
-          
-          if [ "${{ inputs.build_linux }}" = "true" ] && [ "${{ inputs.build_pdf }}" = "true" ]; then
-            echo "linux_pdf_artifact=${TARGET}-pdf-linux" >> $GITHUB_OUTPUT
-          fi
-          
-          if [ "${{ inputs.build_windows }}" = "true" ] && [ "${{ inputs.build_html }}" = "true" ]; then
-            echo "windows_html_artifact=${TARGET}-html-windows" >> $GITHUB_OUTPUT
-          fi
-          
-          if [ "${{ inputs.build_windows }}" = "true" ] && [ "${{ inputs.build_pdf }}" = "true" ]; then
-            echo "windows_pdf_artifact=${TARGET}-pdf-windows" >> $GITHUB_OUTPUT
-          fi
-          
-          echo "✅ Results collected - Success: $BUILD_SUCCESS"
+          echo "✅ Results collected - Status: $BUILD_SUCCESS_MSG"
