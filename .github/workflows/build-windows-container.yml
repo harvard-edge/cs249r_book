@@ -73,14 +73,14 @@ on:
         description: "Whether build used cache (true/false)"
         value: ${{ jobs.build.outputs.cache-hit }}
         
-  # DISABLED: Automatic triggers while working on containers
-  # schedule:
-  #   - cron: '0 2 * * 0'  # Weekly rebuild (Sunday at 2am - after Linux container)
-  # push:
-  #   paths:
-  #     - 'tools/dependencies/**'
-  #     - 'docker/build-quarto-windows/**'
-  #     - '.github/workflows/build-windows-container.yml'
+  # Re-enable automatic triggers
+  schedule:
+    - cron: '0 2 * * 0'  # Weekly rebuild (Sunday at 2am - after Linux container)
+  push:
+    paths:
+      - 'tools/dependencies/**'
+      - 'docker/windows/**'
+      - '.github/workflows/build-windows-container.yml'
 
 env:
   # Container Registry Configuration (configurable via inputs)
@@ -89,7 +89,7 @@ env:
   CONTAINER_TAG: ${{ inputs.container_tag || 'latest' }}
   
   # Container Build Configuration
-  DOCKERFILE_PATH: ./docker/build-quarto-windows/Dockerfile
+  DOCKERFILE_PATH: ./docker/windows/Dockerfile
   CONTEXT_PATH: .
 
 jobs:
@@ -100,9 +100,18 @@ jobs:
       contents: read
       packages: write
 
+    outputs:
+      build-status: ${{ steps.build.outputs.build-status }}
+      image-name: ${{ steps.build.outputs.image-name }}
+      image-digest: ${{ steps.build.outputs.image-digest }}
+      cache-hit: ${{ steps.build.outputs.cache-hit }}
+
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
+
+      - name: 🛠️ Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: 🔐 Log in to Container Registry
         uses: docker/login-action@v3
@@ -111,27 +120,47 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 🐳 Build Windows container
+      - name: 🏷️ Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ env.CONTAINER_TAG }}
+
+      - name: 🐳 Build and Push Windows container
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ env.CONTEXT_PATH }}
+          file: ${{ env.DOCKERFILE_PATH }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          no-cache: ${{ inputs.no_cache }}
+
+      - name: 📊 Build Summary
+        id: build-summary
+        if: always()
         run: |
-          echo "🚀 Building Windows container..."
-          $useNoCache = "${{ inputs.no_cache }}" -eq "true"
-          if ($useNoCache) {
-            echo "📊 Cache mode: DISABLED (fresh build)"
-            docker build --no-cache -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.CONTAINER_TAG }} -f ${{ env.DOCKERFILE_PATH }} ${{ env.CONTEXT_PATH }}
-          } else {
-            echo "📊 Cache mode: ENABLED (faster build)"
-            docker build -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.CONTAINER_TAG }} -f ${{ env.DOCKERFILE_PATH }} ${{ env.CONTEXT_PATH }}
-          }
+          # Determine build status
+          if [ "${{ steps.build.outcome }}" = "success" ]; then
+            BUILD_STATUS="success"
+          else
+            BUILD_STATUS="failure"
+          fi
           
-          echo "✅ Local container build completed"
-
-      - name: 🐳 Push Windows container
-        run: |
-          echo "📦 Pushing container to registry..."
-          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.CONTAINER_TAG }}
-          echo "✅ Container push completed"
-
-      - name: Build Complete
-        run: |
-          echo "✅ Windows container build completed successfully!"
-          echo "📊 Container: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.CONTAINER_TAG }}"
+          # Extract build information
+          IMAGE_NAME="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.CONTAINER_TAG }}"
+          IMAGE_DIGEST="${{ steps.build.outputs.digest }}"
+          CACHE_HIT="${{ steps.build.outputs.cache-hit }}"
+          
+          echo "build-status=$BUILD_STATUS" >> $GITHUB_OUTPUT
+          echo "image-name=$IMAGE_NAME" >> $GITHUB_OUTPUT
+          echo "image-digest=$IMAGE_DIGEST" >> $GITHUB_OUTPUT
+          echo "cache-hit=$CACHE_HIT" >> $GITHUB_OUTPUT
+          
+          echo "📊 Build Status: $BUILD_STATUS"
+          echo "🐳 Image: $IMAGE_NAME"
+          echo "🔍 Digest: $IMAGE_DIGEST"
+          echo "💾 Cache Hit: $CACHE_HIT"

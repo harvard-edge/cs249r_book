@@ -39,17 +39,25 @@ This directory contains the Windows Server 2022 container configuration for buil
 - At least 8GB RAM available for Docker
 - 20GB+ free disk space
 
-### Build Command
+## Local Build
+To build the Windows container locally, run the following command from the repository root:
 ```powershell
-# From project root
-docker build -f docker/build-quarto-windows/Dockerfile -t mlsysbook-windows .
+docker build -f docker/windows/Dockerfile -t mlsysbook-windows .
 ```
 
-### Test Before Building
+### Testing
+To test the Dockerfile before building, you can use the provided PowerShell script:
 ```powershell
-# Run validation script
-.\docker\build-quarto-windows\test_dockerfile.ps1
+./docker/windows/test_dockerfile.ps1
 ```
+
+## Workflow
+The container is built and pushed to the GitHub Container Registry via the [`.github/workflows/build-windows-container.yml`](../../.github/workflows/build-windows-container.yml) workflow.
+This workflow is triggered manually or on a weekly schedule.
+
+## Notes
+- Building the Windows container can take a significant amount of time (often over 2 hours).
+- The image is large due to the comprehensive set of pre-installed dependencies.
 
 ## 📋 Build Phases
 

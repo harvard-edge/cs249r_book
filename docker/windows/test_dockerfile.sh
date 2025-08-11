@@ -5,7 +5,10 @@
 
 # Variables
 headline="🚀 Testing Dockerfile: Windows"
-dockerfile="docker/build-quarto-windows/Dockerfile"
+# Set the Dockerfile path
+dockerfile="docker/windows/Dockerfile"
+# Get the directory of the Dockerfile
+dockerfile_dir=$(dirname "$dockerfile")
 image_name="mlsysbook-windows-test"
 container_name="mlsysbook-windows-test-container"
 
@@ -13,11 +16,9 @@ echo "$headline"
 
 # Check if required files exist
 required_files=(
-    "tools/dependencies/requirements/"
-    "tools/dependencies/requirements-build.txt"
-    "tools/dependencies/install_packages.R"
-    "tools/dependencies/tl_packages"
-    "docker/build-quarto-windows/verify_r_packages.R"
+    "$dockerfile"
+    "docker/windows/verify_r_packages.R"
+    "tools/dependencies/requirements.txt"
 )
 
 echo "📁 Checking required files..."
@@ -89,5 +90,6 @@ fi
 
 echo "✅ Dockerfile validation complete!"
 echo ""
-echo "To build the container:"
-echo "  docker build -f docker/build-quarto-windows/Dockerfile -t mlsysbook-windows ."
+echo "To build the container locally, run:"
+echo "  docker build -f docker/windows/Dockerfile -t mlsysbook-windows ."
+exit 0

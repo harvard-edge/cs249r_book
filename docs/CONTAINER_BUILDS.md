@@ -30,13 +30,12 @@ Containerized Linux Build (5-10 minutes):
 ## Files
 
 ### Core Files
-- `docker/build-quarto-linux/Dockerfile` - A single Dockerfile for Linux builds.
-- `docker/build-quarto-linux/README.md` - Linux container documentation
-- `docker/build-quarto-linux/.dockerignore` - Build exclusions
-- `docker/build-quarto-windows/Dockerfile` - A single Dockerfile for Windows builds.
-- `.github/workflows/build-linux-container.yml` - Builds and pushes Linux container
-- `.github/workflows/build-windows-container.yml` - Builds and pushes Windows container
-- `.github/workflows/quarto-build-container.yml` - Containerized build workflow
+- `docker/linux/Dockerfile` - A single Dockerfile for Linux builds.
+- `docker/linux/README.md` - Linux container documentation
+- `docker/linux/.dockerignore` - Build exclusions
+- `docker/windows/Dockerfile` - A single Dockerfile for Windows builds.
+- `docker/windows/README.md` - Windows container documentation
+- `docker/windows/.dockerignore` - Build exclusions
 
 ### Container Lifecycle
 1. **Build**: Weekly automatic rebuilds + manual triggers
@@ -48,14 +47,20 @@ Containerized Linux Build (5-10 minutes):
 
 ## Usage
 
-### Manual Container Build
-```bash
-# Trigger Linux container build manually
-gh workflow run build-linux-container.yml
+### Registry Paths
+- **Linux Registry**: `ghcr.io/harvard-edge/cs249r_book/quarto-linux`
+- **Windows Registry**: `ghcr.io/harvard-edge/cs249r_book/quarto-windows`
 
-# Trigger Windows container build manually
-gh workflow run build-windows-container.yml
-```
+### Manual Builds
+You can build the containers locally using these commands:
+- **Linux**:
+  ```bash
+  docker build -f docker/linux/Dockerfile -t mlsysbook-linux .
+  ```
+- **Windows**:
+  ```powershell
+  docker build -f docker/windows/Dockerfile -t mlsysbook-windows .
+  ```
 
 ### Manual Build Test
 ```bash
@@ -64,8 +69,8 @@ gh workflow run quarto-build-container.yml --field os=ubuntu-latest --field form
 ```
 
 ### Container Information
-- **Linux Registry**: `ghcr.io/harvard-edge/cs249r_book/quarto-build`
-- **Windows Registry**: `ghcr.io/harvard-edge/cs249r_book/build-quarto-windows`
+- **Linux Registry**: `ghcr.io/harvard-edge/cs249r_book/quarto-linux`
+- **Windows Registry**: `ghcr.io/harvard-edge/cs249r_book/quarto-windows`
 - **Tags**: `latest`, `main`, `dev`, branch-specific tags
 - **Linux Size**: ~2-3GB (includes TeX Live, R, Python packages)
 - **Windows Size**: ~4-5GB (includes Windows Server Core + dependencies)
@@ -120,7 +125,7 @@ LC_ALL=en_US.UTF-8
 3. Test locally with `docker build -t test .`
 
 ### Build Issues
-1. Check if container exists: `ghcr.io/harvard-edge/cs249r_book/quarto-build:latest`
+1. Check if container exists: `ghcr.io/harvard-edge/cs249r_book/quarto-linux:latest`
 2. Verify container has all dependencies
 3. Compare with traditional build logs
 
@@ -170,8 +175,8 @@ To build the containers, use the standard `docker build` command:
 
 ```bash
 # For Linux
-docker build -f docker/build-quarto-linux/Dockerfile -t mlsysbook-linux .
+docker build -f docker/linux/Dockerfile -t mlsysbook-linux .
 
 # For Windows
-docker build -f docker/build-quarto-windows/Dockerfile -t mlsysbook-windows .
+docker build -f docker/windows/Dockerfile -t mlsysbook-windows .
 ``` 
