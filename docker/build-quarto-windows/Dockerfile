@@ -13,9 +13,6 @@ FROM mcr.microsoft.com/windows/server:ltsc2022
 # Use Windows PowerShell initially
 SHELL ["powershell.exe", "-NoLogo", "-ExecutionPolicy", "Bypass", "-Command"]
 
-# Set execution policy once for the build
-RUN Set-ExecutionPolicy Unrestricted -Scope CurrentUser -Force
-
 # ------------------------------------------------------------
 # PHASE 0: Base dirs and env (same as quarto-build workflow)
 # ------------------------------------------------------------
