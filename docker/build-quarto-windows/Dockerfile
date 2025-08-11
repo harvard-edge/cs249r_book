@@ -268,11 +268,23 @@ RUN Write-Host '=== STARTING INKSCAPE INSTALLATION ===' ; `
 # ------------------------------------------------------------
 # PHASE 12: Install R (Medium complexity)
 # ------------------------------------------------------------
-RUN Write-Host '=== STARTING R INSTALLATION ===' ; `
-    Write-Host 'Installing R via Scoop (same as quarto-build workflow)...' ; `
-    Write-Host 'Installing R from main bucket...' ; `
-    scoop install main/r ; `
-    Write-Host '📦 R installed' ; `
+RUN Write-Host '=== STARTING R INSTALLATION (DIRECT) ===' ; `
+    $rUrl = 'https://cran.r-project.org/bin/windows/base/R-4.5.1-win.exe' ; `
+    $rInstaller = 'C:\temp\R-win.exe' ; `
+    Write-Host "Downloading R from $rUrl..." ; `
+    Invoke-WebRequest -Uri $rUrl -OutFile $rInstaller -UseBasicParsing ; `
+    Write-Host "📦 R downloaded to $rInstaller" ; `
+    Write-Host 'Installing R silently...' ; `
+    $process = Start-Process -FilePath $rInstaller -ArgumentList '/VERYSILENT', '/DIR=C:\R' -Wait -PassThru ; `
+    if ($process.ExitCode -ne 0) { `
+        Write-Host "❌ R installation failed with exit code: $($process.ExitCode)" ; `
+        exit $process.ExitCode ; `
+    } ; `
+    Write-Host '✅ R installed successfully' ; `
+    Write-Host 'Adding R to PATH...' ; `
+    $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
+    [Environment]::SetEnvironmentVariable('PATH', ('C:\R\bin;' + $mach), 'Machine') ; `
+    Write-Host '🔗 Added R to PATH' ; `
     Write-Host 'Verifying R installation...' ; `
     R --version ; `
     Write-Host '✅ R installation complete'
