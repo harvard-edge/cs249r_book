@@ -692,7 +692,7 @@ Let me know if you'd like a more detailed summary of specific changes!
 <summary>**📖 Chapters**</summary>
 
 - **Chapter 4: DNN Architectures**: This update cleans up Chapter 4 on DNN Architectures by removing dead commented text and incorporating Bravo's suggested fixes for clarity and accuracy.  The changes focus on improving the readability and quality of the content.
-- **Chapter 20: Conclusion**: Chapter 20's conclusion received feedback and revisions from @Bravo, addressing unspecified issues for improved clarity and accuracy.
+- **Chapter 20: Conclusion**: Chapter 20's conclusion received feedback and revisions from Bravo, addressing unspecified issues for improved clarity and accuracy.
 - **Chapter: Generative Ai**: This commit cleans up the "Generative Ai" chapter by removing outdated and commented-out text, improving readability and clarity.
 
 </details>
@@ -1014,8 +1014,8 @@ Let me know if you'd like a more detailed summary or want to focus on specific a
 
 
 Let me know if you'd like a more detailed breakdown of the specific changes!
-- **Chapter 18: Robust AI**: Chapter 18, "Robust AI", has been updated with fixes identified and implemented by @BravoBaldo. These changes improve the accuracy and clarity of the content within the chapter.
-- **Chapter 17: Sustainable AI**: Chapter 17 on Sustainable AI was updated with formatting fixes and improvements to indentation, thanks to feedback from @BravoBaldo.  
+- **Chapter 18: Robust AI**: Chapter 18, "Robust AI", has been updated with fixes identified and implemented by BravoBaldo. These changes improve the accuracy and clarity of the content within the chapter.
+- **Chapter 17: Sustainable AI**: Chapter 17 on Sustainable AI was updated with formatting fixes and improvements to indentation, thanks to feedback from BravoBaldo.  
 
 
 These changes ensure clear presentation and readability of the content.
@@ -1101,7 +1101,7 @@ Let me know if you'd like me to elaborate on any specific commit message!
 <summary>**📖 Chapters**</summary>
 
 - **Chapter 11: AI Acceleration**: The Chapter 11 commit for AI Acceleration focused on enhancing clarity and accessibility for students.  This includes fixing table formatting issues and providing more student-focused explanations of hardware design principles within the introduction.
-- **Chapter 2: ML Systems**: This update addresses a grammatical error in Chapter 2's content about ML systems by fixing a dangling sentence.  Special thanks to @shreyasgrampurohit for identifying and resolving this issue. 
+- **Chapter 2: ML Systems**: This update addresses a grammatical error in Chapter 2's content about ML systems by fixing a dangling sentence.  Special thanks to shreyasgrampurohit for identifying and resolving this issue. 
 
 
 Let me know if you have any other Git commit messages you'd like summarized!
@@ -1124,7 +1124,7 @@ Let me know if you have any other Git commit messages you'd like summarized!
 <summary>**📖 Chapters**</summary>
 
 - **Chapter 13: ML Operations**: Updates to Chapter 13: ML Operations were made to address feedback from BravoBaldo, improving the clarity and accuracy of the content.  These fixes enhance the chapter's educational value for readers learning about ML Operations.
-- **Chapter 14: On-Device Learning**: Updates to Chapter 14: On-Device Learning were made based on feedback from @BravoBaldo, ensuring improved clarity and accuracy of the content.  These revisions refine the chapter's explanation of on-device learning concepts. 
+- **Chapter 14: On-Device Learning**: Updates to Chapter 14: On-Device Learning were made based on feedback from BravoBaldo, ensuring improved clarity and accuracy of the content.  These revisions refine the chapter's explanation of on-device learning concepts. 
 
 
 Let me know if you'd like me to elaborate on any specific changes mentioned in the commit messages!
@@ -1147,7 +1147,7 @@ Let me know if you'd like me to elaborate on any specific changes mentioned in t
 <details >
 <summary>**📖 Chapters**</summary>
 
-- **Chapter 12: Benchmarking AI**: This update fixes issues in Chapter 12: Benchmarking AI, specifically addressing feedback from @BravoBaldo to improve the content's accuracy and clarity.  
+- **Chapter 12: Benchmarking AI**: This update fixes issues in Chapter 12: Benchmarking AI, specifically addressing feedback from BravoBaldo to improve the content's accuracy and clarity.  
 
 
 Let me know if you would like me to elaborate on any specific commit message!
@@ -1529,11 +1529,11 @@ The commit also adds bullets to the "Coming Soon" section for better readability
 - **Chapter 2: ML Systems**: This update fixes rendering issues, improves Colab badge integration, and refines formatting for exercises, slides, and PDF output. Minor bullet point and "coming soon" section edits were also made.
 - **Chapter 14: On-Device Learning**: This update primarily focuses on fixing formatting issues and improving the visual presentation of Chapter 14.  It addresses broken Colab badges, header inconsistencies, and slide rendering problems for better PDF compatibility.
 - **Chapter 13: ML Operations**: This update fixes a broken Colab badge from a previous commit and improves the "coming soon" section with bullet points.  Additional formatting changes were made to ensure slides render correctly in PDF and enhance the overall presentation of labs, exercises, and slides.
-- **Chapter 10: Model Optimizations**: This update fixes a broken Colab badge and improves the presentation of Chapter 10 content.  Key changes include using the `@exr-` format for Colab notebooks, formatting exercises and slides for better PDF rendering, and updating "coming soon" sections with bullet points.
+- **Chapter 10: Model Optimizations**: This update fixes a broken Colab badge and improves the presentation of Chapter 10 content.  Key changes include using the `exr-` format for Colab notebooks, formatting exercises and slides for better PDF rendering, and updating "coming soon" sections with bullet points.
 - **Chapter 15: Security & Privacy**: This update fixes issues with the Colab badge and formatting, ensures slides display correctly in PDFs, and improves the "coming soon" section with bullet points.  Various formatting changes were also made to labs, exercises, and slides for better clarity and consistency.
 - **Chapter 18: Robust AI**: This update fixes several rendering and display issues in Chapter 18, including a broken Colab badge and formatting problems with slides and labs.  It also standardizes note usage for better PDF output.
 - **Chapter 17: Sustainable AI**: This update fixes a broken Colab badge and improves the formatting of slides, labs, and exercises. It also clarifies upcoming content using bullet points instead of a general "coming soon" message.
-- **Chapter 8: AI Training**: This update fixes a broken Colab badge, standardizes notebook links with "@exr-", and improves the formatting of slides and exercises for better PDF rendering.  Additionally, the "coming soon" section now uses bullet points for readability.
+- **Chapter 8: AI Training**: This update fixes a broken Colab badge, standardizes notebook links with "exr-", and improves the formatting of slides and exercises for better PDF rendering.  Additionally, the "coming soon" section now uses bullet points for readability.
 - **Chapter 9: Efficient AI**: This update focuses on improving the rendering and formatting of Chapter 9: Efficient AI. It addresses issues with rendering, corrects header formatting inconsistencies, and standardizes slide note usage for better PDF output.
 - **Generative Ai**: This update addresses rendering issues within the Generative AI section. The fixes ensure content displays correctly for users.
 - **Chapter 16: Responsible AI**: This update focuses on improving the visual presentation and readability of Chapter 16. It includes formatting changes to labs, exercises, and slides for better PDF rendering and clarifies the "coming soon" section with bullet points.
