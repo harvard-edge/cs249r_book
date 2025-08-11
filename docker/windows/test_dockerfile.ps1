@@ -5,19 +5,29 @@
 
 # Variables
 $headline = "🚀 Testing Dockerfile: Windows"
-$dockerfile = "docker/build-quarto-windows/Dockerfile"
+# Set the Dockerfile path
+$dockerfile = "docker/windows/Dockerfile"
+# Get the directory of the Dockerfile
+$dockerfileDir = Split-Path -Parent $dockerfile
 $image_name = "mlsysbook-windows-test"
 $container_name = "mlsysbook-windows-test-container"
 
 Write-Host $headline -ForegroundColor Green
 
 # Check if required files exist
+# List of files to check for existence
 $requiredFiles = @(
+    $dockerfile,
+    "docker/windows/verify_r_packages.R",
+    "tools/dependencies/requirements.txt"
+)
+
+# List of files to check for non-emptiness
+$nonEmptyFiles = @(
     "tools/dependencies/requirements/",
     "tools/dependencies/requirements-build.txt", 
     "tools/dependencies/install_packages.R",
-    "tools/dependencies/tl_packages",
-    "docker/build-quarto-windows/verify_r_packages.R"
+    "tools/dependencies/tl_packages"
 )
 
 Write-Host "📁 Checking required files..." -ForegroundColor Yellow
@@ -92,5 +102,6 @@ if (Test-Path $requirements) {
 
 Write-Host "✅ Dockerfile validation complete!" -ForegroundColor Green
 Write-Host ""
-Write-Host "To build the container:" -ForegroundColor Cyan
-Write-Host "  docker build -f docker/build-quarto-windows/Dockerfile -t mlsysbook-windows ." -ForegroundColor White
+Write-Host "To build the container locally, run:" -ForegroundColor Green
+Write-Host "  docker build -f docker/windows/Dockerfile -t mlsysbook-windows ." -ForegroundColor White
+exit 0
