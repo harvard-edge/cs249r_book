@@ -663,6 +663,8 @@ jobs:
             $quartoCmd = Get-Command quarto.exe -ErrorAction Stop
             Write-Output ("Quarto.exe location: {0}" -f $quartoCmd.Source)
             Write-Output ("Quarto.exe file size: {0} bytes" -f (Get-Item $quartoCmd.Source).Length)
+            $quartoVersion = & $quartoCmd.Source --version 2>&1
+            Write-Output ("Quarto version: {0}" -f $quartoVersion.Trim())
           } catch {
             Write-Output 'quarto.exe not found in PATH'
           }
@@ -677,16 +679,38 @@ jobs:
               $env:QUARTO_LOG_LEVEL = 'DEBUG'
               $env:QUARTO_PRINT_STACK = 'true'
               
-              # Capture raw output with timestamps
+              # Capture raw output with timestamps using a more robust method
               Write-Output "⏰ Quarto check started at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-              $rawOutput = & quarto.exe check 2>&1
-              $quartoExitCode = $LASTEXITCODE
+              
+              $stdOutPath = [System.IO.Path]::GetTempFileName()
+              $stdErrPath = [System.IO.Path]::GetTempFileName()
+              
+              $quartoExitCode = 0
+              
+              try {
+                  $process = Start-Process -FilePath "quarto.exe" -ArgumentList "check" -Wait -PassThru -RedirectStandardOutput $stdOutPath -RedirectStandardError $stdErrPath
+                  $quartoExitCode = $process.ExitCode
+              } catch {
+                  $quartoExitCode = 1 # Indicate failure
+                  Write-Output "‼️ Error executing Start-Process: $($_.Exception.Message)"
+              }
+
+              $rawOutput = Get-Content $stdOutPath -Raw -ErrorAction SilentlyContinue
+              $errorOutput = Get-Content $stdErrPath -Raw -ErrorAction SilentlyContinue
+
+              # Combine stdout and stderr for the log
+              if (![string]::IsNullOrEmpty($errorOutput)) {
+                $rawOutput += "`n--- STDERR ---`n" + $errorOutput
+              }
+              
+              Remove-Item $stdOutPath, $stdErrPath -Force -ErrorAction SilentlyContinue
+              
               Write-Output "⏰ Quarto check completed at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
               
               # Display raw output line by line with prefixes for clarity
               Write-Output '📋 RAW QUARTO CHECK OUTPUT:'
               Write-Output '┌─────────────────────────────────────────────────────────────────────────────┐'
-              foreach ($line in $rawOutput) {
+              foreach ($line in $rawOutput.Split("`n")) {
                 Write-Output "│ $line"
               }
               Write-Output '└─────────────────────────────────────────────────────────────────────────────┘'
