@@ -84,14 +84,17 @@ class ImageReferenceValidator:
         Returns:
             List of tuples: (full_match, image_path)
         """
-        # Pattern to match markdown images: ![anything](path) with optional {attributes}
-        # This captures both simple images and figure references
-        pattern = r'!\[[^\]]*\]\(([^)]+)\)(?:\{[^}]*\})?'
+        # This captures both simple images and figure references, and handles nested brackets in captions.
+        pattern = r'!\[(?:[^\]]|\[[^\]]*\])*\]\(([^)]+)\)(?:\{[^}]*\})?'
         
         matches = []
         for match in re.finditer(pattern, content):
             full_match = match.group(0)
             image_path = match.group(1).strip()
+
+            # Check for valid image extension
+            if not any(image_path.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.svg']):
+                continue
             
             # Skip external URLs (already handled by external image validator)
             if image_path.startswith(('http://', 'https://')):
