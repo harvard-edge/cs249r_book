@@ -175,9 +175,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: ⚙️ Get Quarto output directory
-        id: get_output_dir
-        if: matrix.enabled
+      - name: ⚙️ Get Quarto output directory (Linux)
+        id: get_output_dir_linux
+        if: matrix.enabled && matrix.platform == 'linux'
         working-directory: quarto
         shell: bash
         run: |
@@ -185,7 +185,6 @@ jobs:
           echo "📝 Reading output directory from: $CONFIG_FILE"
           OUTPUT_DIR=$(grep -oP 'output-dir: \K.*' "$CONFIG_FILE" || echo "")
           
-          # Fallback logic if output-dir is not found
           if [ -z "$OUTPUT_DIR" ]; then
             echo "⚠️ 'output-dir' not found in $CONFIG_FILE. Defaulting based on format."
             if [ "${{ matrix.format_name }}" = "HTML" ]; then
@@ -200,6 +199,40 @@ jobs:
           
           echo "✅ Output directory: $OUTPUT_DIR"
           echo "dir=$OUTPUT_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: ⚙️ Get Quarto output directory (Windows)
+        id: get_output_dir_windows
+        if: matrix.enabled && matrix.platform == 'windows'
+        working-directory: quarto
+        shell: pwsh
+        run: |
+          $CONFIG_FILE = "config\${{ matrix.config }}"
+          Write-Output "📝 Reading output directory from: $CONFIG_FILE"
+          $OUTPUT_DIR = (Select-String -Path $CONFIG_FILE -Pattern 'output-dir: \K.*' | ForEach-Object { $_.Matches.Value })
+
+          if (-not $OUTPUT_DIR) {
+            Write-Output "⚠️ 'output-dir' not found in $CONFIG_FILE. Defaulting based on format."
+            if ("${{ matrix.format_name }}" -eq "HTML") {
+              $OUTPUT_DIR = "_build\html"
+            } elseif ("${{ matrix.format_name }}" -eq "PDF") {
+              $OUTPUT_DIR = "_build\pdf"
+            } else {
+              Write-Error "❌ Unknown format. Cannot determine default output directory."
+              exit 1
+            }
+          }
+
+          Write-Output "✅ Output directory: $OUTPUT_DIR"
+          echo "dir=$OUTPUT_DIR" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Set combined output directory
+        id: get_output_dir
+        run: |
+          if ("${{ matrix.platform }}" == "linux") {
+            echo "dir=${{ steps.get_output_dir_linux.outputs.dir }}" >> "$GITHUB_OUTPUT"
+          } else {
+            echo "dir=${{ steps.get_output_dir_windows.outputs.dir }}" >> "$GITHUB_OUTPUT"
+          }
 
       - name: 💾 Cache Docker Images
         if: matrix.enabled
