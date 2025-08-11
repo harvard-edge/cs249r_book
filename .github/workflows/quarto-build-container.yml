@@ -120,6 +120,7 @@ jobs:
             render_target: html
             enabled: ${{ inputs.build_linux && inputs.build_html }}
             artifact_name: ${{ inputs.target }}-html-linux
+            output_dir: _build/html
           - platform: linux
             platform_name: Linux
             platform_emoji: '🐧'
@@ -130,6 +131,7 @@ jobs:
             render_target: titlepage-pdf
             enabled: ${{ inputs.build_linux && inputs.build_pdf }}
             artifact_name: ${{ inputs.target }}-pdf-linux
+            output_dir: _build/pdf
           # Windows builds  
           - platform: windows
             platform_name: Windows
@@ -141,6 +143,7 @@ jobs:
             render_target: html
             enabled: ${{ inputs.build_windows && inputs.build_html }}
             artifact_name: ${{ inputs.target }}-html-windows
+            output_dir: _build/html
           - platform: windows
             platform_name: Windows
             platform_emoji: '🪟'
@@ -151,12 +154,13 @@ jobs:
             render_target: titlepage-pdf
             enabled: ${{ inputs.build_windows && inputs.build_pdf }}
             artifact_name: ${{ inputs.target }}-pdf-windows
+            output_dir: _build/pdf
     
     outputs:
       platform: ${{ matrix.platform }}
       format: ${{ matrix.format_name }}
       artifact_name: ${{ matrix.artifact_name }}
-      output_dir: ${{ steps.get_output_dir.outputs.dir }}
+      output_dir: ${{ matrix.output_dir }}
 
     # Only Linux runs in containers
     container: ${{ matrix.platform == 'linux' && format('{0}/{1}/quarto-{2}:{3}', inputs.container_registry || 'ghcr.io', github.repository, matrix.platform, inputs.container_tag || 'latest') || null }}
@@ -174,70 +178,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: ⚙️ Get Quarto output directory (Linux)
-        id: get_output_dir_linux
-        if: matrix.enabled && matrix.platform == 'linux'
-        working-directory: quarto
-        shell: bash
-        run: |
-          CONFIG_FILE="config/${{ matrix.config }}"
-          echo "📝 Reading output directory from: $CONFIG_FILE"
-          OUTPUT_DIR=$(grep -oP 'output-dir: \K.*' "$CONFIG_FILE" || echo "")
-          
-          if [ -z "$OUTPUT_DIR" ]; then
-            echo "⚠️ 'output-dir' not found in $CONFIG_FILE. Defaulting based on format."
-            if [ "${{ matrix.format_name }}" = "HTML" ]; then
-              OUTPUT_DIR="_build/html"
-            elif [ "${{ matrix.format_name }}" = "PDF" ]; then
-              OUTPUT_DIR="_build/pdf"
-            else
-              echo "❌ Unknown format. Cannot determine default output directory."
-              exit 1
-            fi
-          fi
-          
-          echo "✅ Output directory: $OUTPUT_DIR"
-          echo "dir=$OUTPUT_DIR" >> "$GITHUB_OUTPUT"
-
-      - name: ⚙️ Get Quarto output directory (Windows)
-        id: get_output_dir_windows
-        if: matrix.enabled && matrix.platform == 'windows'
-        working-directory: quarto
-        shell: pwsh
-        run: |
-          $CONFIG_FILE = "config\${{ matrix.config }}"
-          Write-Output "📝 Reading output directory from: $CONFIG_FILE"
-          $match = Select-String -Path $CONFIG_FILE -Pattern 'output-dir: (.*)'
-          
-          $OUTPUT_DIR = ""
-          if ($match) {
-            $OUTPUT_DIR = $match.Matches.Groups[1].Value.Trim()
-          }
-
-          if (-not $OUTPUT_DIR) {
-            Write-Output "⚠️ 'output-dir' not found in $CONFIG_FILE. Defaulting based on format."
-            if ("${{ matrix.format_name }}" -eq "HTML") {
-              $OUTPUT_DIR = "_build\html"
-            } elseif ("${{ matrix.format_name }}" -eq "PDF") {
-              $OUTPUT_DIR = "_build\pdf"
-            } else {
-              Write-Error "❌ Unknown format. Cannot determine default output directory."
-              exit 1
-            }
-          }
-
-          Write-Output "✅ Output directory: $OUTPUT_DIR"
-          echo "dir=$OUTPUT_DIR" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-
-      - name: Set combined output directory
-        id: get_output_dir
-        run: |
-          if ("${{ matrix.platform }}" == "linux") {
-            echo "dir=${{ steps.get_output_dir_linux.outputs.dir }}" >> "$GITHUB_OUTPUT"
-          } else {
-            echo "dir=${{ steps.get_output_dir_windows.outputs.dir }}" >> "$GITHUB_OUTPUT"
-          }
 
       - name: 💾 Cache Docker Images
         if: matrix.enabled
@@ -282,7 +222,7 @@ jobs:
           echo "🔨 Building ${{ matrix.format }} on Linux container..."
           rm -f _quarto.yml
           cp config/${{ matrix.config }} _quarto.yml
-          quarto render --to ${{ matrix.render_target }}
+          quarto render --to ${{ matrix.render_target }} --output-dir "${{ matrix.output_dir }}"
           echo "✅ ${{ matrix.format }} build completed"
 
       - name: 🔨 Build ${{ matrix.format }} (Windows)
@@ -291,16 +231,16 @@ jobs:
         working-directory: quarto
         run: |
           Write-Host "🔨 Building ${{ matrix.format }} on Windows container..."
-          docker run --rm -v "${PWD}:C:\workspace" -w "C:\workspace" ${{ env.CONTAINER_IMAGE }} powershell -Command "
+          docker run --rm -v "$($PWD.Path):C:\workspace" -w "C:\workspace" ${{ env.CONTAINER_IMAGE }} powershell -Command "
             if (Test-Path '_quarto.yml') { Remove-Item '_quarto.yml' -Force }
             Copy-Item 'config\${{ matrix.config }}' '_quarto.yml' -Force
-            quarto render --to ${{ matrix.render_target }}
+            quarto render --to ${{ matrix.render_target }} --output-dir '${{ matrix.output_dir }}'
           "
           Write-Host "✅ ${{ matrix.format }} build completed"
 
       - name: 📉 Compress PDF (Linux)
         if: matrix.platform == 'linux' && matrix.format_name == 'PDF' && matrix.enabled
-        working-directory: quarto/${{ steps.get_output_dir.outputs.dir }}
+        working-directory: quarto/${{ matrix.output_dir }}
         run: |
           if [ -f "Machine-Learning-Systems.pdf" ]; then
             echo "📉 Compressing PDF..."
@@ -313,7 +253,7 @@ jobs:
       - name: 📉 Compress PDF (Windows)
         if: matrix.platform == 'windows' && matrix.format_name == 'PDF' && matrix.enabled
         shell: pwsh
-        working-directory: quarto/${{ steps.get_output_dir.outputs.dir }}
+        working-directory: quarto/${{ matrix.output_dir }}
         run: |
           if (Test-Path "Machine-Learning-Systems.pdf") {
             Write-Host "📉 Compressing PDF..."
@@ -330,7 +270,7 @@ jobs:
         if: matrix.enabled
         with:
           name: ${{ matrix.artifact_name }}
-          path: quarto/${{ steps.get_output_dir.outputs.dir }}
+          path: quarto/${{ matrix.output_dir }}
 
   collect-outputs:
     name: '📊 Collect Outputs'
