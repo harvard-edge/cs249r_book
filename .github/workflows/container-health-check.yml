@@ -84,62 +84,32 @@ jobs:
     env:
       CONTAINER_IMAGE: ${{ inputs.container_registry || 'ghcr.io' }}/${{ github.repository }}/${{ matrix.container_name }}:${{ inputs.container_tag || 'latest' }}
       PLATFORM: ${{ matrix.platform }}
+      DOCKERFILE_PATH: ./docker/${{ matrix.platform }}/dockerfile
       
     steps:
-      - name: 💾 Cache Docker Images
+      - name: 📥 Checkout repository
         if: |
           (matrix.platform == 'linux' && inputs.test_linux != false) ||
           (matrix.platform == 'windows' && inputs.test_windows != false)
-        uses: actions/cache@v4
-        id: cache-docker-images
+        uses: actions/checkout@v4
         with:
-          path: |
-            ~/.docker
-            ~/AppData/Local/Docker/wsl/data
-          key: docker-${{ matrix.platform }}-${{ env.CONTAINER_IMAGE }}-${{ hashFiles('docker/**') }}
-          restore-keys: |
-            docker-${{ matrix.platform }}-${{ env.CONTAINER_IMAGE }}-
-            docker-${{ matrix.platform }}-
+          fetch-depth: 0
 
-      - name: 🐳 Pull Linux Container
-        if: matrix.platform == 'linux' && inputs.test_linux != false
-        shell: bash
-        run: |
-          echo "🐳 Pulling Linux container..."
-          echo "📦 Image: ${{ env.CONTAINER_IMAGE }}"
-          echo "💾 Cache Status: ${{ steps.cache-docker-images.outputs.cache-hit == 'true' && '✅ HIT - faster pull expected' || '❌ MISS - full pull required' }}"
-          
-          # Check if image already exists locally (from cache)
-          if docker image inspect ${{ env.CONTAINER_IMAGE }} >/dev/null 2>&1; then
-            echo "✅ Container image found locally - skipping pull"
-          else
-            echo "📥 Pulling container image..."
-            docker pull ${{ env.CONTAINER_IMAGE }}
-            echo "✅ Container pulled successfully"
-          fi
+      - name: 🔑 Log in to GitHub Container Registry
+        if: |
+          (matrix.platform == 'linux' && inputs.test_linux != false) ||
+          (matrix.platform == 'windows' && inputs.test_windows != false)
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 🐳 Pull Windows Container
-        if: matrix.platform == 'windows' && inputs.test_windows != false
-        shell: pwsh
-        run: |
-          Write-Output "🐳 Pulling Windows container..."
-          Write-Output "📦 Image: ${{ env.CONTAINER_IMAGE }}"
-          $cacheHit = "${{ steps.cache-docker-images.outputs.cache-hit }}"
-          if ($cacheHit -eq 'true') {
-            Write-Output "💾 Cache Status: ✅ HIT - faster pull expected"
-          } else {
-            Write-Output "💾 Cache Status: ❌ MISS - full pull required"
-          }
-          
-          # Check if image already exists locally (from cache)
-          $imageExists = docker image inspect ${{ env.CONTAINER_IMAGE }}
-          if ($LASTEXITCODE -eq 0) {
-            Write-Output "✅ Container image found locally - skipping pull"
-          } else {
-            Write-Output "📥 Pulling container image..."
-            docker pull ${{ env.CONTAINER_IMAGE }}
-            Write-Output "✅ Container pulled successfully"
-          }
+      - name: 🐳 Pull Docker Image
+        if: |
+          (matrix.platform == 'linux' && inputs.test_linux != false) ||
+          (matrix.platform == 'windows' && inputs.test_windows != false)
+        run: docker pull ${{ env.CONTAINER_IMAGE }}
 
       - name: 📊 Container Information
         if: |
