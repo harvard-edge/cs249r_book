@@ -42,6 +42,7 @@ import os
 import re
 import argparse
 import sys
+import subprocess
 from pathlib import Path
 from typing import List, Tuple, Set
 import logging
@@ -52,6 +53,16 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+def find_project_root(marker: str = 'quarto/_quarto.yml') -> Path:
+    """Find the project root by looking for a specific file/directory."""
+    current_path = Path.cwd()
+    while current_path != current_path.parent:
+        if (current_path / marker).exists():
+            return current_path
+        current_path = current_path.parent
+    return Path.cwd() # Fallback to current working directory if marker not found
+
 
 class ImageReferenceValidator:
     """
@@ -65,9 +76,10 @@ class ImageReferenceValidator:
         Args:
             base_dir (str): Base directory to search for .qmd files
         """
-        self.base_dir = Path(base_dir).resolve()
+        self.project_root = find_project_root()
+        self.base_dir = self.project_root / base_dir
         if not self.base_dir.exists():
-            raise ValueError(f"Directory does not exist: {base_dir}")
+            raise ValueError(f"Directory does not exist: {self.base_dir}")
     
     def find_qmd_files(self) -> List[Path]:
         """Find all .qmd files in the base directory recursively."""
@@ -137,7 +149,7 @@ class ImageReferenceValidator:
             
             # Resolve path relative to the .qmd file's directory
             qmd_dir = qmd_file.parent
-            resolved_path = qmd_dir / image_path
+            resolved_path = (qmd_dir / image_path).resolve(strict=False)
             
             if not resolved_path.exists():
                 missing_images.append((full_match, str(resolved_path)))
