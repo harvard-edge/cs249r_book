@@ -190,10 +190,19 @@ RUN Write-Host '=== STARTING SCOOP INSTALLATION ===' ; `
 # ------------------------------------------------------------
 # PHASE 6: Install Quarto (Main tool)
 # ------------------------------------------------------------
-RUN Write-Host '=== STARTING QUARTO INSTALLATION ===' ; `
-    Write-Host 'Installing Quarto via Scoop...' ; `
-    scoop install quarto ; `
-    Write-Host '📦 Quarto installed' ; `
+RUN Write-Host '=== STARTING QUARTO INSTALLATION (DIRECT MSI) ===' ; `
+    $quartoUrl = 'https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.33/quarto-1.7.33-win.msi' ; `
+    $quartoMsi = 'C:\temp\quarto.msi' ; `
+    Write-Host "Downloading Quarto from $quartoUrl..." ; `
+    Invoke-WebRequest -Uri $quartoUrl -OutFile $quartoMsi -UseBasicParsing ; `
+    Write-Host "📦 Quarto downloaded to $quartoMsi" ; `
+    Write-Host 'Installing Quarto via MSI...' ; `
+    $process = Start-Process msiexec.exe -ArgumentList "/i `"$quartoMsi`" /quiet" -Wait -PassThru ; `
+    if ($process.ExitCode -ne 0) { `
+        Write-Host "❌ Quarto installation failed with exit code: $($process.ExitCode)" ; `
+        exit $process.ExitCode ; `
+    } ; `
+    Write-Host '✅ Quarto installed successfully' ; `
     Write-Host 'Verifying Quarto installation...' ; `
     quarto --version ; `
     Write-Host '✅ Quarto installation completed!'
@@ -259,11 +268,23 @@ RUN Write-Host '=== STARTING INKSCAPE INSTALLATION ===' ; `
 # ------------------------------------------------------------
 # PHASE 12: Install R (Medium complexity)
 # ------------------------------------------------------------
-RUN Write-Host '=== STARTING R INSTALLATION ===' ; `
-    Write-Host 'Installing R via Scoop (same as quarto-build workflow)...' ; `
-    Write-Host 'Installing R from main bucket...' ; `
-    scoop install main/r ; `
-    Write-Host '📦 R installed' ; `
+RUN Write-Host '=== STARTING R INSTALLATION (DIRECT) ===' ; `
+    $rUrl = 'https://cran.r-project.org/bin/windows/base/R-4.5.1-win.exe' ; `
+    $rInstaller = 'C:\temp\R-win.exe' ; `
+    Write-Host "Downloading R from $rUrl..." ; `
+    Invoke-WebRequest -Uri $rUrl -OutFile $rInstaller -UseBasicParsing ; `
+    Write-Host "📦 R downloaded to $rInstaller" ; `
+    Write-Host 'Installing R silently...' ; `
+    $process = Start-Process -FilePath $rInstaller -ArgumentList '/VERYSILENT', '/DIR=C:\R' -Wait -PassThru ; `
+    if ($process.ExitCode -ne 0) { `
+        Write-Host "❌ R installation failed with exit code: $($process.ExitCode)" ; `
+        exit $process.ExitCode ; `
+    } ; `
+    Write-Host '✅ R installed successfully' ; `
+    Write-Host 'Adding R to PATH...' ; `
+    $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
+    [Environment]::SetEnvironmentVariable('PATH', ('C:\R\bin;' + $mach), 'Machine') ; `
+    Write-Host '🔗 Added R to PATH' ; `
     Write-Host 'Verifying R installation...' ; `
     R --version ; `
     Write-Host '✅ R installation complete'
@@ -333,21 +354,8 @@ RUN Write-Host '=== FINAL VERIFICATION WITH ENHANCED DIAGNOSTICS ===' ; `
     Write-Host '📊 TOOL VERIFICATION:' ; `
     Write-Host '---------------------' ; `
     Write-Host 'Checking Quarto...' ; `
-    try { `
-        quarto --version ; `
-        Write-Host '✅ Quarto version check: PASSED' ; `
-        Write-Host 'Running Quarto check for comprehensive validation...' ; `
-        & quarto check 2>&1 | Write-Host ; `
-        if ($LASTEXITCODE -eq 0) { `
-            Write-Host '✅ Quarto check: PASSED' ; `
-        } else { `
-            Write-Host '⚠️ Quarto check: ISSUES DETECTED' ; `
-            Write-Host "Exit code: $LASTEXITCODE" ; `
-        } ; `
-    } catch { `
-        Write-Host '❌ Quarto verification failed:' ; `
-        Write-Host $_.Exception.Message ; `
-    } ; `
+    quarto --version ; `
+    Write-Host '✅ Quarto verified' ; `
     Write-Host 'Checking Python...' ; `
     python --version ; `
     Write-Host '✅ Python verified' ; `
