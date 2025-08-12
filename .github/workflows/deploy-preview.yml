@@ -89,16 +89,45 @@ jobs:
           ls -la ./preview-site
           echo "::endgroup::"
 
-      - name: 👀 Deploy to GitHub Pages (dev staging)
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          personal_token: ${{ secrets.SSH_DEPLOY_KEY }}
-          external_repository: harvard-edge/cs249r_book_dev
-          publish_dir: ./preview-site
-          publish_branch: main
-          destination_dir: docs
-          keep_files: false
-          commit_message: |
-            🚀 Deploy dev preview from ${{ steps.run_info.outputs.head_sha }}
-            
-            Triggered by workflow run: ${{ steps.run_info.outputs.run_id }}
+      - name: 🚀 Deploy to Dev Site via SSH
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+        run: |
+          echo "🔐 Starting ssh-agent..."
+          eval "$(ssh-agent -s)"
+          echo "$SSH_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
+          # Add github.com to known hosts to avoid prompt
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+          echo "🔧 Configuring git..."
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+
+          echo "🔄 Cloning target repository..."
+          git clone --depth=1 git@github.com:harvard-edge/cs249r_book_dev.git target-repo
+          
+          echo "🔄 Entering target repository..."
+          cd target-repo
+          
+          echo "🧹 Cleaning existing docs/ directory..."
+          rm -rf docs
+          
+          echo "🚚 Copying new site content..."
+          cp -r "${{ github.workspace }}/preview-site" docs
+          
+          echo "🔍 Validating deployment content..."
+          if [ ! -f "docs/index.html" ]; then
+            echo "❌ CRITICAL: docs/index.html is missing after copy. Aborting deployment."
+            exit 1
+          fi
+          
+          if [ "$(ls -1 docs | wc -l)" -le 3 ]; then
+            echo "❌ WARNING: docs/ directory seems too empty. Something might be wrong."
+          fi
+          
+          echo "📦 Committing and pushing changes..."
+          git add docs
+          # Use --allow-empty in case the content hasn't changed
+          git commit -m "🚀 Deploy dev preview from ${{ steps.run_info.outputs.head_sha }}" --allow-empty || echo "🟡 Nothing to commit"
+          git push origin main
