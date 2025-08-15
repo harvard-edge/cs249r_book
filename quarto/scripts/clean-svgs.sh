@@ -11,7 +11,14 @@ set -euo pipefail
 # ==============================================================================
 
 # Configuration
-BUILD_DIR="${1:-_build}"
+# Use Quarto's output directory if available, otherwise fall back to command line arg or default
+if [[ -n "${QUARTO_PROJECT_OUTPUT_DIR:-}" ]]; then
+    BUILD_DIR="$QUARTO_PROJECT_OUTPUT_DIR"
+    DEBUG_MODE="${1:-false}"  # First arg becomes debug mode when run by Quarto
+else
+    BUILD_DIR="${1:-_build}"
+    DEBUG_MODE="${2:-false}"
+fi
 SCRIPT_NAME="$(basename "$0")"
 
 # Colors for output (if terminal supports them)
@@ -48,9 +55,58 @@ log_file() {
     echo -e "${PURPLE}  → ${NC}$*"
 }
 
+log_debug() {
+    if [[ "$DEBUG_MODE" == "true" ]]; then
+        echo -e "${BLUE}[DEBUG]${NC} ${SCRIPT_NAME}: $*"
+    fi
+}
+
+# Usage function
+usage() {
+    echo "Usage: $0 [BUILD_DIR] [DEBUG_MODE]"
+    echo ""
+    echo "This script can be run in two modes:"
+    echo ""
+    echo "1. Quarto Post-Render Script (automatic):"
+    echo "   When run by Quarto, uses QUARTO_PROJECT_OUTPUT_DIR environment variable"
+    echo "   Usage: $0 [DEBUG_MODE]"
+    echo "   DEBUG_MODE   Enable debug output (true/false, default: false)"
+    echo ""
+    echo "2. Standalone Script:"
+    echo "   Usage: $0 [BUILD_DIR] [DEBUG_MODE]"
+    echo "   BUILD_DIR    Directory to clean SVG files in (default: _build)"
+    echo "   DEBUG_MODE   Enable debug output (true/false, default: false)"
+    echo ""
+    echo "Examples:"
+    echo "  $0                    # Clean SVGs in _build directory (or Quarto output dir)"
+    echo "  $0 true               # Enable debug mode (when run by Quarto)"
+    echo "  $0 output             # Clean SVGs in output directory (standalone)"
+    echo "  $0 _build true        # Clean with debug output enabled (standalone)"
+}
+
 # Main execution
 main() {
+    # Handle help option
+    if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+        usage
+        exit 0
+    fi
+    
     log_info "Starting SVG cleanup in directory: ${BUILD_DIR}"
+    if [[ "$DEBUG_MODE" == "true" ]]; then
+        log_debug "Debug mode enabled"
+        if [[ -n "${QUARTO_PROJECT_OUTPUT_DIR:-}" ]]; then
+            log_debug "Running as Quarto post-render script"
+            log_debug "QUARTO_PROJECT_OUTPUT_DIR=${QUARTO_PROJECT_OUTPUT_DIR}"
+            if [[ -n "${QUARTO_PROJECT_RENDER_ALL:-}" ]]; then
+                log_debug "Full project render detected (QUARTO_PROJECT_RENDER_ALL=${QUARTO_PROJECT_RENDER_ALL})"
+            else
+                log_debug "Incremental or preview render"
+            fi
+        else
+            log_debug "Running as standalone script"
+        fi
+    fi
     
     # Check if build directory exists
     if [[ ! -d "$BUILD_DIR" ]]; then
@@ -75,16 +131,52 @@ main() {
     local cleaned_count=0
     
     for svg_file in "${svg_files[@]}"; do
+        log_debug "Processing: ${svg_file}"
+        
         # Check if file contains control characters before cleaning
         if LC_ALL=C grep -q '[[:cntrl:]]' "$svg_file" 2>/dev/null; then
             log_file "Cleaning: ${svg_file}"
+            log_debug "Control characters detected in: ${svg_file}"
             
-            # Clean control characters
-            if LC_ALL=C perl -i -pe 's/[\x00-\x08\x0B\x0C\x0E-\x1F]//g' "$svg_file"; then
-                ((cleaned_count++))
-            else
-                log_error "Failed to clean: ${svg_file}"
+            # Check file permissions before attempting to modify
+            if [[ ! -w "$svg_file" ]]; then
+                log_error "No write permission for: ${svg_file}"
+                continue
             fi
+            
+            # Check if perl is available
+            if ! command -v perl >/dev/null 2>&1; then
+                log_error "Perl is not available - cannot clean control characters"
+                exit 1
+            fi
+            
+            # Create a backup and clean control characters
+            local backup_file="${svg_file}.bak.$$"
+            log_debug "Creating backup: ${backup_file}"
+            
+            if cp "$svg_file" "$backup_file" 2>/dev/null; then
+                # Clean control characters with better error handling
+                log_debug "Running perl cleaning on: ${svg_file}"
+                if LC_ALL=C perl -i -pe 's/[\x00-\x08\x0B\x0C\x0E-\x1F]//g' "$svg_file" 2>/dev/null; then
+                    ((cleaned_count++))
+                    log_debug "Successfully cleaned: ${svg_file}"
+                    # Remove backup on success
+                    rm -f "$backup_file" 2>/dev/null
+                    log_debug "Removed backup: ${backup_file}"
+                else
+                    log_error "Perl cleaning failed for: ${svg_file}"
+                    # Restore from backup
+                    if mv "$backup_file" "$svg_file" 2>/dev/null; then
+                        log_info "Restored original file from backup"
+                    else
+                        log_error "Failed to restore backup for: ${svg_file}"
+                    fi
+                fi
+            else
+                log_error "Cannot create backup for: ${svg_file}"
+            fi
+        else
+            log_debug "No control characters found in: ${svg_file}"
         fi
     done
     
