@@ -20,9 +20,9 @@ from typing import Dict, List, Set, Tuple
 
 def load_part_summaries() -> Dict:
     """Load part summaries from YAML file."""
-    yaml_path = Path("quarto/data/part_summaries.yml")
+    yaml_path = Path("quarto/contents/parts/summaries.yml")
     if not yaml_path.exists():
-        print("❌ Error: quarto/data/part_summaries.yml not found")
+        print("❌ Error: quarto/contents/parts/summaries.yml not found")
         return {}
     
     try:
