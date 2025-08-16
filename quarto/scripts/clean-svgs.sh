@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
-
 # ==============================================================================
 # SVG Cleanup Script
 # ==============================================================================
@@ -129,6 +127,7 @@ main() {
     
     # Process each SVG file
     local cleaned_count=0
+    local error_count=0
     
     for svg_file in "${svg_files[@]}"; do
         log_debug "Processing: ${svg_file}"
@@ -144,27 +143,41 @@ main() {
                 continue
             fi
             
-            # Check if perl is available
-            if ! command -v perl >/dev/null 2>&1; then
-                log_error "Perl is not available - cannot clean control characters"
-                exit 1
-            fi
-            
             # Create a backup and clean control characters
             local backup_file="${svg_file}.bak.$$"
             log_debug "Creating backup: ${backup_file}"
             
             if cp "$svg_file" "$backup_file" 2>/dev/null; then
-                # Clean control characters with better error handling
-                log_debug "Running perl cleaning on: ${svg_file}"
-                if LC_ALL=C perl -i -pe 's/[\x00-\x08\x0B\x0C\x0E-\x1F]//g' "$svg_file" 2>/dev/null; then
-                    ((cleaned_count++))
-                    log_debug "Successfully cleaned: ${svg_file}"
-                    # Remove backup on success
-                    rm -f "$backup_file" 2>/dev/null
-                    log_debug "Removed backup: ${backup_file}"
+                # Clean control characters using tr (no external dependencies needed)
+                log_debug "Running tr cleaning on: ${svg_file}"
+                
+                # Try to clean the file - capture any errors for debugging
+                local tr_error_msg
+                if tr_error_msg=$(LC_ALL=C tr -d '\000-\010\013\014\016-\037' < "$svg_file" > "${svg_file}.tmp" 2>&1); then
+                    # tr succeeded, now try to replace the original file
+                    if mv "${svg_file}.tmp" "$svg_file" 2>/dev/null; then
+                        ((cleaned_count++))
+                        log_debug "Successfully cleaned: ${svg_file}"
+                        # Remove backup on success
+                        rm -f "$backup_file" 2>/dev/null
+                        log_debug "Removed backup: ${backup_file}"
+                    else
+                        log_error "Failed to replace cleaned file: ${svg_file}"
+                        rm -f "${svg_file}.tmp" 2>/dev/null
+                        # Restore from backup
+                        if mv "$backup_file" "$svg_file" 2>/dev/null; then
+                            log_info "Restored original file from backup"
+                        else
+                            log_error "Failed to restore backup for: ${svg_file}"
+                        fi
+                    fi
                 else
-                    log_error "Perl cleaning failed for: ${svg_file}"
+                    log_error "tr cleaning failed for: ${svg_file}"
+                    if [[ -n "$tr_error_msg" ]]; then
+                        log_error "tr error details: $tr_error_msg"
+                    fi
+                    ((error_count++))
+                    rm -f "${svg_file}.tmp" 2>/dev/null
                     # Restore from backup
                     if mv "$backup_file" "$svg_file" 2>/dev/null; then
                         log_info "Restored original file from backup"
@@ -174,15 +187,23 @@ main() {
                 fi
             else
                 log_error "Cannot create backup for: ${svg_file}"
+                ((error_count++))
             fi
         else
             log_debug "No control characters found in: ${svg_file}"
         fi
     done
     
-    # Only show summary if files were actually cleaned
+    # Show summary of processing results
     if [[ $cleaned_count -gt 0 ]]; then
         log_success "Cleaned ${cleaned_count} SVG file(s)"
+    fi
+    
+    if [[ $error_count -gt 0 ]]; then
+        log_warning "Failed to clean ${error_count} SVG file(s) - see error messages above"
+        log_info "Script completed with some errors but continuing"
+    else
+        log_info "Script completed successfully"
     fi
 }
 
