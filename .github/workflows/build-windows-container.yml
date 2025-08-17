@@ -110,8 +110,10 @@ jobs:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🛠️ Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      # Skip Docker Buildx for Windows containers - use native Docker engine
+      # Buildx doesn't properly support Windows containers on GitHub Actions
+      # - name: 🛠️ Set up Docker Buildx
+      #   uses: docker/setup-buildx-action@v3
 
       - name: 🔐 Log in to Container Registry
         uses: docker/login-action@v3
@@ -130,14 +132,80 @@ jobs:
 
       - name: 🐳 Build and Push Windows container
         id: build
-        uses: docker/build-push-action@v5
-        with:
-          context: ${{ env.CONTEXT_PATH }}
-          file: ${{ env.DOCKERFILE_PATH }}
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          no-cache: ${{ github.event_name == 'workflow_dispatch' && inputs.no_cache || false }}
+        shell: pwsh
+        # Use native Docker instead of docker/build-push-action for Windows containers
+        # Buildx has compatibility issues with Windows containers on GitHub Actions
+        run: |
+          # Extract image name and tag from metadata
+          $IMAGE_TAG = "${{ steps.meta.outputs.tags }}"
+          $NO_CACHE = "${{ github.event_name == 'workflow_dispatch' && inputs.no_cache || false }}"
+          
+          Write-Host "🔨 Building Windows container..."
+          Write-Host "📊 Image: $IMAGE_TAG"
+          Write-Host "📊 Context: ${{ env.CONTEXT_PATH }}"
+          Write-Host "📊 Dockerfile: ${{ env.DOCKERFILE_PATH }}"
+          Write-Host "📊 No Cache: $NO_CACHE"
+          
+          # Build the container using native Docker
+          $buildArgs = @(
+            "build",
+            "--file", "${{ env.DOCKERFILE_PATH }}",
+            "--tag", $IMAGE_TAG
+          )
+          
+          # Add no-cache flag if requested
+          if ($NO_CACHE -eq "true") {
+            $buildArgs += "--no-cache"
+            Write-Host "🚫 Cache disabled - building from scratch"
+          } else {
+            Write-Host "💾 Using Docker cache"
+          }
+          
+          # Add labels from metadata
+          $labels = "${{ steps.meta.outputs.labels }}"
+          if ($labels) {
+            $labels -split "`n" | ForEach-Object {
+              if ($_.Trim()) {
+                $buildArgs += "--label", $_.Trim()
+              }
+            }
+          }
+          
+          # Add context path
+          $buildArgs += "${{ env.CONTEXT_PATH }}"
+          
+          Write-Host "🔨 Running: docker $($buildArgs -join ' ')"
+          & docker @buildArgs
+          
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "❌ Docker build failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+          
+          Write-Host "✅ Build completed successfully"
+          
+          # Push the container
+          Write-Host "📤 Pushing container to registry..."
+          & docker push $IMAGE_TAG
+          
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "❌ Docker push failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+          
+          Write-Host "✅ Push completed successfully"
+          
+          # Get image digest for output
+          $DIGEST = & docker inspect --format='{{index .RepoDigests 0}}' $IMAGE_TAG 2>$null
+          if ($DIGEST -match '@(.+)$') {
+            $DIGEST = $matches[1]
+          } else {
+            $DIGEST = "unknown"
+          }
+          
+          # Set outputs for build summary
+          "digest=$DIGEST" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "cache-hit=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: 📊 Build Summary
         id: build-summary
