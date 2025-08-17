@@ -754,8 +754,9 @@ jobs:
     with:
       build_linux: true    # Production builds Linux only for now
       build_windows: false
-      build_html: true     # HTML + PDF for production
+      build_html: true     # HTML + PDF + EPUB for production
       build_pdf: true
+      build_epub: true
       target: main
       container_registry: 'ghcr.io'
       container_tag: 'latest'
@@ -1129,6 +1130,10 @@ jobs:
           # Find the PDF artifact using manifest
           LINUX_PDF_ARTIFACT=$(echo "$ARTIFACTS_RESPONSE" | jq -r --arg name "$PDF_ARTIFACT_NAME" '.artifacts[] | select(.name == $name) | .id' | head -1)
           
+          # Find EPUB artifact (look for main-epub-linux pattern)
+          EPUB_ARTIFACT_NAME="main-epub-linux"
+          LINUX_EPUB_ARTIFACT=$(echo "$ARTIFACTS_RESPONSE" | jq -r --arg name "$EPUB_ARTIFACT_NAME" '.artifacts[] | select(.name == $name) | .id' | head -1)
+          
           if [ "$LINUX_PDF_ARTIFACT" = "null" ] || [ -z "$LINUX_PDF_ARTIFACT" ]; then
             echo "❌ PDF artifact '$PDF_ARTIFACT_NAME' not found!"
             echo "🔍 Looking for any PDF artifact as fallback..."
@@ -1147,6 +1152,25 @@ jobs:
             echo "✅ Found PDF artifact: $PDF_ARTIFACT_NAME (ID: $LINUX_PDF_ARTIFACT)"
           fi
           
+          # Check EPUB artifact
+          if [ "$LINUX_EPUB_ARTIFACT" = "null" ] || [ -z "$LINUX_EPUB_ARTIFACT" ]; then
+            echo "⚠️ EPUB artifact '$EPUB_ARTIFACT_NAME' not found!"
+            echo "🔍 Looking for any EPUB artifact as fallback..."
+            
+            # Fallback: look for any EPUB artifact
+            EPUB_ARTIFACT=$(echo "$ARTIFACTS_RESPONSE" | jq -r '.artifacts[] | select(.name | contains("epub")) | .id' | head -1)
+            
+            if [ "$EPUB_ARTIFACT" = "null" ] || [ -z "$EPUB_ARTIFACT" ]; then
+              echo "⚠️ No EPUB artifact found in build - EPUB will be skipped"
+              LINUX_EPUB_ARTIFACT=""
+            else
+              echo "⚠️ Using fallback EPUB artifact: $EPUB_ARTIFACT"
+              LINUX_EPUB_ARTIFACT=$EPUB_ARTIFACT
+            fi
+          else
+            echo "✅ Found EPUB artifact: $EPUB_ARTIFACT_NAME (ID: $LINUX_EPUB_ARTIFACT)"
+          fi
+          
           # Download HTML artifact
           echo "📥 Downloading HTML artifact..."
           curl -L \
@@ -1163,6 +1187,18 @@ jobs:
             "https://api.github.com/repos/${{ github.repository }}/actions/runs/$LATEST_BUILD/artifacts/$LINUX_PDF_ARTIFACT/zip" \
             -o pdf-artifact.zip
           
+          # Download EPUB artifact if available
+          if [ -n "$LINUX_EPUB_ARTIFACT" ] && [ "$LINUX_EPUB_ARTIFACT" != "null" ]; then
+            echo "📥 Downloading EPUB artifact..."
+            curl -L \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ github.repository }}/actions/runs/$LATEST_BUILD/artifacts/$LINUX_EPUB_ARTIFACT/zip" \
+              -o epub-artifact.zip
+          else
+            echo "⚠️ Skipping EPUB artifact download (not available)"
+          fi
+          
           # Extract HTML artifact
           echo "📦 Extracting HTML artifact..."
           mkdir -p html-temp
@@ -1176,6 +1212,17 @@ jobs:
           cd pdf-temp
           unzip -q ../pdf-artifact.zip
           cd ..
+          
+          # Extract EPUB artifact if available
+          if [ -f "epub-artifact.zip" ]; then
+            echo "📦 Extracting EPUB artifact..."
+            mkdir -p epub-temp
+            cd epub-temp
+            unzip -q ../epub-artifact.zip
+            cd ..
+          else
+            echo "⚠️ No EPUB artifact to extract"
+          fi
           
           # Find HTML build directory
           HTML_BUILD_DIR=$(find html-temp -name "html" -type d | head -1)
@@ -1200,8 +1247,30 @@ jobs:
           echo "✅ PDF found: $PDF_FILE"
           echo "📊 PDF size: $(du -h "$PDF_FILE" | cut -f1)"
           
+          # Find EPUB file if available
+          EPUB_FILE=""
+          if [ -d "epub-temp" ]; then
+            EPUB_FILE=$(find epub-temp -name "Machine-Learning-Systems.epub" -type f | head -1)
+            if [ -z "$EPUB_FILE" ] || [ ! -f "$EPUB_FILE" ]; then
+              # Try alternative EPUB filenames
+              EPUB_FILE=$(find epub-temp -name "*.epub" -type f | head -1)
+              if [ -n "$EPUB_FILE" ] && [ -f "$EPUB_FILE" ]; then
+                echo "✅ EPUB found (alternative name): $EPUB_FILE"
+                echo "📊 EPUB size: $(du -h "$EPUB_FILE" | cut -f1)"
+              else
+                echo "⚠️ EPUB file not found in extracted artifacts - will skip EPUB deployment"
+                EPUB_FILE=""
+              fi
+            else
+              echo "✅ EPUB found: $EPUB_FILE"
+              echo "📊 EPUB size: $(du -h "$EPUB_FILE" | cut -f1)"
+            fi
+          else
+            echo "⚠️ No EPUB artifact extracted - will skip EPUB deployment"
+          fi
+          
           # Prepare combined site
-          echo "🔄 Preparing combined HTML site with PDF..."
+          echo "🔄 Preparing combined HTML site with PDF and EPUB..."
           mkdir -p combined-site
           
           # Copy HTML content
@@ -1211,7 +1280,17 @@ jobs:
           mkdir -p combined-site/assets
           cp "$PDF_FILE" combined-site/assets/Machine-Learning-Systems.pdf
           
-          echo "✅ Combined site prepared with HTML + PDF"
+          # Copy EPUB if available
+          if [ -n "$EPUB_FILE" ] && [ -f "$EPUB_FILE" ]; then
+            cp "$EPUB_FILE" combined-site/assets/Machine-Learning-Systems.epub
+            echo "✅ Combined site prepared with HTML + PDF + EPUB"
+            
+            # Also copy EPUB to root for GitHub release
+            cp "$EPUB_FILE" "Machine-Learning-Systems.epub"
+          else
+            echo "✅ Combined site prepared with HTML + PDF (EPUB not available)"
+          fi
+          
           echo "📊 Combined site structure:"
           ls -la combined-site/ | head -10
           echo "📊 Assets directory:"
@@ -1249,10 +1328,11 @@ jobs:
           # Commit and push
           git commit -m "🚀 Deploy release ${{ needs.validate-inputs.outputs.new_version }} from commit ${{ github.sha }}
 
-          Combined HTML site with PDF asset for download.
+          Combined HTML site with PDF and EPUB assets for download.
           
           - HTML: Interactive web textbook  
           - PDF: assets/Machine-Learning-Systems.pdf
+          - EPUB: assets/Machine-Learning-Systems.epub (if available)
           - Release: ${{ needs.validate-inputs.outputs.new_version }}
           " || echo "No changes to commit"
           
@@ -1261,6 +1341,7 @@ jobs:
           echo "✅ GitHub Pages deployment complete!"
           echo "🌐 Site: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
           echo "📄 PDF: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/assets/Machine-Learning-Systems.pdf"
+          echo "📚 EPUB: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/assets/Machine-Learning-Systems.epub"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1269,6 +1350,23 @@ jobs:
         with:
           name: pdf-artifact
           path: Machine-Learning-Systems.pdf
+
+      - name: 📤 Upload EPUB Artifact for GitHub Release
+        if: success()
+        run: |
+          if [ -f "Machine-Learning-Systems.epub" ]; then
+            echo "✅ EPUB file found for upload"
+          else
+            echo "⚠️ No EPUB file found - creating empty artifact to prevent workflow failure"
+            touch Machine-Learning-Systems.epub
+          fi
+
+      - name: 📤 Upload EPUB Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: epub-artifact
+          path: Machine-Learning-Systems.epub
+          if-no-files-found: warn
 
   generate-release-notes:
     name: '📝 Generate Release Notes'
@@ -1462,6 +1560,12 @@ jobs:
           name: pdf-artifact
           path: ./
 
+      - name: 📚 Download EPUB from previous job
+        uses: actions/download-artifact@v4
+        with:
+          name: epub-artifact
+          path: ./
+
       - name: 📝 Download release notes
         uses: actions/download-artifact@v4
         with:
@@ -1559,6 +1663,48 @@ jobs:
             exit 1
           fi
 
+      - name: 📚 Upload EPUB to Release Assets
+        run: |
+          echo "📚 Checking for EPUB file to upload..."
+          
+          if [ ! -f "Machine-Learning-Systems.epub" ]; then
+            echo "⚠️ EPUB file not found - skipping EPUB upload"
+            exit 0
+          fi
+          
+          # Check if it's an empty file (created as placeholder)
+          if [ ! -s "Machine-Learning-Systems.epub" ]; then
+            echo "⚠️ EPUB file is empty (placeholder) - skipping EPUB upload"
+            exit 0
+          fi
+          
+          echo "📚 Uploading EPUB to release assets..."
+          echo "📊 EPUB size: $(du -h Machine-Learning-Systems.epub | cut -f1)"
+          
+          # Upload the EPUB to the release
+          UPLOAD_RESPONSE=$(curl -s \
+            -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            -H "Content-Type: application/epub+zip" \
+            --data-binary @Machine-Learning-Systems.epub \
+            "https://uploads.github.com/repos/${{ github.repository }}/releases/${{ env.release_id }}/assets?name=Machine-Learning-Systems.epub")
+          
+          echo "📊 Upload Response:"
+          echo "$UPLOAD_RESPONSE" | jq '.'
+          
+          UPLOAD_ID=$(echo "$UPLOAD_RESPONSE" | jq -r '.id')
+          
+          if [ "$UPLOAD_ID" != "null" ] && [ -n "$UPLOAD_ID" ]; then
+            echo "✅ EPUB uploaded successfully to release!"
+            echo "📊 Asset ID: $UPLOAD_ID"
+            echo "🔗 Download URL: https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/Machine-Learning-Systems.epub"
+          else
+            echo "⚠️ Failed to upload EPUB to release (continuing anyway)!"
+            echo "📊 Error details:"
+            echo "$UPLOAD_RESPONSE" | jq -r '.message // "Unknown error"'
+          fi
+
   summary:
     name: '📋 Publication Summary'
     runs-on: ubuntu-latest
@@ -1603,15 +1749,17 @@ jobs:
           echo "- 📋 **Build Manager Workflow**: Triggered by main branch push" >> $GITHUB_STEP_SUMMARY
           echo "- 🔨 **Build Jobs**: HTML + PDF generation on Linux (parallel builds)" >> $GITHUB_STEP_SUMMARY
           echo "- 📄 **PDF Processing**: Generated, compressed with Ghostscript, stored in build/pdf/" >> $GITHUB_STEP_SUMMARY
-          echo "- 📦 **Artifacts**: main-html-linux (web content) + main-pdf-linux (PDF file)" >> $GITHUB_STEP_SUMMARY
-          echo "- 🔄 **Integration**: Downloaded both artifacts and combined into unified deployment" >> $GITHUB_STEP_SUMMARY
-          echo "- 🌐 **Deployment**: Combined HTML + PDF deployed to GitHub Pages (gh-pages branch)" >> $GITHUB_STEP_SUMMARY
+          echo "- 📦 **Artifacts**: main-html-linux (web content) + main-pdf-linux (PDF file) + main-epub-linux (EPUB file)" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔄 **Integration**: Downloaded all artifacts and combined into unified deployment" >> $GITHUB_STEP_SUMMARY
+          echo "- 🌐 **Deployment**: Combined HTML + PDF + EPUB deployed to GitHub Pages (gh-pages branch)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🌐 Access Your Published Textbook:" >> $GITHUB_STEP_SUMMARY
           echo "- 📖 [Interactive Web Textbook](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }})" >> $GITHUB_STEP_SUMMARY
           echo "- 📦 [Version Release Notes](https://github.com/${{ github.repository }}/releases/tag/${{ needs.validate-inputs.outputs.new_version }})" >> $GITHUB_STEP_SUMMARY
           echo "- 📄 [Download Complete PDF](https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/Machine-Learning-Systems.pdf)" >> $GITHUB_STEP_SUMMARY
+          echo "- 📚 [Download EPUB eBook](https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/Machine-Learning-Systems.epub)" >> $GITHUB_STEP_SUMMARY
           echo "- 📄 [Direct PDF Access](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/assets/Machine-Learning-Systems.pdf)" >> $GITHUB_STEP_SUMMARY
+          echo "- 📚 [Direct EPUB Access](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/assets/Machine-Learning-Systems.epub)" >> $GITHUB_STEP_SUMMARY
           echo "- 🎓 [Share with Students](https://mlsysbook.ai)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📊 Build Status:" >> $GITHUB_STEP_SUMMARY
