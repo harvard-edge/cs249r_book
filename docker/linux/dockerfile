@@ -23,44 +23,18 @@ RUN echo "🚀 === STARTING DEPENDENCY FILE COPY ===" && \
     echo "  - docker/linux/verify_r_packages.R → /tmp/verify_r_packages.R" && \
     echo "✅ Dependency file copy phase complete"
 
-# Copy dependency files
+# Copy dependency files early for better cache efficiency
 COPY tools/dependencies/requirements.txt /tmp/requirements.txt
 COPY tools/dependencies/install_packages.R /tmp/install_packages.R
 COPY docker/linux/verify_r_packages.R /tmp/verify_r_packages.R
-RUN <<EOF
-    set -e
-    echo "Running R setup script with the following files:"
-    echo "  - /tmp/install_packages.R"
-    echo "  - /tmp/verify_r_packages.R"
-    Rscript /tmp/install_packages.R
-    Rscript /tmp/verify_r_packages.R
-    rm -f /tmp/install_packages.R /tmp/verify_r_packages.R
-EOF
-# --- END R DEPENDENCIES ---
-# Phase 6: Install Python packages
-# Description: Install Python packages using pip and requirements.txt
-# --- START PYTHON DEPENDENCIES ---
-# Copy Python requirements file
-COPY tools/dependencies/requirements.txt /tmp/requirements.txt
-# Install Python packages
-# hadolint ignore=DL3013
-RUN <<EOF
-    set -e
-    echo "Installing Python packages from /tmp/requirements.txt"
-    pip install --no-cache-dir --upgrade pip
-    pip install --no-cache-dir -r /tmp/requirements.txt
-    rm -f /tmp/requirements.txt
-EOF
-# --- END PYTHON DEPENDENCIES ---
-# Phase 7: Cleanup
-# Description: Remove temporary files and clean up the environment
-# --- START CLEANUP ---
-RUN rm -rf /var/lib/apt/lists/* && \
-    rm -rf /tmp/* && \
-    apt-get clean
-# --- END CLEANUP ---
 
-# Install and configure locales
+# Note: Python packages are installed later in Phase 10
+
+# Early cleanup
+RUN rm -rf /var/lib/apt/lists/* && \
+    apt-get clean
+
+# === PHASE 1: LOCALE CONFIGURATION ===
 RUN echo "🚀 === STARTING LOCALE CONFIGURATION ===" && \
     echo "🔍 Checking system readiness..." && \
     if [ -f /etc/os-release ]; then \
@@ -83,7 +57,7 @@ RUN echo "🚀 === STARTING LOCALE CONFIGURATION ===" && \
     rm -rf /var/lib/apt/lists/* && \
     echo "✅ Locale configuration complete"
 
-# === PHASE 1: LOCALE CONFIGURATION ===
+# === PHASE 2: SYSTEM DEPENDENCIES ===
 RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
     echo "⏰ Estimated time: 2-3 minutes" && \
     echo "📊 Free disk space: $(df -h / | tail -1 | awk '{print $4}')" && \
@@ -173,7 +147,7 @@ RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
     echo "✅ === SYSTEM DEPENDENCIES COMPLETE === (${duration}s)" && \
     echo "📊 Free disk space: $(df -h / | tail -1 | awk '{print $4}')"
 
-# === PHASE 2: SYSTEM DEPENDENCIES ===
+# === PHASE 3: INKSCAPE INSTALLATION ===
 RUN echo "🚀 === STARTING INKSCAPE INSTALLATION ===" && \
     echo "⏰ Estimated time: 1-2 minutes" && \
     start_time=$(date +%s) && \
@@ -233,7 +207,7 @@ RUN echo "🚀 === STARTING INKSCAPE TEST ===" && \
     rm -f test.svg test.pdf && \
     echo "✅ Inkscape test complete"
 
-# === PHASE 3: GHOSTSCRIPT INSTALLATION ===
+# === PHASE 4: GHOSTSCRIPT INSTALLATION ===
 RUN echo "🚀 === STARTING GHOSTSCRIPT INSTALLATION ===" && \
     echo "⏰ Estimated time: 30 seconds" && \
     start_time=$(date +%s) && \
@@ -251,7 +225,7 @@ RUN echo "🚀 === STARTING GHOSTSCRIPT INSTALLATION ===" && \
     duration=$((end_time - start_time)) && \
     echo "✅ === GHOSTSCRIPT INSTALLATION COMPLETE === (${duration}s)"
 
-# === PHASE 4: TEX LIVE INSTALLATION ===
+# === PHASE 5: TEX LIVE INSTALLATION ===
 RUN echo "🚀 === STARTING TEX LIVE INSTALLATION ===" && \
     echo "⏰ Estimated time: 8-12 minutes (largest phase)" && \
     echo "📊 Free disk space before: $(df -h / | tail -1 | awk '{print $4}')" && \
@@ -413,7 +387,39 @@ RUN echo "🚀 === STARTING R INSTALLATION ===" && \
     duration=$((end_time - start_time)) && \
     echo "✅ === R INSTALLATION COMPLETE === (${duration}s)"
 
-# === PHASE 7: PYTHON INSTALLATION ===
+# === PHASE 7: R PACKAGE INSTALLATION ===
+RUN echo "🚀 === STARTING R PACKAGE INSTALLATION ===" && \
+    echo "⏰ Estimated time: 2-3 minutes" && \
+    start_time=$(date +%s) && \
+    \
+    echo "Running R setup script with the following files:" && \
+    echo "  - /tmp/install_packages.R" && \
+    echo "  - /tmp/verify_r_packages.R" && \
+    \
+    echo "📦 Installing R packages..." && \
+    Rscript /tmp/install_packages.R && \
+    if [ $? -ne 0 ]; then \
+        echo "❌ Failed to install R packages"; \
+        exit 1; \
+    fi && \
+    echo "✅ R packages installed successfully" && \
+    \
+    echo "🔍 Verifying R packages..." && \
+    Rscript /tmp/verify_r_packages.R && \
+    if [ $? -ne 0 ]; then \
+        echo "❌ Failed to verify R packages"; \
+        exit 1; \
+    fi && \
+    echo "✅ R packages verified successfully" && \
+    \
+    echo "🧹 Cleaning up R installation files..." && \
+    rm -f /tmp/install_packages.R /tmp/verify_r_packages.R && \
+    \
+    end_time=$(date +%s) && \
+    duration=$((end_time - start_time)) && \
+    echo "✅ === R PACKAGE INSTALLATION COMPLETE === (${duration}s)"
+
+# === PHASE 8: PYTHON INSTALLATION ===
 RUN echo "🚀 === STARTING PYTHON INSTALLATION ===" && \
     echo "⏰ Estimated time: 1 minute" && \
     start_time=$(date +%s) && \
@@ -451,7 +457,7 @@ RUN echo "🚀 === STARTING PYTHON INSTALLATION ===" && \
     duration=$((end_time - start_time)) && \
     echo "✅ === PYTHON INSTALLATION COMPLETE === (${duration}s)"
 
-# === PHASE 5: QUARTO INSTALLATION ===
+# === PHASE 9: QUARTO INSTALLATION ===
 RUN echo "🚀 === STARTING QUARTO INSTALLATION ===" && \
     echo "⏰ Estimated time: 1 minute" && \
     start_time=$(date +%s) && \
@@ -491,7 +497,7 @@ RUN echo "🚀 === STARTING R LIBRARY SETUP ===" && \
 
 
 
-# === PHASE 8: PYTHON PACKAGES ===
+# === PHASE 10: PYTHON PACKAGES ===
 RUN echo "🚀 === STARTING PYTHON PACKAGE INSTALLATION ===" && \
     echo "⏰ Estimated time: 1-2 minutes" && \
     start_time=$(date +%s) && \
@@ -582,16 +588,10 @@ RUN echo "🚀 === STEP 9.3: VERIFYING R PACKAGES ===" && \
     fi && \
     echo "✅ R package verification successful"
 
-# === PHASE 10: R PACKAGE VERIFICATION ===
-RUN echo "🔍 Verifying R package installation..." && \
-    Rscript /tmp/verify_r_packages.R && \
-    if [ $? -ne 0 ]; then \
-        echo "❌ R package verification failed"; \
-        exit 1; \
-    fi && \
-    echo "✅ R package verification successful"
+# === PHASE 11: R PACKAGE VERIFICATION ===
+# Note: R package verification is now done immediately after R package installation (Phase 6.5)
 
-# === PHASE 11: COMPREHENSIVE CLEANUP ===
+# === PHASE 12: COMPREHENSIVE CLEANUP ===
 RUN echo "🚀 === STARTING COMPREHENSIVE CLEANUP ===" && \
     echo "📊 Disk space before cleanup: $(df -h / | tail -1 | awk '{print $4}')" && \
     start_time=$(date +%s) && \
@@ -632,7 +632,7 @@ RUN echo "🚀 === STARTING COMPREHENSIVE CLEANUP ===" && \
 # Set working directory
 WORKDIR /workspace
 
-# Verify installations
+# === PHASE 13: FINAL VERIFICATION ===
 RUN echo "🚀 === STARTING FINAL VERIFICATION ===" && \
     export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH && \
     echo "📊 Checking Quarto..." && \
