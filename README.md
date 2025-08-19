@@ -3,12 +3,13 @@
 
 <div align="center">
   
-[![Build](https://github.com/harvard-edge/cs249r_book/actions/workflows/validate-dev.yml/badge.svg?label=Build)](https://github.com/harvard-edge/cs249r_book/actions/workflows/validate-dev.yml)
-
+[![Build](https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/validate-dev.yml?branch=dev&label=Build&logo=githubactions&cacheSeconds=300)](https://github.com/harvard-edge/cs249r_book/actions/workflows/validate-dev.yml)
 [![Website](https://img.shields.io/website?url=https%3A%2F%2Fmlsysbook.ai&label=Website&logo=readthedocs)](https://mlsysbook.ai)
 [![Ecosystem](https://img.shields.io/website?url=https%3A%2F%2Fmlsysbook.org&label=Ecosystem&logo=internet-explorer)](https://mlsysbook.org)
 [![License](https://img.shields.io/badge/License-CC--BY--NC--SA%204.0-blue.svg)](https://github.com/harvard-edge/cs249r_book/blob/dev/LICENSE)
 [![Funding](https://img.shields.io/badge/Fund%20Us-Open%20Collective-blue.svg?logo=open-collective)](https://opencollective.com/mlsysbook)
+[![Powered by Netlify](https://img.shields.io/badge/Powered%20by-Netlify-00C7B7?logo=netlify&logoColor=white)](https://www.netlify.com)
+
 
 
 **[📖 Read Online](https://mlsysbook.ai)** • **[💾 Download PDF](https://mlsysbook.ai/Machine-Learning-Systems.pdf)** • **[🌐 Explore Ecosystem](https://mlsysbook.org)**
@@ -116,15 +117,15 @@ curl -O https://mlsysbook.ai/Machine-Learning-Systems.pdf
 ```bash
 git clone https://github.com/harvard-edge/cs249r_book.git
 cd cs249r_book
-make setup-hooks  # Setup automated quality controls
-make install      # Install dependencies
 
-# Recommended: Use the binder for development
+# Quick setup (recommended)
+./binder setup      # Setup environment and dependencies
+./binder hello      # Welcome and overview
+
+# Fast development workflow
 ./binder preview intro    # Fast chapter development
+./binder build html       # Build complete book
 ./binder help            # See all commands
-
-# Or use traditional Make commands
-make preview        # Start development server
 ```
 
 ---
@@ -158,14 +159,14 @@ All contributions benefit from automated quality assurance:
 The **Book Binder** is our lightning-fast development CLI for streamlined building and iteration:
 
 ```bash
-# Fast chapter development
-./binder build intro html             # Build single chapter  
-./binder build intro,ml_systems html  # Build multiple chapters together
-./binder preview intro                # Build and preview chapter
+# Chapter development (fast iteration)
+./binder preview intro                # Build and preview single chapter
+./binder preview intro,ml_systems     # Build and preview multiple chapters
 
-# Full book building
-./binder build * html                 # Build complete website
-./binder build * pdf                  # Build complete PDF
+# Complete book building
+./binder build html                   # Build complete website
+./binder build pdf                    # Build complete PDF
+./binder build epub                   # Build complete EPUB
 
 # Management
 ./binder clean                    # Clean artifacts
@@ -173,27 +174,27 @@ The **Book Binder** is our lightning-fast development CLI for streamlined buildi
 ./binder help                     # Show all commands
 ```
 
-### Make Commands (Traditional)
+### Development Commands
 ```bash
-# Building
-make build          # Build HTML version
-make build-pdf      # Build PDF version
-make preview        # Start development server
+# Book Binder CLI (Recommended)
+./binder setup            # First-time setup
+./binder build html       # Build complete HTML book
+./binder build pdf        # Build complete PDF book  
+./binder preview intro    # Preview chapter development
+./binder publish          # Publish to production
 
-# Quality Control  
-make clean          # Clean build artifacts
-make test           # Run validation tests
-make lint           # Check for issues
-
-# Get help
-make help           # Show all commands
+# Traditional setup (if needed)
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r tools/dependencies/requirements.txt
+pre-commit install
 ```
 
 ### Project Structure
 ```
 MLSysBook/
 ├── binder                   # ⚡ Fast development CLI (recommended)
-├── book/                    # Main book content (Quarto)
+├── quarto/                  # Main book content (Quarto)
 │   ├── contents/            # Chapter content
 │   │   ├── core/            # Core chapters
 │   │   ├── labs/            # Hands-on labs
@@ -201,51 +202,37 @@ MLSysBook/
 │   │   ├── backmatter/      # References and resources
 │   │   └── parts/           # Book parts and sections
 │   ├── _extensions/         # Quarto extensions
+│   ├── config/              # Build configurations
+│   │   ├── _quarto-html.yml # Website build configuration
+│   │   └── _quarto-pdf.yml  # PDF build configuration
 │   ├── data/                # Cross-reference and metadata files
-│   ├── _quarto-html.yml     # Website build configuration
-│   ├── _quarto-pdf.yml      # PDF build configuration
-
-│   ├── _quarto.yml          # Active config (symlink)
-│   ├── index.qmd            # Main entry point
-│   └── assets/              # Images, styles, media
-├── build/                   # Build artifacts (git-ignored)
-│   ├── html/                # HTML website output
-│   ├── pdf/                 # PDF book output
-│   └── dist/                # Distribution files
-├── scripts/                 # Root-level development scripts
-│   ├── content/             # Content management tools
-│   ├── cross_refs/          # Cross-reference management
-│   ├── genai/               # AI-assisted content tools
-│   ├── maintenance/         # Maintenance scripts
-│   ├── testing/             # Test scripts
-│   └── utilities/           # General utilities
+│   ├── assets/              # Images, styles, media
+│   ├── filters/             # Lua filters
+│   ├── scripts/             # Build scripts
+│   └── _quarto.yml          # Active config (symlink)
 ├── tools/                   # Development automation
 │   ├── scripts/             # Organized development scripts
-│   │   ├── build/           # Build and development tools
 │   │   ├── content/         # Content management tools
+│   │   ├── cross_refs/      # Cross-reference management
+│   │   ├── genai/           # AI-assisted content tools
 │   │   ├── maintenance/     # System maintenance scripts
 │   │   ├── testing/         # Test and validation scripts
-│   │   ├── utilities/       # General utility scripts
-│   │   └── docs/            # Script documentation
+│   │   └── utilities/       # General utility scripts
 │   ├── dependencies/        # Package requirements  
 │   └── setup/               # Setup and configuration
-├── config/                  # Build configuration
+├── config/                  # Project configuration
 │   ├── dev/                 # Development configurations
 │   ├── linting/             # Code quality configurations
-│   ├── quarto/              # Quarto publishing settings
-│   ├── lua/                 # Lua filters and scripts
-│   └── tex/                 # LaTeX templates
-├── locals/                  # Local development files
-├── assets/                  # Global assets (covers, icons)
+│   └── quarto/              # Quarto publishing settings
 ├── docs/                    # Documentation
 │   ├── BINDER.md            # Binder CLI guide
-│   ├── DEVELOPMENT.md       # Development guide
-│   ├── MAINTENANCE_GUIDE.md # Daily workflow guide
 │   ├── BUILD.md             # Build instructions
+│   ├── DEVELOPMENT.md       # Development guide
 │   └── contribute.md        # Contribution guidelines
 ├── CHANGELOG.md             # Project changelog
 ├── CITATION.bib             # Citation information
-└── Makefile                 # Traditional development commands
+├── pyproject.toml           # Python project configuration
+└── README.md                # This file
 ```
 
 ### Documentation
@@ -257,20 +244,20 @@ MLSysBook/
 
 ### Publishing
 ```bash
-# Command-line trigger (recommended)
-./binder publish "Description" COMMIT_HASH
-
-# Interactive wizard
+# Interactive publishing (recommended)
 ./binder publish
 
-# Manual steps
-./binder build - html && ./binder build - pdf
-# Then copy PDF to assets and push to main
+# Command-line publishing
+./binder publish "Description" COMMIT_HASH
+
+# Manual workflow (if needed)
+./binder build html && ./binder build pdf
+# Then use GitHub Actions to deploy
 ```
 
 **Publishing Options:**
 - **`./binder publish`** — Unified command with interactive and command-line modes
-- **Web Interface** — Manual trigger via GitHub Actions UI
+- **GitHub Actions** — Automated deployment via workflows
 
 ### Getting Started
 ```bash

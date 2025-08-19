@@ -42,16 +42,39 @@ import os
 import re
 import argparse
 import sys
+import subprocess
 from pathlib import Path
 from typing import List, Tuple, Set
 import logging
 
 # Set up logging - only show warnings and errors by default
 logging.basicConfig(
-    level=logging.WARNING,
+    level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+def find_project_root(marker: str = 'quarto/_quarto.yml') -> Path:
+    """Find the project root by looking for a specific file/directory."""
+    current_path = Path.cwd()
+    while current_path != current_path.parent:
+        if (current_path / marker).exists():
+            return current_path
+        current_path = current_path.parent
+    return Path.cwd() # Fallback to current working directory if marker not found
+
+
+def realcase(path):
+    dirname, basename = os.path.split(path)
+    if dirname == path:
+        return dirname
+    dirname = realcase(dirname)
+    basename = os.path.normcase(basename)
+    for child in os.listdir(dirname):
+        if os.path.normcase(child) == basename:
+            return os.path.join(dirname, child)
+    raise FileNotFoundError(f'{path} not found')
+
 
 class ImageReferenceValidator:
     """
@@ -65,9 +88,10 @@ class ImageReferenceValidator:
         Args:
             base_dir (str): Base directory to search for .qmd files
         """
-        self.base_dir = Path(base_dir).resolve()
+        self.project_root = find_project_root()
+        self.base_dir = self.project_root / base_dir
         if not self.base_dir.exists():
-            raise ValueError(f"Directory does not exist: {base_dir}")
+            raise ValueError(f"Directory does not exist: {self.base_dir}")
     
     def find_qmd_files(self) -> List[Path]:
         """Find all .qmd files in the base directory recursively."""
@@ -84,14 +108,17 @@ class ImageReferenceValidator:
         Returns:
             List of tuples: (full_match, image_path)
         """
-        # Pattern to match markdown images: ![anything](path) with optional {attributes}
-        # This captures both simple images and figure references
-        pattern = r'!\[[^\]]*\]\(([^)]+)\)(?:\{[^}]*\})?'
+        # This captures both simple images and figure references, and handles nested brackets in captions.
+        pattern = r'!\[(?:[^\]]|\[[^\]]*\])*\]\(([^)]+)\)(?:\{[^}]*\})?'
         
         matches = []
         for match in re.finditer(pattern, content):
             full_match = match.group(0)
             image_path = match.group(1).strip()
+
+            # Check for valid image extension
+            if not any(image_path.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.svg']):
+                continue
             
             # Skip external URLs (already handled by external image validator)
             if image_path.startswith(('http://', 'https://')):
@@ -110,7 +137,7 @@ class ImageReferenceValidator:
             quiet (bool): If True, suppress progress messages
             
         Returns:
-            List of missing image references: (reference_text, resolved_path)
+            List of missing image references: (reference_text, resolved_path_or_error)
         """
         try:
             with open(qmd_file, 'r', encoding='utf-8') as f:
@@ -126,48 +153,35 @@ class ImageReferenceValidator:
             print(f"📄 Checking {len(image_references)} image references in {qmd_file}")
         
         for full_match, image_path in image_references:
-            # Skip obviously invalid paths (URLs, malformed references)
-            if image_path.startswith(('http://', 'https://', 'HTTP://', 'HTTPS://')):
-                if not quiet:
-                    print(f"⚠️ Skipping URL-like path: {image_path}")
+            # Skip external URLs
+            if image_path.startswith(('http://', 'https://')):
                 continue
-            
+                
             # Resolve path relative to the .qmd file's directory
             qmd_dir = qmd_file.parent
-            resolved_path = qmd_dir / image_path
-            
-            if not resolved_path.exists():
-                missing_images.append((full_match, str(resolved_path)))
+            referenced_path_str = str((qmd_dir / image_path).resolve(strict=False))
+
+            try:
+                true_path_str = realcase(referenced_path_str)
+                
+                if referenced_path_str != true_path_str:
+                    relative_qmd_path = qmd_file.relative_to(self.project_root)
+                    error_message = (
+                        f"Case mismatch in {relative_qmd_path}: "
+                        f"reference is '{Path(referenced_path_str).name}', but on disk it is '{Path(true_path_str).name}'"
+                    )
+                    missing_images.append((full_match, error_message))
+                    if not quiet:
+                        print(f"❌ {error_message}")
+                else:
+                    if not quiet:
+                        print(f"✅ Found: {image_path}")
+                        
+            except FileNotFoundError:
+                missing_images.append((full_match, referenced_path_str))
                 if not quiet:
                     print(f"❌ Missing image: {image_path}")
-                    print(f"   📍 Expected at: {resolved_path}")
-                    print(f"   📄 In file: {qmd_file}")
-            else:
-                # Check for case sensitivity issues on case-insensitive filesystems
-                expected_name = Path(image_path).name
-                
-                # Find the actual filename on disk by scanning the directory
-                actual_name = None
-                try:
-                    parent_dir = resolved_path.parent
-                    if parent_dir.exists():
-                        for file_on_disk in parent_dir.iterdir():
-                            if file_on_disk.is_file() and file_on_disk.name.lower() == expected_name.lower():
-                                actual_name = file_on_disk.name
-                                break
-                except Exception:
-                    actual_name = expected_name  # Fallback
-                
-                if actual_name and actual_name != expected_name:
-                    # Case mismatch found
-                    missing_images.append((full_match, f"Case mismatch: expected '{expected_name}' but found '{actual_name}'"))
-                    if not quiet:
-                        print(f"⚠️ Case mismatch: {image_path}")
-                        print(f"   📄 Expected: {expected_name}")
-                        print(f"   💿 On disk: {actual_name}")
-                        print(f"   📍 This will break on case-sensitive systems (Linux)")
-                elif not quiet:
-                    print(f"✅ Found: {image_path}")
+                    print(f"   📍 Expected at: {referenced_path_str}")
         
         return missing_images
     

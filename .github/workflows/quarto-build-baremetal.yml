@@ -1,9 +1,5 @@
 name: '📚 Quarto Build (Baremetal)'
 
-# Set retention period to 7 days
-env:
-  GITHUB_ACTIONS_RETENTION_DAYS: 7
-
 # Cancel duplicate builds for same target+ref combination
 concurrency:
   group: quarto-build-baremetal-${{ inputs.target }}-${{ github.ref }}-${{ github.workflow }}
@@ -34,6 +30,11 @@ on:
         type: boolean
       build_pdf:
         description: '📑 Build PDF format'
+        required: false
+        default: true
+        type: boolean
+      build_epub:
+        description: '📚 Build EPUB format'
         required: false
         default: true
         type: boolean
@@ -94,6 +95,11 @@ on:
         type: boolean
         default: false
         description: 'Build PDF format'
+      build_epub:
+        required: false
+        type: boolean
+        default: false
+        description: 'Build EPUB format'
       # Build configuration
       target:
         required: false
@@ -133,6 +139,12 @@ on:
       windows_pdf_artifact:
         description: "Windows PDF artifact name"
         value: ${{ jobs.collect-outputs.outputs.windows_pdf_artifact }}
+      linux_epub_artifact:
+        description: "Linux EPUB artifact name"
+        value: ${{ jobs.collect-outputs.outputs.linux_epub_artifact }}
+      windows_epub_artifact:
+        description: "Windows EPUB artifact name"
+        value: ${{ jobs.collect-outputs.outputs.windows_epub_artifact }}
 
 permissions:
   contents: write
@@ -180,6 +192,23 @@ jobs:
             config: _quarto-pdf.yml
             render_target: titlepage-pdf
             enabled: ${{ inputs.build_windows && inputs.build_pdf }}
+          # EPUB builds
+          - os: ubuntu-latest
+            os_name: Linux
+            os_emoji: '🐧'
+            format: EPUB
+            format_emoji: '📚'
+            config: _quarto-epub.yml
+            render_target: epub
+            enabled: ${{ inputs.build_linux && inputs.build_epub }}
+          - os: windows-latest
+            os_name: Windows
+            os_emoji: '🪟'
+            format: EPUB
+            format_emoji: '📚'
+            config: _quarto-epub.yml
+            render_target: epub
+            enabled: ${{ inputs.build_windows && inputs.build_epub }}
             
     timeout-minutes: 120   # ⏰ Set job timeout to 2 hours (7200 seconds)
     
@@ -188,6 +217,7 @@ jobs:
       format: ${{ matrix.format }}
       artifact_name: ${{ steps.build-declaration.outputs.artifact_name }}
       status: ${{ job.status }}
+      output_dir: ${{ steps.build.outputs.output_dir }}
 
     env:
       R_LIBS_USER: ${{ github.workspace }}/.r-lib
@@ -543,6 +573,19 @@ jobs:
         id: build
         shell: bash
         run: |
+          OUTPUT_DIR=""
+          if [ "${{ matrix.format }}" = "HTML" ]; then
+            OUTPUT_DIR="_build/html"
+          elif [ "${{ matrix.format }}" = "PDF" ]; then
+            OUTPUT_DIR="_build/pdf"
+          elif [ "${{ matrix.format }}" = "EPUB" ]; then
+            OUTPUT_DIR="_build/epub"
+          else
+            echo "❌ Unknown format '${{ matrix.format }}'. Cannot determine default output directory."
+            exit 1
+          fi
+          echo "output_dir=${OUTPUT_DIR}" >> "$GITHUB_OUTPUT"
+
           echo "🚀 Setting up ${{ matrix.format }} configuration..."
           cd quarto
           rm -f _quarto.yml
@@ -561,7 +604,7 @@ jobs:
               \"context\": \"ci/quarto-build-${{ matrix.os_name }}-${{ matrix.format }}\"
             }"
           
-          quarto render --to ${{ matrix.render_target }}
+          quarto render --to ${{ matrix.render_target }} --output-dir "../${OUTPUT_DIR}"
           echo "✅ ${{ matrix.format }} build completed"
       
       - name: 📋 Check Quarto Build Output
@@ -569,21 +612,22 @@ jobs:
         shell: bash
         run: |
           echo "🔄 Checking Quarto build output for ${{ matrix.format }}..."
-          if [ -d "build/${{ matrix.format }}" ]; then
-            echo "✅ build/${{ matrix.format }} directory exists"
-            echo "📊 Files in build/${{ matrix.format }} directory:"
-            ls -la build/${{ matrix.format }} | head -n 20
-            echo "📊 Total files in build/${{ matrix.format }}:"
-            find build/${{ matrix.format }} -type f | wc -l
+          if [ -d "${{ steps.build.outputs.output_dir }}" ]; then
+            echo "✅ ${{ steps.build.outputs.output_dir }} directory exists"
+            echo "📊 Files in ${{ steps.build.outputs.output_dir }} directory:"
+            ls -la ${{ steps.build.outputs.output_dir }} | head -n 20
+            echo "📊 Total files in ${{ steps.build.outputs.output_dir }}:"
+            find ${{ steps.build.outputs.output_dir }} -type f | wc -l
           else
-            echo "❌ build/${{ matrix.format }} directory not found!"
+            echo "❌ ${{ steps.build.outputs.output_dir }} directory not found!"
             exit 1
           fi
 
       - name: 📉 Compress PDF with Ghostscript (Linux)
-        if: matrix.enabled && matrix.format == 'pdf' && runner.os == 'Linux'
+        if: matrix.enabled && matrix.format == 'PDF' && runner.os == 'Linux'
+        working-directory: ${{ steps.build.outputs.output_dir }}
         run: |
-          if [ -f "build/pdf/Machine-Learning-Systems.pdf" ]; then
+          if [ -f "Machine-Learning-Systems.pdf" ]; then
             gs \
               -sDEVICE=pdfwrite \
               -dCompatibilityLevel=1.4 \
@@ -591,26 +635,27 @@ jobs:
               -dNOPAUSE \
               -dQUIET \
               -dBATCH \
-              -sOutputFile="./build/pdf/ebook.pdf" \
-              "./build/pdf/Machine-Learning-Systems.pdf"
+              -sOutputFile="ebook.pdf" \
+              "Machine-Learning-Systems.pdf"
 
             # Replace original with compressed
-            mv ./build/pdf/ebook.pdf ./build/pdf/Machine-Learning-Systems.pdf
+            mv ebook.pdf Machine-Learning-Systems.pdf
           else
             echo "⚠️ PDF file not found for compression"
           fi
 
       - name: 📉 Compress PDF with Ghostscript (Windows)
-        if: matrix.enabled && matrix.format == 'pdf' && runner.os == 'Windows'
+        if: matrix.enabled && matrix.format == 'PDF' && runner.os == 'Windows'
         shell: pwsh
+        working-directory: ${{ steps.build.outputs.output_dir }}
         run: |
           # Set UTF-8 encoding for proper emoji display
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $OutputEncoding = [System.Text.Encoding]::UTF8
           [Console]::InputEncoding = [System.Text.Encoding]::UTF8
           
-          $input = "./build/pdf/Machine-Learning-Systems.pdf"
-          $output = "./build/pdf/ebook.pdf"
+          $input = "Machine-Learning-Systems.pdf"
+          $output = "ebook.pdf"
 
           if (!(Test-Path $input)) {
             Write-Warning "⚠️ Input PDF not found! Skipping compression..."
@@ -644,7 +689,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.build-declaration.outputs.artifact_name }}
-          path: build/${{ matrix.format }}
+          path: ${{ steps.build.outputs.output_dir }}
 
       - name: 📝 Collect Build Logs and System Info (Universal)
         if: matrix.enabled && always()  # Always run, even if previous steps failed
@@ -728,7 +773,6 @@ jobs:
         with:
           name: build-logs-${{ matrix.os_name }}-${{ matrix.format }}-${{ github.run_id }}
           path: logs/
-          retention-days: 30  # Keep logs for 30 days for debugging
           if-no-files-found: warn
 
       - name: 📋 Build Summary
@@ -755,7 +799,6 @@ jobs:
             - Python Packages: ${{ steps.cache-python-packages.outputs.cache-hit == 'true' && '✅ Hit' || '❌ Miss' }}
           📝 Debug Artifacts:
             - Build logs available as artifact: build-logs-${{ matrix.os_name }}-${{ matrix.format }}-${{ github.run_id }}
-            - Retention: 30 days for debugging
           ⏰ Completed at: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
           "@ | Add-Content $env:GITHUB_STEP_SUMMARY
 
@@ -799,8 +842,10 @@ jobs:
       build_success: ${{ steps.collect.outputs.build_success }}
       linux_html_artifact: ${{ steps.collect.outputs.linux_html_artifact }}
       linux_pdf_artifact: ${{ steps.collect.outputs.linux_pdf_artifact }}
+      linux_epub_artifact: ${{ steps.collect.outputs.linux_epub_artifact }}
       windows_html_artifact: ${{ steps.collect.outputs.windows_html_artifact }}
       windows_pdf_artifact: ${{ steps.collect.outputs.windows_pdf_artifact }}
+      windows_epub_artifact: ${{ steps.collect.outputs.windows_epub_artifact }}
     
     steps:
       - name: 📊 Collect results
@@ -822,9 +867,10 @@ jobs:
           extract_artifact() {
             local os_name=$1
             local format=$2
-            # The .[] iterates over the values of the top-level object
+            # Robustly handle either a single output object or an object of output objects.
+            # Also, convert matrix os_name and format to lowercase for case-insensitive matching.
             echo "$outputs_json" | jq -r --arg o "$os_name" --arg f "$format" \
-              '.[] | select(.os_name==$o and .format==$f and .status=="success") | .artifact_name'
+              '(if .os_name then . else .[] end) | select((.os_name | ascii_downcase) == $o and (.format | ascii_downcase) == $f and .status=="success") | .artifact_name'
           }
 
           # Set artifact names for requested builds if they were generated
@@ -843,6 +889,14 @@ jobs:
           if [[ "${{ inputs.build_windows && inputs.build_pdf }}" == "true" ]]; then
             artifact_name=$(extract_artifact "windows" "pdf")
             echo "windows_pdf_artifact=$artifact_name" >> $GITHUB_OUTPUT
+          fi
+          if [[ "${{ inputs.build_linux && inputs.build_epub }}" == "true" ]]; then
+            artifact_name=$(extract_artifact "linux" "epub")
+            echo "linux_epub_artifact=$artifact_name" >> $GITHUB_OUTPUT
+          fi
+          if [[ "${{ inputs.build_windows && inputs.build_epub }}" == "true" ]]; then
+            artifact_name=$(extract_artifact "windows" "epub")
+            echo "windows_epub_artifact=$artifact_name" >> $GITHUB_OUTPUT
           fi
           
           echo "✅ Results collected - Status: $BUILD_SUCCESS_MSG" 

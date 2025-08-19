@@ -19,8 +19,8 @@ For most users, the easiest way is using our **Book Binder CLI**:
 ./binder preview intro
 
 # Build everything
-./binder build - html
-./binder build - pdf
+./binder build html
+./binder build pdf
 ```
 
 The `binder` tool automatically handles all dependencies, configuration, and build processes for you!
@@ -50,7 +50,7 @@ By default, Quarto can build the HTML version pretty easily. But **building the 
 | **TinyTeX + TeX Live** | Needed for LaTeX → PDF rendering |
 | **Inkscape** | Converts `.svg` diagrams into `.pdf` (especially TikZ) |
 | **Ghostscript** | Compresses large PDF files |
-| **Python 3** | Needed for PDF compression scripts |
+| **Python 3.9+** | Needed for PDF compression scripts and Book Binder CLI |
 | **System libraries** | Fonts and rendering support on Linux systems |
 
 Don’t worry — this guide will walk you through installing all of them, step by step.
@@ -64,8 +64,8 @@ Don’t worry — this guide will walk you through installing all of them, step 
 Quarto is what drives the entire build process.
 
 ```sh
-wget https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.13/quarto-1.7.13-linux-amd64.deb
-sudo dpkg -i quarto-1.7.13-linux-amd64.deb
+wget https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.31/quarto-1.7.31-linux-amd64.deb
+sudo dpkg -i quarto-1.7.31-linux-amd64.deb
 ```
 
 Test it with:

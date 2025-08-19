@@ -1,12 +1,5 @@
 name: '💯 Validate Dev'
 
-# Enhanced dev workflow: validate + build + preview deployment
-# Uses container builds by default with configurable options
-# Eliminates code duplication with matrix strategy
-
-env:
-  GITHUB_ACTIONS_RETENTION_DAYS: 7
-
 # Cancel duplicate builds on same branch
 concurrency:
   group: validate-dev-${{ github.ref }}
@@ -33,14 +26,15 @@ on:
           - main
       # Format & OS selection
       build_formats:
-        description: '📦 Build formats (both, html, pdf)'
+        description: '📦 Build formats (all, html, pdf, epub)'
         required: true
-        default: 'both'
+        default: 'all'
         type: choice
         options:
-          - both
+          - all
           - html
           - pdf
+          - epub
       build_os:
         description: '⚙️ Build OS (both, linux, windows)'
         required: true
@@ -124,7 +118,7 @@ jobs:
   # Step 2: Container Health Check (validate containers before builds)
   container-health-check:
     name: '💊 Container Health Check'
-    needs: [pre-commit]
+    needs: [build-config]
     if: inputs.run_health_check == true
     uses: ./.github/workflows/container-health-check.yml
     with:
@@ -136,10 +130,13 @@ jobs:
   # Step 3: Determine build configuration (shared logic)
   build-config:
     name: '🎯 Build Configuration'
+    needs: [pre-commit]
+    if: needs.pre-commit.result == 'success'
     runs-on: ubuntu-latest
     outputs:
       build_html: ${{ steps.config.outputs.build_html }}
       build_pdf: ${{ steps.config.outputs.build_pdf }}
+      build_epub: ${{ steps.config.outputs.build_epub }}
       build_linux: ${{ steps.config.outputs.build_linux }}
       build_windows: ${{ steps.config.outputs.build_windows }}
       build_method: ${{ steps.config.outputs.build_method }}
@@ -158,27 +155,33 @@ jobs:
             # Auto-trigger: build everything
             BUILD_HTML="true"
             BUILD_PDF="true"
+            BUILD_EPUB="true"
             BUILD_LINUX="true"
-            BUILD_WINDOWS="false"
+            BUILD_WINDOWS="true"
             BUILD_METHOD="both"
             TARGET="dev" # For push events, always target dev
             echo "📊 Trigger: Automatic (dev branch push)"
             echo "📊 HTML: $BUILD_HTML (mandatory)"
             echo "📊 PDF: $BUILD_PDF (mandatory)"
+            echo "📊 EPUB: $BUILD_EPUB (mandatory)"
             echo "📊 Linux: $BUILD_LINUX (mandatory)"
-            echo "📊 Windows: $BUILD_WINDOWS (disabled by default)"
+            echo "📊 Windows: $BUILD_WINDOWS (enabled by default)"
             echo "📊 Method: $BUILD_METHOD (default)"
             echo "📊 Target: $TARGET"
           else
             # Manual trigger: respect choices
             echo "📊 Trigger: Manual workflow dispatch"
             BUILD_HTML="false"
-            if [[ "${{ inputs.build_formats }}" == "both" || "${{ inputs.build_formats }}" == "html" ]]; then
+            if [[ "${{ inputs.build_formats }}" == "all" || "${{ inputs.build_formats }}" == "html" ]]; then
               BUILD_HTML="true"
             fi
             BUILD_PDF="false"
-            if [[ "${{ inputs.build_formats }}" == "both" || "${{ inputs.build_formats }}" == "pdf" ]]; then
+            if [[ "${{ inputs.build_formats }}" == "all" || "${{ inputs.build_formats }}" == "pdf" ]]; then
               BUILD_PDF="true"
+            fi
+            BUILD_EPUB="false"
+            if [[ "${{ inputs.build_formats }}" == "all" || "${{ inputs.build_formats }}" == "epub" ]]; then
+              BUILD_EPUB="true"
             fi
             
             BUILD_LINUX="false"
@@ -216,6 +219,7 @@ jobs:
           # Set outputs (individual format flags for matrix-driven approach)
           echo "build_html=$BUILD_HTML" >> $GITHUB_OUTPUT
           echo "build_pdf=$BUILD_PDF" >> $GITHUB_OUTPUT
+          echo "build_epub=$BUILD_EPUB" >> $GITHUB_OUTPUT
           echo "build_linux=$BUILD_LINUX" >> $GITHUB_OUTPUT
           echo "build_windows=$BUILD_WINDOWS" >> $GITHUB_OUTPUT
           echo "build_method=$BUILD_METHOD" >> $GITHUB_OUTPUT
@@ -227,10 +231,9 @@ jobs:
   # Step 4: Matrix-driven build calls (clean and simple!)
   build-container:
     name: '🐳 Container Build Matrix'
-    needs: [pre-commit, build-config]
+    needs: [build-config]
     if: |
       always() && 
-      (needs.pre-commit.result == 'success') &&
       (needs.build-config.result == 'success') &&
       (needs.build-config.outputs.build_method == 'container' || needs.build-config.outputs.build_method == 'both')
     uses: ./.github/workflows/quarto-build-container.yml
@@ -239,13 +242,14 @@ jobs:
       build_windows: ${{ needs.build-config.outputs.build_windows == 'true' }}
       build_html: ${{ needs.build-config.outputs.build_html == 'true' }}
       build_pdf: ${{ needs.build-config.outputs.build_pdf == 'true' }}
+      build_epub: ${{ needs.build-config.outputs.build_epub == 'true' }}
       target: ${{ needs.build-config.outputs.target }}
       container_registry: ${{ needs.build-config.outputs.container_registry }}
       container_tag: ${{ needs.build-config.outputs.container_tag }}
 
   build-baremetal:
     name: '⚠️ Baremetal Build Matrix (Legacy)'
-    needs: [pre-commit, build-config]
+    needs: [build-config]
     if: needs.build-config.outputs.build_method == 'baremetal' || needs.build-config.outputs.build_method == 'both'
     uses: ./.github/workflows/quarto-build-baremetal.yml
     with:
@@ -253,7 +257,17 @@ jobs:
       build_windows: ${{ needs.build-config.outputs.build_windows == 'true' }}
       build_html: ${{ needs.build-config.outputs.build_html == 'true' }}
       build_pdf: ${{ needs.build-config.outputs.build_pdf == 'true' }}
+      build_epub: ${{ needs.build-config.outputs.build_epub == 'true' }}
       target: ${{ needs.build-config.outputs.target }}
+
+  report-baremetal-pass:
+    name: 'Baremetal Build Status'
+    runs-on: ubuntu-latest
+    needs: [build-baremetal]
+    if: ${{ needs.build-baremetal.result == 'success' }}
+    steps:
+      - name: Report Baremetal Success
+        run: echo "✅ Baremetal build passed."
 
   # Step 4: Collect build results (needed for outputs)
   collect-results:

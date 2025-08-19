@@ -1,6 +1,15 @@
-name: '🧪 Deploy (Dev) Preview'
+name: '🛰️ Deploy (Dev) Preview'
+
+env:
+  ARTIFACT_NAME: dev-html-linux # The name of the artifact produced by the 'validate-dev' workflow
 
 on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: 'Optional: Specific commit SHA to deploy. Deploys the latest successful `dev` build if empty.'
+        required: false
+        type: string
   workflow_run:
     workflows: ["💯 Validate Dev"]
     types:
@@ -12,33 +21,115 @@ concurrency:
 
 jobs:
   deploy:
-    name: '🚀 Deploy to GitHub Pages'
-    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'dev'
+    name: '📺 Deploy to GitHub Pages'
+    if: (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'dev') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write # Allow write access to repository
       pages: write
+      actions: read # Allow reading of workflow runs
     environment:
       name: development
-      url: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/dev/
+      url: https://harvard-edge.github.io/cs249r_book_dev/
 
     steps:
+      - name: ⬇️ Get workflow run ID
+        id: run_info
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            echo "run_id=${{ github.event.workflow_run.id }}" >> $GITHUB_OUTPUT
+            echo "head_sha=${{ github.event.workflow_run.head_sha }}" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          COMMIT_SHA=$(echo "${{ github.event.inputs.commit_sha }}" | xargs)
+          API_URL="repos/${{ github.repository }}/actions/workflows/validate-dev.yml/runs"
+          
+          if [[ -n "$COMMIT_SHA" ]]; then
+            echo "🔎 Searching for successful 'Validate Dev' run for commit starting with: $COMMIT_SHA"
+            JQ_QUERY=".workflow_runs[] | select((.head_sha | startswith(\"$COMMIT_SHA\")) and .status == \"completed\" and .conclusion == \"success\") | .id"
+          else
+            echo "🔎 No commit SHA provided. Searching for the latest successful 'Validate Dev' run on 'dev' branch."
+            JQ_QUERY=".workflow_runs[] | select(.head_branch == \"dev\" and .status == \"completed\" and .conclusion == \"success\") | .id"
+          fi
+
+          latest_run_id=$(gh api "$API_URL" --jq "$JQ_QUERY" | head -n 1)
+
+          if [ -z "$latest_run_id" ]; then
+              if [[ -n "$COMMIT_SHA" ]]; then
+                echo "::error::Could not find a successful 'Validate Dev' run for commit ${COMMIT_SHA}."
+              else
+                echo "::error::Could not find any successful 'Validate Dev' run on the 'dev' branch."
+              fi
+              exit 1
+          fi
+          
+          echo "Found run ID: ${latest_run_id}"
+          echo "run_id=${latest_run_id}" >> $GITHUB_OUTPUT
+
+          latest_run_sha=$(gh api repos/${{ github.repository }}/actions/runs/${latest_run_id} --jq '.head_sha')
+          echo "head_sha=${latest_run_sha}" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: 📥 Download Preview Artifact
         uses: actions/download-artifact@v4
         with:
-          name: dev-html-linux # This is the predictable name for dev branch linux html builds
-          run-id: ${{ github.event.workflow_run.id }}
+          name: ${{ env.ARTIFACT_NAME }}
+          run-id: ${{ steps.run_info.outputs.run_id }}
           path: ./preview-site
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 🚀 Deploy to GitHub Pages (dev staging)
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./preview-site
-          destination_dir: dev
-          keep_files: false
-          commit_message: |
-            🚀 Deploy dev preview from ${{ github.event.workflow_run.head_sha }}
-            
-            Triggered by workflow run: ${{ github.event.workflow_run.id }}
+      - name: 📝 Create .nojekyll file
+        run: touch ./preview-site/.nojekyll
+
+      - name: 📦 Inspect downloaded artifact
+        run: |
+          echo "::group::Artifact Contents"
+          ls -la ./preview-site
+          echo "::endgroup::"
+
+      - name: 🚀 Deploy to Dev Site via SSH
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+        run: |
+          echo "🔐 Starting ssh-agent..."
+          eval "$(ssh-agent -s)"
+          echo "$SSH_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
+          # Add github.com to known hosts to avoid prompt
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+          echo "🔧 Configuring git..."
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+
+          echo "🔄 Cloning target repository..."
+          git clone --depth=1 git@github.com:harvard-edge/cs249r_book_dev.git target-repo
+          
+          echo "🔄 Entering target repository..."
+          cd target-repo
+          
+          echo "🧹 Cleaning repository..."
+          # Remove all files except .git
+          git rm -rf .
+          git clean -fdx
+          
+          echo "🚚 Copying new site content to root..."
+          cp -r "${{ github.workspace }}/preview-site/." .
+          
+          echo "🔍 Validating deployment content..."
+          if [ ! -f "index.html" ]; then
+            echo "❌ CRITICAL: index.html is missing after copy. Aborting deployment."
+            exit 1
+          fi
+          
+          if [ "$(ls -1A | wc -l)" -le 3 ]; then
+            echo "❌ WARNING: Root directory seems too empty. Something might be wrong."
+          fi
+          
+          echo "📦 Committing and pushing changes..."
+          git add .
+          # Use --allow-empty in case the content hasn't changed
+          git commit -m "🚀 Deploy dev preview from ${{ steps.run_info.outputs.head_sha }}" --allow-empty || echo "🟡 Nothing to commit"
+          git push origin main

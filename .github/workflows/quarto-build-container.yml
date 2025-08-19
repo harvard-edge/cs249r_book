@@ -30,6 +30,11 @@ on:
         required: false
         default: true
         type: boolean
+      build_epub:
+        description: '📚 Build EPUB format'
+        required: false
+        default: true
+        type: boolean
       target:
         description: 'Target branch (dev/main)'
         required: false
@@ -66,6 +71,10 @@ on:
         required: false
         type: boolean
         default: true
+      build_epub:
+        required: false
+        type: boolean
+        default: true
       target:
         required: false
         type: string
@@ -94,6 +103,12 @@ on:
       windows_pdf_artifact:
         description: "Windows PDF artifact name"
         value: ${{ jobs.collect-outputs.outputs.windows_pdf_artifact }}
+      linux_epub_artifact:
+        description: "Linux EPUB artifact name"
+        value: ${{ jobs.collect-outputs.outputs.linux_epub_artifact }}
+      windows_epub_artifact:
+        description: "Windows EPUB artifact name"
+        value: ${{ jobs.collect-outputs.outputs.windows_epub_artifact }}
 
 permissions:
   contents: read
@@ -120,6 +135,7 @@ jobs:
             render_target: html
             enabled: ${{ inputs.build_linux && inputs.build_html }}
             artifact_name: ${{ inputs.target }}-html-linux
+            output_dir: _build/html
           - platform: linux
             platform_name: Linux
             platform_emoji: '🐧'
@@ -130,6 +146,7 @@ jobs:
             render_target: titlepage-pdf
             enabled: ${{ inputs.build_linux && inputs.build_pdf }}
             artifact_name: ${{ inputs.target }}-pdf-linux
+            output_dir: _build/pdf
           # Windows builds  
           - platform: windows
             platform_name: Windows
@@ -141,6 +158,7 @@ jobs:
             render_target: html
             enabled: ${{ inputs.build_windows && inputs.build_html }}
             artifact_name: ${{ inputs.target }}-html-windows
+            output_dir: _build/html
           - platform: windows
             platform_name: Windows
             platform_emoji: '🪟'
@@ -151,17 +169,43 @@ jobs:
             render_target: titlepage-pdf
             enabled: ${{ inputs.build_windows && inputs.build_pdf }}
             artifact_name: ${{ inputs.target }}-pdf-windows
+            output_dir: _build/pdf
+          # EPUB builds
+          - platform: linux
+            platform_name: Linux
+            platform_emoji: '🐧'
+            runner: ubuntu-latest
+            format_name: EPUB
+            format_emoji: '📚'
+            config: _quarto-epub.yml
+            render_target: epub
+            enabled: ${{ inputs.build_linux && inputs.build_epub }}
+            artifact_name: ${{ inputs.target }}-epub-linux
+            output_dir: _build/epub
+          - platform: windows
+            platform_name: Windows
+            platform_emoji: '🪟'
+            runner: windows-latest
+            format_name: EPUB
+            format_emoji: '📚'
+            config: _quarto-epub.yml
+            render_target: epub
+            enabled: ${{ inputs.build_windows && inputs.build_epub }}
+            artifact_name: ${{ inputs.target }}-epub-windows
+            output_dir: _build/epub
     
     outputs:
       platform: ${{ matrix.platform }}
       format: ${{ matrix.format_name }}
       artifact_name: ${{ matrix.artifact_name }}
+      output_dir: ${{ matrix.output_dir }}
 
     # Only Linux runs in containers
     container: ${{ matrix.platform == 'linux' && format('{0}/{1}/quarto-{2}:{3}', inputs.container_registry || 'ghcr.io', github.repository, matrix.platform, inputs.container_tag || 'latest') || null }}
     
     env:
       CONTAINER_IMAGE: ${{ format('{0}/{1}/quarto-{2}:{3}', inputs.container_registry || 'ghcr.io', github.repository, matrix.platform, inputs.container_tag || 'latest') }}
+      DOCKERFILE_PATH: ./docker/${{ matrix.platform }}/dockerfile
 
     steps:
       - name: 🛑 Skip build
@@ -174,68 +218,43 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: 💾 Cache Docker Images
-        if: matrix.enabled
-        uses: actions/cache@v4
-        id: cache-docker-images
-        with:
-          path: |
-            ~/.docker
-            ~/AppData/Local/Docker/wsl/data
-          key: docker-${{ matrix.platform }}-${{ env.CONTAINER_IMAGE }}-${{ hashFiles('docker/**') }}
-          restore-keys: |
-            docker-${{ matrix.platform }}-${{ env.CONTAINER_IMAGE }}-
-            docker-${{ matrix.platform }}-
-
-      - name: 🐳 Pull Windows Container
+      - name: 🔑 Log in to GitHub Container Registry
         if: matrix.platform == 'windows' && matrix.enabled
-        shell: pwsh
-        run: |
-          Write-Output "🐳 Pulling Windows container..."
-          Write-Output "📦 Image: ${{ env.CONTAINER_IMAGE }}"
-          $cacheHit = "${{ steps.cache-docker-images.outputs.cache-hit }}"
-          if ($cacheHit -eq 'true') {
-            Write-Output "💾 Cache Status: ✅ HIT - faster pull expected"
-          } else {
-            Write-Output "💾 Cache Status: ❌ MISS - full pull required"
-          }
-          
-          # Check if image already exists locally (from cache)
-          $imageExists = docker image inspect ${{ env.CONTAINER_IMAGE }}
-          if ($LASTEXITCODE -eq 0) {
-            Write-Output "✅ Container image found locally - skipping pull"
-          } else {
-            Write-Output "📥 Pulling container image..."
-            docker pull ${{ env.CONTAINER_IMAGE }}
-            Write-Output "✅ Container pulled successfully"
-          }
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ inputs.container_registry }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 🔨 Build ${{ matrix.format }} (Linux)
+      - name: 🐳 Pull Docker Image
+        if: matrix.platform == 'windows' && matrix.enabled
+        run: docker pull ${{ env.CONTAINER_IMAGE }}
+
+      - name: 🔨 Build ${{ matrix.format_name }} (Linux)
         if: matrix.platform == 'linux' && matrix.enabled
         working-directory: quarto
         run: |
-          echo "🔨 Building ${{ matrix.format }} on Linux container..."
+          echo "🔨 Building ${{ matrix.format_name }} on Linux container..."
           rm -f _quarto.yml
           cp config/${{ matrix.config }} _quarto.yml
-          quarto render --to ${{ matrix.render_target }}
-          echo "✅ ${{ matrix.format }} build completed"
+          quarto render --to ${{ matrix.render_target }} --output-dir "${{ matrix.output_dir }}"
+          echo "✅ ${{ matrix.format_name }} build completed"
 
-      - name: 🔨 Build ${{ matrix.format }} (Windows)
+      - name: 🔨 Build ${{ matrix.format_name }} (Windows)
         if: matrix.platform == 'windows' && matrix.enabled
         shell: pwsh
-        working-directory: quarto
         run: |
-          Write-Host "🔨 Building ${{ matrix.format }} on Windows container..."
-          docker run --rm -v "${PWD}:C:\workspace" -w "C:\workspace" ${{ env.CONTAINER_IMAGE }} powershell -Command "
+          Write-Host "🔨 Building ${{ matrix.format_name }} on Windows container..."
+          docker run --rm -v "$($PWD.Path):C:\workspace" -w "C:\workspace\quarto" ${{ env.CONTAINER_IMAGE }} powershell -Command "
             if (Test-Path '_quarto.yml') { Remove-Item '_quarto.yml' -Force }
             Copy-Item 'config\${{ matrix.config }}' '_quarto.yml' -Force
-            quarto render --to ${{ matrix.render_target }}
+            quarto render --to ${{ matrix.render_target }} --output-dir '${{ matrix.output_dir }}'
           "
-          Write-Host "✅ ${{ matrix.format }} build completed"
+          Write-Host "✅ ${{ matrix.format_name }} build completed"
 
       - name: 📉 Compress PDF (Linux)
-        if: matrix.platform == 'linux' && matrix.format == 'pdf' && matrix.enabled
-        working-directory: build/pdf
+        if: matrix.platform == 'linux' && matrix.format_name == 'PDF' && matrix.enabled
+        working-directory: quarto/${{ matrix.output_dir }}
         run: |
           if [ -f "Machine-Learning-Systems.pdf" ]; then
             echo "📉 Compressing PDF..."
@@ -246,26 +265,29 @@ jobs:
           fi
 
       - name: 📉 Compress PDF (Windows)
-        if: matrix.platform == 'windows' && matrix.format == 'pdf' && matrix.enabled
+        if: matrix.platform == 'windows' && matrix.format_name == 'PDF' && matrix.enabled
         shell: pwsh
-        working-directory: build/pdf
         run: |
-          if (Test-Path "Machine-Learning-Systems.pdf") {
-            Write-Host "📉 Compressing PDF..."
-            & gswin64c -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 -dPDFSETTINGS=/ebook `
-                       -dNOPAUSE -dBATCH `
-                       -sOutputFile="compressed.pdf" "Machine-Learning-Systems.pdf"
-            if (Test-Path "compressed.pdf") { 
-              Move-Item -Force "compressed.pdf" "Machine-Learning-Systems.pdf" 
+          Write-Host "🔨 Compressing PDF on Windows container..."
+          docker run --rm -v "$($PWD.Path):C:\workspace" -w "C:\workspace\quarto\${{ matrix.output_dir }}" ${{ env.CONTAINER_IMAGE }} powershell -Command "
+            if (Test-Path 'Machine-Learning-Systems.pdf') {
+              Write-Host '📉 Compressing PDF...'
+              & gswin64c -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 -dPDFSETTINGS=/ebook -dNOPAUSE -dBATCH -sOutputFile='compressed.pdf' 'Machine-Learning-Systems.pdf'
+              if (Test-Path 'compressed.pdf') {
+                Move-Item -Force 'compressed.pdf' 'Machine-Learning-Systems.pdf'
+              }
+            } else {
+              Write-Warning '⚠️ Machine-Learning-Systems.pdf not found for compression.'
             }
-          }
+          "
+          Write-Host "✅ PDF compression completed."
 
       - name: 📤 Upload artifact
         uses: actions/upload-artifact@v4
         if: matrix.enabled
         with:
           name: ${{ matrix.artifact_name }}
-          path: build/${{ matrix.format }}
+          path: quarto/${{ matrix.output_dir }}
 
   collect-outputs:
     name: '📊 Collect Outputs'
@@ -276,8 +298,10 @@ jobs:
       build_success: ${{ steps.collect.outputs.build_success }}
       linux_html_artifact: ${{ steps.collect.outputs.linux_html_artifact }}
       linux_pdf_artifact: ${{ steps.collect.outputs.linux_pdf_artifact }}
+      linux_epub_artifact: ${{ steps.collect.outputs.linux_epub_artifact }}
       windows_html_artifact: ${{ steps.collect.outputs.windows_html_artifact }}
       windows_pdf_artifact: ${{ steps.collect.outputs.windows_pdf_artifact }}
+      windows_epub_artifact: ${{ steps.collect.outputs.windows_epub_artifact }}
     
     steps:
       - name: 📊 Collect results
@@ -299,9 +323,10 @@ jobs:
           extract_artifact() {
             local platform=$1
             local format=$2
-            # The .[] iterates over the values of the top-level object
+            # Robustly handle either a single output object or an object of output objects.
+            # Also, convert matrix platform and format to lowercase for case-insensitive matching.
             echo "$outputs_json" | jq -r --arg p "$platform" --arg f "$format" \
-              '.[] | select(.platform==$p and .format==$f) | .artifact_name'
+              '(if .platform then . else .[] end) | select((.platform | ascii_downcase) == $p and (.format | ascii_downcase) == $f) | .artifact_name'
           }
 
           # Set artifact names for requested builds if they were generated
@@ -320,6 +345,14 @@ jobs:
           if [[ "${{ inputs.build_windows && inputs.build_pdf }}" == "true" ]]; then
             artifact_name=$(extract_artifact "windows" "pdf")
             echo "windows_pdf_artifact=$artifact_name" >> $GITHUB_OUTPUT
+          fi
+          if [[ "${{ inputs.build_linux && inputs.build_epub }}" == "true" ]]; then
+            artifact_name=$(extract_artifact "linux" "epub")
+            echo "linux_epub_artifact=$artifact_name" >> $GITHUB_OUTPUT
+          fi
+          if [[ "${{ inputs.build_windows && inputs.build_epub }}" == "true" ]]; then
+            artifact_name=$(extract_artifact "windows" "epub")
+            echo "windows_epub_artifact=$artifact_name" >> $GITHUB_OUTPUT
           fi
           
           echo "✅ Results collected - Status: $BUILD_SUCCESS_MSG"

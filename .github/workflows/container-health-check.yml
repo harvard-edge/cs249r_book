@@ -67,7 +67,7 @@ jobs:
   # Matrix strategy for both container platforms
   container-health-check:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 60
     strategy:
       fail-fast: false  # Test both containers even if one fails
       matrix:
@@ -84,62 +84,32 @@ jobs:
     env:
       CONTAINER_IMAGE: ${{ inputs.container_registry || 'ghcr.io' }}/${{ github.repository }}/${{ matrix.container_name }}:${{ inputs.container_tag || 'latest' }}
       PLATFORM: ${{ matrix.platform }}
+      DOCKERFILE_PATH: ./docker/${{ matrix.platform }}/dockerfile
       
     steps:
-      - name: 💾 Cache Docker Images
+      - name: 📥 Checkout repository
         if: |
           (matrix.platform == 'linux' && inputs.test_linux != false) ||
           (matrix.platform == 'windows' && inputs.test_windows != false)
-        uses: actions/cache@v4
-        id: cache-docker-images
+        uses: actions/checkout@v4
         with:
-          path: |
-            ~/.docker
-            ~/AppData/Local/Docker/wsl/data
-          key: docker-${{ matrix.platform }}-${{ env.CONTAINER_IMAGE }}-${{ hashFiles('docker/**') }}
-          restore-keys: |
-            docker-${{ matrix.platform }}-${{ env.CONTAINER_IMAGE }}-
-            docker-${{ matrix.platform }}-
+          fetch-depth: 0
 
-      - name: 🐳 Pull Linux Container
-        if: matrix.platform == 'linux' && inputs.test_linux != false
-        shell: bash
-        run: |
-          echo "🐳 Pulling Linux container..."
-          echo "📦 Image: ${{ env.CONTAINER_IMAGE }}"
-          echo "💾 Cache Status: ${{ steps.cache-docker-images.outputs.cache-hit == 'true' && '✅ HIT - faster pull expected' || '❌ MISS - full pull required' }}"
-          
-          # Check if image already exists locally (from cache)
-          if docker image inspect ${{ env.CONTAINER_IMAGE }} >/dev/null 2>&1; then
-            echo "✅ Container image found locally - skipping pull"
-          else
-            echo "📥 Pulling container image..."
-            docker pull ${{ env.CONTAINER_IMAGE }}
-            echo "✅ Container pulled successfully"
-          fi
+      - name: 🔑 Log in to GitHub Container Registry
+        if: |
+          (matrix.platform == 'linux' && inputs.test_linux != false) ||
+          (matrix.platform == 'windows' && inputs.test_windows != false)
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 🐳 Pull Windows Container
-        if: matrix.platform == 'windows' && inputs.test_windows != false
-        shell: pwsh
-        run: |
-          Write-Output "🐳 Pulling Windows container..."
-          Write-Output "📦 Image: ${{ env.CONTAINER_IMAGE }}"
-          $cacheHit = "${{ steps.cache-docker-images.outputs.cache-hit }}"
-          if ($cacheHit -eq 'true') {
-            Write-Output "💾 Cache Status: ✅ HIT - faster pull expected"
-          } else {
-            Write-Output "💾 Cache Status: ❌ MISS - full pull required"
-          }
-          
-          # Check if image already exists locally (from cache)
-          $imageExists = docker image inspect ${{ env.CONTAINER_IMAGE }}
-          if ($LASTEXITCODE -eq 0) {
-            Write-Output "✅ Container image found locally - skipping pull"
-          } else {
-            Write-Output "📥 Pulling container image..."
-            docker pull ${{ env.CONTAINER_IMAGE }}
-            Write-Output "✅ Container pulled successfully"
-          }
+      - name: 🐳 Pull Docker Image
+        if: |
+          (matrix.platform == 'linux' && inputs.test_linux != false) ||
+          (matrix.platform == 'windows' && inputs.test_windows != false)
+        run: docker pull ${{ env.CONTAINER_IMAGE }}
 
       - name: 📊 Container Information
         if: |
@@ -323,7 +293,7 @@ jobs:
         if: matrix.platform == 'windows' && inputs.test_windows != false
         run: |
           Write-Output "🪟 === WINDOWS CONTAINER TOOL VERSIONS ==="
-          Write-Output "📋 Testing Windows tools with version capture:"
+          Write-Output "📋 Testing Windows tools with enhanced path detection using 'scoop which':"
           Write-Output "=============================================="
           
           docker run --rm ${{ env.CONTAINER_IMAGE }} pwsh -Command "
@@ -343,75 +313,79 @@ jobs:
               Write-Output '❌ Scoop directory not found'
             }
             Write-Output ''
-            
+
+            # --- Tool Checks ---
+
             Write-Output '📊 QUARTO:'
             Write-Output '----------'
             try {
-              `$quartoPath = Get-Command quarto -ErrorAction Stop
-              Write-Output `"📍 Location: `$(`$quartoPath.Source)`"
-              # Check if it's a Scoop shim
-              if (`$quartoPath.Source -like '*scoop*') {
-                Write-Output `"📦 Package Manager: Scoop`"
-              }
-              `$quartoVersion = & quarto --version 2>&1
+              `$quartoPath = (scoop which quarto 2>`$null).Trim()
+              if (`$LASTEXITCODE -ne 0) { throw }
+              Write-Output `"📍 Location: `$quartoPath`"
+              Write-Output '📦 Method: scoop which'
+              `$quartoVersion = & `$quartoPath --version 2>&1
               Write-Output `"📋 Version: `$quartoVersion`"
               Write-Output '✅ Status: OK'
             } catch {
-              Write-Output '❌ Status: NOT FOUND'
+              try {
+                `$quartoPath = (Get-Command quarto -ErrorAction Stop).Source
+                Write-Output `"📍 Location: `$quartoPath`"
+                Write-Output '📦 Method: Get-Command (PATH)'
+                `$quartoVersion = & `$quartoPath --version 2>&1
+                Write-Output `"📋 Version: `$quartoVersion`"
+                Write-Output '✅ Status: OK'
+              } catch {
+                Write-Output '❌ Status: NOT FOUND'
+              }
             }
             Write-Output ''
             
             Write-Output '📊 PYTHON:'
             Write-Output '-----------'
             try {
-              `$pythonPath = Get-Command python -ErrorAction Stop
-              Write-Output `"📍 Location: `$(`$pythonPath.Source)`"
-              # Check if it's a Scoop shim
-              if (`$pythonPath.Source -like '*scoop*') {
-                Write-Output `"📦 Package Manager: Scoop`"
-              }
-              `$pythonVersion = & python --version 2>&1
+              `$pythonPath = (scoop which python 2>`$null).Trim()
+              if (`$LASTEXITCODE -ne 0) { throw }
+              Write-Output `"📍 Location: `$pythonPath`"
+              Write-Output '📦 Method: scoop which'
+              `$pythonVersion = & `$pythonPath --version 2>&1
               Write-Output `"📋 Version: `$pythonVersion`"
               Write-Output '✅ Status: OK'
             } catch {
-              Write-Output '❌ Status: NOT FOUND'
+              try {
+                `$pythonPath = (Get-Command python -ErrorAction Stop).Source
+                Write-Output `"📍 Location: `$pythonPath`"
+                Write-Output '📦 Method: Get-Command (PATH)'
+                `$pythonVersion = & `$pythonPath --version 2>&1
+                Write-Output `"📋 Version: `$pythonVersion`"
+                Write-Output '✅ Status: OK'
+              } catch {
+                Write-Output '❌ Status: NOT FOUND'
+              }
             }
             Write-Output ''
             
             Write-Output '📊 R:'
             Write-Output '------'
             try {
-              # Try R.exe first, then R
-              `$rPath = `$null
-              try {
-                `$rPath = Get-Command R.exe -ErrorAction Stop
-              } catch {
-                `$rPath = Get-Command R -ErrorAction Stop
-              }
-              Write-Output `"📍 Location: `$(`$rPath.Source)`"
-              # Check if it's a Scoop shim
-              if (`$rPath.Source -like '*scoop*') {
-                Write-Output `"📦 Package Manager: Scoop`"
-                Write-Output `"📁 Scoop Shim: `$(`$rPath.Source)`"
-              }
-              `$rVersion = & `$rPath.Name --version 2>&1 | Select-Object -First 1
-              Write-Output `"📋 Version: `$rVersion`"
-              Write-Output '✅ Status: OK'
+                `$rCmd = Get-Command R.exe -ErrorAction SilentlyContinue
+                if (-not `$rCmd) { `$rCmd = Get-Command R -ErrorAction Stop }
+                `$rPath = `$rCmd.Source
+                Write-Output `"📍 Location: `$rPath`"
+                Write-Output '📦 Method: Get-Command (PATH)'
+                `$rVersion = & `$rCmd.Name --version 2>&1 | Select-Object -First 1
+                Write-Output `"📋 Version: `$rVersion`"
+                Write-Output '✅ Status: OK'
             } catch {
               Write-Output '❌ Status: NOT FOUND'
-              # Debug: Check if Scoop directory exists
-              if (Test-Path 'C:\Users\ContainerAdministrator\scoop\shims\R.exe') {
-                Write-Output '🔍 Debug: Found R.exe in Scoop shims but Get-Command failed'
-              }
             }
             Write-Output ''
             
             Write-Output '📊 LUALATEX:'
             Write-Output '------------'
             try {
-              `$lualatexPath = Get-Command lualatex -ErrorAction Stop
-              Write-Output `"📍 Location: `$(`$lualatexPath.Source)`"
-              `$lualatexVersion = & lualatex --version 2>&1 | Select-Object -First 1
+              `$lualatexPath = (Get-Command lualatex -ErrorAction Stop).Source
+              Write-Output `"📍 Location: `$lualatexPath`"
+              `$lualatexVersion = & `$lualatexPath --version 2>&1 | Select-Object -First 1
               Write-Output `"📋 Version: `$lualatexVersion`"
               Write-Output '✅ Status: OK'
             } catch {
@@ -422,16 +396,22 @@ jobs:
             Write-Output '📊 GHOSTSCRIPT:'
             Write-Output '---------------'
             try {
-              `$gsPath = Get-Command gswin64c -ErrorAction Stop
-              Write-Output `"📍 Location: `$(`$gsPath.Source)`"
-              `$gsVersion = & gswin64c --version 2>&1
+              `$gsPath = (scoop which gswin64c 2>`$null).Trim()
+              if (`$LASTEXITCODE -ne 0) { `$gsPath = (scoop which gs 2>`$null).Trim() }
+              if (`$LASTEXITCODE -ne 0) { throw }
+              Write-Output `"📍 Location: `$gsPath`"
+              Write-Output '📦 Method: scoop which'
+              `$gsVersion = & `$gsPath --version 2>&1
               Write-Output `"📋 Version: `$gsVersion`"
               Write-Output '✅ Status: OK'
             } catch {
               try {
-                `$gsPath = Get-Command gs -ErrorAction Stop
-                Write-Output `"📍 Location: `$(`$gsPath.Source)`"
-                `$gsVersion = & gs --version 2>&1
+                `$gsCmd = Get-Command gswin64c -ErrorAction SilentlyContinue
+                if (-not `$gsCmd) { `$gsCmd = Get-Command gs -ErrorAction Stop }
+                `$gsPath = `$gsCmd.Source
+                Write-Output `"📍 Location: `$gsPath`"
+                Write-Output '📦 Method: Get-Command (PATH)'
+                `$gsVersion = & `$gsCmd.Name --version 2>&1
                 Write-Output `"📋 Version: `$gsVersion`"
                 Write-Output '✅ Status: OK'
               } catch {
@@ -443,13 +423,24 @@ jobs:
             Write-Output '📊 INKSCAPE:'
             Write-Output '------------'
             try {
-              `$inkscapePath = Get-Command inkscape -ErrorAction Stop
-              Write-Output `"📍 Location: `$(`$inkscapePath.Source)`"
-              `$inkscapeVersion = & inkscape --version 2>&1 | Select-Object -First 1
+              `$inkscapePath = (scoop which inkscape 2>`$null).Trim()
+              if (`$LASTEXITCODE -ne 0) { throw }
+              Write-Output `"📍 Location: `$inkscapePath`"
+              Write-Output '📦 Method: scoop which'
+              `$inkscapeVersion = & `$inkscapePath --version 2>&1 | Select-Object -First 1
               Write-Output `"📋 Version: `$inkscapeVersion`"
               Write-Output '✅ Status: OK'
             } catch {
-              Write-Output '❌ Status: NOT FOUND'
+              try {
+                `$inkscapePath = (Get-Command inkscape -ErrorAction Stop).Source
+                Write-Output `"📍 Location: `$inkscapePath`"
+                Write-Output '📦 Method: Get-Command (PATH)'
+                `$inkscapeVersion = & `$inkscapePath --version 2>&1 | Select-Object -First 1
+                Write-Output `"📋 Version: `$inkscapeVersion`"
+                Write-Output '✅ Status: OK'
+              } catch {
+                Write-Output '❌ Status: NOT FOUND'
+              }
             }
             Write-Output ''
             
@@ -461,56 +452,35 @@ jobs:
             Write-Output '==============================='
             
             # Check each tool and show status
-            try {
-              Get-Command quarto -ErrorAction Stop | Out-Null
-              Write-Output '✅ Quarto: AVAILABLE'
-            } catch {
-              Write-Output '❌ Quarto: MISSING'
+            if ((scoop which quarto 2>`$null) -or (Get-Command quarto -ErrorAction SilentlyContinue)) {
+                Write-Output '✅ Quarto: AVAILABLE'
+            } else {
+                Write-Output '❌ Quarto: MISSING'
             }
-            
-            try {
-              Get-Command python -ErrorAction Stop | Out-Null
-              Write-Output '✅ Python: AVAILABLE'
-            } catch {
-              Write-Output '❌ Python: MISSING'
+            if ((scoop which python 2>`$null) -or (Get-Command python -ErrorAction SilentlyContinue)) {
+                Write-Output '✅ Python: AVAILABLE'
+            } else {
+                Write-Output '❌ Python: MISSING'
             }
-            
-            try {
-              if (Get-Command R.exe -ErrorAction SilentlyContinue) {
+            if ((Get-Command R.exe -ErrorAction SilentlyContinue) -or (Get-Command R -ErrorAction SilentlyContinue)) {
                 Write-Output '✅ R: AVAILABLE'
-              } elseif (Get-Command R -ErrorAction SilentlyContinue) {
-                Write-Output '✅ R: AVAILABLE'
-              } else {
+            } else {
                 Write-Output '❌ R: MISSING'
-              }
-            } catch {
-              Write-Output '❌ R: MISSING'
             }
-            
-            try {
-              Get-Command lualatex -ErrorAction Stop | Out-Null
-              Write-Output '✅ LuaLaTeX: AVAILABLE'
-            } catch {
-              Write-Output '❌ LuaLaTeX: MISSING'
+            if (Get-Command lualatex -ErrorAction SilentlyContinue) {
+                Write-Output '✅ LuaLaTeX: AVAILABLE'
+            } else {
+                Write-Output '❌ LuaLaTeX: MISSING'
             }
-            
-            try {
-              if (Get-Command gswin64c -ErrorAction SilentlyContinue) {
+            if ((scoop which gswin64c 2>`$null) -or (scoop which gs 2>`$null) -or (Get-Command gswin64c -ErrorAction SilentlyContinue) -or (Get-Command gs -ErrorAction SilentlyContinue)) {
                 Write-Output '✅ Ghostscript: AVAILABLE'
-              } elseif (Get-Command gs -ErrorAction SilentlyContinue) {
-                Write-Output '✅ Ghostscript: AVAILABLE'
-              } else {
+            } else {
                 Write-Output '❌ Ghostscript: MISSING'
-              }
-            } catch {
-              Write-Output '❌ Ghostscript: MISSING'
             }
-            
-            try {
-              Get-Command inkscape -ErrorAction Stop | Out-Null
-              Write-Output '✅ Inkscape: AVAILABLE'
-            } catch {
-              Write-Output '❌ Inkscape: MISSING'
+            if ((scoop which inkscape 2>`$null) -or (Get-Command inkscape -ErrorAction SilentlyContinue)) {
+                Write-Output '✅ Inkscape: AVAILABLE'
+            } else {
+                Write-Output '❌ Inkscape: MISSING'
             }
             
             Write-Output ''
@@ -518,52 +488,19 @@ jobs:
             # Check if any tools are missing and fail if so
             `$FailedTools = 0
             
-            try {
-              Get-Command quarto -ErrorAction Stop | Out-Null
-            } catch {
-              `$FailedTools++
-            }
-            
-            try {
-              Get-Command python -ErrorAction Stop | Out-Null
-            } catch {
-              `$FailedTools++
-            }
-            
-            try {
-              if (-not (Get-Command R.exe -ErrorAction SilentlyContinue) -and -not (Get-Command R -ErrorAction SilentlyContinue)) {
-                `$FailedTools++
-              }
-            } catch {
-              `$FailedTools++
-            }
-            
-            try {
-              Get-Command lualatex -ErrorAction Stop | Out-Null
-            } catch {
-              `$FailedTools++
-            }
-            
-            try {
-              if (-not (Get-Command gswin64c -ErrorAction SilentlyContinue) -and -not (Get-Command gs -ErrorAction SilentlyContinue)) {
-                `$FailedTools++
-              }
-            } catch {
-              `$FailedTools++
-            }
-            
-            try {
-              Get-Command inkscape -ErrorAction Stop | Out-Null
-            } catch {
-              `$FailedTools++
-            }
+            if (-not ((scoop which quarto 2>`$null) -or (Get-Command quarto -ErrorAction SilentlyContinue))) { `$FailedTools++ }
+            if (-not ((scoop which python 2>`$null) -or (Get-Command python -ErrorAction SilentlyContinue))) { `$FailedTools++ }
+            if (-not ((Get-Command R.exe -ErrorAction SilentlyContinue) -or (Get-Command R -ErrorAction SilentlyContinue))) { `$FailedTools++ }
+            if (-not (Get-Command lualatex -ErrorAction SilentlyContinue)) { `$FailedTools++ }
+            if (-not ((scoop which gswin64c 2>`$null) -or (scoop which gs 2>`$null) -or (Get-Command gswin64c -ErrorAction SilentlyContinue) -or (Get-Command gs -ErrorAction SilentlyContinue))) { `$FailedTools++ }
+            if (-not ((scoop which inkscape 2>`$null) -or (Get-Command inkscape -ErrorAction SilentlyContinue))) { `$FailedTools++ }
             
             if (`$FailedTools -eq 0) {
               Write-Output '🎯 ✅ Windows container tool validation: PASSED'
               Write-Output 'All essential Quarto build tools are available!'
             } else {
               Write-Output '🎯 ❌ Windows container tool validation: FAILED'
-              Write-Output \"Missing `$FailedTools essential tools - container not ready!\"
+              Write-Output "Missing `$FailedTools essential tools - container not ready!"
               Write-Output 'This container is NOT ready for Quarto builds.'
               exit 1
             }
@@ -686,6 +623,8 @@ jobs:
             $quartoCmd = Get-Command quarto.exe -ErrorAction Stop
             Write-Output ("Quarto.exe location: {0}" -f $quartoCmd.Source)
             Write-Output ("Quarto.exe file size: {0} bytes" -f (Get-Item $quartoCmd.Source).Length)
+            $quartoVersion = & $quartoCmd.Source --version 2>&1
+            Write-Output ("Quarto version: {0}" -f $quartoVersion.Trim())
           } catch {
             Write-Output 'quarto.exe not found in PATH'
           }
@@ -700,17 +639,41 @@ jobs:
               $env:QUARTO_LOG_LEVEL = 'DEBUG'
               $env:QUARTO_PRINT_STACK = 'true'
               
-              # Capture raw output with timestamps
+              # Capture raw output with timestamps using a more robust method
               Write-Output "⏰ Quarto check started at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-              $rawOutput = & quarto.exe check 2>&1
-              $quartoExitCode = $LASTEXITCODE
+              
+              $stdOutPath = [System.IO.Path]::GetTempFileName()
+              $stdErrPath = [System.IO.Path]::GetTempFileName()
+              
+              $quartoExitCode = 0
+              
+              try {
+                  $process = Start-Process -FilePath "quarto.exe" -ArgumentList "check", "--log-level=debug" -Wait -PassThru -RedirectStandardOutput $stdOutPath -RedirectStandardError $stdErrPath
+                  $quartoExitCode = $process.ExitCode
+              } catch {
+                  $quartoExitCode = 1 # Indicate failure
+                  Write-Output "‼️ Error executing Start-Process: $($_.Exception.Message)"
+              }
+
+              $rawOutput = Get-Content $stdOutPath -Raw -ErrorAction SilentlyContinue
+              $errorOutput = Get-Content $stdErrPath -Raw -ErrorAction SilentlyContinue
+
+              # Combine stdout and stderr for the log
+              if (![string]::IsNullOrEmpty($errorOutput)) {
+                $rawOutput += "`n--- STDERR ---`n" + $errorOutput
+              }
+              
+              Remove-Item $stdOutPath, $stdErrPath -Force -ErrorAction SilentlyContinue
+              
               Write-Output "⏰ Quarto check completed at: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
               
               # Display raw output line by line with prefixes for clarity
               Write-Output '📋 RAW QUARTO CHECK OUTPUT:'
               Write-Output '┌─────────────────────────────────────────────────────────────────────────────┐'
-              foreach ($line in $rawOutput) {
-                Write-Output "│ $line"
+              if (-not [string]::IsNullOrEmpty($rawOutput)) {
+                  foreach ($line in $rawOutput.Split("`n")) {
+                      Write-Output "│ $line"
+                  }
               }
               Write-Output '└─────────────────────────────────────────────────────────────────────────────┘'
               
@@ -801,7 +764,6 @@ jobs:
             ${{ matrix.platform == 'linux' && 'linux-quarto-check.log' || 'windows-quarto-check.log' }}
             ${{ matrix.platform == 'linux' && 'linux-quarto-raw-output.txt' || 'windows-quarto-raw-output.txt' }}
             ${{ matrix.platform == 'windows' && 'windows-quarto-check.ps1' || '' }}
-          retention-days: 30
           if-no-files-found: warn
 
   # Final summary job
