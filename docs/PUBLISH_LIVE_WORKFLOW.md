@@ -60,7 +60,7 @@ The publish-live workflow is designed to handle the publication of your Machine 
 
 ### Modified Files
 - `.github/workflows/publish-live.yml`: Added PDF download and upload steps
-- `.github/workflows/quarto-build.yml`: Modified deployment to exclude PDF from git
+- `.github/workflows/quarto-build-container.yml`: Modified deployment to exclude PDF from git
 - `.gitignore`: Added PDF exclusion rules
 - `tools/scripts/quarto_publish/publish.sh`: Removed PDF commit
 - `binder`: Removed PDF commit

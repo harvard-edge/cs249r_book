@@ -78,15 +78,15 @@ gh workflow run quarto-build-container.yml --field os=ubuntu-latest --field form
 ## Workflow Integration
 
 ### Current Workflows
-- `quarto-build.yml` - Original workflow (brute force approach)
-- `quarto-build-container.yml` - Containerized version (fast path)
+- `quarto-build-baremetal.yml` - Original workflow (brute force approach, legacy)
+- `quarto-build-container.yml` - Containerized version (fast path, recommended)
 - `build-linux-container.yml` - Linux container management
 - `build-windows-container.yml` - Windows container management
 
-### Migration Strategy
-1. **Phase 1**: Test containerized builds on dev branch
-2. **Phase 2**: Compare performance and reliability
-3. **Phase 3**: Replace original workflow if successful
+### Migration Status
+1. **✅ Phase 1**: Containerized builds tested and validated
+2. **✅ Phase 2**: Performance significantly improved (45min → 5-10min)
+3. **✅ Phase 3**: Container workflow is now the primary build method
 
 ## Container Contents
 
@@ -151,7 +151,7 @@ LC_ALL=en_US.UTF-8
 ## Rollback Plan
 
 If issues arise:
-1. Keep original `quarto-build.yml` as backup
+1. Keep original `quarto-build-baremetal.yml` as backup
 2. Switch back to traditional builds immediately
 3. Debug container issues separately
 4. Re-enable when resolved
