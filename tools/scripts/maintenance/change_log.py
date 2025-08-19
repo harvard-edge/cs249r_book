@@ -687,15 +687,24 @@ def get_changes_in_dev_since(date_start, date_end=None, verbose=False):
     cmd = ["git", "log", "--numstat", "--since", date_start]
     if date_end:
         cmd += ["--until", date_end]
-    cmd += ["origin/dev", "--", "quarto/contents/**/*.qmd"]
+    cmd += ["origin/dev"]  # Get all changes, filter .qmd files in code
     return run_git_command(cmd, verbose=verbose)
 
-def get_commit_messages_for_file(file_path, since, until=None, verbose=False):
+def get_changes_in_dev_between(date_start, date_end, verbose=False):
+    """Get all changes in dev branch between two dates (for historical periods)."""
+    cmd = ["git", "log", "--numstat", "--since", date_start, "--until", date_end]
+    cmd += ["origin/dev"]  # Get all changes, filter .qmd files in code
+    return run_git_command(cmd, verbose=verbose)
+
+def get_commit_messages_for_file(file_path, since, until=None, verbose=False, is_latest=False):
     """Get commit messages for a specific file since a date."""
     cmd = ["git", "log", "--pretty=format:%s", "--since", since]
     if until:
         cmd += ["--until", until]
+    
+    # Use dev branch for all changes (simpler and more comprehensive)
     cmd += ["origin/dev", "--", file_path]
+    
     messages = run_git_command(cmd, verbose=verbose)
     
     # Return all commit messages - let AI determine importance
@@ -715,8 +724,8 @@ def format_friendly_date(date_str):
         else:
             # Fallback to space-separated format
             dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z")
-        # Format as "January 28 at 02:36 PM" (full month name)
-        return dt.strftime("%B %d at %I:%M %p")
+        # Format as "January 28" (full month name, no time)
+        return dt.strftime("%B %d")
     except:
         return date_str
 
@@ -724,12 +733,203 @@ def normalized_path(path):
     """Normalize path for comparison."""
     return os.path.normpath(path).lower()
 
+def generate_aggregated_entry(start_date, end_date=None, is_latest=False, ai_mode=False, ollama_url="http://localhost:11434", ollama_model="gemma2:9b", verbose=False, sort_processing="chapter"):
+    """Generate a single changelog entry with proper day-level and file-level aggregation."""
+    
+    # Get all changes for this period
+    if is_latest:
+        changes = get_changes_in_dev_since(start_date, end_date, verbose=verbose)
+    else:
+        if not end_date:
+            print("  ❌ Error: Historical periods require both start and end dates")
+            return None
+        changes = get_changes_in_dev_between(start_date, end_date, verbose=verbose)
+    
+    if not changes.strip():
+        return None
+
+    # FILE-LEVEL AGGREGATION: Group all changes by unique file
+    changes_by_file = defaultdict(lambda: [0, 0])  # [added, removed]
+    for line in changes.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 3:
+            continue
+        added, removed, file_path = parts
+        
+        # Only process .qmd files
+        if not file_path.endswith('.qmd'):
+            continue
+            
+        added = int(added) if added.isdigit() else 0
+        removed = int(removed) if removed.isdigit() else 0
+        changes_by_file[file_path][0] += added
+        changes_by_file[file_path][1] += removed
+
+    if not changes_by_file:
+        return None
+
+    # TITLE-LEVEL AGGREGATION: Group files by their display title
+    # This handles cases where files moved locations during project history
+    # e.g., embedded_sys.qmd -> quarto/contents/core/embedded_sys/embedded_sys.qmd
+    changes_by_title = defaultdict(lambda: [0, 0, []])  # [added, removed, file_paths]
+    for file_path, (added, removed) in changes_by_file.items():
+        title = extract_chapter_title(file_path)
+        changes_by_title[title][0] += added
+        changes_by_title[title][1] += removed
+        changes_by_title[title][2].append(file_path)
+
+    # Generate entry header with clean date
+    current_date = datetime.now().strftime('%B %d') if not end_date else format_friendly_date(end_date)
+    entry = f"### 📅 {current_date}\n\n"
+
+    # Organize by content type
+    frontmatter, chapters, labs, appendix = [], [], [], []
+
+    # Sort titles based on processing preference
+    if sort_processing == "impact":
+        # Sort by impact (total changes) - highest first
+        ordered_titles = sorted(
+            changes_by_title.items(),
+            key=lambda item: item[1][0] + item[1][1],  # added + removed
+            reverse=True
+        )
+    else:
+        # Chapter ordering - use chapter number from lookup table
+        def get_chapter_number(title):
+            # Extract chapter number from title or use chapter_lookup
+            for file_path in changes_by_title[title][2]:  # file_paths
+                for fname, lookup_title, number in chapter_lookup:
+                    if (os.path.basename(fname) == os.path.basename(file_path) or 
+                        normalized_path(file_path).endswith(normalized_path(fname))):
+                        return number
+            # Fallback: try to extract number from title
+            if title.startswith("Chapter "):
+                try:
+                    return int(title.split(":")[0].replace("Chapter ", ""))
+                except:
+                    pass
+            return float('inf')  # Put unknown items at end
+        
+        ordered_titles = sorted(
+            changes_by_title.items(),
+            key=lambda item: get_chapter_number(item[0])
+        )
+
+    # Process each unique title once in the correct order
+    for chapter_title, (added, removed, file_paths) in ordered_titles:
+        # Skip references
+        if any("references.qmd" in fp for fp in file_paths):
+            continue
+            
+        total_changes = added + removed
+        if total_changes == 0:
+            continue
+
+        # Get ALL commit messages for ALL files with this title (TITLE-LEVEL AGGREGATION)
+        all_commit_msgs = []
+        for file_path in file_paths:
+            commit_msgs = get_commit_messages_for_file(file_path, start_date, end_date, verbose=verbose, is_latest=is_latest)
+            if commit_msgs.strip():
+                all_commit_msgs.append(commit_msgs)
+        
+        combined_commit_msgs = "\n".join(all_commit_msgs)
+        if not combined_commit_msgs.strip():
+            continue
+
+        # Generate summary based on AI mode
+        if ai_mode:
+            summary_text = generate_ai_summary(chapter_title, combined_commit_msgs, file_paths[0], verbose=verbose)
+            if summary_text is None:
+                if is_latest:
+                    continue  # Skip organizational changes for recent
+                else:
+                    # For historical, create basic summary
+                    summary_text = f"Updated content"
+        else:
+            # No summary text needed - impact bar tells the story
+            summary_text = ""
+
+        # Create clean entry (NO COMMIT COUNTS)
+        impact_bar = generate_impact_bar(total_changes)
+        if summary_text:
+            summary = f"- `{impact_bar}` **{chapter_title}**: {summary_text}"
+        else:
+            summary = f"- `{impact_bar}` **{chapter_title}**"
+        
+        # Show real-time progress with the actual summary being generated
+        print(f"  📄 {chapter_title}: {summary_text}")
+        
+        # Categorize by content type (use first file path for categorization)
+        primary_file_path = file_paths[0]
+        if "contents/frontmatter/" in primary_file_path or "quarto/contents/frontmatter/" in primary_file_path:
+            frontmatter.append(summary)
+        elif "contents/labs/" in primary_file_path or "quarto/contents/labs/" in primary_file_path:
+            labs.append(summary)
+        elif "contents/appendix/" in primary_file_path or "quarto/contents/appendix/" in primary_file_path:
+            appendix.append(summary)
+        else:
+            chapters.append(summary)
+
+    # Build organized entry
+    if frontmatter:
+        entry += "<details >\n<summary>**📄 Frontmatter**</summary>\n\n"
+        entry += "\n".join(frontmatter) + "\n\n</details>\n\n"
+    
+    if chapters:
+        entry += "<details >\n<summary>**📖 Chapters**</summary>\n\n"
+        entry += "\n".join(chapters) + "\n\n</details>\n\n"
+    
+    if labs:
+        entry += "<details >\n<summary>**🧑‍💻 Labs**</summary>\n\n"
+        # Group labs by platform
+        labs_by_platform = defaultdict(list)
+        for lab in labs:
+            # Extract platform from lab title - this is simplified
+            if "Arduino" in lab:
+                labs_by_platform["Arduino"].append(lab)
+            elif "XIAO" in lab:
+                labs_by_platform["Seeed XIAO ESP32S3"].append(lab)
+            elif "Pi" in lab or "Raspberry" in lab:
+                labs_by_platform["Raspberry Pi"].append(lab)
+            elif "Grove" in lab:
+                labs_by_platform["Grove Vision"].append(lab)
+            else:
+                labs_by_platform["Hands-on Labs"].append(lab)
+        
+        for platform, platform_labs in labs_by_platform.items():
+            if platform_labs:
+                entry += f"**{platform}**\n\n"
+                entry += "\n".join(platform_labs) + "\n\n"
+        
+        entry += "</details>\n\n"
+    
+    if appendix:
+        entry += "<details >\n<summary>**📚 Appendix**</summary>\n\n"
+        entry += "\n".join(appendix) + "\n\n</details>"
+
+    return entry.strip()
+
 def generate_entry(start_date, end_date=None, verbose=False, is_latest=False, ai_mode=False, ollama_url="http://localhost:11434", ollama_model="gemma2:9b", sort_processing="chapter"):
     """Generate a changelog entry for the specified time period."""
     if verbose:
         print(f"📁 Processing changes from {start_date} to {end_date or 'now'}")
     print(f"🔍 Analyzing Git changes...")
-    changes = get_changes_in_dev_since(start_date, end_date, verbose=verbose)
+    
+    # Use different branch comparison based on whether this is current dev changes or historical
+    if is_latest:
+        # Current dev changes: compare dev branch from last gh-pages release to now
+        changes = get_changes_in_dev_since(start_date, end_date, verbose=verbose)
+        if verbose:
+            print(f"  📊 Comparing origin/dev from {start_date} to {'now' if not end_date else end_date}")
+    else:
+        # Historical period: compare dev branch between two gh-pages release dates
+        if not end_date:
+            print("  ❌ Error: Historical periods require both start and end dates")
+            return None
+        changes = get_changes_in_dev_between(start_date, end_date, verbose=verbose)
+        if verbose:
+            print(f"  📊 Comparing origin/dev from {start_date} to {end_date} (historical period)")
+    
     if not changes.strip():
         print("  ⚠️ No changes found in specified period")
         return None
@@ -741,12 +941,17 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False, ai
         if len(parts) != 3:
             continue
         added, removed, file_path = parts
+        
+        # Only process .qmd files (filter here to handle historical file moves)
+        if not file_path.endswith('.qmd'):
+            continue
+            
         added = int(added) if added.isdigit() else 0
         removed = int(removed) if removed.isdigit() else 0
         changes_by_file[file_path][0] += added
         changes_by_file[file_path][1] += removed
 
-    current_date = datetime.now().strftime('%B %d at %I:%M %p') if not end_date else format_friendly_date(end_date)
+    current_date = datetime.now().strftime('%B %d') if not end_date else format_friendly_date(end_date)
     entry = f"### 📅 {current_date}\n\n"
 
     frontmatter, chapters, labs, appendix = [], [], [], []
@@ -784,7 +989,7 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False, ai
         if "references.qmd" in file_path:
             continue
             
-        commit_msgs = get_commit_messages_for_file(file_path, start_date, end_date, verbose=verbose)
+        commit_msgs = get_commit_messages_for_file(file_path, start_date, end_date, verbose=verbose, is_latest=is_latest)
         
         # Skip if no meaningful commits
         if not commit_msgs.strip():
@@ -883,7 +1088,7 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False, ai
     print("✅ Entry generation complete")
     return entry
 
-def generate_changelog(mode="incremental", verbose=False, ai_mode=False, ollama_url="http://localhost:11434", ollama_model="gemma2:9b", include_unpublished=False, sort_processing="chapter"):
+def generate_changelog(mode="incremental", verbose=False, ai_mode=False, ollama_url="http://localhost:11434", ollama_model="gemma2:9b", include_unpublished=False, sort_processing="chapter", skip_empty=False, dry_run=False, output_file=CHANGELOG_FILE):
     """Generate changelog entries."""
     if verbose:
         print("🔄 Starting Git data fetch...")
@@ -993,73 +1198,145 @@ def generate_changelog(mode="incremental", verbose=False, ai_mode=False, ollama_
         
         print("=" * 50)
         print(f"🎯 Total periods to process: {len(unique_dates) + (1 if include_unpublished else 0)}")
-        print(f"🤖 AI summaries: {'Current dev changes only' if not ai_mode else 'Disabled for historical periods, enabled for current dev'}")
+        print(f"🤖 AI summaries: {'Enabled for all periods' if ai_mode else 'Disabled for all periods'}")
         print("=" * 50)
         print()
         
-        # Group entries by year
-        entries_by_year = defaultdict(list)
+        # Track periods with and without changes
+        periods_with_changes = 0
+        periods_without_changes = 0
         
-        # Process periods between publication dates
-        for i in range(len(unique_dates) - 1):
-            current_date_key = unique_dates[i]
-            previous_date_key = unique_dates[i + 1]
-            
-            # Get the latest commit from current date for the "published on" date
-            current_commits = commits_by_date[current_date_key]
-            latest_current = max(current_commits, key=lambda x: x[1])  # latest timestamp
-            
-            # Get the earliest commit from previous date as the "since" date
-            previous_commits = commits_by_date[previous_date_key]
-            earliest_previous = min(previous_commits, key=lambda x: x[1])  # earliest timestamp
-            
-            current_date = latest_current[1]
-            previous_date = earliest_previous[1]
-            
-            # Extract year from current_date (the publication date)
-            pub_year = extract_year_from_date(current_date)
-            
-            if verbose:
-                print(f"📅 Processing period {i+1}/{len(unique_dates)}: {format_friendly_date(previous_date)} → {format_friendly_date(current_date)} [{pub_year}]")
-            else:
-                print(f"📅 Processing {pub_year} period {i+1}/{len(unique_dates)}...")
-            # For historical periods, use simple summaries to avoid slow AI processing
-            # Only use AI for the most recent period (current dev changes)
-            historical_ai_mode = False  # Disable AI for historical periods
-            entry = generate_entry(previous_date, current_date, verbose=verbose, is_latest=False, ai_mode=historical_ai_mode, ollama_url=ollama_url, ollama_model=ollama_model, sort_processing=sort_processing)
-            if entry:
-                entries_by_year[pub_year].append(entry)
+        # Collect all entries in memory first, write at the end
+        all_entries = []
+        all_entries.append("# Changelog\n")
+        print("📝 Accumulating changelog entries in memory...")
+        print("  ✅ Added: Header")
         
-        # CRITICAL: Process all unpublished dev changes as one release preparation entry
+        # PRIORITY 1: Process current dev changes FIRST (most important to users)
         if include_unpublished and unique_dates:
             latest_date_key = unique_dates[0]  # Most recent publication date
             latest_commits = commits_by_date[latest_date_key]
             latest_publication = max(latest_commits, key=lambda x: x[1])
             
-            if verbose:
-                print(f"📅 Processing unpublished dev changes: {format_friendly_date(latest_publication[1])} → TODAY")
-            else:
-                print(f"📅 Processing current dev changes...")
+            # Add year header for current dev changes
+            current_dev_year = datetime.now().year
+            year_header = f"## {current_dev_year}\n"
+            print(f"\n📅 === {current_dev_year} ===")
+            all_entries.append(year_header)
+            print(f"  ✅ Added: Year header ({current_dev_year})")
             
-            # Generate entry from last publication to today (no end_date = up to current dev)
-            # This represents all changes being prepared for the next gh-pages release
-            # Use full AI mode for current dev changes
-            entry = generate_entry(latest_publication[1], end_date=None, verbose=verbose, is_latest=True, ai_mode=ai_mode, ollama_url=ollama_url, ollama_model=ollama_model, sort_processing=sort_processing)
+            print("\n" + "=" * 60)
+            print("🚀 CURRENT DEV CHANGES")
+            print("=" * 60)
+            print("📝 Generating summaries...")
+            
+            # Generate entry from last publication to today
+            entry = generate_aggregated_entry(
+                latest_publication[1], 
+                end_date=None, 
+                is_latest=True, 
+                ai_mode=ai_mode, 
+                ollama_url=ollama_url, 
+                ollama_model=ollama_model,
+                verbose=verbose,
+                sort_processing=sort_processing
+            )
+            
             if entry:
-                current_year = datetime.now().year
-                entries_by_year[current_year].append(entry)
+                # Show the generated content
+                print(f"\n📋 Generated changelog entry:")
+                print(entry)
+                print("\n✅ Current dev changes entry completed")
+                
+                # Collect entry in memory
+                all_entries.append(entry)
+                periods_with_changes += 1
+            else:
+                periods_without_changes += 1
+                print("⚠️ No changes found in current dev")
         
-        if not entries_by_year:
-            return "_No updates found._"
+        # PRIORITY 2: Process historical periods (day-level aggregation)
+        if len(unique_dates) > 1:
+            print("\n" + "=" * 60)
+            print("📚 HISTORICAL RELEASES")
+            print("=" * 60)
         
-        # Build output with year headers, newest years first
-        output_sections = []
-        for year in sorted(entries_by_year.keys(), reverse=True):
-            year_header = f"## {year} Updates"
-            year_entries = "\n\n".join(entries_by_year[year])
-            output_sections.append(f"{year_header}\n\n{year_entries}")
+        current_year = datetime.now().year  # Start with current year (already written)
+        for i in range(len(unique_dates) - 1):
+            current_date_key = unique_dates[i]
+            previous_date_key = unique_dates[i + 1]
+            
+            # Get all commits for this day (day-level aggregation)
+            current_commits = commits_by_date[current_date_key]
+            latest_current = max(current_commits, key=lambda x: x[1])
+            earliest_current = min(current_commits, key=lambda x: x[1])
+            
+            # Get previous day boundary
+            previous_commits = commits_by_date[previous_date_key]
+            earliest_previous = min(previous_commits, key=lambda x: x[1])
+            
+            # Use the entire day range for this release
+            start_date = earliest_previous[1]
+            end_date = latest_current[1]  # Latest commit of the day
+            
+            # Check if we need a year header
+            entry_year = extract_year_from_date(end_date)
+            if current_year != entry_year:
+                current_year = entry_year
+                year_header = f"## {current_year}\n"
+                print(f"\n📅 === {current_year} ===")
+                all_entries.append(year_header)
+            
+            # Skip empty check
+            if skip_empty:
+                test_changes = get_changes_in_dev_between(start_date, end_date, verbose=False)
+                if not test_changes.strip():
+                    periods_without_changes += 1
+                    print(f"⏭️ {format_friendly_date(end_date)[:12]} - No changes")
+                    continue
+            
+            # Generate aggregated entry for this day
+            entry = generate_aggregated_entry(
+                start_date, 
+                end_date, 
+                is_latest=False, 
+                ai_mode=ai_mode, 
+                ollama_url=ollama_url, 
+                ollama_model=ollama_model,
+                verbose=verbose,
+                sort_processing=sort_processing
+            )
+            
+            if entry:
+                # Show the generated content
+                print(f"\n📋 Generated changelog entry:")
+                print(f"{entry}")
+                print(f"\n✅ {format_friendly_date(end_date)[:12]} entry completed")
+                
+                # Collect entry in memory
+                all_entries.append(entry)
+                periods_with_changes += 1
+            else:
+                periods_without_changes += 1
+                print(f"⚠️ {format_friendly_date(end_date)[:12]} - No changes")
         
-        return "\n\n---\n\n".join(output_sections) + "\n"
+        # Final summary
+        print("\n" + "=" * 50)
+        print("📊 CHANGELOG GENERATION SUMMARY")
+        print("=" * 50)
+        print(f"🎯 Total periods processed: {periods_with_changes + periods_without_changes}")
+        print(f"✅ Periods with changes: {periods_with_changes}")
+        print(f"⏭️ Periods skipped (empty): {periods_without_changes}")
+        print("=" * 50)
+        
+        # Write all collected entries to file at the end
+        if not dry_run and all_entries:
+            final_content = "\n\n".join(all_entries).strip() + "\n"
+            with open(output_file, 'w') as f:
+                f.write(final_content)
+            print("✅ Done")
+        
+        return f"Changelog generated successfully with {periods_with_changes} entries."
         
     else:
         if verbose:
@@ -1073,7 +1350,7 @@ def generate_changelog(mode="incremental", verbose=False, ai_mode=False, ollama_
         else:
             print(f"📅 Processing changes since: {format_friendly_date(latest_date) if latest_date else 'beginning'}")
             
-        entry = generate_entry(latest_date, end_date=end_date, verbose=verbose, is_latest=True, ai_mode=ai_mode, ollama_url=ollama_url, ollama_model=ollama_model, sort_processing=sort_processing)
+        entry = generate_aggregated_entry(latest_date, end_date=end_date, is_latest=True, ai_mode=ai_mode, ollama_url=ollama_url, ollama_model=ollama_model, verbose=verbose, sort_processing=sort_processing)
         if not entry:
             return "_No updates found._"
         
@@ -1101,7 +1378,10 @@ def parse_arguments():
     parser.add_argument("--ollama-model", default="gemma2:9b", help="Ollama model to use for AI summaries.")
     
     # Sorting options
-    parser.add_argument("--sort", choices=["chapter", "impact"], default="impact", help="Sort order: 'impact' sorts by change volume (default), 'chapter' maintains textbook sequence.")
+    parser.add_argument("--sort", choices=["chapter", "impact"], default="chapter", help="Sort order: 'chapter' maintains textbook sequence (default), 'impact' sorts by change volume.")
+    
+    # Processing options
+    parser.add_argument("--skip-empty", action="store_true", help="Skip periods with no changes (faster processing, less verbose output).")
 
     
     return parser.parse_args()
@@ -1158,7 +1438,7 @@ def main():
         # --update: Add latest changes since last publication to the top
         include_unpublished = True
         
-        new_entry = generate_changelog(mode=mode, verbose=args.verbose, ai_mode=args.ai, ollama_url=args.ollama_url, ollama_model=args.ollama_model, include_unpublished=include_unpublished, sort_processing=args.sort)
+        new_entry = generate_changelog(mode=mode, verbose=args.verbose, ai_mode=args.ai, ollama_url=args.ollama_url, ollama_model=args.ollama_model, include_unpublished=include_unpublished, sort_processing=args.sort, skip_empty=args.skip_empty, dry_run=args.dry_run, output_file=args.output)
 
         if args.dry_run:
             print("🧪 DRY RUN OUTPUT ONLY:\n")
@@ -1204,7 +1484,7 @@ def main():
             with open(args.output, "w", encoding="utf-8") as f:
                 f.write(updated_content.strip() + "\n")
 
-            print(f"\n✅ Changelog written to {args.output}")
+            print("✅ Done")
             
     except KeyboardInterrupt:
         print(f"\n⚠️ Process interrupted by user")
