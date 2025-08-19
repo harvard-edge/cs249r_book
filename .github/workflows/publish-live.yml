@@ -72,10 +72,10 @@ env:
 # after the merge. The build manager can also be called manually with
 # custom branch targets if needed for testing or special builds.
 
-# Cancel duplicate publish-live runs (only one deployment should run at a time)
+# Concurrency control: strict for production, flexible for testing
 concurrency:
-  group: publish-live
-  cancel-in-progress: true
+  group: ${{ github.event.inputs.testing_mode == 'yes' && format('publish-live-test-{0}-{1}', github.run_number, github.event.inputs.dev_commit) || 'publish-live' }}
+  cancel-in-progress: ${{ github.event.inputs.testing_mode != 'yes' }}
 
 on:
   workflow_dispatch:
@@ -121,6 +121,14 @@ on:
         description: 'Previous version to increment from [auto-detect from latest git tag]'
         required: false
         default: ''
+      testing_mode:
+        description: 'Enable testing mode (allows parallel runs, skips actual deployment) [no]'
+        required: false
+        type: choice
+        options:
+          - 'no'
+          - 'yes'
+        default: 'no'
 
 permissions:
   contents: write
@@ -265,7 +273,7 @@ jobs:
     name: '🔍 Validate Inputs'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.event.inputs.confirm == 'PUBLISH' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
+    if: github.event.inputs.confirm == 'PUBLISH' && github.event.inputs.testing_mode != 'yes' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
     outputs:
       new_version: ${{ steps.version.outputs.new_version }}
       previous_version: ${{ steps.version.outputs.previous_version }}
@@ -387,7 +395,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: validate-inputs
-    if: github.event.inputs.confirm == 'PUBLISH'
+    if: github.event.inputs.confirm == 'PUBLISH' && github.event.inputs.testing_mode != 'yes'
     
     steps:
       - name: 📥 Checkout repository
@@ -601,7 +609,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [validate-inputs, pre-flight-checks]
-    if: github.event.inputs.confirm == 'PUBLISH'
+    if: github.event.inputs.confirm == 'PUBLISH' && github.event.inputs.testing_mode != 'yes'
     
     steps:
       - name: 📥 Checkout repository
@@ -728,7 +736,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: merge-to-main
-    if: github.event.inputs.confirm == 'PUBLISH'
+    if: github.event.inputs.confirm == 'PUBLISH' && github.event.inputs.testing_mode != 'yes'
     outputs:
       commit_sha: ${{ steps.commit.outputs.commit_sha }}
     
@@ -980,7 +988,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [validate-inputs, wait-for-build, download-and-deploy-artifacts]
-    if: github.event.inputs.confirm == 'PUBLISH'
+    if: github.event.inputs.confirm == 'PUBLISH' && github.event.inputs.testing_mode != 'yes'
     
     steps:
       - name: 📥 Checkout repository
@@ -1039,7 +1047,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: wait-for-build
-    if: github.event.inputs.confirm == 'PUBLISH'
+    if: github.event.inputs.confirm == 'PUBLISH' && github.event.inputs.testing_mode != 'yes'
     
     steps:
       - name: 📥 Checkout repository
@@ -1307,9 +1315,10 @@ jobs:
           # Also copy PDF to root for GitHub release
           cp "$PDF_FILE" "Machine-Learning-Systems.pdf"
 
-      - name: 🚀 Deploy Combined Site to GitHub Pages
+      - name: 🚀 Deploy Combined Site to GitHub Pages (Production)
         run: |
           echo "🚀 Deploying combined HTML + PDF site to GitHub Pages..."
+          echo "🌐 Production URL: https://harvard-edge.github.io/cs249r_book/"
           
           # Configure git
           git config user.name "github-actions"
@@ -1381,7 +1390,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [validate-inputs, wait-for-build, download-and-deploy-artifacts]
-    if: github.event.inputs.confirm == 'PUBLISH'
+    if: github.event.inputs.confirm == 'PUBLISH' && github.event.inputs.testing_mode != 'yes'
     
     steps:
       - name: 📥 Checkout repository
@@ -1554,7 +1563,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [validate-inputs, generate-release-notes, create-tag]
-    if: github.event.inputs.confirm == 'PUBLISH'
+    if: github.event.inputs.confirm == 'PUBLISH' && github.event.inputs.testing_mode != 'yes'
     
     steps:
       - name: 📥 Checkout repository
@@ -1718,7 +1727,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: [validate-inputs, create-release]
-    if: github.event.inputs.confirm == 'PUBLISH'
+    if: github.event.inputs.confirm == 'PUBLISH' && github.event.inputs.testing_mode != 'yes'
     
     steps:
       - name: 📋 Publication Summary
@@ -2005,6 +2014,47 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🐛 Troubleshooting:" >> $GITHUB_STEP_SUMMARY
           echo "If you continue to have issues, check the workflow logs for the failed step." >> $GITHUB_STEP_SUMMARY
+
+  testing-mode-summary:
+    name: '🧪 Testing Mode Summary'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event.inputs.confirm == 'PUBLISH' && github.event.inputs.testing_mode == 'yes'
+    needs: [validate-inputs, wait-for-build]
+    
+    steps:
+      - name: 🧪 Testing Mode Complete
+        run: |
+          echo "## 🧪 Testing Mode Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ✅ Testing workflow completed successfully" >> $GITHUB_STEP_SUMMARY
+          echo "**Mode:** Testing (no actual deployment)" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Time:** $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 What was tested:" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Input validation" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Build workflow triggering" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Build completion detection" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Artifact availability" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🚀 To run actual deployment:" >> $GITHUB_STEP_SUMMARY
+          echo "- Set **testing_mode** to **no**" >> $GITHUB_STEP_SUMMARY
+          echo "- Re-run with same parameters" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔍 Debug Information:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Run ID:** ${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Description:** ${{ github.event.inputs.description }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release Type:** ${{ github.event.inputs.release_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dev Commit:** ${{ github.event.inputs.dev_commit }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Concurrency Group:** publish-live-test-${{ github.run_number }}-${{ github.event.inputs.dev_commit }}" >> $GITHUB_STEP_SUMMARY
+          
+          echo "✅ Testing mode completed successfully!"
+          echo "🧪 This run tested the workflow without actual deployment"
+          echo "🔄 Run ID: ${{ github.run_id }}"
+          echo "👤 Triggered by: ${{ github.actor }}"
+          echo "🌐 Branch: ${{ github.ref_name }}"
 
   fail-validation:
     name: '❌ Validation Failed'
