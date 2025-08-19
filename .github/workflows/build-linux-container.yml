@@ -85,9 +85,9 @@ on:
 
 env:
   # Container Registry Configuration (configurable via inputs)
-  REGISTRY: ${{ inputs.container_registry || 'ghcr.io' }}
-  IMAGE_NAME: ${{ github.repository }}/${{ inputs.container_name || 'quarto-linux' }}
-  CONTAINER_TAG: ${{ inputs.container_tag || 'latest' }}
+  REGISTRY: ${{ (github.event_name == 'workflow_dispatch' && inputs.container_registry) || 'ghcr.io' }}
+  IMAGE_NAME: ${{ github.repository }}/${{ (github.event_name == 'workflow_dispatch' && inputs.container_name) || 'quarto-linux' }}
+  CONTAINER_TAG: ${{ (github.event_name == 'workflow_dispatch' && inputs.container_tag) || 'latest' }}
   
   # Container Build Configuration  
   PLATFORM: linux/amd64
@@ -147,8 +147,45 @@ jobs:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
+      - name: 🧹 Free up disk space
+        run: |
+          echo "🧹 Freeing up disk space for large container build..."
+          echo "📊 Disk space before cleanup:"
+          df -h /
+          
+          # Remove unnecessary packages and files
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker system prune -af
+          
+          echo "📊 Disk space after cleanup:"
+          df -h /
+          echo "✅ Disk cleanup complete"
+
       - name: 🐳 Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+          driver-opts: |
+            network=host
+          buildkitd-flags: |
+            --allow-insecure-entitlement security.insecure
+            --allow-insecure-entitlement network.host
+          buildkitd-config-inline: |
+            [worker.oci]
+              max-parallelism = 1
+            [registry."docker.io"]
+              mirrors = ["mirror.gcr.io"]
+
+      - name: 🔍 Verify Buildx Builder
+        run: |
+          echo "🔍 Checking buildx builder status..."
+          docker buildx ls
+          echo "🔍 Inspecting builder..."
+          docker buildx inspect --bootstrap
+          echo "✅ Buildx builder ready"
 
       - name: 🔐 Log in to Container Registry
         id: login
@@ -235,10 +272,13 @@ jobs:
           push: true  # Also push to registry
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          no-cache: ${{ inputs.no_cache }}  # Use cache unless explicitly disabled
+          no-cache: ${{ github.event_name == 'workflow_dispatch' && inputs.no_cache || false }}  # Use cache unless explicitly disabled
           platforms: ${{ env.PLATFORM }}
           provenance: false  # Disable provenance for better compatibility
           sbom: false  # Disable SBOM for better compatibility
+          cache-from: ${{ (github.event_name != 'workflow_dispatch' || !inputs.no_cache) && 'type=gha' || '' }}
+          cache-to: ${{ (github.event_name != 'workflow_dispatch' || !inputs.no_cache) && 'type=gha,mode=max' || '' }}
+          outputs: type=docker
 
       - name: Build Complete
         run: |
