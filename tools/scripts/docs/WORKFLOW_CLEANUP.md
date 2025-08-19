@@ -46,7 +46,7 @@ python3 tools/scripts/cleanup_workflow_runs.py --summary
 python3 tools/scripts/cleanup_workflow_runs.py --dry-run --keep 5
 
 # Preview cleanup for specific workflow
-python3 tools/scripts/cleanup_workflow_runs.py --dry-run --workflow "quarto-build.yml" --keep 3
+python3 tools/scripts/cleanup_workflow_runs.py --dry-run --workflow "quarto-build-container.yml" --keep 3
 ```
 
 ### Actual Cleanup
@@ -55,7 +55,7 @@ python3 tools/scripts/cleanup_workflow_runs.py --dry-run --workflow "quarto-buil
 python3 tools/scripts/cleanup_workflow_runs.py --keep 5
 
 # Clean specific workflow only, keep 3 runs
-python3 tools/scripts/cleanup_workflow_runs.py --workflow "quarto-build.yml" --keep 3
+python3 tools/scripts/cleanup_workflow_runs.py --workflow "quarto-build-container.yml" --keep 3
 
 # Keep more runs (10 per workflow)
 python3 tools/scripts/cleanup_workflow_runs.py --keep 10
@@ -76,7 +76,7 @@ export GITHUB_REPOSITORY="owner/repo"
 You can target specific workflows by name or filename:
 ```bash
 # By workflow filename
-python3 tools/scripts/cleanup_workflow_runs.py --workflow "quarto-build.yml" --keep 3
+python3 tools/scripts/cleanup_workflow_runs.py --workflow "quarto-build-container.yml" --keep 3
 
 # By workflow name
 python3 tools/scripts/cleanup_workflow_runs.py --workflow "Quarto Build" --keep 3
