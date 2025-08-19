@@ -815,7 +815,7 @@ jobs:
               QUARTO_CHECK=$(curl -s \
                 -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
                 -H "Accept: application/vnd.github.v3+json" \
-                "https://api.github.com/repos/${{ github.repository }}/actions/workflows/quarto-build.yml/runs?head_sha=$COMMIT_SHA&per_page=1")
+                "https://api.github.com/repos/${{ github.repository }}/actions/workflows/quarto-build-container.yml/runs?head_sha=$COMMIT_SHA&per_page=1")
               
               QUARTO_COUNT=$(echo "$QUARTO_CHECK" | jq -r '.total_count')
               
@@ -827,46 +827,50 @@ jobs:
               fi
             fi
             
-            # Check for our specific quarto-build status checks
-            HTML_STATUS=$(echo "$STATUSES" | jq -r '.[] | select(.context == "ci/quarto-build-ubuntu-latest-html") | .state' | head -1)
-            PDF_STATUS=$(echo "$STATUSES" | jq -r '.[] | select(.context == "ci/quarto-build-ubuntu-latest-pdf") | .state' | head -1)
+            # Check workflow run completion directly (container workflow doesn't create status checks)
+            echo "🔍 Checking quarto-build-container workflow completion..."
+            WORKFLOW_RUNS=$(curl -s \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ github.repository }}/actions/workflows/quarto-build-container.yml/runs?head_sha=$COMMIT_SHA&per_page=5")
             
-            echo "📋 Expected build status checks:"
-            echo "  - HTML Build (Linux): ${HTML_STATUS:-pending}"
-            echo "  - PDF Build (Linux): ${PDF_STATUS:-pending}"
+            # Get the most recent workflow run for this commit
+            LATEST_RUN=$(echo "$WORKFLOW_RUNS" | jq -r '.workflow_runs[0]')
+            RUN_STATUS=$(echo "$LATEST_RUN" | jq -r '.status')
+            RUN_CONCLUSION=$(echo "$LATEST_RUN" | jq -r '.conclusion')
+            RUN_ID=$(echo "$LATEST_RUN" | jq -r '.id')
             
-            # Show detailed status for quarto-build checks specifically
-            echo "📋 Quarto build status checks:"
-            echo "$STATUSES" | jq -r '.[] | select(.context | startswith("ci/quarto-build")) | "  - \(.context): \(.state) - \(.description)"' | head -4
+            echo "📋 Workflow run status:"
+            echo "  - Run ID: ${RUN_ID:-none}"
+            echo "  - Status: ${RUN_STATUS:-none}"
+            echo "  - Conclusion: ${RUN_CONCLUSION:-none}"
             
-            # Check if all required builds are successful
-            if [ "$HTML_STATUS" = "success" ] && [ "$PDF_STATUS" = "success" ]; then
-              echo "✅ All production builds completed successfully!"
-              echo "📊 HTML Build: ✅ Success"
-              echo "📊 PDF Build: ✅ Success"
-              echo "🔗 View commit status: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
-              break
-            fi
-            
-            # Check for any failures, cancellations, or errors
-            if [ "$HTML_STATUS" = "failure" ] || [ "$PDF_STATUS" = "failure" ]; then
-              echo "❌ Production build failed!"
-              echo "📊 HTML Build: ${HTML_STATUS:-pending}"
-              echo "📊 PDF Build: ${PDF_STATUS:-pending}"
-              echo "🔗 View commit status: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
-              exit 1
-            elif [ "$HTML_STATUS" = "cancelled" ] || [ "$PDF_STATUS" = "cancelled" ]; then
-              echo "🚫 Production build was cancelled!"
-              echo "📊 HTML Build: ${HTML_STATUS:-pending}"
-              echo "📊 PDF Build: ${PDF_STATUS:-pending}"
-              echo "🔗 View commit status: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
-              exit 1
-            elif [ "$HTML_STATUS" = "error" ] || [ "$PDF_STATUS" = "error" ]; then
-              echo "⚠️ Production build encountered an error!"
-              echo "📊 HTML Build: ${HTML_STATUS:-pending}"
-              echo "📊 PDF Build: ${PDF_STATUS:-pending}"
-              echo "🔗 View commit status: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
-              exit 1
+            # Check if workflow run is completed
+            if [ "$RUN_STATUS" = "completed" ]; then
+              if [ "$RUN_CONCLUSION" = "success" ]; then
+                echo "✅ Production build completed successfully!"
+                echo "📊 Workflow Status: ✅ Success"
+                echo "🔗 View workflow run: https://github.com/${{ github.repository }}/actions/runs/$RUN_ID"
+                break
+              elif [ "$RUN_CONCLUSION" = "failure" ]; then
+                echo "❌ Production build failed!"
+                echo "📊 Workflow Conclusion: ❌ Failure"
+                echo "🔗 View workflow run: https://github.com/${{ github.repository }}/actions/runs/$RUN_ID"
+                exit 1
+              elif [ "$RUN_CONCLUSION" = "cancelled" ]; then
+                echo "🚫 Production build was cancelled!"
+                echo "📊 Workflow Conclusion: 🚫 Cancelled"
+                echo "🔗 View workflow run: https://github.com/${{ github.repository }}/actions/runs/$RUN_ID"
+                exit 1
+              else
+                echo "⚠️ Production build completed with unexpected conclusion: $RUN_CONCLUSION"
+                echo "🔗 View workflow run: https://github.com/${{ github.repository }}/actions/runs/$RUN_ID"
+                exit 1
+              fi
+            elif [ "$RUN_STATUS" = "in_progress" ] || [ "$RUN_STATUS" = "queued" ]; then
+              echo "⏳ Build is still running (status: $RUN_STATUS)..."
+            else
+              echo "⚠️ Unexpected workflow status: $RUN_STATUS"
             fi
             
             # Show current status with time elapsed
@@ -949,24 +953,27 @@ jobs:
           done
           
           # If we get here, check final status after timeout
-          if [ "$HTML_STATUS" != "success" ] || [ "$PDF_STATUS" != "success" ]; then
-            echo "⏰ Build monitoring timed out after 3 hours"
-            echo "📊 Final status: HTML=$HTML_STATUS, PDF=$PDF_STATUS"
-            
-            # Provide specific guidance based on final state
-            if [ "$HTML_STATUS" = "cancelled" ] || [ "$PDF_STATUS" = "cancelled" ]; then
-              echo "🚫 Build was cancelled - no release will be created"
-            elif [ "$HTML_STATUS" = "failure" ] || [ "$PDF_STATUS" = "failure" ]; then
-              echo "❌ Build failed - check logs for errors"
-            elif [ "$HTML_STATUS" = "error" ] || [ "$PDF_STATUS" = "error" ]; then
-              echo "⚠️ Build encountered an error - check GitHub Actions logs"
-            else
-              echo "⏳ Build may still be running - check manually"
-            fi
-            
-            echo "🔗 Check status: https://github.com/${{ github.repository }}/commit/$COMMIT_SHA"
-            exit 1
+          echo "⏰ Build monitoring timed out after 3 hours"
+          echo "📊 Final workflow status: $RUN_STATUS"
+          echo "📊 Final workflow conclusion: $RUN_CONCLUSION"
+          
+          # Provide specific guidance based on final state
+          if [ "$RUN_CONCLUSION" = "cancelled" ]; then
+            echo "🚫 Build was cancelled - no release will be created"
+          elif [ "$RUN_CONCLUSION" = "failure" ]; then
+            echo "❌ Build failed - check logs for errors"
+          elif [ "$RUN_STATUS" = "in_progress" ] || [ "$RUN_STATUS" = "queued" ]; then
+            echo "⏳ Build is still running - check manually or increase timeout"
+          else
+            echo "⚠️ Build status unclear - check manually"
           fi
+          
+          if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ]; then
+            echo "🔗 Check workflow run: https://github.com/${{ github.repository }}/actions/runs/$RUN_ID"
+          else
+            echo "🔗 Check workflows: https://github.com/${{ github.repository }}/actions"
+          fi
+          exit 1
 
   create-tag:
     name: '🏷️ Create Release Tag (Final Step)'
