@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 
 # ==============================================================================
-# SVG Cleanup Script
+# SVG Cleanup Script (DEPRECATED - Use clean_svgs.py instead)
 # ==============================================================================
+# NOTICE: This bash script has been replaced by clean_svgs.py for cross-platform
+# compatibility. The Python version works on Windows, macOS, and Linux.
+# 
 # Removes control characters from SVG files that can cause rendering issues
 # in browsers and other tools. Control characters are often introduced by
 # LaTeX -> SVG conversion tools.
