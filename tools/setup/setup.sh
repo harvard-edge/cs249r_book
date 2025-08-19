@@ -9,7 +9,7 @@ echo "🚀 Setting up MLSysBook development environment..."
 
 # Check if Python is installed
 if ! command -v python3 &> /dev/null; then
-    echo "❌ Python 3 is required but not installed. Please install Python 3.8+ first."
+    echo "❌ Python 3 is required but not installed. Please install Python 3.9+ first."
     exit 1
 fi
 
@@ -33,7 +33,7 @@ pip install --upgrade pip
 
 # Install dependencies
 echo "📚 Installing dependencies..."
-pip install -r requirements.txt
+pip install -r tools/dependencies/requirements.txt
 
 # Install pre-commit hooks
 echo "🔗 Installing pre-commit hooks..."
