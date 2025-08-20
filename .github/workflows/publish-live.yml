@@ -846,173 +846,28 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 📦 Download HTML, PDF & EPUB Artifacts
+      - name: 📦 Download HTML Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.call-production-build.outputs.linux_html_artifact || 'main-html-linux' }}
+          path: ./html-temp
+
+      - name: 📦 Download PDF Artifacts  
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.call-production-build.outputs.linux_pdf_artifact || 'main-pdf-linux' }}
+          path: ./pdf-temp
+
+      - name: 📦 Download EPUB Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.call-production-build.outputs.linux_epub_artifact || 'main-epub-linux' }}
+          path: ./epub-temp
+        continue-on-error: true
+
+      - name: 📋 Verify Downloaded Artifacts
         run: |
-          echo "📦 Downloading HTML, PDF, and EPUB artifacts from successful builds..."
-          echo "🔍 Getting artifact manifest from quarto-build-container workflow..."
-          
-          # Get artifacts from the current workflow run (since we use workflow_call)
-          CURRENT_RUN_ID="${{ github.run_id }}"
-          echo "📌 Looking for artifacts in current workflow run: $CURRENT_RUN_ID"
-          
-          LATEST_BUILD="$CURRENT_RUN_ID"
-          echo "📊 Using current workflow run for artifacts: $LATEST_BUILD"
-          
-          # Download artifact manifest first
-          echo "📥 Downloading artifact manifest..."
-          ARTIFACTS_RESPONSE=$(curl -s \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/runs/$LATEST_BUILD/artifacts")
-          
-          MANIFEST_ARTIFACT=$(echo "$ARTIFACTS_RESPONSE" | jq -r '.artifacts[] | select(.name == "artifact-manifest") | .id' | head -1)
-          
-          if [ "$MANIFEST_ARTIFACT" != "null" ] && [ -n "$MANIFEST_ARTIFACT" ]; then
-            echo "📋 Found artifact manifest, downloading..."
-            curl -L \
-              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              -H "Accept: application/vnd.github.v3+json" \
-              "https://api.github.com/repos/${{ github.repository }}/actions/runs/$LATEST_BUILD/artifacts/$MANIFEST_ARTIFACT/zip" \
-              -o manifest.zip
-            
-            unzip -q manifest.zip
-            
-            if [ -f "artifact-manifest.json" ]; then
-              echo "📄 Artifact manifest contents:"
-              cat artifact-manifest.json
-              
-              HTML_ARTIFACT_NAME=$(jq -r '.html_artifact_name' artifact-manifest.json)
-              PDF_ARTIFACT_NAME=$(jq -r '.pdf_artifact_name' artifact-manifest.json)
-            else
-              echo "⚠️ Manifest file not found, using new defaults"
-              HTML_ARTIFACT_NAME="main-html-linux"
-              PDF_ARTIFACT_NAME="main-pdf-linux"
-            fi
-          else
-            echo "⚠️ No artifact manifest found, using new default names"
-            HTML_ARTIFACT_NAME="main-html-linux"
-            PDF_ARTIFACT_NAME="main-pdf-linux"
-          fi
-          
-          echo "📋 Using artifact names:"
-          echo "  - HTML: $HTML_ARTIFACT_NAME"
-          echo "  - PDF: $PDF_ARTIFACT_NAME"
-          
-          # Download artifacts from the latest build
-          ARTIFACTS_RESPONSE=$(curl -s \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/runs/$LATEST_BUILD/artifacts")
-          
-          echo "📊 Available artifacts:"
-          echo "$ARTIFACTS_RESPONSE" | jq -r '.artifacts[] | "  - \(.name) (ID: \(.id))"'
-          
-          # Find the HTML artifact using manifest
-          LINUX_HTML_ARTIFACT=$(echo "$ARTIFACTS_RESPONSE" | jq -r --arg name "$HTML_ARTIFACT_NAME" '.artifacts[] | select(.name == $name) | .id' | head -1)
-          
-          if [ "$LINUX_HTML_ARTIFACT" = "null" ] || [ -z "$LINUX_HTML_ARTIFACT" ]; then
-            echo "❌ HTML artifact '$HTML_ARTIFACT_NAME' not found!"
-            exit 1
-          fi
-          
-          echo "✅ Found HTML artifact: $HTML_ARTIFACT_NAME (ID: $LINUX_HTML_ARTIFACT)"
-          
-          # Find the PDF artifact using manifest
-          LINUX_PDF_ARTIFACT=$(echo "$ARTIFACTS_RESPONSE" | jq -r --arg name "$PDF_ARTIFACT_NAME" '.artifacts[] | select(.name == $name) | .id' | head -1)
-          
-          # Find EPUB artifact (look for main-epub-linux pattern)
-          EPUB_ARTIFACT_NAME="main-epub-linux"
-          LINUX_EPUB_ARTIFACT=$(echo "$ARTIFACTS_RESPONSE" | jq -r --arg name "$EPUB_ARTIFACT_NAME" '.artifacts[] | select(.name == $name) | .id' | head -1)
-          
-          if [ "$LINUX_PDF_ARTIFACT" = "null" ] || [ -z "$LINUX_PDF_ARTIFACT" ]; then
-            echo "❌ PDF artifact '$PDF_ARTIFACT_NAME' not found!"
-            echo "🔍 Looking for any PDF artifact as fallback..."
-            
-            # Fallback: look for any PDF artifact
-            PDF_ARTIFACT=$(echo "$ARTIFACTS_RESPONSE" | jq -r '.artifacts[] | select(.name | contains("pdf")) | .id' | head -1)
-            
-            if [ "$PDF_ARTIFACT" = "null" ] || [ -z "$PDF_ARTIFACT" ]; then
-              echo "❌ No PDF artifact found in build $LATEST_BUILD"
-              exit 1
-            fi
-            
-            echo "⚠️ Using fallback PDF artifact: $PDF_ARTIFACT"
-            LINUX_PDF_ARTIFACT=$PDF_ARTIFACT
-          else
-            echo "✅ Found PDF artifact: $PDF_ARTIFACT_NAME (ID: $LINUX_PDF_ARTIFACT)"
-          fi
-          
-          # Check EPUB artifact
-          if [ "$LINUX_EPUB_ARTIFACT" = "null" ] || [ -z "$LINUX_EPUB_ARTIFACT" ]; then
-            echo "⚠️ EPUB artifact '$EPUB_ARTIFACT_NAME' not found!"
-            echo "🔍 Looking for any EPUB artifact as fallback..."
-            
-            # Fallback: look for any EPUB artifact
-            EPUB_ARTIFACT=$(echo "$ARTIFACTS_RESPONSE" | jq -r '.artifacts[] | select(.name | contains("epub")) | .id' | head -1)
-            
-            if [ "$EPUB_ARTIFACT" = "null" ] || [ -z "$EPUB_ARTIFACT" ]; then
-              echo "⚠️ No EPUB artifact found in build - EPUB will be skipped"
-              LINUX_EPUB_ARTIFACT=""
-            else
-              echo "⚠️ Using fallback EPUB artifact: $EPUB_ARTIFACT"
-              LINUX_EPUB_ARTIFACT=$EPUB_ARTIFACT
-            fi
-          else
-            echo "✅ Found EPUB artifact: $EPUB_ARTIFACT_NAME (ID: $LINUX_EPUB_ARTIFACT)"
-          fi
-          
-          # Download HTML artifact
-          echo "📥 Downloading HTML artifact..."
-          curl -L \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/runs/$LATEST_BUILD/artifacts/$LINUX_HTML_ARTIFACT/zip" \
-            -o html-artifact.zip
-          
-          # Download PDF artifact
-          echo "📥 Downloading PDF artifact..."
-          curl -L \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/runs/$LATEST_BUILD/artifacts/$LINUX_PDF_ARTIFACT/zip" \
-            -o pdf-artifact.zip
-          
-          # Download EPUB artifact if available
-          if [ -n "$LINUX_EPUB_ARTIFACT" ] && [ "$LINUX_EPUB_ARTIFACT" != "null" ]; then
-            echo "📥 Downloading EPUB artifact..."
-            curl -L \
-              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              -H "Accept: application/vnd.github.v3+json" \
-              "https://api.github.com/repos/${{ github.repository }}/actions/runs/$LATEST_BUILD/artifacts/$LINUX_EPUB_ARTIFACT/zip" \
-              -o epub-artifact.zip
-          else
-            echo "⚠️ Skipping EPUB artifact download (not available)"
-          fi
-          
-          # Extract HTML artifact
-          echo "📦 Extracting HTML artifact..."
-          mkdir -p html-temp
-          cd html-temp
-          unzip -q ../html-artifact.zip
-          cd ..
-          
-          # Extract PDF artifact
-          echo "📦 Extracting PDF artifact..."
-          mkdir -p pdf-temp
-          cd pdf-temp
-          unzip -q ../pdf-artifact.zip
-          cd ..
-          
-          # Extract EPUB artifact if available
-          if [ -f "epub-artifact.zip" ]; then
-            echo "📦 Extracting EPUB artifact..."
-            mkdir -p epub-temp
-            cd epub-temp
-            unzip -q ../epub-artifact.zip
-            cd ..
-          else
-            echo "⚠️ No EPUB artifact to extract"
-          fi
+          echo "📦 Verifying downloaded artifacts..."
           
           # Find HTML build directory
           HTML_BUILD_DIR=$(find html-temp -name "html" -type d | head -1)
