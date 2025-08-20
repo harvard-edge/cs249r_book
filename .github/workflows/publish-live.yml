@@ -846,22 +846,55 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: 🔍 Validate API Contract
+        run: |
+          echo "🔍 Validating artifact names from API..."
+          
+          HTML_ARTIFACT="${{ needs.call-production-build.outputs.linux_html_artifact }}"
+          PDF_ARTIFACT="${{ needs.call-production-build.outputs.linux_pdf_artifact }}"
+          EPUB_ARTIFACT="${{ needs.call-production-build.outputs.linux_epub_artifact }}"
+          
+          echo "📄 HTML artifact name: '$HTML_ARTIFACT'"
+          echo "📑 PDF artifact name: '$PDF_ARTIFACT'"
+          echo "📚 EPUB artifact name: '$EPUB_ARTIFACT'"
+          
+          # Fail explicitly if API didn't provide artifact names
+          if [ -z "$HTML_ARTIFACT" ]; then
+            echo "❌ CRITICAL: HTML artifact name not provided by build workflow API!"
+            echo "🔧 This indicates the workflow output contract is broken."
+            exit 1
+          fi
+          
+          if [ -z "$PDF_ARTIFACT" ]; then
+            echo "❌ CRITICAL: PDF artifact name not provided by build workflow API!"
+            echo "🔧 This indicates the workflow output contract is broken."
+            exit 1
+          fi
+          
+          if [ -z "$EPUB_ARTIFACT" ]; then
+            echo "❌ CRITICAL: EPUB artifact name not provided by build workflow API!"
+            echo "🔧 This indicates the workflow output contract is broken."
+            exit 1
+          fi
+          
+          echo "✅ API contract validated - all artifact names provided"
+
       - name: 📦 Download HTML Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: ${{ needs.call-production-build.outputs.linux_html_artifact || 'main-html-linux' }}
+          name: ${{ needs.call-production-build.outputs.linux_html_artifact }}
           path: ./html-temp
 
       - name: 📦 Download PDF Artifacts  
         uses: actions/download-artifact@v4
         with:
-          name: ${{ needs.call-production-build.outputs.linux_pdf_artifact || 'main-pdf-linux' }}
+          name: ${{ needs.call-production-build.outputs.linux_pdf_artifact }}
           path: ./pdf-temp
 
       - name: 📦 Download EPUB Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: ${{ needs.call-production-build.outputs.linux_epub_artifact || 'main-epub-linux' }}
+          name: ${{ needs.call-production-build.outputs.linux_epub_artifact }}
           path: ./epub-temp
         continue-on-error: true
 
@@ -921,19 +954,39 @@ jobs:
           # Copy HTML content
           cp -r "$HTML_BUILD_DIR"/* combined-site/
           
-          # Create assets directory and copy PDF
+          # Create assets directory
           mkdir -p combined-site/assets
-          cp "$PDF_FILE" combined-site/assets/Machine-Learning-Systems.pdf
+          
+          # Copy PDF if available
+          if [ -n "$PDF_FILE" ] && [ -f "$PDF_FILE" ]; then
+            PDF_SIZE_MB=$(du -m "$PDF_FILE" | cut -f1)
+            echo "📊 PDF size: ${PDF_SIZE_MB}MB"
+            
+            # Deploy PDF to both GitHub Pages and GitHub Release
+            cp "$PDF_FILE" combined-site/assets/Machine-Learning-Systems.pdf
+            echo "✅ PDF deployed to GitHub Pages (${PDF_SIZE_MB}MB)"
+            
+            # Also copy PDF for GitHub release
+            cp "$PDF_FILE" "Machine-Learning-Systems.pdf"
+            echo "✅ PDF prepared for release"
+          else
+            echo "❌ PDF file not found - skipping PDF deployment"
+          fi
           
           # Copy EPUB if available
           if [ -n "$EPUB_FILE" ] && [ -f "$EPUB_FILE" ]; then
-            cp "$EPUB_FILE" combined-site/assets/Machine-Learning-Systems.epub
-            echo "✅ Combined site prepared with HTML + PDF + EPUB"
+            EPUB_SIZE_MB=$(du -m "$EPUB_FILE" | cut -f1)
+            echo "📊 EPUB size: ${EPUB_SIZE_MB}MB"
             
-            # Also copy EPUB to root for GitHub release
+            # Deploy EPUB to both GitHub Pages and GitHub Release
+            cp "$EPUB_FILE" combined-site/assets/Machine-Learning-Systems.epub
+            echo "✅ EPUB deployed to GitHub Pages (${EPUB_SIZE_MB}MB)"
+            
+            # Also copy EPUB for GitHub release
             cp "$EPUB_FILE" "Machine-Learning-Systems.epub"
+            echo "✅ EPUB prepared for release"
           else
-            echo "✅ Combined site prepared with HTML + PDF (EPUB not available)"
+            echo "❌ EPUB file not found - skipping EPUB deployment"
           fi
           
           echo "📊 Combined site structure:"
@@ -941,8 +994,18 @@ jobs:
           echo "📊 Assets directory:"
           ls -la combined-site/assets/
           
-          # Also copy PDF to root for GitHub release
-          cp "$PDF_FILE" "Machine-Learning-Systems.pdf"
+          # Summary of what was prepared
+          echo "📋 Asset preparation complete:"
+          if [ -f "Machine-Learning-Systems.pdf" ]; then
+            echo "  ✅ PDF: Ready for deployment"
+          else
+            echo "  ❌ PDF: Not available"
+          fi
+          if [ -f "Machine-Learning-Systems.epub" ]; then
+            echo "  ✅ EPUB: Ready for deployment"
+          else
+            echo "  ❌ EPUB: Not available"
+          fi
 
       - name: 🚀 Deploy Combined Site to GitHub Pages (Production)
         run: |
