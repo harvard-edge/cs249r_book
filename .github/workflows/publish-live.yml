@@ -1155,22 +1155,47 @@ jobs:
           
           if [ "${{ github.event.inputs.ai_generated_notes }}" = "yes" ]; then
             echo ""
-            echo "🤖 AI Enhancement Mode Selected - using pre-tested Ollama system..."
+            echo "🤖 AI Enhancement Mode Selected - installing Ollama for release notes..."
             
-            # Check if Ollama is already running from pre-flight
-            if ollama list >/dev/null 2>&1; then
-              echo "✅ Ollama service is already running from pre-flight checks"
+            # Install Ollama for this job (each job runs in isolation)
+            echo "🤖 Installing Ollama..."
+            if curl -fsSL https://ollama.ai/install.sh | sh; then
+              echo "✅ Ollama installed successfully"
               
-              # Get the working model from pre-flight
-              if [ -f "/tmp/ollama_model.txt" ]; then
-                MODEL=$(cat /tmp/ollama_model.txt)
-                echo "🤖 Using pre-tested model: $MODEL"
-              else
-                echo "⚠️ Model info not found, using default"
+              # Start Ollama service
+              echo "🚀 Starting Ollama service..."
+              ollama serve &
+              
+              # Wait for service to be ready
+              echo "⏳ Waiting for Ollama service..."
+              OLLAMA_READY=false
+              for i in {1..30}; do
+                if ollama list >/dev/null 2>&1; then
+                  echo "✅ Ollama service ready after ${i}0 seconds"
+                  OLLAMA_READY=true
+                  break
+                fi
+                echo "⏳ Waiting... (${i}/30)"
+                sleep 10
+              done
+              
+              if [ "$OLLAMA_READY" = "true" ]; then
+                # Pull the model
                 MODEL="${{ env.DEFAULT_AI_MODEL }}"
+                echo "📦 Pulling AI model: $MODEL"
+                if timeout ${{ env.OLLAMA_TIMEOUT }} ollama pull $MODEL; then
+                  echo "✅ Model $MODEL ready for release notes generation"
+                  AI_GENERATION_FAILED=false
+                else
+                  echo "⚠️ Model pull failed, using git log only"
+                  AI_GENERATION_FAILED=true
+                fi
+              else
+                echo "⚠️ Ollama service failed to start, using git log only"
+                AI_GENERATION_FAILED=true
               fi
             else
-              echo "⚠️ Ollama not running, AI generation was likely skipped in pre-flight"
+              echo "⚠️ Ollama installation failed, using git log only"
               AI_GENERATION_FAILED=true
             fi
             
@@ -1213,9 +1238,21 @@ jobs:
                 } > "release_notes_${{ needs.validate-inputs.outputs.new_version }}.md"
               else
                 echo "⚠️ AI generation failed, using git log only"
-                cp git_changes.md "release_notes_${{ needs.validate-inputs.outputs.new_version }}.md"
+                AI_GENERATION_FAILED=true
               fi
-              
+            fi
+            
+            # If AI generation failed, fall back to git log only
+            if [ "$AI_GENERATION_FAILED" = "true" ]; then
+              echo "📋 Falling back to git log only release notes"
+              {
+                echo "# Release ${{ needs.validate-inputs.outputs.new_version }}: ${{ github.event.inputs.description }}"
+                echo ""
+                echo "## Overview"
+                echo "This ${{ github.event.inputs.release_type }} release includes the following changes:"
+                echo ""
+                cat git_changes.md
+              } > "release_notes_${{ needs.validate-inputs.outputs.new_version }}.md"
             fi
           else
             echo ""
@@ -1240,8 +1277,20 @@ jobs:
             echo "📝 Release notes content (first 50 lines):"
             head -50 "release_notes_${{ needs.validate-inputs.outputs.new_version }}.md"
           else
-            echo "❌ Failed to generate release notes"
-            exit 1
+            echo "❌ Failed to generate release notes - creating basic fallback"
+            # Create a basic fallback release notes file
+            {
+              echo "# Release ${{ needs.validate-inputs.outputs.new_version }}: ${{ github.event.inputs.description }}"
+              echo ""
+              echo "## Release Information"
+              echo "- **Version**: ${{ needs.validate-inputs.outputs.new_version }}"
+              echo "- **Type**: ${{ github.event.inputs.release_type }} release"
+              echo "- **Description**: ${{ github.event.inputs.description }}"
+              echo ""
+              echo "## Changes"
+              echo "Please see the git commit history for detailed changes."
+            } > "release_notes_${{ needs.validate-inputs.outputs.new_version }}.md"
+            echo "✅ Basic release notes created as fallback"
           fi
 
       - name: 📤 Upload Release Notes Artifact
