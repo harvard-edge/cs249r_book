@@ -6,8 +6,8 @@ name: '🚀 Publish Live'
 
 # AI Model Configuration
 env:
-  DEFAULT_AI_MODEL: "gemma2:9b"           # Default Ollama model
-  FALLBACK_AI_MODEL: "gemma2:27b"         # Fallback if default model fails
+  DEFAULT_AI_MODEL: "gemma2:27b"           # Default Ollama model
+  FALLBACK_AI_MODEL: "gemma2:9b"         # Fallback if default model fails
   OLLAMA_TIMEOUT: "300"                    # Timeout for Ollama operations (seconds)
   OLLAMA_RETRIES: "3"                      # Number of retries for Ollama calls
   BUILD_TIMEOUT: "3600"                    # Timeout for build operations (1 hour)
@@ -493,100 +493,23 @@ jobs:
           
           echo "✅ All prerequisites validated"
 
-      - name: 🤖 Test AI System (Ollama)
+      - name: 🤖 Test AI System Availability
         if: github.event.inputs.ai_generated_notes == 'yes'
         run: |
-          echo "🤖 Testing AI system for release notes generation..."
+          echo "🤖 Testing if AI system can be installed for release notes..."
           
-          # Install Python dependencies first
-          echo "🐍 Installing Python dependencies..."
-          python -m pip install --upgrade pip
-          python -m pip install requests
-          
-          # Install Ollama with retry
-          echo "🤖 Installing Ollama..."
-          for i in {1..3}; do
-            if curl -fsSL https://ollama.ai/install.sh | sh; then
-              echo "✅ Ollama installed successfully on attempt $i"
-              break
-            else
-              echo "⚠️ Ollama install attempt $i failed, retrying..."
-              sleep 5
-              if [ $i -eq 3 ]; then
-                echo "❌ Ollama installation failed after 3 attempts"
-                echo "🔄 Will use manual release notes instead"
-                exit 0  # Don't fail the whole workflow
-              fi
-            fi
-          done
-          
-          # Start Ollama service with health check
-          echo "🚀 Starting Ollama service..."
-          ollama serve &
-          
-          # Wait for service with timeout
-          echo "⏳ Waiting for Ollama service to be ready..."
-          OLLAMA_READY=false
-          for i in {1..30}; do
-            if ollama list >/dev/null 2>&1; then
-              echo "✅ Ollama service ready after ${i}0 seconds"
-              OLLAMA_READY=true
-              break
-            fi
-            echo "⏳ Waiting for Ollama service... (${i}/30)"
-            sleep 10
-          done
-          
-          if [ "$OLLAMA_READY" != "true" ]; then
-            echo "❌ Ollama service failed to start within 5 minutes"
-            echo "🔄 Will use manual release notes instead"
-            exit 0  # Don't fail the whole workflow
-          fi
-          
-          # Pull the default model with retry
-          MODEL="${{ env.DEFAULT_AI_MODEL }}"
-          echo "📦 Pulling AI model: $MODEL"
-          MODEL_READY=false
-          for i in {1..3}; do
-            if timeout ${{ env.OLLAMA_TIMEOUT }} ollama pull $MODEL; then
-              echo "✅ Model $MODEL pulled successfully on attempt $i"
-              MODEL_READY=true
-              break
-            else
-              echo "⚠️ Model pull attempt $i failed, retrying..."
-              sleep 10
-            fi
-          done
-          
-          # Try fallback model if default failed
-          if [ "$MODEL_READY" != "true" ]; then
-            echo "⚠️ Default model failed, trying fallback..."
-            MODEL="${{ env.FALLBACK_AI_MODEL }}"
-            echo "📦 Pulling fallback AI model: $MODEL"
-            if timeout ${{ env.OLLAMA_TIMEOUT }} ollama pull $MODEL; then
-              echo "✅ Fallback model $MODEL pulled successfully"
-              MODEL_READY=true
-            else
-              echo "❌ Fallback model also failed"
-              echo "🔄 Will use manual release notes instead"
-              exit 0  # Don't fail the whole workflow
-            fi
-          fi
-          
-          # Test Ollama with a simple query
-          echo "🧪 Testing Ollama with simple query..."
-          if echo "Test" | ollama run $MODEL >/dev/null 2>&1; then
-            echo "✅ Ollama AI system is working correctly!"
-            echo "🤖 Model: $MODEL"
-            echo "🚀 Ready for AI-powered release notes generation"
-            
-            # Save the working model for later use
-            echo "$MODEL" > /tmp/ollama_model.txt
+          # Quick test: Can we download Ollama installer?
+          echo "🔍 Checking Ollama availability..."
+          if curl -fsSL --max-time 30 https://ollama.ai/install.sh > /dev/null; then
+            echo "✅ Ollama installer is accessible"
+            echo "🤖 AI-enhanced release notes will be available"
           else
-            echo "❌ Ollama test query failed"
-            echo "🔄 Will use manual release notes instead"
-            exit 0  # Don't fail the whole workflow
+            echo "⚠️ Ollama installer not accessible"
+            echo "📋 Will use git-log-only release notes instead"
+            echo "💡 This is not a failure - release notes will still be generated"
           fi
+          
+          echo "✅ AI system availability check complete"
 
       - name: 📋 Pre-Flight Summary
         run: |
@@ -1155,22 +1078,47 @@ jobs:
           
           if [ "${{ github.event.inputs.ai_generated_notes }}" = "yes" ]; then
             echo ""
-            echo "🤖 AI Enhancement Mode Selected - using pre-tested Ollama system..."
+            echo "🤖 AI Enhancement Mode Selected - installing Ollama for release notes..."
             
-            # Check if Ollama is already running from pre-flight
-            if ollama list >/dev/null 2>&1; then
-              echo "✅ Ollama service is already running from pre-flight checks"
+            # Install Ollama for this job (each job runs in isolation)
+            echo "🤖 Installing Ollama..."
+            if curl -fsSL https://ollama.ai/install.sh | sh; then
+              echo "✅ Ollama installed successfully"
               
-              # Get the working model from pre-flight
-              if [ -f "/tmp/ollama_model.txt" ]; then
-                MODEL=$(cat /tmp/ollama_model.txt)
-                echo "🤖 Using pre-tested model: $MODEL"
-              else
-                echo "⚠️ Model info not found, using default"
+              # Start Ollama service
+              echo "🚀 Starting Ollama service..."
+              ollama serve &
+              
+              # Wait for service to be ready
+              echo "⏳ Waiting for Ollama service..."
+              OLLAMA_READY=false
+              for i in {1..30}; do
+                if ollama list >/dev/null 2>&1; then
+                  echo "✅ Ollama service ready after ${i}0 seconds"
+                  OLLAMA_READY=true
+                  break
+                fi
+                echo "⏳ Waiting... (${i}/30)"
+                sleep 10
+              done
+              
+              if [ "$OLLAMA_READY" = "true" ]; then
+                # Pull the model
                 MODEL="${{ env.DEFAULT_AI_MODEL }}"
+                echo "📦 Pulling AI model: $MODEL"
+                if timeout ${{ env.OLLAMA_TIMEOUT }} ollama pull $MODEL; then
+                  echo "✅ Model $MODEL ready for release notes generation"
+                  AI_GENERATION_FAILED=false
+                else
+                  echo "⚠️ Model pull failed, using git log only"
+                  AI_GENERATION_FAILED=true
+                fi
+              else
+                echo "⚠️ Ollama service failed to start, using git log only"
+                AI_GENERATION_FAILED=true
               fi
             else
-              echo "⚠️ Ollama not running, AI generation was likely skipped in pre-flight"
+              echo "⚠️ Ollama installation failed, using git log only"
               AI_GENERATION_FAILED=true
             fi
             
@@ -1213,9 +1161,21 @@ jobs:
                 } > "release_notes_${{ needs.validate-inputs.outputs.new_version }}.md"
               else
                 echo "⚠️ AI generation failed, using git log only"
-                cp git_changes.md "release_notes_${{ needs.validate-inputs.outputs.new_version }}.md"
+                AI_GENERATION_FAILED=true
               fi
-              
+            fi
+            
+            # If AI generation failed, fall back to git log only
+            if [ "$AI_GENERATION_FAILED" = "true" ]; then
+              echo "📋 Falling back to git log only release notes"
+              {
+                echo "# Release ${{ needs.validate-inputs.outputs.new_version }}: ${{ github.event.inputs.description }}"
+                echo ""
+                echo "## Overview"
+                echo "This ${{ github.event.inputs.release_type }} release includes the following changes:"
+                echo ""
+                cat git_changes.md
+              } > "release_notes_${{ needs.validate-inputs.outputs.new_version }}.md"
             fi
           else
             echo ""
@@ -1240,8 +1200,20 @@ jobs:
             echo "📝 Release notes content (first 50 lines):"
             head -50 "release_notes_${{ needs.validate-inputs.outputs.new_version }}.md"
           else
-            echo "❌ Failed to generate release notes"
-            exit 1
+            echo "❌ Failed to generate release notes - creating basic fallback"
+            # Create a basic fallback release notes file
+            {
+              echo "# Release ${{ needs.validate-inputs.outputs.new_version }}: ${{ github.event.inputs.description }}"
+              echo ""
+              echo "## Release Information"
+              echo "- **Version**: ${{ needs.validate-inputs.outputs.new_version }}"
+              echo "- **Type**: ${{ github.event.inputs.release_type }} release"
+              echo "- **Description**: ${{ github.event.inputs.description }}"
+              echo ""
+              echo "## Changes"
+              echo "Please see the git commit history for detailed changes."
+            } > "release_notes_${{ needs.validate-inputs.outputs.new_version }}.md"
+            echo "✅ Basic release notes created as fallback"
           fi
 
       - name: 📤 Upload Release Notes Artifact
