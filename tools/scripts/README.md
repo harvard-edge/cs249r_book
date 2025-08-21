@@ -14,7 +14,7 @@ tools/scripts/
 ├── docs/            # Documentation for scripts
 ├── genai/           # AI and generation tools
 ├── cross_refs/      # Cross-reference management
-├── quarto_publish/  # Publishing and deployment
+├── publish/  # Publishing and deployment
 └── ai_menu/         # AI menu and interface tools
 ```
 
@@ -139,7 +139,7 @@ Tools for AI-powered content generation and enhancement.
 ### Cross-References (`cross_refs/`)
 Advanced cross-reference management and validation tools.
 
-### Publishing (`quarto_publish/`)
+### Publishing (`publish/`)
 Scripts for publishing and deployment workflows. **Note**: The main publishing workflow is now handled by `./binder publish`.
 
 ### AI Menu (`ai_menu/`)

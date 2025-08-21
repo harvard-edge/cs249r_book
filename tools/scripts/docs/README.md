@@ -53,7 +53,7 @@ The current dependencies include:
 Some subdirectories have their own `requirements.txt` files for specific workflows:
 
 - `scripts/genai/requirements.txt` - AI-specific dependencies
-- `scripts/quarto_publish/requirements.txt` - Publishing dependencies
+- `scripts/publish/requirements.txt` - Publishing dependencies
 
 These are kept for reference but the main workflow uses the root `requirements.txt`.
 
