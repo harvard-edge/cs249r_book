@@ -971,8 +971,23 @@ jobs:
           # Add all files to git
           git add .
           
-          # Commit and push
-          git commit -m "🚀 Deploy release ${{ needs.validate-inputs.outputs.new_version }} from commit ${{ github.sha }}
+          # Check if there are actually changes to commit
+          echo "🔍 Checking for changes to deploy..."
+          if git diff --cached --quiet; then
+            echo "❌ CRITICAL: No changes detected in staging area!"
+            echo "🔧 This indicates the site content wasn't properly copied or is identical to existing content."
+            echo "📊 Current directory contents:"
+            ls -la | head -10
+            exit 1
+          else
+            echo "✅ Changes detected - proceeding with deployment"
+            CHANGED_FILES=$(git diff --cached --name-only | wc -l)
+            echo "📊 Files to be deployed: $CHANGED_FILES"
+          fi
+          
+          # Commit with comprehensive validation
+          echo "📝 Creating deployment commit..."
+          COMMIT_MSG="🚀 Deploy release ${{ needs.validate-inputs.outputs.new_version }} from commit ${{ github.sha }}
 
           Combined HTML site with PDF and EPUB assets for download.
           
@@ -980,14 +995,57 @@ jobs:
           - PDF: assets/Machine-Learning-Systems.pdf
           - EPUB: assets/Machine-Learning-Systems.epub (if available)
           - Release: ${{ needs.validate-inputs.outputs.new_version }}
-          " || echo "No changes to commit"
+          - Files updated: $CHANGED_FILES"
           
-          git push origin gh-pages
+          if git commit -m "$COMMIT_MSG"; then
+            echo "✅ Commit created successfully"
+            COMMIT_HASH=$(git rev-parse HEAD)
+            echo "📋 Commit hash: $COMMIT_HASH"
+          else
+            echo "❌ CRITICAL: Failed to create commit!"
+            echo "🔧 Git status:"
+            git status
+            exit 1
+          fi
           
-          echo "✅ GitHub Pages deployment complete!"
-          echo "🌐 Site: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
-          echo "📄 PDF: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/assets/Machine-Learning-Systems.pdf"
-          echo "📚 EPUB: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/assets/Machine-Learning-Systems.epub"
+          # Push with validation
+          echo "🚀 Pushing to gh-pages branch..."
+          if git push origin gh-pages; then
+            echo "✅ Push successful!"
+            
+            # Verify the push actually updated the remote
+            echo "🔍 Verifying remote update..."
+            REMOTE_HASH=$(git ls-remote origin gh-pages | cut -f1)
+            if [ "$COMMIT_HASH" = "$REMOTE_HASH" ]; then
+              echo "✅ Remote branch updated successfully"
+              echo "📋 Remote commit hash matches local: $REMOTE_HASH"
+            else
+              echo "⚠️ WARNING: Remote hash doesn't match local commit"
+              echo "📋 Local: $COMMIT_HASH"
+              echo "📋 Remote: $REMOTE_HASH"
+            fi
+          else
+            echo "❌ CRITICAL: Failed to push to gh-pages!"
+            echo "🔧 This could be due to permissions or network issues."
+            exit 1
+          fi
+          
+          echo ""
+          echo "🎉 GitHub Pages deployment completed successfully!"
+          echo "📊 Deployment Summary:"
+          echo "  - Files updated: $CHANGED_FILES"
+          echo "  - Commit hash: $COMMIT_HASH"
+          echo "  - Branch: gh-pages"
+          echo ""
+          echo "🌐 Site URLs:"
+          echo "  - GitHub Pages: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+          echo "  - Custom Domain: https://mlsysbook.ai"
+          echo ""
+          echo "📄 Direct Asset Links:"
+          echo "  - PDF: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/assets/Machine-Learning-Systems.pdf"
+          echo "  - EPUB: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/assets/Machine-Learning-Systems.epub"
+          echo ""
+          echo "⏰ Note: Changes may take 1-5 minutes to appear due to CDN caching."
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
