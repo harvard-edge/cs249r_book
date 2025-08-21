@@ -41,7 +41,7 @@ class EPUBCompressor:
     
     SUPPORTED_IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff')
     
-    def __init__(self, quality: int = 70, max_size: int = 1600, verbose: bool = False):
+    def __init__(self, quality: int = 60, max_size: int = 1200, verbose: bool = False):
         """
         Initialize the EPUB compressor.
         
@@ -121,21 +121,22 @@ class EPUBCompressor:
                 
                 # Optimize based on format
                 if img_format in ('JPEG', 'JPG'):
-                    # Convert to RGB if necessary (removes alpha channel)
-                    if img.mode in ('RGBA', 'LA', 'P'):
+                    # Convert RGBA to RGB if needed (simpler approach)
+                    if img.mode in ('RGBA', 'LA'):
                         rgb_img = Image.new('RGB', img.size, (255, 255, 255))
-                        if img.mode == 'P':
-                            img = img.convert('RGBA')
                         rgb_img.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
                         img = rgb_img
                     
                     img.save(image_path, 'JPEG', quality=self.quality, optimize=True)
                     
                 elif img_format == 'PNG':
-                    # Try to reduce PNG to palette mode if possible
-                    if img.mode in ('RGBA', 'RGB') and len(img.getcolors(maxcolors=256)) is not None:
+                    # Always try aggressive palette conversion for maximum compression
+                    try:
                         img = img.convert('P', palette=Image.ADAPTIVE)
-                    img.save(image_path, 'PNG', optimize=True)
+                        img.save(image_path, 'PNG', optimize=True)
+                    except Exception:
+                        # Fallback to original PNG optimization if palette conversion fails
+                        img.save(image_path, 'PNG', optimize=True)
                     
                 else:
                     # For other formats, convert to JPEG if RGB, PNG if has transparency
@@ -224,7 +225,7 @@ class EPUBCompressor:
         self.logger.info("📦 Repacking EPUB...")
         
         try:
-            with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as zip_file:
+            with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
                 # First, add mimetype uncompressed (EPUB specification requirement)
                 mimetype_path = source_dir / 'mimetype'
                 if mimetype_path.exists():
@@ -316,19 +317,19 @@ def create_argument_parser() -> argparse.ArgumentParser:
 Examples:
   %(prog)s --input input.epub --output output.epub
   %(prog)s -i input.epub -o output.epub
-  %(prog)s -i input.epub -o output.epub --quality 85 --max-size 1200
+  %(prog)s -i input.epub -o output.epub --quality 70 --max-size 1400
   %(prog)s -i input.epub -o output.epub --verbose
-  %(prog)s -i input.epub -o output.epub -q 60 -s 800 -v
+  %(prog)s -i input.epub -o output.epub -q 50 -s 1000 -v
 
 Quality Guidelines:
   90-100: Highest quality, larger files
-  70-89:  Good quality, balanced size (recommended)
-  50-69:  Acceptable quality, smaller files
-  1-49:   Lower quality, smallest files
+  60-89:  Good quality, balanced size (recommended)
+  40-59:  Acceptable quality, smaller files
+  1-39:   Lower quality, smallest files
 
 Max Size Guidelines:
-  1600px: Default, good for most displays
-  1200px: Smaller, good for mobile devices
+  1200px: Default, good balance of quality and size
+  1400px: Higher quality for detailed images
   800px:  Compact, suitable for basic readers
         """
     )
@@ -352,17 +353,17 @@ Max Size Guidelines:
     parser.add_argument(
         '--quality', '-q',
         type=int,
-        default=70,
+        default=60,
         metavar='N',
-        help='JPEG compression quality (1-100, default: 70)'
+        help='JPEG compression quality (1-100, default: 60)'
     )
     
     parser.add_argument(
         '--max-size', '-s',
         type=int,
-        default=1600,
+        default=1200,
         metavar='PIXELS',
-        help='Maximum image dimension in pixels (default: 1600)'
+        help='Maximum image dimension in pixels (default: 1200)'
     )
     
     parser.add_argument(
