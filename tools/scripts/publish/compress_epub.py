@@ -41,7 +41,7 @@ class EPUBCompressor:
     
     SUPPORTED_IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff')
     
-    def __init__(self, quality: int = 60, max_size: int = 1200, verbose: bool = False):
+    def __init__(self, quality: int = 50, max_size: int = 1000, verbose: bool = False):
         """
         Initialize the EPUB compressor.
         
@@ -317,20 +317,21 @@ def create_argument_parser() -> argparse.ArgumentParser:
 Examples:
   %(prog)s --input input.epub --output output.epub
   %(prog)s -i input.epub -o output.epub
-  %(prog)s -i input.epub -o output.epub --quality 70 --max-size 1400
+  %(prog)s -i input.epub -o output.epub --quality 60 --max-size 1200
   %(prog)s -i input.epub -o output.epub --verbose
-  %(prog)s -i input.epub -o output.epub -q 50 -s 1000 -v
+  %(prog)s -i input.epub -o output.epub -q 40 -s 800 -v
 
 Quality Guidelines:
   90-100: Highest quality, larger files
-  60-89:  Good quality, balanced size (recommended)
-  40-59:  Acceptable quality, smaller files
-  1-39:   Lower quality, smallest files
+  50-89:  Good quality, balanced size (recommended)
+  35-49:  Acceptable quality, smaller files
+  1-34:   Lower quality, smallest files
 
 Max Size Guidelines:
-  1200px: Default, good balance of quality and size
-  1400px: Higher quality for detailed images
+  1000px: Default, optimized balance of quality and size
+  1200px: Higher quality for detailed images
   800px:  Compact, suitable for basic readers
+  600px:  Maximum compression for size-critical applications
         """
     )
     
@@ -353,17 +354,17 @@ Max Size Guidelines:
     parser.add_argument(
         '--quality', '-q',
         type=int,
-        default=60,
+        default=50,
         metavar='N',
-        help='JPEG compression quality (1-100, default: 60)'
+        help='JPEG compression quality (1-100, default: 50)'
     )
     
     parser.add_argument(
         '--max-size', '-s',
         type=int,
-        default=1200,
+        default=1000,
         metavar='PIXELS',
-        help='Maximum image dimension in pixels (default: 1200)'
+        help='Maximum image dimension in pixels (default: 1000)'
     )
     
     parser.add_argument(
