@@ -266,9 +266,31 @@ RUN echo "🚀 === STARTING TEX LIVE INSTALLATION ===" && \
     rm -rf /var/lib/apt/lists/* && \
     echo "✅ TeX Live prerequisites installed"
 
-# Step 5.2: Download and extract TeX Live installer
-RUN echo "🔄 Downloading TeX Live installer (~4MB)..." && \
-    wget -O /tmp/install-tl-unx.tar.gz "https://mirror.ctan.org/systems/texlive/tlnet/install-tl-unx.tar.gz" && \
+# Step 5.2: Download and extract TeX Live installer with mirror fallbacks
+RUN echo "🔄 Downloading TeX Live installer (~4MB) with mirror fallbacks..." && \
+    MIRRORS=( \
+        "https://mirror.ctan.org/systems/texlive/tlnet/install-tl-unx.tar.gz" \
+        "https://mirrors.mit.edu/CTAN/systems/texlive/tlnet/install-tl-unx.tar.gz" \
+        "https://ctan.math.washington.edu/tex-archive/systems/texlive/tlnet/install-tl-unx.tar.gz" \
+        "https://mirrors.rit.edu/CTAN/systems/texlive/tlnet/install-tl-unx.tar.gz" \
+        "https://mirror.las.iastate.edu/tex-archive/systems/texlive/tlnet/install-tl-unx.tar.gz" \
+    ) && \
+    SUCCESS=false && \
+    for mirror in "${MIRRORS[@]}"; do \
+        echo "🔄 Trying mirror: $mirror" && \
+        if wget --timeout=30 --tries=2 -O /tmp/install-tl-unx.tar.gz "$mirror"; then \
+            echo "✅ Download successful from: $mirror" && \
+            SUCCESS=true && \
+            break; \
+        else \
+            echo "❌ Failed to download from: $mirror" && \
+            rm -f /tmp/install-tl-unx.tar.gz; \
+        fi; \
+    done && \
+    if [ "$SUCCESS" = false ]; then \
+        echo "❌ All mirrors failed, cannot proceed" && \
+        exit 1; \
+    fi && \
     echo "📥 Download completed" && \
     echo "📊 Downloaded file size:" && \
     ls -lh /tmp/install-tl-unx.tar.gz && \
@@ -280,7 +302,7 @@ RUN echo "🔄 Downloading TeX Live installer (~4MB)..." && \
     ls -la /tmp/install-tl-* && \
     echo "✅ TeX Live installer ready"
 
-# Step 5.3: Create TeX Live profile and install base system
+# Step 5.3: Create TeX Live profile and install base system with retry logic
 RUN echo "🔧 Creating TeX Live installation profile..." && \
     echo "selected_scheme scheme-medium" > /tmp/texlive.profile && \
     echo "tlpdbopt_install_docfiles 0" >> /tmp/texlive.profile && \
@@ -296,8 +318,28 @@ RUN echo "🔧 Creating TeX Live installation profile..." && \
     echo "📊 Profile contents:" && \
     cat /tmp/texlive.profile && \
     \
-    echo "🔄 Installing TeX Live base system..." && \
-    /tmp/install-tl-*/install-tl --profile=/tmp/texlive.profile && \
+    echo "🔄 Installing TeX Live base system with retry logic..." && \
+    INSTALL_SUCCESS=false && \
+    for attempt in 1 2 3; do \
+        echo "🔄 Installation attempt $attempt/3..." && \
+        if /tmp/install-tl-*/install-tl --profile=/tmp/texlive.profile; then \
+            echo "✅ TeX Live installation successful on attempt $attempt" && \
+            INSTALL_SUCCESS=true && \
+            break; \
+        else \
+            echo "❌ Installation attempt $attempt failed" && \
+            if [ $attempt -lt 3 ]; then \
+                echo "⏳ Waiting 10 seconds before retry..." && \
+                sleep 10; \
+            fi; \
+        fi; \
+    done && \
+    if [ "$INSTALL_SUCCESS" = false ]; then \
+        echo "❌ All installation attempts failed" && \
+        echo "📋 Checking for partial installation..." && \
+        ls -la /usr/local/texlive/ || echo "No TeX Live directory found" && \
+        exit 1; \
+    fi && \
     echo "📦 TeX Live base system installed"
 
 # Step 5.4: Configure TeX Live PATH
@@ -316,20 +358,38 @@ RUN echo "🔧 Setting up TeX Live PATH..." && \
     fi && \
     echo "✅ TeX Live PATH and tlmgr verified"
 
-# Step 5.5: Install TeX Live packages
+# Step 5.5: Install TeX Live packages with improved error handling
 RUN echo "📊 Analyzing tl_packages file..." && \
     collection_count=$(grep -c '^collection-' /tmp/tl_packages) && \
     echo "📦 Found $collection_count TeX Live collections to install" && \
     \
-    echo "🔄 Installing TeX Live collections..." && \
+    echo "🔄 Installing TeX Live collections with retry logic..." && \
     export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH && \
     i=1 && \
+    failed_packages="" && \
     while IFS= read -r collection; do \
         case "$collection" in \
             collection-*) \
                 echo "📦 [$i/$collection_count] Installing $collection..."; \
                 if command -v tlmgr >/dev/null 2>&1; then \
-                    tlmgr install "$collection" || echo "⚠️ Failed to install $collection, continuing..."; \
+                    success=false; \
+                    for retry in 1 2; do \
+                        if tlmgr install "$collection"; then \
+                            echo "✅ Successfully installed $collection"; \
+                            success=true; \
+                            break; \
+                        else \
+                            echo "❌ Attempt $retry failed for $collection"; \
+                            if [ $retry -lt 2 ]; then \
+                                echo "⏳ Retrying in 5 seconds..."; \
+                                sleep 5; \
+                            fi; \
+                        fi; \
+                    done; \
+                    if [ "$success" = false ]; then \
+                        echo "⚠️ Failed to install $collection after retries, continuing..."; \
+                        failed_packages="$failed_packages $collection"; \
+                    fi; \
                 else \
                     echo "⚠️ tlmgr not available, skipping $collection"; \
                 fi; \
@@ -337,7 +397,11 @@ RUN echo "📊 Analyzing tl_packages file..." && \
                 ;; \
         esac; \
     done < /tmp/tl_packages && \
-    echo "✅ TeX Live packages installed"
+    if [ -n "$failed_packages" ]; then \
+        echo "⚠️ Some packages failed to install:$failed_packages"; \
+        echo "📋 This may not be critical for basic functionality"; \
+    fi && \
+    echo "✅ TeX Live packages installation completed"
 
 # Step 5.6: TeX Live cleanup and completion
 RUN echo "🧹 Cleaning up TeX Live installer..." && \
