@@ -116,7 +116,15 @@ class EPUBCompressor:
                 
                 # Resize if image is too large
                 if max(img.size) > self.max_size:
-                    img.thumbnail((self.max_size, self.max_size), Image.Resampling.LANCZOS)
+                    # Use backward-compatible resampling for older Pillow versions
+                    try:
+                        # Pillow >= 10.0.0
+                        resample = Image.Resampling.LANCZOS
+                    except AttributeError:
+                        # Pillow < 10.0.0
+                        resample = Image.LANCZOS
+                    
+                    img.thumbnail((self.max_size, self.max_size), resample)
                     self.logger.debug(f"  📏 Resized {original_dimensions} → {img.size}")
                 
                 # Optimize based on format
