@@ -11,17 +11,23 @@ The **Book Binder** is a self-contained, lightning-fast development CLI for the 
 # Welcome and overview
 ./binder hello
 
-# Build a single chapter
-./binder build intro html
+# Build a single chapter (HTML)
+./binder build intro
 
-# Build multiple chapters together 
-./binder build intro,ml_systems html
+# Build multiple chapters together (HTML)
+./binder build intro,ml_systems
 
 # Preview a chapter (builds and opens in browser)
 ./binder preview intro
 
-# Build the complete book
-./binder build * pdf
+# Build the complete book (HTML)
+./binder build
+
+# Build the complete book (PDF)
+./binder pdf
+
+# Build a single chapter (PDF)
+./binder pdf intro
 
 # Publish the book
 ./binder publish
@@ -42,25 +48,25 @@ chmod +x binder
 
 ## Command Reference
 
-### ⚡ Fast Chapter Commands
+### ⚡ Core Commands
 
-Fast builds focus on individual chapters with minimal overhead, perfect for development and iteration.
-
-| Command | Description | Example |
-|---------|-------------|---------|
-| `build <chapter[,ch2,...]> <format>` | Build one or more chapters | `./binder build intro,ml_systems html` |
-| `preview <chapter>` | Build and preview a chapter | `./binder preview ops` |
-
-**Supported formats**: `html`, `pdf` (format is required)
-
-### 📚 Full Book Commands
-
-Full builds render the complete book with all chapters, parts, and cross-references.
+Intuitive commands that work on both individual chapters and the entire book.
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `build * <format>` | Build complete book | `./binder build * pdf` |
-| `preview-full` | Preview complete book | `./binder preview-full` |
+| `build [chapter[,ch2,...]]` | Build book or chapter(s) in HTML | `./binder build intro,ml_systems` |
+| `preview [chapter[,ch2,...]]` | Preview book or chapter(s) | `./binder preview ops` |
+| `pdf [chapter[,ch2,...]]` | Build book or chapter(s) in PDF | `./binder pdf intro` |
+
+**Smart defaults**: No target = entire book, with target = specific chapter(s)
+
+### 📚 Full Book Examples
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `build` | Build complete book (HTML) | `./binder build` |
+| `preview` | Preview complete book | `./binder preview` |
+| `pdf` | Build complete book (PDF) | `./binder pdf` |
 | `publish` | Build and publish book | `./binder publish` |
 
 ### 🔧 Management Commands
@@ -78,22 +84,21 @@ Full builds render the complete book with all chapters, parts, and cross-referen
 
 ### 🚀 Shortcuts
 
-All commands have single-letter shortcuts:
+All commands have convenient shortcuts:
 
 | Shortcut | Command |
 |----------|---------|
 | `b` | `build` |
 | `p` | `preview` |
-| `pf` | `preview-full` |
-| `pt` | `publish-trigger` |
-| `pub` | `publish` |
-| `se` | `setup` |
-| `he` | `hello` |
+| `pdf` | `pdf` |
 | `c` | `clean` |
 | `ch` | `check` |
 | `s` | `switch` |
 | `st` | `status` |
 | `l` | `list` |
+| `he` | `hello` |
+| `se` | `setup` |
+| `pu` | `publish` |
 | `h` | `help` |
 
 ## Chapter Names
@@ -172,9 +177,9 @@ When called with arguments, `publish` triggers the GitHub Actions workflow direc
 ```bash
 # Development workflow
 ./binder preview intro          # Preview a chapter
-./binder build - html          # Build complete HTML
-./binder build - pdf           # Build complete PDF
-./binder publish               # Publish to the world
+./binder build                  # Build complete HTML
+./binder pdf                    # Build complete PDF
+./binder publish                # Publish to the world
 ```
 
 ### After Publishing:
@@ -196,12 +201,14 @@ When called with arguments, `publish` triggers the GitHub Actions workflow direc
 The binder supports building multiple chapters together in a single Quarto render command:
 
 ```bash
-# Old behavior: Sequential builds (slower)
-# ./binder build intro    # Build intro alone  
-# ./binder build ml_systems  # Build ml_systems alone
+# Build multiple chapters together (HTML)
+./binder build intro,ml_systems
 
-# New behavior: Unified build (faster)
-./binder build intro,ml_systems html  # Build both together
+# Build multiple chapters together (PDF)  
+./binder pdf intro,ml_systems
+
+# Preview multiple chapters together
+./binder preview intro,ml_systems
 ```
 
 **Benefits:**
