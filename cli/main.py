@@ -216,14 +216,7 @@ class MLSysBookCLI:
         """Handle about command."""
         return self.maintenance_command.show_about()
     
-    def handle_check_command(self, args):
-        """Handle check command (legacy compatibility)."""
-        return self.maintenance_command.check_artifacts()
-    
-    def handle_check_tags_command(self, args):
-        """Handle check-tags command."""
-        return self.maintenance_command.check_orphaned_tags()
-    
+
     def handle_list_command(self, args):
         """Handle list chapters command."""
         self.chapter_discovery.show_chapters()
@@ -267,8 +260,7 @@ class MLSysBookCLI:
             "setup": self.handle_setup_command,
             "hello": self.handle_hello_command,
             "about": self.handle_about_command,
-            "check": self.handle_check_command,
-            "check-tags": self.handle_check_tags_command,
+
             "help": lambda args: self.show_help() or True,
         }
         
