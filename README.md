@@ -120,11 +120,12 @@ cd cs249r_book
 
 # Quick setup (recommended)
 ./binder setup      # Setup environment and dependencies
-./binder hello      # Welcome and overview
+./binder doctor     # Check system health
 
 # Fast development workflow
 ./binder preview intro    # Fast chapter development
-./binder build html       # Build complete book
+./binder build intro      # Build specific chapter
+./binder build            # Build complete book (HTML)
 ./binder help            # See all commands
 ```
 
@@ -164,24 +165,25 @@ The **Book Binder** is our lightning-fast development CLI for streamlined buildi
 ./binder preview intro,ml_systems     # Build and preview multiple chapters
 
 # Complete book building
-./binder build html                   # Build complete website
-./binder build pdf                    # Build complete PDF
-./binder build epub                   # Build complete EPUB
+./binder build                        # Build complete website (HTML)
+./binder pdf                          # Build complete PDF
+./binder epub                         # Build complete EPUB
 
 # Management
-./binder clean                    # Clean artifacts
-./binder status                   # Show current status
-./binder help                     # Show all commands
+./binder clean                        # Clean artifacts
+./binder status                       # Show current status
+./binder doctor                       # Run health check
+./binder help                         # Show all commands
 ```
 
 ### Development Commands
 ```bash
 # Book Binder CLI (Recommended)
 ./binder setup            # First-time setup
-./binder build html       # Build complete HTML book
-./binder build pdf        # Build complete PDF book  
+./binder build            # Build complete HTML book
+./binder pdf              # Build complete PDF book  
+./binder epub             # Build complete EPUB book
 ./binder preview intro    # Preview chapter development
-./binder publish          # Publish to production
 
 # Traditional setup (if needed)
 python3 -m venv .venv
@@ -261,11 +263,11 @@ MLSysBook/
 
 ### Getting Started
 ```bash
-# Welcome and overview
-./binder hello
-
 # First time setup
 ./binder setup
+
+# Check system health
+./binder doctor
 
 # Quick preview
 ./binder preview intro

@@ -365,7 +365,6 @@ class DoctorCommand:
         """Check file permissions for key files."""
         key_files = [
             ("binder", self.config_manager.root_dir / "binder"),
-            ("binder_legacy", self.config_manager.root_dir / "binder_legacy"),
         ]
         
         for name, file_path in key_files:

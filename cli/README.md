@@ -76,8 +76,7 @@ The modular CLI has replaced the original binder and is available as `./binder` 
 
 The modular CLI has successfully replaced the original monolithic binder script:
 
-- **`./binder`** - New modular CLI (4000+ lines → organized modules)
-- **`./binder_legacy`** - Original monolithic script (backup)
+- **`./binder`** - Modular CLI (4000+ lines → organized modules)
 
 All functionality has been preserved and enhanced:
 - All existing commands work the same way
