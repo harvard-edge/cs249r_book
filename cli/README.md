@@ -41,21 +41,26 @@ cli/
 
 ## Usage
 
-The new CLI is available as `./binder2` in the project root:
+The modular CLI has replaced the original binder and is available as `./binder` in the project root:
 
 ```bash
 # Show help
-./binder2 help
+./binder help
 
 # Build commands
-./binder2 build                    # Build full book (HTML)
-./binder2 build intro,ml_systems   # Build specific chapters (HTML)
-./binder2 pdf intro                # Build chapter as PDF
-./binder2 epub                     # Build full book as EPUB
+./binder build                    # Build full book (HTML)
+./binder build intro,ml_systems   # Build specific chapters (HTML)
+./binder pdf intro                # Build chapter as PDF
+./binder epub                     # Build full book as EPUB
+
+# Preview commands
+./binder preview                  # Start live dev server for full book
+./binder preview intro            # Start live dev server for chapter
 
 # Management
-./binder2 list                     # List all chapters
-./binder2 status                   # Show current status
+./binder list                     # List all chapters
+./binder status                   # Show current status
+./binder doctor                   # Run comprehensive health check
 ```
 
 ## Benefits of Modular Architecture
@@ -67,14 +72,19 @@ The new CLI is available as `./binder2` in the project root:
 5. **Code Reuse**: Shared functionality is properly modularized
 6. **Collaboration**: Multiple developers can work on different components
 
-## Migration from Original Binder
+## Migration Complete
 
-The original `binder` script remains functional during the transition. The new `binder2` provides the same functionality with improved architecture:
+The modular CLI has successfully replaced the original monolithic binder script:
 
+- **`./binder`** - New modular CLI (4000+ lines → organized modules)
+- **`./binder_legacy`** - Original monolithic script (backup)
+
+All functionality has been preserved and enhanced:
 - All existing commands work the same way
-- Same configuration files and output directories
+- Same configuration files and output directories  
 - Same build processes and quality
 - Enhanced error handling and progress indication
+- New preview and doctor commands added
 
 ## Future Enhancements
 

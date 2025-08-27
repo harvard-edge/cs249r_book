@@ -19,6 +19,8 @@ from core.discovery import ChapterDiscovery
 from commands.build import BuildCommand
 from commands.preview import PreviewCommand
 from commands.doctor import DoctorCommand
+from commands.clean import CleanCommand
+from commands.maintenance import MaintenanceCommand
 
 console = Console()
 
@@ -38,6 +40,8 @@ class MLSysBookCLI:
         self.build_command = BuildCommand(self.config_manager, self.chapter_discovery)
         self.preview_command = PreviewCommand(self.config_manager, self.chapter_discovery)
         self.doctor_command = DoctorCommand(self.config_manager, self.chapter_discovery)
+        self.clean_command = CleanCommand(self.config_manager, self.chapter_discovery)
+        self.maintenance_command = MaintenanceCommand(self.config_manager, self.chapter_discovery)
         
     def show_banner(self):
         """Display the CLI banner."""
@@ -58,10 +62,10 @@ class MLSysBookCLI:
         fast_table.add_column("Description", style="white", width=30)
         fast_table.add_column("Example", style="dim", width=30)
         
-        fast_table.add_row("build [chapter[,ch2,...]]", "Build static files to disk (HTML)", "./binder2 build intro,ops")
-        fast_table.add_row("preview [chapter[,ch2,...]]", "Start live dev server with hot reload", "./binder2 preview intro")
-        fast_table.add_row("pdf [chapter[,ch2,...]]", "Build static PDF file to disk", "./binder2 pdf intro")
-        fast_table.add_row("epub [chapter[,ch2,...]]", "Build static EPUB file to disk", "./binder2 epub intro")
+        fast_table.add_row("build [chapter[,ch2,...]]", "Build static files to disk (HTML)", "./binder build intro,ops")
+        fast_table.add_row("preview [chapter[,ch2,...]]", "Start live dev server with hot reload", "./binder preview intro")
+        fast_table.add_row("pdf [chapter[,ch2,...]]", "Build static PDF file to disk", "./binder pdf intro")
+        fast_table.add_row("epub [chapter[,ch2,...]]", "Build static EPUB file to disk", "./binder epub intro")
         
         # Full Book Commands
         full_table = Table(show_header=True, header_style="bold blue", box=None)
@@ -69,10 +73,10 @@ class MLSysBookCLI:
         full_table.add_column("Description", style="white", width=30)
         full_table.add_column("Example", style="dim", width=30)
         
-        full_table.add_row("build", "Build entire book as static HTML", "./binder2 build")
-        full_table.add_row("preview", "Start live dev server for entire book", "./binder2 preview")
-        full_table.add_row("pdf", "Build entire book as static PDF", "./binder2 pdf")
-        full_table.add_row("epub", "Build entire book as static EPUB", "./binder2 epub")
+        full_table.add_row("build", "Build entire book as static HTML", "./binder build")
+        full_table.add_row("preview", "Start live dev server for entire book", "./binder preview")
+        full_table.add_row("pdf", "Build entire book as static PDF", "./binder pdf")
+        full_table.add_row("epub", "Build entire book as static EPUB", "./binder epub")
         
         # Management Commands
         mgmt_table = Table(show_header=True, header_style="bold blue", box=None)
@@ -80,10 +84,15 @@ class MLSysBookCLI:
         mgmt_table.add_column("Description", style="white", width=30)
         mgmt_table.add_column("Example", style="dim", width=30)
         
-        mgmt_table.add_row("list", "List available chapters", "./binder2 list")
-        mgmt_table.add_row("status", "Show current config status", "./binder2 status")
-        mgmt_table.add_row("doctor", "Run comprehensive health check", "./binder2 doctor")
-        mgmt_table.add_row("help", "Show this help", "./binder2 help")
+        mgmt_table.add_row("clean", "Clean build artifacts", "./binder clean")
+        mgmt_table.add_row("switch <format>", "Switch active config", "./binder switch pdf")
+        mgmt_table.add_row("list", "List available chapters", "./binder list")
+        mgmt_table.add_row("status", "Show current config status", "./binder status")
+        mgmt_table.add_row("doctor", "Run comprehensive health check", "./binder doctor")
+        mgmt_table.add_row("setup", "Setup development environment", "./binder setup")
+        mgmt_table.add_row("hello", "Show welcome message", "./binder hello")
+        mgmt_table.add_row("about", "Show project information", "./binder about")
+        mgmt_table.add_row("help", "Show this help", "./binder help")
         
         # Display tables
         console.print(Panel(fast_table, title="⚡ Fast Chapter Commands", border_style="green"))
@@ -93,11 +102,11 @@ class MLSysBookCLI:
         # Pro Tips
         examples = Text()
         examples.append("🎯 Modular CLI Examples:\n", style="bold magenta")
-        examples.append("  ./binder2 build intro,ml_systems ", style="cyan")
+        examples.append("  ./binder build intro,ml_systems ", style="cyan")
         examples.append("# Build multiple chapters (HTML)\n", style="dim")
-        examples.append("  ./binder2 epub intro ", style="cyan")
+        examples.append("  ./binder epub intro ", style="cyan")
         examples.append("# Build single chapter as EPUB\n", style="dim")
-        examples.append("  ./binder2 pdf ", style="cyan")
+        examples.append("  ./binder pdf ", style="cyan")
         examples.append("# Build entire book as PDF\n", style="dim")
         
         console.print(Panel(examples, title="💡 Pro Tips", border_style="magenta"))
@@ -170,6 +179,51 @@ class MLSysBookCLI:
         """Handle doctor/health check command."""
         return self.doctor_command.run_health_check()
     
+    def handle_clean_command(self, args):
+        """Handle clean command."""
+        if len(args) > 0:
+            # Clean specific format
+            format_type = args[0].lower()
+            if format_type in ["html", "pdf", "epub"]:
+                return self.clean_command.clean_format(format_type)
+            else:
+                console.print(f"[red]❌ Unknown format: {format_type}[/red]")
+                console.print("[yellow]💡 Available formats: html, pdf, epub[/yellow]")
+                return False
+        else:
+            # Clean all
+            return self.clean_command.clean_all()
+    
+    def handle_switch_command(self, args):
+        """Handle switch command."""
+        if len(args) < 1:
+            console.print("[red]❌ Usage: ./binder switch <format>[/red]")
+            console.print("[yellow]💡 Available formats: html, pdf, epub[/yellow]")
+            return False
+        
+        format_type = args[0].lower()
+        return self.maintenance_command.switch_format(format_type)
+    
+    def handle_setup_command(self, args):
+        """Handle setup command."""
+        return self.maintenance_command.setup_environment()
+    
+    def handle_hello_command(self, args):
+        """Handle hello command."""
+        return self.maintenance_command.show_hello()
+    
+    def handle_about_command(self, args):
+        """Handle about command."""
+        return self.maintenance_command.show_about()
+    
+    def handle_check_command(self, args):
+        """Handle check command (legacy compatibility)."""
+        return self.maintenance_command.check_artifacts()
+    
+    def handle_check_tags_command(self, args):
+        """Handle check-tags command."""
+        return self.maintenance_command.check_orphaned_tags()
+    
     def handle_list_command(self, args):
         """Handle list chapters command."""
         self.chapter_discovery.show_chapters()
@@ -205,9 +259,16 @@ class MLSysBookCLI:
             "preview": self.handle_preview_command,
             "pdf": self.handle_pdf_command,
             "epub": self.handle_epub_command,
+            "clean": self.handle_clean_command,
+            "switch": self.handle_switch_command,
             "list": self.handle_list_command,
             "status": self.handle_status_command,
             "doctor": self.handle_doctor_command,
+            "setup": self.handle_setup_command,
+            "hello": self.handle_hello_command,
+            "about": self.handle_about_command,
+            "check": self.handle_check_command,
+            "check-tags": self.handle_check_tags_command,
             "help": lambda args: self.show_help() or True,
         }
         
