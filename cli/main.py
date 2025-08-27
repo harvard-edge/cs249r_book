@@ -17,6 +17,8 @@ from rich.text import Text
 from core.config import ConfigManager
 from core.discovery import ChapterDiscovery
 from commands.build import BuildCommand
+from commands.preview import PreviewCommand
+from commands.doctor import DoctorCommand
 
 console = Console()
 
@@ -34,6 +36,8 @@ class MLSysBookCLI:
         
         # Initialize command handlers
         self.build_command = BuildCommand(self.config_manager, self.chapter_discovery)
+        self.preview_command = PreviewCommand(self.config_manager, self.chapter_discovery)
+        self.doctor_command = DoctorCommand(self.config_manager, self.chapter_discovery)
         
     def show_banner(self):
         """Display the CLI banner."""
@@ -54,9 +58,10 @@ class MLSysBookCLI:
         fast_table.add_column("Description", style="white", width=30)
         fast_table.add_column("Example", style="dim", width=30)
         
-        fast_table.add_row("build [chapter[,ch2,...]]", "Build book or chapter(s) (HTML)", "./binder2 build intro,ops")
-        fast_table.add_row("pdf [chapter[,ch2,...]]", "Build book or chapter(s) (PDF)", "./binder2 pdf intro")
-        fast_table.add_row("epub [chapter[,ch2,...]]", "Build book or chapter(s) (EPUB)", "./binder2 epub intro")
+        fast_table.add_row("build [chapter[,ch2,...]]", "Build static files to disk (HTML)", "./binder2 build intro,ops")
+        fast_table.add_row("preview [chapter[,ch2,...]]", "Start live dev server with hot reload", "./binder2 preview intro")
+        fast_table.add_row("pdf [chapter[,ch2,...]]", "Build static PDF file to disk", "./binder2 pdf intro")
+        fast_table.add_row("epub [chapter[,ch2,...]]", "Build static EPUB file to disk", "./binder2 epub intro")
         
         # Full Book Commands
         full_table = Table(show_header=True, header_style="bold blue", box=None)
@@ -64,9 +69,10 @@ class MLSysBookCLI:
         full_table.add_column("Description", style="white", width=30)
         full_table.add_column("Example", style="dim", width=30)
         
-        full_table.add_row("build", "Build entire book (HTML)", "./binder2 build")
-        full_table.add_row("pdf", "Build entire book (PDF)", "./binder2 pdf")
-        full_table.add_row("epub", "Build entire book (EPUB)", "./binder2 epub")
+        full_table.add_row("build", "Build entire book as static HTML", "./binder2 build")
+        full_table.add_row("preview", "Start live dev server for entire book", "./binder2 preview")
+        full_table.add_row("pdf", "Build entire book as static PDF", "./binder2 pdf")
+        full_table.add_row("epub", "Build entire book as static EPUB", "./binder2 epub")
         
         # Management Commands
         mgmt_table = Table(show_header=True, header_style="bold blue", box=None)
@@ -76,6 +82,7 @@ class MLSysBookCLI:
         
         mgmt_table.add_row("list", "List available chapters", "./binder2 list")
         mgmt_table.add_row("status", "Show current config status", "./binder2 status")
+        mgmt_table.add_row("doctor", "Run comprehensive health check", "./binder2 doctor")
         mgmt_table.add_row("help", "Show this help", "./binder2 help")
         
         # Display tables
@@ -140,6 +147,29 @@ class MLSysBookCLI:
             chapter_list = [ch.strip() for ch in chapters.split(',')]
             return self.build_command.build_chapters(chapter_list, "epub")
     
+    def handle_preview_command(self, args):
+        """Handle preview command."""
+        self.config_manager.show_symlink_status()
+        
+        if len(args) < 1:
+            # No target specified - preview entire book
+            console.print("[blue]🌐 Starting preview for entire book...[/blue]")
+            return self.preview_command.preview_full("html")
+        else:
+            # Chapter specified
+            chapter = args[0]
+            if ',' in chapter:
+                console.print("[yellow]⚠️ Preview only supports single chapters, not multiple[/yellow]")
+                console.print("[dim]💡 Use the first chapter from your list[/dim]")
+                chapter = chapter.split(',')[0].strip()
+            
+            console.print(f"[blue]🌐 Starting preview for chapter: {chapter}[/blue]")
+            return self.preview_command.preview_chapter(chapter)
+    
+    def handle_doctor_command(self, args):
+        """Handle doctor/health check command."""
+        return self.doctor_command.run_health_check()
+    
     def handle_list_command(self, args):
         """Handle list chapters command."""
         self.chapter_discovery.show_chapters()
@@ -172,19 +202,24 @@ class MLSysBookCLI:
         # Command mapping
         commands = {
             "build": self.handle_build_command,
+            "preview": self.handle_preview_command,
             "pdf": self.handle_pdf_command,
             "epub": self.handle_epub_command,
             "list": self.handle_list_command,
             "status": self.handle_status_command,
+            "doctor": self.handle_doctor_command,
             "help": lambda args: self.show_help() or True,
         }
         
         # Command aliases
         aliases = {
             "b": "build",
-            "p": "pdf",  # Changed from preview to pdf for simplicity
+            "p": "preview",
+            "pdf": "pdf",  # Keep pdf as explicit command
+            "epub": "epub",  # Keep epub as explicit command
             "l": "list",
             "s": "status",
+            "d": "doctor",
             "h": "help",
         }
         
