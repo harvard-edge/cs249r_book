@@ -74,12 +74,12 @@ Intuitive commands that work on both individual chapters and the entire book.
 | Command | Description | Example |
 |---------|-------------|---------|
 | `setup` | Configure environment | `./binder setup` |
-| `hello` | Welcome and overview | `./binder hello` |
 | `clean` | Clean configs & artifacts | `./binder clean` |
-| `check` | Check for build artifacts | `./binder check` |
 | `switch <format>` | Switch active config | `./binder switch pdf` |
 | `status` | Show current status | `./binder status` |
 | `list` | List available chapters | `./binder list` |
+| `doctor` | Run comprehensive health check | `./binder doctor` |
+| `about` | Show project information | `./binder about` |
 | `help` | Show help information | `./binder help` |
 
 ### 🚀 Shortcuts
@@ -91,14 +91,10 @@ All commands have convenient shortcuts:
 | `b` | `build` |
 | `p` | `preview` |
 | `pdf` | `pdf` |
-| `c` | `clean` |
-| `ch` | `check` |
-| `s` | `switch` |
-| `st` | `status` |
+| `epub` | `epub` |
 | `l` | `list` |
-| `he` | `hello` |
-| `se` | `setup` |
-| `pu` | `publish` |
+| `s` | `status` |
+| `d` | `doctor` |
 | `h` | `help` |
 
 ## Chapter Names
@@ -276,12 +272,12 @@ Use `./binder switch <format>` to change the active configuration symlink.
 # Clean up any build artifacts
 ./binder clean
 
-# Verify no artifacts remain
-./binder check
+# Run health check
+./binder doctor
 
 # Build full book to ensure everything works
-./binder build * html
-./binder build * pdf
+./binder build
+./binder pdf
 ```
 
 ## Troubleshooting
@@ -295,7 +291,7 @@ Use `./binder switch <format>` to change the active configuration symlink.
 
 **"Build artifacts detected"**
 - Run `./binder clean` to remove temporary files
-- Use `./binder check` to verify cleanup
+- Use `./binder doctor` to verify system health
 
 **"Config not clean"** 
 - The binder detected a previous fast build configuration
