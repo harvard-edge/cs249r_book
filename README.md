@@ -320,6 +320,17 @@ This work is licensed under **Creative Commons Attribution–NonCommercial–Sha
 
 ---
 
+## 🙏 Contributors
+
+Thanks goes to these wonderful people who have contributed to making this resource better for everyone:
+
+<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+<!-- ALL-CONTRIBUTORS-LIST:END -->
+
+---
+
 <div align="center">
 
 **Made with ❤️ for AI learners worldwide**
