@@ -29,8 +29,15 @@
 
 </p>
 
+<p align="center">
 
-**[📖 Read Online](https://mlsysbook.ai)** • **[💾 Download PDF](https://mlsysbook.ai/Machine-Learning-Systems.pdf)** • **[🌐 Explore Ecosystem](https://mlsysbook.org)**
+  <!-- Reader Navigation -->
+  **[📖 Read Online](https://mlsysbook.ai)** • 
+  **[💾 Download PDF](https://mlsysbook.ai/pdf)** • 
+  **[💾 Download ePub](https://mlsysbook.ai/epub)** • 
+  **[🌐 Explore Ecosystem](https://mlsysbook.org)**
+
+</p>
 
 📚 **Hardcopy edition coming 2026 via MIT Press!**
 
