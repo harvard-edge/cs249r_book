@@ -593,26 +593,8 @@ This drastically reduces the number of stored gradients and optimizer states, en
 
 The code snippet in @lst-bias-adaptation demonstrates how to implement bias-only adaptation in PyTorch.
 
-::: {.content-visible when-format="html"}
 ::: {#lst-bias-adaptation lst-cap="**Bias-Only Adaptation**: Freezes model parameters except for biases to reduce memory usage and enable on-device learning."}
 ```{.python}
-# Freeze all parameters
-for name, param in model.named_parameters():
-    param.requires_grad = False
-
-# Enable gradients for bias parameters only
-for name, param in model.named_parameters():
-    if 'bias' in name:
-        param.requires_grad = True
-```
-:::
-:::
-
-::: {.content-visible when-format="pdf"}
-```{python}
-#| lst-label: lst-bias-adaptation
-#| lst-cap: "**Bias-Only Adaptation**: Freezes model parameters except for biases to reduce memory usage and enable on-device learning."
-#| eval: false
 # Freeze all parameters
 for name, param in model.named_parameters():
     param.requires_grad = False
@@ -651,17 +633,13 @@ These methods extend a frozen model by adding trainable layers, which are typica
 #### Adapter-Based Adaptation {#sec-ondevice-learning-adapterbased-adaptation-04de}
 
 A common implementation involves inserting adapters, which are small residual bottleneck layers, between existing layers in a pretrained model. Consider a hidden representation $h$ passed between layers. A residual adapter introduces a transformation:
-
 $$
 h' = h + A(h)
 $$
-
 where $A(\cdot)$ is a trainable function, typically composed of two linear layers with a nonlinearity:
-
 $$
 A(h) = W_2 \, \sigma(W_1 h)
 $$
-
 with $W_1 \in \mathbb{R}^{r \times d}$ and $W_2 \in \mathbb{R}^{d \times r}$, where $r \ll d$. This bottleneck design ensures that only a small number of parameters are introduced per layer.
 
 The adapters act as learnable perturbations on top of a frozen backbone. Because they are small and sparsely applied, they add negligible memory overhead, yet they allow the model to shift its predictions in response to new inputs.
@@ -679,27 +657,8 @@ $$
 
 This formulation is commonly used in LoRA (Low-Rank Adaptation) techniques, originally developed for transformer models [@hu2021lora] but broadly applicable across architectures. Low-rank updates can be implemented efficiently on edge devices, particularly when $U$ and $V$ are small and fixed-point representations are supported (@lst-lowrank-adapter).
 
-::: {.content-visible when-format="html"}
 ::: {#lst-lowrank-adapter lst-cap="**Low-Rank Adapter**: The code implements a low-rank adapter module by approximating weight updates using matrices \(u\) and \(v\), reducing parameter count while enabling efficient model adaptation on edge devices."}
 ```{.python}
-class Adapter(nn.Module):
-    def __init__(self, dim, bottleneck_dim):
-        super().__init__()
-        self.down = nn.Linear(dim, bottleneck_dim)
-        self.up = nn.Linear(bottleneck_dim, dim)
-        self.activation = nn.ReLU()
-
-    def forward(self, x):
-        return x + self.up(self.activation(self.down(x)))
-```
-:::
-:::
-
-::: {.content-visible when-format="pdf"}
-```{python}
-#| lst-label: lst-lowrank-adapter
-#| lst-cap: "**Low-Rank Adapter**: The code implements a low-rank adapter module by approximating weight updates using matrices u and v, reducing parameter count while enabling efficient model adaptation on edge devices."
-#| eval: false
 class Adapter(nn.Module):
     def __init__(self, dim, bottleneck_dim):
         super().__init__()
@@ -775,7 +734,8 @@ A concrete example is TinyTrain, a method designed to enable rapid adaptation on
 
 #### Code Fragment: Selective Layer Updating (PyTorch) {#sec-ondevice-learning-code-fragment-selective-layer-updating-pytorch-d094}
 
-::: {.content-visible when-format="html"}
+This pattern can be extended with profiling logic to select layers based on contribution scores or hardware profiles, as shown in @lst-selective-update.
+
 ::: {#lst-selective-update lst-cap="**Selective Layer Updating**: This technique enables fine-tuning specific layers of a pre-trained model while keeping others frozen, optimizing computational resources for targeted improvements. *Source: PyTorch Documentation*"}
 ```{.python}
 ## Assume model has named layers: ['conv1', 'conv2', 'fc']
@@ -788,25 +748,6 @@ for name, param in model.named_parameters():
         param.requires_grad = False
 ```
 :::
-:::
-
-::: {.content-visible when-format="pdf"}
-```{python}
-#| lst-label: lst-selective-update
-#| lst-cap: "**Selective Layer Updating**: This technique enables fine-tuning specific layers of a pre-trained model while keeping others frozen, optimizing computational resources for targeted improvements. *Source: PyTorch Documentation*"
-#| eval: false
-## Assume model has named layers: ['conv1', 'conv2', 'fc']
-## We selectively update only conv2 and fc
-
-for name, param in model.named_parameters():
-    if 'conv2' in name or 'fc' in name:
-        param.requires_grad = True
-    else:
-        param.requires_grad = False
-```
-:::
-
-This pattern can be extended with profiling logic to select layers based on contribution scores or hardware profiles, as shown in @lst-selective-update.
 
 #### TinyTrain Personalization {#sec-ondevice-learning-tinytrain-personalization-bdf2}
 
@@ -894,37 +835,8 @@ A practical on-device implementation might use a ring buffer[^fn-ring-buffer] to
 
 [^fn-ring-buffer]: **Ring Buffer:** A circular buffer that efficiently manages data by overwriting old entries with new ones as space requires.
 
-::: {.content-visible when-format="html"}
 ::: {#lst-replay-buffer lst-cap="**Replay Buffer**: Implements a circular storage mechanism for efficient memory management in constrained environments. This approach allows models to efficiently retain and sample from recent data points, balancing the need to leverage historical information while incorporating new insights."}
 ```{.python}
-# Replay Buffer Techniques
-class ReplayBuffer:
-    def __init__(self, capacity):
-        self.capacity = capacity
-        self.buffer = []
-        self.index = 0
-
-    def store(self, feature_vec, label):
-        if len(self.buffer) < self.capacity:
-            self.buffer.append((feature_vec, label))
-        else:
-            self.buffer[self.index] = (feature_vec, label)
-        self.index = (self.index + 1) % self.capacity
-
-    def sample(self, k):
-    return random.sample(
-        self.buffer,
-        min(k, len(self.buffer))
-    )
-```
-:::
-:::
-
-::: {.content-visible when-format="pdf"}
-```{python}
-#| lst-label: lst-replay-buffer
-#| lst-cap: "**Replay Buffer**: Implements a circular storage mechanism for efficient memory management in constrained environments. This approach allows models to efficiently retain and sample from recent data points, balancing the need to leverage historical information while incorporating new insights."
-#| eval: false
 # Replay Buffer Techniques
 class ReplayBuffer:
     def __init__(self, capacity):
@@ -1412,28 +1324,26 @@ The flowchart in @fig-odl-design-flow summarizes key decision points in designin
 ```{.tikz}
 \begin{tikzpicture}[line join=round,font=\usefont{T1}{phv}{m}{n}\small]
 \tikzset{%
-    Line/.style={line width=0.75pt,black!50,text=black
-},
+  Line/.style={line width=0.75pt,black!50,text=black},
   Box/.style={align=flush center,
     inner xsep=2pt,
-    node distance=0.65,
+    node distance=0.45,
     draw=BlueLine,
     line width=0.75pt,
     top color=white, bottom color=BlueL,
     text width=35mm,
     minimum width=35mm, minimum height=9mm
   },
- decision/.style = {Box,diamond, aspect=2.0, inner xsep=0pt,, bottom color=VioletL2, draw=VioletLine},
+ decision/.style = {Box,diamond, aspect=1.95, inner xsep=7pt,inner ysep=-2ex, bottom color=VioletL2, draw=VioletLine},
   startstop/.style = {Box,rounded rectangle, top color=white, bottom color=RedL, draw=RedLine},
 }
-
 \node[startstop](B1){Start: Deploying On-Device Learning};
 \node[decision,below=of B1](B2){Need Heavy\\ Adaptation?};
 \node[Box,below left=0.7 and 0.9 of B2](B3){Use Bias-Only or Lightweight Updates};
 \node[Box,below right=0.7 and 0.9 of B2](B4){Add Residual Adapters or Small Heads};
-\node[decision,below=of B4](B5){Sufficient Compute and Energy?};
+\node[decision,below=of B4](B5){Sufficient Compute\\ and Energy?};
 \node[Box,below=of B5](B6){Allow Partial or Full Fine-Tuning};
-\node[decision,below=of B6](B7){Is Data Valuable Across Devices?};
+\node[decision,below=of B6](B7){Is Data Valuable\\ Across Devices?};
 \node[Box,below left=1 and 0.9 of B7](B8){Use Federated Learning + Privacy Measures};
 \node[Box,below right=1 and 0.9 of B7](B9){Stay Localized and Monitor Drift};
 %
@@ -1446,7 +1356,6 @@ The flowchart in @fig-odl-design-flow summarizes key decision points in designin
 \draw[Line,-latex](B6)--(B7);
 \draw[Line,-latex](B7.west)node[above left]{Yes}-|(B8);
 \draw[Line,-latex](B7.east)node[above right]{No}-|(B9);
-
 \end{tikzpicture}
 ```
 **On-Device Learning Design**: This flowchart guides the systematic development of practical on-device learning systems by outlining key decision points related to data management, model selection, and privacy considerations throughout the system lifecycle. Integrating privacy and compliance requirements—such as user consent and data minimization—into the design process ensures auditable autonomy and scalable deployment of on-device intelligence.
@@ -1456,7 +1365,7 @@ The flowchart in @fig-odl-design-flow summarizes key decision points in designin
 
 While on-device learning holds significant promise for enabling adaptive, private, and efficient machine learning at the edge, its practical deployment introduces a range of challenges that extend beyond algorithm design. Unlike conventional centralized systems, where training occurs in controlled environments with uniform hardware and curated datasets, edge systems must contend with heterogeneity in devices, fragmentation in data, and the absence of centralized validation infrastructure. These factors give rise to new systems-level tradeoffs and open questions concerning reliability, safety, and maintainability. Moreover, regulatory and operational constraints complicate the deployment of self-updating models in real-world applications. This section explores these limitations, emphasizing the systemic barriers that must be addressed to make on-device learning robust, scalable, and trustworthy.
 
-#### Heterogeneity {#sec-ondevice-learning-heterogeneity-ac2d}
+### Heterogeneity {#sec-ondevice-learning-heterogeneity-ac2d}
 
 Federated and on-device learning systems must operate across a vast and diverse ecosystem of devices, ranging from smartphones and wearables to IoT sensors and microcontrollers. This heterogeneity spans multiple dimensions: hardware capabilities, software stacks, network connectivity, and power availability. Unlike cloud-based systems, where environments can be standardized and controlled, edge deployments encounter a wide distribution of system configurations and constraints. These variations introduce significant complexity in algorithm design, resource scheduling, and model deployment.
 
@@ -1470,7 +1379,7 @@ Finally, system fragmentation affects reproducibility and testing. With such a w
 
 Consider a federated learning deployment for mobile keyboards. A high-end smartphone might feature 8 GB of RAM, a dedicated AI accelerator, and continuous Wi-Fi access. In contrast, a budget device may have just 2 GB of RAM, no hardware acceleration, and rely on intermittent mobile data. These disparities influence how long training runs can proceed, how frequently models can be updated, and even whether training is feasible at all. To support such a range, the system must dynamically adjust training schedules, model formats, and compression strategies—ensuring equitable model improvement across users while respecting each device's limitations.
 
-#### Data Fragmentation {#sec-ondevice-learning-data-fragmentation-378d}
+### Data Fragmentation {#sec-ondevice-learning-data-fragmentation-378d}
 
 In centralized machine learning, data can be aggregated, shuffled, and curated to approximate independent and identically distributed (IID) samples—a key assumption underlying many learning algorithms. In contrast, on-device and federated learning systems must contend with highly fragmented and non-IID data. Each device collects data specific to its user, context, and usage patterns. These data distributions are often skewed, sparse, and dynamically shifting over time.
 
@@ -1484,7 +1393,7 @@ A common example of data fragmentation arises in speech recognition systems depl
 
 In federated learning deployments for virtual keyboards, the problem is further amplified. One user might primarily type in English, another in Hindi, and a third may switch fluidly between multiple languages. The resulting training data is highly non-IID—not only in language but also in vocabulary, phrasing, and typing cadence. A global model trained on aggregated updates may degrade if it fails to capture these localized differences, highlighting the need for adaptive, data-aware strategies that accommodate heterogeneity without sacrificing collective performance.
 
-#### Monitoring and Validation {#sec-ondevice-learning-monitoring-validation-3151}
+### Monitoring and Validation {#sec-ondevice-learning-monitoring-validation-3151}
 
 Unlike centralized machine learning systems, where model updates can be continuously evaluated against a held-out validation set, on-device learning introduces a fundamental shift in visibility and observability. Once deployed, models operate in highly diverse and often disconnected environments, where internal updates may proceed without external monitoring. This creates significant challenges for ensuring that model adaptation is both beneficial and safe.
 
@@ -1500,7 +1409,7 @@ In some cases, federated validation offers a partial solution. Devices can share
 
 Ultimately, update monitoring and validation in on-device learning require a rethinking of traditional evaluation practices. Instead of centralized test sets, systems must rely on implicit signals, runtime feedback, and conservative adaptation policies to ensure robustness. The absence of global observability is not merely a technical limitation—it reflects a deeper systems challenge in aligning local adaptation with global reliability.
 
-#### Resource Management {#sec-ondevice-learning-resource-management-4bbd}
+### Resource Management {#sec-ondevice-learning-resource-management-4bbd}
 
 On-device learning introduces new modes of resource contention that are not present in conventional inference-only deployments. While many edge devices are provisioned to run pretrained models efficiently, they are rarely designed with training workloads in mind. Local adaptation therefore competes for scarce resources, including compute cycles, memory bandwidth, energy, and thermal headroom, with other system processes and user-facing applications.
 
@@ -1518,7 +1427,7 @@ In some deployments, adaptation is further gated by cost constraints imposed by 
 
 In summary, the cost of on-device learning is not solely measured in FLOPs or memory usage. It manifests as a complex interplay of system load, user experience, energy availability, and infrastructure capacity. Addressing these challenges requires co-design across algorithmic, runtime, and hardware layers, ensuring that adaptation remains unobtrusive, efficient, and sustainable under real-world constraints.
 
-#### Deployment Risks {#sec-ondevice-learning-deployment-risks-92aa}
+### Deployment Risks {#sec-ondevice-learning-deployment-risks-92aa}
 
 The deployment of adaptive models on edge devices introduces challenges that extend beyond technical feasibility. In domains where compliance, auditability, and regulatory approval are necessary, including healthcare, finance, and safety-critical systems, on-device learning poses a fundamental tension between system autonomy and control.
 
@@ -1542,7 +1451,7 @@ Lastly, the emergence of edge learning raises open questions about accountabilit
 
 Addressing these deployment and compliance risks requires new tooling, protocols, and design practices that support auditable autonomy—the ability of a system to adapt in place while still satisfying external requirements for traceability, reproducibility, and user protection. As on-device learning becomes more prevalent, these challenges will become central to both system architecture and governance frameworks.
 
-#### Challenges Summary {#sec-ondevice-learning-challenges-summary-7983}
+### Challenges Summary {#sec-ondevice-learning-challenges-summary-7983}
 
 Designing on-device learning systems involves navigating a complex landscape of technical and practical constraints. While localized adaptation enables personalization, privacy, and responsiveness, it also introduces a range of challenges that span hardware heterogeneity, data fragmentation, observability, and regulatory compliance.
 
@@ -1560,7 +1469,6 @@ These challenges are not isolated—they interact in ways that influence the via
 | Limited Observability and Feedback  | No centralized testing or logging                         | Makes update validation and debugging difficult      |
 +-------------------------------------+-----------------------------------------------------------+------------------------------------------------------+
 | Resource Contention and Scheduling  | Competing demands for memory, compute, and battery        | Requires dynamic scheduling and budget-aware learning|
-
 +-------------------------------------+-----------------------------------------------------------+------------------------------------------------------+
 | Deployment and Compliance Risk      | Learning continues post-deployment                        | Complicates model versioning, auditing, and rollback |
 +-------------------------------------+-----------------------------------------------------------+------------------------------------------------------+
