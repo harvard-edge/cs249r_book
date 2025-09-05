@@ -81,6 +81,17 @@ Task(
 3. **Git branch** - `improve-[chapter]-[date]`
 4. **Summary report** - What was changed and why
 
+## CRITICAL: Commit Separation Rules
+
+**NEVER mix system and content changes in one commit!**
+
+When committing:
+1. **First commit**: .claude/ changes only (system/commands)
+2. **Second commit**: .qmd changes only (content improvements)
+3. **See**: .claude/COMMIT_RULES.md for detailed requirements
+
+This separation is MANDATORY for clean review and rollback.
+
 ## Example Workflow
 
 ```bash
