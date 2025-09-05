@@ -15,9 +15,11 @@ defaultOptions={
 blockStart = function (tt, fmt)
   local Open =""
   local BoxStyle =" fbx-default closebutton"
+  -- Special case for quiz answers
   if tt.type == "callout-quiz-answer" then
     BoxStyle = " fbx-answer closebutton"
-  elseif tt.type == "callout-quiz-question" then
+  else
+    -- All other callout types use default styling
     BoxStyle = " fbx-default closebutton"
   end
 
@@ -70,26 +72,15 @@ insertPreamble = function(doc, classDefs, fmt)
       local iconFormat = str(config["icon-format"] or "png")
       
       if fmt == "html" then
-        -- Generate dynamic CSS for icon paths
+        -- Generate dynamic CSS for icon paths - generic version using classDefs
         iconCSS = "<style>\n"
-        iconCSS = iconCSS .. "details.callout-quiz-question > summary::before {\n"
-        iconCSS = iconCSS .. "  background-image: url(\"" .. iconPath .. "/icon_callout-quiz-question." .. iconFormat .. "\");\n"
-        iconCSS = iconCSS .. "}\n"
-        iconCSS = iconCSS .. "details.callout-quiz-answer > summary::before {\n"
-        iconCSS = iconCSS .. "  background-image: url(\"" .. iconPath .. "/icon_callout-quiz-answer." .. iconFormat .. "\");\n"
-        iconCSS = iconCSS .. "}\n"
-        iconCSS = iconCSS .. "details.callout-chapter-connection > summary::before {\n"
-        iconCSS = iconCSS .. "  background-image: url(\"" .. iconPath .. "/icon_callout-chapter-connection." .. iconFormat .. "\");\n"
-        iconCSS = iconCSS .. "}\n"
-        iconCSS = iconCSS .. "details.callout-resource-slides > summary::before {\n"
-        iconCSS = iconCSS .. "  background-image: url(\"" .. iconPath .. "/icon_callout-resource-slides." .. iconFormat .. "\");\n"
-        iconCSS = iconCSS .. "}\n"
-        iconCSS = iconCSS .. "details.callout-resource-videos > summary::before {\n"
-        iconCSS = iconCSS .. "  background-image: url(\"" .. iconPath .. "/icon_callout-resource-videos." .. iconFormat .. "\");\n"
-        iconCSS = iconCSS .. "}\n"
-        iconCSS = iconCSS .. "details.callout-resource-exercises > summary::before {\n"
-        iconCSS = iconCSS .. "  background-image: url(\"" .. iconPath .. "/icon_callout-resource-exercises." .. iconFormat .. "\");\n"
-        iconCSS = iconCSS .. "}\n"
+        if classDefs then
+          for calloutType, _ in pairs(classDefs) do
+            iconCSS = iconCSS .. "details." .. calloutType .. " > summary::before {\n"
+            iconCSS = iconCSS .. "  background-image: url(\"" .. iconPath .. "/icon_" .. calloutType .. "." .. iconFormat .. "\");\n"
+            iconCSS = iconCSS .. "}\n"
+          end
+        end
         iconCSS = iconCSS .. "</style>"
       elseif fmt == "pdf" then
         -- Define the commands before including foldbox.tex
