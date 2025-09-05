@@ -56,6 +56,10 @@ def report_unreferenced(defined, referenced):
     unreferenced_labels = []
 
     for label_type, label_map in defined.items():
+        # Skip checking sections for unreferenced labels - it's normal for textbook sections to not be cross-referenced
+        if label_type == "Section":
+            continue
+            
         for label, (file, line) in sorted(label_map.items()):
             if label not in referenced:
                 try:
@@ -70,7 +74,7 @@ def report_unreferenced(defined, referenced):
             print(f"❌ {label_type:<10}: @{label:<30} ({rel_path}:{line})")
         return False
     else:
-        print("All defined labels are referenced!")
+        print("All defined labels are referenced (sections excluded from check)!")
         return True
 
 def parse_args():
