@@ -18,7 +18,7 @@ Remove common AI/LLM writing patterns including:
 - "It's worth noting that..."
 - "Harnessing the power of..."
 - "Navigating the landscape of..."
-- Excessive use of "moreover," "furthermore," "additionally"
+- Excessive use of "moreover," "furthermore," "additionally", "fundamental", "fundamentally"
 - Overly enthusiastic or promotional language
 - Redundant transitional phrases
 

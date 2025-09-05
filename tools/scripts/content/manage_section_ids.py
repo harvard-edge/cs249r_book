@@ -364,7 +364,7 @@ def is_properly_formatted_id(section_id, title, file_path, chapter_title, sectio
     # If it passes all format checks, it's properly formatted
     return True, section_id
 
-def generate_section_id(title, file_path, chapter_title, section_counter, parent_sections=None, section_content=None):
+def generate_section_id(title, file_path, chapter_title, section_counter, parent_sections=None, section_content=None, is_chapter=False):
     """
     Generate a unique section ID based on the section title and hierarchy.
     
@@ -381,15 +381,20 @@ def generate_section_id(title, file_path, chapter_title, section_counter, parent
         section_content: The content of the section (ignored - not used in hash)
     
     Returns:
-        A unique section ID in the format: sec-{chapter-slug}-{section-slug}-{4-char-hash}
+        For chapters: sec-{chapter-slug}
+        For sections: sec-{chapter-slug}-{section-slug}-{4-char-hash}
         
     Example:
-        Same section name in different files:
-        - File A: "contents/chapter1.qmd|Getting Started|Introduction" → hash: d212
-        - File B: "contents/chapter2.qmd|Getting Started|Introduction" → hash: 8435
-        Result: Different IDs ensure uniqueness based on location and hierarchy only
+        Chapter: "Introduction" → sec-introduction
+        Section: "Getting Started" in "Introduction" → sec-introduction-getting-started-d212
     """
     clean_title = simple_slugify(title)
+    
+    # For chapter-level headers, use simple format
+    if is_chapter:
+        return f"sec-{clean_title}"
+    
+    # For subsections, use the full format with chapter prefix and hash
     clean_chapter_title = simple_slugify(chapter_title)
     
     # Build hierarchy string from parent sections
@@ -543,7 +548,7 @@ def create_backup(file_path):
     logging.info(f"💾 Created backup: {backup_path}")
     return backup_path
 
-def process_markdown_file(file_path, auto_yes=False, force=False, dry_run=False, repair_mode=False, remove_mode=False, backup_mode=False):
+def process_markdown_file(file_path, auto_yes=False, force=False, dry_run=False, repair_mode=False, remove_mode=False, backup_mode=False, include_chapters=False):
     """Process a single Markdown file."""
     global id_replacements
     logging.info(f"\n📄 Processing: {file_path}")
@@ -597,9 +602,9 @@ def process_markdown_file(file_path, auto_yes=False, force=False, dry_run=False,
             hashes, title = match.groups()
             header_level = len(hashes)
             
-            if header_level > 1:  # Skip chapter title (level 1)
+            if header_level > 1 or (header_level == 1 and include_chapters):  # Skip chapter title (level 1) unless include_chapters is True
                 # Update section hierarchy based on header level
-                while len(section_hierarchy) >= header_level - 1:
+                while len(section_hierarchy) >= header_level:
                     section_hierarchy.pop()
                 
                 # Add current section to hierarchy (will be used for next section)
@@ -670,7 +675,8 @@ def process_markdown_file(file_path, auto_yes=False, force=False, dry_run=False,
                         section_content = extract_section_content(lines, i, header_level)
                         
                         # Generate the new ID in the standard format with parent hierarchy and content
-                        new_id = generate_section_id(title, file_path, chapter_title, section_counter, parent_sections, section_content)
+                        is_chapter = (header_level == 1)
+                        new_id = generate_section_id(title, file_path, chapter_title, section_counter, parent_sections, section_content, is_chapter)
                         section_counter += 1
                         
                         # Check if the existing ID needs to be repaired/updated
@@ -703,7 +709,8 @@ def process_markdown_file(file_path, auto_yes=False, force=False, dry_run=False,
                         section_content = extract_section_content(lines, i, header_level)
                         
                         # Generate the new ID in the standard format with parent hierarchy and content
-                        new_id = generate_section_id(title, file_path, chapter_title, section_counter, parent_sections, section_content)
+                        is_chapter = (header_level == 1)
+                        new_id = generate_section_id(title, file_path, chapter_title, section_counter, parent_sections, section_content, is_chapter)
                         section_counter += 1
                         # Add ID while preserving other attributes
                         if existing_attrs:
@@ -738,7 +745,7 @@ def process_markdown_file(file_path, auto_yes=False, force=False, dry_run=False,
 
     return file_summary
 
-def process_directory(directory, auto_yes=False, force=False, dry_run=False, repair_mode=False, remove_mode=False, backup_mode=False):
+def process_directory(directory, auto_yes=False, force=False, dry_run=False, repair_mode=False, remove_mode=False, backup_mode=False, include_chapters=False):
     """
     Recursively process all Markdown and Quarto files in a directory.
     """
@@ -763,7 +770,7 @@ def process_directory(directory, auto_yes=False, force=False, dry_run=False, rep
         logging.info(f"\n📄 [{i}/{len(all_files)}] Processing: {file_path}")
         logging.info(f"{'-'*60}")
         
-        file_summary = process_markdown_file(file_path, auto_yes=auto_yes, force=force, dry_run=dry_run, repair_mode=repair_mode, remove_mode=remove_mode, backup_mode=backup_mode)
+        file_summary = process_markdown_file(file_path, auto_yes=auto_yes, force=force, dry_run=dry_run, repair_mode=repair_mode, remove_mode=remove_mode, backup_mode=backup_mode, include_chapters=include_chapters)
         all_summaries.append(file_summary)
         
         # Add a separator between files
@@ -816,7 +823,7 @@ def print_summary(all_summaries):
 
     logging.info(f"\n{'='*60}")
 
-def verify_section_ids(filepath):
+def verify_section_ids(filepath, include_chapters=False):
     """Verify that all headers have proper section IDs, skipping unnumbered headers."""
     missing_ids = []
     with open(filepath, 'r', encoding='utf-8') as file:
@@ -831,7 +838,7 @@ def verify_section_ids(filepath):
         should_process, match = should_process_header(line, state)
         if should_process:
             hashes, title = match.groups()
-            if len(hashes) > 1:  # Skip chapter title
+            if len(hashes) > 1 or (len(hashes) == 1 and include_chapters):  # Skip chapter title unless include_chapters is True
                 # Extract existing attributes if any
                 existing_attrs = ""
                 if "{" in line:
@@ -1006,6 +1013,7 @@ MODE EXAMPLES:
     parser.add_argument("--remove", action="store_true", help="Remove all section IDs (use with --backup for safety)")
     parser.add_argument("--list", action="store_true", help="List all section IDs found in files")
     parser.add_argument("--backup", action="store_true", help="Create backup files before making changes")
+    parser.add_argument("--include-chapters", action="store_true", help="Include main chapter headers (level 1) for section ID management")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     args = parser.parse_args()
 
@@ -1029,7 +1037,7 @@ MODE EXAMPLES:
             sys.exit(0)
             
         if args.file:
-            missing_ids = verify_section_ids(args.file)
+            missing_ids = verify_section_ids(args.file, args.include_chapters)
             if missing_ids:
                 logging.warning(f"❌ {args.file}")
                 for header in missing_ids:
@@ -1041,7 +1049,7 @@ MODE EXAMPLES:
         elif args.directory:
             all_missing = []
             for filepath in glob.glob(os.path.join(args.directory, "**/*.qmd"), recursive=True):
-                missing_ids = verify_section_ids(filepath)
+                missing_ids = verify_section_ids(filepath, args.include_chapters)
                 if missing_ids:
                     logging.warning(f"❌ {filepath}")
                     all_missing.append((filepath, missing_ids))
@@ -1067,7 +1075,7 @@ MODE EXAMPLES:
     else:
         # First phase: Update all section IDs and build mapping
         if args.file:
-            file_summary = process_markdown_file(args.file, args.yes, args.force, args.dry_run, args.repair, args.remove, args.backup)
+            file_summary = process_markdown_file(args.file, args.yes, args.force, args.dry_run, args.repair, args.remove, args.backup, args.include_chapters)
             # Print summary for single file
             print_summary([file_summary])
             
@@ -1091,7 +1099,7 @@ MODE EXAMPLES:
                         update_cross_references(str(quiz_file), id_replacements)
         elif args.directory:
             # Process all files with summary
-            process_directory(args.directory, args.yes, args.force, args.dry_run, args.repair, args.remove, args.backup)
+            process_directory(args.directory, args.yes, args.force, args.dry_run, args.repair, args.remove, args.backup, args.include_chapters)
             
             # Then update cross-references if we have replacements
             if not args.dry_run and id_replacements:
