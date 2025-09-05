@@ -63,6 +63,7 @@ class MLSysBookCLI:
         fast_table.add_column("Example", style="dim", width=30)
         
         fast_table.add_row("build [chapter[,ch2,...]]", "Build static files to disk (HTML)", "./binder build intro,ops")
+        fast_table.add_row("html [chapter[,ch2,...]]", "Build HTML with index.qmd + specific files", "./binder html intro")
         fast_table.add_row("preview [chapter[,ch2,...]]", "Start live dev server with hot reload", "./binder preview intro")
         fast_table.add_row("pdf [chapter[,ch2,...]]", "Build static PDF file to disk", "./binder pdf intro")
         fast_table.add_row("epub [chapter[,ch2,...]]", "Build static EPUB file to disk", "./binder epub intro")
@@ -74,6 +75,7 @@ class MLSysBookCLI:
         full_table.add_column("Example", style="dim", width=30)
         
         full_table.add_row("build", "Build entire book as static HTML", "./binder build")
+        full_table.add_row("html", "Build HTML with index.qmd only", "./binder html")
         full_table.add_row("preview", "Start live dev server for entire book", "./binder preview")
         full_table.add_row("pdf", "Build entire book as static PDF", "./binder pdf")
         full_table.add_row("epub", "Build entire book as static EPUB", "./binder epub")
@@ -104,12 +106,28 @@ class MLSysBookCLI:
         examples.append("🎯 Modular CLI Examples:\n", style="bold magenta")
         examples.append("  ./binder build intro,ml_systems ", style="cyan")
         examples.append("# Build multiple chapters (HTML)\n", style="dim")
+        examples.append("  ./binder html intro ", style="cyan")
+        examples.append("# Build HTML with index.qmd + intro chapter\n", style="dim")
+        examples.append("  ./binder html ", style="cyan")
+        examples.append("# Build HTML with index.qmd only\n", style="dim")
         examples.append("  ./binder epub intro ", style="cyan")
         examples.append("# Build single chapter as EPUB\n", style="dim")
         examples.append("  ./binder pdf ", style="cyan")
         examples.append("# Build entire book as PDF\n", style="dim")
         
         console.print(Panel(examples, title="💡 Pro Tips", border_style="magenta"))
+        
+        # Command Aliases
+        aliases_text = Text()
+        aliases_text.append("🔗 Command Aliases:\n", style="bold cyan")
+        aliases_text.append("  b → build    ", style="green")
+        aliases_text.append("  p → preview\n", style="green")
+        aliases_text.append("  l → list     ", style="green")
+        aliases_text.append("  s → status     ", style="green")
+        aliases_text.append("  d → doctor     ", style="green")
+        aliases_text.append("  h → help\n", style="green")
+        
+        console.print(Panel(aliases_text, title="⚡ Shortcuts", border_style="cyan"))
     
     def handle_build_command(self, args):
         """Handle build command (HTML format)."""
@@ -125,6 +143,21 @@ class MLSysBookCLI:
             console.print(f"[green]🏗️ Building chapter(s): {chapters}[/green]")
             chapter_list = [ch.strip() for ch in chapters.split(',')]
             return self.build_command.build_chapters(chapter_list, "html")
+    
+    def handle_html_command(self, args):
+        """Handle HTML build command."""
+        self.config_manager.show_symlink_status()
+        
+        if len(args) < 1:
+            # No chapters specified - build index.qmd only
+            console.print("[green]🌐 Building HTML (index.qmd only)...[/green]")
+            return self.build_command.build_html_only()
+        else:
+            # Chapters specified
+            chapters = args[0]
+            console.print(f"[green]🌐 Building HTML with chapters: {chapters}[/green]")
+            chapter_list = [ch.strip() for ch in chapters.split(',')]
+            return self.build_command.build_html_only(chapter_list)
     
     def handle_pdf_command(self, args):
         """Handle PDF build command."""
@@ -249,6 +282,7 @@ class MLSysBookCLI:
         # Command mapping
         commands = {
             "build": self.handle_build_command,
+            "html": self.handle_html_command,
             "preview": self.handle_preview_command,
             "pdf": self.handle_pdf_command,
             "epub": self.handle_epub_command,

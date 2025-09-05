@@ -228,6 +228,120 @@ class BuildCommand:
             console.print(f"[red]❌ Command execution error: {e}[/red]")
             return False
     
+    def build_html_only(self, chapter_names: List[str] = None) -> bool:
+        """Build HTML-only version with index.qmd and specific files of interest.
+        
+        Args:
+            chapter_names: List of chapter names to include (optional)
+            
+        Returns:
+            True if build succeeded, False otherwise
+        """
+        console.print("[green]🌐 Building HTML-only version...[/green]")
+        
+        try:
+            # Always include index.qmd
+            files_to_render = ["index.qmd"]
+            
+            # Add specified chapters if provided
+            if chapter_names:
+                console.print(f"[dim]📋 Including chapters: {', '.join(chapter_names)}[/dim]")
+                chapter_files = self.chapter_discovery.validate_chapters(chapter_names)
+                
+                # Convert to relative paths from book directory
+                for chapter_file in chapter_files:
+                    rel_path = chapter_file.relative_to(self.config_manager.book_dir)
+                    files_to_render.append(str(rel_path))
+            else:
+                console.print("[dim]📋 Building index.qmd only[/dim]")
+            
+            # Create temporary config for HTML-only build
+            config_file = self.config_manager.get_config_file("html")
+            temp_config_file = self._create_html_only_config(config_file, files_to_render)
+            
+            # Setup symlink to temporary config
+            if self.config_manager.active_config.exists() or self.config_manager.active_config.is_symlink():
+                self.config_manager.active_config.unlink()
+            
+            relative_temp_config = temp_config_file.relative_to(self.config_manager.book_dir)
+            self.config_manager.active_config.symlink_to(relative_temp_config)
+            
+            # Build HTML
+            render_cmd = ["quarto", "render", "--to", "html"]
+            cmd_str = " ".join(render_cmd)
+            console.print(f"[blue]💻 Command: {cmd_str}[/blue]")
+            
+            success = self._run_command(
+                render_cmd,
+                cwd=self.config_manager.book_dir,
+                description="Building HTML-only version"
+            )
+            
+            if success:
+                output_dir = self.config_manager.get_output_dir("html")
+                console.print(f"[green]✅ HTML-only build completed: {output_dir}/[/green]")
+            else:
+                console.print("[red]❌ HTML-only build failed[/red]")
+                
+            return success
+            
+        except Exception as e:
+            console.print(f"[red]❌ HTML-only build error: {e}[/red]")
+            return False
+        finally:
+            # Always restore original config
+            try:
+                self._restore_html_config()
+                # Clean up temporary config file
+                if 'temp_config_file' in locals() and temp_config_file.exists():
+                    temp_config_file.unlink()
+            except:
+                pass
+    
+    def _create_html_only_config(self, base_config_file: Path, files_to_render: List[str]) -> Path:
+        """Create a temporary Quarto config for HTML-only builds.
+        
+        Args:
+            base_config_file: Base HTML configuration file
+            files_to_render: List of files to include in the build
+            
+        Returns:
+            Path to the temporary configuration file
+        """
+        import yaml
+        
+        # Read the base configuration
+        with open(base_config_file, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+        
+        # Add project.render configuration to limit files
+        if 'project' not in config:
+            config['project'] = {}
+        
+        config['project']['render'] = files_to_render
+        
+        # Create temporary config file
+        temp_config_file = self.config_manager.book_dir / "_quarto_html_only.yml"
+        
+        with open(temp_config_file, 'w', encoding='utf-8') as f:
+            yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
+        
+        console.print(f"[dim]⚡ Created HTML-only config with {len(files_to_render)} files[/dim]")
+        return temp_config_file
+    
+    def _restore_html_config(self) -> None:
+        """Restore the original HTML configuration."""
+        try:
+            # Remove current symlink
+            if self.config_manager.active_config.exists() or self.config_manager.active_config.is_symlink():
+                self.config_manager.active_config.unlink()
+            
+            # Restore HTML config symlink
+            self.config_manager.setup_symlink("html")
+            console.print("[dim]🛡️ Restored original HTML config[/dim]")
+        except Exception as e:
+            console.print(f"[yellow]⚠️ Error restoring config: {e}[/yellow]")
+
     def _setup_fast_build_mode(self, config_file: Path, chapter_files: List[Path]) -> None:
         """Setup fast build mode for specific chapters."""
         # This is a simplified version - in the full implementation,
