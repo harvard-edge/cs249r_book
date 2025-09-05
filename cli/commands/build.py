@@ -121,11 +121,16 @@ class BuildCommand:
             # Set up fast build mode for the target chapters
             self._setup_fast_build_mode(config_file, chapter_files)
             
+            # Track if config has been restored to avoid double restoration
+            self._config_restored = False
+            
             # Setup signal handler to restore config on Ctrl+C
             def signal_handler(signum, frame):
-                console.print("\n[yellow]🛡️ Ctrl+C detected - restoring config...[/yellow]")
-                self._restore_config(config_file)
-                console.print("[green]✅ Config restored[/green]")
+                if not self._config_restored:
+                    console.print("\n[yellow]🛡️ Ctrl+C detected - restoring config...[/yellow]")
+                    self._restore_config(config_file)
+                    self._config_restored = True
+                    console.print("[green]✅ Config restored[/green]")
                 sys.exit(0)
             
             signal.signal(signal.SIGINT, signal_handler)
@@ -156,9 +161,10 @@ class BuildCommand:
             console.print(f"[red]❌ Build error: {e}[/red]")
             return False
         finally:
-            # Always restore config
+            # Always restore config (unless already restored by signal handler)
             try:
-                self._restore_config(config_file)
+                if not self._config_restored:
+                    self._restore_config(config_file)
             except:
                 pass
     
@@ -343,13 +349,179 @@ class BuildCommand:
             console.print(f"[yellow]⚠️ Error restoring config: {e}[/yellow]")
 
     def _setup_fast_build_mode(self, config_file: Path, chapter_files: List[Path]) -> None:
-        """Setup fast build mode for specific chapters."""
-        # This is a simplified version - in the full implementation,
-        # this would modify the config file to only render specific chapters
+        """Setup fast build mode for specific chapters by commenting out others."""
         console.print("[dim]⚡ Setting up fast build mode...[/dim]")
+        
+        # Create backup of original config
+        backup_file = config_file.with_suffix('.backup')
+        if backup_file.exists():
+            backup_file.unlink()  # Remove old backup
+        
+        # Read original config
+        with open(config_file, 'r', encoding='utf-8') as f:
+            original_content = f.read()
+        
+        # Save backup
+        with open(backup_file, 'w', encoding='utf-8') as f:
+            f.write(original_content)
+        
+        # Get target chapter paths (relative to quarto dir)
+        target_chapters = set()
+        for chapter_file in chapter_files:
+            # Convert absolute path to relative path from quarto directory
+            try:
+                rel_path = chapter_file.relative_to(self.config_manager.book_dir)
+                target_chapters.add(str(rel_path))
+            except ValueError:
+                # If not relative to book_dir, use the filename approach
+                target_chapters.add(chapter_file.name.replace('.qmd', ''))
+        
+        console.print(f"[dim]📋 Target chapters: {', '.join(target_chapters)}[/dim]")
+        
+        # Process config line by line with better part handling
+        lines = original_content.split('\n')
+        modified_lines = []
+        in_chapters_section = False
+        
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip()
+            
+            # Detect main chapters section
+            if stripped == 'chapters:':
+                in_chapters_section = True
+                modified_lines.append(line)
+                i += 1
+                continue
+            
+            # Exit chapters section when we hit another top-level key
+            if in_chapters_section and line and not line.startswith(' ') and not line.startswith('\t'):
+                in_chapters_section = False
+            
+            # Handle part sections - process entire part block as a unit
+            if in_chapters_section and stripped.startswith('- part:'):
+                part_lines = [line]  # Start with the part line
+                part_has_included_chapters = False
+                i += 1
+                
+                # Collect all lines belonging to this part
+                while i < len(lines):
+                    next_line = lines[i]
+                    next_stripped = next_line.strip()
+                    
+                    # If we hit another part or exit the indented section, we're done with this part
+                    if (next_stripped.startswith('- part:') or 
+                        (next_line and not next_line.startswith(' ') and not next_line.startswith('\t')) or
+                        (next_stripped.startswith('- ') and not next_stripped.startswith('- part:') and 
+                         not next_line.startswith('        '))):  # Not deeply indented chapter
+                        break
+                    
+                    part_lines.append(next_line)
+                    
+                    # Check if this is a chapter line within the part
+                    if next_stripped.startswith('- ') and next_line.startswith('        '):
+                        chapter_path = next_stripped[2:].strip()
+                        
+                        # Check if this chapter should be included
+                        should_include = False
+                        for target in target_chapters:
+                            if target in chapter_path or chapter_path.endswith(f'{target}.qmd'):
+                                should_include = True
+                                break
+                        
+                        if should_include:
+                            part_has_included_chapters = True
+                    
+                    i += 1
+                
+                # Now decide whether to include or comment out the entire part
+                if part_has_included_chapters:
+                    # Include the part but comment out non-target chapters
+                    for part_line in part_lines:
+                        part_stripped = part_line.strip()
+                        if part_stripped.startswith('- ') and part_line.startswith('        '):
+                            chapter_path = part_stripped[2:].strip()
+                            
+                            should_include = False
+                            for target in target_chapters:
+                                if target in chapter_path or chapter_path.endswith(f'{target}.qmd'):
+                                    should_include = True
+                                    break
+                            
+                            if should_include:
+                                modified_lines.append(part_line)
+                                console.print(f"[green]✓[/green] [dim]Including: {chapter_path}[/dim]")
+                            else:
+                                modified_lines.append(f"        # COMMENTED OUT: {part_stripped}")
+                                console.print(f"[yellow]#[/yellow] [dim]Commenting out: {chapter_path}[/dim]")
+                        else:
+                            modified_lines.append(part_line)
+                else:
+                    # Comment out the entire part
+                    for j, part_line in enumerate(part_lines):
+                        if j == 0:  # First line (the part line)
+                            modified_lines.append(f"    # COMMENTED OUT: {part_line.strip()}")
+                            console.print(f"[yellow]#[/yellow] [dim]Commenting out part: {part_line.strip()}[/dim]")
+                        else:
+                            modified_lines.append(f"    # COMMENTED OUT: {part_line.strip()}")
+                
+                continue  # i is already advanced
+            
+            # Handle regular chapter lines (not in parts)
+            if in_chapters_section and stripped.startswith('- ') and not stripped.startswith('- part:'):
+                chapter_path = stripped[2:].strip()
+                
+                # Check if this chapter should be included
+                should_include = False
+                for target in target_chapters:
+                    if target in chapter_path or chapter_path.endswith(f'{target}.qmd'):
+                        should_include = True
+                        break
+                
+                # Always include index.qmd
+                if 'index.qmd' in chapter_path:
+                    should_include = True
+                
+                if should_include:
+                    modified_lines.append(line)
+                    console.print(f"[green]✓[/green] [dim]Including: {chapter_path}[/dim]")
+                else:
+                    modified_lines.append(f"    # COMMENTED OUT: {line.strip()}")
+                    console.print(f"[yellow]#[/yellow] [dim]Commenting out: {chapter_path}[/dim]")
+            else:
+                modified_lines.append(line)
+            
+            i += 1
+        
+        # Write modified config
+        modified_content = '\n'.join(modified_lines)
+        with open(config_file, 'w', encoding='utf-8') as f:
+            f.write(modified_content)
+        
+        console.print(f"[green]✅ Fast build mode enabled - {len(target_chapters)} chapters selected[/green]")
     
     def _restore_config(self, config_file: Path) -> None:
         """Restore configuration to pristine state."""
-        # This is a simplified version - in the full implementation,
-        # this would restore the original config file
         console.print("[dim]🛡️ Restoring config...[/dim]")
+        
+        backup_file = config_file.with_suffix('.backup')
+        
+        if backup_file.exists():
+            try:
+                # Read backup content
+                with open(backup_file, 'r', encoding='utf-8') as f:
+                    original_content = f.read()
+                
+                # Restore original config
+                with open(config_file, 'w', encoding='utf-8') as f:
+                    f.write(original_content)
+                
+                # Clean up backup file
+                backup_file.unlink()
+                
+                console.print("[green]✅ Configuration restored successfully[/green]")
+            except Exception as e:
+                console.print(f"[red]❌ Error restoring config: {e}[/red]")
+        else:
+            console.print("[yellow]⚠️ No backup file found - config may already be restored[/yellow]")
