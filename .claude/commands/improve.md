@@ -1,39 +1,57 @@
-Run multi-perspective ML Systems textbook review using parallel Task subagents.
+Pure Claude-native textbook review using Task subagents - NO external code needed!
 
-This command reviews your chapter from 5 different engineering perspectives simultaneously, finds consensus issues, and applies improvements directly to the file. You then review the changes in GitKraken and keep what you want.
+Reviews chapters from multiple perspectives using Claude's built-in Task subagent infrastructure. Everything runs through Claude - no Python files, no external scripts.
 
 Usage: `/improve introduction.qmd`
 
-## What Happens:
+## How It Works (100% Claude Native)
 
-1. **Creates a branch**: `improve-[chapter]-[timestamp]` for safe experimentation
-2. **Chunks the file**: Splits into ~400 line semantic chunks 
-3. **Parallel review**: 5 Task subagents review each chunk simultaneously
-4. **Finds consensus**: Identifies issues multiple reviewers agree on
-5. **Applies improvements**: Makes direct changes to the file (no markdown comments)
-6. **Generates report**: Creates `.improve-report-[chapter].md` with all findings
+When you run this command, Claude will:
+1. Launch student Task subagents to validate learning progression
+2. Launch expert Task subagents to verify technical accuracy
+3. Analyze consensus patterns using Claude's reasoning
+4. Apply improvements directly to files using Edit tools
 
-## The 5 Reviewers:
+No Python code, no external files - just Claude!
 
-- **Systems Engineer**: Production deployment, scaling, operations
-- **ML Practitioner**: Notebook-to-production gap, deployment challenges  
-- **Embedded Engineer**: Hardware constraints, power, edge deployment
-- **Platform Engineer**: MLOps, infrastructure, team collaboration
-- **Data Engineer**: Pipelines, feature stores, data quality
+## Default Reviewers (Balanced Mix)
 
-## Consensus Application:
+**Students (3):**
+- Senior Undergrad: Has ML basics, needs deployment guidance
+- Masters Student: Cross-disciplinary, working on projects
+- PhD Student: Strong theory, learning systems aspects
 
-- **4-5 reviewers agree**: Applied automatically
+**Experts (3):**
+- Systems Engineer: Production deployment, scaling, operations
+- ML Practitioner: Notebook-to-production specialist
+- Data Engineer: Pipelines, data quality, feature stores
+
+## Consensus Application
+
+Based on `config/settings.json`:
+- **4+ reviewers agree**: Applied automatically
 - **3 reviewers agree**: Applied (high priority)
-- **2 reviewers agree**: Noted in report for manual review
+- **2 reviewers agree**: Noted in report
 - **1 reviewer**: Documented only
 
-## After Running:
+## Customizing Reviewers
 
-1. Open GitKraken to see all changes as clean diffs
-2. Review the `.improve-report-[chapter].md` for context
-3. Stage changes you want to keep
-4. Discard changes you don't like
-5. Commit when satisfied
+### Customize Review (Natural Language)
 
-The improvements focus on the book's mission: teaching practical ML systems engineering, not just algorithms.
+Just tell Claude what you want:
+- "Focus on student confusion points"
+- "Add a mobile developer perspective"
+- "Check for security issues"
+- "Use only expert reviewers"
+
+Claude will adjust the review approach dynamically - no config files to edit!
+
+## Output
+
+1. **Direct file improvements** (no markdown clutter)
+2. **Report** (`.improve-report-[chapter].md`) with full context
+3. **Git branch** for safe experimentation
+
+Review changes in GitKraken - stage what you like, discard what you don't.
+
+The system focuses on the textbook's mission: teaching students to build real ML systems, not just understand algorithms.
