@@ -1,8 +1,10 @@
-Advanced textbook review system using Claude's Task subagent infrastructure.
+Multi-perspective textbook assessment generating comprehensive scorecards.
 
-This command orchestrates multiple review passes using ONLY Claude's native capabilities - no external code needed. Everything runs through Task subagents with intelligent coordination.
+Analyzes chapters from student and expert perspectives WITHOUT making changes. Generates detailed report cards showing strengths, weaknesses, and recommendations across all dimensions.
 
 Usage: `/review introduction.qmd`
+
+**Output**: Detailed scorecard only - NO file changes
 
 ## Review Architecture (Pure Claude)
 
@@ -107,10 +109,25 @@ They DON'T necessarily have:
 
 Claude will adjust the review accordingly!
 
-## Output
+## Output: Comprehensive Scorecard
 
-1. **Direct improvements** applied to file
-2. **Review report** with full analysis
-3. **Git branch** for experimentation
+Generates `.review-scorecard-[chapter].md` with:
 
-All orchestrated by Claude, no external code needed!
+### 📊 Dimension Scores (0-10)
+- **Learning Progression**: How well concepts build
+- **Technical Accuracy**: Correctness and best practices
+- **Production Readiness**: Real-world applicability
+- **Pedagogical Effectiveness**: Teaching quality
+- **Accessibility**: Diverse learner support
+
+### 📋 Detailed Feedback
+- **Strengths**: What works well
+- **Critical Issues**: Must-fix problems
+- **Recommendations**: Suggested improvements
+- **Student Confusion Points**: Where learners struggle
+- **Expert Concerns**: Technical gaps
+
+### 🎯 Priority Actions
+Ranked list of what to fix first based on consensus.
+
+NO changes are made to files - use `/improve` to apply changes.
