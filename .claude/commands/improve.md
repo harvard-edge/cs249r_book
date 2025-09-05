@@ -1,41 +1,39 @@
-Run multi-perspective textbook review and create small, focused PRs for improvements.
+Run multi-perspective ML Systems textbook review using parallel Task subagents.
 
-This command:
-1. Chunks large .qmd files intelligently to avoid context overflow
-2. Reviews each chunk from 5 student perspectives (Junior CS, Senior EE, Masters, PhD, Industry)
-3. Consolidates feedback and prioritizes issues
-4. Creates small PRs (≤5 changes each) for easy review
-5. Generates descriptive commit messages and PR descriptions
+This command reviews your chapter from 5 different engineering perspectives simultaneously, finds consensus issues, and applies improvements directly to the file. You then review the changes in GitKraken and keep what you want.
 
-Usage:
-- Basic: `/improve introduction.qmd`
-- With options: `/improve frameworks.qmd --max-prs 3`
+Usage: `/improve introduction.qmd`
 
-The command will:
-1. Analyze the file and split into semantic chunks (~400 lines each)
-2. Run multi-perspective reviews using Task subagents
-3. Identify consensus issues (reported by multiple reviewers)
-4. Create separate Git branches for Critical, High, and Medium priority fixes
-5. Generate PRs with clear descriptions of what was fixed
+## What Happens:
 
-Example workflow:
-```python
-# 1. Chunk the file
-chunks = smart_chunk_file(chapter_file)
+1. **Creates a branch**: `improve-[chapter]-[timestamp]` for safe experimentation
+2. **Chunks the file**: Splits into ~400 line semantic chunks 
+3. **Parallel review**: 5 Task subagents review each chunk simultaneously
+4. **Finds consensus**: Identifies issues multiple reviewers agree on
+5. **Applies improvements**: Makes direct changes to the file (no markdown comments)
+6. **Generates report**: Creates `.improve-report-[chapter].md` with all findings
 
-# 2. Review each chunk from multiple perspectives
-for chunk in chunks:
-    reviews = run_multi_perspective_review(chunk)
-    
-# 3. Consolidate and prioritize
-issues = consolidate_feedback(reviews)
-prioritized = prioritize_by_consensus(issues)
+## The 5 Reviewers:
 
-# 4. Create small PR batches
-create_pr_for_critical_issues(prioritized[:5])
-create_pr_for_high_priority(prioritized[5:10])
+- **Systems Engineer**: Production deployment, scaling, operations
+- **ML Practitioner**: Notebook-to-production gap, deployment challenges  
+- **Embedded Engineer**: Hardware constraints, power, edge deployment
+- **Platform Engineer**: MLOps, infrastructure, team collaboration
+- **Data Engineer**: Pipelines, feature stores, data quality
 
-# 5. Output summary with PR links
-```
+## Consensus Application:
 
-The review system files are located in `/review/` directory.
+- **4-5 reviewers agree**: Applied automatically
+- **3 reviewers agree**: Applied (high priority)
+- **2 reviewers agree**: Noted in report for manual review
+- **1 reviewer**: Documented only
+
+## After Running:
+
+1. Open GitKraken to see all changes as clean diffs
+2. Review the `.improve-report-[chapter].md` for context
+3. Stage changes you want to keep
+4. Discard changes you don't like
+5. Commit when satisfied
+
+The improvements focus on the book's mission: teaching practical ML systems engineering, not just algorithms.
