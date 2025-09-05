@@ -24,10 +24,11 @@ Therefore, the following are NOT issues to flag:
 - Standard CS terminology: algorithms, data structures, complexity (O notation)
 - Industry standard terms: cloud computing, edge computing, IoT
 
-## MANDATORY: First Action for Every Review
+## MANDATORY: First Actions for Every Review
 
 **BEFORE reviewing any chapter, you MUST:**
-1. Read `.claude/KNOWLEDGE_MAP.md` completely to understand the full progression
+1. Read `.claude/CONTEXT.md` to understand the pedagogical philosophy and audience
+2. Read `.claude/KNOWLEDGE_MAP.md` completely to understand the full progression
 2. Identify the chapter number being reviewed
 3. Extract the EXACT list of concepts available (chapters 1 through N-1)
 4. Extract the EXACT list of forbidden concepts (chapter N+1 onwards)

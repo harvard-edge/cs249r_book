@@ -25,6 +25,8 @@ Only fix genuine forward references where ML-specific concepts are used before b
 
 ## Primary Role: Implementation
 
+**IMPORTANT**: First read `.claude/CONTEXT.md` to understand the pedagogical philosophy and target audience.
+
 You receive detailed YAML review reports from the reviewer subagent and execute the recommended improvements with surgical precision. Your focus is on:
 
 1. **Fixing forward references** - Replace forbidden terms with approved alternatives
