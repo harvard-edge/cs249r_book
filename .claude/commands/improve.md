@@ -1,28 +1,38 @@
-Progressive textbook improvement using a two-agent pipeline: reviewer analyzes, editor implements.
+Progressive textbook improvement using Task subagents for dynamic, specialized review and editing.
 
 This command ensures improvements never reference concepts that haven't been introduced yet. Each chapter can only use terminology and concepts from chapters that come before it.
 
 Usage: `/improve chapter.qmd`
 
-## Two-Agent Pipeline
+## Task Subagent Pipeline
 
-### Agent 1: Reviewer
-- Analyzes chapter for forward references
-- Provides multi-perspective feedback
-- Creates detailed review report
-- Suggests specific improvements
+This command orchestrates multiple Task subagents, each with specialized expertise:
 
-### Agent 2: Editor
-- Receives review report
-- Implements approved changes
-- Ensures clean, minimal edits
-- Maintains academic quality
+### **Subagent 1: Knowledge Reviewer**
+- **Expertise**: Progressive knowledge boundary enforcement
+- **Task**: Scan for forward references, validate concept sequences
+- **Output**: YAML report with exact violations and fixes
+
+### **Subagent 2: Multi-Perspective Reviewer** 
+- **Expertise**: Seven different student/professional backgrounds
+- **Task**: Review chapter from diverse reader perspectives
+- **Output**: Structured feedback highlighting clarity issues
+
+### **Subagent 3: Content Editor**
+- **Expertise**: Precise implementation of improvements
+- **Task**: Apply fixes from review reports using MultiEdit
+- **Output**: Surgically edited chapter with clean diffs
+
+### **Subagent 4: Quality Validator**
+- **Expertise**: Post-edit verification and regression detection
+- **Task**: Verify all issues resolved, no new problems introduced
+- **Output**: Validation report and quality metrics
 
 ## Critical Constraint: Progressive Knowledge Only
 
 ### ⚠️ FORBIDDEN: Forward References
 - **Never use terms from future chapters**
-- **Never assume knowledge not yet taught**
+- **Never assume knowledge not yet taught** 
 - **Never reference concepts that come later**
 
 ### ✅ ALLOWED: Previous Knowledge
@@ -30,7 +40,7 @@ Usage: `/improve chapter.qmd`
 - **Only reference previous chapters**
 - **Build on established foundations**
 
-## Chapter Knowledge Map
+## Knowledge Foundation
 
 The system uses `.claude/KNOWLEDGE_MAP.md` which contains:
 - Complete concept progression for all 20 chapters
@@ -38,45 +48,64 @@ The system uses `.claude/KNOWLEDGE_MAP.md` which contains:
 - Common violations and safe alternatives
 - Progressive building examples
 
-## Review Process
+## Dynamic Subagent Process
 
-### Phase 1: Analysis (Reviewer Agent)
-1. Loads KNOWLEDGE_MAP.md to understand boundaries
-2. Identifies chapter position and available concepts
-3. Scans for forward references line-by-line
-4. Gathers multi-perspective feedback:
-   - CS Junior (new to ML)
-   - CS Senior (some ML exposure)
-   - Early Career Engineer
-   - Platform Architect
-   - MLOps Engineer
-   - Data Engineer
-   - Professor/Educator
-5. Produces detailed review report with consensus scoring
+### Phase 1: Knowledge Analysis
+```
+Task("knowledge-reviewer"):
+- Load KNOWLEDGE_MAP.md for chapter boundaries
+- Identify available vs forbidden concepts
+- Scan every line for forward references
+- Generate YAML report with exact fixes
+```
 
-### Phase 2: Implementation (Editor Agent)
-1. Parses review report for critical issues
-2. Implements forward reference fixes first
-3. Addresses high-priority clarity issues
-4. Makes minimal, surgical edits
-5. Preserves TikZ, tables, equations, Purpose sections
-6. Maintains clean diffs without comments
+### Phase 2: Multi-Perspective Review
+```
+Task("multi-perspective-reviewer"):
+- CS Undergrad (Systems Track): OS/arch background, new to ML
+- CS Undergrad (AI Track): ML theory, needs systems context
+- Industry New Grad: Practical coding, mixed theory
+- Career Transition: Smart but minimal tech background
+- Graduate Student: Deep theory, needs practical application
+- Industry Practitioner: Real experience, needs cutting-edge updates
+- Educator/Professor: Pedagogical effectiveness focus
+```
 
-## Example Progressive Improvements
+### Phase 3: Content Implementation
+```
+Task("content-editor"):
+- Parse YAML review reports
+- Implement forward reference fixes first
+- Apply clarity improvements using MultiEdit
+- Add footnotes for brief future concept mentions
+- Preserve TikZ, tables, equations, Purpose sections
+```
+
+### Phase 4: Quality Validation
+```
+Task("quality-validator"):
+- Verify all reported issues fixed
+- Check for new forward references introduced
+- Validate protected content unchanged
+- Confirm academic tone maintained
+```
+
+## Example Forward Reference Fixes
 
 ### ❌ BAD (Forward Reference):
 Chapter 3: "Neural networks can be optimized through quantization and pruning"
 → Quantization/pruning not introduced until Chapter 10!
 
-### ✅ GOOD (Progressive):
-Chapter 3: "Neural networks can be made more efficient through techniques we'll explore in later chapters"
+### ✅ GOOD (Progressive with Footnote):
+Chapter 3: "Neural networks can be optimized through various techniques[^ch3-opt]"
+[^ch3-opt]: Specific methods like quantization and pruning are covered in Chapter 10.
 
 ### ❌ BAD (Undefined Term):
 Chapter 2: "Edge devices often use GPUs for acceleration"
 → GPUs haven't been defined yet!
 
 ### ✅ GOOD (Using Known Terms):
-Chapter 2: "Edge devices often use specialized hardware for faster processing"
+Chapter 2: "Edge devices often use specialized hardware for acceleration"
 
 ## Common Replacements
 
@@ -90,38 +119,20 @@ Chapter 2: "Edge devices often use specialized hardware for faster processing"
 | Federated Learning | Chapter 14 | "distributed approaches" |
 | Differential Privacy | Chapter 16 | "privacy techniques" |
 
-## Implementation
+## Subagent Benefits
 
-When running `/improve dl_primer.qmd`:
-
-1. **Reviewer agent** activated first:
-   - Reads `.claude/KNOWLEDGE_MAP.md`
-   - Identifies this is Chapter 3
-   - Lists allowed concepts from Chapters 1-2
-   - Lists forbidden concepts from Chapters 4-20
-   - Produces comprehensive review report
-
-2. **Editor agent** activated second:
-   - Receives review report
-   - Implements all critical fixes (4+ reviewer consensus)
-   - Addresses high-priority issues (3+ reviewers)
-   - Makes clean, minimal edits
-   - Preserves protected content
-
-## Benefits
-
-- **True progressive learning** - Students never encounter undefined terms
-- **Clear knowledge building** - Each chapter adds specific concepts
-- **No confusion** - Everything is defined before use
-- **Proper pedagogy** - Concepts introduced in optimal order
-- **Clean implementation** - Separation of analysis and editing
-- **Quality assurance** - Multi-perspective validation
+- **Fresh Context**: Each subagent starts with clean context
+- **Specialized Expertise**: Tailored prompts for specific tasks
+- **Dynamic Configuration**: No files to maintain
+- **Isolated Execution**: Independent operation prevents cross-contamination
+- **Scalable Design**: Easy to add new perspectives or capabilities
 
 ## Output
 
 The command produces:
-1. Detailed review report showing all issues found
-2. Clean edits to the chapter file
-3. Summary of changes made
+1. **Knowledge Review Report**: All forward references and violations found
+2. **Multi-Perspective Feedback**: Issues identified by different backgrounds
+3. **Clean Chapter Edits**: Precise fixes with surgical accuracy
+4. **Quality Validation**: Confirmation all issues resolved
 
-This ensures the textbook truly builds knowledge progressively, never assuming students know something that hasn't been taught yet.
+This ensures the textbook builds knowledge progressively, with each chapter serving readers from diverse backgrounds while never assuming knowledge that hasn't been taught yet.
