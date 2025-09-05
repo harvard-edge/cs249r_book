@@ -99,11 +99,13 @@ Forbidden future concepts: [explicit list]
 
 When running `/improve dl_primer.qmd`:
 
-1. Claude identifies chapter position (Chapter 3)
-2. Claude lists allowed knowledge (Chapters 1-2)
-3. Claude lists forbidden terms (from Chapters 4+)
-4. Reviewers operate within these boundaries
-5. Improvements use only established concepts
+1. The textbook-editor agent FIRST reads `.claude/KNOWLEDGE_MAP.md`
+2. Agent identifies chapter position (Chapter 3)
+3. Agent extracts EXACT allowed concepts (Chapters 1-2)
+4. Agent extracts EXACT forbidden terms (from Chapters 4+)
+5. Reviewers operate strictly within these boundaries
+6. Every edit is checked against the knowledge map
+7. Improvements use only established concepts
 
 ## Benefits
 
