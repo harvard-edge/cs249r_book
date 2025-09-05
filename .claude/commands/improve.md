@@ -38,24 +38,41 @@ Every review agent automatically:
 - **3 reviewers agree**: Apply if safe
 - **2 or fewer**: Document only
 
-## Review Perspectives (With Built-in Constraints)
+## Review Perspectives (Optimized for ML Systems Book)
 
-**Students (Progressive Validation):**
-- CS Junior: Has systems background, learning ML
-- CS Senior: Some ML knowledge, learning deployment
-- Masters: Strong foundation, production focus
+### Learning Path Validators (Sequential)
+Claude launches these in order, passing insights forward:
 
-**Experts (Technical Accuracy):**
-- Systems Engineer: Scalability and operations
-- ML Practitioner: Algorithm to production
-- Data Engineer: Pipeline and quality
+1. **Systems CS Student**: Strong systems, NO ML → "Can I use my systems knowledge?"
+2. **ML Algorithm Student**: Theory-rich, deployment-poor → "How do I productionize?"
+3. **Early Career Engineer**: 1-2 years industry → "Is this real-world accurate?"
 
-**All agents are programmed to:**
-- Never suggest changes to TikZ code
-- Never modify tables (markdown or LaTeX)
+### Domain Experts (Parallel Review)
+Claude launches these simultaneously for comprehensive coverage:
+
+1. **Platform Architect**: Cloud/K8s/GPU clusters → Infrastructure design
+2. **MLOps Engineer**: CI/CD, monitoring, versioning → Operational excellence
+3. **Edge Systems Engineer**: Embedded, quantization → Resource-constrained deployment
+4. **Data Platform Engineer**: Feature stores, pipelines → Data foundation
+5. **Professor/Educator**: Curriculum design → Teachability & exercises
+
+### How Claude Creates the Prompts
+
+At runtime, Claude constructs Task subagent prompts like:
+```
+Task(
+  prompt="You are a CS Junior with strong OS/architecture background 
+          but have NEVER seen ML before. Review this chapter and 
+          identify what's confusing for someone with your background.
+          CONSTRAINTS: Skip TikZ, skip tables, keep Purpose single paragraph..."
+)
+```
+
+**All agents automatically follow constraints:**
+- Never touch TikZ code or tables
 - Keep Purpose sections as single paragraphs
-- Add inline definitions rather than separate glossaries
-- Focus on clean, mergeable improvements
+- Add inline definitions
+- Create clean, mergeable improvements
 
 ## Output
 
