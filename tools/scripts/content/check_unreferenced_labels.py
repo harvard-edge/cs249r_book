@@ -69,12 +69,12 @@ def report_unreferenced(defined, referenced):
                 unreferenced_labels.append((label_type, label, rel_path, line))
 
     if unreferenced_labels:
-        print("🔍 Unreferenced labels found:\n")
+        print("🔍 Unreferenced figures, tables, equations, or listings found:\n")
         for label_type, label, rel_path, line in unreferenced_labels:
             print(f"❌ {label_type:<10}: @{label:<30} ({rel_path}:{line})")
         return False
     else:
-        print("All defined labels are referenced (sections excluded from check)!")
+        print("All figures, tables, equations, and listings are properly referenced!")
         return True
 
 def parse_args():
