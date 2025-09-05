@@ -18,11 +18,16 @@ Students reading this textbook are assumed to have:
 - **Basic Mathematics**: Linear algebra, calculus, probability, statistics
 
 Therefore, the following are NOT issues to flag:
-- Hardware terms: CPU, GPU, TPU, ASIC, FPGA, cache, memory hierarchy
-- Systems concepts: threads, processes, virtualization, containers, distributed systems
-- Performance metrics: latency, throughput, FLOPS, bandwidth
+- Basic hardware: CPU, memory, cache basics
+- Systems concepts: threads, processes, distributed systems
+- Performance metrics: latency, throughput, bandwidth
 - Standard CS terminology: algorithms, data structures, complexity (O notation)
-- Industry standard terms: cloud computing, edge computing, IoT
+
+The following need brief context/footnotes on first use:
+- GPU (when used for ML computing)
+- Specialized hardware: TPU, FPGA, ASIC (explain what they are)
+- Advanced architecture: tensor cores, systolic arrays
+- ML-specific terms that bridge to systems
 
 ## MANDATORY: First Actions for Every Review
 

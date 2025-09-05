@@ -68,11 +68,14 @@ After analyzing existing footnotes, maintain their patterns:
 
 ## Types of Footnotes for CS/Engineering Content
 
-1. **Definition footnotes**: Brief, precise definitions of technical terms
-   - Example: [^fn-cache]: **Cache**: High-speed memory that stores frequently accessed data to reduce retrieval time.
+**IMPORTANT**: Make footnotes interesting even for those who know the concept! Add historical context, surprising origins, or fascinating connections.
 
-2. **Etymology footnotes**: Origins of terms that aid understanding
-   - Example: [^fn-algorithm]: From the name of 9th-century mathematician Al-Khwarizmi.
+1. **Definition footnotes**: Brief definitions with interesting context
+   - Bad: [^fn-cache]: **Cache**: High-speed memory that stores frequently accessed data.
+   - Good: [^fn-cache]: **Cache**: From the French word "cacher" (to hide), originally used to describe hidden stores of provisions. In computing, first used in 1968 by IBM for the System/360 Model 85.
+
+2. **Etymology footnotes**: Origins that surprise and educate
+   - Example: [^fn-algorithm]: From "al-Khwarizmi," the 9th-century Persian mathematician whose name also gave us "algebra." His systematic methods for solving equations became the blueprint for computational thinking.
 
 3. **Contrast footnotes**: Clarifying similar but distinct concepts
    - Example: [^fn-ml-ai]: While AI is the broader goal of machine intelligence, ML specifically refers to systems that learn from data.
@@ -113,6 +116,18 @@ For each section of text:
 6. Generate footnotes that match existing style exactly
 7. Review for redundancy and genuine value
 8. Ensure no forward references to future chapters
+
+## CRITICAL RULE: Footnote Placement
+
+**NEVER add a footnote marker to words that don't exist in the text!**
+
+If the text says "electrical grids", you CANNOT add a footnote for "smart grids".
+If the text says "particle accelerators", you CANNOT add a footnote for "big data".
+
+You must:
+1. Find the EXACT term in the text
+2. Add the footnote marker to THAT exact term
+3. If the term doesn't exist, DO NOT add the footnote
 
 ## Working Process
 
