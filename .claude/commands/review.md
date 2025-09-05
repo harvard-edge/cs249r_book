@@ -46,7 +46,16 @@ When you run `/review chapter.qmd`, Claude will:
    - All experts review simultaneously
    - Each focuses on their domain
 4. **Analyze consensus** using Claude's reasoning
-5. **Apply improvements** using Edit operations
+5. **Generate scorecard** with actionable feedback
+
+### 🎯 Built-in Constraints (Automatic)
+All review agents automatically:
+- Skip TikZ code blocks (never analyze)
+- Skip all tables (markdown and LaTeX)
+- Respect Purpose section single-paragraph rule
+- Preserve mathematical equations
+- Focus on inline improvements
+- Generate clean, actionable feedback
 
 ## Student Progression Tracking
 

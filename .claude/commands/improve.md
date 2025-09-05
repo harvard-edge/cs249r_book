@@ -13,15 +13,23 @@ Usage: `/improve introduction.qmd`
 
 ## Important Constraints
 
-### ⚠️ Never Modified
-- **TikZ code blocks** - All `.tikz` environments preserved exactly
+### ⚠️ AUTOMATIC CONSTRAINTS (Always Applied)
+- **TikZ code blocks** - All `.tikz` environments preserved exactly (NEVER touch)
+- **Tables** - All markdown and LaTeX tables preserved exactly
 - **Mathematical equations** - LaTeX math left untouched
 - **Figure references** - @fig- references maintained
-
-### 📝 Special Rules  
-- **Purpose sections** - Kept as SINGLE paragraph only
+- **Purpose sections** - MUST remain as SINGLE paragraph only
 - **No markdown comments** - Clean diffs for GitKraken
 - **Preserve formatting** - Maintain existing style
+
+### 🎯 Auto-Applied by All Agents
+Every review agent automatically:
+1. Skips all TikZ code blocks completely
+2. Skips all tables (markdown and LaTeX)
+3. Ensures Purpose stays single paragraph
+4. Preserves mathematical notation
+5. Creates clean diffs without comment clutter
+6. Maintains existing formatting patterns
 
 ## Consensus Thresholds
 
@@ -30,7 +38,7 @@ Usage: `/improve introduction.qmd`
 - **3 reviewers agree**: Apply if safe
 - **2 or fewer**: Document only
 
-## Review Perspectives
+## Review Perspectives (With Built-in Constraints)
 
 **Students (Progressive Validation):**
 - CS Junior: Has systems background, learning ML
@@ -41,6 +49,13 @@ Usage: `/improve introduction.qmd`
 - Systems Engineer: Scalability and operations
 - ML Practitioner: Algorithm to production
 - Data Engineer: Pipeline and quality
+
+**All agents are programmed to:**
+- Never suggest changes to TikZ code
+- Never modify tables (markdown or LaTeX)
+- Keep Purpose sections as single paragraphs
+- Add inline definitions rather than separate glossaries
+- Focus on clean, mergeable improvements
 
 ## Output
 
