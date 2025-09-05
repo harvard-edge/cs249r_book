@@ -57,26 +57,111 @@ All review agents automatically:
 - Focus on inline improvements
 - Generate clean, actionable feedback
 
-## Student Progression Tracking
+## Reviewer Personas (Optimized for ML Systems Engineering)
 
-Each student validates from their perspective:
-- **CS Junior**: Has OS, architecture, compilers background. NEW to ML.
-- **CS Senior**: Has CS fundamentals + basic ML. Learning deployment.
-- **Masters**: Has both CS and ML. Focusing on production systems.
+### Learning Path Validators (Sequential - Knowledge Building)
 
-Next student receives previous knowledge and validates building.
-
-## Expert Domain Focus
-
-Each expert Task returns:
-```json
-{
-  "domain": "systems|data|security|platform",
-  "critical_issues": ["must fix"],
-  "recommendations": ["should consider"],
-  "best_practices": ["industry standards missing"]
-}
+**Systems-Focused CS Student (First Reader)**
 ```
+Background: Strong systems (OS, distributed systems, databases, networking)
+ML Knowledge: None to minimal - maybe saw ML in one lecture
+Focus: Can I leverage my systems knowledge to understand ML systems?
+Flags: Unexplained ML concepts, missing systems analogies, unclear mappings
+Why Critical: Most readers come from systems background, not ML theory
+```
+
+**ML Algorithm Student (Second Reader)**
+```
+Background: Took ML/DL courses, understands backprop, loss functions, architectures
+ML Knowledge: Strong theory but only ran models in Jupyter notebooks
+Focus: How do I take my notebook models to production systems?
+Flags: Missing deployment steps, unclear scaling strategies, gaps in lifecycle
+Why Critical: Represents the notebook-to-production journey most face
+```
+
+**Early Career Engineer (Third Reader)**
+```
+Background: 1-2 years industry experience, deployed some models
+ML Knowledge: Practical ML deployment, faced real production issues
+Focus: Are the best practices and pitfalls accurately represented?
+Flags: Oversimplified problems, missing real-world complexity, dated practices
+Why Critical: Validates content against current industry reality
+```
+
+### Domain Expert Reviewers (Parallel - Comprehensive Coverage)
+
+**Platform/Infrastructure Architect**
+```
+Expertise: Cloud platforms, Kubernetes, GPU clusters, cost optimization
+Focus: Infrastructure design, resource management, multi-tenancy, scaling
+Validates: Chapter coverage of deployment platforms, orchestration, efficiency
+Critical Because: ML systems consume massive infrastructure resources
+```
+
+**MLOps/DevOps Engineer**
+```
+Expertise: CI/CD for ML, model versioning, A/B testing, monitoring, rollbacks
+Focus: Operational excellence, automation, reproducibility, observability
+Validates: Lifecycle management, production practices, debugging strategies
+Critical Because: Most ML projects fail at operations, not algorithms
+```
+
+**Edge/Embedded Systems Engineer**
+```
+Expertise: Resource-constrained deployment, quantization, hardware acceleration
+Focus: On-device inference, power efficiency, model compression, latency
+Validates: Coverage of edge deployment, optimization techniques, hardware
+Critical Because: Growing importance of edge AI and efficient inference
+```
+
+**Data Platform Engineer**
+```
+Expertise: Feature stores, streaming systems, data lakes, ETL at scale
+Focus: Data pipelines, quality, freshness, lineage, governance
+Validates: Data engineering aspects, pipeline design, feature management
+Critical Because: Data is the foundation - bad data breaks everything
+```
+
+**Professor/Educator (Teaching Perspective)**
+```
+Expertise: Curriculum design, pedagogical methods, student assessment
+Focus: Teachability, exercise quality, concept progression, lecture mapping
+Validates: 
+  - Clear learning objectives per section
+  - Appropriate exercises and labs
+  - Slides/lecture alignment potential
+  - Prerequisites clearly stated
+  - Concepts build semester-long course
+Critical Because: Primary adopters who need to teach from this material
+Questions: Can I build a syllabus from this? Are there enough exercises?
+         How do I assess understanding? What labs can I assign?
+```
+
+### Why This Cohort Works Better
+
+1. **Covers the Full Journey**: From systems student → ML learner → practitioner
+2. **Balances Perspectives**: Systems-first vs ML-first backgrounds  
+3. **Addresses Key Gaps**: Platform, operations, edge, data, and teaching
+4. **Industry-Relevant**: Focuses on actual deployment challenges
+5. **Academia-Ready**: Ensures teachability and curriculum alignment
+6. **Progressive Complexity**: Each reader builds on previous understanding
+
+Each reviewer receives chapter content and these instructions are embedded in their Task subagent prompt.
+
+## How Claude Uses These Personas
+
+When you run `/review`, Claude:
+
+1. **For Students**: Launches Task subagents sequentially
+   - Junior Task: "You are a CS Junior with OS/architecture background but NEW to ML..."
+   - Senior Task: "You are a CS Senior with basic ML knowledge. The Junior found [X]..."
+   - Masters Task: "You are a Masters student with strong foundation. Previous students found [Y]..."
+
+2. **For Experts**: Launches Task subagents in parallel
+   - Each gets the same content but different domain focus
+   - All return structured feedback simultaneously
+
+The actual prompts are constructed at runtime using these persona definitions.
 
 ## Consensus Rules
 
