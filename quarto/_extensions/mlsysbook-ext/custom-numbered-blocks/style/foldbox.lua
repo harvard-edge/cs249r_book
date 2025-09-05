@@ -19,6 +19,8 @@ blockStart = function (tt, fmt)
     BoxStyle = " fbx-answer closebutton"
   elseif tt.type == "callout-quiz-question" then
     BoxStyle = " fbx-default closebutton"
+  elseif tt.type == "callout-definition" then
+    BoxStyle = " fbx-default closebutton"
   end
 
   local texEnv = "fbx"
@@ -89,6 +91,9 @@ insertPreamble = function(doc, classDefs, fmt)
         iconCSS = iconCSS .. "}\n"
         iconCSS = iconCSS .. "details.callout-resource-exercises > summary::before {\n"
         iconCSS = iconCSS .. "  background-image: url(\"" .. iconPath .. "/icon_callout-resource-exercises." .. iconFormat .. "\");\n"
+        iconCSS = iconCSS .. "}\n"
+        iconCSS = iconCSS .. "details.callout-definition > summary::before {\n"
+        iconCSS = iconCSS .. "  background-image: url(\"" .. iconPath .. "/icon_callout-definition." .. iconFormat .. "\");\n"
         iconCSS = iconCSS .. "}\n"
         iconCSS = iconCSS .. "</style>"
       elseif fmt == "pdf" then
