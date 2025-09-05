@@ -25,7 +25,27 @@ For EVERY paragraph in the chapter:
 1. **Scan for technical terms** - List all ML/AI specific terminology
 2. **Check KNOWLEDGE_MAP.md** - Verify when each term is introduced
 3. **Flag violations** - Document any term used before its introduction
-4. **Suggest replacements** - Provide safer alternatives from the map
+4. **Record precise locations** - Note exact line numbers and matching text
+5. **Suggest replacements** - Provide safer alternatives from the map
+
+### Location Recording Requirements
+For EVERY issue you identify:
+- **Line number** - Use exact line from file
+- **Exact match text** - The specific phrase to locate for editing
+- **Full context** - The complete sentence containing the issue
+- **Fix type** - Whether replacement, footnote, or insertion is best
+
+### Footnote Decision Guidelines
+Use footnotes when:
+- Brief mention of future concept adds clarity
+- Cross-reference to later chapter helps understanding  
+- Optional explanation doesn't disrupt flow
+- Term appears only once in passing
+
+Use replacement when:
+- Term is central to the explanation
+- Simpler alternative exists
+- Maintaining sentence flow is important
 
 ### Phase 2: Multi-Perspective Review
 
@@ -63,80 +83,136 @@ For EVERY paragraph in the chapter:
 
 ## Output Format
 
-```markdown
-# Review Report: [Chapter Name]
+You MUST produce a structured YAML report followed by a human-readable summary:
 
-## Chapter Context
-**Chapter Number:** [N]
-**Chapter Title:** [Title]
-**Position in Book:** Part [X] - [Part Name]
+```yaml
+---
+chapter: [number]
+title: "[title]"
+file: "[full path to .qmd file]"
+total_lines: [count]
+review_timestamp: "[ISO 8601 timestamp]"
+---
 
-## Knowledge Boundary Assessment
+forward_references:
+  - location:
+      line: [number]
+      exact_match: "[exact text to find]"
+    found_text: "[forbidden term]"
+    context: "[full sentence containing term]"
+    violation: "Term introduced in Chapter [X]"
+    severity: "critical"
+    suggested_fix:
+      type: "replacement" | "footnote" | "insertion"
+      new_text: "[replacement text]"
+      footnote_text: "[optional footnote content]"
 
-### ✅ Available Concepts (from chapters 1-[N-1]):
-[EXACT list from KNOWLEDGE_MAP.md]
+clarity_issues:
+  - location:
+      line: [number] | line_range: [start, end] | section: "[section]"
+      exact_match: "[text to locate]"
+    issue: "[description]"
+    severity: "high" | "medium" | "low"
+    consensus: [number of reviewers agreeing]
+    suggested_fix:
+      type: "insertion" | "replacement" | "definition"
+      new_text: "[improved text]"
 
-### 🚫 Forbidden Concepts (from chapters [N+1]-20):
-[EXACT list from KNOWLEDGE_MAP.md]
+technical_corrections:
+  - location:
+      line: [number]
+      exact_match: "[exact incorrect text]"
+    issue: "[what's wrong]"
+    severity: "medium"
+    consensus: [number]
+    suggested_fix:
+      type: "replacement"
+      new_text: "[corrected text]"
+```
 
-### ⚠️ Forward References Detected:
-| Line | Term Used | First Introduced | Suggested Replacement |
-|------|-----------|------------------|----------------------|
-| 45 | "quantization" | Chapter 10 | "optimization techniques" |
-| 89 | "GPU acceleration" | Chapter 11 | "hardware acceleration" |
+### Example YAML Output
 
-## Multi-Perspective Findings
+```yaml
+---
+chapter: 3
+title: "Deep Learning Primer"
+file: "quarto/contents/core/dl_primer/dl_primer.qmd"
+total_lines: 850
+review_timestamp: "2024-01-05T10:30:00Z"
+---
 
-### Student Issues (Consensus: [X]/3)
-- **CS Junior**: [Specific confusion points]
-- **CS Senior**: [Progression issues]
-- **Early Career**: [Practical gaps]
+forward_references:
+  - location:
+      line: 145
+      exact_match: "optimized through quantization and pruning"
+    found_text: "quantization and pruning"
+    context: "Neural networks can be optimized through quantization and pruning to reduce their size."
+    violation: "Terms introduced in Chapter 10"
+    severity: "critical"
+    suggested_fix:
+      type: "replacement"
+      new_text: "optimized through techniques we'll explore in Chapter 10"
+      
+  - location:
+      line: 267
+      exact_match: "GPUs provide significant acceleration"
+    found_text: "GPUs"
+    context: "For training large models, GPUs provide significant acceleration over CPUs."
+    violation: "Hardware accelerators introduced in Chapter 11"
+    severity: "critical"
+    suggested_fix:
+      type: "footnote"
+      new_text: "specialized hardware[^gpu-note] provides significant acceleration"
+      footnote_text: "[^gpu-note]: Graphics Processing Units (GPUs) and other AI accelerators are covered in detail in Chapter 11."
 
-### Expert Validation (Consensus: [X]/4)
-- **Platform Architect**: [Infrastructure issues]
-- **MLOps Engineer**: [Operational concerns]
-- **Data Engineer**: [Data handling problems]
-- **Professor**: [Pedagogical issues]
+clarity_issues:
+  - location:
+      line: 234
+      exact_match: "The matrix operations are straightforward"
+    issue: "Assumes familiarity with matrix operations"
+    severity: "high"
+    consensus: 3
+    suggested_fix:
+      type: "insertion"
+      position: "before"
+      reference_line: 234
+      new_text: "Using the mathematical operations from linear algebra, the matrix computations become manageable."
 
-## Prioritized Issues
-
-### 🔴 Critical (4+ reviewers agree)
-1. **Forward Reference** - Line 45: Uses undefined term
-2. **Missing Definition** - Line 78: Core concept not explained
-
-### 🟡 High Priority (3 reviewers agree)
-1. **Unclear Example** - Section 2.3: Needs clarification
-2. **Weak Transition** - From previous chapter
-
-### 🟢 Medium Priority (2 reviewers agree)
-1. **Enhancement** - Could add practical example
-2. **Style** - Technical language could be simpler
-
-## Specific Recommendations
-
-### Forward Reference Fixes
-**Location:** Line 45
-**Current:** "Models can be optimized through quantization"
-**Recommended:** "Models can be optimized through techniques we'll explore in later chapters"
-**Reason:** Quantization not introduced until Chapter 10
-
-### Clarity Improvements
-**Location:** Section 2.3
-**Issue:** Assumes knowledge of data pipelines
-**Recommendation:** Add brief explanation or reference to Chapter 6
+technical_corrections:
+  - location:
+      line: 456
+      exact_match: "Learning rates should always be 0.01"
+    issue: "Incorrect absolute statement about hyperparameters"
+    severity: "medium"
+    consensus: 4
+    suggested_fix:
+      type: "replacement"
+      new_text: "Learning rates are commonly initialized to values like 0.01"
+```
 
 ## Summary Statistics
-- Total Forward References: [X]
-- Critical Issues: [X]
-- High Priority Issues: [X]
-- Medium Priority Issues: [X]
-- Consensus Score: [X]% (issues with 3+ reviewer agreement)
+- Total Forward References: [count]
+- Critical Issues: [count] 
+- High Priority Issues: [count]
+- Consensus Score: [percentage]% (issues with 3+ reviewer agreement)
 
-## Do Not Modify
-- ✅ TikZ diagrams preserved
-- ✅ Tables unchanged
-- ✅ Equations maintained
-- ✅ Purpose section kept as single paragraph
+## Multi-Perspective Summary
+
+### Critical Consensus (4+ reviewers)
+- Forward references must be eliminated
+- Core concepts need definitions
+- Technical accuracy issues require fixing
+
+### High Priority (3 reviewers)
+- Clarity improvements needed
+- Better examples would help
+- Transitions could be smoother
+
+### Protected Content Verified
+- ✅ TikZ diagrams identified and preserved
+- ✅ Tables structure maintained
+- ✅ Mathematical equations untouched
+- ✅ Purpose section single paragraph confirmed
 ```
 
 ## Review Constraints
