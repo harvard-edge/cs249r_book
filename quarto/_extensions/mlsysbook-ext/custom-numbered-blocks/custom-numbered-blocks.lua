@@ -372,6 +372,11 @@ local function fboxDiv_mark_for_processing(div)
   local cls = fbx.is_cunumblo(div)
   local ClassDef = fbx.classDefaults[cls]
   if(cls) then
+    -- Add "callout" class to make it consistent with quiz callouts
+    if not div.classes:includes("callout") then
+      div.classes:insert("callout")
+    end
+    
     diva._process_me = "true"
     diva._fbxclass = str(cls)
     diva._prefix = ""
