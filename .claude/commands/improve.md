@@ -1,108 +1,115 @@
-Review + automatic improvement application for ML Systems textbook chapters.
+Progressive textbook improvement that ONLY uses knowledge from previous chapters.
 
-Runs full multi-perspective review FIRST, then applies high-consensus improvements. Creates clean diffs for GitKraken review with important constraints respected.
+This command ensures improvements never reference concepts that haven't been introduced yet. Each chapter can only use terminology and concepts from chapters that come before it.
 
-Usage: `/improve introduction.qmd`
+Usage: `/improve chapter.qmd`
 
-## How It Works
+## Critical Constraint: Progressive Knowledge Only
 
-1. **Full Review First** - Same as `/review` command
-2. **Consensus Analysis** - Identifies high-agreement issues
-3. **Smart Application** - Applies improvements with constraints
-4. **Git Branch** - Safe experimentation environment
+### ⚠️ FORBIDDEN: Forward References
+- **Never use terms from future chapters**
+- **Never assume knowledge not yet taught**
+- **Never reference concepts that come later**
 
-## Important Constraints
+### ✅ ALLOWED: Previous Knowledge
+- **Only use terms already defined**
+- **Only reference previous chapters**
+- **Build on established foundations**
 
-### ⚠️ AUTOMATIC CONSTRAINTS (Always Applied)
-- **TikZ code blocks** - All `.tikz` environments preserved exactly (NEVER touch)
-- **Tables** - All markdown and LaTeX tables preserved exactly
-- **Mathematical equations** - LaTeX math left untouched
-- **Figure references** - @fig- references maintained
-- **Purpose sections** - MUST remain as SINGLE paragraph only
-- **No markdown comments** - Clean diffs for GitKraken
-- **Preserve formatting** - Maintain existing style
+## Chapter Knowledge Map
 
-### 🎯 Auto-Applied by All Agents
-Every review agent automatically:
-1. Skips all TikZ code blocks completely
-2. Skips all tables (markdown and LaTeX)
-3. Ensures Purpose stays single paragraph
-4. Preserves mathematical notation
-5. Creates clean diffs without comment clutter
-6. Maintains existing formatting patterns
-
-## Consensus Thresholds
-
-- **5+ reviewers agree**: Auto-apply (critical)
-- **4 reviewers agree**: Auto-apply (high priority)
-- **3 reviewers agree**: Apply if safe
-- **2 or fewer**: Document only
-
-## Review Perspectives (Optimized for ML Systems Book)
-
-### Learning Path Validators (Sequential)
-Claude launches these in order, passing insights forward:
-
-1. **Systems CS Student**: Strong systems, NO ML → "Can I use my systems knowledge?"
-2. **ML Algorithm Student**: Theory-rich, deployment-poor → "How do I productionize?"
-3. **Early Career Engineer**: 1-2 years industry → "Is this real-world accurate?"
-
-### Domain Experts (Parallel Review)
-Claude launches these simultaneously for comprehensive coverage:
-
-1. **Platform Architect**: Cloud/K8s/GPU clusters → Infrastructure design
-2. **MLOps Engineer**: CI/CD, monitoring, versioning → Operational excellence
-3. **Edge Systems Engineer**: Embedded, quantization → Resource-constrained deployment
-4. **Data Platform Engineer**: Feature stores, pipelines → Data foundation
-5. **Professor/Educator**: Curriculum design → Teachability & exercises
-
-### How Claude Creates the Prompts
-
-At runtime, Claude constructs Task subagent prompts like:
 ```
-Task(
-  prompt="You are a CS Junior with strong OS/architecture background 
-          but have NEVER seen ML before. Review this chapter and 
-          identify what's confusing for someone with your background.
-          CONSTRAINTS: Skip TikZ, skip tables, keep Purpose single paragraph..."
-)
+Chapter 1 (Introduction) - Can use:
+- Basic CS concepts (systems, deployment, infrastructure)
+- No ML-specific terms yet
+
+Chapter 2 (ML Systems) - Can use:
+- Everything from Ch 1
+- Deployment tiers (Cloud, Edge, Mobile, TinyML)
+- Resource constraints (memory, compute, power)
+
+Chapter 3 (DL Primer) - Can use:
+- Everything from Ch 1-2
+- Neural networks, neurons, weights, connections
+- Forward/backward propagation
+- Training vs inference
+
+Chapter 4 (DNN Architectures) - Can use:
+- Everything from Ch 1-3
+- MLPs, CNNs, RNNs, Transformers (introduced here)
+- Architectural patterns
+
+Chapter 10 (Optimizations) - First mentions:
+- Quantization
+- Pruning
+- Model compression
+- Knowledge distillation
 ```
 
-**All agents automatically follow constraints:**
-- Never touch TikZ code or tables
-- Keep Purpose sections as single paragraphs
-- Add inline definitions
-- Create clean, mergeable improvements
+## Review Process
 
-## Output
+### Phase 1: Knowledge Inventory
+Before reviewing any chapter, Claude:
+1. Lists all concepts introduced in PREVIOUS chapters
+2. Identifies NEW concepts in CURRENT chapter
+3. Flags any forward references to remove
 
-1. **Scorecard** - Same as `/review` output
-2. **Applied changes** - Direct file improvements
-3. **Git branch** - `improve-[chapter]-[date]`
-4. **Summary report** - What was changed and why
-
-## CRITICAL: Commit Separation Rules
-
-**NEVER mix system and content changes in one commit!**
-
-When committing:
-1. **First commit**: .claude/ changes only (system/commands)
-2. **Second commit**: .qmd changes only (content improvements)
-3. **See**: .claude/COMMIT_RULES.md for detailed requirements
-
-This separation is MANDATORY for clean review and rollback.
-
-## Example Workflow
-
-```bash
-# First, just review without changes
-/review introduction.qmd  
-
-# If scorecard looks good, apply improvements
-/improve introduction.qmd
-
-# Review changes in GitKraken
-# Stage what you like, discard what you don't
+### Phase 2: Progressive Review
+Reviewers are given strict knowledge boundaries:
+```
+"You can ONLY use these concepts: [list from previous chapters]
+You CANNOT use these terms: [list from future chapters]"
 ```
 
-The system ensures your textbook teaches AI engineering effectively while maintaining technical accuracy and pedagogical quality.
+### Phase 3: Validation
+Every improvement is checked:
+- Does it use undefined terms? → Remove
+- Does it reference future concepts? → Rewrite
+- Does it build on established knowledge? → Keep
+
+## Example Progressive Improvements
+
+### ❌ BAD (Forward Reference):
+Chapter 3: "Neural networks can be optimized through quantization and pruning"
+→ Quantization/pruning not introduced until Chapter 10!
+
+### ✅ GOOD (Progressive):
+Chapter 3: "Neural networks can be made smaller and faster through techniques we'll explore in later chapters"
+
+### ❌ BAD (Undefined Term):
+Chapter 2: "Edge devices often use NPUs for acceleration"
+→ NPUs haven't been defined yet!
+
+### ✅ GOOD (Using Known Terms):
+Chapter 2: "Edge devices often use specialized hardware for faster processing"
+
+## Reviewer Constraints
+
+All reviewers receive this critical instruction:
+```
+CRITICAL CONSTRAINT: You are reviewing Chapter N.
+You can ONLY use terminology from Chapters 1 through N-1.
+You CANNOT use any terms that will be introduced in Chapter N+1 or later.
+
+Known concepts so far: [explicit list]
+Forbidden future concepts: [explicit list]
+```
+
+## Implementation
+
+When running `/improve dl_primer.qmd`:
+
+1. Claude identifies chapter position (Chapter 3)
+2. Claude lists allowed knowledge (Chapters 1-2)
+3. Claude lists forbidden terms (from Chapters 4+)
+4. Reviewers operate within these boundaries
+5. Improvements use only established concepts
+
+## Benefits
+
+- **True progressive learning** - Students never encounter undefined terms
+- **Clear knowledge building** - Each chapter adds specific concepts
+- **No confusion** - Everything is defined before use
+- **Proper pedagogy** - Concepts introduced in optimal order
+
+This ensures the textbook truly builds knowledge progressively, never assuming students know something that hasn't been taught yet.
