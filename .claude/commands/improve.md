@@ -1,32 +1,31 @@
-Progressive textbook improvement using Task subagents for dynamic, specialized review and editing.
+Progressive textbook improvement using specialized subagents for review and editing.
 
 This command ensures improvements never reference concepts that haven't been introduced yet. Each chapter can only use terminology and concepts from chapters that come before it.
 
 Usage: `/improve chapter.qmd`
 
-## Task Subagent Pipeline
+## Subagent Pipeline
 
-This command orchestrates multiple Task subagents, each with specialized expertise:
+This command orchestrates two specialized subagents from `.claude/agents/`:
 
-### **Subagent 1: Knowledge Reviewer**
-- **Expertise**: Progressive knowledge boundary enforcement
-- **Task**: Scan for forward references, validate concept sequences
-- **Output**: YAML report with exact violations and fixes
+### **Reviewer Subagent**
+- **Expertise**: Multi-perspective analysis with 7 different viewpoints
+- **Task**: Analyze chapter for forward references, clarity issues, and pedagogical problems
+- **Output**: Structured YAML report with exact line locations and suggested fixes
+- **Perspectives Covered**:
+  - CS Junior (Systems Track) - OS/architecture background, new to ML
+  - CS Junior (AI Track) - ML theory knowledge, needs systems context  
+  - Industry New Grad - Practical coding experience, mixed theory
+  - Career Transition - Smart professional, minimal tech background
+  - Graduate Student - Deep theory, needs practical applications
+  - Industry Practitioner - Real-world experience, current best practices
+  - Professor/Educator - Pedagogical effectiveness and teaching quality
 
-### **Subagent 2: Multi-Perspective Reviewer** 
-- **Expertise**: Seven different student/professional backgrounds
-- **Task**: Review chapter from diverse reader perspectives
-- **Output**: Structured feedback highlighting clarity issues
-
-### **Subagent 3: Content Editor**
-- **Expertise**: Precise implementation of improvements
-- **Task**: Apply fixes from review reports using MultiEdit
-- **Output**: Surgically edited chapter with clean diffs
-
-### **Subagent 4: Quality Validator**
-- **Expertise**: Post-edit verification and regression detection
-- **Task**: Verify all issues resolved, no new problems introduced
-- **Output**: Validation report and quality metrics
+### **Editor Subagent**
+- **Expertise**: Precise implementation of improvements using MultiEdit
+- **Task**: Parse YAML review report and implement surgical edits
+- **Output**: Clean chapter edits with preserved academic tone
+- **Capabilities**: Forward reference fixes, footnote additions, clarity improvements
 
 ## Critical Constraint: Progressive Knowledge Only
 
@@ -48,47 +47,24 @@ The system uses `.claude/KNOWLEDGE_MAP.md` which contains:
 - Common violations and safe alternatives
 - Progressive building examples
 
-## Dynamic Subagent Process
+## Subagent Workflow
 
-### Phase 1: Knowledge Analysis
-```
-Task("knowledge-reviewer"):
-- Load KNOWLEDGE_MAP.md for chapter boundaries
-- Identify available vs forbidden concepts
-- Scan every line for forward references
-- Generate YAML report with exact fixes
-```
+### Phase 1: Multi-Perspective Review
+The reviewer subagent:
+1. Reads KNOWLEDGE_MAP.md to understand chapter boundaries
+2. Identifies available concepts (previous chapters) vs forbidden (future chapters)
+3. Reviews chapter from all 7 perspectives simultaneously
+4. Scans every line for forward references
+5. Generates structured YAML report with exact fixes
 
-### Phase 2: Multi-Perspective Review
-```
-Task("multi-perspective-reviewer"):
-- CS Undergrad (Systems Track): OS/arch background, new to ML
-- CS Undergrad (AI Track): ML theory, needs systems context
-- Industry New Grad: Practical coding, mixed theory
-- Career Transition: Smart but minimal tech background
-- Graduate Student: Deep theory, needs practical application
-- Industry Practitioner: Real experience, needs cutting-edge updates
-- Educator/Professor: Pedagogical effectiveness focus
-```
-
-### Phase 3: Content Implementation
-```
-Task("content-editor"):
-- Parse YAML review reports
-- Implement forward reference fixes first
-- Apply clarity improvements using MultiEdit
-- Add footnotes for brief future concept mentions
-- Preserve TikZ, tables, equations, Purpose sections
-```
-
-### Phase 4: Quality Validation
-```
-Task("quality-validator"):
-- Verify all reported issues fixed
-- Check for new forward references introduced
-- Validate protected content unchanged
-- Confirm academic tone maintained
-```
+### Phase 2: Precise Implementation
+The editor subagent:
+1. Parses the YAML review report
+2. Prioritizes critical issues (forward references first)
+3. Implements fixes using exact line numbers and text matching
+4. Uses MultiEdit for surgical precision
+5. Adds footnotes for brief future concept references
+6. Preserves protected content (TikZ, tables, equations, Purpose sections)
 
 ## Example Forward Reference Fixes
 
@@ -119,20 +95,44 @@ Chapter 2: "Edge devices often use specialized hardware for acceleration"
 | Federated Learning | Chapter 14 | "distributed approaches" |
 | Differential Privacy | Chapter 16 | "privacy techniques" |
 
-## Subagent Benefits
+## Multi-Perspective Benefits
 
-- **Fresh Context**: Each subagent starts with clean context
-- **Specialized Expertise**: Tailored prompts for specific tasks
-- **Dynamic Configuration**: No files to maintain
-- **Isolated Execution**: Independent operation prevents cross-contamination
-- **Scalable Design**: Easy to add new perspectives or capabilities
+The reviewer subagent ensures the chapter works for:
+- **Systems students** learning ML for the first time
+- **AI students** gaining practical systems knowledge
+- **Industry professionals** transitioning between domains
+- **Career changers** building foundational understanding
+- **Educators** teaching these concepts effectively
+
+## Subagent Capabilities
+
+### Reviewer Features:
+- Loads complete knowledge progression automatically
+- Flags every forward reference with exact line numbers
+- Provides consensus scoring across 7 perspectives
+- Suggests specific fixes (replacement vs footnote vs insertion)
+- Preserves protected content during analysis
+
+### Editor Features:  
+- Parses structured YAML reports automatically
+- Implements exact text matching for surgical edits
+- Batches changes using MultiEdit for efficiency
+- Manages footnote IDs and placement
+- Validates all fixes were applied correctly
+
+## Quality Assurance
+
+- **Forward Reference Elimination**: 100% detection and fixing
+- **Multi-Background Accessibility**: Content works for diverse readers
+- **Academic Quality**: Maintains professional tone and structure
+- **Progressive Learning**: Each chapter builds on previous knowledge only
+- **Protected Content**: TikZ, tables, equations never modified
 
 ## Output
 
 The command produces:
-1. **Knowledge Review Report**: All forward references and violations found
-2. **Multi-Perspective Feedback**: Issues identified by different backgrounds
-3. **Clean Chapter Edits**: Precise fixes with surgical accuracy
-4. **Quality Validation**: Confirmation all issues resolved
+1. **Detailed Review Report**: Issues found by all 7 perspectives with consensus scoring
+2. **Clean Chapter Edits**: Precise improvements with surgical accuracy
+3. **Validation Summary**: Confirmation all critical issues resolved
 
-This ensures the textbook builds knowledge progressively, with each chapter serving readers from diverse backgrounds while never assuming knowledge that hasn't been taught yet.
+This ensures the textbook builds knowledge progressively, serving readers from diverse backgrounds while never assuming knowledge that hasn't been taught yet.
