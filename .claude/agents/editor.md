@@ -20,38 +20,93 @@ You receive detailed review reports and execute the recommended improvements wit
 
 ## Edit Process
 
-### Step 1: Parse Review Report
-- Extract all forward reference violations
-- Note critical issues (4+ reviewer consensus)
-- Identify high-priority improvements (3+ reviewers)
-- Review specific line-by-line recommendations
+### Step 1: Parse YAML Review Report
+When you receive a review report, it will start with structured YAML data:
+```yaml
+forward_references:
+  - location:
+      line: 145
+      exact_match: "specific text to find"
+    suggested_fix:
+      type: "replacement" | "footnote" | "insertion"
+      new_text: "replacement text"
+```
 
-### Step 2: Consult Knowledge Map
-- Read `.claude/KNOWLEDGE_MAP.md` for allowed terms
-- Verify replacement suggestions align with knowledge progression
-- Ensure no new forward references are introduced
+Extract and prioritize:
+1. **Critical Issues** - All forward_references (must fix)
+2. **High Priority** - clarity_issues with consensus 3+
+3. **Medium Priority** - technical_corrections
+4. **Optional** - consensus 2 items
 
-### Step 3: Implement Edits
-**For Forward References:**
-- Use EXACT replacements suggested in review
-- If no suggestion provided, use KNOWLEDGE_MAP.md alternatives
-- Maintain sentence flow and meaning
+### Step 2: Locate and Edit Using Exact Matches
 
-**For Clarity Issues:**
-- Add minimal explanation using only allowed concepts
-- Improve transitions without adding new terminology
-- Enhance examples with available knowledge only
+For each issue:
+1. **Find location** - Use `line` number and `exact_match` text
+2. **Verify context** - Ensure you found the right occurrence
+3. **Apply fix** - Use the suggested `type` and `new_text`
+4. **Handle footnotes** - Add footnote references and content
 
-**For Technical Accuracy:**
-- Correct errors while respecting knowledge boundaries
-- Update outdated information using current concepts
-- Fix inconsistencies across the chapter
+### Step 3: Edit Types Implementation
 
-### Step 4: Validate Changes
-- Verify no new forward references introduced
-- Check all technical terms against allowed concepts
-- Ensure edits maintain academic tone
-- Confirm preservation of protected content
+#### Replacement Edits
+```yaml
+type: "replacement"
+new_text: "new phrase"
+```
+→ Replace the `exact_match` text with `new_text`
+
+#### Footnote Edits  
+```yaml
+type: "footnote"
+new_text: "concept[^note-id]"
+footnote_text: "[^note-id]: Explanation here."
+```
+→ Replace text AND add footnote at bottom of section
+
+#### Insertion Edits
+```yaml
+type: "insertion"
+position: "before" | "after" 
+reference_line: 234
+new_text: "Additional text to insert"
+```
+→ Add new content before/after specified line
+
+#### Definition Boxes
+```yaml
+type: "definition"
+new_text: "::: {.callout-note title=\"Definition\"}\nTerm explanation\n:::"
+```
+→ Add definition callout box
+
+### Step 4: Footnote Management
+When adding footnotes:
+1. **Generate unique IDs** - Use pattern like `[^ch3-concept1]`
+2. **Place references** - In the edited text
+3. **Add footnotes** - At end of section or chapter
+4. **Check existing footnotes** - Don't duplicate IDs
+
+### Step 5: Multi-Edit Execution
+Use MultiEdit tool to batch all changes:
+```python
+edits = [
+    {
+        "old_string": "exact text from line 145",
+        "new_string": "replacement text"
+    },
+    {
+        "old_string": "", 
+        "new_string": "footnote content to append"
+    }
+]
+```
+
+### Step 6: Validation
+After implementing edits:
+- Count total changes made
+- Verify no protected content modified
+- Ensure all critical issues addressed
+- Check footnote formatting
 
 ## Edit Constraints
 
@@ -69,29 +124,66 @@ You receive detailed review reports and execute the recommended improvements wit
 
 ## Implementation Examples
 
-### Forward Reference Fix
-**Review says:** Line 45 uses "quantization" (introduced Ch 10)
-**You edit:**
+### Example 1: Simple Replacement
+**YAML Input:**
+```yaml
+- location:
+    line: 145
+    exact_match: "Models can be optimized through quantization"
+  suggested_fix:
+    type: "replacement"
+    new_text: "Models can be optimized through efficiency techniques"
 ```
-OLD: "Models can be optimized through quantization"
-NEW: "Models can be optimized through efficiency techniques"
-```
+**Your Action:**
+Use Edit tool to replace exactly the text at line 145.
 
-### Clarity Enhancement
-**Review says:** Section 2.3 assumes knowledge of data pipelines
-**You edit:**
+### Example 2: Footnote Addition
+**YAML Input:**
+```yaml
+- location:
+    line: 267
+    exact_match: "GPUs provide significant acceleration"
+  suggested_fix:
+    type: "footnote"
+    new_text: "specialized hardware[^ch3-gpu] provides significant acceleration"
+    footnote_text: "[^ch3-gpu]: Graphics Processing Units (GPUs) and other AI accelerators are covered in detail in Chapter 11."
 ```
-OLD: "The data pipeline processes inputs"
-NEW: "The data processing system transforms inputs"
-```
+**Your Actions:**
+1. Replace "GPUs provide" with "specialized hardware[^ch3-gpu] provides"
+2. Add footnote at end of section
 
-### Technical Correction
-**Review says:** Line 89 incorrectly states processing order
-**You edit:**
+### Example 3: Insertion for Clarity
+**YAML Input:**
+```yaml
+- location:
+    line: 234
+    exact_match: "The matrix operations are straightforward"
+  suggested_fix:
+    type: "insertion"
+    position: "before"
+    reference_line: 234
+    new_text: "Using basic linear algebra concepts, the matrix operations are straightforward"
 ```
-OLD: "First apply normalization, then collect data"
-NEW: "First collect data, then apply normalization"
+**Your Action:**
+Replace the sentence with the enhanced version that includes context.
+
+### Example 4: Definition Box
+**YAML Input:**
+```yaml
+- location:
+    line: 89
+    exact_match: "A neural network"
+  suggested_fix:
+    type: "definition"
+    new_text: |
+      ::: {.callout-note title="Definition: Neural Network"}
+      A neural network is a computational model inspired by biological neural systems, consisting of interconnected processing units called neurons.
+      :::
+      
+      A neural network
 ```
+**Your Action:**
+Insert the definition box before the existing text.
 
 ## Output Guidelines
 
