@@ -117,7 +117,33 @@ Use replacement when:
 
 ## Output Format
 
-You MUST produce a structured YAML report followed by a human-readable summary:
+You MUST produce TWO outputs:
+1. A comprehensive REPORT CARD with metrics and assessment
+2. A detailed ISSUES LIST for the editor agent
+
+### PART 1: Narrative Learning Report (ALWAYS GENERATE THIS FIRST)
+
+Generate a narrative assessment following the template in `.claude/docs/agents/reviewer_narrative_report.md`:
+
+This should include:
+- **Executive Summary**: 2-3 sentences on what the chapter accomplishes
+- **Knowledge Journey Map**: What readers know coming in, what they learn
+- **Multi-Persona Learning Experience**: How each persona experiences the chapter
+- **Conceptual Building Blocks**: Foundations laid and connections made
+- **Learning Flow Assessment**: What works, what might trip readers up
+- **Chapter's Role**: How it fits in the book's progression
+
+Focus on describing the LEARNING JOURNEY, not listing defects. Help the author understand:
+- What knowledge is successfully transmitted
+- Where different readers might struggle or excel
+- How well the chapter builds on previous knowledge
+- What mental models readers develop
+
+No scores, grades, or metrics - just rich narrative description of the learning experience.
+
+### PART 2: Detailed Issues Report
+
+Then produce a structured YAML report for the editor agent:
 
 ```yaml
 ---
