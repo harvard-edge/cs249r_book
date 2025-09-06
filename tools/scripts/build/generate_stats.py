@@ -66,8 +66,12 @@ def collect_stats_from_qmd(file_path):
     # 📚 Citations
     stats['citations'] += len(re.findall(r'@[\w:.-]+', content))
 
-    # 🦶 Footnotes
-    stats['footnotes'] += len(re.findall(r'\[\^.+?\]', content))
+    # 🦶 Footnotes - count definitions and references separately
+    footnote_defs = re.findall(r'\[\^fn-[^]]+\]:', content)
+    footnote_refs = re.findall(r'\[\^fn-[^]]+\](?!:)', content)
+    stats['footnote_defs'] += len(footnote_defs)
+    stats['footnote_refs'] += len(footnote_refs)
+    stats['footnotes'] += len(footnote_defs)  # Keep backward compatibility
 
     # 📦 Callouts
     stats['callouts'] += len(re.findall(r':::\s*\{\.callout-', content))
@@ -83,7 +87,7 @@ def summarize_stats(stats_by_file):
     header = (
         f"{'File':35} | {'Ch':>3} | {'Sec':>4} | {'Words':>7} | "
         f"{'Fig':>5} | {'Tbl':>5} | {'Code':>5} | {'Cite':>5} | "
-        f"{'Foot':>5} | {'Call':>5} | {'TODO':>5}"
+        f"{'FnDef':>5} | {'FnRef':>5} | {'Call':>5} | {'TODO':>5}"
     )
 
     print(header)
@@ -92,7 +96,7 @@ def summarize_stats(stats_by_file):
     for file, stats in stats_by_file.items():
         print(f"{file.name:35} | {stats['chapters']:>3} | {stats['sections']:>4} | {stats['words']:>7} | "
             f"{stats['figures']:>5} | {stats['tables']:>5} | {stats['code_blocks']:>5} | {stats['citations']:>5} | "
-            f"{stats['footnotes']:>5} | {stats['callouts']:>5} | {stats['todos']:>5}")
+            f"{stats['footnote_defs']:>5} | {stats['footnote_refs']:>5} | {stats['callouts']:>5} | {stats['todos']:>5}")
 
         for key in stats:
             total[key] += stats[key]
@@ -107,7 +111,9 @@ def summarize_stats(stats_by_file):
         "tables":             "📊 Tables",
         "code_blocks":        "💻 Code Blocks",
         "citations":          "📚 Citations",
-        "footnotes":          "🦶 Footnotes",
+        "footnotes":          "🦶 Footnotes (Total)",
+        "footnote_defs":      "📖 Footnote Definitions",
+        "footnote_refs":      "🔗 Footnote References",
         "callouts":           "📦 Callouts",
         "todos":              "🚧 TODOs",
         "figs_no_caption":    "❌ Figures w/o Caption",
