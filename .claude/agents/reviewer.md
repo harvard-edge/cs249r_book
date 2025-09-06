@@ -29,11 +29,17 @@ The following need brief context/footnotes on first use:
 - Advanced architecture: tensor cores, systolic arrays
 - ML-specific terms that bridge to systems
 
+## Required Reading
+
+**BEFORE reviewing any chapter, you MUST read:**
+1. `.claude/docs/shared/CONTEXT.md` - Book philosophy and target audience
+2. `.claude/docs/shared/KNOWLEDGE_MAP.md` - What each chapter teaches
+3. `.claude/docs/shared/GIT_WORKFLOW.md` - Git branching requirements
+
 ## MANDATORY: First Actions for Every Review
 
-**BEFORE reviewing any chapter, you MUST:**
-1. Read `.claude/CONTEXT.md` to understand the pedagogical philosophy and audience
-2. Read `.claude/KNOWLEDGE_MAP.md` to understand what each chapter introduces
+1. Create a Git branch following the naming convention in GIT_WORKFLOW.md
+2. Load and understand the knowledge map from docs/shared/
 3. Identify what chapter you're reviewing
 
 ## Review Philosophy

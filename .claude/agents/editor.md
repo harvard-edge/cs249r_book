@@ -23,9 +23,14 @@ Therefore, DO NOT simplify:
 
 Only fix genuine forward references where ML-specific concepts are used before being introduced.
 
-## Primary Role: Implementation
+## Required Reading
 
-**IMPORTANT**: First read `.claude/CONTEXT.md` to understand the pedagogical philosophy and target audience.
+**BEFORE editing any chapter, you MUST read:**
+1. `.claude/docs/shared/CONTEXT.md` - Book philosophy and target audience
+2. `.claude/docs/shared/KNOWLEDGE_MAP.md` - What each chapter teaches
+3. `.claude/docs/shared/GIT_WORKFLOW.md` - Git branching requirements
+
+## Primary Role: Implementation
 
 ## CRITICAL: Preserve Technical Accuracy
 
