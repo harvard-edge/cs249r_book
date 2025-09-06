@@ -13,7 +13,7 @@ Special Handling for Unnumbered Headers:
 ---------------------------------------
 - Any header with the {.unnumbered} class is always skipped for section ID management.
 - Unnumbered headers will never have a section ID added, updated, or required (including in verify mode).
-- Only numbered headers (without {.unnumbered}) require section IDs.
+- All headers (including chapter headers) are processed by default unless they have {.unnumbered}.
 
 Smart Block Detection:
 ---------------------
@@ -86,10 +86,10 @@ Example hash inputs:
 
 Available Modes:
 ----------------
-- **Add Mode (default):** Add missing section IDs to headers (skips unnumbered headers and code blocks)
+- **Add Mode (default):** Add missing section IDs to all headers including chapters (skips unnumbered headers and code blocks)
 - **Repair Mode (--repair):** Fix existing section IDs to match the new format (stable across multiple runs)
 - **Remove Mode (--remove):** Remove all section IDs (use with --backup)
-- **Verify Mode (--verify):** Check that all section IDs are present and properly formatted (skips unnumbered headers and code blocks)
+- **Verify Mode (--verify):** Check that all section IDs are present and properly formatted for all headers including chapters (skips unnumbered headers and code blocks)
 - **List Mode (--list):** Display all section IDs found in files (skips code blocks)
 
 Safety Features:
@@ -123,7 +123,7 @@ Key Features:
 - Detailed summaries and progress reporting
 - Support for both single files (-f) and directories (-d)
 - Stopword removal for cleaner, more readable IDs
-- **Unnumbered headers are always skipped for section IDs in all modes**
+- **All headers including chapters are processed by default; use {.unnumbered} to skip specific headers**
 - **Code blocks and divs are automatically detected and skipped**
 - **Stable ID generation prevents unnecessary changes**
 
@@ -143,7 +143,7 @@ Typical Usage:
     python section_id_manager.py -d contents/ --repair --backup
     python section_id_manager.py -d contents/ --repair --force
     
-    # Verify all IDs (skips unnumbered headers and code blocks)
+    # Verify all IDs including chapters (skips unnumbered headers and code blocks)
     python section_id_manager.py -d contents/ --verify
     
     # List all IDs (skips code blocks)
@@ -548,7 +548,7 @@ def create_backup(file_path):
     logging.info(f"💾 Created backup: {backup_path}")
     return backup_path
 
-def process_markdown_file(file_path, auto_yes=False, force=False, dry_run=False, repair_mode=False, remove_mode=False, backup_mode=False, include_chapters=False):
+def process_markdown_file(file_path, auto_yes=False, force=False, dry_run=False, repair_mode=False, remove_mode=False, backup_mode=False):
     """Process a single Markdown file."""
     global id_replacements
     logging.info(f"\n📄 Processing: {file_path}")
@@ -602,49 +602,49 @@ def process_markdown_file(file_path, auto_yes=False, force=False, dry_run=False,
             hashes, title = match.groups()
             header_level = len(hashes)
             
-            if header_level > 1 or (header_level == 1 and include_chapters):  # Skip chapter title (level 1) unless include_chapters is True
-                # Update section hierarchy based on header level
-                while len(section_hierarchy) >= header_level:
-                    section_hierarchy.pop()
-                
-                # Add current section to hierarchy (will be used for next section)
-                section_hierarchy.append(title.strip())
-                
-                # Get parent sections for current section (exclude the current section itself)
-                parent_sections = section_hierarchy[:-1] if len(section_hierarchy) > 1 else []
-                
-                # Extract existing attributes if any
-                existing_attrs = ""
-                if "{" in line:
-                    attrs_start = line.find("{")
-                    attrs_end = line.rfind("}")
-                    if attrs_end > attrs_start:
-                        existing_attrs = line[attrs_start:attrs_end+1]
-                # Skip headers with {.unnumbered}
-                if ".unnumbered" in existing_attrs:
-                    # Remove any existing section ID from unnumbered headers
-                    existing_id_matches = re.findall(r'\{#(sec-[^}]+)\}', line)
-                    if existing_id_matches:
-                        existing_id = existing_id_matches[0]
-                        # Remove the section ID while preserving other attributes
-                        new_attrs = re.sub(r'#sec-[^}\s]+', '', existing_attrs)
-                        # Remove duplicate .unnumbered
-                        new_attrs = re.sub(r'(\.unnumbered)(?=.*\.unnumbered)', '', new_attrs)
-                        # Remove extra whitespace
-                        new_attrs = re.sub(r'\s+', ' ', new_attrs).strip()
-                        # Remove empty braces or braces with only whitespace
-                        if new_attrs in ["{}", "{ }", ""]:
-                            new_line = f"{hashes} {title}\n"
-                        else:
-                            new_line = f"{hashes} {title} {new_attrs}\n"
-                        lines[i] = new_line
-                        modified = True
-                        file_summary['modified'] = True
-                        file_summary['removed_ids'].append((title.strip(), existing_id))
-                        logging.info(f"  🗑️  Removed ID from unnumbered header: {title}")
-                        logging.info(f"    {line.strip()}")
-                        logging.info(f"    → {new_line.strip()}")
-                    continue  # Skip this header
+            # Process all headers (including chapter headers) unless they have {.unnumbered}
+            # Update section hierarchy based on header level
+            while len(section_hierarchy) >= header_level:
+                section_hierarchy.pop()
+            
+            # Add current section to hierarchy (will be used for next section)
+            section_hierarchy.append(title.strip())
+            
+            # Get parent sections for current section (exclude the current section itself)
+            parent_sections = section_hierarchy[:-1] if len(section_hierarchy) > 1 else []
+            
+            # Extract existing attributes if any
+            existing_attrs = ""
+            if "{" in line:
+                attrs_start = line.find("{")
+                attrs_end = line.rfind("}")
+                if attrs_end > attrs_start:
+                    existing_attrs = line[attrs_start:attrs_end+1]
+            # Skip headers with {.unnumbered}
+            if ".unnumbered" in existing_attrs:
+                # Remove any existing section ID from unnumbered headers
+                existing_id_matches = re.findall(r'\{#(sec-[^}]+)\}', line)
+                if existing_id_matches:
+                    existing_id = existing_id_matches[0]
+                    # Remove the section ID while preserving other attributes
+                    new_attrs = re.sub(r'#sec-[^}\s]+', '', existing_attrs)
+                    # Remove duplicate .unnumbered
+                    new_attrs = re.sub(r'(\.unnumbered)(?=.*\.unnumbered)', '', new_attrs)
+                    # Remove extra whitespace
+                    new_attrs = re.sub(r'\s+', ' ', new_attrs).strip()
+                    # Remove empty braces or braces with only whitespace
+                    if new_attrs in ["{}", "{ }", ""]:
+                        new_line = f"{hashes} {title}\n"
+                    else:
+                        new_line = f"{hashes} {title} {new_attrs}\n"
+                    lines[i] = new_line
+                    modified = True
+                    file_summary['modified'] = True
+                    file_summary['removed_ids'].append((title.strip(), existing_id))
+                    logging.info(f"  🗑️  Removed ID from unnumbered header: {title}")
+                    logging.info(f"    {line.strip()}")
+                    logging.info(f"    → {new_line.strip()}")
+                continue  # Skip this header
 
                 existing_id_matches = re.findall(r'\{#(sec-[^}]+)\}', line)
                 if existing_id_matches:
@@ -745,7 +745,7 @@ def process_markdown_file(file_path, auto_yes=False, force=False, dry_run=False,
 
     return file_summary
 
-def process_directory(directory, auto_yes=False, force=False, dry_run=False, repair_mode=False, remove_mode=False, backup_mode=False, include_chapters=False):
+def process_directory(directory, auto_yes=False, force=False, dry_run=False, repair_mode=False, remove_mode=False, backup_mode=False):
     """
     Recursively process all Markdown and Quarto files in a directory.
     """
@@ -770,7 +770,7 @@ def process_directory(directory, auto_yes=False, force=False, dry_run=False, rep
         logging.info(f"\n📄 [{i}/{len(all_files)}] Processing: {file_path}")
         logging.info(f"{'-'*60}")
         
-        file_summary = process_markdown_file(file_path, auto_yes=auto_yes, force=force, dry_run=dry_run, repair_mode=repair_mode, remove_mode=remove_mode, backup_mode=backup_mode, include_chapters=include_chapters)
+        file_summary = process_markdown_file(file_path, auto_yes=auto_yes, force=force, dry_run=dry_run, repair_mode=repair_mode, remove_mode=remove_mode, backup_mode=backup_mode)
         all_summaries.append(file_summary)
         
         # Add a separator between files
@@ -823,7 +823,7 @@ def print_summary(all_summaries):
 
     logging.info(f"\n{'='*60}")
 
-def verify_section_ids(filepath, include_chapters=False):
+def verify_section_ids(filepath):
     """Verify that all headers have proper section IDs, skipping unnumbered headers."""
     missing_ids = []
     with open(filepath, 'r', encoding='utf-8') as file:
@@ -838,22 +838,22 @@ def verify_section_ids(filepath, include_chapters=False):
         should_process, match = should_process_header(line, state)
         if should_process:
             hashes, title = match.groups()
-            if len(hashes) > 1 or (len(hashes) == 1 and include_chapters):  # Skip chapter title unless include_chapters is True
-                # Extract existing attributes if any
-                existing_attrs = ""
-                if "{" in line:
-                    attrs_start = line.find("{")
-                    attrs_end = line.rfind("}")
-                    if attrs_end > attrs_start:
-                        existing_attrs = line[attrs_start:attrs_end+1]
-                # Skip headers with {.unnumbered}
-                if ".unnumbered" in existing_attrs:
-                    continue  # Skip this header
-                if not re.search(r'\{#sec-[^}]+\}', line):
-                    missing_ids.append({
-                        'line': i,
-                        'title': title.strip()
-                    })
+            # Process all headers (including chapter headers) unless they have {.unnumbered}
+            # Extract existing attributes if any
+            existing_attrs = ""
+            if "{" in line:
+                attrs_start = line.find("{")
+                attrs_end = line.rfind("}")
+                if attrs_end > attrs_start:
+                    existing_attrs = line[attrs_start:attrs_end+1]
+            # Skip headers with {.unnumbered}
+            if ".unnumbered" in existing_attrs:
+                continue  # Skip this header
+            if not re.search(r'\{#sec-[^}]+\}', line):
+                missing_ids.append({
+                    'line': i,
+                    'title': title.strip()
+                })
     
     return missing_ids
 
@@ -1013,7 +1013,6 @@ MODE EXAMPLES:
     parser.add_argument("--remove", action="store_true", help="Remove all section IDs (use with --backup for safety)")
     parser.add_argument("--list", action="store_true", help="List all section IDs found in files")
     parser.add_argument("--backup", action="store_true", help="Create backup files before making changes")
-    parser.add_argument("--include-chapters", action="store_true", help="Include main chapter headers (level 1) for section ID management")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     args = parser.parse_args()
 
@@ -1037,7 +1036,7 @@ MODE EXAMPLES:
             sys.exit(0)
             
         if args.file:
-            missing_ids = verify_section_ids(args.file, args.include_chapters)
+            missing_ids = verify_section_ids(args.file)
             if missing_ids:
                 logging.warning(f"❌ {args.file}")
                 for header in missing_ids:
@@ -1049,7 +1048,7 @@ MODE EXAMPLES:
         elif args.directory:
             all_missing = []
             for filepath in glob.glob(os.path.join(args.directory, "**/*.qmd"), recursive=True):
-                missing_ids = verify_section_ids(filepath, args.include_chapters)
+                missing_ids = verify_section_ids(filepath)
                 if missing_ids:
                     logging.warning(f"❌ {filepath}")
                     all_missing.append((filepath, missing_ids))
@@ -1075,7 +1074,7 @@ MODE EXAMPLES:
     else:
         # First phase: Update all section IDs and build mapping
         if args.file:
-            file_summary = process_markdown_file(args.file, args.yes, args.force, args.dry_run, args.repair, args.remove, args.backup, args.include_chapters)
+            file_summary = process_markdown_file(args.file, args.yes, args.force, args.dry_run, args.repair, args.remove, args.backup)
             # Print summary for single file
             print_summary([file_summary])
             
@@ -1099,7 +1098,7 @@ MODE EXAMPLES:
                         update_cross_references(str(quiz_file), id_replacements)
         elif args.directory:
             # Process all files with summary
-            process_directory(args.directory, args.yes, args.force, args.dry_run, args.repair, args.remove, args.backup, args.include_chapters)
+            process_directory(args.directory, args.yes, args.force, args.dry_run, args.repair, args.remove, args.backup)
             
             # Then update cross-references if we have replacements
             if not args.dry_run and id_replacements:
