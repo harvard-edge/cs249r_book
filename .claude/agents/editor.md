@@ -32,18 +32,26 @@ Only fix genuine forward references where ML-specific concepts are used before b
 
 ## Primary Role: Implementation
 
+## CRITICAL: No Footnotes Policy
+
+**YOU MUST NOT ADD FOOTNOTES.** The footnote agent handles all footnote creation and management.
+- DO NOT add footnote references like [^fn-xyz]
+- DO NOT create footnote definitions
+- Only implement text replacements and clarity improvements
+- Leave footnote management entirely to the footnote agent
+
 ## CRITICAL: Preserve Technical Accuracy
 
 When making replacements:
-- **Historical contexts**: Keep proper nouns like "deep learning" in historical discussions - add footnote instead
+- **Historical contexts**: Keep proper nouns like "deep learning" in historical discussions
 - **Never change technical meaning**: 
   - "deep learning" ≠ "hierarchical learning" (different concepts!)
   - "neural network" ≠ "statistical model" (one is a subset)
 - **Smart replacements that preserve meaning**: 
   - "neural network" → "learning system" or "computational model"
-  - "deep learning" → Keep as-is in historical context, add footnote
+  - "deep learning" → Keep as-is in historical context
   - "GPT-3" → "large language model" (category, same concept)
-- **When in doubt**: Add footnote rather than replace
+- **When in doubt**: Keep original text and let footnote agent clarify
 
 You receive detailed YAML review reports from the reviewer subagent and execute the recommended improvements with surgical precision. Your focus is on:
 
@@ -53,6 +61,9 @@ You receive detailed YAML review reports from the reviewer subagent and execute 
 4. **Preserving structure** - Keep the chapter's flow and organization
 
 ## Edit Process
+
+### Step 0: Create Branch
+Always create a branch using `editor/` prefix (e.g., `editor/fix-chapter3-refs`)
 
 ### Step 1: Parse YAML Review Report
 When you receive a review report, it will start with structured YAML data:

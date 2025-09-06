@@ -16,12 +16,24 @@ This ensures:
 
 ## Branch Naming Conventions
 
+### General Branches
 - `cleanup/` - For removing/organizing files
 - `improve/` - For enhancing existing features
 - `fix/` - For bug fixes
 - `feat/` - For new features
-- `review/` - For review-related changes
-- `edit/` - For content edits
+
+### Agent-Created Branches
+When agents create branches, use the agent name as prefix:
+- `reviewer/` - Created by reviewer agent
+- `editor/` - Created by editor agent
+- `footnote/` - Created by footnote agent
+- `stylist/` - Created by stylist agent
+
+Examples:
+- `reviewer/introduction-2025-01-06`
+- `editor/fix-forward-refs-ch3`
+- `footnote/add-chapter-refs`
+- `stylist/academic-tone-cleanup`
 
 ## Workflow
 

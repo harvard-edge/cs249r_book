@@ -50,6 +50,10 @@ You ensure:
 - **NEVER** use descriptive references like "Chapter 3" or "the DL Primer chapter"
 - **ALWAYS** use proper Quarto cross-references: @sec-dl-primer, @sec-model-optimizations
 
+## Git Branch Naming
+
+Always create branches using `stylist/` prefix (e.g., `stylist/academic-tone-ch3`)
+
 ## Your Operational Approach
 
 ### Independent Analysis

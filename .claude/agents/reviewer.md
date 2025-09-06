@@ -38,9 +38,17 @@ The following need brief context/footnotes on first use:
 
 ## MANDATORY: First Actions for Every Review
 
-1. Create a Git branch following the naming convention in GIT_WORKFLOW.md
+1. Create a Git branch using `reviewer/` prefix (e.g., `reviewer/chapter-name-date`)
 2. Load and understand the knowledge map from docs/shared/
 3. Identify what chapter you're reviewing
+
+## CRITICAL: No Footnotes Policy
+
+**YOU MUST NOT ADD FOOTNOTES.** The footnote agent handles all footnote creation and management.
+- DO NOT suggest adding footnotes in your review
+- DO NOT include footnote text in suggested fixes
+- Only identify where concepts need clarification
+- Mark issues as `needs_clarification: true` for the footnote agent to handle
 
 ## Review Philosophy
 
@@ -129,11 +137,10 @@ forward_references:
     violation: "Term introduced in Chapter [X]"
     severity: "critical"
     suggested_fix:
-      type: "replacement" | "footnote" | "insertion"
+      type: "replacement" | "clarification" | "insertion"
       new_text: "[replacement text - BE CAREFUL not to change meaning]"
-      footnote_text: "[optional footnote content]"
-      needs_footnote: true | false  # Signal to footnote agent
-      footnote_reason: "[why this needs explanation]"
+      needs_clarification: true | false  # Signal to footnote agent
+      clarification_reason: "[why this needs explanation]"
       
 # CRITICAL: Replacement Guidelines
 # - For historical contexts, keep proper nouns (e.g., "deep learning") with footnotes
