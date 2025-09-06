@@ -42,17 +42,8 @@ class Colors:
 def find_footnote_references(content: str) -> Set[str]:
     """Find all footnote references [^fn-name] in the content."""
     # Match [^fn-name] but not [^fn-name]:
-    # Use negative lookahead to exclude definitions
-    references = set()
-    # Find all [^fn-xxx] patterns
-    all_patterns = re.findall(r'\[\^(fn-[a-zA-Z0-9-_]+)\]', content)
-    # Find all definitions [^fn-xxx]:
-    definitions = set(re.findall(r'^\[\^(fn-[a-zA-Z0-9-_]+)\]:', content, re.MULTILINE))
-    # References are all patterns minus definitions
-    for pattern in all_patterns:
-        if pattern not in definitions:
-            references.add(pattern)
-    return references
+    pattern = r'\[\^(fn-[a-zA-Z0-9-_]+)\](?!:)'
+    return set(re.findall(pattern, content))
 
 def find_footnote_definitions(content: str) -> Dict[str, List[int]]:
     """Find all footnote definitions [^fn-name]: and their line numbers."""
