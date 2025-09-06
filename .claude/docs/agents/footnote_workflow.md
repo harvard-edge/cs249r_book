@@ -80,9 +80,9 @@ cat .claude/footnote_context.md
 python scripts/catalog_footnotes.py
 # Check the updated catalog for any issues
 
-# 6. Commit
-git add quarto/contents/core/chapter_name/chapter_name.qmd
-git commit -m "footnote: add technical term clarifications to chapter_name"
+# 6. DO NOT stage or commit
+# Leave changes unstaged for user review
+# User will decide what to stage and commit
 ```
 
 ## Common Patterns
