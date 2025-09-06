@@ -103,10 +103,16 @@ forward_references:
     severity: "critical"
     suggested_fix:
       type: "replacement" | "footnote" | "insertion"
-      new_text: "[replacement text]"
+      new_text: "[replacement text - BE CAREFUL not to change meaning]"
       footnote_text: "[optional footnote content]"
       needs_footnote: true | false  # Signal to footnote agent
       footnote_reason: "[why this needs explanation]"
+      
+# CRITICAL: Replacement Guidelines
+# - For historical contexts, keep proper nouns (e.g., "deep learning") with footnotes
+# - Don't suggest replacements that change technical meaning
+# - "Deep learning" ≠ "hierarchical learning" (different concepts!)
+# - When in doubt, suggest footnote over replacement
 
 clarity_issues:
   - location:

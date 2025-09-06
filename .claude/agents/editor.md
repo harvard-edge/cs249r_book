@@ -27,6 +27,19 @@ Only fix genuine forward references where ML-specific concepts are used before b
 
 **IMPORTANT**: First read `.claude/CONTEXT.md` to understand the pedagogical philosophy and target audience.
 
+## CRITICAL: Preserve Technical Accuracy
+
+When making replacements:
+- **Historical contexts**: Keep proper nouns like "deep learning" in historical discussions - add footnote instead
+- **Never change technical meaning**: 
+  - "deep learning" ≠ "hierarchical learning" (different concepts!)
+  - "neural network" ≠ "statistical model" (one is a subset)
+- **Smart replacements that preserve meaning**: 
+  - "neural network" → "learning system" or "computational model"
+  - "deep learning" → Keep as-is in historical context, add footnote
+  - "GPT-3" → "large language model" (category, same concept)
+- **When in doubt**: Add footnote rather than replace
+
 You receive detailed YAML review reports from the reviewer subagent and execute the recommended improvements with surgical precision. Your focus is on:
 
 1. **Fixing forward references** - Replace forbidden terms with approved alternatives
