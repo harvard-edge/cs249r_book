@@ -227,6 +227,11 @@ For each section of text:
    - Document style patterns observed
    - Note any inconsistencies to fix
 
+**IMPORTANT - Staging Changes**:
+- After making edits, use `git add` to stage files
+- DO NOT commit changes - leave in staging area
+- User will review staged changes and commit when ready
+
 2. **Identification Phase**:
    - Mark candidates for new footnotes
    - Apply the 5-question analysis framework

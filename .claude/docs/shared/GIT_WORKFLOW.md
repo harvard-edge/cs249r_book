@@ -39,10 +39,18 @@ Examples:
 
 1. Create feature branch from dev
 2. Make changes
-3. Stage selectively (not everything)
-4. Review changes before committing
-5. Merge with --no-ff back to dev
-6. **Delete feature branch after merge** (mandatory cleanup)
+3. Stage selectively with `git add`
+4. **DO NOT COMMIT** - leave changes staged for user review
+5. User will commit when ready
+6. Merge with --no-ff back to dev
+7. **Delete feature branch after merge** (mandatory cleanup)
+
+## Important for Agents
+
+- Agents should stage changes but NEVER commit
+- Use `git add` to stage modified files
+- Leave changes in staging area for user review
+- User maintains control over commit timing
 
 ## Important Notes
 
