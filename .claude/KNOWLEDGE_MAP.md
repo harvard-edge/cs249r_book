@@ -1,18 +1,18 @@
 # Knowledge Progression Map
 
-This document tracks what concepts are introduced in each chapter of the ML Systems textbook. Chapters should primarily explain their own concepts while building on previous chapters.
+This document tracks what concepts are taught in each chapter. The content listing comes from our design and has been validated against actual chapter content.
 
-## Guiding Principles
+## Core Principles
 
 1. **Historical Context is Always Acceptable**: Terms like "deep learning", "AlexNet", "GPT-3" can be mentioned as historical facts or examples in any chapter
-2. **Technical Details Must Wait**: The actual mechanics (how things work) should only be explained in their designated chapter
+2. **Technical Details Must Wait**: The actual mechanics (how things work) should only be explained in their designated chapter  
 3. **Use Footnotes for Forward References**: If mentioning a future concept, add a footnote like "explained in detail in Chapter X"
-4. **Preserve Accuracy**: Never change technical terms to incorrect alternatives (e.g., don't replace "deep learning" with "hierarchical learning")
+4. **Preserve Accuracy**: Never change technical terms to incorrect alternatives
 
 ## Part I: Systems Foundations
 
 ### Chapter 1: Introduction
-**Introduces:**
+**Teaches:**
 - What is ML Systems Engineering
 - Historical evolution of AI (symbolic → statistical → deep learning)
 - Why ML systems are challenging
@@ -21,8 +21,10 @@ This document tracks what concepts are introduced in each chapter of the ML Syst
 - Cross-functional collaboration needs
 - Case studies: FarmBeats, AlphaFold, Waymo
 
+**Mentions (with footnotes):** Neural networks, deep learning, AlexNet, GPT-3, backpropagation (as historical milestones)
+
 ### Chapter 2: ML Systems
-**Introduces:**
+**Teaches:**
 - Deployment tiers (Cloud, Edge, Mobile, TinyML)
 - Resource constraints (memory, compute, power)
 - System architectures for ML
@@ -32,21 +34,21 @@ This document tracks what concepts are introduced in each chapter of the ML Syst
 - Scalability considerations
 
 ### Chapter 3: Deep Learning Primer
-**Introduces:**
+**Teaches:**
 - How neural networks actually work
 - Neurons, weights, biases, connections
-- Activation functions
-- Forward and backward propagation
+- Activation functions (what they are, why needed)
+- Forward and backward propagation algorithms
 - Gradient descent and optimization
 - Loss functions
 - Training vs inference
 - Overfitting, underfitting, regularization
 
 ### Chapter 4: DNN Architectures
-**Introduces:**
+**Teaches:**
 - Multi-Layer Perceptrons (MLPs)
-- Convolutional Neural Networks (CNNs)
-- Recurrent Neural Networks (RNNs)
+- Convolutional Neural Networks (CNNs) - layers, filters, pooling
+- Recurrent Neural Networks (RNNs) - sequential processing
 - Transformers and attention mechanisms
 - Architectural patterns and design choices
 - Layer types and configurations
@@ -56,7 +58,7 @@ This document tracks what concepts are introduced in each chapter of the ML Syst
 ## Part II: Design Principles
 
 ### Chapter 5: Workflow
-**Introduces:**
+**Teaches:**
 - ML development workflow stages
 - Data collection and preparation
 - Model development pipeline
@@ -67,7 +69,7 @@ This document tracks what concepts are introduced in each chapter of the ML Syst
 - Deployment pipelines
 
 ### Chapter 6: Data Engineering
-**Introduces:**
+**Teaches:**
 - Data pipelines
 - Data quality and validation
 - Feature engineering
@@ -79,8 +81,8 @@ This document tracks what concepts are introduced in each chapter of the ML Syst
 - Data governance
 
 ### Chapter 7: Frameworks
-**New Concepts Introduced:**
-- ML frameworks (TensorFlow, PyTorch, etc.)
+**Teaches:**
+- ML frameworks (TensorFlow, PyTorch, JAX)
 - Computational graphs
 - Automatic differentiation
 - Framework APIs and abstractions
@@ -89,13 +91,10 @@ This document tracks what concepts are introduced in each chapter of the ML Syst
 - Hardware backend support
 - Distributed training support
 
-**Can Use:** Chapters 1-6 concepts
-**Cannot Use:** Hardware acceleration specifics, quantization
-
 ### Chapter 8: Training
-**New Concepts Introduced:**
+**Teaches:**
 - Training algorithms in detail
-- Optimization techniques
+- Optimization techniques (SGD, Adam, etc.)
 - Learning rate scheduling
 - Batch processing strategies
 - Distributed training methods
@@ -104,13 +103,10 @@ This document tracks what concepts are introduced in each chapter of the ML Syst
 - Mixed precision training
 - Checkpointing and recovery
 
-**Can Use:** Chapters 1-7 concepts
-**Cannot Use:** Deployment optimizations, quantization
-
 ## Part III: Performance Engineering
 
 ### Chapter 9: Efficient AI
-**New Concepts Introduced:**
+**Teaches:**
 - AI scaling laws
 - Power-law relationships
 - Algorithmic efficiency
@@ -120,25 +116,18 @@ This document tracks what concepts are introduced in each chapter of the ML Syst
 - Sustainability considerations
 - Resource optimization strategies
 
-**Can Use:** Chapters 1-8 concepts
-**Cannot Use:** Specific compression techniques
-
 ### Chapter 10: Model Optimizations
-**New Concepts Introduced:**
-- Quantization
-- Pruning
+**Teaches:**
+- Quantization (INT8, FP16)
+- Pruning (structured, unstructured)
 - Knowledge distillation
 - Model compression
 - Sparsity
 - Neural Architecture Search (NAS)
 - Hardware-aware optimization
-- Numerical precision formats (FP16, INT8)
-
-**Can Use:** Chapters 1-9 concepts
-**Cannot Use:** Hardware accelerators specifics
 
 ### Chapter 11: AI Acceleration
-**New Concepts Introduced:**
+**Teaches:**
 - Hardware accelerators (GPUs, TPUs, NPUs)
 - Specialized AI chips
 - Memory hierarchies
@@ -148,156 +137,103 @@ This document tracks what concepts are introduced in each chapter of the ML Syst
 - SIMD/SIMT architectures
 - Tensor cores
 
-**Can Use:** Chapters 1-10 concepts
-
 ### Chapter 12: Benchmarking AI
-**New Concepts Introduced:**
+**Teaches:**
 - Performance metrics
 - Benchmarking methodologies
-- MLPerf and other benchmarks
-- System-level evaluation
-- Throughput and latency measurement
-- Power and energy profiling
-- Reproducibility in benchmarking
-- Statistical significance testing
+- Standard benchmarks (MLPerf, etc.)
+- Profiling and analysis
+- Performance debugging
+- System-level metrics
+- Energy efficiency measurement
 
-**Can Use:** Chapters 1-11 concepts
-
-## Part IV: Robust Deployment
+## Part IV: Deployment Engineering
 
 ### Chapter 13: ML Operations
-**New Concepts Introduced:**
+**Teaches:**
 - MLOps principles
 - CI/CD for ML
 - Model monitoring
-- Data drift and concept drift
-- Model versioning and registry
-- A/B testing for ML
-- Feature stores
-- Model observability
-
-**Can Use:** Chapters 1-12 concepts
+- A/B testing
+- Model versioning
+- Data drift detection
+- Deployment strategies
+- Production debugging
 
 ### Chapter 14: On-Device Learning
-**New Concepts Introduced:**
-- Edge training
+**Teaches:**
 - Federated learning
 - Transfer learning
-- Fine-tuning
-- Continual learning
+- Edge training techniques
 - Privacy-preserving ML
+- Continual learning
 - Model personalization
 - Resource-constrained training
 
-**Can Use:** Chapters 1-13 concepts
-
 ### Chapter 15: Robust AI
-**New Concepts Introduced:**
-- Model robustness
-- Adversarial attacks and defenses
+**Teaches:**
+- Adversarial robustness
+- Distribution shifts
 - Out-of-distribution detection
-- Uncertainty quantification
-- Model calibration
-- Failure modes and mitigation
-- Safety-critical ML systems
-
-**Can Use:** Chapters 1-14 concepts
+- Model uncertainty
+- Failure modes
+- Safety engineering
+- Testing strategies
 
 ### Chapter 16: Privacy & Security
-**New Concepts Introduced:**
+**Teaches:**
+- Privacy-preserving techniques
 - Differential privacy
 - Secure multi-party computation
+- Model extraction attacks
+- Data poisoning
+- Membership inference
 - Homomorphic encryption
-- Privacy attacks (membership, reconstruction)
-- Model stealing and extraction
-- Backdoor attacks
-- Secure enclaves
-- Privacy regulations (GDPR, HIPAA)
 
-**Can Use:** Chapters 1-15 concepts
-
-## Part V: Trustworthy Systems
+## Part V: Societal Impact
 
 ### Chapter 17: Responsible AI
-**New Concepts Introduced:**
-- AI ethics frameworks
-- Fairness metrics and definitions
+**Teaches:**
+- Fairness metrics
 - Bias detection and mitigation
-- Algorithmic transparency
-- Explainable AI (XAI)
-- Model interpretability
-- Accountability in AI systems
+- Explainability methods
+- Accountability frameworks
+- Ethical considerations
 - Regulatory compliance
-
-**Can Use:** Chapters 1-16 concepts
+- Impact assessment
 
 ### Chapter 18: Sustainable AI
-**New Concepts Introduced:**
-- Carbon footprint of ML
-- Energy-efficient computing
-- Green AI initiatives
+**Teaches:**
+- Carbon footprint of AI
+- Green AI practices
+- Energy-efficient training
+- Sustainable deployment
 - Lifecycle assessment
-- Sustainable hardware design
-- Carbon-aware computing
-- Environmental impact metrics
-
-**Can Use:** Chapters 1-17 concepts
+- Environmental impact
 
 ### Chapter 19: AI for Good
-**New Concepts Introduced:**
-- Social impact applications
-- Healthcare AI systems
-- Environmental monitoring
-- Educational technology
-- Accessibility features
-- Humanitarian applications
-- Development considerations
-
-**Can Use:** Chapters 1-18 concepts
-
-## Part VI: Frontiers
+**Teaches:**
+- Healthcare applications
+- Climate change solutions
+- Education technology
+- Accessibility
+- Social good applications
+- Global development
 
 ### Chapter 20: Conclusion
-**New Concepts Introduced:**
-- Future trends and directions
-- Emerging architectures
-- Research frontiers
-- Industry evolution
-- Societal implications
-
-**Can Use:** All previous chapters (1-19)
+**Synthesizes:**
+- Key principles recap
+- Future directions
+- Emerging challenges
+- Call to action
 
 ## Usage Guidelines
 
-When reviewing or improving any chapter:
+### For Review/Edit Agents:
+- Historical mentions → Always OK
+- Technical explanations → Only in designated chapter
+- When in doubt → Add footnote, don't replace
 
-1. **Check chapter number** - Identify which chapter you're working on
-2. **List available concepts** - All concepts from chapters 1 through (N-1)
-3. **List forbidden concepts** - Any concepts from chapter N+1 onwards
-4. **Flag violations** - Identify any forward references
-5. **Suggest alternatives** - Replace with concepts already introduced
-
-## Common Forward Reference Violations
-
-| Term | First Introduced | Safe Alternative Before Introduction |
-|------|-----------------|--------------------------------------|
-| Quantization | Chapter 10 | "optimization techniques" or "efficiency methods" |
-| GPUs/TPUs | Chapter 11 | "specialized hardware" or "accelerators" |
-| MLOps | Chapter 13 | "operational practices" or "deployment processes" |
-| Federated Learning | Chapter 14 | "distributed approaches" or "collaborative methods" |
-| Differential Privacy | Chapter 16 | "privacy techniques" or "data protection methods" |
-| Fairness/Bias | Chapter 17 | "model behavior" or "system characteristics" |
-
-## Progressive Building Examples
-
-### Good Progression:
-- Ch 3: "Neural networks process data through layers"
-- Ch 4: "CNNs use convolutional layers for image processing"
-- Ch 10: "We can quantize CNN weights to reduce memory"
-
-### Bad Progression (Forward Reference):
-- Ch 3: "Neural networks can be quantized for efficiency" ❌
-- Ch 4: "CNNs run efficiently on GPUs" ❌
-- Ch 8: "Training uses MLOps pipelines" ❌
-
-This knowledge map ensures that the textbook builds concepts progressively, never using undefined terms or assuming knowledge not yet introduced.
+### Key Distinction:
+- **Mentioning** "deep learning revolutionized computer vision" → OK anywhere
+- **Explaining** "deep learning uses backpropagation to adjust weights" → Only Chapter 3+
