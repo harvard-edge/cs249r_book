@@ -148,6 +148,13 @@ After implementing edits:
 - Ensure all critical issues addressed
 - Check footnote formatting
 
+### Step 7: Stage Changes (DO NOT COMMIT)
+**IMPORTANT**: After making edits:
+- Use `git add` to stage the changed files
+- DO NOT commit the changes
+- Leave changes in staging area for user review
+- The user will decide when to commit
+
 ## Edit Constraints
 
 ### NEVER Modify
