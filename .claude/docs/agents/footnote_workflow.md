@@ -42,10 +42,11 @@ When working on a specific chapter:
 [^fn-term-name]: **Bold Term**: Clear, concise definition. Optional helpful analogy or context.
 ```
 
-#### Placement Rules
+#### Placement Rules (CRITICAL - See footnote_placement_rules.md)
 1. Add inline reference where term first appears: `API[^fn-api]`
-2. Place definition at end of section or document
-3. Keep definitions together, not scattered
+2. **Place definition IMMEDIATELY after the paragraph containing the reference**
+3. Never bulk definitions at section/document end
+4. If multiple terms in one paragraph, group their definitions together right after that paragraph
 
 #### Content Guidelines
 - **Concise**: Aim for 1-2 sentences (avg ~200 characters)
