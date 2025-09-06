@@ -133,24 +133,9 @@ return {
       return pandoc.RawBlock("html", html_output)
     elseif FORMAT:match("pdf") or FORMAT:match("latex") then
       log_info("Generating PDF output...")
-      
-      -- Calculate approximate height needed for the margin box
-      -- Base box: ~25mm, QR code: 14mm, text: ~8mm, spacing: ~10mm = ~57mm total
-      local box_height = "57mm"
-      local author_lines = (author ~= "" and 1 or 0)
-      if author_lines > 0 then
-        box_height = "62mm"  -- Add ~5mm for author line
-      end
-      
-      -- PDF: QR code and margin note with calculated spacing and collision detection
-      local box_height_num = string.match(box_height, "(%d+)")
+      -- PDF: QR code and margin note with brand-aligned styling
       local pdf_output = [[
-% Use collision detection system for safe margin placement
-\safemarginspace{]] .. box_height_num .. [[}%
-\needspace{]] .. box_height .. [[}%
-% Place margin note with calculated positioning
-\marginnote{%
-  \centering%
+\marginnote{\centering\\\vspace*{5mm}%
   \begin{tcolorbox}[
     enhanced,
     colback=white,
@@ -160,7 +145,7 @@ return {
     width=32mm,
     left=1mm,
     right=1mm,
-    top=1mm,
+    top=0mm,
     bottom=1mm,
     before skip=0pt,
     after skip=0pt,
@@ -190,9 +175,7 @@ return {
     \\[2mm]
     \textcolor{black!60}{\scriptsize Scan with your phone\\to watch the video}
   \end{tcolorbox}
-}%
-% Reserve corresponding space in main text to prevent overlap
-\vspace{]] .. box_height .. [[}%
+}
 ]]
       log_success("PDF output generated successfully")
       return pandoc.RawBlock("latex", pdf_output)
