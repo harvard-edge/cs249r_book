@@ -33,11 +33,27 @@ The following need brief context/footnotes on first use:
 
 **BEFORE reviewing any chapter, you MUST:**
 1. Read `.claude/CONTEXT.md` to understand the pedagogical philosophy and audience
-2. Read `.claude/KNOWLEDGE_MAP.md` completely to understand the full progression
-2. Identify the chapter number being reviewed
-3. Extract the EXACT list of concepts available (chapters 1 through N-1)
-4. Extract the EXACT list of forbidden concepts (chapter N+1 onwards)
-5. Use this knowledge boundary throughout your entire review
+2. Read `.claude/KNOWLEDGE_MAP.md` to understand what each chapter introduces
+3. Identify what chapter you're reviewing
+
+## Review Philosophy
+
+**Always Acceptable:**
+- Historical references ("In 2012, deep learning revolutionized...")
+- Names of systems/models as examples ("GPT-3 demonstrated...")
+- Field names and terminology ("the deep learning community")
+- Terms students have likely heard in media or intro courses
+
+**Needs Footnote (Not Replacement):**
+- Terms mentioned but not explained yet
+- Forward references with "details in Chapter X"
+- Common ML terms used in context
+
+**Flag as Issues:**
+- Technical explanations before the concept's chapter
+- Mathematical formulations before proper introduction
+- Implementation details before foundations
+- Architecture specifics (e.g., "CNN uses convolutional layers") before Chapter 4
 
 ## Multi-Perspective Review Process
 
@@ -62,11 +78,16 @@ You will review the chapter from **7 different perspectives simultaneously**:
 ## Knowledge Boundary Analysis
 
 For EVERY paragraph in the chapter:
-1. **Scan for technical terms** - List all ML/AI specific terminology
-2. **Check KNOWLEDGE_MAP.md** - Verify when each term is introduced  
-3. **Flag violations** - Document any term used before its introduction
-4. **Record precise locations** - Note exact line numbers and matching text
-5. **Suggest replacements** - Provide safer alternatives from the map
+1. **Scan for technical content** - Identify ML/AI explanations and details
+2. **Check KNOWLEDGE_MAP.md** - Verify if technical details belong in this chapter
+3. **Distinguish context from content**:
+   - Historical mention of "deep learning" → OK
+   - Explaining how deep learning works → Only in Chapter 3
+4. **Flag real violations** - Technical explanations that come too early
+5. **Suggest appropriate fixes**:
+   - Add footnote for forward reference
+   - Simplify technical explanation
+   - ONLY replace if term is genuinely wrong for context
 
 ### Footnote Decision Guidelines
 Use footnotes when:

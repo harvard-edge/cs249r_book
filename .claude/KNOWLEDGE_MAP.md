@@ -1,24 +1,28 @@
-# Comprehensive Knowledge Progression Map
+# Knowledge Progression Map
 
-This document tracks the concepts introduced in each chapter of the ML Systems textbook, ensuring progressive knowledge building. Each chapter can only use concepts from previous chapters.
+This document tracks what concepts are introduced in each chapter of the ML Systems textbook. Chapters should primarily explain their own concepts while building on previous chapters.
+
+## Guiding Principles
+
+1. **Historical Context is Always Acceptable**: Terms like "deep learning", "AlexNet", "GPT-3" can be mentioned as historical facts or examples in any chapter
+2. **Technical Details Must Wait**: The actual mechanics (how things work) should only be explained in their designated chapter
+3. **Use Footnotes for Forward References**: If mentioning a future concept, add a footnote like "explained in detail in Chapter X"
+4. **Preserve Accuracy**: Never change technical terms to incorrect alternatives (e.g., don't replace "deep learning" with "hierarchical learning")
 
 ## Part I: Systems Foundations
 
 ### Chapter 1: Introduction
-**New Concepts Introduced:**
-- AI engineering principles
-- Machine learning systems fundamentals
+**Introduces:**
+- What is ML Systems Engineering
+- Historical evolution of AI (symbolic → statistical → deep learning)
+- Why ML systems are challenging
 - Systems thinking for ML
-- Real-world deployment challenges
-- ML system lifecycle
+- Real-world deployment considerations
 - Cross-functional collaboration needs
-- System vs model perspective
-
-**Can Use:** Basic CS concepts only
-**Cannot Use:** Any ML-specific algorithms, neural networks, etc.
+- Case studies: FarmBeats, AlphaFold, Waymo
 
 ### Chapter 2: ML Systems
-**New Concepts Introduced:**
+**Introduces:**
 - Deployment tiers (Cloud, Edge, Mobile, TinyML)
 - Resource constraints (memory, compute, power)
 - System architectures for ML
@@ -27,27 +31,19 @@ This document tracks the concepts introduced in each chapter of the ML Systems t
 - ML system design patterns
 - Scalability considerations
 
-**Can Use:** Chapter 1 concepts
-**Cannot Use:** Neural networks, specific architectures, optimization techniques
-
 ### Chapter 3: Deep Learning Primer
-**New Concepts Introduced:**
-- Neural networks fundamentals
+**Introduces:**
+- How neural networks actually work
 - Neurons, weights, biases, connections
 - Activation functions
-- Forward propagation
-- Backward propagation (backpropagation)
-- Gradient descent
+- Forward and backward propagation
+- Gradient descent and optimization
 - Loss functions
-- Training vs inference phases
-- Overfitting and underfitting
-- Regularization basics
-
-**Can Use:** Chapters 1-2 concepts
-**Cannot Use:** Specific architectures (CNNs, RNNs), attention, transformers
+- Training vs inference
+- Overfitting, underfitting, regularization
 
 ### Chapter 4: DNN Architectures
-**New Concepts Introduced:**
+**Introduces:**
 - Multi-Layer Perceptrons (MLPs)
 - Convolutional Neural Networks (CNNs)
 - Recurrent Neural Networks (RNNs)
@@ -57,13 +53,10 @@ This document tracks the concepts introduced in each chapter of the ML Systems t
 - Model depth vs width trade-offs
 - Skip connections and residual blocks
 
-**Can Use:** Chapters 1-3 concepts
-**Cannot Use:** Specific training techniques, hardware accelerators, quantization
-
 ## Part II: Design Principles
 
 ### Chapter 5: Workflow
-**New Concepts Introduced:**
+**Introduces:**
 - ML development workflow stages
 - Data collection and preparation
 - Model development pipeline
@@ -73,11 +66,8 @@ This document tracks the concepts introduced in each chapter of the ML Systems t
 - Model validation strategies
 - Deployment pipelines
 
-**Can Use:** Chapters 1-4 concepts
-**Cannot Use:** Advanced optimization, hardware-specific optimizations
-
 ### Chapter 6: Data Engineering
-**New Concepts Introduced:**
+**Introduces:**
 - Data pipelines
 - Data quality and validation
 - Feature engineering
@@ -87,9 +77,6 @@ This document tracks the concepts introduced in each chapter of the ML Systems t
 - Data versioning
 - ETL/ELT processes
 - Data governance
-
-**Can Use:** Chapters 1-5 concepts
-**Cannot Use:** Distributed training, model compression
 
 ### Chapter 7: Frameworks
 **New Concepts Introduced:**
