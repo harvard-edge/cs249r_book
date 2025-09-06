@@ -17,7 +17,7 @@ from typing import List, Tuple
 def remove_inline_footnotes(text: str) -> str:
     """Remove inline footnote references like [^fn-name] from text."""
     # Pattern matches [^anything-here] where 'anything-here' doesn't contain ]
-    pattern = r'\[^\^[^\]]+\]'
+    pattern = r'\[\^[^\]]+\]'
     return re.sub(pattern, '', text)
 
 
@@ -68,7 +68,7 @@ def process_qmd_file(file_path: Path) -> Tuple[bool, int, int]:
             lines = content.splitlines()
         
         # Count footnotes before processing
-        inline_refs_before = len(re.findall(r'\[^\^[^\]]+\]', content))
+        inline_refs_before = len(re.findall(r'\[\^[^\]]+\]', content))
         definitions_before = len([l for l in lines if re.match(r'^\[\^[^\]]+\]:', l)])
         
         # Remove inline references
