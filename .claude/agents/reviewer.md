@@ -105,6 +105,8 @@ forward_references:
       type: "replacement" | "footnote" | "insertion"
       new_text: "[replacement text]"
       footnote_text: "[optional footnote content]"
+      needs_footnote: true | false  # Signal to footnote agent
+      footnote_reason: "[why this needs explanation]"
 
 clarity_issues:
   - location:
