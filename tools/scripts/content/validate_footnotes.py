@@ -40,13 +40,30 @@ class Colors:
     BOLD = '\033[1m'
 
 def find_footnote_references(content: str) -> Set[str]:
-    """Find all footnote references [^fn-name] in the content."""
-    # Match [^fn-name] but not [^fn-name]:
-    pattern = r'\[\^(fn-[a-zA-Z0-9-_]+)\](?!:)'
+    """
+    Find all footnote references [^fn-name] in the content.
+    
+    This captures both:
+    1. Pure references: "text[^fn-name] more text"
+    2. Inline definitions: "text[^fn-name]: definition content"
+    
+    The logic is that any footnote that appears anywhere in the text
+    (whether as a reference or inline definition) is considered "used".
+    """
+    pattern = r'\[\^(fn-[a-zA-Z0-9-_]+)\]'
     return set(re.findall(pattern, content))
 
 def find_footnote_definitions(content: str) -> Dict[str, List[int]]:
-    """Find all footnote definitions [^fn-name]: and their line numbers."""
+    """
+    Find footnote definitions that appear at the start of lines.
+    
+    These are separate definition blocks like:
+    [^fn-name]: Definition content here
+    
+    Only these line-start definitions are considered for "unused" detection.
+    Inline definitions (like "text[^fn-name]: content") are not unused by definition
+    since they appear where they're referenced.
+    """
     pattern = r'^\[\^(fn-[a-zA-Z0-9-_]+)\]:'
     definitions = defaultdict(list)
     
