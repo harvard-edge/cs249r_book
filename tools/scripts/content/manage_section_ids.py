@@ -431,15 +431,26 @@ def list_section_ids(filepath):
         should_process, match = should_process_header(line, state)
         if should_process:
             hashes, title = match.groups()
-            if len(hashes) > 1:  # Skip chapter title
-                section_count += 1
-                existing_id_matches = re.findall(r'\{#(sec-[^}]+)\}', line)
-                if existing_id_matches:
-                    section_id = existing_id_matches[0]
-                    logging.info(f"  {section_count:2d}. {title.strip()}")
-                    logging.info(f"      ID: #{section_id}")
-                else:
-                    logging.info(f"  {section_count:2d}. {title.strip()} (NO ID)")
+            # Process all headers (including chapter headers) unless they have {.unnumbered}
+            # Extract existing attributes if any
+            existing_attrs = ""
+            if "{" in line:
+                attrs_start = line.find("{")
+                attrs_end = line.rfind("}")
+                if attrs_end > attrs_start:
+                    existing_attrs = line[attrs_start:attrs_end+1]
+            # Skip headers with {.unnumbered}
+            if ".unnumbered" in existing_attrs:
+                continue  # Skip this header
+            
+            section_count += 1
+            existing_id_matches = re.findall(r'\{#(sec-[^}]+)\}', line)
+            if existing_id_matches:
+                section_id = existing_id_matches[0]
+                logging.info(f"  {section_count:2d}. {title.strip()}")
+                logging.info(f"      ID: #{section_id}")
+            else:
+                logging.info(f"  {section_count:2d}. {title.strip()} (NO ID)")
     
     if section_count == 0:
         logging.info("  No sections found")
