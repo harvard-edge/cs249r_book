@@ -157,7 +157,7 @@ Hardware developments have fundamentally reshaped how frameworks implement and o
 
 The development of hardware-specific accelerators further revolutionized framework design. [Google's Tensor Processing Units (TPUs)](https://cloud.google.com/tpu/), first deployed in 2016, were purpose-built for tensor operations, the fundamental building blocks of deep learning computations. TPUs introduced systolic array architectures, which are particularly efficient for matrix multiplication and convolution operations. This hardware architecture prompted frameworks like TensorFlow to develop specialized compilation strategies that could map high-level operations directly to TPU instructions, bypassing traditional CPU-oriented optimizations.
 
-Mobile hardware accelerators, such as [Apple's Neural Engine (2017)](https://machinelearning.apple.com/research/neural-engine-transformers) and Qualcomm's Neural Processing Units, brought new constraints and opportunities to framework design. These devices emphasized power efficiency over raw computational speed, requiring frameworks to develop new strategies for model optimization and efficient execution. Mobile frameworks like TensorFlow Lite (more recently rebraneded to [LiteRT](https://ai.google.dev/edge/litert)) and [PyTorch Mobile](https://pytorch.org/mobile/home/) needed to balance model accuracy with energy consumption, leading to innovations in how matrix operations are scheduled and executed.
+Mobile hardware accelerators, such as [Apple's Neural Engine (2017)](https://machinelearning.apple.com/research/neural-engine-transformers) and Qualcomm's Neural Processing Units, brought new constraints and opportunities to framework design. These devices emphasized power efficiency over raw computational speed, requiring frameworks to develop new strategies for quantization and operator fusion. Mobile frameworks like TensorFlow Lite (more recently rebraneded to [LiteRT](https://ai.google.dev/edge/litert)) and [PyTorch Mobile](https://pytorch.org/mobile/home/) needed to balance model accuracy with energy consumption, leading to innovations in how matrix operations are scheduled and executed.
 
 The emergence of custom ASIC (Application-Specific Integrated Circuit) solutions has further diversified the hardware landscape. Companies like [Graphcore](https://www.graphcore.ai/), [Cerebras](https://www.cerebras.net/), and [SambaNova](https://sambanova.ai/) have developed unique architectures for matrix computation, each with different strengths and optimization opportunities. This proliferation of specialized hardware has pushed frameworks to adopt more flexible intermediate representations of matrix operations, allowing for target-specific optimization while maintaining a common high-level interface.
 
@@ -354,7 +354,7 @@ As shown in @fig-mlfm-comp-graph, the structure of the computation graph involve
 \draw[latex-,Line](2B1) --node[Text,pos=0.55]{Interacts with} (scope1.east|-2B1);
 \end{tikzpicture}
 ```
-**Computation Graph**: This diagram represents a computation as a directed acyclic graph, where nodes denote variables and edges represent operations. By expressing computations in this form, systems can efficiently perform automatic differentiation and optimize resource allocation before execution.
+**Computation Graph**: This diagram represents a computation as a directed acyclic graph, where nodes denote variables and edges represent operations. By expressing computations in this form, systems can efficiently perform automatic differentiation—essential for training machine learning models through backpropagation—and optimize resource allocation before execution.
 :::
 
 ##### Layers and Tensors {#sec-ai-frameworks-layers-tensors-9b0f}
@@ -811,25 +811,86 @@ d_x = w1 * d_hidden    # 2.0 * 3.0 = 6.0
 
 This example illustrates several key implementation considerations: 1. The framework must track dependencies between operations 2. Intermediate values must be stored for the backward pass 3. Gradient computations follow the reverse topological order of the forward computation 4. Each operation needs both forward and backward implementations
 
-###### Framework Implementation {#sec-ai-frameworks-framework-implementation-e69a}
+###### Memory Management Strategies {#sec-ai-frameworks-memory-management-strategies-e69a}
 
-Implementing automatic differentiation within machine learning frameworks requires careful system design to balance computational efficiency with developer usability. Frameworks must provide transparent gradient computation while abstracting away the underlying complexity from users.
+Memory management represents one of the key challenges in implementing reverse mode differentiation in machine learning frameworks. Unlike forward mode where we can discard intermediate values as we go, reverse mode requires storing results from the forward pass to compute gradients during the backward pass.
 
-The key architectural challenge lies in representing operations and their derivatives within the framework's computational graph structure. Each operation must provide both forward computation and gradient computation functions, enabling the framework to execute the forward pass and then compute gradients during the backward pass.
+This requirement is illustrated in @lst-reverse_memory, which extends our neural network example to highlight how intermediate activations must be preserved for use during backpropagation.
 
-Modern frameworks solve this through operator registration systems where each mathematical operation includes both its forward implementation and its gradient definition. This modular approach allows frameworks to automatically construct the derivative computation graph by chaining these gradient functions together.
+::: {#lst-reverse_memory lst-cap="**Reverse Mode Memory Management**: Stores intermediate values for gradient computation during backpropagation."}
+```{.python}
+def deep_network(x, w1, w2, w3):
+    # Forward pass - must store intermediates
+    hidden1 = x * w1
+    activated1 = max(0, hidden1)   # Store for backward
+    hidden2 = activated1 * w2
+    activated2 = max(0, hidden2)   # Store for backward
+    output = activated2 * w3
+    return output
+```
+:::
 
-The integration must also handle memory management efficiently, as intermediate values from forward computation may need to be preserved for gradient calculation. Frameworks implement various strategies to optimize this memory usage while maintaining computational correctness.
+Each intermediate value needed for gradient computation must be kept in memory until its backward pass completes. As networks grow deeper, this memory requirement grows linearly with network depth. For a typical deep neural network processing a batch of images, this can mean gigabytes of stored activations.
 
-###### System Integration {#sec-ai-frameworks-system-integration-2ec0}
+Frameworks employ several strategies to manage this memory burden. One such approach is illustrated in @lst-memory_strategies.
 
-The successful integration of automatic differentiation into machine learning frameworks depends on seamless interaction between multiple system components. The computational graph representation must interface effectively with hardware abstraction layers, allowing the same model definition to execute efficiently across different processing units.
+::: {#lst-memory_strategies lst-cap="**Memory Management Strategies**: Training involves layered transformations where memory is managed to optimize performance. Checkpointing allows intermediate values to be freed during training, reducing memory usage while maintaining computational integrity via Explanation: The code. This emphasizes the trade-offs between memory management and model complexity in deep learning systems."}
+```{.python}
+def training_step(model, input_batch):
+    # Strategy 1: Checkpointing
+    with checkpoint_scope():
+        hidden1 = activation(layer1(input_batch))
+        # Framework might free some memory here
+        hidden2 = activation(layer2(hidden1))
+        # More selective memory management
+        output = layer3(hidden2)
 
-Frameworks achieve this integration through layered architectures where automatic differentiation operates at a level above hardware-specific optimizations. The gradient computation logic remains device-agnostic, while lower layers handle the mapping to specific hardware capabilities such as GPU kernels or specialized accelerator instructions.
+    # Strategy 2: Gradient accumulation
+    loss = compute_loss(output)
+    # Backward pass with managed memory
+    loss.backward()
+```
+:::
 
-This separation enables frameworks to apply hardware-specific optimizations to both forward and backward operations without requiring changes to the user's model definition. Operation fusion, memory layout optimizations, and parallel execution strategies can be applied transparently while preserving the mathematical correctness of gradient computations.
+Modern frameworks automatically balance memory usage and computation speed. They might recompute some intermediate values during the backward pass rather than storing everything, particularly for memory-intensive operations. This trade-off between memory and computation becomes especially important in large-scale training scenarios.
 
-The framework's type system also plays a crucial role in this integration, ensuring that gradient computations maintain numerical precision and handle edge cases appropriately across different hardware platforms. This systematic approach enables the complex automatic differentiation machinery to operate reliably in production environments.
+###### Optimization Techniques {#sec-ai-frameworks-optimization-techniques-2ec0}
+
+Reverse mode automatic differentiation in machine learning frameworks employs several key optimization techniques to enhance training efficiency. These optimizations become crucial when training large neural networks where computational and memory resources are pushed to their limits.
+
+Modern frameworks implement gradient checkpointing, a technique that strategically balances computation and memory. A simplified forward pass of such a network is shown in @lst-deep_forward.
+
+::: {#lst-deep_forward lst-cap="**Forward Pass**: Neural networks process input through sequential layers of transformations to produce an output, highlighting the hierarchical nature of deep learning architectures."}
+```{.python}
+def deep_network(input_tensor):
+    # A typical deep network computation
+    layer1 = large_dense_layer(input_tensor)
+    activation1 = relu(layer1)
+    layer2 = large_dense_layer(activation1)
+    activation2 = relu(layer2)
+    # ... many more layers
+    output = final_layer(activation_n)
+    return output
+```
+:::
+
+Instead of storing all intermediate activations, frameworks can strategically recompute certain values during the backward pass. @lst-checkpoint_scheme demonstrates how frameworks achieve this memory saving. The framework might save activations only every few layers.
+
+::: {#lst-checkpoint_scheme lst-cap="**Checkpointing**: Reduces memory usage by selectively storing intermediate activations during forward passes. Frameworks balance storage needs with computational efficiency to optimize model training."}
+```{.python}
+# Conceptual representation of checkpointing
+checkpoint1 = save_for_backward(activation1)
+# Intermediate activations can be recomputed
+checkpoint2 = save_for_backward(activation4)
+# Framework balances storage vs recomputation
+```
+:::
+
+Another crucial optimization involves operation fusion. Rather than treating each mathematical operation separately, frameworks combine operations that commonly occur together. Matrix multiplication followed by bias addition, for instance, can be fused into a single operation, reducing memory transfers and improving hardware utilization.
+
+The backward pass itself can be optimized by reordering computations to maximize hardware efficiency. Consider the gradient computation for a convolution layer - rather than directly translating the mathematical definition into code, frameworks implement specialized backward operations that take advantage of modern hardware capabilities.
+
+These optimizations work together to make the training of large neural networks practical. Without them, many modern architectures would be prohibitively expensive to train, both in terms of memory usage and computation time.
 
 #### Integration with Frameworks {#sec-ai-frameworks-integration-frameworks-9e4c}
 
@@ -837,29 +898,28 @@ The integration of automatic differentiation into machine learning frameworks re
 
 Let's examine how frameworks present AD to users.  A typical example from PyTorch is shown in @lst-ad_interface.
 
-::: {#lst-ad_interface lst-cap="**Automatic Differentiation Interface**: PyTorch transparently tracks operations during neural network execution, enabling frameworks to compute gradients automatically without manual intervention."}
+::: {#lst-ad_interface lst-cap="**Automatic Differentiation Interface**: PyTorch transparently tracks operations during neural network execution to enable efficient backpropagation. Training requires careful management of gradients and model parameters, highlighting the importance of automatic differentiation in achieving optimal performance."}
 ```{.python}
-import torch
-import torch.nn as nn
-
 # PyTorch-style automatic differentiation
 def neural_network(x):
     # Framework transparently tracks operations
     layer1 = nn.Linear(784, 256)
     layer2 = nn.Linear(256, 10)
 
-    # Each operation is automatically tracked for gradients
+    # Each operation is automatically tracked
     hidden = torch.relu(layer1(x))
     output = layer2(hidden)
     return output
 
-# Framework provides gradient computation capabilities
-model = neural_network
-input_data = torch.randn(32, 784, requires_grad=True)
-output = model(input_data)
+# Training loop showing AD integration
+for batch_x, batch_y in data_loader:
+    optimizer.zero_grad()    # Clear previous gradients
+    output = neural_network(batch_x)
+    loss = loss_function(output, batch_y)
 
-# Automatic gradient computation
-gradients = torch.autograd.grad(output.sum(), input_data)
+    # Framework handles all AD machinery
+    loss.backward()         # Automatic backward pass
+    optimizer.step()        # Parameter updates
 ```
 :::
 
@@ -974,11 +1034,11 @@ Modern frameworks handle these system-level concerns while maintaining a simple 
 
 #### Summary {#sec-ai-frameworks-summary-99ec}
 
-Automatic differentiation systems represent an important computational abstraction in machine learning frameworks, transforming the mathematical concept of derivatives into efficient implementations. Through our examination of both forward and reverse modes, we've seen how frameworks balance mathematical precision with computational efficiency to enable gradient computation for neural networks.
+Automatic differentiation systems represent an important computational abstraction in machine learning frameworks, transforming the mathematical concept of derivatives into efficient implementations. Through our examination of both forward and reverse modes, we've seen how frameworks balance mathematical precision with computational efficiency to enable training of modern neural networks.
 
 The implementation of AD systems reveals key design patterns in machine learning frameworks. One such pattern is shown in @lst-ad_mechanics.
 
-::: {#lst-ad_mechanics lst-cap="**AD Mechanism**: Frameworks track operations to enable efficient gradient computation. This example emphasizes the importance of tracking intermediate computations to enable effective gradient calculations, a core aspect of automatic differentiation in machine learning systems."}
+::: {#lst-ad_mechanics lst-cap="**AD Mechanism**: Frameworks track operations for efficient backward passes during training through The code. This example emphasizes the importance of tracking intermediate computations to enable effective gradient calculations, a core aspect of automatic differentiation in machine learning systems."}
 ```{.python}
 def computation(x, w):
     # Framework tracks operations
@@ -998,10 +1058,9 @@ As shown in @lst-ad_abstraction, modern frameworks abstract these complexities b
 
 ::: {#lst-ad_abstraction lst-cap="**Minimal API**: Simplifies automatic differentiation by tracking forward computations and efficiently computing gradients, enabling effective model optimization."}
 ```{.python}
-output = model(input)      # Forward pass tracks computation
-gradients = torch.autograd.grad(
-    output.sum(), model.parameters())  # Efficient reverse mode AD
-# Gradients now available for optimization
+loss = model(input)  # Forward pass tracks computation
+loss.backward()      # Triggers efficient reverse mode AD
+optimizer.step()     # Uses computed gradients
 ```
 :::
 
@@ -1513,7 +1572,7 @@ Many modern ML frameworks incorporate JIT compilation to provide developers with
 
 As machine learning models continue to grow in size and complexity, training them on a single device is often no longer feasible. Large models require significant computational power and memory, while massive datasets demand efficient processing across multiple machines. To address these challenges, modern AI frameworks provide built-in support for distributed execution, allowing computations to be split across multiple GPUs, TPUs, or distributed clusters. By abstracting the complexities of parallel execution, these frameworks enable practitioners to scale machine learning workloads efficiently while maintaining ease of use.
 
-At the essence of distributed execution are two primary strategies: data parallelism and model parallelism. Data parallelism allows multiple devices to process the same model on different subsets of data, enabling faster computation without increasing memory requirements per device. Model parallelism, on the other hand, partitions the model itself across multiple devices, allowing the execution of architectures too large to fit into a single device's memory. These distribution strategies are essential for scaling modern machine learning computations efficiently.
+At the essence of distributed execution are two primary strategies: data parallelism and model parallelism. Data parallelism allows multiple devices to train the same model on different subsets of data, ensuring faster convergence without increasing memory requirements. Model parallelism, on the other hand, partitions the model itself across multiple devices, allowing the training of architectures too large to fit into a single device’s memory. While model parallelism comes in several variations, which will be explored in later chapters, both techniques are essential for training modern machine learning models efficiently.
 
 ##### Data Parallelism {#sec-ai-frameworks-data-parallelism-5fe3}
 
@@ -2179,7 +2238,7 @@ class SimpleNet(nn.Module):
 
 At the highest level (@lst-high_level_api), frameworks often provide model-level abstractions that automate common workflows. For example, the Keras API provides a highly abstract interface that hides most implementation details:
 
-::: {#lst-high_level_api lst-cap="**High-level model definition**: Defines a convolutional neural network architecture using Keras, showcasing layer stacking for feature extraction and classification. **Framework API**: Demonstrates high-level framework capabilities for model compilation and configuration."}
+::: {#lst-high_level_api lst-cap="**High-level model definition**: Defines a convolutional neural network architecture using Keras, showcasing layer stacking for feature extraction and classification. **Training workflow**: Automates the training process by compiling the model with an optimizer and loss function, then fitting it to data over multiple epochs."}
 ```{.python}
 from tensorflow import keras
 
@@ -2193,11 +2252,11 @@ model = keras.Sequential([
     keras.layers.Dense(10)
 ])
 
-# Framework provides high-level model compilation
+# Automated training workflow
 model.compile(
     optimizer='adam',
     loss='sparse_categorical_crossentropy')
-# Training capabilities built into the framework
+model.fit(train_data, train_labels, epochs=10)
 ```
 :::
 
@@ -2211,38 +2270,39 @@ Machine learning frameworks organize their fundamental capabilities into distinc
 
 At the heart of every machine learning framework lies a set of core libraries, forming the foundation upon which all other components are built. These libraries provide the essential building blocks for machine learning operations, implementing fundamental tensor operations that serve as the backbone of numerical computations. Heavily optimized for performance, these operations often leverage low-level programming languages and hardware-specific optimizations to ensure efficient execution of tasks like matrix multiplication, a cornerstone of neural network computations.
 
-Alongside these basic operations, core libraries implement automatic differentiation capabilities, enabling the efficient computation of gradients for complex functions. This feature is crucial for neural network development. The implementation often involves intricate graph manipulation and symbolic computation techniques, abstracting away the complexities of gradient calculation from the end-user.
+Alongside these basic operations, core libraries implement automatic differentiation capabilities, enabling the efficient computation of gradients for complex functions. This feature is crucial for the backpropagation algorithm that powers most neural network training. The implementation often involves intricate graph manipulation and symbolic computation techniques, abstracting away the complexities of gradient calculation from the end-user.
 
-Building upon these fundamental operations, core libraries typically provide pre-implemented neural network layers such as convolutional, recurrent, and attention mechanisms. These ready-to-use components save developers from reinventing the wheel for common model architectures, allowing them to focus on higher-level model design rather than low-level implementation details. The frameworks also provide mathematical optimization capabilities that enable the automated improvement of model parameters.
+Building upon these fundamental operations, core libraries typically provide pre-implemented neural network layers such as convolutional, recurrent, and attention mechanisms. These ready-to-use components save developers from reinventing the wheel for common model architectures, allowing them to focus on higher-level model design rather than low-level implementation details. Similarly, optimization algorithms like various flavors of gradient descent are provided out-of-the-box, further streamlining the model development process.
 
 A simplified example of how these components might be used in practice is shown in @lst-integrated_example.
 
-::: {#lst-integrated_example lst-cap="**Framework Integration**: Core libraries provide high-level abstractions for model creation and computation, demonstrating how frameworks integrate tensor operations, neural network layers, and automatic differentiation."}
+::: {#lst-integrated_example lst-cap="**Training Pipeline**: Machine learning workflows partition datasets into training, validation, and test sets to ensure robust model development and unbiased evaluation."}
 ```{.python}
 import torch
 import torch.nn as nn
 
-# Create a simple neural network using framework abstractions
+# Create a simple neural network
 model = nn.Sequential(
-    nn.Linear(10, 20),      # Framework provides linear layers
-    nn.ReLU(),              # Activation functions built-in
-    nn.Linear(20, 1)        # Output layer
+    nn.Linear(10, 20),
+    nn.ReLU(),
+    nn.Linear(20, 1)
 )
 
-# Framework handles tensor operations seamlessly
-x = torch.randn(32, 10)     # Input tensor
-y_pred = model(x)           # Forward computation through layers
+# Define loss function and optimizer
+loss_fn = nn.MSELoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
-# Automatic differentiation capabilities
-y_pred.sum().backward()     # Framework computes gradients automatically
-
-# Access computed gradients
-for param in model.parameters():
-    print(param.grad.shape)  # Gradient tensors available
+# Forward pass, compute loss, and backward pass
+x = torch.randn(32, 10)
+y = torch.randn(32, 1)
+y_pred = model(x)
+loss = loss_fn(y_pred, y)
+loss.backward()
+optimizer.step()
 ```
 :::
 
-This example demonstrates how core libraries provide high-level abstractions for model creation, tensor operations, and gradient computation, while handling low-level implementation details internally.
+This example demonstrates how core libraries provide high-level abstractions for model creation, loss computation, and optimization, while handling low-level details internally.
 
 ### Extensions and Plugins {#sec-ai-frameworks-extensions-plugins-3af7}
 
@@ -2662,7 +2722,7 @@ The specializations of mobile ML frameworks collectively enable the deployment o
 
 TinyML frameworks are specialized software infrastructures designed for deploying machine learning models on extremely resource-constrained devices, typically microcontrollers and low-power embedded systems. These frameworks address the severe limitations in processing power, memory, and energy consumption characteristic of tiny devices. The specialization of TinyML frameworks primarily focuses on extreme model compression, optimizations for severely constrained environments, and integration with microcontroller-specific architectures.
 
-Extreme model compression in TinyML frameworks takes model optimization techniques to their logical conclusion. While mobile frameworks might use higher precision representations, TinyML often employs aggressive optimization approaches to reduce model parameters. Frameworks like TensorFlow Lite Micro exemplify this approach [@david2021tensorflow], pushing the boundaries of model compression to fit within the kilobytes of memory available on microcontrollers.
+Extreme model compression in TinyML frameworks takes the quantization techniques mentioned in mobile and edge frameworks to their logical conclusion. While mobile frameworks might use 8-bit quantization, TinyML often employs even more aggressive techniques, such as 4-bit, 2-bit, or even 1-bit (binary) representations of model parameters. Frameworks like TensorFlow Lite Micro exemplify this approach [@david2021tensorflow], pushing the boundaries of model compression to fit within the kilobytes of memory available on microcontrollers.
 
 The execution model in TinyML frameworks is highly specialized. Unlike the dynamic graph capabilities seen in some cloud and mobile frameworks, TinyML frameworks almost exclusively use static, highly optimized graphs. The just-in-time compilation approach seen in frameworks like JAX is typically not feasible in TinyML due to memory constraints. Instead, these frameworks often employ ahead-of-time compilation techniques to generate highly optimized, device-specific code.
 
@@ -2711,7 +2771,7 @@ Model architecture capabilities vary significantly across TensorFlow variants, w
 
 TensorFlow supports approximately 1,400 operations and enables both training and inference. However, as @tbl-tf-comparison indicates, its inference capabilities are inefficient for edge deployment. TensorFlow Lite reduces the operation count to roughly 130 operations while improving inference efficiency. It eliminates training support but adds native quantization tooling. TensorFlow Lite Micro further constrains the operation set to approximately 50 operations, achieving even higher inference efficiency through these constraints. Like TensorFlow Lite, it includes native quantization support but removes training capabilities.
 
-This progressive reduction in operations enables deployment on increasingly constrained devices. The addition of native optimization tooling in both TensorFlow Lite and TensorFlow Lite Micro provides essential capabilities absent in the full TensorFlow framework. These optimization techniques transform models to use lower precision operations, reducing computational and memory requirements for resource-constrained deployments.
+This progressive reduction in operations enables deployment on increasingly constrained devices. The addition of native quantization in both TensorFlow Lite and TensorFlow Lite Micro provides essential optimization capabilities absent in the full TensorFlow framework. Quantization transforms models to use lower precision operations, reducing computational and memory requirements for resource-constrained deployments.
 
 ### Software Dependencies {#sec-ai-frameworks-software-dependencies-29bb}
 
