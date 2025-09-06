@@ -42,7 +42,7 @@ Examples:
 3. Stage selectively (not everything)
 4. Review changes before committing
 5. Merge with --no-ff back to dev
-6. Delete feature branch after merge
+6. **Delete feature branch after merge** (mandatory cleanup)
 
 ## Important Notes
 

@@ -35,8 +35,9 @@ When agents create branches, prefix with agent name:
 ### 4. Merging Rules
 - **Always use --no-ff**: Preserve merge history with `git merge --no-ff branch-name`
 - **Merge to appropriate target**: Usually `dev`, never directly to `main`
-- **Clean up after merge**: Delete feature branches after successful merge
+- **Delete branches after merge**: MANDATORY - use `git branch -d branch-name`
 - **One feature at a time**: Don't mix unrelated changes in a single merge
+- **Check for merged branches**: Use `git branch --merged` to find deletable branches
 
 ### 5. Working Practices
 
