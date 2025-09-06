@@ -3,10 +3,12 @@
 📝 Validate and Clean Footnotes in Quarto Files
 
 This script validates footnote consistency in .qmd files and can optionally clean up issues:
-- Finds undefined footnote references
-- Finds unused footnote definitions  
+- Finds undefined footnote references (e.g., [^fn-xyz] with no definition)
+- Finds unused footnote definitions (e.g., [^fn-xyz]: ... that's never referenced)
 - Detects duplicate footnote definitions
-- Can automatically remove unused definitions with --clean flag
+- Can automatically fix both issues with --clean flag:
+  - Removes undefined references from the text
+  - Removes unused definitions from the file
 
 DESIGN PHILOSOPHY:
 - Clear visual output with emoji indicators
@@ -17,8 +19,9 @@ DESIGN PHILOSOPHY:
 Usage:
     python validate_footnotes.py -d quarto/contents/  # Check all files
     python validate_footnotes.py -f chapter.qmd       # Check single file
-    python validate_footnotes.py -d quarto/ --clean   # Clean unused footnotes
+    python validate_footnotes.py -d quarto/ --clean   # Clean both undefined refs and unused defs
     python validate_footnotes.py -d quarto/ --quiet   # Minimal output for CI
+    python validate_footnotes.py -d quarto/ --clean --dry-run # Preview changes
 """
 
 import argparse
@@ -75,10 +78,10 @@ def find_footnote_definitions(content: str) -> Dict[str, List[int]]:
     
     return dict(definitions)
 
-def validate_footnotes_in_file(filepath: Path, quiet: bool = False) -> Tuple[List[str], Dict[str, List[int]]]:
+def validate_footnotes_in_file(filepath: Path, quiet: bool = False) -> Tuple[List[str], Dict[str, List[int]], Set[str]]:
     """
     Validate footnotes in a single file.
-    Returns (errors, unused_definitions_with_lines)
+    Returns (errors, unused_definitions_with_lines, undefined_references)
     """
     errors = []
     unused_with_lines = {}
@@ -87,7 +90,7 @@ def validate_footnotes_in_file(filepath: Path, quiet: bool = False) -> Tuple[Lis
         with open(filepath, 'r', encoding='utf-8') as f:
             content = f.read()
     except Exception as e:
-        return [f"Error reading {filepath}: {e}"], {}
+        return [f"Error reading {filepath}: {e}"], {}, set()
     
     references = find_footnote_references(content)
     definitions = find_footnote_definitions(content)
@@ -117,9 +120,39 @@ def validate_footnotes_in_file(filepath: Path, quiet: bool = False) -> Tuple[Lis
             for line_num in line_nums[1:]:  # Report all but the first as duplicates
                 errors.append(f"{Colors.RED}❌ Duplicate definition{Colors.ENDC}: [{def_name}] at {rel_path}:{line_num}")
     
-    return errors, unused_with_lines
+    return errors, unused_with_lines, undefined
 
-def clean_unused_footnotes(filepath: Path, unused_definitions: Dict[str, List[int]], dry_run: bool = False) -> int:
+def clean_undefined_references(filepath: Path, undefined_refs: Set[str], dry_run: bool = False) -> int:
+    """Remove undefined footnote references from a file."""
+    if not undefined_refs:
+        return 0
+    
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            content = f.read()
+    except Exception as e:
+        print(f"{Colors.RED}❌ Error reading {filepath}: {e}{Colors.ENDC}")
+        return 0
+    
+    if dry_run:
+        rel_path = filepath.relative_to(Path.cwd()) if filepath.is_relative_to(Path.cwd()) else filepath
+        print(f"{Colors.CYAN}Would remove {len(undefined_refs)} undefined reference(s) from {rel_path}{Colors.ENDC}")
+        return len(undefined_refs)
+    
+    # Remove each undefined reference
+    cleaned_content = content
+    for ref in undefined_refs:
+        # Remove the reference pattern [^fn-name]
+        pattern = re.escape(f"[^{ref}]")
+        cleaned_content = re.sub(pattern, '', cleaned_content)
+    
+    # Write back the cleaned content
+    with open(filepath, 'w', encoding='utf-8') as f:
+        f.write(cleaned_content)
+    
+    return len(undefined_refs)
+
+def clean_unused_definitions(filepath: Path, unused_definitions: Dict[str, List[int]], dry_run: bool = False) -> int:
     """Remove unused footnote definitions from a file."""
     if not unused_definitions:
         return 0
@@ -139,7 +172,7 @@ def clean_unused_footnotes(filepath: Path, unused_definitions: Dict[str, List[in
     
     if dry_run:
         rel_path = filepath.relative_to(Path.cwd()) if filepath.is_relative_to(Path.cwd()) else filepath
-        print(f"{Colors.CYAN}Would remove {len(lines_to_remove)} unused footnote(s) from {rel_path}{Colors.ENDC}")
+        print(f"{Colors.CYAN}Would remove {len(lines_to_remove)} unused definition(s) from {rel_path}{Colors.ENDC}")
         return len(lines_to_remove)
     
     # Remove lines (in reverse order to maintain indices)
@@ -179,15 +212,17 @@ def find_qmd_files(path: Path) -> List[Path]:
     else:
         return []
 
-def print_summary(total_files: int, total_errors: int, total_cleaned: int = 0, quiet: bool = False):
+def print_summary(total_files: int, total_errors: int, total_cleaned_refs: int = 0, total_cleaned_defs: int = 0, quiet: bool = False):
     """Print a summary of the validation/cleaning results."""
     if quiet and total_errors == 0:
         return
     
     print(f"\n{Colors.BOLD}{'='*60}{Colors.ENDC}")
     
-    if total_cleaned > 0:
-        print(f"{Colors.GREEN}✨ Cleaned {total_cleaned} unused footnote definition(s){Colors.ENDC}")
+    if total_cleaned_refs > 0:
+        print(f"{Colors.GREEN}✨ Removed {total_cleaned_refs} undefined reference(s){Colors.ENDC}")
+    if total_cleaned_defs > 0:
+        print(f"{Colors.GREEN}✨ Removed {total_cleaned_defs} unused definition(s){Colors.ENDC}")
     
     if total_errors == 0:
         print(f"{Colors.GREEN}✅ All footnotes validated successfully!{Colors.ENDC}")
@@ -229,7 +264,7 @@ Examples:
     parser.add_argument(
         "--clean",
         action="store_true",
-        help="Remove unused footnote definitions"
+        help="Remove undefined references and unused definitions"
     )
     parser.add_argument(
         "--dry-run",
@@ -266,11 +301,12 @@ Examples:
     
     # Validate each file
     all_errors = []
-    total_cleaned = 0
+    total_cleaned_refs = 0
+    total_cleaned_defs = 0
     files_with_issues = []
     
     for qmd_file in qmd_files:
-        errors, unused_defs = validate_footnotes_in_file(qmd_file, args.quiet)
+        errors, unused_defs, undefined_refs = validate_footnotes_in_file(qmd_file, args.quiet)
         
         if errors:
             files_with_issues.append(qmd_file)
@@ -282,17 +318,28 @@ Examples:
                 print()
             all_errors.extend(errors)
         
-        # Clean unused definitions if requested
-        if args.clean and unused_defs:
-            cleaned = clean_unused_footnotes(qmd_file, unused_defs, args.dry_run)
-            total_cleaned += cleaned
-            if not args.quiet and cleaned > 0:
-                action = "Would remove" if args.dry_run else "Removed"
-                rel_path = qmd_file.relative_to(Path.cwd()) if qmd_file.is_relative_to(Path.cwd()) else qmd_file
-                print(f"{Colors.GREEN}✨ {action} {cleaned} unused footnote(s) from {rel_path}{Colors.ENDC}")
+        # Clean undefined references and unused definitions if requested
+        if args.clean:
+            # Clean undefined references
+            if undefined_refs:
+                cleaned_refs = clean_undefined_references(qmd_file, undefined_refs, args.dry_run)
+                total_cleaned_refs += cleaned_refs
+                if not args.quiet and cleaned_refs > 0:
+                    action = "Would remove" if args.dry_run else "Removed"
+                    rel_path = qmd_file.relative_to(Path.cwd()) if qmd_file.is_relative_to(Path.cwd()) else qmd_file
+                    print(f"{Colors.GREEN}✨ {action} {cleaned_refs} undefined reference(s) from {rel_path}{Colors.ENDC}")
+            
+            # Clean unused definitions
+            if unused_defs:
+                cleaned_defs = clean_unused_definitions(qmd_file, unused_defs, args.dry_run)
+                total_cleaned_defs += cleaned_defs
+                if not args.quiet and cleaned_defs > 0:
+                    action = "Would remove" if args.dry_run else "Removed"
+                    rel_path = qmd_file.relative_to(Path.cwd()) if qmd_file.is_relative_to(Path.cwd()) else qmd_file
+                    print(f"{Colors.GREEN}✨ {action} {cleaned_defs} unused definition(s) from {rel_path}{Colors.ENDC}")
     
     # Print summary
-    print_summary(len(qmd_files), len(all_errors), total_cleaned, args.quiet)
+    print_summary(len(qmd_files), len(all_errors), total_cleaned_refs, total_cleaned_defs, args.quiet)
     
     # Determine exit code
     if args.strict and all_errors:
