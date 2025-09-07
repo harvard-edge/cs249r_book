@@ -135,8 +135,20 @@ class FootnoteManager:
         
         return len(lines) - 1
     
+    def count_footnotes(self, content: str) -> Tuple[int, int]:
+        """Count footnote references and definitions in content."""
+        footnote_defs, footnote_refs, lines = self.parse_footnotes(content)
+        
+        total_refs = sum(len(refs) for refs in footnote_refs.values())
+        total_defs = len(footnote_defs)
+        
+        return total_refs, total_defs
+    
     def reorganize_footnotes(self, content: str) -> Tuple[str, bool]:
         """Reorganize footnotes to appear after their references."""
+        # Count footnotes before reorganization
+        original_refs, original_defs = self.count_footnotes(content)
+        
         footnote_defs, footnote_refs, lines = self.parse_footnotes(content)
         
         if not footnote_defs or not footnote_refs:
@@ -204,11 +216,15 @@ class FootnoteManager:
                     # Add empty line before footnotes (proper spacing)
                     new_lines.append('')
                     
-                    for footnote_id in refs_in_line:
+                    for i, footnote_id in enumerate(refs_in_line):
                         if footnote_id in footnote_defs:
                             footnote_def_line = f'[^{footnote_id}]: {footnote_defs[footnote_id]}'
                             new_lines.append(footnote_def_line)
                             processed_footnotes.add(footnote_id)
+                            
+                            # Add blank line between footnotes (but not after the last one)
+                            if i < len(refs_in_line) - 1:
+                                new_lines.append('')
         
         # Clean up excessive empty lines (more than 2 consecutive)
         final_lines = []
@@ -223,7 +239,19 @@ class FootnoteManager:
                 empty_count = 0
                 final_lines.append(line)
         
-        return '\n'.join(final_lines), True
+        reorganized_content = '\n'.join(final_lines)
+        
+        # Verify footnote counts after reorganization
+        new_refs, new_defs = self.count_footnotes(reorganized_content)
+        
+        if original_refs != new_refs or original_defs != new_defs:
+            self.log(f"⚠️  WARNING: Footnote count mismatch!", Colors.RED)
+            self.log(f"   Original: {original_refs} refs, {original_defs} defs", Colors.YELLOW)
+            self.log(f"   New: {new_refs} refs, {new_defs} defs", Colors.YELLOW)
+            # Return original content to prevent data loss
+            return content, False
+        
+        return reorganized_content, True
     
     def validate_footnotes(self, content: str, file_path: Path) -> Tuple[Set[str], Set[str], Set[str]]:
         """
@@ -408,8 +436,14 @@ class FootnoteManager:
             modified = False
             
             if operation == 'reorganize':
+                # Count footnotes before reorganization
+                original_refs, original_defs = self.count_footnotes(original_content)
+                
                 new_content, was_modified = self.reorganize_footnotes(original_content)
                 if was_modified:
+                    # Verify counts after reorganization
+                    new_refs, new_defs = self.count_footnotes(new_content)
+                    
                     if not self.dry_run:
                         if self.backup:
                             backup_path = file_path.with_suffix(file_path.suffix + '.bak')
@@ -419,11 +453,11 @@ class FootnoteManager:
                         with open(file_path, 'w', encoding='utf-8') as f:
                             f.write(new_content)
                     
-                    self.log(f"✅ Reorganized footnotes: {file_path}", Colors.GREEN)
+                    self.log(f"✅ Reorganized footnotes: {file_path} ({original_refs} refs, {original_defs} defs)", Colors.GREEN)
                     self.stats['files_modified'] += 1
                     modified = True
                 else:
-                    self.log(f"⏭️  No changes needed: {file_path}", Colors.BLUE)
+                    self.log(f"⏭️  No changes needed: {file_path} ({original_refs} refs, {original_defs} defs)", Colors.BLUE)
             
             elif operation == 'validate':
                 undefined_refs, unused_defs, duplicate_defs = self.validate_footnotes(original_content, file_path)
