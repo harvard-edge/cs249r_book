@@ -197,6 +197,20 @@ For each section of text:
 7. Review for redundancy and genuine value
 8. Ensure no forward references to future chapters
 
+### Strategic Repetition vs Redundancy
+
+**Strategic repetition is valuable when**:
+- Early chapter provides basic definition, later adds technical depth
+- Same concept viewed through different lens (historical vs technical vs benchmark)
+- Progressive knowledge building with new context each time
+- Brief recall with significant expansion
+
+**Remove redundancy when**:
+- Identical definitions with no added value
+- Pure repetition without context evolution
+- Chapter assumes prior knowledge per knowledge map
+- Simple cross-reference would be clearer
+
 ## CRITICAL RULE: Footnote Placement
 
 **IMPORTANT FOOTNOTE INSERTION RULES:**
@@ -259,11 +273,25 @@ For each section of text:
    - Ensure appropriate depth and length
    - Maintain consistent voice
 
-4. **Review Phase**:
-   - Check for redundancy
-   - Verify no forward references
+4. **Fact-Checking Phase** (NEW):
+   - For footnotes with specific claims (dates, statistics, performance numbers):
+     - Use WebSearch tool to verify accuracy
+     - Check multiple authoritative sources
+     - Correct any inaccuracies found
+   - Common fact-check targets:
+     - Historical dates and attributions
+     - Performance metrics and comparisons
+     - Cost figures and inflation adjustments
+     - Technical specifications
+     - Market statistics and growth rates
+   - If unable to verify, add qualifier like "approximately" or "reported"
+
+5. **Review Phase**:
+   - Check for redundancy vs strategic repetition
+   - Verify no forward references to unexplained concepts
    - Ensure value addition
    - Confirm style consistency
+   - Validate all factual claims have been checked
 
 ## Output Format
 

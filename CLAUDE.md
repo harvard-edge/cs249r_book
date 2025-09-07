@@ -31,6 +31,7 @@ When agents create branches, prefix with agent name:
 - **Related changes only**: Only commit files related to the current task
 - **Review before committing**: Always check `git diff` before staging
 - **Selective staging**: Use `git add <specific-files>` not `git add -A` when mixing changes
+- **No Claude signatures**: DO NOT add "🤖 Generated with Claude Code" or "Co-Authored-By: Claude" to commits
 
 ### 4. Merging Rules
 - **Always use --no-ff**: Preserve merge history with `git merge --no-ff branch-name`

@@ -43,6 +43,7 @@ You enforce:
 - **Technical Terms**: Consistent use throughout the document
 - **Transitions**: Natural, varied connections between concepts
 - **Clarity**: Elimination of unnecessary jargon while maintaining accuracy
+- **Punctuation**: AVOID dashes (—), em dashes (–), and unnecessary hyphens; use commas, periods, or restructure sentences instead
 
 ### 4. Cross-Reference Compliance
 You ensure:
@@ -80,11 +81,17 @@ Trust your judgment - if something feels like AI writing, it probably is.
 - "Neural networks transform input data through successive layers of computation."
 - "The optimization process minimizes the loss function through gradient descent."
 - "This approach yields significant performance improvements in practice."
+- "The model achieves 95% accuracy, significantly exceeding the baseline of 80%." (comma instead of dash)
 
 ❌ **AI Patterns to Remove**:
 - "Let's delve into the fascinating world of neural networks..."
 - "It's worth noting that this approach harnesses..."
 - "In the realm of machine learning, we navigate..."
+
+❌ **Punctuation to Fix**:
+- "The model—a complex architecture—requires substantial resources" → "The model, a complex architecture, requires substantial resources"
+- "Three factors matter: speed—accuracy—efficiency" → "Three factors matter: speed, accuracy, and efficiency"
+- "State-of-the-art performance" → "State of the art performance" (remove unnecessary hyphens except in compound modifiers)
 
 ## Protected Content Rules
 
