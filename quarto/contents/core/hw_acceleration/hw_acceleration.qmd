@@ -50,7 +50,9 @@ Unlike CPUs and GPUs, which were originally designed for general-purpose computi
 
 As ML models have grown in size and complexity, hardware acceleration has evolved to keep pace. The shift from von Neumann architectures to specialized accelerators reflects a broader trend in computing: reducing the cost of data movement, increasing parallelism, and tailoring hardware to domain-specific workloads. Moving data across memory hierarchies often consumes more energy than computation itself, making efficient memory organization and computation placement critical to overall system performance.
 
-This chapter explores AI acceleration from a systems perspective, examining how computational models, hardware optimizations, and software frameworks interact to enable efficient execution. It covers key operations like matrix multiplications and activation functions, the role of memory hierarchies in data movement, and techniques for mapping neural networks to hardware. The discussion extends to compilers, scheduling strategies, and runtime optimizations, highlighting their impact on performance. Finally, it addresses the challenges of scaling AI systems from single-chip accelerators to multi-chip and distributed architectures, integrating real-world examples to illustrate effective AI acceleration.
+This chapter explores AI acceleration from a systems perspective, examining how computational models, hardware optimizations, and software frameworks interact to enable efficient execution. It covers key operations like matrix multiplications and activation functions, the role of memory hierarchies[^fn-memory-hierarchy] in data movement, and techniques for mapping neural networks to hardware. The discussion extends to compilers, scheduling strategies, and runtime optimizations, highlighting their impact on performance. Finally, it addresses the challenges of scaling AI systems from single-chip accelerators to multi-chip and distributed architectures, integrating real-world examples to illustrate effective AI acceleration.
+
+[^fn-memory-hierarchy]: **Memory Hierarchy Challenge**: Traditional memory hierarchy (L1: ~1ns, L2: ~10ns, RAM: ~100ns, SSD: ~100μs) breaks down for AI workloads. A single transformer layer might need 1GB+ of weights, but L1 cache is only 32KB. Google's TPU addresses this with 128MB of on-chip memory running at 900 GB/s bandwidth—600x faster than typical RAM—because keeping weights on-chip dramatically reduces both latency and energy consumption.
 
 ## Hardware Evolution {#sec-ai-acceleration-hardware-evolution-7723}
 
@@ -319,7 +321,9 @@ Traditional scalar processors execute these operations sequentially, processing 
 
 #### Parallel Vector Execution {#sec-ai-acceleration-parallel-vector-execution-cdaa}
 
-Vector processing units transform this execution pattern by operating on multiple data elements simultaneously. As shown in @lst-riscv_vector_mac, the RISC-V assembly code demonstrates modern vector processing.
+Vector processing units transform this execution pattern by operating on multiple data elements simultaneously. As shown in @lst-riscv_vector_mac, the RISC-V[^fn-risc-v-ai] assembly code demonstrates modern vector processing.
+
+[^fn-risc-v-ai]: **RISC-V for AI**: RISC-V, the open-source instruction set architecture from UC Berkeley (2010), is becoming crucial for AI accelerators because it's freely customizable. Companies like SiFive and Google have created RISC-V chips with custom AI extensions. Unlike proprietary architectures, RISC-V allows hardware designers to add specialized ML instructions without licensing fees, potentially democratizing AI hardware development beyond the current duopoly of x86 and ARM.
 
 ::: {#lst-riscv_vector_mac lst-cap="**Vectorized Multiply-Accumulate Loop**: This loop showcases how RISC-V vector instructions enable efficient batch processing by performing 8 multiply-add operations simultaneously, reducing computational latency in neural network training. *Source: RISC-V Architecture Manual*"}
 ```{.c}
@@ -592,7 +596,9 @@ Each execution unit combines these computational primitives with specialized mem
 
 #### SIMD to SIMT Transition {#sec-ai-acceleration-simd-simt-transition-dfb3}
 
-Single Instruction Multiple Data (SIMD) execution applies identical operations to multiple data elements in parallel, minimizing instruction overhead while maximizing data throughput. This execution model is widely used to accelerate workloads with regular, independent data parallelism, such as neural network computations. The ARM Scalable Vector Extension (SVE) provides a representative example of how modern architectures implement SIMD operations efficiently, as illustrated in @lst-arm_sve_vector.
+Single Instruction Multiple Data (SIMD)[^fn-simd-evolution] execution applies identical operations to multiple data elements in parallel, minimizing instruction overhead while maximizing data throughput. This execution model is widely used to accelerate workloads with regular, independent data parallelism, such as neural network computations. The ARM Scalable Vector Extension (SVE) provides a representative example of how modern architectures implement SIMD operations efficiently, as illustrated in @lst-arm_sve_vector.
+
+[^fn-simd-evolution]: **SIMD Evolution**: SIMD originated in Flynn's 1966 taxonomy for scientific computing, but neural networks transformed it from a niche HPC concept to mainstream necessity. Modern CPUs have 512-bit SIMD units (AVX-512), but AI pushed development of SIMT (Single Instruction, Multiple Thread) where thousands of lightweight threads execute in parallel—GPU architectures now coordinate 65,536+ threads simultaneously, impossible with traditional SIMD.
 
 ::: {#lst-arm_sve_vector lst-cap="**Vector Operation**: Vector multiplication and addition operations enable efficient parallel processing in machine learning models. *Source: ARM Documentation*"}
 ```{.c}
@@ -632,7 +638,9 @@ SIMT execution allows neural network computations to scale efficiently across th
 
 While SIMD and SIMT units provide efficient execution of vector operations, neural networks rely heavily on matrix computations that require specialized execution units for structured multi-dimensional processing. Tensor processing units extend SIMD and SIMT principles by enabling efficient matrix operations through dedicated hardware blocks. These units execute matrix multiplications and accumulations on entire matrix blocks in a single operation, reducing instruction overhead and optimizing data movement.
 
-Tensor cores, implemented in architectures such as NVIDIA's Ampere GPUs, provide an example of this approach. They expose matrix computation capabilities through specialized instructions, such as the tensor core operation shown in @lst-tensor_core_op on the NVIDIA A100 GPU.
+Tensor cores[^fn-tensor-cores], implemented in architectures such as NVIDIA's Ampere GPUs, provide an example of this approach. They expose matrix computation capabilities through specialized instructions, such as the tensor core operation shown in @lst-tensor_core_op on the NVIDIA A100 GPU.
+
+[^fn-tensor-cores]: **Tensor Core Breakthrough**: NVIDIA introduced tensor cores in the V100 (2017) to accelerate the 4x4 matrix operations common in neural networks. The A100's third-generation tensor cores achieve 312 TFLOPS for FP16 matrix math—20x faster than traditional CUDA cores. This single innovation enabled training of models like GPT-3 that would have been impossible with conventional hardware, fundamentally changing the scale of AI research.
 
 ::: {#lst-tensor_core_op lst-cap="**Tensor Core Operation**: Matrix multiplications are performed in parallel across entire matrix blocks, optimizing computational efficiency for neural network training."}
 ```{.c}
@@ -648,7 +656,9 @@ mma.sync.aligned.m16n16k16.f16.f16
 
 A single tensor core instruction processes an entire matrix block while maintaining intermediate results in local registers, significantly improving computational efficiency compared to implementations based on scalar or vector operations. This structured approach enables hardware to achieve high throughput while reducing the burden of explicit loop unrolling and data management at the software level.
 
-Tensor processing unit architectures differ based on design priorities. NVIDIA's Ampere architecture incorporates tensor cores optimized for general-purpose deep learning acceleration. Google's TPUv4 utilizes large-scale matrix units arranged in systolic arrays to maximize sustained training throughput. Apple's M1 neural engine integrates smaller matrix processors optimized for mobile inference workloads, while Intel's Sapphire Rapids architecture introduces AMX tiles designed for high-performance datacenter applications.
+Tensor processing unit architectures differ based on design priorities. NVIDIA's Ampere architecture incorporates tensor cores optimized for general-purpose deep learning acceleration. Google's TPUv4 utilizes large-scale matrix units arranged in systolic arrays to maximize sustained training throughput. Apple's M1 neural engine[^fn-neural-engine] integrates smaller matrix processors optimized for mobile inference workloads, while Intel's Sapphire Rapids architecture introduces AMX tiles designed for high-performance datacenter applications.
+
+[^fn-neural-engine]: **Apple's Neural Engine Strategy**: Apple introduced the Neural Engine in 2017's A11 chip to enable on-device ML without draining battery life. The M1's 16-core Neural Engine delivers 11.8 TOPS while consuming just 20 watts—enabling real-time features like live text recognition and voice processing without cloud connectivity. This "privacy through hardware" approach influenced the entire industry to prioritize edge AI capabilities.
 
 The increasing specialization of AI hardware has driven significant performance improvements in deep learning workloads. @fig-ai-performance illustrates the trajectory of AI accelerator performance in NVIDIA GPUs, highlighting the transition from general-purpose floating-point execution units to highly optimized tensor processing cores.
 
