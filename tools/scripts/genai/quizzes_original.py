@@ -701,72 +701,6 @@ If a self-check IS needed, follow the structure below. For "MCQ" questions, prov
 - Quantization: "7B FP32 model (28GB) to INT8 = ? GB saved"
 - Pruning: "Model with 350M params, 70% pruned = ? remaining"
 - Throughput: "Batch 32, latency 50ms = ? samples/sec"
-
-
-## CRITICAL OPTIMIZATIONS FOR QUIZ QUALITY
-
-### 1. MCQ ANSWER DISTRIBUTION (MANDATORY)
-**SEVERE ISSUE**: Currently 60% of MCQ answers are B. This MUST be fixed.
-
-**REQUIREMENTS**:
-- Use this rotation pattern: A, D, C, A, D, C (skip B frequently)
-- Track distribution: If you've used B once, avoid it for next 3 MCQs
-- Each letter should be correct 25% of the time across all MCQs
-- Make all distractors equally plausible
-
-**Example Distribution for 4 MCQs**: A, D, C, A (no B)
-**Example Distribution for 8 MCQs**: A, D, C, A, D, C, B, A
-
-### 2. QUESTION TYPE REQUIREMENTS BY CHAPTER
-
-**Technical Chapters** (training, optimizations, hw_acceleration, benchmarking, efficient_ai, ops, data_engineering):
-- CALC: 25-30% (MANDATORY - currently <1%!)
-- SHORT: 25-30%
-- MCQ: 20-25%
-- TF: 10-15%
-- Others: 10-15%
-
-**CALC Examples**:
-- Memory: "7B FP32 model (28GB) → INT8 = ? GB saved"
-- Speedup: "70% pruning → theoretical speedup = ?"
-- Throughput: "Batch 32, latency 50ms = ? samples/sec"
-- Show calculations: "28GB × 0.25 = 7GB (75% reduction)"
-
-**Conceptual Chapters** (responsible_ai, privacy_security, sustainable_ai, ai_for_good, robust_ai):
-- SHORT: 30-35%
-- TF: 20-25%
-- MCQ: 20-25%
-- FILL: 10-15%
-- Others: 10-15%
-- CALC: 0-5%
-
-**Balanced Chapters** (introduction, ml_systems, dl_primer, frameworks, workflow, conclusion):
-- SHORT: 25-30%
-- MCQ: 20-25%
-- TF: 15-20%
-- CALC: 10-15%
-- Others: 15-20%
-
-### 3. KNOWLEDGE PROGRESSION
-- Reference concepts from earlier chapters when applicable
-- Use phrases like: "Building on [concept] from Chapter X..."
-- Connect related ideas across sections
-- 15-20% of questions should reference prior knowledge
-
-### 4. SELF-CHECK PURPOSE
-These are learning reinforcement tools, NOT grading instruments:
-- Help students identify knowledge gaps
-- Provide explanations that teach
-- Progress from basic to complex within each section
-- Focus on understanding, not memorization
-
-### 5. QUALITY CHECKLIST
-Before finalizing each section's quiz:
-✓ MCQ answers follow rotation pattern (A,D,C,A,D,C)
-✓ CALC questions included for technical content (with real numbers)
-✓ Variety of question types (avoid >40% of any single type)
-✓ At least one question builds on prior knowledge
-✓ Explanations provide learning value, not just answers
 """
 
 def update_qmd_frontmatter(qmd_file_path, quiz_file_name):
@@ -1129,24 +1063,6 @@ def validate_individual_quiz_response(data):
     
     return True
 
-
-# Chapter type detection for optimization
-TECHNICAL_CHAPTERS = ["training", "optimizations", "hw_acceleration", "benchmarking", 
-                      "efficient_ai", "ops", "data_engineering"]
-CONCEPTUAL_CHAPTERS = ["responsible_ai", "privacy_security", "sustainable_ai", 
-                       "ai_for_good", "robust_ai"]
-
-def get_chapter_type(file_path):
-    """Determine chapter type from file path."""
-    for chapter in TECHNICAL_CHAPTERS:
-        if chapter in str(file_path):
-            return "technical"
-    for chapter in CONCEPTUAL_CHAPTERS:
-        if chapter in str(file_path):
-            return "conceptual"
-    return "balanced"
-
-
 def build_user_prompt(section_title, section_text, chapter_number=None, chapter_title=None, previous_quizzes=None):
     """
     Build a user prompt with chapter context and previous quiz data for variety.
@@ -1291,19 +1207,19 @@ The following sections in this chapter already have quizzes. Ensure your questio
 - Consider how this section's concepts connect to and build upon earlier chapters
 """
     
-    
-    
-    # Add chapter type hint
-    chapter_type = get_chapter_type(chapter_title) if chapter_title else "balanced"
-    if chapter_type == "technical":
-        prompt_addition = "\n\nNOTE: This is a TECHNICAL chapter. Include 25-30% CALC questions with real calculations."
-    elif chapter_type == "conceptual":
-        prompt_addition = "\n\nNOTE: This is a CONCEPTUAL chapter. Focus on SHORT reflection questions (30-35%)."
-    else:
-        prompt_addition = "\n\nNOTE: This is a BALANCED chapter. Mix all question types appropriately."
-    
-    return prompt + prompt_addition
+    return f"""
+This section is titled "{section_title}".
 
+{chapter_context}
+{book_progression_context}
+{difficulty_guidelines}
+{previous_quiz_context}
+
+Section content:
+{section_text}
+
+Generate a self-check quiz with 1 to 5 well-structured questions and answers based on this section. Include a rationale explaining your question generation strategy and focus areas. Return your response in the specified JSON format.
+""".strip()
 def regenerate_section_quiz(client, section_title, section_text, current_quiz_data, user_prompt, chapter_number=None, chapter_title=None, previous_quizzes=None):
     """
     Regenerate quiz questions for a section with custom instructions.
