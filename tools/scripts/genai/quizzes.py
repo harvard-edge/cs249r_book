@@ -382,6 +382,9 @@ Chapters 16-20: Specialized topics (cutting-edge, research-oriented)"""
 # CONFIGURATION CONSTANTS
 # ============================================================================
 
+# File naming constants
+QUIZ_JSON_SUFFIX = '_quizzes.json'
+
 # Callout class names for quiz insertion
 QUIZ_QUESTION_CALLOUT_CLASS = ".callout-quiz-question"
 QUIZ_ANSWER_CALLOUT_CLASS = ".callout-quiz-answer"
@@ -4953,8 +4956,6 @@ def run_insert_mode_directory(directory):
     for i, quiz_file in enumerate(quiz_files, 1):
         print(f"[{i}/{len(quiz_files)}] Inserting from: {quiz_file}")
         run_insert_mode_simple(quiz_file)
-
-QUIZ_JSON_SUFFIX = '_quizzes.json'
 
 # Add a helper function to find safe insertion points for quiz callouts
 
