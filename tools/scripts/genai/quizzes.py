@@ -408,16 +408,8 @@ SECTION_TAXONOMY = {
             r"\d+%",  # Percentages
             r"=\s*\d+",  # Equations with results
         ],
-        "question_distribution": {
-            "CALC": 0.4,  # 40% CALC questions
-            "MCQ": 0.2,
-            "SHORT": 0.2,
-            "TF": 0.1,
-            "FILL": 0.1
-        },
-        "min_questions": 3,
-        "max_questions": 4,
-        "calc_priority": "HIGH"
+        "content_hints": "This section contains formulas, calculations, and metrics. Consider including CALC questions for numerical examples, MCQ for comparing approaches, and SHORT for explaining trade-offs.",
+        "quiz_likelihood": "HIGH"
     },
     
     "ARCHITECTURAL_DESIGN": {
@@ -432,16 +424,8 @@ SECTION_TAXONOMY = {
             r"\d+\s*(?:neurons?|units?|channels?)",
             r"(?:CNN|RNN|LSTM|GRU|transformer)",
         ],
-        "question_distribution": {
-            "MCQ": 0.3,
-            "SHORT": 0.3,
-            "CALC": 0.2,  # For parameter counting
-            "ORDER": 0.1,
-            "TF": 0.1
-        },
-        "min_questions": 2,
-        "max_questions": 4,
-        "calc_priority": "MEDIUM"
+        "content_hints": "This section covers system design and neural network architectures. Consider CALC questions for parameter counting, MCQ for architecture comparisons, and SHORT for design decisions.",
+        "quiz_likelihood": "HIGH"
     },
     
     "CONCEPTUAL_FOUNDATIONAL": {
@@ -456,16 +440,8 @@ SECTION_TAXONOMY = {
             r"refers to",
             r"can be described as",
         ],
-        "question_distribution": {
-            "MCQ": 0.3,
-            "SHORT": 0.3,
-            "TF": 0.2,
-            "FILL": 0.2,
-            "CALC": 0.0  # No CALC for pure concepts
-        },
-        "min_questions": 2,
-        "max_questions": 3,
-        "calc_priority": "NONE"
+        "content_hints": "This section introduces fundamental concepts and definitions. MCQ and TF questions work well for testing understanding, SHORT for explaining relationships.",
+        "quiz_likelihood": "MEDIUM"
     },
     
     "PROCESS_WORKFLOW": {
@@ -480,16 +456,8 @@ SECTION_TAXONOMY = {
             r"phase\s+\d+",
             r"\d+\.\s+\w+",  # Numbered lists
         ],
-        "question_distribution": {
-            "ORDER": 0.4,  # ORDER questions excel here
-            "MCQ": 0.2,
-            "SHORT": 0.2,
-            "FILL": 0.1,
-            "TF": 0.1
-        },
-        "min_questions": 2,
-        "max_questions": 3,
-        "calc_priority": "LOW"
+        "content_hints": "This section describes sequential processes and workflows. ORDER questions are particularly effective here, along with MCQ for phase identification.",
+        "quiz_likelihood": "HIGH"
     },
     
     "TRADEOFF_ANALYSIS": {
@@ -504,15 +472,8 @@ SECTION_TAXONOMY = {
             r"on one hand.*on the other",
             r"while.*however",
         ],
-        "question_distribution": {
-            "SHORT": 0.4,  # SHORT excels at explaining tradeoffs
-            "MCQ": 0.3,
-            "CALC": 0.2,  # For quantitative comparisons
-            "TF": 0.1
-        },
-        "min_questions": 2,
-        "max_questions": 4,
-        "calc_priority": "MEDIUM"
+        "content_hints": "This section analyzes trade-offs and comparisons. SHORT questions excel at exploring trade-offs, MCQ for identifying best options, CALC for quantitative comparisons.",
+        "quiz_likelihood": "HIGH"
     },
     
     "IMPLEMENTATION_PRACTICAL": {
@@ -527,39 +488,27 @@ SECTION_TAXONOMY = {
             r"def\s+\w+\(",  # Function definitions
             r"class\s+\w+",  # Class definitions
         ],
-        "question_distribution": {
-            "SHORT": 0.3,
-            "MCQ": 0.3,
-            "CALC": 0.2,
-            "FILL": 0.1,
-            "TF": 0.1
-        },
-        "min_questions": 2,
-        "max_questions": 4,
-        "calc_priority": "MEDIUM"
+        "content_hints": "This section covers practical implementation details. Consider questions about real-world applications, deployment challenges, and practical considerations.",
+        "quiz_likelihood": "HIGH"
     },
     
     "BACKGROUND_CONTEXTUAL": {
-        "description": "Historical context, motivation, overview, introduction",
+        "description": "Historical context, key breakthroughs, evolution of the field",
         "indicators": [
             "history", "evolution", "background", "motivation",
             "overview", "introduction", "context", "origin",
-            "development", "emergence", "historical", "timeline"
+            "development", "emergence", "historical", "timeline",
+            "breakthrough", "milestone", "seminal", "landmark", "pioneering"
         ],
         "content_patterns": [
             r"in\s+\d{4}",  # Years
             r"(?:early|late)\s+\d{4}s",
             r"historically",
+            r"\d+\.?\d*%\s+(?:error|accuracy)",  # Performance metrics
+            r"(?:breakthrough|milestone|revolutionized|transformed)",  # Impact words
         ],
-        "question_distribution": {
-            "MCQ": 0.4,
-            "TF": 0.3,
-            "SHORT": 0.3,
-            "CALC": 0.0  # No CALC for background
-        },
-        "min_questions": 0,  # May not need quiz
-        "max_questions": 2,
-        "calc_priority": "NONE"
+        "content_hints": "This section provides historical context. If it contains significant milestones or breakthroughs that shaped the field, consider testing key dates, innovations, and their impact.",
+        "quiz_likelihood": "VARIES"  # Depends on educational significance
     }
 }
 
@@ -691,20 +640,46 @@ def get_section_generation_hints(section_type, features):
     hints = {
         "section_type": section_type,
         "section_description": config["description"],
-        "calc_priority": config["calc_priority"],
-        "min_questions": config["min_questions"],
-        "max_questions": config["max_questions"],
-        "question_distribution": config["question_distribution"],
-        "specific_guidance": ""
+        "content_hints": config.get("content_hints", ""),
+        "quiz_likelihood": config.get("quiz_likelihood", "MEDIUM"),
+        "contextual_guidance": ""
     }
     
-    # Add specific guidance based on features
-    if section_type == "TECHNICAL_COMPUTATIONAL" and features.get('has_numbers'):
-        hints["specific_guidance"] = "Include calculations based on the numerical examples in the text."
-    elif section_type == "ARCHITECTURAL_DESIGN" and features.get('has_code'):
-        hints["specific_guidance"] = "Consider parameter counting or computational complexity questions."
-    elif section_type == "PROCESS_WORKFLOW" and features.get('list_items', 0) > 3:
-        hints["specific_guidance"] = "Create ORDER questions based on the sequential steps described."
+    # Add contextual guidance based on specific features
+    if section_type == "TECHNICAL_COMPUTATIONAL":
+        if features.get('has_numbers') and features.get('has_formulas'):
+            hints["contextual_guidance"] = "The section contains numerical examples and formulas that could be used for calculation questions."
+        elif features.get('has_memory_units'):
+            hints["contextual_guidance"] = "Memory and storage calculations appear to be discussed."
+            
+    elif section_type == "ARCHITECTURAL_DESIGN":
+        if features.get('has_code'):
+            hints["contextual_guidance"] = "Code examples suggest opportunities for implementation-focused questions."
+        if 'parameter' in features.get('content_lower', ''):
+            hints["contextual_guidance"] = "Neural network parameters are discussed - consider parameter counting questions."
+            
+    elif section_type == "PROCESS_WORKFLOW":
+        if features.get('list_items', 0) > 3:
+            hints["contextual_guidance"] = "The sequential nature of the content is well-suited for ORDER questions."
+            
+    elif section_type == "BACKGROUND_CONTEXTUAL":
+        content = features.get('content', '')
+        # Check for indicators of important historical content
+        has_metrics = bool(re.search(r'\d+\.?\d*%', content))  # Performance metrics
+        has_specific_years = bool(re.search(r'(?:19|20)\d{2}', content))  # Specific years
+        has_impact_words = any(word in content.lower() for word in ['breakthrough', 'revolutionized', 'transformed', 'milestone'])
+        
+        if has_metrics or (has_specific_years and has_impact_words):
+            hints["contextual_guidance"] = "This appears to contain significant milestones with specific metrics or dates that students should know."
+            hints["quiz_likelihood"] = "HIGH"  # Upgrade likelihood for important history
+        elif has_specific_years:
+            hints["contextual_guidance"] = "Chronological developments are mentioned."
+        else:
+            hints["contextual_guidance"] = "General historical overview - evaluate educational significance."
+            
+    elif section_type == "TRADEOFF_ANALYSIS":
+        if 'however' in features.get('content_lower', '') or 'although' in features.get('content_lower', ''):
+            hints["contextual_guidance"] = "Clear trade-offs are discussed that could be explored in questions."
     
     return hints
 
@@ -3041,8 +3016,12 @@ def pre_process_section(section):
         # Log classification for debugging (optional)
         if confidence > 0:
             print(f"     Classification: {section_type} (confidence: {confidence:.2f})")
-            if generation_hints.get('calc_priority') == 'HIGH':
-                print(f"     → Prioritizing CALC questions for this technical section")
+            if generation_hints.get('quiz_likelihood') == 'HIGH':
+                print(f"     → High likelihood of quiz generation")
+            elif generation_hints.get('quiz_likelihood') == 'VARIES':
+                print(f"     → Quiz generation depends on content significance")
+            if generation_hints.get('contextual_guidance'):
+                print(f"     → {generation_hints.get('contextual_guidance')}")
         
         return result
         
@@ -3053,9 +3032,9 @@ def pre_process_section(section):
             'section_type': 'CONCEPTUAL_FOUNDATIONAL',
             'type_confidence': 0.0,
             'generation_hints': {
-                'calc_priority': 'MEDIUM',
-                'min_questions': 2,
-                'max_questions': 4
+                'content_hints': 'Unable to classify - using general guidance',
+                'quiz_likelihood': 'MEDIUM',
+                'contextual_guidance': ''
             }
         }
 
@@ -3085,6 +3064,27 @@ def process_section(client, section, chapter_context, previous_quizzes, args, pr
         chapter_title,
         previous_quizzes
     )
+    
+    # Add preprocessing hints if available
+    if preprocessing_metadata and preprocessing_metadata.get('generation_hints'):
+        hints = preprocessing_metadata['generation_hints']
+        section_type = preprocessing_metadata.get('section_type', 'UNKNOWN')
+        
+        # Add classification context to the prompt
+        classification_context = f"""
+        
+## SECTION ANALYSIS:
+**Classification:** {section_type} (confidence: {preprocessing_metadata.get('type_confidence', 0):.1%})
+**Description:** {hints.get('section_description', '')}
+
+**Content Guidance:** {hints.get('content_hints', '')}
+
+**Contextual Notes:** {hints.get('contextual_guidance', '')}
+
+**Quiz Likelihood:** {hints.get('quiz_likelihood', 'MEDIUM')}
+"""
+        
+        user_prompt += classification_context
     
     # Call OpenAI
     response = call_openai(client, SYSTEM_PROMPT, user_prompt, args.model)
