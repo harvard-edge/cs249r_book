@@ -389,6 +389,325 @@ QUIZ_FILE_SCHEMA = {
     "additionalProperties": False
 }
 
+# ============================================================================
+# SECTION CLASSIFICATION SYSTEM
+# ============================================================================
+
+SECTION_TAXONOMY = {
+    "TECHNICAL_COMPUTATIONAL": {
+        "description": "Sections with formulas, calculations, metrics, and quantitative analysis",
+        "indicators": [
+            "calculate", "formula", "equation", "bytes", "parameters", 
+            "flops", "latency", "throughput", "bandwidth", "memory",
+            "quantization", "precision", "fp32", "int8", "fp16", "compression",
+            "reduction", "speedup", "efficiency", "utilization", "percentage"
+        ],
+        "content_patterns": [
+            r"\d+\s*[×x]\s*\d+",  # Multiplication patterns
+            r"\d+\s*(?:MB|GB|KB|bytes)",  # Memory sizes
+            r"\d+%",  # Percentages
+            r"=\s*\d+",  # Equations with results
+        ],
+        "question_distribution": {
+            "CALC": 0.4,  # 40% CALC questions
+            "MCQ": 0.2,
+            "SHORT": 0.2,
+            "TF": 0.1,
+            "FILL": 0.1
+        },
+        "min_questions": 3,
+        "max_questions": 4,
+        "calc_priority": "HIGH"
+    },
+    
+    "ARCHITECTURAL_DESIGN": {
+        "description": "System architecture, neural network layers, design patterns",
+        "indicators": [
+            "architecture", "layer", "component", "module", "pipeline",
+            "design pattern", "structure", "framework", "system", "network",
+            "convolution", "attention", "transformer", "embedding", "decoder"
+        ],
+        "content_patterns": [
+            r"(?:input|hidden|output)\s+layer",
+            r"\d+\s*(?:neurons?|units?|channels?)",
+            r"(?:CNN|RNN|LSTM|GRU|transformer)",
+        ],
+        "question_distribution": {
+            "MCQ": 0.3,
+            "SHORT": 0.3,
+            "CALC": 0.2,  # For parameter counting
+            "ORDER": 0.1,
+            "TF": 0.1
+        },
+        "min_questions": 2,
+        "max_questions": 4,
+        "calc_priority": "MEDIUM"
+    },
+    
+    "CONCEPTUAL_FOUNDATIONAL": {
+        "description": "Core concepts, definitions, principles, theories",
+        "indicators": [
+            "concept", "principle", "definition", "fundamental",
+            "theory", "approach", "method", "technique", "paradigm",
+            "understanding", "foundation", "basis", "core"
+        ],
+        "content_patterns": [
+            r"is defined as",
+            r"refers to",
+            r"can be described as",
+        ],
+        "question_distribution": {
+            "MCQ": 0.3,
+            "SHORT": 0.3,
+            "TF": 0.2,
+            "FILL": 0.2,
+            "CALC": 0.0  # No CALC for pure concepts
+        },
+        "min_questions": 2,
+        "max_questions": 3,
+        "calc_priority": "NONE"
+    },
+    
+    "PROCESS_WORKFLOW": {
+        "description": "Procedures, workflows, pipelines, sequential steps",
+        "indicators": [
+            "process", "workflow", "pipeline", "steps", "procedure",
+            "lifecycle", "phase", "stage", "sequence", "iteration",
+            "first", "then", "next", "finally", "subsequently"
+        ],
+        "content_patterns": [
+            r"step\s+\d+",
+            r"phase\s+\d+",
+            r"\d+\.\s+\w+",  # Numbered lists
+        ],
+        "question_distribution": {
+            "ORDER": 0.4,  # ORDER questions excel here
+            "MCQ": 0.2,
+            "SHORT": 0.2,
+            "FILL": 0.1,
+            "TF": 0.1
+        },
+        "min_questions": 2,
+        "max_questions": 3,
+        "calc_priority": "LOW"
+    },
+    
+    "TRADEOFF_ANALYSIS": {
+        "description": "Comparing options, analyzing tradeoffs, pros and cons",
+        "indicators": [
+            "tradeoff", "trade-off", "versus", "comparison", "advantage", 
+            "disadvantage", "benefit", "limitation", "constraint", "balance",
+            "pros", "cons", "however", "although", "while"
+        ],
+        "content_patterns": [
+            r"(?:advantages?|benefits?)\s+(?:and|vs\.?)\s+(?:disadvantages?|limitations?)",
+            r"on one hand.*on the other",
+            r"while.*however",
+        ],
+        "question_distribution": {
+            "SHORT": 0.4,  # SHORT excels at explaining tradeoffs
+            "MCQ": 0.3,
+            "CALC": 0.2,  # For quantitative comparisons
+            "TF": 0.1
+        },
+        "min_questions": 2,
+        "max_questions": 4,
+        "calc_priority": "MEDIUM"
+    },
+    
+    "IMPLEMENTATION_PRACTICAL": {
+        "description": "Implementation details, code examples, practical applications",
+        "indicators": [
+            "implement", "code", "example", "practice", "deploy",
+            "production", "real-world", "application", "use case",
+            "practical", "hands-on", "exercise", "demonstration"
+        ],
+        "content_patterns": [
+            r"```[\s\S]*?```",  # Code blocks
+            r"def\s+\w+\(",  # Function definitions
+            r"class\s+\w+",  # Class definitions
+        ],
+        "question_distribution": {
+            "SHORT": 0.3,
+            "MCQ": 0.3,
+            "CALC": 0.2,
+            "FILL": 0.1,
+            "TF": 0.1
+        },
+        "min_questions": 2,
+        "max_questions": 4,
+        "calc_priority": "MEDIUM"
+    },
+    
+    "BACKGROUND_CONTEXTUAL": {
+        "description": "Historical context, motivation, overview, introduction",
+        "indicators": [
+            "history", "evolution", "background", "motivation",
+            "overview", "introduction", "context", "origin",
+            "development", "emergence", "historical", "timeline"
+        ],
+        "content_patterns": [
+            r"in\s+\d{4}",  # Years
+            r"(?:early|late)\s+\d{4}s",
+            r"historically",
+        ],
+        "question_distribution": {
+            "MCQ": 0.4,
+            "TF": 0.3,
+            "SHORT": 0.3,
+            "CALC": 0.0  # No CALC for background
+        },
+        "min_questions": 0,  # May not need quiz
+        "max_questions": 2,
+        "calc_priority": "NONE"
+    }
+}
+
+def extract_content_features(section_content, section_title=""):
+    """
+    Extract measurable features from section content for classification.
+    
+    Args:
+        section_content (str): The content of the section
+        section_title (str): The title of the section
+        
+    Returns:
+        dict: Features extracted from the content
+    """
+    content_lower = section_content.lower()
+    title_lower = section_title.lower()
+    
+    features = {
+        "content": section_content,
+        "content_lower": content_lower,
+        "title_lower": title_lower,
+        "word_count": len(section_content.split()),
+        "has_math": bool(re.search(r'\$.*?\$|\\\[.*?\\\]', section_content)),
+        "has_code": '```' in section_content,
+        "has_numbers": bool(re.search(r'\d+', section_content)),
+        "has_formulas": bool(re.search(r'[=×÷+\-*/]', section_content)),
+        "has_percentages": bool(re.search(r'\d+%', section_content)),
+        "has_memory_units": bool(re.search(r'\d+\s*(?:MB|GB|KB|bytes)', section_content, re.I)),
+        "subsection_count": section_content.count('###'),
+        "list_items": section_content.count('\n-') + section_content.count('\n*') + section_content.count('\n1.'),
+        "emphasis_phrases": section_content.count('**') // 2,
+        "code_blocks": section_content.count('```') // 2,
+    }
+    
+    # Count technical terms
+    technical_terms = 0
+    tech_keywords = ['algorithm', 'model', 'network', 'layer', 'parameter', 'training', 
+                     'inference', 'optimization', 'gradient', 'loss', 'accuracy', 'precision']
+    for term in tech_keywords:
+        technical_terms += content_lower.count(term)
+    features['technical_terms'] = technical_terms
+    
+    return features
+
+def classify_section_type(features):
+    """
+    Classify a section into one of the taxonomy categories.
+    
+    Args:
+        features (dict): Features extracted from section content
+        
+    Returns:
+        tuple: (section_type, confidence_score, scores_dict)
+    """
+    scores = {}
+    content_lower = features.get('content_lower', '')
+    title_lower = features.get('title_lower', '')
+    
+    for section_type, config in SECTION_TAXONOMY.items():
+        score = 0.0
+        
+        # Check indicators in content and title
+        for indicator in config['indicators']:
+            if indicator in content_lower:
+                score += 1.0
+            if indicator in title_lower:
+                score += 0.5  # Title matches are worth half
+        
+        # Check content patterns
+        for pattern in config.get('content_patterns', []):
+            matches = len(re.findall(pattern, features.get('content', ''), re.I))
+            score += min(matches * 0.5, 3.0)  # Cap pattern contribution
+        
+        # Apply feature-based boosts
+        if section_type == "TECHNICAL_COMPUTATIONAL":
+            if features.get('has_math'): score += 3.0
+            if features.get('has_formulas'): score += 2.0
+            if features.get('has_numbers'): score += 1.0
+            if features.get('has_percentages'): score += 1.5
+            if features.get('has_memory_units'): score += 2.0
+            
+        elif section_type == "ARCHITECTURAL_DESIGN":
+            if features.get('has_code'): score += 1.0
+            if 'layer' in content_lower or 'network' in content_lower: score += 2.0
+            
+        elif section_type == "PROCESS_WORKFLOW":
+            if features.get('list_items', 0) > 5: score += 2.0
+            if 'step' in content_lower: score += 2.0
+            if 'first' in content_lower and 'then' in content_lower: score += 1.5
+            
+        elif section_type == "IMPLEMENTATION_PRACTICAL":
+            if features.get('code_blocks', 0) > 0: score += 3.0
+            if features.get('has_code'): score += 2.0
+            
+        elif section_type == "BACKGROUND_CONTEXTUAL":
+            if re.search(r'in\s+\d{4}', features.get('content', '')): score += 2.0
+            if 'history' in title_lower or 'evolution' in title_lower: score += 3.0
+        
+        scores[section_type] = score
+    
+    # Find the best match
+    if sum(scores.values()) == 0:
+        # Default to conceptual if no clear match
+        return "CONCEPTUAL_FOUNDATIONAL", 0.0, scores
+    
+    best_type = max(scores, key=scores.get)
+    total_score = sum(scores.values())
+    confidence = scores[best_type] / total_score if total_score > 0 else 0.0
+    
+    # If confidence is too low, default to conceptual
+    if confidence < 0.3:
+        best_type = "CONCEPTUAL_FOUNDATIONAL"
+    
+    return best_type, confidence, scores
+
+def get_section_generation_hints(section_type, features):
+    """
+    Get generation hints based on section type and features.
+    
+    Args:
+        section_type (str): The classified section type
+        features (dict): Content features
+        
+    Returns:
+        dict: Generation hints for the AI
+    """
+    config = SECTION_TAXONOMY.get(section_type, SECTION_TAXONOMY["CONCEPTUAL_FOUNDATIONAL"])
+    
+    hints = {
+        "section_type": section_type,
+        "section_description": config["description"],
+        "calc_priority": config["calc_priority"],
+        "min_questions": config["min_questions"],
+        "max_questions": config["max_questions"],
+        "question_distribution": config["question_distribution"],
+        "specific_guidance": ""
+    }
+    
+    # Add specific guidance based on features
+    if section_type == "TECHNICAL_COMPUTATIONAL" and features.get('has_numbers'):
+        hints["specific_guidance"] = "Include calculations based on the numerical examples in the text."
+    elif section_type == "ARCHITECTURAL_DESIGN" and features.get('has_code'):
+        hints["specific_guidance"] = "Consider parameter counting or computational complexity questions."
+    elif section_type == "PROCESS_WORKFLOW" and features.get('list_items', 0) > 3:
+        hints["specific_guidance"] = "Create ORDER questions based on the sequential steps described."
+    
+    return hints
+
 SYSTEM_PROMPT = f"""
 You are a professor and an educational content specialist with deep expertise in machine learning systems. You are tasked with creating pedagogically sound self-check questions for the university-level introduction to machine learning systems textbook.
 
@@ -2683,20 +3002,64 @@ def extract_chapter_info(file_path):
 def pre_process_section(section):
     """
     PHASE 1: PRE-PROCESSING
-    Analyze section content and prepare metadata for quiz generation.
-    Currently a placeholder for future enhancements.
+    Analyze section content, classify it, and prepare metadata for quiz generation.
     
     Args:
         section: Dictionary with section_title and section_text
         
     Returns:
-        dict: Metadata about the section (currently empty)
+        dict: Metadata about the section including classification and generation hints
     """
-    # Placeholder for future pre-processing logic
-    # Could analyze content type, complexity, key concepts, etc.
-    return {}
+    try:
+        # Extract features from the section
+        features = extract_content_features(
+            section.get('section_text', ''),
+            section.get('section_title', '')
+        )
+        
+        # Classify the section type
+        section_type, confidence, scores = classify_section_type(features)
+        
+        # Get generation hints based on classification
+        generation_hints = get_section_generation_hints(section_type, features)
+        
+        # Build the preprocessing result
+        result = {
+            'section_type': section_type,
+            'type_confidence': confidence,
+            'classification_scores': scores,
+            'content_features': {
+                'word_count': features['word_count'],
+                'has_math': features['has_math'],
+                'has_code': features['has_code'],
+                'has_numbers': features['has_numbers'],
+                'technical_density': features['technical_terms'] / max(features['word_count'], 1)
+            },
+            'generation_hints': generation_hints
+        }
+        
+        # Log classification for debugging (optional)
+        if confidence > 0:
+            print(f"     Classification: {section_type} (confidence: {confidence:.2f})")
+            if generation_hints.get('calc_priority') == 'HIGH':
+                print(f"     → Prioritizing CALC questions for this technical section")
+        
+        return result
+        
+    except Exception as e:
+        # If classification fails, return minimal metadata
+        print(f"     Warning: Classification failed ({str(e)}), using defaults")
+        return {
+            'section_type': 'CONCEPTUAL_FOUNDATIONAL',
+            'type_confidence': 0.0,
+            'generation_hints': {
+                'calc_priority': 'MEDIUM',
+                'min_questions': 2,
+                'max_questions': 4
+            }
+        }
 
-def process_section(client, section, chapter_context, previous_quizzes, args):
+def process_section(client, section, chapter_context, previous_quizzes, args, preprocessing_metadata=None):
     """
     PHASE 2: PROCESSING
     Main quiz generation phase - generates questions using OpenAI.
@@ -2707,6 +3070,7 @@ def process_section(client, section, chapter_context, previous_quizzes, args):
         chapter_context: Chapter number and title
         previous_quizzes: List of previous quiz data
         args: Command line arguments
+        preprocessing_metadata: Optional metadata from pre_process_section
         
     Returns:
         dict: Quiz response from OpenAI
@@ -2890,7 +3254,8 @@ def generate_for_file(qmd_file, args):
                 section,
                 (chapter_number, chapter_title),
                 previous_quizzes,
-                args
+                args,
+                metadata  # Pass preprocessing metadata
             )
             
             # PHASE 3: POST-PROCESSING
