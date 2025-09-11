@@ -4161,60 +4161,6 @@ def _generate_for_file_with_client(qmd_file, args, client, progress_tracker=None
         "total_sections": len(sections)
     }
 
-def generate_for_directory(directory, args):
-    """
-    Generate quizzes for all QMD files in a directory, in the order specified by _quarto.yml if present.
-    """
-    print(f"Generating quizzes for directory: {directory}")
-    
-    # Use the global QUARTO_YML_PATH
-    yml_path = QUARTO_YML_PATH
-    if os.path.exists(yml_path):
-        print(f"Using _quarto.yml for chapter order: {yml_path}")
-    else:
-        print("No _quarto.yml found in project root. Using default file order.")
-    ordered_files = []
-    if os.path.exists(yml_path):
-        try:
-            ordered_files = get_qmd_order_from_quarto_yml(yml_path)
-            print(f"Found {len(ordered_files)} .qmd files in _quarto.yml chapters section.")
-        except Exception as e:
-            print(f"⚠️  Could not parse _quarto.yml for chapter order: {e}")
-    
-    # Find all .qmd files in the directory (recursively)
-    qmd_files = []
-    for root, _, files in os.walk(directory):
-        for file in files:
-            if file.endswith('.qmd') or file.endswith('.md'):
-                qmd_files.append(os.path.relpath(os.path.join(root, file), os.getcwd()))
-    
-    # Order files: first those in ordered_files, then the rest
-    ordered_qmds = []
-    seen = set()
-    for f in ordered_files:
-        # Try both as-is and with/without leading './'
-        f_norm = f.lstrip('./')
-        for q in qmd_files:
-            if q == f or q == f_norm or q.endswith(f_norm):
-                ordered_qmds.append(q)
-                seen.add(q)
-                break
-    # Add remaining files not in chapters
-    for q in qmd_files:
-        if q not in seen:
-            ordered_qmds.append(q)
-    
-    if not ordered_qmds:
-        print("❌ No QMD files found in directory")
-        return
-    
-    print(f"Found {len(ordered_qmds)} QMD files (ordered by _quarto.yml where possible)")
-    
-    for qmd_file in ordered_qmds:
-        print(f"\n{'='*60}")
-        base_name = os.path.splitext(os.path.basename(qmd_file))[0]
-        args.output = f"{base_name}_quizzes.json"
-        generate_for_file(qmd_file, args)
 
 def generate_for_directory_parallel(directory, args):
     """
