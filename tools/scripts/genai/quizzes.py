@@ -4991,7 +4991,6 @@ def find_safe_insertion_points(markdown_lines):
         Headers inside callouts, code blocks, or other div structures are properly
         ignored to ensure insertion points are at actual section boundaries.
     """
-    from re import match
     state = {'inside_code_block': False, 'inside_div_block': False}
     insertion_points = []
     section_title = None
