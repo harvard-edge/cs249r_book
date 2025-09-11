@@ -34,11 +34,11 @@ MODES OF OPERATION:
 
 USAGE EXAMPLES:
 ---------------
-# Generate quizzes for a single chapter (OpenAI)
+# Generate quizzes for a single chapter (uses OpenAI gpt-4o by default)
 python quizzes.py --mode generate -f contents/core/introduction/introduction.qmd
 
-# Generate quizzes using local Ollama
-python quizzes.py --mode generate -f chapter.qmd --provider ollama --model llama3.2
+# Generate quizzes using local Ollama instead
+python quizzes.py --mode generate -f chapter.qmd --provider ollama
 
 # Generate quizzes for all chapters in a directory
 python quizzes.py --mode generate -d contents/core/ --parallel
@@ -96,11 +96,15 @@ LLM PROVIDERS:
 -------------
 - OpenAI (default): Uses OpenAI API for quiz generation
   - Requires OPENAI_API_KEY environment variable
-  - Models: gpt-4o, gpt-4o-mini, gpt-3.5-turbo
-- Ollama (local): Uses local Ollama instance
+  - Default model: gpt-4o
+  - Available models: gpt-4o, gpt-4o-mini, gpt-3.5-turbo
+  
+- Ollama: Uses local Ollama instance for quiz generation
+  - No API key required - runs locally
+  - Default model: llama3.2:3b (when using --provider ollama)
+  - Recommended models: llama3.1:8b (balanced), mistral:7b (fast)
   - Default URL: http://localhost:11434
-  - Models: llama3.2, mistral, or any installed model
-  - No API key required
+  - Install: https://ollama.ai
 
 DEPENDENCIES:
 ------------
@@ -297,6 +301,244 @@ class OllamaClient:
         
         return Response(result.get("response", ""))
 
+# ============================================================================
+# LLM JUDGE FOR QUALITY EVALUATION
+# ============================================================================
+
+from enum import Enum
+from dataclasses import dataclass
+from typing import Dict, List
+
+class QuestionQuality(Enum):
+    EXCELLENT = "excellent"
+    GOOD = "good" 
+    NEEDS_IMPROVEMENT = "needs_improvement"
+    REJECT = "reject"
+
+@dataclass
+class QuestionEvaluation:
+    quality: QuestionQuality
+    score: float  # 0-100
+    issues: List[str]
+    suggestions: List[str]
+    should_regenerate: bool
+
+class QuizQuestionJudge:
+    """LLM-based judge for evaluating quiz question quality"""
+    
+    def __init__(self, client, model_type="default"):
+        """
+        Initialize judge with an LLM client
+        
+        Args:
+            client: LLM client (OpenAI or Ollama)
+            model_type: "fast", "default", or "thorough"
+        """
+        self.client = client
+        self.model_type = model_type
+        
+        # Model configurations for different evaluation depths
+        self.model_configs = {
+            "fast": {
+                "model": "llama3.2:3b",  # Ollama fast model
+                "temperature": 0.1,
+                "max_tokens": 500
+            },
+            "default": {
+                "model": "llama3.1:8b",  # Ollama balanced model  
+                "temperature": 0.2,
+                "max_tokens": 1000
+            },
+            "thorough": {
+                "model": "gpt-4o-mini",  # OpenAI for thorough evaluation
+                "temperature": 0.3,
+                "max_tokens": 1500
+            }
+        }
+    
+    def _get_type_specific_criteria(self, question_type: str) -> str:
+        """Get evaluation criteria specific to question type"""
+        
+        criteria = {
+            "CALC": """
+- CALC Questions:
+  * Must have 2-4 calculation steps (not single multiplication)
+  * Must use ML-specific formulas (not just arithmetic)
+  * Should lead to system insights (not just numbers)
+  * Numbers should be realistic for the domain
+  * REJECT if: Single-step like "1TB × 8 = ?", "$3 × 10 = ?", "500 × 0.2 = ?"
+""",
+            "MCQ": """
+- MCQ Questions:
+  * All distractors must be plausible
+  * No "all of the above" or "none of the above"
+  * Choices should test understanding, not trick students
+  * One clearly correct answer
+""",
+            "SHORT": """
+- SHORT Answer:
+  * Should require explanation, not just listing
+  * Answer length appropriate (2-4 sentences)
+  * Tests conceptual understanding
+""",
+            "TF": """
+- True/False:
+  * Should address common misconceptions
+  * Not trivially obvious
+  * Explanation must clarify why
+""",
+            "FILL": """
+- Fill-in-the-blank:
+  * Blank should be for key technical term
+  * Context should make answer unambiguous
+  * Not just vocabulary testing
+""",
+            "ORDER": """
+- Ordering Questions:
+  * Steps must have logical sequence
+  * No arbitrary orderings
+  * Tests process understanding
+"""
+        }
+        
+        return criteria.get(question_type, "No specific criteria for this type")
+    
+    def create_evaluation_prompt(self, question: Dict, chapter_info: Dict) -> str:
+        """Create the evaluation prompt for the LLM judge"""
+        
+        return f"""You are an expert quiz question evaluator for a Machine Learning Systems textbook.
+Evaluate the following quiz question for quality, difficulty appropriateness, and pedagogical value.
+
+CHAPTER CONTEXT:
+- Chapter: {chapter_info.get('title', 'Unknown')}
+- Chapter Number: {chapter_info.get('number', 0)} of 20
+- Target Audience: Senior undergraduate and graduate students
+- Section: {chapter_info.get('section', 'Unknown')}
+
+QUESTION TO EVALUATE:
+Type: {question.get('question_type', 'Unknown')}
+Question: {question.get('question', '')}
+{"Choices: " + json.dumps(question.get('choices', [])) if question.get('choices') else ''}
+Answer: {question.get('answer', '')}
+Learning Objective: {question.get('learning_objective', '')}
+
+EVALUATION CRITERIA:
+
+1. **Difficulty Appropriateness** (25 points)
+   - Is the difficulty appropriate for senior undergrad/grad students?
+   - Does it match the chapter progression (early chapters easier)?
+   - For CALC: Are there 2-4 steps (not trivial arithmetic)?
+
+2. **Question Clarity** (20 points)
+   - Is the question unambiguous?
+   - Are all terms clearly defined?
+   - Is the language precise and academic?
+
+3. **Answer Quality** (20 points)
+   - Is the answer correct and complete?
+   - Does it explain the reasoning?
+   - For MCQ: Are distractors plausible but clearly wrong?
+
+4. **Learning Value** (20 points)
+   - Does it test understanding, not memorization?
+   - Does it connect to real ML systems concepts?
+   - Is the learning objective meaningful?
+
+5. **Technical Accuracy** (15 points)
+   - Are all technical details correct?
+   - Are formulas/calculations accurate?
+   - Is terminology used correctly?
+
+SPECIAL CHECKS FOR QUESTION TYPES:
+
+{self._get_type_specific_criteria(question.get('question_type', ''))}
+
+OUTPUT FORMAT (JSON):
+{{
+  "quality": "excellent|good|needs_improvement|reject",
+  "score": 0-100,
+  "issues": ["list of specific problems"],
+  "suggestions": ["list of improvement suggestions"],
+  "should_regenerate": true|false,
+  "detailed_scores": {{
+    "difficulty": 0-25,
+    "clarity": 0-20,
+    "answer": 0-20,
+    "learning_value": 0-20,
+    "accuracy": 0-15
+  }},
+  "reasoning": "Brief explanation of the evaluation"
+}}
+
+Evaluate the question and provide your assessment:"""
+
+    def evaluate_question(self, question: Dict, chapter_info: Dict) -> QuestionEvaluation:
+        """
+        Evaluate a single question using the LLM judge
+        
+        Args:
+            question: The question dictionary
+            chapter_info: Context about the chapter
+            
+        Returns:
+            QuestionEvaluation object with quality assessment
+        """
+        
+        # Create the evaluation prompt
+        prompt = self.create_evaluation_prompt(question, chapter_info)
+        
+        # Get model configuration
+        config = self.model_configs[self.model_type]
+        
+        try:
+            # Call the LLM
+            if isinstance(self.client, OllamaClient):
+                # For Ollama, use the configured model
+                response = self.client.chat.completions.create(
+                    model=config["model"],
+                    messages=[
+                        {"role": "system", "content": "You are an expert educational content evaluator."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=config["temperature"],
+                    response_format={"type": "json_object"}
+                )
+            else:
+                # For OpenAI
+                response = self.client.chat.completions.create(
+                    model=config["model"],
+                    messages=[
+                        {"role": "system", "content": "You are an expert educational content evaluator."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=config["temperature"],
+                    max_tokens=config["max_tokens"],
+                    response_format={"type": "json_object"}
+                )
+            
+            # Parse the response
+            result = json.loads(response.choices[0].message.content)
+            
+            # Create evaluation object
+            return QuestionEvaluation(
+                quality=QuestionQuality(result.get("quality", "needs_improvement")),
+                score=result.get("score", 50),
+                issues=result.get("issues", []),
+                suggestions=result.get("suggestions", []),
+                should_regenerate=result.get("should_regenerate", False)
+            )
+            
+        except Exception as e:
+            print(f"Error evaluating question: {e}")
+            # Return a default evaluation on error
+            return QuestionEvaluation(
+                quality=QuestionQuality.NEEDS_IMPROVEMENT,
+                score=50,
+                issues=["Could not evaluate question due to error"],
+                suggestions=["Manual review recommended"],
+                should_regenerate=False
+            )
+
 def get_llm_client(args):
     """
     Initialize the appropriate LLM client based on provider argument.
@@ -307,6 +549,13 @@ def get_llm_client(args):
     Returns:
         Client instance (OpenAI or OllamaClient)
     """
+    # Set default model if not specified
+    if args.model is None:
+        if args.provider == "ollama":
+            args.model = "llama3.2:3b"  # Default Ollama model with specific tag
+        else:
+            args.model = "gpt-4o"  # Default OpenAI model
+    
     if args.provider == "ollama":
         print(f"Using Ollama with model: {args.model}")
         return OllamaClient(base_url=args.ollama_url)
@@ -1031,16 +1280,32 @@ When previous self-check context is provided for the chapter:
 
 **When to use different question types:**
 - **CALC questions for (PRIORITIZE THESE IN TECHNICAL SECTIONS):** 
-  - Neural network parameters: Calculate total parameters in networks (e.g., CNN layers, fully connected layers)
-  - Layer computations: FLOPs for convolution operations, attention mechanisms
-  - Quantization impact: Model size reduction when converting FP32 to INT8/FP16
-  - Memory calculations: Storage requirements for models with specific architectures
-  - Performance metrics: GPU utilization, throughput, latency calculations
-  - Energy consumption: Power usage comparisons between precision formats
-  - Compression ratios: Size reduction from pruning or knowledge distillation
-  - Bandwidth requirements: Data transfer rates for distributed training
-  - Scaling analysis: Resource requirements when increasing batch size or model size
-  - Cost-benefit analysis: Trade-offs between accuracy loss and efficiency gains
+  
+  **⚠️ CRITICAL WARNING - AVOID SINGLE-STEP TRIVIAL CALC QUESTIONS:**
+  - ❌ NEVER: "1 TB × 8 hours = ?" (single-step multiplication)
+  - ❌ NEVER: "1000 GPU-hours × $0.50 = ?" (single-step cost calculation)
+  - ❌ NEVER: "Cloud processes 7TB, edge processes 0.7TB, difference = ?" (single-step subtraction)
+  - ❌ NEVER: Any single-operation question solvable by elementary school students
+  
+  **✅ CALC QUESTIONS MUST USE MULTI-STEP REASONING (2-4 steps minimum):**
+  
+  **Required Multi-Step Patterns:**
+  1. Calculate → Compare → Conclude (e.g., INT8 vs FP32 memory → ratio → edge deployment feasibility)
+  2. Convert → Calculate → Interpret (e.g., power to current → battery life → IoT viability)
+  3. Base Calculation → Apply Factor → Analyze Impact (e.g., theoretical FLOPS → efficiency → overhead analysis)
+  4. Multiple Operations → Combine Results → System Implications
+  
+  **Good Multi-Step Examples:**
+  - Memory: Calculate INT8 size (step 1) → Calculate FP32 size (step 2) → Compare reduction (step 3) → Conclude about edge constraints (step 4)
+  - Power: Convert mW to mA (step 1) → Calculate hours from mAh (step 2) → Convert to days/years (step 3) → Assess feasibility (step 4)
+  - FLOPs: Calculate matrix mult FLOPs (step 1) → Calculate memory access (step 2) → Compute arithmetic intensity (step 3) → Determine if compute-bound (step 4)
+  - Training: Calculate steps/epoch (step 1) → Total steps for all epochs (step 2) → Time per step to total time (step 3) → Compare to deadline (step 4)
+  
+  **ML Formulas to Chain Together:**
+  - Neural parameters → Memory usage → Compare to device limits → Deployment decision
+  - Compression ratio → Speedup factor → Energy savings → Battery life extension
+  - GPU utilization → Efficiency loss → Actual TFLOPS → Cost per TFLOP
+  - Batch size → Memory requirements → Available memory → Maximum batch determination
 - **MCQ questions for:** Comparing system architectures, identifying appropriate design patterns, selecting deployment strategies
 - **SHORT questions for:** Explaining system tradeoffs, justifying design decisions, analyzing failure scenarios
 - **FILL questions for:** Specific technical terminology, protocol names, architectural components (only when precise recall is required)
@@ -1054,12 +1319,13 @@ When previous self-check context is provided for the chapter:
 - **TF**: Must include justification that addresses common misconceptions and explains why the statement matters in ML systems context.
 - **ORDER**: Focus on processes where sequence matters for system outcomes.
 - **CALC**: **CRITICAL FOR TECHNICAL SECTIONS.** Must include:
+  - Use ACTUAL ML FORMULAS from the chapter (parameter counting, FLOPs, compression ratios, etc.)
   - Real-world parameters (e.g., "ResNet-50 with 25.6M parameters in FP32")
-  - Clear calculation steps showing the mathematical process
+  - Clear calculation steps showing the mathematical process AND formula used
   - Practical interpretation of the result (e.g., "4x reduction enables edge deployment")
-  - Focus on substantial calculations, not trivial arithmetic
-  - Examples: quantization savings, memory bandwidth calculations, inference time comparisons, energy consumption estimates
-  - Avoid: Simple addition/subtraction without technical context
+  - Multi-step calculations that demonstrate understanding of ML concepts
+  - Examples: Parameter counting with (input × output) + bias, FLOPs analysis, compression with sparsity, training iterations
+  - **ABSOLUTELY AVOID**: Trivial multiplication (hours × rate), simple addition/subtraction, elementary school arithmetic
 
 ## Language and Writing Guidelines
 
@@ -1472,6 +1738,66 @@ def fix_ollama_response_format(data):
     if not isinstance(data, dict):
         return data
     
+    # First check if response has wrong field names (answers -> choices, correct_answer -> answer)
+    if 'questions' in data and isinstance(data['questions'], list):
+        for question in data['questions']:
+            # Fix 'answers' field to 'choices' for MCQ
+            if 'answers' in question and 'choices' not in question:
+                question['choices'] = question['answers']
+                del question['answers']
+            
+            # Fix 'correct_answer' field to proper answer format
+            if 'correct_answer' in question:
+                correct = question['correct_answer']
+                del question['correct_answer']
+                
+                # Determine question type if not present
+                if 'question_type' not in question:
+                    if 'choices' in question:
+                        question['question_type'] = 'MCQ'
+                    else:
+                        question['question_type'] = 'SHORT'
+                
+                # Format answer based on type
+                if question.get('question_type') == 'MCQ' and 'choices' in question:
+                    # Find which choice matches the correct answer
+                    choices = question['choices']
+                    if isinstance(correct, str):
+                        # Check if it's a letter (A, B, C, D)
+                        if len(correct) == 1 and correct in 'ABCD':
+                            question['answer'] = f"The correct answer is {correct}."
+                        # Check if it's a number as string
+                        elif correct.isdigit():
+                            idx = int(correct) - 1
+                            if 0 <= idx < len(choices):
+                                letter = chr(65 + idx)
+                                question['answer'] = f"The correct answer is {letter}."
+                        # Otherwise it's the actual answer text
+                        else:
+                            # Find which choice matches
+                            for i, choice in enumerate(choices):
+                                if choice == correct or correct in choice:
+                                    letter = chr(65 + i)
+                                    question['answer'] = f"The correct answer is {letter}."
+                                    break
+                            else:
+                                # Default to first choice if no match
+                                question['answer'] = f"The correct answer is A."
+                    elif isinstance(correct, list):
+                        # Multiple correct answers - convert to string
+                        question['answer'] = ', '.join(correct)
+                else:
+                    # For non-MCQ questions, use the correct answer as is
+                    if isinstance(correct, list):
+                        question['answer'] = ', '.join(correct)
+                    else:
+                        question['answer'] = str(correct)
+            
+            # Add learning objective if missing
+            if 'learning_objective' not in question and 'question' in question:
+                question['learning_objective'] = "Understand key concepts from the section"
+    
+    # Continue with existing fixes
     # Fix question format if needed
     if 'questions' in data and isinstance(data['questions'], list):
         for question in data['questions']:
@@ -2222,7 +2548,7 @@ class QuizEditorGradio:
             return f"Error saving file: {str(e)}"
     
     def save_changes_with_checkboxes(self, checkbox_states):
-        """Save the current quiz data with removed questions based on checkbox states"""
+        """Save the current quiz data with hidden/shown status based on checkbox states"""
         if not self.quiz_data or not self.sections:
             return "No data to save"
         
@@ -2234,7 +2560,10 @@ class QuizEditorGradio:
         # Create a copy of the data to modify
         modified_data = json.loads(json.dumps(self.quiz_data))
         
-        # Remove unchecked questions from each section
+        # Update hidden status for unchecked questions in each section
+        questions_hidden_count = 0
+        questions_shown_count = 0
+        
         for section in modified_data['sections']:
             section_id = section['section_id']
             quiz_data = section.get('quiz_data', {})
@@ -2243,26 +2572,41 @@ class QuizEditorGradio:
                 questions = quiz_data.get('questions', [])
                 question_states = self.question_states.get(section_id, [True] * len(questions))
                 
-                # Keep only checked questions
-                kept_questions = []
+                # Update hidden status for each question
                 for i, question in enumerate(questions):
-                    if i < len(question_states) and question_states[i]:
-                        kept_questions.append(question)
-                
-                # Update the questions list
-                quiz_data['questions'] = kept_questions
-        
-        # Remove any section where quiz_needed is true but questions is empty
-        modified_data['sections'] = [
-            s for s in modified_data['sections']
-            if not (s.get('quiz_data', {}).get('quiz_needed', False) and len(s.get('quiz_data', {}).get('questions', [])) == 0)
-        ]
+                    if i < len(question_states):
+                        if not question_states[i]:
+                            # Unchecked - hide the question
+                            if not question.get('hidden', False):
+                                question['hidden'] = True
+                                question['_manually_hidden'] = True
+                                question['_hidden_at'] = datetime.now().isoformat()
+                                questions_hidden_count += 1
+                        else:
+                            # Checked - ensure it's visible
+                            if question.get('hidden', False):
+                                # Was hidden, now showing
+                                del question['hidden']
+                                question['_manually_shown'] = True
+                                question['_shown_at'] = datetime.now().isoformat()
+                                questions_shown_count += 1
+                            # Remove any manual hiding markers if question is checked
+                            if '_manually_hidden' in question:
+                                del question['_manually_hidden']
         
         # Save to the original file
         try:
             with open(self.initial_file_path, 'w', encoding='utf-8') as f:
                 json.dump(modified_data, f, indent=2, ensure_ascii=False)
-            return f"Saved changes to {os.path.basename(self.initial_file_path)}"
+            
+            # Create informative message
+            status_msg = f"Saved changes to {os.path.basename(self.initial_file_path)}"
+            if questions_hidden_count > 0:
+                status_msg += f"\n📝 {questions_hidden_count} question(s) hidden (reversible)"
+            if questions_shown_count > 0:
+                status_msg += f"\n✅ {questions_shown_count} question(s) restored"
+            
+            return status_msg
         except Exception as e:
             return f"Error saving file: {str(e)}"
     
@@ -2572,7 +2916,7 @@ def create_gradio_interface(initial_file_path=None):
             with gr.Column(scale=1):
                 prev_btn = gr.Button("← Previous", size="lg")
             with gr.Column(scale=1):
-                save_btn = gr.Button("💾 Save & Exit", size="lg", variant="primary")
+                save_btn = gr.Button("💾 Save Changes", size="lg", variant="primary")
             with gr.Column(scale=1):
                 next_btn = gr.Button("Next →", size="lg")
         
@@ -2695,6 +3039,8 @@ def create_gradio_interface(initial_file_path=None):
         
         # Save handler - directly save changes
         def save_changes(*checkbox_values):
+            import datetime
+            
             if editor.sections and editor.current_section_index < len(editor.sections):
                 current_section = editor.sections[editor.current_section_index]
                 section_id = current_section['section_id']
@@ -2705,22 +3051,51 @@ def create_gradio_interface(initial_file_path=None):
                 editor.question_states[section_id] = list(checkbox_values[:num_questions])
             
             # Count total changes across all sections
-            total_questions_removed = 0
+            total_questions_hidden = 0
+            total_questions_visible = 0
+            total_questions_before = 0
+            sections_modified = []
+            
             for section in editor.sections:
                 section_id = section['section_id']
+                section_title = section.get('section_title', 'Unknown')
                 quiz_data = section.get('quiz_data', {})
                 questions = quiz_data.get('questions', []) if quiz_data.get('quiz_needed', False) else []
-                question_states = editor.question_states.get(section_id, [True] * len(questions))
-                removed_count = sum(1 for state in question_states if not state)
-                total_questions_removed += removed_count
+                
+                if questions:
+                    total_questions_before += len(questions)
+                    question_states = editor.question_states.get(section_id, [True] * len(questions))
+                    hidden_count = sum(1 for i, state in enumerate(question_states) if i < len(questions) and not state)
+                    visible_count = sum(1 for i, state in enumerate(question_states) if i < len(questions) and state)
+                    total_questions_hidden += hidden_count
+                    total_questions_visible += visible_count
+                    if hidden_count > 0:
+                        sections_modified.append(f"  {section_title}: {hidden_count} hidden, {visible_count} visible")
+            
+            # Print to command line for visibility
+            print("\n" + "="*60)
+            print(f"SAVING QUIZ - {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            print("="*60)
+            print(f"File: {os.path.basename(editor.initial_file_path)}")
+            print(f"Total questions: {total_questions_before}")
+            print(f"Hidden: {total_questions_hidden}, Visible: {total_questions_visible}")
+            
+            if sections_modified:
+                print("\nModified sections:")
+                for mod in sections_modified:
+                    print(mod)
             
             # Save the changes
             result = editor.save_changes_with_checkboxes(list(checkbox_values))
             
-            if total_questions_removed > 0:
-                return f"{result}\n\nRemoved {total_questions_removed} question(s) total."
+            # Print save result
+            print(f"\n✅ {result}")
+            print("="*60 + "\n")
+            
+            if total_questions_hidden > 0:
+                return f"✅ {result}\n\n📝 {total_questions_hidden} question(s) hidden (reversible)\n✅ {total_questions_visible} question(s) remain visible\n\n**Note:** Hidden questions are preserved in the JSON but won't appear in quizzes.\n**To restore:** Check the boxes and save again.\n\n**To exit:** Close browser tab and press Ctrl+C in terminal"
             else:
-                return f"{result}\n\nAll questions kept."
+                return f"✅ {result}\n\nAll {total_questions_before} questions remain visible.\n\n**To exit:** Close browser tab and press Ctrl+C in terminal"
         
         # Confirmed save handler
         def confirmed_save(confirm_save, *checkbox_values):
@@ -2856,12 +3231,13 @@ def show_usage_examples():
     and their applications.
     """
     print("\n=== Usage Examples ===")
-    print("\n1. Generate quizzes from a markdown file:")
-    print("   python quizzes.py --mode generate -f chapter1.qmd")
-    print("   python quizzes.py --mode generate -f chapter1.qmd -o my_quizzes.json")
-    print("   python quizzes.py --mode generate -d ./chapters/")
+    print("\n1. Generate quizzes from a markdown file (uses OpenAI gpt-4o by default):")
+    print("   python quizzes.py --mode generate -f chapter1.qmd  # Uses OpenAI gpt-4o")
+    print("   python quizzes.py --mode generate -f chapter1.qmd --model gpt-4o-mini  # Use faster model")
+    print("   python quizzes.py --mode generate -f chapter1.qmd --evaluate  # With quality evaluation")
+    print("   python quizzes.py --mode generate -f chapter1.qmd --provider ollama  # Use local Ollama")
     print("   python quizzes.py --mode generate -d ./chapters/ --parallel")
-    print("   python quizzes.py --mode generate -d ./chapters/ --parallel --max-workers 2")
+    print("   python quizzes.py --mode generate -d ./chapters/ --parallel --max-workers 2 --evaluate")
     
     print("\n2. Review existing quizzes with GUI:")
     print("   python quizzes.py --mode review -f quizzes.json")
@@ -2882,6 +3258,14 @@ def show_usage_examples():
     print("   python quizzes.py --mode clean -d ./chapters/")
     print("   python quizzes.py --mode clean --backup -f chapter1.qmd")
     print("   python quizzes.py --mode clean --dry-run -d ./chapters/")
+    
+    print("\n6. Evaluate existing quizzes and hide poor questions:")
+    print("   python quizzes.py --mode evaluate -f quizzes.json --dry-run  # Preview changes")
+    print("   python quizzes.py --mode evaluate -f quizzes.json  # Uses OpenAI gpt-4o")
+    print("   python quizzes.py --mode evaluate -f quizzes.json --provider ollama  # Use local Ollama")
+    print("   python quizzes.py --mode evaluate -d ./quiz_files/  # Evaluate all files")
+    print("   # Rejected questions (score < 40) are marked as hidden")
+    print("   # Hidden questions won't appear when quizzes are injected")
     
     print("\n⚠️  IMPORTANT: You must specify either -f (file) or -d (directory) for all modes.")
     print("   The tool automatically detects file types (JSON vs QMD) and performs the appropriate action.")
@@ -2938,14 +3322,14 @@ The tool will automatically detect file types (JSON vs QMD) and perform the appr
 Use --parallel for faster directory processing (one thread per file).
         """
     )
-    parser.add_argument("--mode", choices=["generate", "review", "insert", "verify", "clean"], 
+    parser.add_argument("--mode", choices=["generate", "review", "insert", "verify", "clean", "evaluate"], 
                        required=False, help="Mode of operation")
     parser.add_argument("-f", "--file", help="Path to a file (.qmd, .md, or .json)")
     parser.add_argument("-d", "--directory", help="Path to directory")
     parser.add_argument("--provider", default="openai", choices=["openai", "ollama"], 
                        help="LLM provider to use (default: openai)")
-    parser.add_argument("--model", default="gpt-4o", 
-                       help="Model to use (e.g., gpt-4o for OpenAI, llama3.2 for Ollama)")
+    parser.add_argument("--model", default=None, 
+                       help="Model to use (default: llama3.2 for Ollama, gpt-4o for OpenAI)")
     parser.add_argument("--ollama-url", default="http://localhost:11434", 
                        help="Ollama API URL (default: http://localhost:11434)")
     parser.add_argument("-o", "--output", default="quizzes.json", help="Path to output JSON file (generate mode only)")
@@ -2953,6 +3337,8 @@ Use --parallel for faster directory processing (one thread per file).
     parser.add_argument("--dry-run", action="store_true", help="Show what would be done without making changes")
     parser.add_argument("--parallel", action="store_true", help="Process multiple files in parallel (directory mode only)")
     parser.add_argument("--max-workers", type=int, default=None, help="Maximum number of parallel workers (default: number of files, max 4)")
+    parser.add_argument("--verbose", action="store_true", help="Show detailed output during processing")
+    parser.add_argument("--evaluate", action="store_true", help="Enable LLM judge to evaluate question quality (generate mode only)")
     parser.add_argument("--examples", action="store_true", help="Show usage examples")
     args = parser.parse_args()
 
@@ -2996,6 +3382,9 @@ Use --parallel for faster directory processing (one thread per file).
             elif args.mode == "clean":
                 print("Error: Clean mode requires a .qmd file, not a .json file")
                 return
+            elif args.mode == "evaluate":
+                # Evaluate existing quiz JSON file
+                evaluate_existing_quiz_file(args.file, args)
         elif file_ext in ['.qmd', '.md']:
             # QMD/MD file - treat as markdown file
             if args.mode == "generate":
@@ -3025,6 +3414,8 @@ Use --parallel for faster directory processing (one thread per file).
             run_verify_mode_directory(args.directory)
         elif args.mode == "clean":
             run_clean_mode_directory(args.directory, args)
+        elif args.mode == "evaluate":
+            evaluate_directory(args.directory, args)
 
 def run_generate_mode_simple(qmd_file, args):
     """
@@ -3354,7 +3745,7 @@ def extract_chapter_info(file_path):
 # 3. Post-processing: Redistribute MCQ answers for balance
 # ============================================================================
 
-def pre_process_section(section, client=None, model=None):
+def pre_process_section(section, client=None, model=None, verbose=False, parallel=False):
     """
     PHASE 1: PRE-PROCESSING
     Analyze section content using LLM, classify it, and prepare metadata for quiz generation.
@@ -3413,8 +3804,8 @@ def pre_process_section(section, client=None, model=None):
             }
         }
         
-        # Log classification
-        if result['type_confidence'] > 0:
+        # Log classification (only if verbose or not parallel)
+        if (verbose or not parallel) and result['type_confidence'] > 0:
             print(f"     Classification: {result['section_type']} (confidence: {result['type_confidence']:.2f})")
             if result['generation_hints'].get('quiz_likelihood') == 'HIGH':
                 print(f"     → High likelihood of quiz generation")
@@ -3425,7 +3816,8 @@ def pre_process_section(section, client=None, model=None):
         
     except Exception as e:
         # If classification fails, return minimal metadata
-        print(f"     Warning: Classification failed ({str(e)}), using defaults")
+        if verbose or not parallel:
+            print(f"     Warning: Classification failed ({str(e)}), using defaults")
         return {
             'section_type': 'GENERAL',
             'type_confidence': 0.0,
@@ -3436,7 +3828,7 @@ def pre_process_section(section, client=None, model=None):
             }
         }
 
-def process_section(client, section, chapter_context, previous_quizzes, args, preprocessing_metadata=None):
+def process_section(client, section, chapter_context, previous_quizzes, args, preprocessing_metadata=None, verbose=False, parallel=False):
     """
     PHASE 2: PROCESSING
     Main quiz generation phase - generates questions using OpenAI.
@@ -3485,21 +3877,24 @@ def process_section(client, section, chapter_context, previous_quizzes, args, pr
         response = call_openai(client, SYSTEM_PROMPT, user_prompt, args.model)
         return response
     except Exception as e:
-        print(f"  ❌ Error generating quiz: {str(e)}")
+        if verbose or not parallel:
+            print(f"  ❌ Error generating quiz: {str(e)}")
         return {"quiz_needed": False, "rationale": f"Generation error: {str(e)}"}
 
-def post_process_section(response):
+def redistribute_mcq_answers(response, verbose=False, parallel=False):
     """
-    PHASE 3: POST-PROCESSING
     Redistribute MCQ answers to ensure balanced distribution across A, B, C, D.
     
     Args:
         response: Quiz response containing questions
+        verbose: Whether to print verbose output
+        parallel: Whether running in parallel mode
         
     Returns:
         dict: Modified response with redistributed MCQ answers
     """
     import random
+    import re
     
     if not response.get('quiz_needed', False):
         return response
@@ -3515,12 +3910,12 @@ def post_process_section(response):
     for q in mcq_questions:
         answer_text = q.get('answer', '')
         # Extract current answer position (e.g., "The correct answer is B.")
-        import re
         match = re.search(r'The correct answer is ([A-D])', answer_text)
         if match:
             current_distribution[match.group(1)] += 1
     
-    print(f"     Current MCQ distribution: {current_distribution}")
+    if verbose or not parallel:
+        print(f"     Current MCQ distribution: {current_distribution}")
     
     # Create a balanced distribution of answer positions
     positions = ['A', 'B', 'C', 'D']
@@ -3585,7 +3980,146 @@ def post_process_section(response):
         if i < len(mcq_questions):
             final_distribution[pos] += 1
     
-    print(f"     Redistributed MCQ answers: {final_distribution}")
+    if verbose or not parallel:
+        print(f"     Redistributed MCQ answers: {final_distribution}")
+    
+    return response
+
+def evaluate_question_quality(response, client, chapter_info, args, verbose=False, parallel=False):
+    """
+    Evaluate the quality of quiz questions using LLM judge.
+    
+    Args:
+        response: Quiz response containing questions
+        client: LLM client for evaluation
+        chapter_info: Dictionary with chapter title, number, and section
+        args: Command line arguments
+        verbose: Whether to print verbose output
+        parallel: Whether running in parallel mode
+        
+    Returns:
+        dict: Modified response with evaluation notes and potentially regenerated questions
+    """
+    if not response.get('quiz_needed', False):
+        return response
+    
+    if not getattr(args, 'evaluate', False):
+        return response
+    
+    if verbose or not parallel:
+        print("     🔍 Evaluating question quality...")
+    
+    # Initialize judge if not already done
+    if not hasattr(thread_local, 'judge'):
+        # Use same client but with judge model configuration
+        judge_model_type = "default" if args.provider == "ollama" else "thorough"
+        thread_local.judge = QuizQuestionJudge(client, judge_model_type)
+    
+    # Evaluate and potentially regenerate questions
+    evaluated_questions = []
+    questions_to_regenerate = []
+    hidden_count = 0
+    kept_count = 0
+    quality_stats = {
+        QuestionQuality.EXCELLENT: 0,
+        QuestionQuality.GOOD: 0,
+        QuestionQuality.NEEDS_IMPROVEMENT: 0,
+        QuestionQuality.REJECT: 0
+    }
+    
+    for q_idx, question in enumerate(response.get('questions', [])):
+        evaluation = thread_local.judge.evaluate_question(question, chapter_info)
+        quality_stats[evaluation.quality] += 1
+        
+        # Print evaluation result
+        quality_emoji = {
+            QuestionQuality.EXCELLENT: "✨",
+            QuestionQuality.GOOD: "✅",
+            QuestionQuality.NEEDS_IMPROVEMENT: "⚠️",
+            QuestionQuality.REJECT: "❌"
+        }
+        if verbose:
+            print(f"       Q{q_idx+1} ({question.get('question_type')}): {quality_emoji[evaluation.quality]} Score: {evaluation.score:.0f}/100")
+        
+        if evaluation.quality == QuestionQuality.REJECT:
+            # Hide rejected questions
+            question['hidden'] = True
+            question['_evaluation'] = {
+                'score': evaluation.score,
+                'quality': evaluation.quality.value,
+                'issues': evaluation.issues[:3],  # Keep top 3 issues
+                'evaluated_at': datetime.now().isoformat()
+            }
+            hidden_count += 1
+            evaluated_questions.append(question)
+        elif evaluation.quality in [QuestionQuality.EXCELLENT, QuestionQuality.GOOD]:
+            kept_count += 1
+            evaluated_questions.append(question)
+        elif evaluation.should_regenerate:
+            questions_to_regenerate.append({
+                'original': question,
+                'issues': evaluation.issues,
+                'suggestions': evaluation.suggestions
+            })
+            # For now, add a comment to the question indicating it needs review
+            question['_evaluation_note'] = f"NEEDS REVIEW: {', '.join(evaluation.issues[:2])}"
+            evaluated_questions.append(question)
+        else:  # NEEDS_IMPROVEMENT but salvageable
+            # Add evaluation note but keep the question
+            question['_evaluation_note'] = f"Could be improved: {', '.join(evaluation.suggestions[:2])}"
+            kept_count += 1
+            evaluated_questions.append(question)
+    
+    # Update response with evaluated questions
+    response['questions'] = evaluated_questions
+    
+    # Report quality statistics and summary
+    if verbose or not parallel:
+        print(f"     Quality: ✨{quality_stats[QuestionQuality.EXCELLENT]} ✅{quality_stats[QuestionQuality.GOOD]} ⚠️{quality_stats[QuestionQuality.NEEDS_IMPROVEMENT]} ❌{quality_stats[QuestionQuality.REJECT]}")
+        
+        # Report kept vs hidden
+        if hidden_count > 0:
+            print(f"     Result: {kept_count} kept, {hidden_count} hidden")
+        else:
+            print(f"     Result: All {kept_count} questions kept")
+        
+        # Report regeneration needs
+        if questions_to_regenerate and verbose:
+            print(f"     ⚠️  {len(questions_to_regenerate)} question(s) flagged for regeneration")
+    
+    return response
+
+def post_process_section(response, client=None, chapter_info=None, args=None, verbose=False, parallel=False):
+    """
+    PHASE 3: POST-PROCESSING
+    Orchestrate all post-processing steps for quiz questions.
+    
+    Args:
+        response: Quiz response containing questions
+        client: LLM client (optional, for evaluation)
+        chapter_info: Chapter context (optional, for evaluation)
+        args: Command line arguments (optional, for evaluation)
+        verbose: Whether to print verbose output
+        parallel: Whether running in parallel mode
+        
+    Returns:
+        dict: Modified response after all post-processing steps
+    """
+    if not response.get('quiz_needed', False):
+        return response
+    
+    # Step 1: Redistribute MCQ answers for balance
+    response = redistribute_mcq_answers(response, verbose=verbose, parallel=parallel)
+    
+    # Step 2: Evaluate question quality (if enabled and parameters provided)
+    if client and chapter_info and args:
+        response = evaluate_question_quality(response, client, chapter_info, args,
+                                            verbose=verbose, parallel=parallel)
+    
+    # Future steps can be added here as separate function calls
+    # response = validate_calculations(response)
+    # response = check_learning_objectives(response)
+    # response = ensure_difficulty_progression(response)
     
     return response
 
@@ -3624,9 +4158,10 @@ def generate_for_file(qmd_file, args):
         # Extract chapter info
         chapter_number, chapter_title = extract_chapter_info(qmd_file)
         
-        print(f"Found {len(sections)} sections")
-        if chapter_number:
-            print(f"Chapter {chapter_number}: {chapter_title}")
+        if not getattr(args, 'parallel', False):
+            print(f"Found {len(sections)} sections")
+            if chapter_number:
+                print(f"Chapter {chapter_number}: {chapter_title}")
         
         # Initialize LLM client
         client = get_llm_client(args)
@@ -3638,48 +4173,66 @@ def generate_for_file(qmd_file, args):
         previous_quizzes = []  # Track previous quiz data for variety
         
         for i, section in enumerate(sections):
-            print(f"\nProcessing section {i+1}/{len(sections)}: {section['section_title']}")
-            print("-" * 40)
+            if args.verbose:
+                print(f"\nProcessing section {i+1}/{len(sections)}: {section['section_title']}")
+                print("-" * 40)
             
             # PHASE 1: PRE-PROCESSING
-            print("  📊 PRE-PROCESSING: Analyzing section...")
-            metadata = pre_process_section(section, client, args.model)
+            if args.verbose:
+                print("  📊 PRE-PROCESSING: Analyzing section...")
+            metadata = pre_process_section(section, client, args.model, verbose=args.verbose, parallel=False)
             
             # PHASE 2: PROCESSING
-            print("  🤖 PROCESSING: Generating questions...")
+            if args.verbose:
+                print("  🤖 PROCESSING: Generating questions...")
             response = process_section(
                 client, 
                 section,
                 (chapter_number, chapter_title),
                 previous_quizzes,
                 args,
-                metadata  # Pass preprocessing metadata
+                metadata,  # Pass preprocessing metadata
+                verbose=args.verbose,
+                parallel=False
             )
             
             # PHASE 3: POST-PROCESSING
             if response.get('quiz_needed', False):
-                print("  🔄 POST-PROCESSING: Redistributing MCQ answers...")
-                response = post_process_section(response)
+                if args.verbose:
+                    print("  🔄 POST-PROCESSING: Processing generated questions...")
+                
+                # Prepare chapter info for evaluation
+                chapter_info = {
+                    'title': chapter_title if chapter_title else 'Unknown',
+                    'number': chapter_number if chapter_number else 10,
+                    'section': section['section_title']
+                }
+                
+                # Run all post-processing steps
+                response = post_process_section(response, client, chapter_info, args, 
+                                               verbose=args.verbose, parallel=False)
             
             if response.get('quiz_needed', False):
                 sections_with_quizzes += 1
                 questions = response.get('questions', [])
-                print(f"  ✅ Generated quiz with {len(questions)} questions")
-                
-                # Show distribution of question types
-                type_counts = {}
-                for q in questions:
-                    q_type = q.get('question_type', 'UNKNOWN')
-                    type_counts[q_type] = type_counts.get(q_type, 0) + 1
-                if type_counts:
-                    type_str = ', '.join([f"{count} {qtype}" for qtype, count in type_counts.items()])
-                    print(f"     Distribution: {type_str}")
+                if args.verbose:
+                    print(f"  ✅ Generated quiz with {len(questions)} questions")
+                    
+                    # Show distribution of question types
+                    type_counts = {}
+                    for q in questions:
+                        q_type = q.get('question_type', 'UNKNOWN')
+                        type_counts[q_type] = type_counts.get(q_type, 0) + 1
+                    if type_counts:
+                        type_str = ', '.join([f"{count} {qtype}" for qtype, count in type_counts.items()])
+                        print(f"     Distribution: {type_str}")
                 
                 # Add to previous quizzes for next section
                 previous_quizzes.append(response)
             else:
                 sections_without_quizzes += 1
-                print(f"  ⏭️  No quiz needed: {response.get('rationale', 'No rationale provided')}")
+                if args.verbose:
+                    print(f"  ⏭️  No quiz needed: {response.get('rationale', 'No rationale provided')}")
                 # Still add to previous quizzes to maintain section count
                 previous_quizzes.append(response)
             
@@ -3715,10 +4268,11 @@ def generate_for_file(qmd_file, args):
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(quiz_data, f, indent=2, ensure_ascii=False)
         
-        print(f"\n✅ Quiz generation complete!")
-        print(f"   - Output file: {output_file}")
-        print(f"   - Sections with quizzes: {sections_with_quizzes}")
-        print(f"   - Sections without quizzes: {sections_without_quizzes}")
+        if not getattr(args, 'parallel', False):
+            print(f"\n✅ Quiz generation complete!")
+            print(f"   - Output file: {output_file}")
+            print(f"   - Sections with quizzes: {sections_with_quizzes}")
+            print(f"   - Sections without quizzes: {sections_without_quizzes}")
         
         # Update QMD frontmatter
         update_qmd_frontmatter(qmd_file, os.path.basename(output_file))
@@ -4006,10 +4560,23 @@ def generate_for_file_parallel(qmd_file, args, progress_tracker=None):
     try:
         # Initialize thread-local LLM client to avoid sharing between threads
         if not hasattr(thread_local, 'llm_client'):
-            thread_local.llm_client = get_llm_client(args)
+            # Create a thread-local copy of args to avoid race conditions
+            import copy
+            thread_args = copy.copy(args)
+            
+            # Make sure model is set before getting client
+            if thread_args.model is None:
+                if thread_args.provider == "ollama":
+                    thread_args.model = "llama3.2:3b"
+                else:
+                    thread_args.model = "gpt-4o"
+            
+            thread_local.llm_client = get_llm_client(thread_args)
+            thread_local.args = thread_args  # Store for later use
         
         # Call the existing generate_for_file logic but with isolated client and progress tracker
-        result = _generate_for_file_with_client(qmd_file, args, thread_local.llm_client, progress_tracker)
+        # Use thread-local args to avoid race conditions
+        result = _generate_for_file_with_client(qmd_file, thread_local.args, thread_local.llm_client, progress_tracker)
         
         elapsed = time.time() - start_time
         
@@ -4025,18 +4592,25 @@ def generate_for_file_parallel(qmd_file, args, progress_tracker=None):
             **result
         }
     except Exception as e:
+        import traceback
         elapsed = time.time() - start_time
         
         # Mark as failed
         if progress_tracker:
             progress_tracker.complete_file(file_name, False)
         
+        # Get more detailed error information
+        error_msg = str(e)
+        if "model" in error_msg.lower() and "not found" in error_msg.lower():
+            error_msg = f"Model error: {error_msg}. Check that the model is installed or use --model to specify a different one."
+        
         return {
             "file": qmd_file,
             "success": False,
             "elapsed": elapsed,
             "thread_id": thread_id,
-            "error": str(e)
+            "error": error_msg,
+            "traceback": traceback.format_exc() if hasattr(args, 'verbose') and args.verbose else None
         }
 
 def _generate_for_file_with_client(qmd_file, args, client, progress_tracker=None):
@@ -4073,17 +4647,35 @@ def _generate_for_file_with_client(qmd_file, args, client, progress_tracker=None
         if progress_tracker:
             progress_tracker.update_file_progress(file_name, i + 1, len(sections))
         
-        # Build user prompt with chapter context and previous quiz data
-        user_prompt = build_user_prompt(
-            section['section_title'], 
-            section['section_text'],
-            chapter_number,
-            chapter_title,
-            previous_quizzes  # Pass previous quiz data for variety
+        # PHASE 1: PRE-PROCESSING
+        metadata = pre_process_section(section, client, args.model, 
+                                      verbose=getattr(args, 'verbose', False), 
+                                      parallel=True)
+        
+        # PHASE 2: PROCESSING
+        response = process_section(
+            client, 
+            section,
+            (chapter_number, chapter_title),
+            previous_quizzes,
+            args,
+            metadata,  # Pass preprocessing metadata
+            verbose=getattr(args, 'verbose', False),
+            parallel=True
         )
         
-        # Call OpenAI with provided client
-        response = call_openai(client, SYSTEM_PROMPT, user_prompt, args.model)
+        # PHASE 3: POST-PROCESSING
+        if response.get('quiz_needed', False):
+            # Prepare chapter info for evaluation
+            chapter_info = {
+                'title': chapter_title if chapter_title else 'Unknown',
+                'number': chapter_number if chapter_number else 10,
+                'section': section['section_title']
+            }
+            
+            # Run all post-processing steps
+            response = post_process_section(response, client, chapter_info, args,
+                                           verbose=getattr(args, 'verbose', False), parallel=True)
         
         if response.get('quiz_needed', False):
             sections_with_quizzes += 1
@@ -4272,6 +4864,230 @@ def generate_for_directory_parallel(directory, args):
             print(f"   - {Path(r['file']).name}: {r.get('error', 'Unknown error')}")
     
     print("=" * 80)
+
+# ============================================================================
+# STANDALONE EVALUATION MODE
+# ============================================================================
+
+def evaluate_existing_quiz_file(quiz_file_path, args):
+    """
+    Evaluate an existing quiz JSON file and mark poor questions as hidden.
+    
+    Args:
+        quiz_file_path: Path to the quiz JSON file
+        args: Command line arguments
+        
+    Returns:
+        bool: True if evaluation was successful
+    """
+    print(f"\n📊 Evaluating quiz file: {quiz_file_path}")
+    print("=" * 60)
+    
+    # Load the quiz file
+    try:
+        with open(quiz_file_path, 'r', encoding='utf-8') as f:
+            quiz_data = json.load(f)
+    except Exception as e:
+        print(f"❌ Failed to load quiz file: {e}")
+        return False
+    
+    # Extract chapter info from filename
+    import os
+    chapter_name = os.path.basename(quiz_file_path).replace('_quizzes.json', '')
+    
+    # Map chapter names to numbers (for difficulty progression)
+    chapter_order = [
+        'introduction', 'ai_ml_basics', 'ml_systems', 'dl_primer',
+        'dnn_architectures', 'data_engineering', 'training', 'optimizations',
+        'hw_acceleration', 'benchmarking', 'ops', 'ondevice_learning',
+        'robust_ai', 'privacy_security', 'responsible_ai', 'sustainable_ai',
+        'ai_for_good', 'emerging_topics', 'frontiers', 'conclusion'
+    ]
+    
+    try:
+        chapter_number = chapter_order.index(chapter_name) + 1
+    except ValueError:
+        chapter_number = 10  # Default to middle difficulty
+    
+    chapter_info = {
+        'title': chapter_name.replace('_', ' ').title(),
+        'number': chapter_number,
+        'section': 'Various'
+    }
+    
+    # Initialize LLM client and judge
+    client = get_llm_client(args)
+    judge_model_type = "default" if args.provider == "ollama" else "thorough"
+    judge = QuizQuestionJudge(client, judge_model_type)
+    
+    # Statistics tracking
+    total_questions = 0
+    questions_hidden = 0
+    questions_flagged = 0
+    section_stats = []
+    
+    # Process each section
+    sections = quiz_data.get('sections', [])
+    for section_idx, section in enumerate(sections):
+        section_title = section.get('section_title', 'Unknown')
+        quiz_needed = section.get('quiz_data', {}).get('quiz_needed', False)
+        
+        if not quiz_needed:
+            continue
+            
+        questions = section.get('quiz_data', {}).get('questions', [])
+        if not questions:
+            continue
+            
+        print(f"\n📖 Section {section_idx + 1}/{len(sections)}: {section_title}")
+        print("-" * 40)
+        
+        # Update chapter info with section
+        chapter_info['section'] = section_title
+        
+        section_hidden = 0
+        section_flagged = 0
+        
+        for q_idx, question in enumerate(questions):
+            total_questions += 1
+            
+            # Skip if already hidden
+            if question.get('hidden', False):
+                print(f"   Q{q_idx+1}: Already hidden, skipping...")
+                continue
+            
+            # Evaluate the question
+            evaluation = judge.evaluate_question(question, chapter_info)
+            
+            # Print evaluation result
+            quality_emoji = {
+                QuestionQuality.EXCELLENT: "✨",
+                QuestionQuality.GOOD: "✅",
+                QuestionQuality.NEEDS_IMPROVEMENT: "⚠️",
+                QuestionQuality.REJECT: "❌"
+            }
+            
+            status = f"{quality_emoji[evaluation.quality]} Score: {evaluation.score:.0f}/100"
+            
+            # Decide action based on quality
+            if evaluation.quality == QuestionQuality.REJECT:
+                # Hide rejected questions
+                question['hidden'] = True
+                question['_evaluation'] = {
+                    'score': evaluation.score,
+                    'quality': evaluation.quality.value,
+                    'issues': evaluation.issues[:3],  # Keep top 3 issues
+                    'evaluated_at': datetime.now().isoformat()
+                }
+                questions_hidden += 1
+                section_hidden += 1
+                status += " → HIDDEN"
+                
+            elif evaluation.quality == QuestionQuality.NEEDS_IMPROVEMENT:
+                # Flag but don't hide questions that need improvement
+                question['_needs_improvement'] = True
+                question['_evaluation'] = {
+                    'score': evaluation.score,
+                    'quality': evaluation.quality.value,
+                    'suggestions': evaluation.suggestions[:3],
+                    'evaluated_at': datetime.now().isoformat()
+                }
+                questions_flagged += 1
+                section_flagged += 1
+                status += " → FLAGGED"
+            
+            elif evaluation.quality in [QuestionQuality.EXCELLENT, QuestionQuality.GOOD]:
+                # Mark good questions as reviewed
+                question['_evaluation'] = {
+                    'score': evaluation.score,
+                    'quality': evaluation.quality.value,
+                    'evaluated_at': datetime.now().isoformat()
+                }
+                status += " → OK"
+            
+            print(f"   Q{q_idx+1} ({question.get('question_type')}): {status}")
+            
+            # Print issues for hidden questions
+            if question.get('hidden'):
+                for issue in evaluation.issues[:2]:
+                    print(f"      ❌ {issue}")
+        
+        # Section summary
+        if section_hidden > 0 or section_flagged > 0:
+            print(f"   Section summary: {section_hidden} hidden, {section_flagged} flagged")
+        
+        section_stats.append({
+            'section': section_title,
+            'total': len(questions),
+            'hidden': section_hidden,
+            'flagged': section_flagged
+        })
+    
+    # Save the updated quiz file
+    if not args.dry_run:
+        # Create backup
+        backup_path = quiz_file_path.replace('.json', '_backup.json')
+        with open(backup_path, 'w', encoding='utf-8') as f:
+            with open(quiz_file_path, 'r', encoding='utf-8') as orig:
+                f.write(orig.read())
+        print(f"\n💾 Backup saved to: {backup_path}")
+        
+        # Save updated quiz data
+        with open(quiz_file_path, 'w', encoding='utf-8') as f:
+            json.dump(quiz_data, f, indent=2, ensure_ascii=False)
+        print(f"✅ Updated quiz file saved: {quiz_file_path}")
+    else:
+        print(f"\n🔍 DRY RUN - No changes saved")
+    
+    # Print final summary
+    print("\n" + "=" * 60)
+    print("EVALUATION SUMMARY")
+    print("=" * 60)
+    print(f"Total questions evaluated: {total_questions}")
+    print(f"Questions hidden (rejected): {questions_hidden}")
+    print(f"Questions flagged (needs improvement): {questions_flagged}")
+    print(f"Questions kept: {total_questions - questions_hidden}")
+    
+    if questions_hidden > 0:
+        print(f"\n⚠️  {questions_hidden} questions have been hidden and won't appear in quizzes")
+        print("   These questions had serious issues like:")
+        print("   - Trivial arithmetic (e.g., '1TB × 8 = ?')")
+        print("   - Poor question clarity")
+        print("   - Incorrect answers")
+    
+    if questions_flagged > 0:
+        print(f"\n📝 {questions_flagged} questions flagged for improvement but still visible")
+    
+    return True
+
+def evaluate_directory(directory, args):
+    """
+    Evaluate all quiz JSON files in a directory.
+    
+    Args:
+        directory: Path to directory containing quiz files
+        args: Command line arguments
+        
+    Returns:
+        bool: True if all evaluations were successful
+    """
+    import glob
+    
+    quiz_files = glob.glob(os.path.join(directory, "**/*_quizzes.json"), recursive=True)
+    
+    if not quiz_files:
+        print(f"❌ No quiz files found in {directory}")
+        return False
+    
+    print(f"Found {len(quiz_files)} quiz files to evaluate")
+    
+    success_count = 0
+    for quiz_file in sorted(quiz_files):
+        if evaluate_existing_quiz_file(quiz_file, args):
+            success_count += 1
+    
+    print(f"\n✅ Successfully evaluated {success_count}/{len(quiz_files)} files")
+    return success_count == len(quiz_files)
 
 def clean_slug(title):
     """Creates a URL-friendly slug from a title."""
