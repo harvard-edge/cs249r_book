@@ -185,7 +185,7 @@ QUESTION_TYPE_CONFIG = [
     },
     {
         "type": "CALC",
-        "description": "For questions requiring mathematical calculation (e.g., performance estimates, metric calculations). The `answer` should show the steps of the calculation."
+        "description": "For questions requiring mathematical calculation. Essential for technical sections discussing quantization, memory requirements, latency, throughput, or efficiency metrics. The `answer` must show calculation steps and explain practical implications. Target realistic scenarios with concrete numbers."
     }
 ]
 
@@ -464,6 +464,7 @@ When previous self-check context is provided for the chapter:
 **Content Focus:**
 - Prioritize system-level reasoning: tradeoffs in deployment environments, impact of data pipeline design on model accuracy, scaling infrastructure for inference workloads, etc.
 - Include quantitative analysis when applicable: resource consumption calculations, performance trade-off analysis, scaling estimates, cost comparisons, latency budgets, throughput analysis
+- **IMPORTANT: For technical sections with numerical content (quantization, bit-widths, memory, latency, throughput), include at least one CALC question**
 - Include at least one question about design tradeoffs or operational implications
 - Address common misconceptions when applicable
 - Connect to practical ML systems scenarios
@@ -473,7 +474,17 @@ When previous self-check context is provided for the chapter:
 {QUESTION_GUIDELINES}
 
 **When to use different question types:**
-- **CALC questions for:** Memory or storage requirements, latency calculations for multi-tier architectures, power consumption estimates, cost analysis for deployment options, throughput calculations for data pipelines, scaling factor analysis
+- **CALC questions for (PRIORITIZE THESE IN TECHNICAL SECTIONS):** 
+  - Neural network parameters: Calculate total parameters in networks (e.g., CNN layers, fully connected layers)
+  - Layer computations: FLOPs for convolution operations, attention mechanisms
+  - Quantization impact: Model size reduction when converting FP32 to INT8/FP16
+  - Memory calculations: Storage requirements for models with specific architectures
+  - Performance metrics: GPU utilization, throughput, latency calculations
+  - Energy consumption: Power usage comparisons between precision formats
+  - Compression ratios: Size reduction from pruning or knowledge distillation
+  - Bandwidth requirements: Data transfer rates for distributed training
+  - Scaling analysis: Resource requirements when increasing batch size or model size
+  - Cost-benefit analysis: Trade-offs between accuracy loss and efficiency gains
 - **MCQ questions for:** Comparing system architectures, identifying appropriate design patterns, selecting deployment strategies
 - **SHORT questions for:** Explaining system tradeoffs, justifying design decisions, analyzing failure scenarios
 - **FILL questions for:** Specific technical terminology, protocol names, architectural components (only when precise recall is required)
@@ -486,7 +497,13 @@ When previous self-check context is provided for the chapter:
 - **FILL**: Should test key terms, but avoid placing the answer immediately before or after the blank. Use only when the term is central and non-obvious.
 - **TF**: Must include justification that addresses common misconceptions and explains why the statement matters in ML systems context.
 - **ORDER**: Focus on processes where sequence matters for system outcomes.
-- **CALC**: Include real-world context and explain the practical significance of the result. Must include realistic parameters, show calculation steps clearly, and explain what the numerical result means for system design decisions.
+- **CALC**: **CRITICAL FOR TECHNICAL SECTIONS.** Must include:
+  - Real-world parameters (e.g., "ResNet-50 with 25.6M parameters in FP32")
+  - Clear calculation steps showing the mathematical process
+  - Practical interpretation of the result (e.g., "4x reduction enables edge deployment")
+  - Focus on substantial calculations, not trivial arithmetic
+  - Examples: quantization savings, memory bandwidth calculations, inference time comparisons, energy consumption estimates
+  - Avoid: Simple addition/subtraction without technical context
 
 ## Language and Writing Guidelines
 
@@ -538,10 +555,33 @@ When previous self-check context is provided for the chapter:
 **Bloom's Taxonomy Mix:**
 - Remember: Key terms and concepts
 - Understand: Explain implications and relationships  
-- Apply: Use concepts in new scenarios
-- Analyze: Compare approaches and identify tradeoffs
+- Apply: Use concepts in new scenarios (CALC questions excel here)
+- Analyze: Compare approaches and identify tradeoffs (CALC for quantitative comparisons)
 - Evaluate: Justify design decisions
 - Create: Propose solutions to system challenges
+
+**CALC Question Priority Sections:**
+Prioritize CALC questions when sections discuss:
+- Neural network architectures (dl_primer, dnn_architectures chapters)
+  - Parameter counting in CNNs, RNNs, Transformers
+  - FLOPs calculations for different layer types
+  - Memory requirements for activations during forward/backward pass
+- Quantization and optimization (optimizations, efficient_ai chapters)
+  - FP32→INT8/FP16 conversions and memory savings
+  - Model compression ratios
+  - Pruning impact on model size
+- Performance metrics (benchmarking, hw_acceleration chapters)
+  - Latency/throughput calculations
+  - GPU/TPU utilization percentages
+  - Memory bandwidth requirements
+- Training efficiency (training, data_engineering chapters)
+  - Batch size vs memory trade-offs
+  - Data pipeline throughput
+  - Distributed training scaling factors
+- Energy and deployment (ondevice_learning, sustainable_ai chapters)
+  - Power consumption comparisons
+  - Battery life estimates
+  - Edge device constraints
 
 **Integration Guidelines:**
 - When appropriate, build on concepts introduced in earlier sections to show how foundational ideas evolve into more complex system-level considerations
@@ -596,6 +636,12 @@ If a self-check IS needed, follow the structure below. For "MCQ" questions, prov
             ],
             "answer": "The correct answer is [LETTER]. This is the explanation for why this choice is correct.",
             "learning_objective": "..."
+        }},
+        {{
+            "question_type": "CALC",
+            "question": "A model with 50 million FP32 parameters is being quantized to INT8. Calculate the memory reduction factor and the absolute memory saved in MB.",
+            "answer": "FP32 uses 4 bytes per parameter, INT8 uses 1 byte. Original size: 50M × 4 = 200 MB. Quantized size: 50M × 1 = 50 MB. Reduction factor: 200/50 = 4×. Memory saved: 200 - 50 = 150 MB. This 4× reduction enables deployment on edge devices with limited memory.",
+            "learning_objective": "Apply quantization concepts to calculate practical memory savings."
         }},
         {{
             "question_type": "Short",
