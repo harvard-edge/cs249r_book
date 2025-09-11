@@ -3257,35 +3257,7 @@ def run_clean_mode_simple(qmd_file, args):
     print("=== Quiz Clean Mode (Single File) ===")
     clean_single_file(qmd_file, args)
 
-def run_clean_mode_directory(directory, args):
-    """
-    Clean all quizzes from all QMD files in a directory.
-    
-    Args:
-        directory (str): Path to the directory containing QMD files
-        args (argparse.Namespace): Command line arguments
-    """
-    print("=== Quiz Clean Mode (Directory) ===")
-    clean_directory(directory, args)
 
-def run_verify_mode_directory(directory_path):
-    """
-    Verify all quiz files in a directory.
-    
-    This function would perform verification on all quiz files in a
-    directory. Currently a placeholder for future implementation.
-    
-    Args:
-        directory_path (str): Path to the directory to verify
-        
-    Note:
-        This functionality is not yet implemented. It would involve:
-        - Finding all JSON and QMD files in the directory
-        - Running verification on each file
-        - Providing a summary report
-    """
-    print("=== Quiz Verify Mode (Directory) ===")
-    run_verify_directory(directory_path)
 
 def extract_quiz_metadata(content):
     """Extract quiz file name from YAML frontmatter using proper YAML parsing"""
