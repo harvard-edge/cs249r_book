@@ -34,11 +34,14 @@ MODES OF OPERATION:
 
 USAGE EXAMPLES:
 ---------------
-# Generate quizzes for a single chapter
+# Generate quizzes for a single chapter (OpenAI)
 python quizzes.py --mode generate -f contents/core/introduction/introduction.qmd
 
+# Generate quizzes using local Ollama
+python quizzes.py --mode generate -f chapter.qmd --provider ollama --model llama3.2
+
 # Generate quizzes for all chapters in a directory
-python quizzes.py --mode generate -d contents/core/
+python quizzes.py --mode generate -d contents/core/ --parallel
 
 # Review quizzes with GUI
 python quizzes.py --mode review -f introduction_quizzes.json
@@ -89,10 +92,21 @@ Quiz files are stored as JSON with the following structure:
   ]
 }
 
+LLM PROVIDERS:
+-------------
+- OpenAI (default): Uses OpenAI API for quiz generation
+  - Requires OPENAI_API_KEY environment variable
+  - Models: gpt-4o, gpt-4o-mini, gpt-3.5-turbo
+- Ollama (local): Uses local Ollama instance
+  - Default URL: http://localhost:11434
+  - Models: llama3.2, mistral, or any installed model
+  - No API key required
+
 DEPENDENCIES:
 ------------
 - openai: For AI-powered quiz generation
-- gradio: For the interactive GUI
+- requests: For Ollama API communication
+- gradio: For the interactive GUI (optional)
 - jsonschema: For JSON validation
 - pyyaml: For YAML frontmatter processing
 - argparse: For command-line interface
@@ -210,6 +224,74 @@ def get_llm_client(args):
     else:
         print(f"Using OpenAI with model: {args.model}")
         return OpenAI()
+
+# ============================================================================
+# PROMPTS AND TEMPLATES
+# ============================================================================
+# All prompts are centralized here for easy maintenance and modification.
+# These prompts control the behavior of quiz generation and classification.
+
+PROMPTS = {
+    # Section classification prompt for preprocessing
+    "classification": {
+        "system": "You are an expert educational content classifier for ML Systems textbooks.",
+        "user_template": """Analyze the following section from an ML Systems textbook and classify it into ONE of these categories:
+
+1. TECHNICAL_COMPUTATIONAL - Contains formulas, calculations, metrics, quantitative analysis
+2. ARCHITECTURAL_DESIGN - System architecture, neural network layers, design patterns
+3. CONCEPTUAL_FOUNDATIONAL - Core concepts, definitions, principles, theories
+4. PROCESS_WORKFLOW - Procedures, workflows, pipelines, sequential steps
+5. TRADEOFF_ANALYSIS - Comparing options, analyzing trade-offs, pros and cons
+6. IMPLEMENTATION_PRACTICAL - Implementation details, code examples, practical applications
+7. BACKGROUND_CONTEXTUAL - Historical context, motivation, overview, introduction
+
+Also provide:
+- confidence: Your confidence level (0.0 to 1.0)
+- content_hints: Guidance for quiz generation based on the content type
+- quiz_likelihood: HIGH, MEDIUM, or LOW based on educational value
+- contextual_notes: Specific observations about the content
+
+Section Title: {section_title}
+
+Section Content (first 1000 chars):
+{section_content}
+
+Respond in JSON format:
+{{
+    "classification": "CATEGORY_NAME",
+    "confidence": 0.0,
+    "content_hints": "string",
+    "quiz_likelihood": "HIGH/MEDIUM/LOW",
+    "contextual_notes": "string"
+}}"""
+    },
+    
+    # Section analysis template for adding to user prompt
+    "section_analysis_template": """
+## SECTION ANALYSIS:
+**Classification:** {section_type} (confidence: {confidence:.1%})
+**Description:** {description}
+
+**Content Guidance:** {content_hints}
+
+**Contextual Notes:** {contextual_notes}
+
+**Quiz Likelihood:** {quiz_likelihood}""",
+    
+    # Main quiz generation system prompt
+    "quiz_generation": {
+        "system": None,  # Will be set below after QUESTION_GUIDELINES is defined
+        "difficulty_chapter_guide": """
+Chapters 1-5: Foundational concepts (simpler questions, focus on understanding)
+Chapters 6-10: Intermediate complexity (practical applications, deeper analysis)
+Chapters 11-15: Advanced topics (system-level reasoning, integration)
+Chapters 16-20: Specialized topics (cutting-edge, research-oriented)"""
+    }
+}
+
+# ============================================================================
+# CONFIGURATION CONSTANTS
+# ============================================================================
 
 # Callout class names for quiz insertion
 QUIZ_QUESTION_CALLOUT_CLASS = ".callout-quiz-question"
@@ -3088,43 +3170,16 @@ def pre_process_section(section, client=None, model=None):
             }
         
         # Use LLM to classify the section
-        classification_prompt = f"""
-Analyze the following section from an ML Systems textbook and classify it into ONE of these categories:
-
-1. TECHNICAL_COMPUTATIONAL - Contains formulas, calculations, metrics, quantitative analysis
-2. ARCHITECTURAL_DESIGN - System architecture, neural network layers, design patterns
-3. CONCEPTUAL_FOUNDATIONAL - Core concepts, definitions, principles, theories
-4. PROCESS_WORKFLOW - Procedures, workflows, pipelines, sequential steps
-5. TRADEOFF_ANALYSIS - Comparing options, analyzing trade-offs, pros and cons
-6. IMPLEMENTATION_PRACTICAL - Implementation details, code examples, practical applications
-7. BACKGROUND_CONTEXTUAL - Historical context, motivation, overview, introduction
-
-Also provide:
-- confidence: Your confidence level (0.0 to 1.0)
-- content_hints: Guidance for quiz generation based on the content type
-- quiz_likelihood: HIGH, MEDIUM, or LOW based on educational value
-- contextual_notes: Specific observations about the content
-
-Section Title: {section.get('section_title', '')}
-
-Section Content (first 1000 chars):
-{section.get('section_text', '')[:1000]}
-
-Respond in JSON format:
-{{
-    "classification": "CATEGORY_NAME",
-    "confidence": 0.0,
-    "content_hints": "string",
-    "quiz_likelihood": "HIGH/MEDIUM/LOW",
-    "contextual_notes": "string"
-}}
-"""
+        classification_prompt = PROMPTS["classification"]["user_template"].format(
+            section_title=section.get('section_title', ''),
+            section_content=section.get('section_text', '')[:1000]
+        )
         
         # Call LLM for classification
         response = client.chat.completions.create(
             model=model or "gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are an expert educational content classifier for ML Systems textbooks."},
+                {"role": "system", "content": PROMPTS["classification"]["system"]},
                 {"role": "user", "content": classification_prompt}
             ],
             temperature=0.3,
@@ -3201,18 +3256,14 @@ def process_section(client, section, chapter_context, previous_quizzes, args, pr
         section_type = preprocessing_metadata.get('section_type', 'UNKNOWN')
         
         # Add classification context to the prompt
-        classification_context = f"""
-        
-## SECTION ANALYSIS:
-**Classification:** {section_type} (confidence: {preprocessing_metadata.get('type_confidence', 0):.1%})
-**Description:** {hints.get('section_description', '')}
-
-**Content Guidance:** {hints.get('content_hints', '')}
-
-**Contextual Notes:** {hints.get('contextual_guidance', '')}
-
-**Quiz Likelihood:** {hints.get('quiz_likelihood', 'MEDIUM')}
-"""
+        classification_context = PROMPTS["section_analysis_template"].format(
+            section_type=section_type,
+            confidence=preprocessing_metadata.get('type_confidence', 0),
+            description=hints.get('section_description', ''),
+            content_hints=hints.get('content_hints', ''),
+            contextual_notes=hints.get('contextual_guidance', ''),
+            quiz_likelihood=hints.get('quiz_likelihood', 'MEDIUM')
+        )
         
         user_prompt += classification_context
     
