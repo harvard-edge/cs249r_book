@@ -121,6 +121,7 @@ import concurrent.futures
 import threading
 import time
 import sys
+import requests
 
 # Gradio imports
 try:
@@ -130,6 +131,85 @@ except ImportError:
 
 # JSON Schema validation
 from jsonschema import validate, ValidationError
+
+# ============================================================================
+# LLM CLIENT WRAPPERS
+# ============================================================================
+
+class OllamaClient:
+    """Simple wrapper for Ollama API to match OpenAI client interface."""
+    
+    def __init__(self, base_url="http://localhost:11434"):
+        self.base_url = base_url
+        self.chat = self
+        self.completions = self
+    
+    def create(self, model, messages, temperature=0.4, response_format=None, **kwargs):
+        """Create a chat completion using Ollama API."""
+        # Convert OpenAI format to Ollama format
+        prompt = ""
+        for msg in messages:
+            if msg["role"] == "system":
+                prompt += f"System: {msg['content']}\n\n"
+            elif msg["role"] == "user":
+                prompt += f"User: {msg['content']}\n\n"
+            elif msg["role"] == "assistant":
+                prompt += f"Assistant: {msg['content']}\n\n"
+        
+        # Add instruction for JSON if requested
+        if response_format and response_format.get("type") == "json_object":
+            prompt += "\nIMPORTANT: Respond with valid JSON only.\n\nAssistant: "
+        else:
+            prompt += "Assistant: "
+        
+        # Call Ollama API
+        response = requests.post(
+            f"{self.base_url}/api/generate",
+            json={
+                "model": model,
+                "prompt": prompt,
+                "temperature": temperature,
+                "stream": False,
+                "format": "json" if response_format and response_format.get("type") == "json_object" else None
+            }
+        )
+        
+        if response.status_code != 200:
+            raise Exception(f"Ollama API error: {response.status_code} - {response.text}")
+        
+        result = response.json()
+        
+        # Wrap in OpenAI-like response format
+        class Message:
+            def __init__(self, content):
+                self.content = content
+        
+        class Choice:
+            def __init__(self, content):
+                self.message = Message(content)
+        
+        class Response:
+            def __init__(self, content):
+                self.choices = [Choice(content)]
+        
+        return Response(result.get("response", ""))
+
+def get_llm_client(args):
+    """
+    Initialize the appropriate LLM client based on provider argument.
+    
+    Args:
+        args: Command line arguments with provider and model info
+        
+    Returns:
+        Client instance (OpenAI or OllamaClient)
+    """
+    if args.provider == "ollama":
+        print(f"Using Ollama with model: {args.model}")
+        return OllamaClient(base_url=args.ollama_url)
+    else:
+        print(f"Using OpenAI with model: {args.model}")
+        return OpenAI()
 
 # Callout class names for quiz insertion
 QUIZ_QUESTION_CALLOUT_CLASS = ".callout-quiz-question"
@@ -2363,8 +2443,8 @@ def create_gradio_interface(initial_file_path=None):
             section_text = editor.get_full_section_content(current_section)
             
             try:
-                # Initialize OpenAI client
-                client = OpenAI()
+                # Initialize LLM client
+                client = get_llm_client(args)
                 
                 # Call regeneration function
                 new_quiz_data = regenerate_section_quiz(
@@ -2545,7 +2625,12 @@ Use --parallel for faster directory processing (one thread per file).
                        required=False, help="Mode of operation")
     parser.add_argument("-f", "--file", help="Path to a file (.qmd, .md, or .json)")
     parser.add_argument("-d", "--directory", help="Path to directory")
-    parser.add_argument("--model", default="gpt-4o", help="OpenAI model to use (generate mode only)")
+    parser.add_argument("--provider", default="openai", choices=["openai", "ollama"], 
+                       help="LLM provider to use (default: openai)")
+    parser.add_argument("--model", default="gpt-4o", 
+                       help="Model to use (e.g., gpt-4o for OpenAI, llama3.2 for Ollama)")
+    parser.add_argument("--ollama-url", default="http://localhost:11434", 
+                       help="Ollama API URL (default: http://localhost:11434)")
     parser.add_argument("-o", "--output", default="quizzes.json", help="Path to output JSON file (generate mode only)")
     parser.add_argument("--backup", action="store_true", help="Create backup files before cleaning")
     parser.add_argument("--dry-run", action="store_true", help="Show what would be done without making changes")
@@ -2974,54 +3059,99 @@ def extract_chapter_info(file_path):
 
 # ===== THREE-PHASE QUIZ GENERATION PIPELINE =====
 
-def pre_process_section(section):
+def pre_process_section(section, client=None, model=None):
     """
     PHASE 1: PRE-PROCESSING
-    Analyze section content, classify it, and prepare metadata for quiz generation.
+    Analyze section content using LLM, classify it, and prepare metadata for quiz generation.
     
     Args:
         section: Dictionary with section_title and section_text
+        client: Optional LLM client for classification
+        model: Optional model name for classification
         
     Returns:
         dict: Metadata about the section including classification and generation hints
     """
     try:
-        # Extract features from the section
-        features = extract_content_features(
-            section.get('section_text', ''),
-            section.get('section_title', '')
+        # If no client provided, use basic feature extraction (backward compatible)
+        if not client:
+            # Fallback to basic analysis
+            word_count = len(section.get('section_text', '').split())
+            return {
+                'section_type': 'GENERAL',
+                'type_confidence': 0.0,
+                'generation_hints': {
+                    'content_hints': 'General educational content',
+                    'quiz_likelihood': 'MEDIUM',
+                    'contextual_guidance': f'Section contains {word_count} words'
+                }
+            }
+        
+        # Use LLM to classify the section
+        classification_prompt = f"""
+Analyze the following section from an ML Systems textbook and classify it into ONE of these categories:
+
+1. TECHNICAL_COMPUTATIONAL - Contains formulas, calculations, metrics, quantitative analysis
+2. ARCHITECTURAL_DESIGN - System architecture, neural network layers, design patterns
+3. CONCEPTUAL_FOUNDATIONAL - Core concepts, definitions, principles, theories
+4. PROCESS_WORKFLOW - Procedures, workflows, pipelines, sequential steps
+5. TRADEOFF_ANALYSIS - Comparing options, analyzing trade-offs, pros and cons
+6. IMPLEMENTATION_PRACTICAL - Implementation details, code examples, practical applications
+7. BACKGROUND_CONTEXTUAL - Historical context, motivation, overview, introduction
+
+Also provide:
+- confidence: Your confidence level (0.0 to 1.0)
+- content_hints: Guidance for quiz generation based on the content type
+- quiz_likelihood: HIGH, MEDIUM, or LOW based on educational value
+- contextual_notes: Specific observations about the content
+
+Section Title: {section.get('section_title', '')}
+
+Section Content (first 1000 chars):
+{section.get('section_text', '')[:1000]}
+
+Respond in JSON format:
+{{
+    "classification": "CATEGORY_NAME",
+    "confidence": 0.0,
+    "content_hints": "string",
+    "quiz_likelihood": "HIGH/MEDIUM/LOW",
+    "contextual_notes": "string"
+}}
+"""
+        
+        # Call LLM for classification
+        response = client.chat.completions.create(
+            model=model or "gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are an expert educational content classifier for ML Systems textbooks."},
+                {"role": "user", "content": classification_prompt}
+            ],
+            temperature=0.3,
+            response_format={"type": "json_object"}
         )
         
-        # Classify the section type
-        section_type, confidence, scores = classify_section_type(features)
-        
-        # Get generation hints based on classification
-        generation_hints = get_section_generation_hints(section_type, features)
+        # Parse response
+        classification_result = json.loads(response.choices[0].message.content)
         
         # Build the preprocessing result
         result = {
-            'section_type': section_type,
-            'type_confidence': confidence,
-            'classification_scores': scores,
-            'content_features': {
-                'word_count': features['word_count'],
-                'has_math': features['has_math'],
-                'has_code': features['has_code'],
-                'has_numbers': features['has_numbers'],
-                'technical_density': features['technical_terms'] / max(features['word_count'], 1)
-            },
-            'generation_hints': generation_hints
+            'section_type': classification_result.get('classification', 'GENERAL'),
+            'type_confidence': classification_result.get('confidence', 0.0),
+            'generation_hints': {
+                'content_hints': classification_result.get('content_hints', ''),
+                'quiz_likelihood': classification_result.get('quiz_likelihood', 'MEDIUM'),
+                'contextual_guidance': classification_result.get('contextual_notes', '')
+            }
         }
         
-        # Log classification for debugging (optional)
-        if confidence > 0:
-            print(f"     Classification: {section_type} (confidence: {confidence:.2f})")
-            if generation_hints.get('quiz_likelihood') == 'HIGH':
+        # Log classification
+        if result['type_confidence'] > 0:
+            print(f"     Classification: {result['section_type']} (confidence: {result['type_confidence']:.2f})")
+            if result['generation_hints'].get('quiz_likelihood') == 'HIGH':
                 print(f"     → High likelihood of quiz generation")
-            elif generation_hints.get('quiz_likelihood') == 'VARIES':
-                print(f"     → Quiz generation depends on content significance")
-            if generation_hints.get('contextual_guidance'):
-                print(f"     → {generation_hints.get('contextual_guidance')}")
+            if result['generation_hints'].get('contextual_guidance'):
+                print(f"     → {result['generation_hints'].get('contextual_guidance')}")
         
         return result
         
@@ -3029,7 +3159,7 @@ def pre_process_section(section):
         # If classification fails, return minimal metadata
         print(f"     Warning: Classification failed ({str(e)}), using defaults")
         return {
-            'section_type': 'CONCEPTUAL_FOUNDATIONAL',
+            'section_type': 'GENERAL',
             'type_confidence': 0.0,
             'generation_hints': {
                 'content_hints': 'Unable to classify - using general guidance',
@@ -3230,8 +3360,8 @@ def generate_for_file(qmd_file, args):
         if chapter_number:
             print(f"Chapter {chapter_number}: {chapter_title}")
         
-        # Initialize OpenAI client
-        client = OpenAI()
+        # Initialize LLM client
+        client = get_llm_client(args)
         
         # Generate quizzes for each section, passing previous quiz data
         quiz_sections = []
@@ -3245,7 +3375,7 @@ def generate_for_file(qmd_file, args):
             
             # PHASE 1: PRE-PROCESSING
             print("  📊 PRE-PROCESSING: Analyzing section...")
-            metadata = pre_process_section(section)
+            metadata = pre_process_section(section, client, args.model)
             
             # PHASE 2: PROCESSING
             print("  🤖 PROCESSING: Generating questions...")
@@ -3601,12 +3731,12 @@ def generate_for_file_parallel(qmd_file, args, progress_tracker=None):
     file_name = Path(qmd_file).name
     
     try:
-        # Initialize thread-local OpenAI client to avoid sharing between threads
-        if not hasattr(thread_local, 'openai_client'):
-            thread_local.openai_client = OpenAI()
+        # Initialize thread-local LLM client to avoid sharing between threads
+        if not hasattr(thread_local, 'llm_client'):
+            thread_local.llm_client = get_llm_client(args)
         
         # Call the existing generate_for_file logic but with isolated client and progress tracker
-        result = _generate_for_file_with_client(qmd_file, args, thread_local.openai_client, progress_tracker)
+        result = _generate_for_file_with_client(qmd_file, args, thread_local.llm_client, progress_tracker)
         
         elapsed = time.time() - start_time
         
