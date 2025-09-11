@@ -4816,25 +4816,6 @@ def clean_directory(directory, args):
     
     print(f"\n✅ Clean operation complete for {len(qmd_files)} files")
 
-def run_verify_directory(directory_path):
-    """
-    Verify all quiz files in a directory.
-    
-    This function would perform verification on all quiz files in a
-    directory. Currently a placeholder for future implementation.
-    
-    Args:
-        directory_path (str): Path to the directory to verify
-        
-    Note:
-        This functionality is not yet implemented. It would involve:
-        - Finding all JSON and QMD files in the directory
-        - Running verification on each file
-        - Providing a summary report
-    """
-    print(f"Verifying quiz files in directory: {directory_path}")
-    # Implementation would go here - this is a placeholder
-    print("❌ Verify directory functionality not yet implemented")
 
 def get_qmd_order_from_quarto_yml(yml_path):
     """Extract the ordered list of .qmd files from the chapters section of _quarto.yml, including commented ones."""
