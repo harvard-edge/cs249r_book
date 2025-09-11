@@ -2,6 +2,13 @@
 
 This document defines how Claude Code should work with this repository to maintain clean, organized development.
 
+## Python Execution Rules
+
+### Always Use Python3
+- **ALWAYS use `python3`** command instead of `python` for all Python scripts
+- This ensures consistency across all environments  
+- Example: `python3 tools/scripts/genai/quizzes.py` NOT `python tools/scripts/genai/quizzes.py`
+
 ## Branch Management Rules
 
 ### 1. Branch Creation
@@ -31,7 +38,41 @@ When agents create branches, prefix with agent name:
 - **Related changes only**: Only commit files related to the current task
 - **Review before committing**: Always check `git diff` before staging
 - **Selective staging**: Use `git add <specific-files>` not `git add -A` when mixing changes
-- **No Claude signatures**: DO NOT add "🤖 Generated with Claude Code" or "Co-Authored-By: Claude" to commits
+- **Claude signatures**: ALWAYS add "🤖 Generated with Claude Code" and "Co-Authored-By: Claude" to commits made by Claude
+
+### 3.1. Incremental Development Practices
+- **One change at a time**: Make only one type of change per commit (e.g., remove one unused function, move one constant)
+- **Test after each change**: Ensure code still runs after each incremental change
+- **Commit frequency**: Commit each small change immediately, don't batch multiple changes
+- **Clean as you go**: When refactoring large files, clean up incrementally rather than all at once
+- **Use diagnostics**: Pay attention to linter warnings and fix them one at a time
+- **Document reasoning**: Each commit message should clearly explain what was changed and why
+
+#### Cleanup and Refactoring Guidelines
+When cleaning up large files (like removing unused code):
+1. **Remove duplicate functions first** - highest priority as they cause override issues
+2. **Remove unused/placeholder functions** - eliminate dead code
+3. **Reorganize constants and imports** - move to proper locations
+4. **Fix unused variables and imports** - address linter warnings
+5. **Consolidate similar functions** - only if functionality is truly identical
+6. **Test thoroughly** - ensure no breaking changes
+
+#### Example Incremental Workflow
+```bash
+# Step 1: Remove one duplicate function
+git add tools/scripts/genai/quizzes.py
+git commit -m "refactor: remove duplicate generate_for_directory function"
+
+# Step 2: Remove another duplicate function  
+git add tools/scripts/genai/quizzes.py
+git commit -m "refactor: remove duplicate run_clean_mode_directory function"
+
+# Step 3: Move misplaced constant
+git add tools/scripts/genai/quizzes.py
+git commit -m "refactor: move QUIZ_JSON_SUFFIX to constants section"
+
+# Continue with one change at a time...
+```
 
 ### 4. Merging Rules
 - **Always use --no-ff**: Preserve merge history with `git merge --no-ff branch-name`
