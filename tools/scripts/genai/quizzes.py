@@ -123,6 +123,10 @@ VERSION: 1.0
 DATE: [Current Date]
 """
 
+# ============================================================================
+# IMPORTS AND DEPENDENCIES
+# ============================================================================
+
 import argparse
 import os
 import re
@@ -148,6 +152,7 @@ from jsonschema import validate, ValidationError
 
 # ============================================================================
 # LLM CLIENT WRAPPERS
+# Provides unified interface for different LLM providers (OpenAI, Ollama).
 # ============================================================================
 
 class OllamaClient:
@@ -553,6 +558,9 @@ QUIZ_FILE_SCHEMA = {
 
 # ============================================================================
 # SECTION CLASSIFICATION SYSTEM
+# Defines content categories for intelligent question type selection.
+# Each category provides hints about appropriate question types based on
+# the nature of the content (technical, conceptual, procedural, etc.)
 # ============================================================================
 
 SECTION_TAXONOMY = {
@@ -673,6 +681,11 @@ SECTION_TAXONOMY = {
         "quiz_likelihood": "VARIES"  # Depends on educational significance
     }
 }
+
+# ============================================================================
+# FEATURE EXTRACTION UTILITIES
+# Functions for analyzing content characteristics to guide classification.
+# ============================================================================
 
 def extract_content_features(section_content, section_title=""):
     """
@@ -1351,6 +1364,11 @@ def extract_sections_with_ids(markdown_text):
     
     return sections
 
+# ============================================================================
+# LLM INTERACTION UTILITIES
+# Functions for calling LLM APIs and handling responses.
+# ============================================================================
+
 def call_openai(client, system_prompt, user_prompt, model="gpt-4o"):
     """
     Make an API call to OpenAI for quiz generation.
@@ -1692,7 +1710,11 @@ Please regenerate the quiz questions following these specific instructions while
     
     return response
 
-# Gradio Application
+# ============================================================================
+# GRADIO GUI APPLICATION
+# Interactive web interface for reviewing and editing quiz questions.
+# ============================================================================
+
 class QuizEditorGradio:
     """
     Gradio-based GUI for reviewing and editing quiz questions.
@@ -2656,6 +2678,11 @@ def show_usage_examples():
     print("\n⚠️  IMPORTANT: You must specify either -f (file) or -d (directory) for all modes.")
     print("   The tool automatically detects file types (JSON vs QMD) and performs the appropriate action.")
 
+# ============================================================================
+# MAIN ENTRY POINT
+# Command-line interface and argument parsing for the quiz generation system.
+# ============================================================================
+
 def main():
     """
     Main entry point for the quiz generation and management tool.
@@ -3139,7 +3166,13 @@ def extract_chapter_info(file_path):
     
     return None, None
 
-# ===== THREE-PHASE QUIZ GENERATION PIPELINE =====
+# ============================================================================
+# THREE-PHASE QUIZ GENERATION PIPELINE
+# Core pipeline functions that implement the quiz generation workflow:
+# 1. Pre-processing: Classify content and generate hints
+# 2. Processing: Generate quiz questions using LLM
+# 3. Post-processing: Redistribute MCQ answers for balance
+# ============================================================================
 
 def pre_process_section(section, client=None, model=None):
     """
@@ -3686,6 +3719,11 @@ def extract_chapter_title_from_qmd(qmd_file_path):
     except Exception as e:
         print(f"Warning: Could not extract chapter title from {qmd_file_path}: {e}")
         return None
+
+# ============================================================================
+# BOOK STRUCTURE UTILITIES
+# Functions for building chapter context and book progression information.
+# ============================================================================
 
 def build_book_outline_from_quarto_yml():
     """
