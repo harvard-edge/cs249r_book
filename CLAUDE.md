@@ -2,6 +2,13 @@
 
 This document defines how Claude Code should work with this repository to maintain clean, organized development.
 
+## Python Execution Rules
+
+### Always Use Python3
+- **ALWAYS use `python3`** command instead of `python` for all Python scripts
+- This ensures consistency across all environments  
+- Example: `python3 tools/scripts/genai/quizzes.py` NOT `python tools/scripts/genai/quizzes.py`
+
 ## Branch Management Rules
 
 ### 1. Branch Creation
