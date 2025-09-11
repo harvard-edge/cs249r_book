@@ -123,7 +123,10 @@ import time
 import sys
 
 # Gradio imports
-import gradio as gr
+try:
+    import gradio as gr
+except ImportError:
+    gr = None
 
 # JSON Schema validation
 from jsonschema import validate, ValidationError
@@ -389,6 +392,19 @@ QUIZ_FILE_SCHEMA = {
 SYSTEM_PROMPT = f"""
 You are a professor and an educational content specialist with deep expertise in machine learning systems. You are tasked with creating pedagogically sound self-check questions for the university-level introduction to machine learning systems textbook.
 
+**CRITICAL JSON REQUIREMENTS:**
+You MUST return a valid JSON object with EXACTLY these fields:
+- "quiz_needed": boolean (true or false, NOT a string "true" or "false")
+- "rationale": 
+  - When quiz_needed is true: Must be an object with EXACTLY these fields:
+    - "focus_areas": array of 2-3 strings
+    - "question_strategy": string
+    - "difficulty_progression": string  
+    - "integration": string
+    - "ranking_explanation": string
+  - When quiz_needed is false: Must be a single string explaining why no quiz is needed
+- "questions": array of question objects (ONLY present when quiz_needed is true)
+
 **TARGET AUDIENCE:**
 This textbook is designed for:
 - Advanced undergraduate students (juniors/seniors) in Computer Science, Engineering, or related fields
@@ -591,182 +607,6 @@ If a self-check IS needed, follow the structure below. For "MCQ" questions, prov
 }}
 ```
 
-
-
-## OPTIMIZATION LEVEL 1: MCQ Balance
-
-**MCQ Answer Distribution Requirements**:
-- Rotate correct answers: A, D, C, A, D, C (avoid B which is overused)
-- Each choice should be correct ~25% of the time
-- Make distractors equally plausible
-
-
-## OPTIMIZATION LEVEL 1: MCQ Balance
-
-**MCQ Answer Distribution Requirements**:
-- Rotate correct answers: A, D, C, A, D, C (avoid B which is overused)
-- Each choice should be correct ~25% of the time
-- Make distractors equally plausible
-
-
-## OPTIMIZATION LEVEL 1: MCQ Balance
-
-**MCQ Answer Distribution Requirements**:
-- Rotate correct answers: A, D, C, A, D, C (avoid B which is overused)
-- Each choice should be correct ~25% of the time
-- Make distractors equally plausible
-
-
-## OPTIMIZATION LEVEL 2: MCQ Balance + CALC Emphasis
-
-**MCQ Requirements**:
-- Use A and D as correct answers 60% of the time (currently underused)
-- Minimize B as correct answer (currently 60% of all MCQs)
-
-**CALC Requirements for Technical Chapters**:
-- Include 2-3 CALC questions per section
-- Examples: memory calculations, speedup metrics, compression ratios
-- Show step-by-step solutions
-
-
-## OPTIMIZATION LEVEL 2: MCQ Balance + CALC Emphasis
-
-**MCQ Requirements**:
-- Use A and D as correct answers 60% of the time (currently underused)
-- Minimize B as correct answer (currently 60% of all MCQs)
-
-**CALC Requirements for Technical Chapters**:
-- Include 2-3 CALC questions per section
-- Examples: memory calculations, speedup metrics, compression ratios
-- Show step-by-step solutions
-
-
-## OPTIMIZATION LEVEL 2: MCQ Balance + CALC Emphasis
-
-**MCQ Requirements**:
-- Use A and D as correct answers 60% of the time (currently underused)
-- Minimize B as correct answer (currently 60% of all MCQs)
-
-**CALC Requirements for Technical Chapters**:
-- Include 2-3 CALC questions per section
-- Examples: memory calculations, speedup metrics, compression ratios
-- Show step-by-step solutions
-
-
-## OPTIMIZATION LEVEL 3: Full Optimization
-
-**Question Type Distribution**:
-- CALC: 20-25% for technical chapters, 5% for conceptual
-- MCQ: 20-25% (balanced A:25%, B:25%, C:25%, D:25%)
-- SHORT: 25-30% (analysis and tradeoffs)
-- TF: 15-20% (misconceptions)
-- FILL: 10-15% (key terms)
-- ORDER: 5-10% (processes)
-
-**MCQ Balance**:
-- Strict rotation: If last MCQ was B, next should be A, C, or D
-- Track distribution within section
-
-**Knowledge Integration**:
-- Reference concepts from earlier chapters when applicable
-- Use phrases like "Building on the gradient descent concept from Chapter 7..."
-- Connect related concepts across chapters
-
-**CALC Examples**:
-- Quantization: "7B FP32 model (28GB) to INT8 = ? GB saved"
-- Pruning: "Model with 350M params, 70% pruned = ? remaining"
-- Throughput: "Batch 32, latency 50ms = ? samples/sec"
-
-
-## OPTIMIZATION LEVEL 3: Full Optimization
-
-**Question Type Distribution**:
-- CALC: 20-25% for technical chapters, 5% for conceptual
-- MCQ: 20-25% (balanced A:25%, B:25%, C:25%, D:25%)
-- SHORT: 25-30% (analysis and tradeoffs)
-- TF: 15-20% (misconceptions)
-- FILL: 10-15% (key terms)
-- ORDER: 5-10% (processes)
-
-**MCQ Balance**:
-- Strict rotation: If last MCQ was B, next should be A, C, or D
-- Track distribution within section
-
-**Knowledge Integration**:
-- Reference concepts from earlier chapters when applicable
-- Use phrases like "Building on the gradient descent concept from Chapter 7..."
-- Connect related concepts across chapters
-
-**CALC Examples**:
-- Quantization: "7B FP32 model (28GB) to INT8 = ? GB saved"
-- Pruning: "Model with 350M params, 70% pruned = ? remaining"
-- Throughput: "Batch 32, latency 50ms = ? samples/sec"
-
-
-## CRITICAL OPTIMIZATIONS FOR QUIZ QUALITY
-
-### 1. MCQ ANSWER DISTRIBUTION (MANDATORY)
-**SEVERE ISSUE**: Currently 60% of MCQ answers are B. This MUST be fixed.
-
-**REQUIREMENTS**:
-- Use this rotation pattern: A, D, C, A, D, C (skip B frequently)
-- Track distribution: If you've used B once, avoid it for next 3 MCQs
-- Each letter should be correct 25% of the time across all MCQs
-- Make all distractors equally plausible
-
-**Example Distribution for 4 MCQs**: A, D, C, A (no B)
-**Example Distribution for 8 MCQs**: A, D, C, A, D, C, B, A
-
-### 2. QUESTION TYPE REQUIREMENTS BY CHAPTER
-
-**Technical Chapters** (training, optimizations, hw_acceleration, benchmarking, efficient_ai, ops, data_engineering):
-- CALC: 25-30% (MANDATORY - currently <1%!)
-- SHORT: 25-30%
-- MCQ: 20-25%
-- TF: 10-15%
-- Others: 10-15%
-
-**CALC Examples**:
-- Memory: "7B FP32 model (28GB) → INT8 = ? GB saved"
-- Speedup: "70% pruning → theoretical speedup = ?"
-- Throughput: "Batch 32, latency 50ms = ? samples/sec"
-- Show calculations: "28GB × 0.25 = 7GB (75% reduction)"
-
-**Conceptual Chapters** (responsible_ai, privacy_security, sustainable_ai, ai_for_good, robust_ai):
-- SHORT: 30-35%
-- TF: 20-25%
-- MCQ: 20-25%
-- FILL: 10-15%
-- Others: 10-15%
-- CALC: 0-5%
-
-**Balanced Chapters** (introduction, ml_systems, dl_primer, frameworks, workflow, conclusion):
-- SHORT: 25-30%
-- MCQ: 20-25%
-- TF: 15-20%
-- CALC: 10-15%
-- Others: 15-20%
-
-### 3. KNOWLEDGE PROGRESSION
-- Reference concepts from earlier chapters when applicable
-- Use phrases like: "Building on [concept] from Chapter X..."
-- Connect related ideas across sections
-- 15-20% of questions should reference prior knowledge
-
-### 4. SELF-CHECK PURPOSE
-These are learning reinforcement tools, NOT grading instruments:
-- Help students identify knowledge gaps
-- Provide explanations that teach
-- Progress from basic to complex within each section
-- Focus on understanding, not memorization
-
-### 5. QUALITY CHECKLIST
-Before finalizing each section's quiz:
-✓ MCQ answers follow rotation pattern (A,D,C,A,D,C)
-✓ CALC questions included for technical content (with real numbers)
-✓ Variety of question types (avoid >40% of any single type)
-✓ At least one question builds on prior knowledge
-✓ Explanations provide learning value, not just answers
 """
 
 def update_qmd_frontmatter(qmd_file_path, quiz_file_name):
@@ -1038,7 +878,8 @@ def call_openai(client, system_prompt, user_prompt, model="gpt-4o"):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            temperature=0.4
+            temperature=0.4,
+            response_format={"type": "json_object"}
         )
         content = response.choices[0].message.content
         try:
@@ -1128,24 +969,6 @@ def validate_individual_quiz_response(data):
             return False
     
     return True
-
-
-# Chapter type detection for optimization
-TECHNICAL_CHAPTERS = ["training", "optimizations", "hw_acceleration", "benchmarking", 
-                      "efficient_ai", "ops", "data_engineering"]
-CONCEPTUAL_CHAPTERS = ["responsible_ai", "privacy_security", "sustainable_ai", 
-                       "ai_for_good", "robust_ai"]
-
-def get_chapter_type(file_path):
-    """Determine chapter type from file path."""
-    for chapter in TECHNICAL_CHAPTERS:
-        if chapter in str(file_path):
-            return "technical"
-    for chapter in CONCEPTUAL_CHAPTERS:
-        if chapter in str(file_path):
-            return "conceptual"
-    return "balanced"
-
 
 def build_user_prompt(section_title, section_text, chapter_number=None, chapter_title=None, previous_quizzes=None):
     """
@@ -1291,19 +1114,19 @@ The following sections in this chapter already have quizzes. Ensure your questio
 - Consider how this section's concepts connect to and build upon earlier chapters
 """
     
-    
-    
-    # Add chapter type hint
-    chapter_type = get_chapter_type(chapter_title) if chapter_title else "balanced"
-    if chapter_type == "technical":
-        prompt_addition = "\n\nNOTE: This is a TECHNICAL chapter. Include 25-30% CALC questions with real calculations."
-    elif chapter_type == "conceptual":
-        prompt_addition = "\n\nNOTE: This is a CONCEPTUAL chapter. Focus on SHORT reflection questions (30-35%)."
-    else:
-        prompt_addition = "\n\nNOTE: This is a BALANCED chapter. Mix all question types appropriately."
-    
-    return prompt + prompt_addition
+    return f"""
+This section is titled "{section_title}".
 
+{chapter_context}
+{book_progression_context}
+{difficulty_guidelines}
+{previous_quiz_context}
+
+Section content:
+{section_text}
+
+Generate a self-check quiz with 1 to 5 well-structured questions and answers based on this section. Include a rationale explaining your question generation strategy and focus areas. Return your response in the specified JSON format.
+""".strip()
 def regenerate_section_quiz(client, section_title, section_text, current_quiz_data, user_prompt, chapter_number=None, chapter_title=None, previous_quizzes=None):
     """
     Regenerate quiz questions for a section with custom instructions.
@@ -2809,6 +2632,155 @@ def extract_chapter_info(file_path):
     
     return None, None
 
+# ===== THREE-PHASE QUIZ GENERATION PIPELINE =====
+
+def pre_process_section(section):
+    """
+    PHASE 1: PRE-PROCESSING
+    Analyze section content and prepare metadata for quiz generation.
+    Currently a placeholder for future enhancements.
+    
+    Args:
+        section: Dictionary with section_title and section_text
+        
+    Returns:
+        dict: Metadata about the section (currently empty)
+    """
+    # Placeholder for future pre-processing logic
+    # Could analyze content type, complexity, key concepts, etc.
+    return {}
+
+def process_section(client, section, chapter_context, previous_quizzes, args):
+    """
+    PHASE 2: PROCESSING
+    Main quiz generation phase - generates questions using OpenAI.
+    
+    Args:
+        client: OpenAI client
+        section: Dictionary with section info
+        chapter_context: Chapter number and title
+        previous_quizzes: List of previous quiz data
+        args: Command line arguments
+        
+    Returns:
+        dict: Quiz response from OpenAI
+    """
+    chapter_number, chapter_title = chapter_context
+    
+    # Build user prompt with chapter context and previous quiz data
+    user_prompt = build_user_prompt(
+        section['section_title'], 
+        section['section_text'],
+        chapter_number,
+        chapter_title,
+        previous_quizzes
+    )
+    
+    # Call OpenAI
+    response = call_openai(client, SYSTEM_PROMPT, user_prompt, args.model)
+    return response
+
+def post_process_section(response):
+    """
+    PHASE 3: POST-PROCESSING
+    Redistribute MCQ answers to ensure balanced distribution across A, B, C, D.
+    
+    Args:
+        response: Quiz response containing questions
+        
+    Returns:
+        dict: Modified response with redistributed MCQ answers
+    """
+    import random
+    
+    if not response.get('quiz_needed', False):
+        return response
+    
+    questions = response.get('questions', [])
+    mcq_questions = [q for q in questions if q.get('question_type') == 'MCQ']
+    
+    if not mcq_questions:
+        return response
+    
+    # Analyze current MCQ answer distribution
+    current_distribution = {'A': 0, 'B': 0, 'C': 0, 'D': 0}
+    for q in mcq_questions:
+        answer_text = q.get('answer', '')
+        # Extract current answer position (e.g., "The correct answer is B.")
+        import re
+        match = re.search(r'The correct answer is ([A-D])', answer_text)
+        if match:
+            current_distribution[match.group(1)] += 1
+    
+    print(f"     Current MCQ distribution: {current_distribution}")
+    
+    # Create a balanced distribution of answer positions
+    positions = ['A', 'B', 'C', 'D']
+    target_positions = []
+    
+    # For each MCQ, assign a position trying to balance the distribution
+    for i in range(len(mcq_questions)):
+        # Try to use each position equally
+        if i < 4:
+            # First 4 questions: use each position once
+            available = [p for p in positions if p not in target_positions]
+            if available:
+                target_positions.append(random.choice(available))
+            else:
+                target_positions.append(random.choice(positions))
+        else:
+            # After first 4: choose randomly but prefer less-used positions
+            counts = {p: target_positions.count(p) for p in positions}
+            min_count = min(counts.values())
+            least_used = [p for p, c in counts.items() if c == min_count]
+            target_positions.append(random.choice(least_used))
+    
+    # Apply the new positions to MCQ questions
+    mcq_index = 0
+    for q in questions:
+        if q.get('question_type') == 'MCQ':
+            if mcq_index < len(target_positions):
+                new_position = target_positions[mcq_index]
+                
+                # Find current correct answer position
+                answer_text = q.get('answer', '')
+                match = re.search(r'The correct answer is ([A-D])', answer_text)
+                
+                if match:
+                    current_position = match.group(1)
+                    
+                    if current_position != new_position:
+                        # Need to shuffle the choices
+                        choices = q.get('choices', [])
+                        if len(choices) == 4:
+                            # Get indices
+                            current_idx = ord(current_position) - ord('A')
+                            new_idx = ord(new_position) - ord('A')
+                            
+                            # Swap the choices
+                            if 0 <= current_idx < 4 and 0 <= new_idx < 4:
+                                choices[current_idx], choices[new_idx] = choices[new_idx], choices[current_idx]
+                                q['choices'] = choices
+                                
+                                # Update the answer text
+                                q['answer'] = re.sub(
+                                    r'The correct answer is [A-D]',
+                                    f'The correct answer is {new_position}',
+                                    answer_text
+                                )
+                
+                mcq_index += 1
+    
+    # Report final distribution
+    final_distribution = {'A': 0, 'B': 0, 'C': 0, 'D': 0}
+    for i, pos in enumerate(target_positions):
+        if i < len(mcq_questions):
+            final_distribution[pos] += 1
+    
+    print(f"     Redistributed MCQ answers: {final_distribution}")
+    
+    return response
+
 def generate_for_file(qmd_file, args):
     """
     Generate quizzes for a single QMD file.
@@ -2859,22 +2831,41 @@ def generate_for_file(qmd_file, args):
         
         for i, section in enumerate(sections):
             print(f"\nProcessing section {i+1}/{len(sections)}: {section['section_title']}")
+            print("-" * 40)
             
-            # Build user prompt with chapter context and previous quiz data
-            user_prompt = build_user_prompt(
-                section['section_title'], 
-                section['section_text'],
-                chapter_number,
-                chapter_title,
-                previous_quizzes  # Pass previous quiz data for variety
+            # PHASE 1: PRE-PROCESSING
+            print("  📊 PRE-PROCESSING: Analyzing section...")
+            metadata = pre_process_section(section)
+            
+            # PHASE 2: PROCESSING
+            print("  🤖 PROCESSING: Generating questions...")
+            response = process_section(
+                client, 
+                section,
+                (chapter_number, chapter_title),
+                previous_quizzes,
+                args
             )
             
-            # Call OpenAI
-            response = call_openai(client, SYSTEM_PROMPT, user_prompt, args.model)
+            # PHASE 3: POST-PROCESSING
+            if response.get('quiz_needed', False):
+                print("  🔄 POST-PROCESSING: Redistributing MCQ answers...")
+                response = post_process_section(response)
             
             if response.get('quiz_needed', False):
                 sections_with_quizzes += 1
-                print(f"  ✅ Generated quiz with {len(response.get('questions', []))} questions")
+                questions = response.get('questions', [])
+                print(f"  ✅ Generated quiz with {len(questions)} questions")
+                
+                # Show distribution of question types
+                type_counts = {}
+                for q in questions:
+                    q_type = q.get('question_type', 'UNKNOWN')
+                    type_counts[q_type] = type_counts.get(q_type, 0) + 1
+                if type_counts:
+                    type_str = ', '.join([f"{count} {qtype}" for qtype, count in type_counts.items()])
+                    print(f"     Distribution: {type_str}")
+                
                 # Add to previous quizzes for next section
                 previous_quizzes.append(response)
             else:
@@ -2927,7 +2918,7 @@ def generate_for_file(qmd_file, args):
         print(f"❌ Error generating quizzes: {str(e)}")
 
 # Global variable for _quarto.yml path
-QUARTO_YML_PATH = os.path.join(os.getcwd(), '_quarto.yml')
+QUARTO_YML_PATH = os.path.join(os.getcwd(), 'quarto', '_quarto.yml')
 
 # Global book outline for Machine Learning Systems textbook
 # This will be populated automatically from _quarto.yml and QMD files
