@@ -150,6 +150,90 @@ except ImportError:
 # JSON Schema validation
 from jsonschema import validate, ValidationError
 
+# Define question types
+QUESTION_TYPES = ["MCQ", "TF", "SHORT", "FILL", "ORDER", "CALC"]
+NON_MCQ_TYPES = ["TF", "SHORT", "FILL", "ORDER", "CALC"]
+
+# Schema for individual quiz_data responses from LLM
+QUIZ_DATA_SCHEMA = {
+    "oneOf": [
+        {
+            "type": "object",
+            "properties": {
+                "quiz_needed": {"type": "boolean", "const": False},
+                "rationale": {"type": "string"}
+            },
+            "required": ["quiz_needed", "rationale"],
+            "additionalProperties": False
+        },
+        {
+            "type": "object",
+            "properties": {
+                "quiz_needed": {"type": "boolean", "const": True},
+                "rationale": {
+                    "type": "object",
+                    "properties": {
+                        "focus_areas": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "minItems": 2,
+                            "maxItems": 3
+                        },
+                        "question_strategy": {"type": "string"},
+                        "difficulty_progression": {"type": "string"},
+                        "integration": {"type": "string"},
+                        "ranking_explanation": {"type": "string"}
+                    },
+                    "required": ["focus_areas", "question_strategy", "difficulty_progression", "integration", "ranking_explanation"],
+                    "additionalProperties": False
+                },
+                "questions": {
+                    "type": "array",
+                    "items": {
+                        "oneOf": [
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "question_type": {"type": "string", "const": "MCQ"},
+                                    "question": {"type": "string"},
+                                    "choices": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                        "minItems": 3,
+                                        "maxItems": 5
+                                    },
+                                    "answer": {"type": "string"},
+                                    "learning_objective": {"type": "string"}
+                                },
+                                "required": ["question_type", "question", "choices", "answer", "learning_objective"],
+                                "additionalProperties": False
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "question_type": {
+                                        "type": "string",
+                                        "enum": NON_MCQ_TYPES
+                                    },
+                                    "question": {"type": "string"},
+                                    "answer": {"type": "string"},
+                                    "learning_objective": {"type": "string"}
+                                },
+                                "required": ["question_type", "question", "answer", "learning_objective"],
+                                "additionalProperties": False
+                            }
+                        ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 5
+                }
+            },
+            "required": ["quiz_needed", "rationale", "questions"],
+            "additionalProperties": False
+        }
+    ]
+}
+
 # ============================================================================
 # LLM CLIENT WRAPPERS
 # Provides unified interface for different LLM providers (OpenAI, Ollama).
@@ -357,7 +441,7 @@ QUESTION_TYPE_CONFIG = [
 ]
 
 # Dynamically generate the list of non-MCQ question types for the schema enum
-NON_MCQ_TYPES = [q["type"] for q in QUESTION_TYPE_CONFIG if q["type"] != "MCQ"]
+# NON_MCQ_TYPES already defined above with QUESTION_TYPES
 
 # Dynamically generate question guidelines for the system prompt
 QUESTION_GUIDELINES = "\n".join(
@@ -1074,7 +1158,7 @@ Before finalizing, ensure:
 You MUST return a valid JSON object that strictly follows this schema:
 
 ```json
-{json.dumps(JSON_SCHEMA, indent=2)}
+{json.dumps(QUIZ_DATA_SCHEMA, indent=2)}
 ```
 
 ## Output Format
@@ -1369,6 +1453,110 @@ def extract_sections_with_ids(markdown_text):
 # Functions for calling LLM APIs and handling responses.
 # ============================================================================
 
+def fix_ollama_response_format(data):
+    """
+    Fix common format issues in Ollama responses to match expected schema.
+    
+    Ollama models may not perfectly follow the schema, so this function
+    normalizes common variations to match our expected format.
+    
+    Args:
+        data (dict): The raw response from Ollama
+        
+    Returns:
+        dict: Fixed response data matching the expected schema
+    """
+    if not isinstance(data, dict):
+        return data
+    
+    # Fix question format if needed
+    if 'questions' in data and isinstance(data['questions'], list):
+        for question in data['questions']:
+            # Fix question_type field name (type -> question_type)
+            if 'type' in question and 'question_type' not in question:
+                question['question_type'] = question['type'].upper()
+                del question['type']
+            
+            # Normalize question type case
+            if 'question_type' in question:
+                q_type = question['question_type'].upper()
+                # Fix common variations
+                if q_type == 'MULTIPLE_CHOICE':
+                    q_type = 'MCQ'
+                elif q_type == 'TRUE_FALSE':
+                    q_type = 'TF'
+                elif q_type == 'SHORT_ANSWER':
+                    q_type = 'SHORT'
+                elif q_type == 'FILL_IN_THE_BLANK':
+                    q_type = 'FILL'
+                question['question_type'] = q_type
+            
+            # Fix MCQ answer format
+            if question.get('question_type') == 'MCQ' and 'answer' in question:
+                answer = question['answer']
+                # Check if answer starts with letter format like "A)" or "D)"
+                import re
+                letter_match = re.match(r'^([A-D])\)', answer)
+                if letter_match:
+                    letter = letter_match.group(1)
+                    # Extract the rest as explanation
+                    explanation = answer[3:].strip()
+                    # Remove duplicate letter if present
+                    explanation = re.sub(r'^[A-D]\.?\s*', '', explanation)
+                    # If no explanation, use the choice text
+                    if not explanation or explanation == letter:
+                        choices = question.get('choices', [])
+                        choice_index = ord(letter) - ord('A')
+                        if 0 <= choice_index < len(choices):
+                            explanation = choices[choice_index]
+                    question['answer'] = f"The correct answer is {letter}. {explanation}"
+                elif not answer.startswith("The correct answer is"):
+                    # Try to detect which choice is indicated
+                    for i, choice in enumerate(question.get('choices', [])):
+                        if answer.lower() in choice.lower() or choice.lower() in answer.lower():
+                            letter = chr(65 + i)  # A, B, C, D
+                            question['answer'] = f"The correct answer is {letter}. {answer}"
+                            break
+    
+    # Fix rationale format if it's a string instead of object
+    if data.get('quiz_needed') and 'rationale' in data:
+        if isinstance(data['rationale'], str):
+            # Convert string rationale to object format
+            data['rationale'] = {
+                'focus_areas': ['Key concepts from the section'],
+                'question_strategy': 'Mixed question types for comprehensive assessment',
+                'difficulty_progression': 'Progressive difficulty from basic to advanced',
+                'integration': 'Questions build on foundational concepts',
+                'ranking_explanation': 'Questions ordered by importance and difficulty'
+            }
+        elif isinstance(data['rationale'], dict):
+            # Ensure all required fields exist
+            defaults = {
+                'focus_areas': ['Key concepts from the section'],
+                'question_strategy': 'Mixed question types for comprehensive assessment',
+                'difficulty_progression': 'Progressive difficulty from basic to advanced',
+                'integration': 'Questions build on foundational concepts',
+                'ranking_explanation': 'Questions ordered by importance and difficulty'
+            }
+            for key, default_value in defaults.items():
+                if key not in data['rationale'] or not data['rationale'][key]:
+                    data['rationale'][key] = default_value
+            
+            # Ensure focus_areas is a list with 2-3 items
+            if 'focus_areas' in data['rationale']:
+                if isinstance(data['rationale']['focus_areas'], str):
+                    data['rationale']['focus_areas'] = [data['rationale']['focus_areas']]
+                elif not isinstance(data['rationale']['focus_areas'], list):
+                    data['rationale']['focus_areas'] = ['Key concepts from the section']
+                
+                # Ensure 2-3 items in focus_areas
+                if len(data['rationale']['focus_areas']) < 2:
+                    data['rationale']['focus_areas'].append('Understanding core principles')
+                if len(data['rationale']['focus_areas']) > 3:
+                    data['rationale']['focus_areas'] = data['rationale']['focus_areas'][:3]
+    
+    return data
+
 def call_openai(client, system_prompt, user_prompt, model="gpt-4o"):
     """
     Make an API call to OpenAI for quiz generation.
@@ -1411,19 +1599,36 @@ def call_openai(client, system_prompt, user_prompt, model="gpt-4o"):
             else:
                 return {"quiz_needed": False, "rationale": "No JSON found in response"}
         
-        # Validate the response against JSON_SCHEMA
+        # Fix Ollama response format if using Ollama client
+        if isinstance(client, OllamaClient):
+            data = fix_ollama_response_format(data)
+        
+        # Validate the response against QUIZ_DATA_SCHEMA
         try:
-            validate(instance=data, schema=JSON_SCHEMA)
+            validate(instance=data, schema=QUIZ_DATA_SCHEMA)
         except ValidationError as e:
-            print(f"⚠️  Warning: AI response doesn't match schema: {e.message}")
-            # Return a fallback response
-            return {"quiz_needed": False, "rationale": f"Schema validation failed: {e.message}"}
+            print(f"⚠️  Schema validation error: {e.message}")
+            print(f"    Response data: {json.dumps(data, indent=2)}")
+            # For Ollama, try to fix and re-validate
+            if isinstance(client, OllamaClient):
+                print("    Attempting additional fixes for Ollama response...")
+                data = fix_ollama_response_format(data)
+                try:
+                    validate(instance=data, schema=QUIZ_DATA_SCHEMA)
+                    print("    ✓ Fixed and validated successfully!")
+                except ValidationError as e2:
+                    print(f"    ✗ Still invalid after fixes: {e2.message}")
+                    raise e2
+            else:
+                raise e
         
         return data
     except APIError as e:
-        return {"quiz_needed": False, "rationale": f"API error: {str(e)}"}
+        raise Exception(f"API error: {str(e)}")
+    except ValidationError as e:
+        raise Exception(f"Schema validation failed: {str(e)}")
     except Exception as e:
-        return {"quiz_needed": False, "rationale": f"Unexpected error: {str(e)}"}
+        raise
 
 def validate_individual_quiz_response(data):
     """
@@ -3301,8 +3506,12 @@ def process_section(client, section, chapter_context, previous_quizzes, args, pr
         user_prompt += classification_context
     
     # Call OpenAI
-    response = call_openai(client, SYSTEM_PROMPT, user_prompt, args.model)
-    return response
+    try:
+        response = call_openai(client, SYSTEM_PROMPT, user_prompt, args.model)
+        return response
+    except Exception as e:
+        print(f"  ❌ Error generating quiz: {str(e)}")
+        return {"quiz_needed": False, "rationale": f"Generation error: {str(e)}"}
 
 def post_process_section(response):
     """
