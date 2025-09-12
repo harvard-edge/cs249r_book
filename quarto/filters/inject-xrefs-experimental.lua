@@ -1,22 +1,19 @@
--- lua/inject-xrefs.lua
--- Production version with hybrid placement strategy
+-- lua/inject-xrefs-experimental.lua
+-- Experimental version with multiple placement strategies
 
--- Configuration for hybrid mode (recommended default)
-local PLACEMENT_MODE = "hybrid"  -- hybrid mode balances overview with specific guidance
+-- Configuration for different experimental modes
+local EXPERIMENT_MODE = os.getenv("XREF_MODE") or "hybrid"  -- hybrid, chapter_only, section_only, priority_based
 
--- Thresholds for filtering connections
-local STRENGTH_THRESHOLD = 0.25  -- Show connections with >25% strength
-local PRIORITY_THRESHOLD = 2     -- Show priority 1-2 in section boxes
-local MAX_CHAPTER_REFS = 8       -- Limit chapter-level overview
-local MAX_SECTION_REFS = 3       -- Keep section boxes concise
+-- Thresholds for filtering
+local STRENGTH_THRESHOLD = 0.25  -- Only show connections stronger than this
+local PRIORITY_THRESHOLD = 2     -- Only show priority 1 or 2 connections
+local MAX_CHAPTER_REFS = 8       -- Maximum refs in chapter-level box
+local MAX_SECTION_REFS = 3       -- Maximum refs per section
 
 -- Initialize logging counters
 local stats = {
-  files_processed = 0,
-  sections_found = 0,
-  injections_made = 0,
-  chapter_boxes = 0,
-  section_boxes = 0,
+  chapter_refs = 0,
+  section_refs = 0,
   filtered_refs = 0,
   total_refs = 0
 }
@@ -42,10 +39,9 @@ local function log_error(message)
   io.stderr:flush()
 end
 
--- Mode can be overridden via environment variable for testing
-if os.getenv("XREF_MODE") then
-  PLACEMENT_MODE = os.getenv("XREF_MODE")
-  log_info("Using placement mode from environment: " .. PLACEMENT_MODE)
+local function log_experiment(message)
+  io.stderr:write("🧪 [Cross-Ref Experiment] " .. message .. "\n")
+  io.stderr:flush()
 end
 
 -- Helper function to read file content
@@ -475,7 +471,7 @@ return {
       end
       
       log_info("🚀 Initializing Cross-Reference Injection Filter")
-      log_info("Placement mode: " .. PLACEMENT_MODE)
+      log_experiment("Mode: " .. EXPERIMENT_MODE)
       
       -- Get current chapter
       local chapter_name = get_chapter_name(doc)
@@ -512,7 +508,7 @@ return {
           table.insert(new_blocks, block)
           
           -- Insert chapter-level connections if not in section_only mode
-          if PLACEMENT_MODE ~= "section_only" and #chapter_refs > 0 then
+          if EXPERIMENT_MODE ~= "section_only" and #chapter_refs > 0 then
             local chapter_box = create_chapter_connection_box(chapter_refs)
             if chapter_box then
               table.insert(new_blocks, chapter_box)
@@ -524,7 +520,7 @@ return {
         elseif block.t == "Header" and block.identifier and block.identifier ~= "" then
           local section_refs = xrefs_data.cross_references[block.identifier]
           
-          if section_refs and should_show_section_refs(section_refs, PLACEMENT_MODE) then
+          if section_refs and should_show_section_refs(section_refs, EXPERIMENT_MODE) then
             -- For PDF: ensure minimum lines before section
             if is_pdf then
               table.insert(new_blocks, needspace_block())
@@ -555,7 +551,7 @@ return {
       
       -- Summary
       log_success("📊 SUMMARY:")
-      log_success("  Mode: " .. PLACEMENT_MODE)
+      log_success("  Mode: " .. EXPERIMENT_MODE)
       log_success("  Chapter connections: " .. stats.chapter_refs)
       log_success("  Section connections: " .. stats.section_refs) 
       log_success("  Filtered references: " .. stats.filtered_refs)
