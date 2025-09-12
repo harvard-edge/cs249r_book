@@ -1,4 +1,4 @@
--- lua/inject_crossrefs.lua
+-- lua/xrefs-inject.lua
 
 -- This script is a Pandoc Lua filter that injects cross-references
 -- into a Quarto document based on a JSON file.
