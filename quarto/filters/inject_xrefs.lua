@@ -5,8 +5,8 @@
 local PLACEMENT_MODE = "hybrid"  -- hybrid mode balances overview with specific guidance
 
 -- Thresholds for filtering connections
-local STRENGTH_THRESHOLD = 0.25  -- Show connections with >25% strength
-local PRIORITY_THRESHOLD = 2     -- Show priority 1-2 (important connections)
+local STRENGTH_THRESHOLD = 0.22  -- Show connections with >22% strength
+local PRIORITY_THRESHOLD = 3     -- Show priority 1-3 (all important connections)
 local MAX_CHAPTER_REFS = 6       -- Show up to 6 chapter-level refs
 local MAX_SECTION_REFS = 3       -- Show up to 3 section refs (more variety)
 
@@ -20,6 +20,28 @@ local stats = {
   filtered_refs = 0,
   total_refs = 0
 }
+
+-- Diversity tracking: track which chapters have been shown
+local shown_chapters = {}  -- tracks {chapter_name = count}
+local shown_in_section = {} -- tracks chapters shown in current section
+local section_counter = 0   -- counts sections processed
+
+-- Calculate diversity score for a reference
+local function get_diversity_score(ref)
+  local chapter = ref.target_chapter
+  if not chapter then return 1.0 end
+  
+  -- Penalize if shown in current section
+  if shown_in_section[chapter] then
+    return 0.1  -- Very low score if already in this section
+  end
+  
+  -- Calculate recency penalty based on how many times shown
+  local times_shown = shown_chapters[chapter] or 0
+  local diversity_multiplier = 1.0 / (1.0 + times_shown * 0.5)
+  
+  return diversity_multiplier
+end
 
 -- Helper function for formatted logging (consistent with other filters)
 local function log_info(message)
@@ -200,53 +222,71 @@ local chapter_names = {
 local function format_xref_entry(ref)
   local ref_text = ""
   
-  -- Add chapter name with proper capitalization
+  -- Add visual indicator for connection type
+  -- Using LaTeX-safe symbols that work in both HTML and PDF
+  local connection_indicators = {}
+  
+  if quarto.doc.isFormat("pdf") then
+    -- LaTeX symbols that render properly in PDF
+    connection_indicators = {
+      prerequisite = "$\\triangleright$",  -- Math triangle right
+      foundation = "$\\blacklozenge$",      -- Black diamond (requires pifont or similar)
+      extends = "$\\nearrow$",              -- Northeast arrow  
+      complements = "$\\leftrightarrow$",   -- Double arrow
+      applies = "$\\rightarrow$",           -- Right arrow
+      optimizes = "$\\star$",               -- Star for performance
+      considers = "$\\triangle$",           -- Triangle for warning
+      explores = "$\\circ$",                -- Circle (simpler, more available)
+      anticipates = "$\\Rightarrow$",       -- Double right arrow
+      specializes = "$\\Diamond$"           -- Diamond (from latexsym)
+    }
+  else
+    -- Unicode for HTML
+    connection_indicators = {
+      prerequisite = "▸",  -- Triangle pointing right
+      foundation = "◆",    -- Diamond
+      extends = "↗",       -- Arrow up-right
+      complements = "⇄",   -- Double arrow
+      applies = "→",       -- Right arrow
+      optimizes = "⚡",    -- Lightning
+      considers = "⚠",     -- Warning
+      explores = "🔍",     -- Magnifying glass
+      anticipates = "➤",   -- Forward arrow
+      specializes = "◈"    -- Special diamond
+    }
+  end
+  
+  -- Get indicator or default
+  local indicator = connection_indicators[ref.connection_type] or "•"
+  
+  -- Add chapter name with section reference if available
   if ref.target_chapter then
     local display_name = chapter_names[ref.target_chapter] or ref.target_chapter
-    ref_text = ref_text .. "**" .. display_name .. "**: "
-  end
-  
-  -- Add section reference with ?? for unbuilt chapters
-  if ref.target_section then
-    if quarto.doc.isFormat("pdf") then
-      ref_text = ref_text .. "(§\\ref{" .. ref.target_section .. "})"
+    
+    -- Include section reference inline if available
+    if ref.target_section then
+      if quarto.doc.isFormat("pdf") then
+        -- For PDF, use LaTeX \ref with indicator: ◆ Chapter (§num)
+        ref_text = ref_text .. indicator .. " **" .. display_name .. "** (§\\ref{" .. ref.target_section .. "}): "
+      else
+        -- For HTML, with indicator
+        ref_text = ref_text .. indicator .. " **" .. display_name .. "**: "
+      end
     else
-      ref_text = ref_text .. "(§??)"
+      -- No section reference, with indicator
+      ref_text = ref_text .. indicator .. " **" .. display_name .. "**: "
     end
   end
   
-  -- Clean up and format explanation
+  -- Add explanation without truncation
   if ref.explanation and ref.explanation ~= "" then
     local clean_explanation = ref.explanation
-    clean_explanation = string.gsub(clean_explanation, "^Builds on foundational concepts: ", "")
-    clean_explanation = string.gsub(clean_explanation, "^Essential prerequisite covering: ", "")
-    clean_explanation = string.gsub(clean_explanation, "^Extends into: ", "")
-    clean_explanation = string.gsub(clean_explanation, "^Foundation for: ", "")
     
-    -- Extract just the key concepts if it's a list
-    local concepts = string.match(clean_explanation, "^([^~]+~[^,]+)")
-    if concepts and string.find(clean_explanation, "~") then
-      local concept_list = {}
-      for concept_pair in string.gmatch(clean_explanation, "[^,]+") do
-        if string.find(concept_pair, "~") then
-          local clean_concept = string.gsub(concept_pair, "~", "/")
-          clean_concept = string.gsub(clean_concept, "^%s+", "")
-          clean_concept = string.gsub(clean_concept, "%s+$", "")
-          table.insert(concept_list, clean_concept)
-          if #concept_list >= 2 then break end
-        end
-      end
-      clean_explanation = table.concat(concept_list, ", ")
-      if #concept_list >= 2 then
-        clean_explanation = clean_explanation .. "..."
-      end
-    else
-      if string.len(clean_explanation) > 60 then
-        clean_explanation = string.sub(clean_explanation, 1, 57) .. "..."
-      end
-    end
+    -- Remove any markdown formatting
+    clean_explanation = string.gsub(clean_explanation, "%*%*", "")
+    clean_explanation = string.gsub(clean_explanation, "%*", "")
     
-    ref_text = ref_text .. " — " .. clean_explanation
+    ref_text = ref_text .. clean_explanation
   end
   
   return ref_text
@@ -271,16 +311,31 @@ local function collect_chapter_connections(xrefs_data)
     end
   end
   
-  -- Sort by connection type (prerequisites first, then foundations, then extends)
+  -- Sort by diversity score, connection type, and strength
   local type_order = {prerequisite = 1, foundation = 2, complements = 3, extends = 4}
   table.sort(chapter_refs, function(a, b)
+    -- First, consider diversity scores
+    local a_diversity = get_diversity_score(a)
+    local b_diversity = get_diversity_score(b)
+    
+    -- Calculate combined scores (diversity * quality * strength)
+    local a_score = a_diversity * (a.quality or 1) * (a.strength or 0.5)
+    local b_score = b_diversity * (b.quality or 1) * (b.strength or 0.5)
+    
+    -- Strong preference for diversity (if one is much more diverse)
+    if math.abs(a_diversity - b_diversity) > 0.3 then
+      return a_diversity > b_diversity
+    end
+    
+    -- Then by connection type priority
     local a_order = type_order[a.connection_type] or 5
     local b_order = type_order[b.connection_type] or 5
     if a_order ~= b_order then
       return a_order < b_order
     end
-    -- Within same type, sort by strength
-    return (a.strength or 0) > (b.strength or 0)
+    
+    -- Finally by overall score
+    return a_score > b_score
   end)
   
   -- Limit to MAX_CHAPTER_REFS
@@ -318,19 +373,25 @@ local function create_chapter_connection_box(chapter_refs)
     end
   end
   
+  -- Track shown chapters for diversity
+  for _, ref in ipairs(chapter_refs) do
+    if ref.target_chapter then
+      shown_chapters[ref.target_chapter] = (shown_chapters[ref.target_chapter] or 0) + 1
+      shown_in_section[ref.target_chapter] = true
+    end
+  end
+  
   -- Build content blocks
   local content_blocks = {}
   
   -- Add a header
   table.insert(content_blocks, pandoc.Para({
-    pandoc.Strong({pandoc.Str("Chapter Roadmap")})
+    pandoc.Strong({pandoc.Str("Related Topics")})
   }))
   
   -- Add prerequisites
   if #grouped.prerequisite > 0 then
-    table.insert(content_blocks, pandoc.Para({
-      pandoc.Emph({pandoc.Str("Prerequisites:")})
-    }))
+    -- Prerequisites section (visual indicators only)
     for _, ref in ipairs(grouped.prerequisite) do
       local ref_text = format_xref_entry(ref)
       local ref_doc = pandoc.read(ref_text, "markdown")
@@ -342,9 +403,7 @@ local function create_chapter_connection_box(chapter_refs)
   
   -- Add foundations
   if #grouped.foundation > 0 then
-    table.insert(content_blocks, pandoc.Para({
-      pandoc.Emph({pandoc.Str("Builds on:")})
-    }))
+    -- Foundations section (visual indicators only)
     for _, ref in ipairs(grouped.foundation) do
       local ref_text = format_xref_entry(ref)
       local ref_doc = pandoc.read(ref_text, "markdown")
@@ -356,9 +415,7 @@ local function create_chapter_connection_box(chapter_refs)
   
   -- Add extensions
   if #grouped.extends > 0 then
-    table.insert(content_blocks, pandoc.Para({
-      pandoc.Emph({pandoc.Str("Leads to:")})
-    }))
+    -- Extensions section (visual indicators only)
     for _, ref in ipairs(grouped.extends) do
       local ref_text = format_xref_entry(ref)
       local ref_doc = pandoc.read(ref_text, "markdown")
@@ -368,10 +425,10 @@ local function create_chapter_connection_box(chapter_refs)
     end
   end
   
-  -- Create a div with callout-chapter-connection class
+  -- Create a div with callout-chapter-connection class and text-left style
   local callout_div = pandoc.Div(
     content_blocks,
-    pandoc.Attr("", {"callout", "callout-chapter-connection"}, {})
+    pandoc.Attr("", {"callout", "callout-chapter-connection"}, {["style"] = "text-align: left;"})
   )
   
   return callout_div
@@ -418,11 +475,14 @@ local function create_section_connection_box(refs)
     end
   end
   
-  -- Limit to MAX_SECTION_REFS
+  -- Limit to MAX_SECTION_REFS with diversity consideration
   if #filtered_refs > MAX_SECTION_REFS then
     table.sort(filtered_refs, function(a, b)
-      local a_score = (a.strength or 0) * (a.quality or 1)
-      local b_score = (b.strength or 0) * (b.quality or 1)
+      -- Include diversity in scoring
+      local a_diversity = get_diversity_score(a)
+      local b_diversity = get_diversity_score(b)
+      local a_score = (a.strength or 0) * (a.quality or 1) * a_diversity
+      local b_score = (b.strength or 0) * (b.quality or 1) * b_diversity
       return a_score > b_score
     end)
     local top_refs = {}
@@ -436,6 +496,14 @@ local function create_section_connection_box(refs)
     return nil
   end
   
+  -- Track shown chapters for diversity
+  for _, ref in ipairs(filtered_refs) do
+    if ref.target_chapter then
+      shown_chapters[ref.target_chapter] = (shown_chapters[ref.target_chapter] or 0) + 1
+      shown_in_section[ref.target_chapter] = true
+    end
+  end
+  
   -- Build content blocks
   local content_blocks = {}
   
@@ -447,10 +515,10 @@ local function create_section_connection_box(refs)
     end
   end
   
-  -- Create a div with callout-chapter-connection class
+  -- Create a div with callout-chapter-connection class and text-left style
   local callout_div = pandoc.Div(
     content_blocks,
-    pandoc.Attr("", {"callout", "callout-chapter-connection"}, {})
+    pandoc.Attr("", {"callout", "callout-chapter-connection"}, {["style"] = "text-align: left;"})
   )
   
   return callout_div
@@ -524,6 +592,10 @@ return {
           end
         -- Check for section headers with cross-references
         elseif block.t == "Header" and block.identifier and block.identifier ~= "" then
+          -- Reset section tracking for new section
+          shown_in_section = {}
+          section_counter = section_counter + 1
+          
           local section_refs = xrefs_data.cross_references[block.identifier]
           
           if section_refs and should_show_section_refs(section_refs, PLACEMENT_MODE) then
