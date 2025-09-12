@@ -20,7 +20,7 @@ FEATURES:
 - Robust quiz insertion with reverse-order processing (prevents line number conflicts)
 - Quiz removal and cleanup from markdown files
 - File validation and verification with comprehensive error checking
-- Support for multiple question types (MCQ, TF, SHORT, FILL, ORDER, CALC)
+- Support for multiple question types (MCQ, TF, SHORT, FILL, ORDER)  # CALC disabled
 - Automatic frontmatter management
 - Backup and dry-run capabilities for safe operation
 
@@ -67,7 +67,7 @@ QUESTION TYPES:
 - SHORT: Short answer questions for deeper reflection
 - FILL: Fill-in-the-blank for specific terminology
 - ORDER: Sequencing questions for processes/workflows
-- CALC: Mathematical calculation questions
+# - CALC: Mathematical calculation questions (DISABLED - placeholder for future)
 
 FILE STRUCTURE:
 --------------
@@ -155,8 +155,10 @@ except ImportError:
 from jsonschema import validate, ValidationError
 
 # Define question types
-QUESTION_TYPES = ["MCQ", "TF", "SHORT", "FILL", "ORDER", "CALC"]
-NON_MCQ_TYPES = ["TF", "SHORT", "FILL", "ORDER", "CALC"]
+# CALC is temporarily disabled - kept as placeholder for future use
+QUESTION_TYPES = ["MCQ", "TF", "SHORT", "FILL", "ORDER"]  # CALC removed from active generation
+NON_MCQ_TYPES = ["TF", "SHORT", "FILL", "ORDER"]  # CALC removed from active generation
+ALL_QUESTION_TYPES_WITH_CALC = ["MCQ", "TF", "SHORT", "FILL", "ORDER", "CALC"]  # For compatibility
 
 # Schema for individual quiz_data responses from LLM
 QUIZ_DATA_SCHEMA = {
@@ -360,8 +362,9 @@ class QuizQuestionJudge:
         """Get evaluation criteria specific to question type"""
         
         criteria = {
+            # CALC disabled - keeping structure for compatibility
             "CALC": """
-- CALC Questions:
+- CALC Questions (DISABLED):
   * Must have 2-4 calculation steps (not single multiplication)
   * Must use ML-specific formulas (not just arithmetic)
   * Should lead to system insights (not just numbers)
@@ -398,6 +401,9 @@ class QuizQuestionJudge:
   * Steps must have logical sequence
   * No arbitrary orderings
   * Tests process understanding
+  * QUESTION FORMAT: Items numbered (1), (2), (3) - keep brief, no explanations
+  * ANSWER FORMAT: Must start "The correct order is: (X), (Y), (Z)." then explain
+  * NEVER put explanations/definitions in the question items
 """
         }
         
@@ -427,7 +433,7 @@ EVALUATION CRITERIA:
 1. **Difficulty Appropriateness** (25 points)
    - Is the difficulty appropriate for senior undergrad/grad students?
    - Does it match the chapter progression (early chapters easier)?
-   - For CALC: Are there 2-4 steps (not trivial arithmetic)?
+   # - For CALC: (DISABLED)
 
 2. **Question Clarity** (20 points)
    - Is the question unambiguous?
@@ -676,7 +682,7 @@ QUESTION_TYPE_CONFIG = [
     },
     {
         "type": "SHORT",
-        "description": "Encourages deeper reflection. Works well for \"Why is X necessary?\" or \"What would happen if...?\" questions."
+        "description": "Encourages deeper reflection. Works well for \"Why is X necessary?\" or \"What would happen if...?\" questions. For numerical concepts, explain implications rather than just calculating."
     },
     {
         "type": "FILL",
@@ -684,12 +690,13 @@ QUESTION_TYPE_CONFIG = [
     },
     {
         "type": "ORDER",
-        "description": "Excellent for reinforcing processes or workflows. The `question` should list the items to be ordered, and the `answer` should present them in the correct sequence with explanations if necessary."
-    },
-    {
-        "type": "CALC",
-        "description": "For questions requiring mathematical calculation. Essential for technical sections discussing quantization, memory requirements, latency, throughput, or efficiency metrics. The `answer` must show calculation steps and explain practical implications. Target realistic scenarios with concrete numbers."
+        "description": "Excellent for reinforcing processes or workflows. Question format: 'Order the following [criterion]: (1) Item A, (2) Item B, (3) Item C.' Keep items concise - save explanations for the answer. Answer format: 'The correct order is: (1), (3), (2). [Explanation of why this sequence is correct, what each item does, etc.]'"
     }
+    # CALC type disabled - keeping structure for future use
+    # {
+    #     "type": "CALC",
+    #     "description": "For questions requiring mathematical calculation..."
+    # }
 ]
 
 # Dynamically generate the list of non-MCQ question types for the schema enum
@@ -914,7 +921,7 @@ SECTION_TAXONOMY = {
             r"\d+%",  # Percentages
             r"=\s*\d+",  # Equations with results
         ],
-        "content_hints": "This section contains formulas, calculations, and metrics. Consider including CALC questions for numerical examples, MCQ for comparing approaches, and SHORT for explaining trade-offs.",
+        "content_hints": "This section contains formulas, calculations, and metrics. Consider MCQ for comparing approaches and SHORT for explaining numerical trade-offs and implications.",
         "quiz_likelihood": "HIGH"
     },
     
@@ -930,7 +937,7 @@ SECTION_TAXONOMY = {
             r"\d+\s*(?:neurons?|units?|channels?)",
             r"(?:CNN|RNN|LSTM|GRU|transformer)",
         ],
-        "content_hints": "This section covers system design and neural network architectures. Consider CALC questions for parameter counting, MCQ for architecture comparisons, and SHORT for design decisions.",
+        "content_hints": "This section covers system design and neural network architectures. Consider MCQ for architecture comparisons and SHORT for design decisions and parameter implications.",
         "quiz_likelihood": "HIGH"
     },
     
@@ -978,7 +985,7 @@ SECTION_TAXONOMY = {
             r"on one hand.*on the other",
             r"while.*however",
         ],
-        "content_hints": "This section analyzes trade-offs and comparisons. SHORT questions excel at exploring trade-offs, MCQ for identifying best options, CALC for quantitative comparisons.",
+        "content_hints": "This section analyzes trade-offs and comparisons. SHORT questions excel at exploring trade-offs, MCQ for identifying best options and quantitative comparisons.",
         "quiz_likelihood": "HIGH"
     },
     
@@ -1195,232 +1202,151 @@ def get_section_generation_hints(section_type, features):
     return hints
 
 SYSTEM_PROMPT = f"""
-You are a professor and an educational content specialist with deep expertise in machine learning systems. You are tasked with creating pedagogically sound self-check questions for the university-level introduction to machine learning systems textbook.
+You are a professor and educational content specialist creating pedagogically sound self-check questions for a university-level machine learning systems textbook.
 
-**CRITICAL JSON REQUIREMENTS:**
-You MUST return a valid JSON object with EXACTLY these fields:
-- "quiz_needed": boolean (true or false, NOT a string "true" or "false")
-- "rationale": 
-  - When quiz_needed is true: Must be an object with EXACTLY these fields:
-    - "focus_areas": array of 2-3 strings
-    - "question_strategy": string
-    - "difficulty_progression": string  
-    - "integration": string
-    - "ranking_explanation": string
-  - When quiz_needed is false: Must be a single string explaining why no quiz is needed
-- "questions": array of question objects (ONLY present when quiz_needed is true)
+# 1. CONTEXT & AUDIENCE
 
-**TARGET AUDIENCE:**
-This textbook is designed for:
-- Advanced undergraduate students (juniors/seniors) in Computer Science, Engineering, or related fields
-- Graduate students (Masters/PhD) in Computer Science, Data Science, or related disciplines
-- Students with varying backgrounds in machine learning - some may have taken ML theory courses, others may be learning ML concepts alongside systems concepts
-- Students with basic programming experience (Python preferred) and understanding of algorithms and data structures
+**Target Audience:**
+- Advanced undergraduate (junior/senior) and graduate students in CS/Engineering
+- Varying ML backgrounds (some learning ML concepts for first time)
+- Prerequisites: Programming (Python), algorithms, data structures, basic math, computer architecture
 
-**ASSUMED PREREQUISITES:**
-- Basic programming experience (Python preferred)
-- Understanding of algorithms and data structures
-- Mathematical fundamentals (algebra, basic calculus concepts)
-- Basic computer architecture concepts
-- **Note: Students may have varying levels of ML theory background - some may be learning ML concepts for the first time in this course**
+**ML Systems Focus:**
+Full lifecycle coverage: data pipelines, training infrastructure, deployment, monitoring, serving, scaling, reliability, operational concerns. Emphasize system-level reasoning over algorithmic theory.
 
-Your task is to first evaluate whether a self-check would be pedagogically valuable for the given section, and if so, generate 1 to 5 self-check questions and answers. Decide the number of questions based on the section's length and complexity. Each chapter has about 10 sections. So be careful not to generate too many questions.
+# 2. EVALUATION CRITERIA - Should This Section Have a Quiz?
 
-## ML Systems Focus
+**Create a quiz (1-5 questions) if the section:**
+- Introduces technical concepts, system components, or operational implications
+- Presents design decisions, tradeoffs, or common misconceptions
+- Requires application of concepts to real scenarios
+- Builds critically on previous knowledge
 
-Machine learning systems encompasses the full lifecycle: data pipelines, model training infrastructure, deployment, monitoring, serving, scaling, reliability, and operational concerns. Focus on system-level reasoning rather than algorithmic theory. When ML concepts are introduced, explain them clearly without assuming deep prior knowledge.
+**Create minimal quiz (1-2 questions) for:**
+- Overview sections → Test concept connections
+- Summary sections → Test integration/synthesis
+- Introduction sections → Test motivation/context
 
-## Self-Check Evaluation Criteria
+**Skip quiz (quiz_needed: false) only for:**
+- Pure bibliography/references
+- Figures/tables without explanatory text
+- Transition paragraphs between topics
+- Purely descriptive content without actionable concepts
 
-First, evaluate if this section warrants a self-check by considering:
-1. Does it contain concepts that students need to actively understand and apply?
-2. Are there potential misconceptions that need to be addressed?
-3. Does it present system design tradeoffs or operational implications?
-4. Does it build on previous knowledge in ways that should be reinforced?
+# 3. QUESTION DESIGN PRINCIPLES
 
-**CRITICAL: If the section does not introduce technical tradeoffs, system components, or operational implications, set quiz_needed: false and justify.**
+**Difficulty Progression (REQUIRED):**
+1. First question: Foundational understanding (definitions, basic concepts)
+2. Middle questions: Application and analysis
+3. Last question: Integration, synthesis, or system design
 
-**Sections that typically DO NOT need self-checks:**
-- Pure introductions or context-setting sections
-- Sections that primarily provide historical context or motivation
-- Sections that are purely descriptive without actionable concepts
-- Overview sections without technical depth
-- Motivational or high-level conceptual sections (e.g., "AI Pervasiveness," "Looking Ahead")
+**Content Requirements:**
+- Focus on system-level reasoning and tradeoffs
+- Test understanding of implications, not arithmetic
+- Include at least one practical application question per technical section
+- Connect to real ML systems scenarios
+- For sections building on previous chapters: Include connection questions
 
-**Sections that typically DO need self-checks:**
-- Sections introducing new technical concepts or system components
-- Sections presenting design decisions, tradeoffs, or operational considerations
-- Sections addressing common pitfalls or misconceptions
-- Sections requiring application of concepts to real scenarios
-- Sections building on previous knowledge in critical ways
+**Context Awareness:**
+- Reference prerequisites clearly (e.g., "Building on Chapter 3's gradient descent...")
+- Ensure questions are self-contained and can stand alone
+- Don't assume knowledge not yet covered
 
-## Chapter-Level Variety and Coherence
+# 4. QUESTION TYPES & FORMATTING
 
-When previous self-check context is provided for the chapter:
-- **Analyze the existing questions** to understand what concepts and question types have been covered
-- **Ensure conceptual variety** - avoid repeating the same learning objectives or approaches
-- **Complement rather than duplicate** - if similar concepts appear, approach them from different angles
-- **Maintain chapter coherence** - questions should build on each other while covering distinct aspects
-- **Balance question types** - if previous sections used mostly MCQs, consider SHORT, FILL, or other types
-- **Focus on different system aspects** - if previous questions focused on tradeoffs, focus on implementation, operational concerns, or real-world applications
+**Available Types:** MCQ, TF, SHORT, FILL, ORDER
 
-## Question Guidelines
+**When to Use Each Type:**
+- **MCQ**: Comparing architectures, identifying patterns, deployment strategies (3-5 options)
+- **TF**: Challenging misconceptions, testing system constraints understanding
+- **SHORT**: Explaining tradeoffs, justifying decisions, analyzing scenarios
+- **FILL**: Specific technical terms (only when precise recall required)
+- **ORDER**: Workflows, pipelines, lifecycle phases (must have logical sequence)
 
-**Content Focus:**
-- Prioritize system-level reasoning: tradeoffs in deployment environments, impact of data pipeline design on model accuracy, scaling infrastructure for inference workloads, etc.
-- Include quantitative analysis when applicable: resource consumption calculations, performance trade-off analysis, scaling estimates, cost comparisons, latency budgets, throughput analysis
-- **IMPORTANT: For technical sections with numerical content (quantization, bit-widths, memory, latency, throughput), include at least one CALC question**
-- Include at least one question about design tradeoffs or operational implications
-- Address common misconceptions when applicable
-- Connect to practical ML systems scenarios
-- Check whether similar concepts have been addressed in earlier sections and avoid repetition unless extending or applying in novel ways
+**Format Requirements:**
+- **MCQ**: 
+  - Answer: "The correct answer is [LETTER]. [30-50 word explanation]"
+  - Distribute correct answers evenly across A, B, C, D
+  - All distractors must be plausible
+- **TF**: 
+  - Answer: "True/False. [20-40 word justification]"
+  - Must address misconceptions
+- **SHORT**: 
+  - Answer: [50-100 words, concise but complete]
+  - Must encourage synthesis/justification
+- **FILL**: 
+  - Answer: "[term]. [15-30 word explanation]"
+  - Blank marked with ____
+- **ORDER**: 
+  - Question: "Order the following: (1) Item, (2) Item, (3) Item"
+  - Answer: "The correct order is: (2), (1), (3). [40-80 word explanation]"
 
 **Question Types (use a variety based on content):**
 {QUESTION_GUIDELINES}
 
-**When to use different question types:**
-- **CALC questions for (PRIORITIZE THESE IN TECHNICAL SECTIONS):** 
-  
-  **⚠️ CRITICAL WARNING - AVOID SINGLE-STEP TRIVIAL CALC QUESTIONS:**
-  - ❌ NEVER: "1 TB × 8 hours = ?" (single-step multiplication)
-  - ❌ NEVER: "1000 GPU-hours × $0.50 = ?" (single-step cost calculation)
-  - ❌ NEVER: "Cloud processes 7TB, edge processes 0.7TB, difference = ?" (single-step subtraction)
-  - ❌ NEVER: Any single-operation question solvable by elementary school students
-  
-  **✅ CALC QUESTIONS MUST USE MULTI-STEP REASONING (2-4 steps minimum):**
-  
-  **Required Multi-Step Patterns:**
-  1. Calculate → Compare → Conclude (e.g., INT8 vs FP32 memory → ratio → edge deployment feasibility)
-  2. Convert → Calculate → Interpret (e.g., power to current → battery life → IoT viability)
-  3. Base Calculation → Apply Factor → Analyze Impact (e.g., theoretical FLOPS → efficiency → overhead analysis)
-  4. Multiple Operations → Combine Results → System Implications
-  
-  **Good Multi-Step Examples:**
-  - Memory: Calculate INT8 size (step 1) → Calculate FP32 size (step 2) → Compare reduction (step 3) → Conclude about edge constraints (step 4)
-  - Power: Convert mW to mA (step 1) → Calculate hours from mAh (step 2) → Convert to days/years (step 3) → Assess feasibility (step 4)
-  - FLOPs: Calculate matrix mult FLOPs (step 1) → Calculate memory access (step 2) → Compute arithmetic intensity (step 3) → Determine if compute-bound (step 4)
-  - Training: Calculate steps/epoch (step 1) → Total steps for all epochs (step 2) → Time per step to total time (step 3) → Compare to deadline (step 4)
-  
-  **ML Formulas to Chain Together:**
-  - Neural parameters → Memory usage → Compare to device limits → Deployment decision
-  - Compression ratio → Speedup factor → Energy savings → Battery life extension
-  - GPU utilization → Efficiency loss → Actual TFLOPS → Cost per TFLOP
-  - Batch size → Memory requirements → Available memory → Maximum batch determination
-- **MCQ questions for:** Comparing system architectures, identifying appropriate design patterns, selecting deployment strategies
-- **SHORT questions for:** Explaining system tradeoffs, justifying design decisions, analyzing failure scenarios
-- **FILL questions for:** Specific technical terminology, protocol names, architectural components (only when precise recall is required)
-- **TF questions for:** Challenging common misconceptions, testing understanding of system constraints
-- **ORDER questions for:** System deployment workflows, data pipeline stages, model lifecycle phases
+# 5. ANTI-PATTERNS TO AVOID
 
-**Question Type Specifics:**
-- **MCQ**: Provide 3-5 plausible distractors. The correct answer should not be obvious from the question stem alone. Do not embed options (e.g., A, B, C) in the question string; use the choices array instead. **CRITICAL: Distribute correct answers evenly across choices (A, B, C, D) to avoid guessing patterns. Do NOT favor any particular choice - ensure equal distribution. If you have 4 MCQ questions, aim for one correct answer for each letter (A, B, C, D). IMPORTANT: Randomize the position of correct answers. Use all four choices (A, B, C, D) across your MCQs. AVOID: Questions where the answer is obvious (e.g., "Which pillar focuses on training?" with "Training" as a choice).**
-- **SHORT**: Should encourage synthesis or justification (e.g., "Explain why X matters in Y context").
-- **FILL**: Should test key terms, but avoid placing the answer immediately before or after the blank. Use only when the term is central and non-obvious.
-- **TF**: Must include justification that addresses common misconceptions and explains why the statement matters in ML systems context.
-- **ORDER**: Focus on processes where sequence matters for system outcomes.
-- **CALC**: **CRITICAL FOR TECHNICAL SECTIONS.** Must include:
-  - Use ACTUAL ML FORMULAS from the chapter (parameter counting, FLOPs, compression ratios, etc.)
-  - Real-world parameters (e.g., "ResNet-50 with 25.6M parameters in FP32")
-  - Clear calculation steps showing the mathematical process AND formula used
-  - Practical interpretation of the result (e.g., "4x reduction enables edge deployment")
-  - Multi-step calculations that demonstrate understanding of ML concepts
-  - Examples: Parameter counting with (input × output) + bias, FLOPs analysis, compression with sparsity, training iterations
-  - **ABSOLUTELY AVOID**: Trivial multiplication (hours × rate), simple addition/subtraction, elementary school arithmetic
+**Never use:**
+- ❌ "All/None of the above" in MCQ
+- ❌ FILL blanks at sentence beginning/end
+- ❌ Obviously true/false TF statements
+- ❌ Pure memorization questions
+- ❌ Answer appearing in question
+- ❌ Ambiguous FILL questions
+- ❌ Arbitrary ORDER sequences
+- ❌ Obvious answers (e.g., "Which focuses on training?" → "Training")
+- ❌ Context-dependent phrases ("in this section", "as discussed above")
+- ❌ Trivial arithmetic calculations
 
-## Language and Writing Guidelines
+# 6. LANGUAGE & WRITING STANDARDS
 
-**Use precise technical language:**
-- Avoid generic academic terms like "crucial," "essential," "vital," "various," "numerous"
-- Replace vague phrases like "in the context of," "in terms of," "with regard to" with specific technical scenarios
-- Eliminate academic filler like "it is important to note," "furthermore," "moreover"
-- Use specific technical impacts instead of general importance statements
-- Frame questions with concrete technical situations rather than abstract contexts
+**Technical Precision:**
+- Use specific technical terms, not generic academic language
+- Eliminate filler ("crucial", "various", "it is important to note")
+- Frame with concrete scenarios, not abstract contexts
+- Use active voice and measurable impacts
 
-**Direct technical framing:**
-- Start with specific deployment scenarios, system constraints, or technical requirements
-- Use active voice and precise terminology
-- Focus on measurable impacts and specific system behaviors
-- Replace qualitative importance with quantitative or specific technical relationships
+**Self-Contained Questions:**
+- No references to "this section" or "as discussed above"
+- Include necessary context within the question
+- Questions must stand alone as complete learning experiences
 
-**Quality Standards:**
-- For `MCQ` questions, the `answer` string MUST start with `The correct answer is [LETTER].` followed by an explanation of why this choice is correct. Do NOT repeat the answer text in the explanation. In MCQ explanations, do not rephrase the question or answer. Instead, explain why the correct answer is correct in light of other distractors.
-- **Maintain a professional textbook tone** - Use clear, academically appropriate language suitable for university-level instruction
-- **Avoid basic definitional questions** - Focus on application, analysis, and system-level implications rather than simple recall
-- **Keep answers concise** - Aim for 50-100 words per answer explanation, not 75-150 words
-- **Every answer must include a "why" — not just what is right, but why it matters in an ML system context**
-- Use the first question to address the most foundational or essential system insight from the section
-- If multiple questions are included, ensure they span distinct ideas (e.g., tradeoffs, lifecycle stages, deployment implications)
-- Progress from basic understanding to application/analysis when multiple questions are used
-- **At least one question per quiz should apply the concept to a real-world systems scenario, such as latency tradeoffs, retraining risks, or data pipeline bottlenecks**
-- **CRITICAL: Make questions self-contained and holistic**
-  - Avoid phrases like "in this section," "as discussed above," "from the text," or any other context-dependent references
-  - Questions should be able to stand alone and provide complete learning value when viewed in isolation
-  - Include necessary context within the question itself rather than assuming the reader has just read the section
-  - Frame questions to be educational and complete learning experiences on their own
-  - Use phrases like "When designing ML systems," "For machine learning applications," etc.
+# 7. QUALITY CHECKLIST
 
-**CRITICAL ANTI-PATTERNS TO AVOID:**
-- Questions where the answer is obvious from the question itself or is trivially inferable
-- **BAD EXAMPLE: "Which pillar focuses on AI training?" with choices A) Data B) Training C) Deployment D) Operations - the answer "Training" is obvious from the question**
-- MCQs where distractors are implausible or where the answer is telegraphed
-- **MCQ answer bias - DO NOT default to B or any particular choice. Ensure equal distribution across A, B, C, D**
-- Questions that test surface-level recall without deeper understanding
-- Questions where multiple reasonable answers could be correct
-- Questions that simply repeat information from the text without requiring analysis
-- Questions that test trivial facts rather than conceptual understanding
-- Questions where the explanation just restates what's already obvious from the question
-- Questions that reference "this section," "as discussed above," "from the text," or other context-dependent phrases
-- Questions that assume the reader has just read the section and can't stand alone as complete learning experiences
-- Generic academic filler language and vague contextual phrases
-- Imprecise qualifiers instead of specific technical terms
+**Before finalizing, verify:**
+✓ Questions follow difficulty progression (basic → application → integration)
+✓ Answer lengths match word counts (MCQ: 30-50, SHORT: 50-100, etc.)
+✓ At least one practical application question
+✓ No anti-patterns present
+✓ Questions test understanding, not memorization
+✓ Previous chapter connections included where relevant
+✓ Questions are distinct and self-contained
+✓ Technical language is precise
+✓ MCQ answers distributed evenly across A, B, C, D
 
-**Bloom's Taxonomy Mix:**
-- Remember: Key terms and concepts
-- Understand: Explain implications and relationships  
-- Apply: Use concepts in new scenarios (CALC questions excel here)
-- Analyze: Compare approaches and identify tradeoffs (CALC for quantitative comparisons)
-- Evaluate: Justify design decisions
-- Create: Propose solutions to system challenges
+**Chapter Coherence (when previous quizzes provided):**
+- Analyze existing questions
+- Ensure conceptual variety
+- Complement, don't duplicate
+- Balance question types
+- Focus on different system aspects
 
-**CALC Question Priority Sections:**
-Prioritize CALC questions when sections discuss:
-- Neural network architectures (dl_primer, dnn_architectures chapters)
-  - Parameter counting in CNNs, RNNs, Transformers
-  - FLOPs calculations for different layer types
-  - Memory requirements for activations during forward/backward pass
-- Quantization and optimization (optimizations, efficient_ai chapters)
-  - FP32→INT8/FP16 conversions and memory savings
-  - Model compression ratios
-  - Pruning impact on model size
-- Performance metrics (benchmarking, hw_acceleration chapters)
-  - Latency/throughput calculations
-  - GPU/TPU utilization percentages
-  - Memory bandwidth requirements
-- Training efficiency (training, data_engineering chapters)
-  - Batch size vs memory trade-offs
-  - Data pipeline throughput
-  - Distributed training scaling factors
-- Energy and deployment (ondevice_learning, sustainable_ai chapters)
-  - Power consumption comparisons
-  - Battery life estimates
-  - Edge device constraints
+# 8. JSON OUTPUT REQUIREMENTS
 
-**Integration Guidelines:**
-- When appropriate, build on concepts introduced in earlier sections to show how foundational ideas evolve into more complex system-level considerations
-- Ensure questions collectively cover the section's main learning objectives
-- Questions should reinforce different facets of system-level thinking
+**MUST return valid JSON with:**
+- "quiz_needed": boolean (not string)
+- "rationale": 
+  - If true: object with {{focus_areas, question_strategy, difficulty_progression, integration, ranking_explanation}}
+  - If false: string explaining why
+- "questions": array (only if quiz_needed is true)
 
-**Quality Check**
-Before finalizing, ensure:
-- Questions test different aspects of the content (avoid redundancy)
-- At least one question addresses system-level implications
-- Questions are appropriate for the textbook's target audience
-- Answer explanations help reinforce learning, not just state correctness
-- The response strictly follows the JSON schema provided above
-- No questions fall into the anti-patterns listed above
-- Questions are distinct, avoid overlap, and reinforce different facets of system-level thinking
-- Language is precise and technical rather than generic or academic filler
-- If previous self-check context was provided: Do these questions complement rather than duplicate previous questions? Do they use different question types and focus areas?
+**Practical Application (REQUIRED for technical sections):**
+Include at least one:
+- "In a production system..." scenario
+- "What would happen if..." analysis
+- System design trade-off question
+- Real-world application
+- "Consider a scenario where..." problem
 
 ## Required JSON Schema
 
@@ -1458,12 +1384,6 @@ If a self-check IS needed, follow the structure below. For "MCQ" questions, prov
             ],
             "answer": "The correct answer is [LETTER]. This is the explanation for why this choice is correct.",
             "learning_objective": "..."
-        }},
-        {{
-            "question_type": "CALC",
-            "question": "A model with 50 million FP32 parameters is being quantized to INT8. Calculate the memory reduction factor and the absolute memory saved in MB.",
-            "answer": "FP32 uses 4 bytes per parameter, INT8 uses 1 byte. Original size: 50M × 4 = 200 MB. Quantized size: 50M × 1 = 50 MB. Reduction factor: 200/50 = 4×. Memory saved: 200 - 50 = 150 MB. This 4× reduction enables deployment on edge devices with limited memory.",
-            "learning_objective": "Apply quantization concepts to calculate practical memory savings."
         }},
         {{
             "question_type": "Short",
