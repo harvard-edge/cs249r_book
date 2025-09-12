@@ -447,15 +447,10 @@ local function create_section_connection_box(refs)
     end
   end
   
-  -- Add a subtle header for section refs
-  table.insert(content_blocks, 1, pandoc.Para({
-    pandoc.Emph({pandoc.Str("See also: ")})
-  }))
-  
-  -- Use callout-tip for section-level connections (more subtle)
+  -- Create a div with callout-chapter-connection class
   local callout_div = pandoc.Div(
     content_blocks,
-    pandoc.Attr("", {"callout", "callout-tip"}, {})
+    pandoc.Attr("", {"callout", "callout-chapter-connection"}, {})
   )
   
   return callout_div
