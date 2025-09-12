@@ -5,10 +5,10 @@
 local PLACEMENT_MODE = "hybrid"  -- hybrid mode balances overview with specific guidance
 
 -- Thresholds for filtering connections
-local STRENGTH_THRESHOLD = 0.25  -- Show connections with >25% strength
-local PRIORITY_THRESHOLD = 2     -- Show priority 1-2 in section boxes
-local MAX_CHAPTER_REFS = 8       -- Limit chapter-level overview
-local MAX_SECTION_REFS = 3       -- Keep section boxes concise
+local STRENGTH_THRESHOLD = 0.30  -- Show connections with >30% strength (more selective)
+local PRIORITY_THRESHOLD = 1     -- Show only priority 1 in section boxes (most important)
+local MAX_CHAPTER_REFS = 5       -- Limit chapter-level overview (more compact)
+local MAX_SECTION_REFS = 2       -- Keep section boxes very concise (max 2 refs)
 
 -- Initialize logging counters
 local stats = {
@@ -447,10 +447,15 @@ local function create_section_connection_box(refs)
     end
   end
   
-  -- Create a div with callout-chapter-connection class
+  -- Add a subtle header for section refs
+  table.insert(content_blocks, 1, pandoc.Para({
+    pandoc.Emph({pandoc.Str("See also: ")})
+  }))
+  
+  -- Use callout-tip for section-level connections (more subtle)
   local callout_div = pandoc.Div(
     content_blocks,
-    pandoc.Attr("", {"callout", "callout-chapter-connection"}, {})
+    pandoc.Attr("", {"callout", "callout-tip"}, {})
   )
   
   return callout_div
