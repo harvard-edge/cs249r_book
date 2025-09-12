@@ -160,7 +160,7 @@ local function is_xrefs_enabled(meta)
   return true
 end
 
--- Define chapter order from _quarto.yml
+-- Define chapter order from _quarto.yml (keep for potential future use)
 local chapter_order = {
   introduction = 1,
   ml_systems = 2,
@@ -211,45 +211,59 @@ local chapter_names = {
 }
 
 -- Format a single cross-reference entry
-local function format_xref_entry(ref, current_chapter_name)
-  -- Determine the arrow based on chapter order
-  local arrow = ""
-  local current_order = chapter_order[current_chapter_name] or 999
-  local target_order = chapter_order[ref.target_chapter] or 999
-  
-  if target_order > current_order then
-    arrow = "→"  -- Forward reference (chapter comes later)
-  elseif target_order < current_order then
-    arrow = "←"  -- Backward reference (chapter comes earlier)
-  else
-    arrow = "•"   -- Same chapter or unknown
-  end
-  
-  -- Build the reference text
-  local ref_text = arrow .. " "
+local function format_xref_entry(ref)
+  -- Build the reference text (no arrows, cleaner format)
+  local ref_text = ""
   
   -- Add chapter name with proper capitalization
   if ref.target_chapter then
     local display_name = chapter_names[ref.target_chapter] or ref.target_chapter
-    ref_text = ref_text .. display_name .. ": "
+    ref_text = ref_text .. "**" .. display_name .. "**: "
   end
   
-  -- Add section reference
+  -- Add section reference with ?? for unbuilt chapters
   if ref.target_section then
-    ref_text = ref_text .. "§\\ref{" .. ref.target_section .. "}"
+    -- Check if this is PDF format
+    if quarto.doc.isFormat("pdf") then
+      ref_text = ref_text .. "(§\\ref{" .. ref.target_section .. "})"
+    else
+      -- For HTML, just use ?? for now
+      ref_text = ref_text .. "(§??)"
+    end
   end
   
-  -- Clean up and shorten explanation
+  -- Clean up and format explanation
   if ref.explanation and ref.explanation ~= "" then
-    -- Remove redundant "Builds on foundational concepts:" type prefixes
+    -- Remove redundant prefixes
     local clean_explanation = ref.explanation
     clean_explanation = string.gsub(clean_explanation, "^Builds on foundational concepts: ", "")
     clean_explanation = string.gsub(clean_explanation, "^Essential prerequisite covering: ", "")
     clean_explanation = string.gsub(clean_explanation, "^Extends into: ", "")
-    -- Limit length
-    if string.len(clean_explanation) > 100 then
-      clean_explanation = string.sub(clean_explanation, 1, 97) .. "..."
+    clean_explanation = string.gsub(clean_explanation, "^Foundation for: ", "")
+    
+    -- Extract just the key concepts if it's a list
+    local concepts = string.match(clean_explanation, "^([^~]+~[^,]+)")
+    if concepts and string.find(clean_explanation, "~") then
+      -- Simplify concept pairs (remove tildes, limit to first few)
+      local concept_list = {}
+      for concept_pair in string.gmatch(concepts, "[^,]+") do
+        local clean_concept = string.gsub(concept_pair, "~", "/")
+        clean_concept = string.gsub(clean_concept, "^%s+", "")
+        clean_concept = string.gsub(clean_concept, "%s+$", "")
+        table.insert(concept_list, clean_concept)
+        if #concept_list >= 3 then break end  -- Limit to 3 concepts
+      end
+      clean_explanation = table.concat(concept_list, ", ")
+      if string.match(concepts, ",") and #concept_list >= 3 then
+        clean_explanation = clean_explanation .. "..."
+      end
+    else
+      -- For other explanations, just limit length
+      if string.len(clean_explanation) > 80 then
+        clean_explanation = string.sub(clean_explanation, 1, 77) .. "..."
+      end
     end
+    
     ref_text = ref_text .. " — " .. clean_explanation
   end
   
@@ -257,7 +271,7 @@ local function format_xref_entry(ref, current_chapter_name)
 end
 
 -- Create a connection box for a section's cross-references
-local function create_connection_box(refs, current_chapter_name)
+local function create_connection_box(refs)
   if not refs or #refs == 0 then
     return nil
   end
@@ -297,7 +311,7 @@ local function create_connection_box(refs, current_chapter_name)
   local content_blocks = {}
   
   for _, ref in ipairs(filtered_refs) do
-    local ref_text = format_xref_entry(ref, current_chapter_name)
+    local ref_text = format_xref_entry(ref)
     local ref_doc = pandoc.read(ref_text, "markdown")
     if ref_doc.blocks[1] then
       table.insert(content_blocks, ref_doc.blocks[1])
@@ -371,7 +385,7 @@ return {
             stats.sections_found = stats.sections_found + 1
             
             -- Create and insert the connection box
-            local connection_box = create_connection_box(section_refs, chapter_name)
+            local connection_box = create_connection_box(section_refs)
             if connection_box then
               table.insert(new_blocks, connection_box)
               stats.injections_made = stats.injections_made + 1
