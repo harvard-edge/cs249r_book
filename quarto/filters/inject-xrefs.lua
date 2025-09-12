@@ -471,6 +471,7 @@ return {
     Pandoc = function(doc)
       -- Check if enabled
       if not is_xrefs_enabled(doc.meta) then
+        log_warning("Cross-references disabled or not configured")
         return doc
       end
       
@@ -516,7 +517,8 @@ return {
             local chapter_box = create_chapter_connection_box(chapter_refs)
             if chapter_box then
               table.insert(new_blocks, chapter_box)
-              stats.chapter_refs = #chapter_refs
+              stats.chapter_boxes = 1
+              stats.total_refs = stats.total_refs + #chapter_refs
               log_info("Injected chapter-level connections: " .. #chapter_refs .. " references")
             end
           end
@@ -537,7 +539,7 @@ return {
             local connection_box = create_section_connection_box(section_refs)
             if connection_box then
               table.insert(new_blocks, connection_box)
-              stats.section_refs = stats.section_refs + 1
+              stats.section_boxes = stats.section_boxes + 1
               log_info("Injected section connections for: " .. block.identifier)
             end
           else
@@ -556,8 +558,8 @@ return {
       -- Summary
       log_success("📊 SUMMARY:")
       log_success("  Mode: " .. PLACEMENT_MODE)
-      log_success("  Chapter connections: " .. stats.chapter_refs)
-      log_success("  Section connections: " .. stats.section_refs) 
+      log_success("  Chapter boxes: " .. stats.chapter_boxes)
+      log_success("  Section boxes: " .. stats.section_boxes) 
       log_success("  Filtered references: " .. stats.filtered_refs)
       log_success("  Total references: " .. stats.total_refs)
       
