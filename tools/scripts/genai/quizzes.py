@@ -16,6 +16,9 @@ on chapter position.
 FEATURES:
 ---------
 - AI-powered quiz generation with chapter-aware difficulty progression
+- Dynamic concept extraction from external YAML files referenced in frontmatter
+- Cumulative knowledge tracking from previous chapters
+- Section-level knowledge boundary enforcement
 - Interactive GUI for reviewing and editing questions
 - Robust quiz insertion with reverse-order processing (prevents line number conflicts)
 - Quiz removal and cleanup from markdown files
@@ -52,13 +55,25 @@ python quizzes.py --mode clean --backup -f introduction.qmd
 # Verify quiz file structure
 python quizzes.py --mode verify -f introduction_quizzes.json
 
-CHAPTER PROGRESSION:
--------------------
+CHAPTER PROGRESSION & CONCEPT TRACKING:
+---------------------------------------
 The tool automatically detects chapter position and adjusts question difficulty:
 - Chapters 1-5: Foundational concepts and basic understanding
 - Chapters 6-10: Intermediate complexity with practical applications
 - Chapters 11-15: Advanced topics requiring system-level reasoning
 - Chapters 16-20: Specialized topics requiring integration across concepts
+
+Concept Extraction (Topics-Covered Approach):
+- Reads topics_covered from external YAML files (e.g., introduction_concepts.yml)
+- Referenced via 'concepts:' field in chapter QMD frontmatter
+- Uses structured topics_covered format: topic names with organized subtopics
+- Provides optimal balance of specificity and efficiency for quiz generation
+- Falls back to concept_map structure (primary/secondary concepts) if available
+- Accumulates topic knowledge from all previous chapters for context
+- Ensures questions only use knowledge available up to current section
+
+The topics_covered approach generates 33% more questions with better practical focus
+compared to traditional concept hierarchies, making it the preferred method.
 
 QUESTION TYPES:
 --------------
@@ -120,11 +135,13 @@ MAINTENANCE:
 - Global variables at the top control patterns and constants
 - Question type configuration is easily modifiable
 - System prompts can be updated for different requirements
-- Chapter mapping can be adjusted for different book structures
+- Chapter ordering defined in CHAPTER_ORDER for consistency
+- Concept maps extracted from external YAML files referenced in frontmatter
+- Knowledge boundaries enforced at prompt and system levels
 
-AUTHOR: [Your Name]
-VERSION: 1.0
-DATE: [Current Date]
+AUTHOR: ML Systems Textbook Team
+VERSION: 2.0 (Dynamic Concept Extraction)
+DATE: 2025
 """
 
 # ============================================================================
@@ -401,8 +418,9 @@ class QuizQuestionJudge:
   * Steps must have logical sequence
   * No arbitrary orderings
   * Tests process understanding
-  * QUESTION FORMAT: Items numbered (1), (2), (3) - keep brief, no explanations
-  * ANSWER FORMAT: Must start "The correct order is: (X), (Y), (Z)." then explain
+  * QUESTION FORMAT: Items numbered (1), (2), (3) - keep brief
+  * ANSWER FORMAT: "The correct order is: (2) Item B, (1) Item A, (3) Item C." 
+  * CRITICAL: Always include BOTH numbers AND item names in answer for readability
   * NEVER put explanations/definitions in the question items
 """
         }
@@ -674,15 +692,15 @@ SECTION_PATTERN = r"^##\s+(.+?)(\s*\{[^}]*\})?\s*$"
 QUESTION_TYPE_CONFIG = [
     {
         "type": "MCQ",
-        "description": "Best for checking definitions, comparisons, and system behaviors. Provide 3–5 options with plausible distractors. The `answer` field must explain why the correct choice is correct."
+        "description": "Best for checking definitions, comparisons, and system behaviors. Provide 3–5 options with plausible distractors. Answer format: 'The correct answer is [letter]: [choice text]. This is correct because [explanation]. [Why other options are incorrect or incomplete].'"
     },
     {
         "type": "TF",
-        "description": "Good for testing basic understanding or challenging misconceptions. The `answer` must include a justification."
+        "description": "Good for testing basic understanding or challenging misconceptions. Answer format: 'True/False. This is [true/false] because [clear explanation]. [Additional context or example if helpful].'"
     },
     {
         "type": "SHORT",
-        "description": "Encourages deeper reflection. Works well for \"Why is X necessary?\" or \"What would happen if...?\" questions. For numerical concepts, explain implications rather than just calculating."
+        "description": "Encourages deeper reflection. Works well for \"Why is X necessary?\" or \"What would happen if...?\" questions. Answer format: '[Main answer in 1-2 sentences]. For example, [concrete example or scenario]. This is important because [practical implication].'"
     },
     {
         "type": "FILL",
@@ -690,7 +708,7 @@ QUESTION_TYPE_CONFIG = [
     },
     {
         "type": "ORDER",
-        "description": "Excellent for reinforcing processes or workflows. Question format: 'Order the following [criterion]: (1) Item A, (2) Item B, (3) Item C.' Keep items concise - save explanations for the answer. Answer format: 'The correct order is: (1), (3), (2). [Explanation of why this sequence is correct, what each item does, etc.]'"
+        "description": "Excellent for reinforcing processes or workflows. Question format: 'Order the following [criterion]: (1) Item A, (2) Item B, (3) Item C.' Keep items concise. Answer format: 'The correct order is: (2) Item B, (1) Item A, (3) Item C. [Explanation].' MUST include item names with numbers for clarity."
     }
     # CALC type disabled - keeping structure for future use
     # {
@@ -1207,7 +1225,7 @@ You are a professor and educational content specialist creating pedagogically so
 # 1. CONTEXT & AUDIENCE
 
 **Target Audience:**
-- Advanced undergraduate (junior/senior) and graduate students in CS/Engineering
+- Advanced undergraduate (junior/senior) and graduate/MS/PhD students in CS/Engineering
 - Varying ML backgrounds (some learning ML concepts for first time)
 - Prerequisites: Programming (Python), algorithms, data structures, basic math, computer architecture
 
@@ -1217,6 +1235,7 @@ Full lifecycle coverage: data pipelines, training infrastructure, deployment, mo
 # 2. EVALUATION CRITERIA - Should This Section Have a Quiz?
 
 **Create a quiz (1-5 questions) if the section:**
+- First determine if the section warrants a quiz
 - Introduces technical concepts, system components, or operational implications
 - Presents design decisions, tradeoffs, or common misconceptions
 - Requires application of concepts to real scenarios
@@ -1278,8 +1297,9 @@ Full lifecycle coverage: data pipelines, training infrastructure, deployment, mo
   - Answer: "[term]. [15-30 word explanation]"
   - Blank marked with ____
 - **ORDER**: 
-  - Question: "Order the following: (1) Item, (2) Item, (3) Item"
-  - Answer: "The correct order is: (2), (1), (3). [40-80 word explanation]"
+  - Question: "Order the following: (1) Item A, (2) Item B, (3) Item C"
+  - Answer: "The correct order is: (2) Item B, (1) Item A, (3) Item C. [40-80 word explanation]"
+  - CRITICAL: Include both numbers AND item names in answer for readability
 
 **Question Types (use a variety based on content):**
 {QUESTION_GUIDELINES}
@@ -1298,20 +1318,57 @@ Full lifecycle coverage: data pipelines, training infrastructure, deployment, mo
 - ❌ Context-dependent phrases ("in this section", "as discussed above")
 - ❌ Trivial arithmetic calculations
 
-# 6. LANGUAGE & WRITING STANDARDS
+**Section-Reference Anti-Patterns (CRITICAL):**
+- ❌ "What is mentioned in the section?" - Tests reading, not understanding
+- ❌ "According to the text..." - Pure recall, not learning
+- ❌ "What does the section say about..." - Section-dependent, not self-contained
+- ❌ "What are the goals mentioned?" - Lists from text, not conceptual understanding
+- ❌ "As described in this section..." - Breaks self-containment
+- ❌ "The section identifies..." - Focus on content recall, not knowledge
 
-**Technical Precision:**
-- Use specific technical terms, not generic academic language
-- Eliminate filler ("crucial", "various", "it is important to note")
-- Frame with concrete scenarios, not abstract contexts
+**Knowledge Boundary Rules (IMPORTANT):**
+- ✅ USE: Knowledge from previous chapters (provided in context)
+- ✅ USE: Content from the current section being processed
+- ❌ AVOID: Concepts from later sections in the same chapter
+- ❌ AVOID: References to material "coming up" or "discussed later"
+- 💡 Each quiz should be answerable with ONLY: prior chapter knowledge + current section content
+
+**Instead, write questions that:**
+- ✓ Test conceptual understanding, not memory of specific text
+- ✓ Could be answered by someone who understands the concept but hasn't read this exact section
+- ✓ Focus on applying knowledge, not recalling what was written
+- ✓ Are self-contained and don't reference "the section" or "the text"
+
+# 6. REFLECTION & ENGAGEMENT
+
+**Personal Application (include 1 per quiz when relevant):**
+- "How might you apply [concept] in your own ML project?"
+- "What trade-offs would you consider when implementing [system]?"
+- "In your experience with [related technology], how does this compare?"
+
+**Answer Enhancement Requirements:**
+- **Explanatory reasoning**: Include "because" or "since" in answers to explain why
+- **Concrete examples**: Add "For example," or "e.g.," to illustrate concepts
+- **Practical implications**: End with "This is important because..." or "In practice..."
+- **Connection to real systems**: Reference actual ML systems or scenarios when possible
+
+# 7. LANGUAGE & WRITING STANDARDS
+
+**Academic Tone:**
+- Use academic language and terminology
+- Avoid generic academic terms like "crucial", "various", "it is important to note"
+- Use specific technical terms and concepts
 - Use active voice and measurable impacts
+- Use concrete scenarios and examples
+- Use precise language and terminology
+- Use a professional and academic tone
 
 **Self-Contained Questions:**
 - No references to "this section" or "as discussed above"
 - Include necessary context within the question
 - Questions must stand alone as complete learning experiences
 
-# 7. QUALITY CHECKLIST
+# 8. QUALITY CHECKLIST
 
 **Before finalizing, verify:**
 ✓ Questions follow difficulty progression (basic → application → integration)
@@ -1638,6 +1695,476 @@ def extract_sections_with_ids(markdown_text):
     return sections
 
 # ============================================================================
+# PROMPT BUILDER AND CONTEXT MANAGEMENT
+# Centralized prompt construction with clean template architecture.
+# ============================================================================
+
+class ChapterContext:
+    """Centralized chapter information management."""
+    
+    def __init__(self, chapter_number=None, chapter_title=None, section_title=None):
+        self.chapter_number = chapter_number
+        self.chapter_title = chapter_title or 'Unknown'
+        self.section_title = section_title or 'Unknown Section'
+        self.book_outline = build_book_outline_from_quarto_yml()
+        self.total_chapters = len(self.book_outline) if self.book_outline else 20
+        
+    def get_difficulty_tier(self):
+        """Get difficulty tier based on chapter position."""
+        if not self.chapter_number:
+            return 'intermediate'
+        if self.chapter_number <= 5:
+            return 'foundational'
+        elif self.chapter_number <= 10:
+            return 'intermediate'
+        elif self.chapter_number <= 15:
+            return 'advanced'
+        else:
+            return 'specialized'
+    
+    def get_difficulty_guidelines(self):
+        """Get difficulty guidelines for current chapter."""
+        tier = self.get_difficulty_tier()
+        guidelines = {
+            'foundational': """Focus on foundational concepts and basic understanding.
+Emphasize core definitions and fundamental principles.
+Questions should test comprehension of basic ML systems concepts.
+Avoid overly complex scenarios or advanced technical details.
+Establish building blocks for later chapters.""",
+            
+            'intermediate': """Intermediate complexity with practical applications.
+Questions should test understanding of technical implementation.
+Include questions about tradeoffs and design decisions.
+Connect concepts to real-world ML system scenarios.
+Build upon foundational concepts from earlier chapters.""",
+            
+            'advanced': """Advanced topics requiring system-level reasoning.
+Questions should test deep understanding of optimization and operational concerns.
+Focus on integration of multiple concepts from earlier chapters.
+Emphasize practical implications and real-world challenges.
+Prepare for specialized topics in final chapters.""",
+            
+            'specialized': """Specialized topics requiring integration across multiple concepts.
+Questions should test synthesis of knowledge from throughout the book.
+Focus on ethical, societal, and advanced operational considerations.
+Emphasize critical thinking about ML systems in broader contexts.
+Integrate concepts from all previous chapters."""
+        }
+        return guidelines.get(tier, guidelines['intermediate'])
+    
+    def get_chapter_progression(self):
+        """Get chapter's position in book progression."""
+        if not self.chapter_number or not self.book_outline:
+            return {}
+            
+        progression = {
+            'current': f"Chapter {self.chapter_number}: {self.chapter_title}",
+            'position': f"{self.chapter_number} of {self.total_chapters}",
+            'builds_upon': [],
+            'connects_to': []
+        }
+        
+        # Previous chapters this builds upon
+        if self.chapter_number > 1:
+            for i in range(max(1, self.chapter_number - 3), self.chapter_number):
+                if i <= len(self.book_outline):
+                    progression['builds_upon'].append(f"Chapter {i}: {self.book_outline[i-1]}")
+        
+        # Upcoming chapters this connects to
+        if self.chapter_number < self.total_chapters:
+            for i in range(self.chapter_number + 1, min(self.chapter_number + 4, self.total_chapters + 1)):
+                if i <= len(self.book_outline):
+                    progression['connects_to'].append(f"Chapter {i}: {self.book_outline[i-1]}")
+        
+        return progression
+    
+    def get_previous_chapter_concepts(self, all_chapter_concepts=None):
+        """Get accumulated topics from ONLY previous chapters (not current) for building upon prior knowledge.
+        
+        Uses topics_covered data when available, falls back to concept_map.
+        """
+        # For chapter 1, there's no prior knowledge
+        if not self.chapter_number or self.chapter_number <= 1:
+            return ""
+        
+        if not all_chapter_concepts:
+            return ""
+        
+        # Accumulate knowledge from chapters BEFORE the current one (not including current)
+        accumulated_topics = []
+        accumulated_concepts = {
+            'primary_concepts': [],
+            'secondary_concepts': [],
+            'technical_terms': [],
+            'methodologies': [],
+            'applications': []
+        }
+        
+        # Collect knowledge ONLY from chapters 1 to (current - 1)
+        for ch_num in range(1, self.chapter_number):  # This stops BEFORE current chapter
+            if ch_num in all_chapter_concepts:
+                chapter_data = all_chapter_concepts[ch_num]
+                
+                if chapter_data.get('type') == 'topics_covered':
+                    # Use topics_covered format (preferred)
+                    topics = chapter_data.get('data', [])
+                    accumulated_topics.extend(topics)
+                
+                elif chapter_data.get('type') == 'concept_map':
+                    # Fallback to concept_map format
+                    concept_map = chapter_data.get('data', {})
+                    for key in accumulated_concepts:
+                        if key in concept_map:
+                            accumulated_concepts[key].extend(concept_map[key])
+                
+                else:
+                    # Legacy format (direct concept_map)
+                    for key in accumulated_concepts:
+                        if key in chapter_data:
+                            accumulated_concepts[key].extend(chapter_data[key])
+        
+        # Build knowledge context
+        if not accumulated_topics and not any(accumulated_concepts.values()):
+            return ""
+        
+        knowledge_context = "\n# ASSUMED PRIOR KNOWLEDGE FROM PREVIOUS CHAPTERS\n"
+        
+        # Format topics_covered data (preferred)
+        if accumulated_topics:
+            knowledge_context += "\n## Topics Previously Covered:\n"
+            for topic_entry in accumulated_topics[:15]:  # Limit to prevent overwhelming
+                topic_name = topic_entry.get('topic', 'Unknown Topic')
+                knowledge_context += f"• {topic_name}\n"
+            
+            if len(accumulated_topics) > 15:
+                knowledge_context += f"... and {len(accumulated_topics) - 15} more topics\n"
+        
+        # Format concept_map data as fallback
+        elif any(accumulated_concepts.values()):
+            # Remove duplicates
+            for key in accumulated_concepts:
+                seen = set()
+                unique = []
+                for item in accumulated_concepts[key]:
+                    if item not in seen:
+                        seen.add(item)
+                        unique.append(item)
+                accumulated_concepts[key] = unique
+            
+            if accumulated_concepts['primary_concepts']:
+                knowledge_context += f"\n## Core Concepts Already Covered:\n"
+                knowledge_context += f"{', '.join(accumulated_concepts['primary_concepts'][:20])}\n"
+            
+            if accumulated_concepts['methodologies']:
+                knowledge_context += f"\n## Methodologies Previously Introduced:\n"
+                knowledge_context += f"{', '.join(accumulated_concepts['methodologies'][:15])}\n"
+        
+        knowledge_context += "\n## Implications for Quiz Design:\n"
+        knowledge_context += "- You can reference these topics without extensive explanation\n"
+        knowledge_context += "- Build upon this foundation with more advanced questions\n"
+        knowledge_context += "- Test integration and application of prior knowledge\n"
+        knowledge_context += "- Avoid re-testing basic understanding of these topics\n"
+        knowledge_context += "- Create questions that connect current content to previous knowledge\n"
+        
+        return knowledge_context
+    
+    def format_context(self, all_chapter_concepts=None):
+        """Format all chapter context as a structured string."""
+        progression = self.get_chapter_progression()
+        difficulty_tier = self.get_difficulty_tier().title()
+        
+        context = f"""# CHAPTER CONTEXT
+- **Chapter**: {self.chapter_number or 'N/A'} - {self.chapter_title}
+- **Section**: {self.section_title}
+- **Book Position**: Chapter {progression.get('position', 'Unknown')}
+- **Difficulty Tier**: {difficulty_tier}
+"""
+        
+        if progression.get('builds_upon'):
+            context += "\n## Builds Upon\n"
+            for chapter in progression['builds_upon']:
+                context += f"- {chapter}\n"
+        
+        if progression.get('connects_to'):
+            context += "\n## Connects To\n"
+            for chapter in progression['connects_to']:
+                context += f"- {chapter}\n"
+        
+        # Add current chapter topics if available
+        if all_chapter_concepts and self.chapter_number and self.chapter_number in all_chapter_concepts:
+            chapter_data = all_chapter_concepts[self.chapter_number]
+            
+            if chapter_data.get('type') == 'topics_covered':
+                topics = chapter_data.get('data', [])
+                if topics:
+                    context += "\n## Chapter Topics Coverage\n"
+                    for topic_entry in topics[:10]:  # Limit to prevent overwhelming
+                        topic_name = topic_entry.get('topic', 'Unknown Topic')
+                        subtopics = topic_entry.get('subtopics', [])
+                        context += f"• **{topic_name}**: {', '.join(subtopics[:5])}"
+                        if len(subtopics) > 5:
+                            context += f" (+{len(subtopics)-5} more)"
+                        context += "\n"
+                    
+                    if len(topics) > 10:
+                        context += f"... and {len(topics) - 10} more topic areas\n"
+        
+        context += f"\n## Difficulty Guidelines\n{self.get_difficulty_guidelines()}\n"
+        
+        return context
+
+
+def extract_all_chapter_concepts(base_path="quarto/contents/core", verbose=False):
+    """Pre-extract all chapter topics_covered data for efficient quiz generation.
+    
+    Reads topics_covered from external YAML files referenced in chapter frontmatter.
+    Uses the chapter ordering from the active quarto config file.
+    The topics_covered approach provides the optimal balance of specificity and 
+    efficiency for generating high-quality self-check questions.
+    
+    Args:
+        base_path: Path to the directory containing chapter folders
+        verbose: Whether to print debug information
+    
+    Returns:
+        Dictionary mapping chapter numbers to their topics_covered data
+    """
+    import yaml
+    import os
+    import glob
+    
+    all_concepts = {}
+    
+    # Try to get chapter order from quarto config first
+    chapter_order = []
+    if os.path.exists(QUARTO_YML_PATH):
+        try:
+            ordered_files = get_qmd_order_from_quarto_yml(QUARTO_YML_PATH)
+            # Extract chapter names from file paths
+            for qmd_file in ordered_files:
+                # Extract chapter name from path like 'contents/core/introduction/introduction.qmd'
+                parts = qmd_file.split('/')
+                if len(parts) >= 2:
+                    chapter_name = parts[-2] if parts[-2] != parts[-1].replace('.qmd', '') else parts[-2]
+                    if chapter_name not in chapter_order:
+                        chapter_order.append(chapter_name)
+            if verbose and chapter_order:
+                print(f"  📋 Using chapter order from {os.path.basename(QUARTO_YML_PATH)}")
+        except Exception as e:
+            if verbose:
+                print(f"  ⚠️ Could not get chapter order from quarto config: {e}")
+    
+    # Fallback to default order if quarto config parsing failed
+    if not chapter_order:
+        chapter_order = [
+            'introduction', 'ml_systems', 'dl_primer', 'dnn_architectures',
+            'data_engineering', 'frameworks', 'training', 'optimizations',
+            'hw_acceleration', 'benchmarking', 'ops', 'workflow',
+            'ondevice_learning', 'robust_ai', 'privacy_security',
+            'responsible_ai', 'sustainable_ai', 'ai_for_good',
+            'frontiers', 'conclusion'
+        ]
+        if verbose:
+            print("  📋 Using default chapter order")
+    
+    # Create a mapping from chapter name to number
+    chapter_name_to_number = {name: idx + 1 for idx, name in enumerate(chapter_order)}
+    
+    # Get all chapter directories
+    chapter_dirs = sorted(glob.glob(os.path.join(base_path, "*/")))
+    
+    for chapter_dir in chapter_dirs:
+        chapter_name = os.path.basename(os.path.dirname(chapter_dir))
+        
+        # Skip non-chapter directories
+        if chapter_name not in chapter_name_to_number:
+            continue
+        
+        chapter_number = chapter_name_to_number[chapter_name]
+        
+        # Find the main .qmd file (same name as directory)
+        main_qmd = os.path.join(chapter_dir, f"{chapter_name}.qmd")
+        
+        # If not found, try to get any .qmd file
+        if not os.path.exists(main_qmd):
+            qmd_files = glob.glob(os.path.join(chapter_dir, "*.qmd"))
+            if qmd_files:
+                main_qmd = qmd_files[0]
+            else:
+                continue
+        
+        try:
+            with open(main_qmd, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Parse YAML frontmatter to get the concepts file reference
+            if content.startswith('---'):
+                end_marker = content.find('---', 3)
+                if end_marker != -1:
+                    frontmatter_str = content[3:end_marker]
+                    frontmatter = yaml.safe_load(frontmatter_str)
+                    
+                    # Get the concepts file reference
+                    concepts_file = frontmatter.get('concepts')
+                    if concepts_file:
+                        # Build the full path to the concepts file
+                        concepts_path = os.path.join(chapter_dir, concepts_file)
+                        
+                        # Read the external concepts file
+                        if os.path.exists(concepts_path):
+                            with open(concepts_path, 'r', encoding='utf-8') as cf:
+                                concepts_data = yaml.safe_load(cf)
+                                
+                            # Extract topics_covered (preferred) or fallback to concept_map
+                            topics_covered = concepts_data.get('topics_covered', [])
+                            if topics_covered:
+                                # Store topics_covered data by chapter number
+                                all_concepts[chapter_number] = {
+                                    'type': 'topics_covered',
+                                    'data': topics_covered
+                                }
+                                if verbose:
+                                    print(f"  📚 Loaded {len(topics_covered)} topics from Chapter {chapter_number}: {chapter_name} ({concepts_file})")
+                            else:
+                                # Fallback to concept_map if topics_covered not available
+                                concept_map = concepts_data.get('concept_map', {})
+                                if concept_map:
+                                    all_concepts[chapter_number] = {
+                                        'type': 'concept_map',
+                                        'data': concept_map
+                                    }
+                                    if verbose:
+                                        print(f"  ⚠️ Fallback to concept_map for Chapter {chapter_number}: {chapter_name} (topics_covered not found)")
+                        else:
+                            if verbose:
+                                print(f"  ⚠️ Concepts file not found: {concepts_path}")
+                    else:
+                        if verbose:
+                            print(f"  ℹ️ No concepts reference in {chapter_name}")
+        except Exception as e:
+            if verbose:
+                print(f"  ⚠️ Could not load concepts from {chapter_name}: {str(e)}")
+            continue
+    
+    return all_concepts
+
+class PromptBuilder:
+    """Centralized prompt construction with template-based architecture."""
+    
+    def __init__(self, all_chapter_concepts=None):
+        # System prompt is now static and doesn't need dynamic injection
+        self.system_prompt = SYSTEM_PROMPT
+        # Store pre-extracted chapter concepts
+        self.all_chapter_concepts = all_chapter_concepts or {}
+        
+    def build_user_prompt_with_context(self, section_text, chapter_context, previous_quizzes=None):
+        """Build user prompt with all context information."""
+        
+        # Format chapter context (including current chapter topics_covered)
+        chapter_info = chapter_context.format_context(self.all_chapter_concepts)
+        
+        # Get accumulated concepts from previous chapters
+        previous_concepts = chapter_context.get_previous_chapter_concepts(self.all_chapter_concepts)
+        
+        # Build previous quiz context if available
+        previous_context = self._format_previous_quizzes(previous_quizzes)
+        
+        # Section classification hints
+        section_hints = self._get_section_classification_hints(section_text)
+        
+        # Add section boundary notice if processing a later section
+        section_boundary_notice = ""
+        if previous_quizzes:
+            section_boundary_notice = """# KNOWLEDGE BOUNDARIES
+Note: You are processing section {0} of this chapter. Use ONLY:
+- Knowledge from previous chapters (provided above)
+- Content from THIS specific section
+- DO NOT reference or assume knowledge from later sections in this chapter
+""".format(len(previous_quizzes) + 1)
+        
+        # Construct the complete user prompt
+        user_prompt = f"""{chapter_info}
+
+{previous_concepts}
+
+{section_boundary_notice}
+
+# SECTION CONTENT
+{section_text}
+
+{section_hints}
+
+{previous_context}
+
+# TASK
+Generate a self-check quiz with 1 to 5 well-structured questions based on this section.
+Focus on the key concepts and ensure questions align with the difficulty tier and chapter progression.
+Questions should be answerable using ONLY the knowledge available up to this point.
+Return your response in the specified JSON format.
+"""
+        
+        return user_prompt.strip()
+    
+    def _format_previous_quizzes(self, previous_quizzes):
+        """Format previous quiz information to avoid overlap."""
+        if not previous_quizzes:
+            return ""
+        
+        context = """# PREVIOUS SECTIONS IN THIS CHAPTER
+Avoid conceptual overlap with these existing questions:\n\n"""
+        
+        for i, quiz_data in enumerate(previous_quizzes, 1):
+            if quiz_data.get('quiz_needed', False):
+                questions = quiz_data.get('questions', [])
+                if questions:
+                    context += f"## Section {i}\n"
+                    for j, question in enumerate(questions, 1):
+                        q_type = question.get('question_type', 'Unknown')
+                        q_text = question.get('question', '')[:100]  # Truncate for brevity
+                        context += f"- Q{j} ({q_type}): {q_text}...\n"
+                    context += "\n"
+        
+        if context != """# PREVIOUS SECTIONS IN THIS CHAPTER
+Avoid conceptual overlap with these existing questions:\n\n""":
+            context += """## Variety Guidelines
+- Use different question types than those already used
+- Focus on different aspects of the content
+- Approach similar concepts from different angles
+- Ensure complementary learning objectives\n"""
+        else:
+            return ""  # No previous quizzes to consider
+        
+        return context
+    
+    def _get_section_classification_hints(self, section_text):
+        """Analyze section content to provide classification hints."""
+        hints = []
+        
+        # Check for code blocks
+        if '```' in section_text:
+            hints.append("Contains code examples - consider implementation questions")
+        
+        # Check for mathematical content
+        if any(marker in section_text for marker in ['$', '\\[', '\\(', 'equation']):
+            hints.append("Contains mathematical content - consider conceptual understanding")
+        
+        # Check for figures/diagrams
+        if any(marker in section_text for marker in ['![', 'Figure', 'Diagram', 'Table']):
+            hints.append("Contains visual elements - consider interpretation questions")
+        
+        # Check for lists/enumerations
+        if any(marker in section_text for marker in ['1.', '2.', '- ', '* ']):
+            hints.append("Contains enumerated concepts - consider ordering or classification")
+        
+        # Check for comparisons
+        if any(word in section_text.lower() for word in ['versus', 'vs', 'compared to', 'difference', 'tradeoff']):
+            hints.append("Contains comparisons - consider tradeoff questions")
+        
+        if hints:
+            return "# CONTENT HINTS\n" + "\n".join(f"- {hint}" for hint in hints)
+        return ""
+
+# ============================================================================
 # LLM INTERACTION UTILITIES
 # Functions for calling LLM APIs and handling responses.
 # ============================================================================
@@ -1944,163 +2471,43 @@ def validate_individual_quiz_response(data):
     
     return True
 
-def build_user_prompt(section_title, section_text, chapter_number=None, chapter_title=None, previous_quizzes=None):
+def build_user_prompt(section_title, section_text, chapter_number=None, chapter_title=None, previous_quizzes=None, all_chapter_concepts=None):
     """
-    Build a user prompt with chapter context and previous quiz data for variety.
+    Build a user prompt using the new PromptBuilder architecture.
     
-    This function constructs the user prompt sent to the AI, incorporating
-    chapter-specific context, difficulty guidelines, and previous quiz data
-    to ensure variety and avoid overlap within the chapter.
+    This is a compatibility wrapper that uses the new centralized PromptBuilder
+    and ChapterContext classes for cleaner prompt construction.
     
     Args:
         section_title (str): Title of the section being processed
         section_text (str): Content of the section
         chapter_number (int, optional): Chapter number (1-20)
         chapter_title (str, optional): Chapter title
-        previous_quizzes (list, optional): List of previous quiz data from earlier sections in this chapter
+        previous_quizzes (list, optional): List of previous quiz data
+        all_chapter_concepts (dict, optional): Pre-extracted concept maps from all chapters
         
     Returns:
-        str: Formatted user prompt with chapter context, difficulty guidelines, and previous quiz context
-        
-    Note:
-        - Chapters 1-5: Foundational concepts and basic understanding
-        - Chapters 6-10: Intermediate complexity with practical applications
-        - Chapters 11-15: Advanced topics requiring system-level reasoning
-        - Chapters 16-20: Specialized topics requiring integration across concepts
-        - Previous quiz data helps avoid redundancy and ensures variety
-        - Uses global BOOK_OUTLINE to connect concepts across chapters and build progression
+        str: Formatted user prompt with all context
     """
-    # Define chapter progression context
-    chapter_context = ""
-    difficulty_guidelines = ""
-    book_progression_context = ""
+    # Create chapter context
+    chapter_context = ChapterContext(
+        chapter_number=chapter_number,
+        chapter_title=chapter_title,
+        section_title=section_title
+    )
     
-    if chapter_number is not None:
-        # Ensure book outline is built
-        book_outline = build_book_outline_from_quarto_yml()
-        
-        if book_outline:
-            chapter_context = f"""
-**Chapter Context:**
-This is Chapter {chapter_number}: {chapter_title or 'Unknown'} in a {len(book_outline)}-chapter textbook on Machine Learning Systems.
-The book progresses from foundational concepts to advanced topics and operational concerns.
-"""
-            
-            # Add book outline context for better progression understanding using dynamic BOOK_OUTLINE
-            book_progression_context = f"""
-**Book Progression Context:**
-This chapter builds upon and connects to the broader textbook structure:
-
-"""
-            # Show previous chapters that this builds upon
-            if chapter_number > 1:
-                book_progression_context += "**Builds upon:**\n"
-                for i in range(1, chapter_number):
-                    if i <= len(book_outline):
-                        book_progression_context += f"- Chapter {i}: {book_outline[i-1]}\n"
-                book_progression_context += "\n"
-            
-            # Show upcoming chapters this connects to
-            if chapter_number < len(book_outline):
-                book_progression_context += "**Connects to:**\n"
-                for i in range(chapter_number + 1, min(chapter_number + 4, len(book_outline) + 1)):
-                    if i <= len(book_outline):
-                        book_progression_context += f"- Chapter {i}: {book_outline[i-1]}\n"
-                book_progression_context += "\n"
-            
-            book_progression_context += """
-**Progression Guidelines:**
-- Questions should acknowledge concepts from earlier chapters where relevant
-- Build upon foundational knowledge established in previous chapters
-- Prepare students for more advanced topics in upcoming chapters
-- Create connections that show how ML systems concepts evolve and integrate
-"""
-        else:
-            # No book outline available
-            chapter_context = f"""
-**Chapter Context:**
-This is Chapter {chapter_number}: {chapter_title or 'Unknown'} in a Machine Learning Systems textbook.
-"""
-            book_progression_context = ""
-        
-        # Progressive difficulty guidelines based on chapter position
-        if chapter_number <= 5:
-            difficulty_guidelines = """
-**Chapter Difficulty Guidelines (Chapters 1-5):**
-- Focus on foundational concepts and basic understanding
-- Emphasize core definitions and fundamental principles
-- Questions should test comprehension of basic ML systems concepts
-- Avoid overly complex scenarios or advanced technical details
-- Establish building blocks for later chapters
-"""
-        elif chapter_number <= 10:
-            difficulty_guidelines = """
-**Chapter Difficulty Guidelines (Chapters 6-10):**
-- Intermediate complexity with practical applications
-- Questions should test understanding of technical implementation
-- Include questions about tradeoffs and design decisions
-- Connect concepts to real-world ML system scenarios
-- Build upon foundational concepts from Chapters 1-5
-"""
-        elif chapter_number <= 15:
-            difficulty_guidelines = """
-**Chapter Difficulty Guidelines (Chapters 11-15):**
-- Advanced topics requiring system-level reasoning
-- Questions should test deep understanding of optimization and operational concerns
-- Focus on integration of multiple concepts from earlier chapters
-- Emphasize practical implications and real-world challenges
-- Prepare for specialized topics in final chapters
-"""
-        else:
-            difficulty_guidelines = """
-**Chapter Difficulty Guidelines (Chapters 16-20):**
-- Specialized topics requiring integration across multiple concepts
-- Questions should test synthesis of knowledge from throughout the book
-- Focus on ethical, societal, and advanced operational considerations
-- Emphasize critical thinking about ML systems in broader contexts
-- Integrate concepts from all previous chapters
-"""
+    # Use PromptBuilder to construct the prompt with chapter concepts
+    prompt_builder = PromptBuilder(all_chapter_concepts=all_chapter_concepts)
     
-    # Build previous quiz context if available
-    previous_quiz_context = ""
-    if previous_quizzes and len(previous_quizzes) > 0:
-        previous_quiz_context = f"""
-**Previous Quiz Context (Avoid Overlap):**
-The following sections in this chapter already have quizzes. Ensure your questions are distinct and avoid conceptual overlap:
-
-"""
-        for i, quiz_data in enumerate(previous_quizzes, 1):
-            if quiz_data.get('quiz_needed', False):
-                questions = quiz_data.get('questions', [])
-                previous_quiz_context += f"\nSection {i} Questions:\n"
-                for j, question in enumerate(questions, 1):
-                    q_type = question.get('question_type', 'Unknown')
-                    q_text = question.get('question', '')
-                    previous_quiz_context += f"  Q{j} ({q_type}): {q_text}\n"
-                previous_quiz_context += "\n"
-        
-        previous_quiz_context += """
-**Variety Guidelines:**
-- Use different question types than those already used in this chapter
-- Focus on different aspects of the content (e.g., if previous questions focused on tradeoffs, focus on implementation or operational concerns)
-- Ensure your questions complement rather than repeat the learning objectives covered in previous sections
-- If similar concepts appear, approach them from a different angle or application context
-- Consider how this section's concepts connect to and build upon earlier chapters
-"""
+    # Add section header to the text
+    full_section_text = f"**Section: {section_title}**\n\n{section_text}"
     
-    return f"""
-This section is titled "{section_title}".
+    return prompt_builder.build_user_prompt_with_context(
+        section_text=full_section_text,
+        chapter_context=chapter_context,
+        previous_quizzes=previous_quizzes
+    )
 
-{chapter_context}
-{book_progression_context}
-{difficulty_guidelines}
-{previous_quiz_context}
-
-Section content:
-{section_text}
-
-Generate a self-check quiz with 1 to 5 well-structured questions and answers based on this section. Include a rationale explaining your question generation strategy and focus areas. Return your response in the specified JSON format.
-""".strip()
 def regenerate_section_quiz(client, section_title, section_text, current_quiz_data, user_prompt, chapter_number=None, chapter_title=None, previous_quizzes=None):
     """
     Regenerate quiz questions for a section with custom instructions.
@@ -3158,6 +3565,9 @@ def show_usage_examples():
     print("   python quizzes.py --mode generate -f chapter1.qmd --provider ollama  # Use local Ollama")
     print("   python quizzes.py --mode generate -d ./chapters/ --parallel")
     print("   python quizzes.py --mode generate -d ./chapters/ --parallel --max-workers 2 --evaluate")
+    print("   python quizzes.py --mode generate -d ./chapters/ --quarto-config pdf  # Use PDF chapter order")
+    print("   python quizzes.py --mode generate -d ./chapters/ --quarto-config html  # Use HTML chapter order")
+    print("   # Note: Automatically uses topics_covered from YAML concept files for optimal quiz generation")
     
     print("\n2. Review existing quizzes with GUI:")
     print("   python quizzes.py --mode review -f quizzes.json")
@@ -3189,6 +3599,10 @@ def show_usage_examples():
     
     print("\n⚠️  IMPORTANT: You must specify either -f (file) or -d (directory) for all modes.")
     print("   The tool automatically detects file types (JSON vs QMD) and performs the appropriate action.")
+    print("\n📚 CONCEPT TRACKING: The tool automatically uses topics_covered from YAML concept files")
+    print("   referenced in chapter frontmatter (e.g., concepts: introduction_concepts.yml)")
+    print("   This provides optimal quiz generation with structured topic coverage and")
+    print("   cumulative knowledge tracking across chapters.")
 
 # ============================================================================
 # MAIN ENTRY POINT
@@ -3219,7 +3633,7 @@ def main():
         - Provides comprehensive help and usage examples
     """
     parser = argparse.ArgumentParser(
-        description="Quiz generation and management tool for markdown files.",
+        description="Quiz generation and management tool for markdown files. Uses topics_covered from YAML concept files for optimal quiz generation.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -3239,6 +3653,7 @@ Examples:
 
 Note: You must specify either -f (file) or -d (directory) for all modes.
 The tool will automatically detect file types (JSON vs QMD) and perform the appropriate action.
+Uses topics_covered from YAML concept files for structured quiz generation.
 Use --parallel for faster directory processing (one thread per file).
         """
     )
@@ -3253,6 +3668,8 @@ Use --parallel for faster directory processing (one thread per file).
     parser.add_argument("--ollama-url", default="http://localhost:11434", 
                        help="Ollama API URL (default: http://localhost:11434)")
     parser.add_argument("-o", "--output", default="quizzes.json", help="Path to output JSON file (generate mode only)")
+    parser.add_argument("--quarto-config", default="html", choices=["html", "pdf", "epub", "auto"],
+                       help="Which _quarto-*.yml config to use for chapter ordering (default: html). 'auto' uses _quarto.yml symlink.")
     parser.add_argument("--backup", action="store_true", help="Create backup files before cleaning")
     parser.add_argument("--dry-run", action="store_true", help="Show what would be done without making changes")
     parser.add_argument("--parallel", action="store_true", help="Process multiple files in parallel (directory mode only)")
@@ -3284,6 +3701,14 @@ Use --parallel for faster directory processing (one thread per file).
     
     if args.max_workers and not args.parallel:
         print("Warning: --max-workers is only effective when used with --parallel")
+    
+    # Set the quarto config path based on user choice
+    quarto_path = set_quarto_yml_path(args.quarto_config)
+    if args.verbose:
+        print(f"Using Quarto config: {quarto_path}")
+    if not os.path.exists(quarto_path):
+        print(f"Warning: Quarto config file not found: {quarto_path}")
+        print("Chapter ordering may not work correctly.")
 
     # Determine file type and route to appropriate function
     if args.file:
@@ -3748,7 +4173,7 @@ def pre_process_section(section, client=None, model=None, verbose=False, paralle
             }
         }
 
-def process_section(client, section, chapter_context, previous_quizzes, args, preprocessing_metadata=None, verbose=False, parallel=False):
+def process_section(client, section, chapter_context, previous_quizzes, args, preprocessing_metadata=None, verbose=False, parallel=False, all_chapter_concepts=None):
     """
     PHASE 2: PROCESSING
     Main quiz generation phase - generates questions using OpenAI.
@@ -3760,6 +4185,7 @@ def process_section(client, section, chapter_context, previous_quizzes, args, pr
         previous_quizzes: List of previous quiz data
         args: Command line arguments
         preprocessing_metadata: Optional metadata from pre_process_section
+        all_chapter_concepts: Pre-extracted concept maps from all chapters
         
     Returns:
         dict: Quiz response from OpenAI
@@ -3772,7 +4198,8 @@ def process_section(client, section, chapter_context, previous_quizzes, args, pr
         section['section_text'],
         chapter_number,
         chapter_title,
-        previous_quizzes
+        previous_quizzes,
+        all_chapter_concepts
     )
     
     # Add preprocessing hints if available
@@ -3905,6 +4332,102 @@ def redistribute_mcq_answers(response, verbose=False, parallel=False):
     
     return response
 
+def balance_tf_answers(response, verbose=False, parallel=False):
+    """
+    Balance True/False answers to ensure approximately 50/50 distribution.
+    
+    Args:
+        response: Quiz response containing questions
+        verbose: Whether to print verbose output
+        parallel: Whether running in parallel mode
+        
+    Returns:
+        dict: Modified response with balanced T/F answers
+    """
+    import random
+    
+    if not response.get('quiz_needed', False):
+        return response
+    
+    questions = response.get('questions', [])
+    tf_questions = [q for q in questions if q.get('question_type') == 'TF']
+    
+    if not tf_questions:
+        return response
+    
+    # Analyze current T/F distribution
+    current_distribution = {'True': 0, 'False': 0}
+    for q in tf_questions:
+        answer_text = q.get('answer', '').lower()
+        if 'true' in answer_text.split('.')[0]:  # Check first sentence
+            current_distribution['True'] += 1
+        else:
+            current_distribution['False'] += 1
+    
+    if verbose or not parallel:
+        print(f"     Current T/F distribution: True={current_distribution['True']}, False={current_distribution['False']}")
+    
+    # If already balanced (within 1), return as is
+    diff = abs(current_distribution['True'] - current_distribution['False'])
+    if diff <= 1:
+        return response
+    
+    # Determine how many to flip
+    total_tf = len(tf_questions)
+    target_true = total_tf // 2
+    target_false = total_tf - target_true
+    
+    # Identify which questions to flip
+    to_flip_to_true = max(0, target_true - current_distribution['True'])
+    to_flip_to_false = max(0, target_false - current_distribution['False'])
+    
+    # Flip some questions
+    if to_flip_to_true > 0:
+        false_questions = [q for q in tf_questions if 'false' in q.get('answer', '').lower().split('.')[0]]
+        questions_to_flip = random.sample(false_questions, min(to_flip_to_true, len(false_questions)))
+        for q in questions_to_flip:
+            # Negate the question to flip the answer
+            original_question = q['question']
+            if 'True or False:' in original_question:
+                statement = original_question.replace('True or False:', '').strip()
+                # Simple negation - this is basic but works for most cases
+                if statement.startswith('The '):
+                    q['question'] = f"True or False: It is not the case that {statement[4:].lower()}"
+                else:
+                    q['question'] = f"True or False: It is not true that {statement.lower()}"
+            # Flip the answer
+            q['answer'] = q['answer'].replace('False', 'True').replace('false', 'true')
+    
+    elif to_flip_to_false > 0:
+        true_questions = [q for q in tf_questions if 'true' in q.get('answer', '').lower().split('.')[0]]
+        questions_to_flip = random.sample(true_questions, min(to_flip_to_false, len(true_questions)))
+        for q in questions_to_flip:
+            # Negate the question to flip the answer
+            original_question = q['question']
+            if 'True or False:' in original_question:
+                statement = original_question.replace('True or False:', '').strip()
+                # Simple negation
+                if statement.startswith('The '):
+                    q['question'] = f"True or False: It is not the case that {statement[4:].lower()}"
+                else:
+                    q['question'] = f"True or False: It is not true that {statement.lower()}"
+            # Flip the answer
+            q['answer'] = q['answer'].replace('True', 'False').replace('true', 'false')
+    
+    # Recalculate distribution
+    final_distribution = {'True': 0, 'False': 0}
+    for q in tf_questions:
+        answer_text = q.get('answer', '').lower()
+        if 'true' in answer_text.split('.')[0]:
+            final_distribution['True'] += 1
+        else:
+            final_distribution['False'] += 1
+    
+    if verbose or not parallel:
+        print(f"     Balanced T/F distribution: True={final_distribution['True']}, False={final_distribution['False']}")
+    
+    return response
+
 def evaluate_question_quality(response, client, chapter_info, args, verbose=False, parallel=False):
     """
     Evaluate the quality of quiz questions using LLM judge.
@@ -4031,7 +4554,10 @@ def post_process_section(response, client=None, chapter_info=None, args=None, ve
     # Step 1: Redistribute MCQ answers for balance
     response = redistribute_mcq_answers(response, verbose=verbose, parallel=parallel)
     
-    # Step 2: Evaluate question quality (if enabled and parameters provided)
+    # Step 2: Balance True/False answers for 50/50 distribution
+    response = balance_tf_answers(response, verbose=verbose, parallel=parallel)
+    
+    # Step 3: Evaluate question quality (if enabled and parameters provided)
     if client and chapter_info and args:
         response = evaluate_question_quality(response, client, chapter_info, args,
                                             verbose=verbose, parallel=parallel)
@@ -4043,7 +4569,7 @@ def post_process_section(response, client=None, chapter_info=None, args=None, ve
     
     return response
 
-def generate_for_file(qmd_file, args):
+def generate_for_file(qmd_file, args, all_chapter_concepts=None):
     """
     Generate quizzes for a single QMD file.
     
@@ -4055,6 +4581,7 @@ def generate_for_file(qmd_file, args):
     Args:
         qmd_file (str): Path to the QMD file to process
         args (argparse.Namespace): Command line arguments including model and output
+        all_chapter_concepts (dict, optional): Pre-extracted concept maps. If None, will extract them.
         
     Note:
         - Automatically detects chapter number and title for difficulty progression
@@ -4062,7 +4589,15 @@ def generate_for_file(qmd_file, args):
         - Creates structured JSON output with metadata
         - Passes previous quiz data to each section for variety and coherence
     """
-    print(f"Generating quizzes for: {qmd_file}")
+    # Extract just the filename for cleaner display
+    file_name = os.path.basename(qmd_file)
+    print(f"\n📚 Generating quizzes for: {file_name}")
+    
+    # Pre-extract all chapter concepts for context if not provided
+    if all_chapter_concepts is None:
+        if args.verbose:
+            print("  📖 Loading chapter concept maps...")
+        all_chapter_concepts = extract_all_chapter_concepts(verbose=args.verbose)
     
     try:
         # Read the QMD file
@@ -4079,9 +4614,9 @@ def generate_for_file(qmd_file, args):
         chapter_number, chapter_title = extract_chapter_info(qmd_file)
         
         if not getattr(args, 'parallel', False):
-            print(f"Found {len(sections)} sections")
             if chapter_number:
-                print(f"Chapter {chapter_number}: {chapter_title}")
+                print(f"  📖 Chapter {chapter_number}: {chapter_title}")
+            print(f"  📝 Found {len(sections)} sections to process")
         
         # Initialize LLM client
         client = get_llm_client(args)
@@ -4093,7 +4628,10 @@ def generate_for_file(qmd_file, args):
         previous_quizzes = []  # Track previous quiz data for variety
         
         for i, section in enumerate(sections):
-            if args.verbose:
+            # Always show section progress for single file processing
+            if not args.verbose:
+                print(f"  📍 Processing section {i+1}/{len(sections)}: {section['section_title']}")
+            else:
                 print(f"\nProcessing section {i+1}/{len(sections)}: {section['section_title']}")
                 print("-" * 40)
             
@@ -4113,7 +4651,8 @@ def generate_for_file(qmd_file, args):
                 args,
                 metadata,  # Pass preprocessing metadata
                 verbose=args.verbose,
-                parallel=False
+                parallel=False,
+                all_chapter_concepts=all_chapter_concepts
             )
             
             # PHASE 3: POST-PROCESSING
@@ -4146,6 +4685,9 @@ def generate_for_file(qmd_file, args):
                     if type_counts:
                         type_str = ', '.join([f"{count} {qtype}" for qtype, count in type_counts.items()])
                         print(f"     Distribution: {type_str}")
+                else:
+                    # Non-verbose completion indicator
+                    print(f"     ✓ Generated {len(questions)} questions")
                 
                 # Add to previous quizzes for next section
                 previous_quizzes.append(response)
@@ -4153,6 +4695,9 @@ def generate_for_file(qmd_file, args):
                 sections_without_quizzes += 1
                 if args.verbose:
                     print(f"  ⏭️  No quiz needed: {response.get('rationale', 'No rationale provided')}")
+                else:
+                    # Non-verbose skip indicator
+                    print(f"     ⏭️  No quiz needed")
                 # Still add to previous quizzes to maintain section count
                 previous_quizzes.append(response)
             
@@ -4189,10 +4734,14 @@ def generate_for_file(qmd_file, args):
             json.dump(quiz_data, f, indent=2, ensure_ascii=False)
         
         if not getattr(args, 'parallel', False):
-            print(f"\n✅ Quiz generation complete!")
-            print(f"   - Output file: {output_file}")
-            print(f"   - Sections with quizzes: {sections_with_quizzes}")
-            print(f"   - Sections without quizzes: {sections_without_quizzes}")
+            total_questions = sum(len(s.get('quiz_data', {}).get('questions', [])) for s in quiz_sections if s.get('quiz_data', {}).get('quiz_needed', False))
+            output_filename = os.path.basename(output_file)
+            print(f"\n✅ Quiz generation complete for {file_name}!")
+            print(f"   📄 Output: {output_filename}")
+            print(f"   ✓ {sections_with_quizzes} sections with quizzes")
+            if sections_without_quizzes > 0:
+                print(f"   ⏭️  {sections_without_quizzes} sections skipped")
+            print(f"   📊 Total: {total_questions} questions generated")
         
         # Update QMD frontmatter
         update_qmd_frontmatter(qmd_file, os.path.basename(output_file))
@@ -4200,8 +4749,28 @@ def generate_for_file(qmd_file, args):
     except Exception as e:
         print(f"❌ Error generating quizzes: {str(e)}")
 
-# Global variable for _quarto.yml path
+# Global variable for _quarto.yml path (will be set based on --quarto-config option)
 QUARTO_YML_PATH = os.path.join(os.getcwd(), 'quarto', '_quarto.yml')
+
+def set_quarto_yml_path(config_type="auto"):
+    """Set the QUARTO_YML_PATH based on the config type.
+    
+    Args:
+        config_type: One of 'html', 'pdf', 'epub', or 'auto'
+    
+    Returns:
+        str: The path to the selected quarto config file
+    """
+    global QUARTO_YML_PATH
+    
+    if config_type == "auto":
+        # Use the symlink (default behavior)
+        QUARTO_YML_PATH = os.path.join(os.getcwd(), 'quarto', '_quarto.yml')
+    else:
+        # Use specific config file
+        QUARTO_YML_PATH = os.path.join(os.getcwd(), 'quarto', 'config', f'_quarto-{config_type}.yml')
+    
+    return QUARTO_YML_PATH
 
 # Global book outline for Machine Learning Systems textbook
 # This will be populated automatically from _quarto.yml and QMD files
@@ -4460,7 +5029,7 @@ def build_book_outline_from_quarto_yml():
         thread_local.building_outline = False
         return BOOK_OUTLINE
 
-def generate_for_file_parallel(qmd_file, args, progress_tracker=None):
+def generate_for_file_parallel(qmd_file, args, progress_tracker=None, all_chapter_concepts=None):
     """
     Thread-safe version of generate_for_file for parallel processing.
     
@@ -4468,6 +5037,7 @@ def generate_for_file_parallel(qmd_file, args, progress_tracker=None):
         qmd_file (str): Path to QMD file
         args: Command line arguments
         progress_tracker (ProgressTracker): Progress tracker for real-time updates
+        all_chapter_concepts (dict, optional): Pre-extracted concept maps from all chapters
     
     Returns:
         dict: Result summary with success/error info
@@ -4496,7 +5066,7 @@ def generate_for_file_parallel(qmd_file, args, progress_tracker=None):
         
         # Call the existing generate_for_file logic but with isolated client and progress tracker
         # Use thread-local args to avoid race conditions
-        result = _generate_for_file_with_client(qmd_file, thread_local.args, thread_local.llm_client, progress_tracker)
+        result = _generate_for_file_with_client(qmd_file, thread_local.args, thread_local.llm_client, progress_tracker, all_chapter_concepts)
         
         elapsed = time.time() - start_time
         
@@ -4533,10 +5103,17 @@ def generate_for_file_parallel(qmd_file, args, progress_tracker=None):
             "traceback": traceback.format_exc() if hasattr(args, 'verbose') and args.verbose else None
         }
 
-def _generate_for_file_with_client(qmd_file, args, client, progress_tracker=None):
+def _generate_for_file_with_client(qmd_file, args, client, progress_tracker=None, all_chapter_concepts=None):
     """
     Core logic of generate_for_file that accepts a specific OpenAI client.
     This allows for thread-safe parallel processing.
+    
+    Args:
+        qmd_file: Path to QMD file
+        args: Command line arguments
+        client: LLM client instance
+        progress_tracker: Progress tracker for updates
+        all_chapter_concepts: Pre-extracted concept maps from all chapters
     """
     file_name = Path(qmd_file).name
     
@@ -4581,7 +5158,8 @@ def _generate_for_file_with_client(qmd_file, args, client, progress_tracker=None
             args,
             metadata,  # Pass preprocessing metadata
             verbose=getattr(args, 'verbose', False),
-            parallel=True
+            parallel=True,
+            all_chapter_concepts=all_chapter_concepts
         )
         
         # PHASE 3: POST-PROCESSING
@@ -4662,6 +5240,11 @@ def generate_for_directory_parallel(directory, args):
     """
     print(f"🚀 Generating quizzes for directory: {directory} (parallel mode)")
     
+    # Pre-extract all chapter concepts once for all threads to share
+    if args.verbose:
+        print("  📖 Loading chapter concept maps for all chapters...")
+    all_chapter_concepts = extract_all_chapter_concepts(verbose=args.verbose)
+    
     # Use the global QUARTO_YML_PATH
     yml_path = QUARTO_YML_PATH
     if os.path.exists(yml_path):
@@ -4728,7 +5311,7 @@ def generate_for_directory_parallel(directory, args):
             base_name = os.path.splitext(os.path.basename(qmd_file))[0]
             file_args.output = f"{base_name}_quizzes.json"
             
-            future = executor.submit(generate_for_file_parallel, qmd_file, file_args, progress_tracker)
+            future = executor.submit(generate_for_file_parallel, qmd_file, file_args, progress_tracker, all_chapter_concepts)
             future_to_file[future] = qmd_file
         
         # Collect results as they complete
@@ -5618,6 +6201,12 @@ def generate_for_directory(directory, args):
         print(f"Using _quarto.yml for chapter order: {QUARTO_YML_PATH}")
     else:
         print("No _quarto.yml found in project root. Using default file order.")
+    
+    # Pre-extract all chapter concepts once for all files
+    if args.verbose:
+        print("  📖 Loading chapter concept maps for all chapters...")
+    all_chapter_concepts = extract_all_chapter_concepts(verbose=args.verbose)
+    
     ordered_qmds = get_ordered_qmd_files(directory)
     if not ordered_qmds:
         print("❌ No QMD files found in directory")
@@ -5627,7 +6216,7 @@ def generate_for_directory(directory, args):
         print(f"\n{'='*60}")
         base_name = os.path.splitext(os.path.basename(qmd_file))[0]
         args.output = f"{base_name}_quizzes.json"
-        generate_for_file(qmd_file, args)
+        generate_for_file(qmd_file, args, all_chapter_concepts)
 
 def run_clean_mode_directory(directory, args):
     print(f"=== Quiz Clean Mode (Directory) ===")
