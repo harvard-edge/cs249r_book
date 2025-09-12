@@ -5,10 +5,10 @@
 local PLACEMENT_MODE = "hybrid"  -- hybrid mode balances overview with specific guidance
 
 -- Thresholds for filtering connections
-local STRENGTH_THRESHOLD = 0.30  -- Show connections with >30% strength (more selective)
-local PRIORITY_THRESHOLD = 1     -- Show only priority 1 in section boxes (most important)
-local MAX_CHAPTER_REFS = 5       -- Limit chapter-level overview (more compact)
-local MAX_SECTION_REFS = 2       -- Keep section boxes very concise (max 2 refs)
+local STRENGTH_THRESHOLD = 0.25  -- Show connections with >25% strength
+local PRIORITY_THRESHOLD = 2     -- Show priority 1-2 (important connections)
+local MAX_CHAPTER_REFS = 6       -- Show up to 6 chapter-level refs
+local MAX_SECTION_REFS = 3       -- Show up to 3 section refs (more variety)
 
 -- Initialize logging counters
 local stats = {
