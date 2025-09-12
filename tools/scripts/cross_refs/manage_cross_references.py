@@ -50,8 +50,8 @@ REQUIREMENTS:
 For AI explanations (--explain flag):
     brew install ollama  # macOS
     # or: curl -fsSL https://ollama.ai/install.sh | sh  # Linux
-    ollama run llama3.1:8b  # Download recommended model (best quality from experiments)
-    # Use --ollama-model to specify a different model (e.g., --ollama-model qwen2.5:7b)
+    ollama run gemma2:27b  # Use larger Gemma 2 model for better quality
+    # Use --ollama-model to specify a different model (e.g., --ollama-model llama3.1:8b)
     
     Core libraries:
     • sentence-transformers: Embedding generation and model handling
@@ -637,8 +637,9 @@ def setup_ollama_interactive() -> str:
     
     if not models:
         print("\n📥 NO MODELS FOUND. Recommended models for explanations:")
-        print("   1. ollama run llama3.1:8b    (Best - 8.0/10 quality from systematic experiments)")
-        print("   2. ollama run qwen2.5:7b     (Fast alternative - 7.8/10 quality)")
+        print("   1. ollama run gemma2:27b     (Recommended - high quality Gemma 2 model)")
+        print("   2. ollama run llama3.1:8b    (Alternative - 8.0/10 quality from systematic experiments)")
+        print("   3. ollama run qwen2.5:7b     (Fast alternative - 7.8/10 quality)")
         print("   3. ollama run phi3:3.8b      (High quality but verbose)")
         print("\nRun one of the above commands and then re-run this script.")
         return ""
@@ -647,7 +648,8 @@ def setup_ollama_interactive() -> str:
     
     # Recommend best model for explanations (based on systematic experiments)
     recommended_models = [
-        "llama3.1:8b",  # Winner: Best quality (8.0/10) from experiments
+        "gemma2:27b",   # Default: High quality Gemma 2 model
+        "llama3.1:8b",  # Alternative: Best quality (8.0/10) from experiments
         "qwen2.5:7b",   # Fast alternative with good quality (7.8/10)
         "gemma2:9b",    # Good balance of quality and length adherence
         "phi3:3.8b",    # High quality but verbose
@@ -678,7 +680,7 @@ def setup_ollama_interactive() -> str:
 
 
 def generate_explanation(source_content: str, target_content: str, source_title: str, target_title: str, 
-                        model: str = "qwen2.5:7b", max_retries: int = 3) -> str:
+                        model: str = "gemma2:27b", max_retries: int = 3) -> str:
     """
     Generate a concise explanation of why two sections are connected using local LLM.
     
@@ -1313,7 +1315,7 @@ def generate_cross_references(model_path: str, directories: List[str], output_fi
         print("=" * 50)
     
     # Handle AI explanation setup
-    selected_model = "llama3.1:8b"  # Default - optimized from experiments
+    selected_model = "gemma2:27b"  # Default - high quality Gemma 2 model
     if explain:
         if not REQUESTS_AVAILABLE:
             print("❌ requests library not available. Install with: pip install requests")
@@ -1571,7 +1573,7 @@ Examples:
     python3 cross_refs.py -g -m sentence-t5-base -o cross_refs.json -d ../../contents/core/ --explain
     
     # Generate with specific ollama model for explanations
-    python3 cross_refs.py -g -m sentence-t5-base -o cross_refs.json -d ../../contents/core/ --explain --ollama-model llama3.1:8b
+    python3 cross_refs.py -g -m sentence-t5-base -o cross_refs.json -d ../../contents/core/ --explain --ollama-model gemma2:27b
     
     # Test extraction methods
     python3 test_intelligent_extraction.py

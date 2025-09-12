@@ -14,7 +14,7 @@ from typing import Dict, List, Optional
 import sys
 
 class LLMEnhancer:
-    def __init__(self, model: str = "llama3.1:8b", base_url: str = "http://localhost:11434"):
+    def __init__(self, model: str = "gemma2:27b", base_url: str = "http://localhost:11434"):
         self.model = model
         self.base_url = base_url
         self.available = self.check_availability()
