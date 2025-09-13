@@ -303,25 +303,74 @@ jobs:
         if: matrix.enabled && runner.os == 'Windows'
         shell: pwsh
         run: |
-          # Install Ghostscript using exact package ID
-          winget install -e --id ArtifexSoftware.GhostScript --accept-source-agreements --accept-package-agreements
-          Write-Output "✅ Ghostscript installed via winget"
+          # Install Scoop (package manager used by Windows containers)
+          if (-not (Get-Command scoop -ErrorAction SilentlyContinue)) {
+            Write-Output "📦 Installing Scoop package manager..."
+            Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+            Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
+          } else {
+            Write-Output "✅ Scoop already installed"
+          }
           
-          # Add Ghostscript to PATH for subsequent steps
-          $gsPath = Get-ChildItem "C:\Program Files\gs" | Sort-Object Name -Descending | Select-Object -First 1
-          $binPath = Join-Path $gsPath.FullName "bin"
-          Write-Output "📁 Adding Ghostscript path: $binPath"
-          echo "$binPath" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding UTF8
+          # Install Ghostscript using Scoop (same as containers)
+          Write-Output "📦 Installing Ghostscript via Scoop..."
+          scoop install ghostscript
+          Write-Output "✅ Ghostscript installed via Scoop"
+          
+          # Verify installation using scoop which (same as container health check)
+          $gsExe = scoop which gswin64c 2>$null
+          if (-not $gsExe) {
+            $gsExe = scoop which gs 2>$null
+          }
+          
+          if ($gsExe) {
+            Write-Output "📁 Ghostscript executable found via Scoop: $gsExe"
+            # Scoop automatically adds to PATH, but let's ensure it's available
+            $binPath = Split-Path $gsExe -Parent
+            Write-Output "📁 Ghostscript bin directory: $binPath"
+          } else {
+            Write-Error "❌ Could not locate Ghostscript installation via Scoop"
+            exit 1
+          }
 
       - name: 🔍 Verify Ghostscript Installation (Windows)
         if: matrix.enabled && runner.os == 'Windows'
         shell: pwsh
         run: |
           Write-Output "🔍 Verifying Ghostscript installation..."
-          $gsPath = Get-ChildItem "C:\Program Files\gs" | Sort-Object Name -Descending | Select-Object -First 1
-          $gsExe = Join-Path $gsPath.FullName "bin\gswin64c.exe"
-          $version = & $gsExe --version
-          Write-Output "✅ Ghostscript available: $version"
+          
+          # Use same verification logic as container health check
+          $gsExe = $null
+          
+          # Try scoop which first (preferred method)
+          try {
+            $gsExe = scoop which gswin64c 2>$null
+            if (-not $gsExe) {
+              $gsExe = scoop which gs 2>$null
+            }
+          } catch {
+            Write-Output "⚠️ Scoop which failed, trying Get-Command..."
+          }
+          
+          # Fallback to Get-Command if scoop which fails
+          if (-not $gsExe) {
+            $gsCmd = Get-Command "gswin64c.exe" -ErrorAction SilentlyContinue
+            if (-not $gsCmd) {
+              $gsCmd = Get-Command "gs.exe" -ErrorAction SilentlyContinue
+            }
+            if ($gsCmd) {
+              $gsExe = $gsCmd.Source
+            }
+          }
+          
+          if ($gsExe) {
+            Write-Output "📍 Ghostscript executable found at: $gsExe"
+            $version = & $gsExe --version
+            Write-Output "✅ Ghostscript available: $version"
+          } else {
+            Write-Error "❌ Ghostscript executable not found via Scoop or PATH"
+            exit 1
+          }
 
       - name: 📦 Install Python dependencies
         if: matrix.enabled
