@@ -335,20 +335,130 @@ jobs:
         if: matrix.enabled && runner.os == 'Windows'
         shell: pwsh
         run: |
-          # Use winget if available, otherwise fallback to chocolatey
-          try {
-            winget install ArtifexSoftware.GhostScript --accept-source-agreements --accept-package-agreements
-            Write-Output "✅ Ghostscript installed via winget"
-          } catch {
-            Write-Output "🔄 winget not available, using chocolatey..."
-            choco install ghostscript -y
+          # Set UTF-8 encoding for proper emoji display
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          [Console]::InputEncoding = [System.Text.Encoding]::UTF8
+          
+          # Try multiple winget package identifiers, fallback to chocolatey
+          $wingetPackages = @(
+            "Ghostscript.Ghostscript",
+            "ArtifexSoftware.GhostScript", 
+            "GPL.Ghostscript"
+          )
+          
+          $installed = $false
+          foreach ($package in $wingetPackages) {
+            try {
+              Write-Output "🔄 Trying winget package: $package"
+              winget install $package --accept-source-agreements --accept-package-agreements
+              Write-Output "✅ Ghostscript installed via winget ($package)"
+              $installed = $true
+              break
+            } catch {
+              Write-Output "❌ Failed to install $package, trying next..."
+            }
           }
           
-          # Add Ghostscript to PATH (both installation methods use the same path)
-          $gsPath = Get-ChildItem "C:\Program Files\gs" | Sort-Object Name -Descending | Select-Object -First 1
-          $binPath = Join-Path $gsPath.FullName "bin"
-          echo "Adding Ghostscript path: $binPath"
-          echo "$binPath" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding UTF8
+          if (-not $installed) {
+            Write-Output "🔄 winget packages failed, using chocolatey..."
+            choco install ghostscript -y
+            Write-Output "✅ Ghostscript installed via chocolatey"
+          }
+          
+          # Find Ghostscript installation directory (multiple possible locations)
+          $gsPaths = @(
+            "C:\Program Files\gs",
+            "C:\Program Files (x86)\gs"
+          )
+          
+          $gsFound = $false
+          foreach ($gsBasePath in $gsPaths) {
+            if (Test-Path $gsBasePath) {
+              Write-Output "📁 Found Ghostscript base directory: $gsBasePath"
+              $gsPath = Get-ChildItem $gsBasePath | Sort-Object Name -Descending | Select-Object -First 1
+              if ($gsPath) {
+                $binPath = Join-Path $gsPath.FullName "bin"
+                Write-Output "📁 Adding Ghostscript path: $binPath"
+                echo "$binPath" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding UTF8
+                $gsFound = $true
+                break
+              }
+            }
+          }
+          
+          if (-not $gsFound) {
+            Write-Output "⚠️ Could not find Ghostscript installation directory"
+            Write-Output "🔍 Checking common locations:"
+            foreach ($path in $gsPaths) {
+              Write-Output "  - $path : $(if (Test-Path $path) { 'EXISTS' } else { 'NOT FOUND' })"
+            }
+          }
+
+      - name: 🔍 Verify Ghostscript Installation (Windows)
+        if: matrix.enabled && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Set UTF-8 encoding for proper emoji display
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
+          [Console]::InputEncoding = [System.Text.Encoding]::UTF8
+          
+          Write-Output "🔍 Verifying Ghostscript installation..."
+          
+          # Try to find Ghostscript executable in common locations
+          $gsExecutables = @(
+            "gswin64c.exe",
+            "gswin32c.exe", 
+            "gs.exe"
+          )
+          
+          $gsPaths = @(
+            "C:\Program Files\gs",
+            "C:\Program Files (x86)\gs"
+          )
+          
+          $gsFound = $false
+          foreach ($gsBasePath in $gsPaths) {
+            if (Test-Path $gsBasePath) {
+              $gsVersionDirs = Get-ChildItem $gsBasePath | Sort-Object Name -Descending
+              foreach ($versionDir in $gsVersionDirs) {
+                $binPath = Join-Path $versionDir.FullName "bin"
+                if (Test-Path $binPath) {
+                  foreach ($exe in $gsExecutables) {
+                    $fullPath = Join-Path $binPath $exe
+                    if (Test-Path $fullPath) {
+                      Write-Output "✅ Found Ghostscript: $fullPath"
+                      try {
+                        $version = & $fullPath --version 2>&1
+                        Write-Output "📊 Ghostscript version: $version"
+                        $gsFound = $true
+                        break
+                      } catch {
+                        Write-Output "⚠️ Found executable but version check failed: $fullPath"
+                      }
+                    }
+                  }
+                  if ($gsFound) { break }
+                }
+              }
+              if ($gsFound) { break }
+            }
+          }
+          
+          if (-not $gsFound) {
+            Write-Output "❌ Ghostscript not found or not working"
+            Write-Output "🔍 This may cause issues with PDF processing"
+            Write-Output "🔍 Searched locations:"
+            foreach ($path in $gsPaths) {
+              Write-Output "  - $path"
+              if (Test-Path $path) {
+                Get-ChildItem $path -Recurse -Include "*.exe" | ForEach-Object {
+                  Write-Output "    Found: $($_.FullName)"
+                }
+              }
+            }
+          }
 
       - name: 📦 Install Python dependencies
         if: matrix.enabled
