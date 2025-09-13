@@ -425,6 +425,18 @@ local function create_chapter_connection_box(chapter_refs)
     end
   end
   
+  -- Add complements
+  if #grouped.complements > 0 then
+    -- Complements section (visual indicators only)
+    for _, ref in ipairs(grouped.complements) do
+      local ref_text = format_xref_entry(ref)
+      local ref_doc = pandoc.read(ref_text, "markdown")
+      if ref_doc.blocks[1] then
+        table.insert(content_blocks, ref_doc.blocks[1])
+      end
+    end
+  end
+  
   -- Create a div with callout-chapter-connection class and text-left style
   local callout_div = pandoc.Div(
     content_blocks,
