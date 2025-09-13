@@ -2,11 +2,11 @@
 
 ## Book-Wide Footnote Statistics
 
-- Total footnotes defined: 383
-- Footnotes with bold terms: 383
-- Average definition length: 383 characters
-- Common ID prefixes: {'fn': 383}
-- Total unique terms: 355
+- Total footnotes defined: 369
+- Footnotes with bold terms: 364
+- Average definition length: 351 characters
+- Common ID prefixes: {'fn': 369}
+- Total unique terms: 337
 
 ## ⚠️ IMPORTANT: Terms Already Defined
 
@@ -25,13 +25,12 @@ These terms have already been defined in other chapters. DO NOT redefine them:
 - **backpropagation**: defined in dl_primer, introduction
 - **flops**: defined in dl_primer, efficient_ai
 - **backpropagation algorithm**: defined in dnn_architectures, training
+- **ensemble methods**: defined in efficient_ai, robust_ai
 - **pruning**: defined in efficient_ai, optimizations
 - **knowledge distillation**: defined in efficient_ai, optimizations
 - **moore's law**: defined in efficient_ai, introduction
 - **transfer learning**: defined in efficient_ai, introduction, introduction, workflow
 - **foundation models**: defined in efficient_ai, introduction
-- **tinyml**: defined in efficient_ai, ml_systems
-- **adversarial examples discovery**: defined in responsible_ai, robust_ai
 
 ## Footnote Style Guidelines
 
@@ -44,74 +43,71 @@ Based on existing footnotes, follow these patterns:
 
 ## All Terms Currently Defined in Book
 
-- tpu origins, parameters, tinyml, data center climate impact, billion-parameter models
-- federated learning birth, mnist, batch processing evolution, energy-aware ai frameworks, latency-critical applications
-- model parallelism memory scaling, endpoint device constraints, ml autoscaling at scale, cosmic ray impact, tensorflow lite
-- 3dmark, hardware lottery, sgd (stochastic gradient descent), google tpus, mechanical turk origins
-- microsoft farmbeats, tensor processing unit (tpu), lapack (linear algebra package), hdfs origins, medical imaging ai revolution
-- feature store scale, system design trade-offs, activation checkpointing, service level agreements (slas), data parallelism scaling
-- data-centric ai, adversarial training overhead, ml reproducibility crisis, microsoft fpga deployment, memory optimization
-- self-supervised learning, tensorrt optimization, imagenet, hyperscale data centers, sigmoid computational cost
-- tpu (tensor processing unit), hipaa violations, a11 bionic breakthrough, lstm origins, tensor cores
-- crisp-dm (cross-industry standard process for data mining), automatic differentiation, multi-agent system, data drift, mosquito species detection
-- model parallelism, learning rate schedules, label flipping attack impact, energy efficiency in tinyml, distilbert
-- tinytl memory breakthrough, plantvillage nuru real-world impact, stochastic computing resilience, tinyml model compression, ml apis
-- structured pruning, mobilemark, mlops emergence, power usage effectiveness, cifar-10
-- learning rate, computer engineering, tinyml market reality, activation checkpointing trade-offs, microcontroller power budget reality
-- active learning, neural processing unit (npu), mirai botnet scale, on-device training constraints, memory scale comparison
-- real-time grid carbon intensity, healthcare ai deployment reality, lottery ticket hypothesis, columnar format revolution, data as code
-- transformer, c&w attack effectiveness, hyperscale data center scale, dram bit flip rates, support vector machines (svms)
-- cloud infrastructure evolution, jupyter notebooks, von neumann architecture, flops, data centers
-- parameter scaling, e-waste from computing, curriculum learning, memory hierarchy challenge, cudnn
-- etl evolution, batch size effects, privacy regulation timeline, transfer learning, arduino edge computing reality
-- smpc performance, onnx deployment, coin-cell batteries, parameter-efficient fine-tuning, scaling laws
-- arm cortex architecture spectrum, model extraction threat, gpt-3 energy consumption, sdg global impact, ai vs industrial emissions
-- differential privacy, ml vs. traditional problem definition, computational photography, google's carbon-free commitment, voice recognition evolution
-- hazardous chemical quantities, defensive distillation effectiveness, bert compression, tvm (tensor virtual machine), adversarial patch success
-- mobile system-on-chip, ensemble methods, ibm watson health, prometheus at scale, activation function
-- sequential neural networks, online learning vulnerability, speculative execution, youtube recommendation impact, 2014-2016 ebola outbreak
-- fab water usage vs cities, application-specific integrated circuit (asic), jax, data center cooling costs, data augmentation
-- medical data annotation costs, covid-19 ml impact, mini-batch gpu optimization, the lab-to-clinic performance gap, spec cpu
-- quantization-aware training, fault injection tool ecosystem, iot device growth, stuck-at faults in ml, ultra-long battery life
-- data lake origins, edge latency advantage, alexnet's gpu revolution, adam (adaptive moment estimation), concept drift challenge
-- kubernetes origins, operator fusion, spec power, data poisoning detection challenge, tensor core breakthrough
-- gdpr's ml impact, backdoor attack effectiveness, risc-v for ai, intel 8087 impact, eniac (electronic numerical integrator and computer)
-- ibm system/360, gdpr, alexnet, dartmouth conference (1956), dp-sgd industry adoption
-- social good resource paradox, model drift detection, "hey siri" technical reality, fdiv bug economic impact, relu hardware efficiency
-- overfitting, single vs multi-bit fault impact, jenkins origins, hardware vs software injection, hsm performance
-- stop sign attack precision, model quantization, model drift phenomenon, jevon's paradox, adversarial examples discovery
-- production alert thresholds, blas (basic linear algebra subprograms), convolutional neural network (cnn), backpropagation algorithm, ci/cd for machine learning
-- mnist dataset, shap in production, tensorflow serving, puf market growth, gradient descent
-- model inversion attack, xla (accelerated linear algebra), gpus for deep learning, medical ai privacy complexity, mathematical convolution
-- mobile device constraints, feature store evolution, brain energy efficiency, rmsprop (root mean square propagation), microcontrollers
-- training-serving skew impact, systems integration philosophy, systems thinking in ai, ml hardware cost spectrum, black box
-- training profiling tools, pgd attack strength, transformer batch size scaling, kserve (formerly kfserving), cray-1 vector legacy
-- core ml, tensor operations, mixed-precision training, artificial neurons, wireless communication reality
-- mobilenet innovation, uci machine learning repository, simd evolution, gdpr article 22, mlperf
-- pytorch, intel sgx constraints, edge computing, fbnet, sparse energy savings
-- gpt-4, perplexity, compas algorithm controversy, mobile power constraints, pruning
-- moore's law, nuclear power for ai data centers, wafer-scale engine specifications, smallholder farmers global impact, adversarial transferability
-- distributed training, green500, edge processor, resnet revolution, principal component analysis (pca)
-- ai compute explosion, data parallelism, eliza, tinyml device scale, nas evaluation metrics
-- efficientnet pruning, generative ai breakthrough, yann lecun and cnns, efficientnet, cassava disease impact
-- viola-jones algorithm, project natick underwater data centers, diabetic retinopathy global impact, knowledge distillation, quantization
-- cascade of classifiers, resnet, backpropagation (historical context), zero-day etymology, lora technology
-- global fishing watch impact, paradigm shift, industrial iot, depthwise separable convolutions, model scaling explosion
-- household energy comparison, inference attack, autoregressive, gpu manufacturing impact, synapses
-- squeezenet, nvidia nccl (collective communications library), systolic array architecture, vision transformers (vits), nvidia triton inference server
-- stuxnet discovery, bert, cdc 6600, large-scale training challenges, cloud inference latency
-- critical material scarcity, foundation models, demographic parity origins, mobilenet, data poisoning emergence
-- gpt-3, cough analysis technology, cloudsuite, energy efficiency metrics, github actions for ml
-- tensor processing units, computational graphs, pay-as-you-go pricing, stochastic gradient descent (sgd), chinese rare earth dominance
-- dhrystone, mlops business impact, energy star, netflix deanonymization, nlp computational demands
-- edge computing origins, electromigration in ai hardware, brittleness in ai systems, data versioning challenges, apple neural engine evolution
-- tokens, ml security threat taxonomy, basic linear algebra subprograms (blas), stm32f4 microcontroller reality, data quality reality
-- value alignment problem, semiconductor water consumption scale, tensorflow, silent data corruption challenge, ml team role evolution
-- hardware-aware nas, experiment tracking evolution, healthcare algorithm scale, esp32 edge computing, safety-critical computing evolution
-- google data centers, fault injection framework evolution, esp32 capabilities, universal approximation theorem, apple's neural engine strategy
-- fgsm breakthrough, google tensor soc architecture, single event upset rates, technical debt origins, "attention is all you need"
-- dvc creation story, nvidia ai gpus, federated learning scale, systolic array renaissance, moore's law origins
-- devops origins, arm trustzone, theano, linpack, backpropagation
-- imagenet revolution, iot hubs, mobile storage evolution, connection machine cm-5, gpt-3 training scale
-- google carbon-aware scheduling results, zillow ibuying failure, service level objectives (slos), kubeflow production usage, gradient accumulation impact
-- whetstone, meltdown/spectre impact, perceptron, ai's sdg impact potential, cloud ml training economics
+- e-waste from computing, fbnet, model uncertainty, infrastructure as code, cray-1 vector legacy
+- eliza, data sanitization, hot spares, jupyter notebooks, connection machine cm-5
+- ai compute explosion, real-time grid carbon intensity, uci machine learning repository, edge computing origins, meltdown/spectre impact
+- universal approximation theorem, microcontrollers, cifar-10, neural processing unit (npu), ibm system/360
+- voice recognition evolution, self-supervised learning, ml apis, principle of least privilege, jenkins origins
+- data versioning challenges, dartmouth conference (1956), google data centers, risc-v for ai, sequential neural networks
+- nas evaluation metrics, core ml, plantvillage nuru real-world impact, structured pruning, alexnet's gpu revolution
+- diabetic retinopathy global impact, training profiling tools, parameter scaling, regularization, glitches
+- resnet revolution, tinyml, active learning, black box, data lake origins
+- gpu manufacturing impact, systems thinking in ai, ml team role evolution, lottery ticket hypothesis, gpus for deep learning
+- "attention is all you need", google's carbon-free commitment, data-centric ai, cascade of classifiers, edge latency advantage
+- data augmentation, blas (basic linear algebra subprograms), autopilot, mnist dataset, systolic array architecture
+- generative ai breakthrough, whetstone, columnar format revolution, beam testing, minimax
+- pay-as-you-go pricing, gpt-4, knowledge distillation, energy efficiency metrics, batch size effects
+- tensor core breakthrough, foundation models, gradient descent, pytorch, transformer batch size scaling
+- vision transformers (vits), critical material scarcity, model drift phenomenon, lstm origins, principal component analysis (pca)
+- shap in production, model drift detection, combinational logic, lora technology, model quantization
+- parameter-efficient fine-tuning, service level objectives (slos), backpropagation, resnet, netflix deanonymization
+- tpu (tensor processing unit), perplexity, feature store scale, flops, ensemble methods
+- arm trustzone, tensorflow lite, f1 score, mobile system-on-chip, tensor cores
+- microsoft fpga deployment, 3dmark, eniac (electronic numerical integrator and computer), ml hardware cost spectrum, relu hardware efficiency
+- cudnn, mobile power constraints, tensor operations, learning rate schedules, puf market growth
+- hdfs origins, etl evolution, data as code, experiment tracking evolution, systolic array renaissance
+- pruning, latency-critical applications, bert, speculative execution, medical data annotation costs
+- alexnet, demographic parity origins, devops origins, autoregressive, lapack (linear algebra package)
+- on-device training constraints, tinytl memory breakthrough, chinese rare earth dominance, jax, energy-aware ai frameworks
+- data centers, technical debt origins, backpropagation (historical context), viola-jones algorithm, hardware-aware nas
+- sdg global impact, concept drift challenge, google carbon-aware scheduling results, multimodal sensor data, tensorflow
+- gpt-3 training scale, quantization, cdc 6600, google tensor soc architecture, ai vs industrial emissions
+- arduino edge computing reality, tvm (tensor virtual machine), computational graphs, basic linear algebra subprograms (blas), artificial neurons
+- green500, data parallelism, tensorrt optimization, nlp computational demands, microcontroller power budget reality
+- operator fusion, youtube recommendation impact, support vector machines (svms), mobilenet, energy star
+- nvidia triton inference server, ai's sdg impact potential, iot hubs, large-scale training challenges, moore's law
+- cloud infrastructure evolution, cloud ml training economics, hipaa violations, nuclear power for ai data centers, dual-use dilemma
+- mixed-precision training, hyperscale data center scale, systems integration philosophy, sparse energy savings, scan chains
+- model scaling explosion, billion-parameter models, ml vs. traditional problem definition, intel 8087 impact, zero-day etymology
+- nvidia ai gpus, activation checkpointing trade-offs, medical ai privacy complexity, distilbert, zillow ibuying failure
+- smpc performance, memory scale comparison, esp32 capabilities, hazardous chemical quantities, model parallelism
+- backpropagation algorithm, error-correcting codes, gdpr article 22, data drift, privacy regulation timeline
+- brittleness in ai systems, data drift discovery, compas algorithm controversy, multi-agent system, imagenet revolution
+- edge processor, learning rate, arm cortex architecture spectrum, efficientnet, energy efficiency in tinyml
+- social good resource paradox, medical imaging ai revolution, mirai botnet scale, sigmoid computational cost, model extraction threat
+- github actions for ml, tensor processing unit (tpu), double modular redundancy (dmr), ultra-long battery life, convolutional neural network (cnn)
+- cough analysis technology, data quality reality, prometheus at scale, kubeflow production usage, huber loss
+- ci/cd for machine learning, the lab-to-clinic performance gap, paradigm shift, gdpr's ml impact, onnx deployment
+- production alert thresholds, computer engineering, quantization-aware training, squeezenet, apple's neural engine strategy
+- mnist, overfitting, federated learning birth, batch processing evolution, "hey siri" technical reality
+- checkpoint and restart mechanisms, spec cpu, mobilemark, dvc creation story, jevon's paradox
+- gradient accumulation impact, differential privacy, theano, cassava disease impact, cloudsuite
+- stochastic computing, model parallelism memory scaling, household energy comparison, kserve (formerly kfserving), nvidia nccl (collective communications library)
+- bayesian neural networks, perceptron, data center climate impact, data parallelism scaling, wafer-scale engine specifications
+- mlops business impact, kubernetes origins, mobile device constraints, apple neural engine evolution, spec power
+- iot device growth, ibm watson health, transformer, tinyml model compression, gpt-3
+- tinyml device scale, dp-sgd industry adoption, synapses, coin-cell batteries, google tpus
+- hsm performance, mobilenet innovation, ml reproducibility crisis, parameters, tokens
+- moore's law origins, bert compression, mechanical turk origins, ml autoscaling at scale, gpt-3 energy consumption
+- service level agreements (slas), healthcare ai deployment reality, memory optimization, automatic differentiation, computational photography
+- microsoft farmbeats, xla (accelerated linear algebra), curriculum learning, hardware lottery, tensor processing units
+- brain energy efficiency, dhrystone, crisp-dm (cross-industry standard process for data mining), scaling laws, yann lecun and cnns
+- global fishing watch impact, depthwise separable convolutions, tinyml market reality, healthcare algorithm scale, triple modular redundancy (tmr)
+- memory hierarchy challenge, hyperscale data centers, linpack, stochastic gradient descent (sgd), efficientnet pruning
+- cloud inference latency, covid-19 ml impact, endpoint device constraints, mlperf, power usage effectiveness
+- tpu origins, intel sgx constraints, mobile storage evolution, wireless communication reality, training-serving skew impact
+- industrial iot, inference attack, 2014-2016 ebola outbreak, lookup table, transfer learning
+- stuxnet discovery, mlops emergence, esp32 edge computing, data center cooling costs, feature store evolution
+- mosquito species detection, application-specific integrated circuit (asic), a11 bionic breakthrough, distributed training, von neumann architecture
+- smallholder farmers global impact, semiconductor water consumption scale, model inversion attack, stm32f4 microcontroller reality, imagenet
+- simd evolution, tensorflow serving
