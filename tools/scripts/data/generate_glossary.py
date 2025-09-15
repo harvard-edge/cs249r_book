@@ -37,14 +37,14 @@ def generate_glossary_qmd(glossary_data):
         "",
         "# Glossary {.unnumbered}",
         "",
-        "This comprehensive glossary contains definitions of key terms used throughout the ML Systems textbook. Terms are organized alphabetically and include cross-references to the chapters where they are primarily discussed.",
+        "This comprehensive glossary contains definitions of key terms used throughout the ML Systems textbook. Terms are organized alphabetically and include references to the chapters where they appear.",
         "",
         "::: {.callout-note}",
         "## Using the Glossary",
         "",
         "- **Terms are alphabetically ordered** for easy reference",
-        "- **Chapter sources** indicate where each term is primarily discussed", 
-        "- **Cross-references** help you explore related concepts",
+        "- **Chapter references** show where terms are introduced or discussed",
+        "- **Cross-references** help you explore related concepts", 
         "- **Interactive tooltips** appear when you hover over glossary terms throughout the book",
         ":::",
         "",
@@ -68,15 +68,23 @@ def generate_glossary_qmd(glossary_data):
         for term in sorted(terms_by_letter[letter], key=lambda x: x["term"]):
             term_name = term["term"]
             definition = term["definition"]
-            chapter = term.get("chapter_source", "")
             
             # Create the term entry with proper formatting
             content.append(f"**{term_name}**")
             content.append(f": {definition}")
             
-            if chapter:
-                formatted_chapter = format_chapter_name(chapter)
-                content.append(f"  *→ Chapter: {formatted_chapter}*")
+            # Handle chapter references properly
+            appears_in = term.get("appears_in", [])
+            chapter_source = term.get("chapter_source", "")
+            
+            if appears_in and len(appears_in) > 1:
+                # Multiple chapters - list them all
+                formatted_chapters = [format_chapter_name(ch) for ch in appears_in]
+                content.append(f"  *Appears in: {', '.join(formatted_chapters)}*")
+            elif chapter_source:
+                # Single primary chapter
+                formatted_chapter = format_chapter_name(chapter_source)
+                content.append(f"  *Chapter: {formatted_chapter}*")
             
             # Add cross-references if available
             if term.get("see_also"):
@@ -118,7 +126,7 @@ def main():
     qmd_content = generate_glossary_qmd(glossary_data)
     
     # Write to file
-    output_path = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/backmatter/glossary.qmd")
+    output_path = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/backmatter/glossary/glossary.qmd")
     print(f"💾 Writing to {output_path}...")
     
     with open(output_path, 'w', encoding='utf-8') as f:
