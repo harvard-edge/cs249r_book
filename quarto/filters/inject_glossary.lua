@@ -138,12 +138,12 @@ local function create_glossary_markup(term_data, text, format)
   end
   
   if format == "tooltip" then
-    -- HTML tooltip using title attribute
+    -- HTML tooltip using data-definition attribute (no title to avoid browser tooltip)
     return pandoc.Span(
       text,
       {
         class = "glossary-term",
-        title = definition,
+        ["data-definition"] = definition,
         ["data-term"] = term
       }
     )
@@ -227,19 +227,32 @@ function Pandoc(doc)
   cursor: help;
   position: relative;
 }
+.glossary-term {
+  position: relative;
+}
 .glossary-term:hover::after {
-  content: attr(title);
+  content: attr(data-definition);
   position: absolute;
   bottom: 100%;
-  left: 0;
+  left: 50%;
+  transform: translateX(-50%);
   background: #333;
   color: white;
-  padding: 5px 10px;
-  border-radius: 4px;
+  padding: 6px 16px;
+  border-radius: 3px;
   white-space: normal;
-  width: 250px;
+  width: 280px;
+  max-width: 90vw;
   z-index: 1000;
-  font-size: 0.9em;
+  font-size: 0.5em;
+  line-height: 1.3;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.3);
+  border: 1px solid #555;
+}
+/* Adjust positioning for tooltips near screen edges */
+.glossary-term:hover::after {
+  left: clamp(140px, 50%, calc(100vw - 140px));
+  transform: translateX(-50%);
 }
 </style>
 ]]
