@@ -7,6 +7,7 @@ formatted Quarto markdown file for the comprehensive glossary page.
 """
 
 import json
+import re
 from pathlib import Path
 from datetime import datetime
 
@@ -17,38 +18,90 @@ def load_master_glossary():
     with open(glossary_path) as f:
         return json.load(f)
 
+def extract_section_id_from_qmd(qmd_path):
+    """Extract the main chapter section ID from a QMD file."""
+    try:
+        with open(qmd_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Look for main chapter heading with section ID
+        # Pattern: # Chapter Title {#sec-something}
+        pattern = r'^#\s+[^{]*\{#(sec-[^}]+)\}'
+        match = re.search(pattern, content, re.MULTILINE)
+        
+        if match:
+            return f"@{match.group(1)}"
+        
+        return None
+        
+    except Exception as e:
+        print(f"Error reading {qmd_path}: {e}")
+        return None
+
+def build_simple_chapter_mapping():
+    """Build mapping from chapter names to their actual section IDs."""
+    project_root = Path(__file__).parent.parent.parent.parent
+    chapters_dir = project_root / "quarto/contents/core"
+    
+    chapter_mapping = {}
+    
+    # List of chapter directories to scan
+    chapter_dirs = [
+        "introduction", "ml_systems", "dl_primer", "dnn_architectures", 
+        "frameworks", "training", "benchmarking", "data_engineering",
+        "hw_acceleration", "efficient_ai", "optimizations", "ops",
+        "ondevice_learning", "robust_ai", "privacy_security", "responsible_ai",
+        "sustainable_ai", "ai_for_good", "workflow", "conclusion", 
+        "frontiers", "generative_ai"
+    ]
+    
+    for chapter_name in chapter_dirs:
+        chapter_path = chapters_dir / chapter_name / f"{chapter_name}.qmd"
+        
+        if chapter_path.exists():
+            section_id = extract_section_id_from_qmd(chapter_path)
+            if section_id:
+                chapter_mapping[chapter_name] = section_id
+    
+    return chapter_mapping
+
 def format_chapter_link(chapter):
     """Format chapter name as Quarto cross-reference link."""
     if not chapter:
         return ""
-    # Convert chapter name to @sec- format with proper section ID
-    # Map chapter names to their section IDs
-    chapter_mapping = {
-        "introduction": "@sec-introduction",
-        "ml_systems": "@sec-ml-systems", 
-        "dl_primer": "@sec-dl-primer",
-        "dnn_architectures": "@sec-dnn-architectures",
-        "frameworks": "@sec-frameworks",
-        "training": "@sec-training",
-        "benchmarking": "@sec-benchmarking",
-        "data_engineering": "@sec-data-engineering", 
-        "hw_acceleration": "@sec-hw-acceleration",
-        "efficient_ai": "@sec-efficient-ai",
-        "optimizations": "@sec-optimizations",
-        "ops": "@sec-ops",
-        "ondevice_learning": "@sec-ondevice-learning",
-        "robust_ai": "@sec-robust-ai",
-        "privacy_security": "@sec-privacy-security",
-        "responsible_ai": "@sec-responsible-ai",
-        "sustainable_ai": "@sec-sustainable-ai",
-        "ai_for_good": "@sec-ai-for-good",
-        "workflow": "@sec-workflow",
-        "conclusion": "@sec-conclusion",
-        "frontiers": "@sec-frontiers",
-        "generative_ai": "@sec-generative-ai"
-    }
     
-    return chapter_mapping.get(chapter, f"@sec-{chapter.replace('_', '-')}")
+    # Use the simple section ID discovery to get actual section IDs from chapter files
+    try:
+        chapter_mapping = build_simple_chapter_mapping()
+        return chapter_mapping.get(chapter, f"@sec-{chapter.replace('_', '-')}")
+    except Exception as e:
+        print(f"Warning: Could not build chapter mapping, using fallback: {e}")
+        # Fallback to manual mapping if section ID discovery fails
+        fallback_mapping = {
+            "introduction": "@sec-introduction",
+            "ml_systems": "@sec-ml-systems", 
+            "dl_primer": "@sec-dl-primer",
+            "dnn_architectures": "@sec-dnn-architectures",
+            "frameworks": "@sec-ai-frameworks",
+            "training": "@sec-ai-training",
+            "benchmarking": "@sec-benchmarking-ai",
+            "data_engineering": "@sec-data-engineering",
+            "hw_acceleration": "@sec-ai-acceleration",
+            "efficient_ai": "@sec-efficient-ai",
+            "optimizations": "@sec-model-optimizations",
+            "ops": "@sec-ml-operations",
+            "ondevice_learning": "@sec-ondevice-learning",
+            "robust_ai": "@sec-robust-ai",
+            "privacy_security": "@sec-security-privacy",
+            "responsible_ai": "@sec-responsible-ai",
+            "sustainable_ai": "@sec-sustainable-ai",
+            "ai_for_good": "@sec-ai-good",
+            "workflow": "@sec-ai-workflow",
+            "conclusion": "@sec-conclusion",
+            "frontiers": "@sec-frontiers-ml-systems",
+            "generative_ai": "@sec-generative-ai"
+        }
+        return fallback_mapping.get(chapter, f"@sec-{chapter.replace('_', '-')}")
 
 def generate_glossary_qmd(glossary_data):
     """Generate the glossary QMD content."""
