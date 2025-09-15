@@ -20,7 +20,9 @@ from collections import defaultdict
 
 def load_chapter_glossaries():
     """Load all individual chapter glossary files."""
-    base_dir = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/core")
+    # Get project root (4 levels up from this script)
+    project_root = Path(__file__).parent.parent.parent.parent
+    base_dir = project_root / "quarto/contents/core"
     json_files = list(base_dir.glob("**/*_glossary.json"))
     
     print(f"📚 Found {len(json_files)} chapter glossary files")
@@ -181,7 +183,8 @@ def build_master_glossary():
     }
     
     # Save master glossary
-    output_path = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/data/master_glossary.json")
+    project_root = Path(__file__).parent.parent.parent.parent  
+    output_path = project_root / "quarto/contents/data/master_glossary.json"
     
     # Create backup if exists
     if output_path.exists():

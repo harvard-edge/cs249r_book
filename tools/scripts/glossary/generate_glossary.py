@@ -12,7 +12,8 @@ from datetime import datetime
 
 def load_master_glossary():
     """Load the master glossary JSON file."""
-    glossary_path = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/data/master_glossary.json")
+    project_root = Path(__file__).parent.parent.parent.parent
+    glossary_path = project_root / "quarto/contents/data/master_glossary.json"
     with open(glossary_path) as f:
         return json.load(f)
 
@@ -57,7 +58,6 @@ def generate_glossary_qmd(glossary_data):
     # Header content
     content = [
         "---",
-        "title: \"Glossary\"",
         "number-sections: false",
         "---",
         "",
@@ -73,8 +73,6 @@ def generate_glossary_qmd(glossary_data):
         "- **Cross-references** help you explore related concepts", 
         "- **Interactive tooltips** appear when you hover over glossary terms throughout the book",
         ":::",
-        "",
-        f"*{total_terms} terms defined across all chapters*",
         ""
     ]
     
@@ -152,7 +150,8 @@ def main():
     qmd_content = generate_glossary_qmd(glossary_data)
     
     # Write to file
-    output_path = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/backmatter/glossary/glossary.qmd")
+    project_root = Path(__file__).parent.parent.parent.parent
+    output_path = project_root / "quarto/contents/backmatter/glossary/glossary.qmd"
     print(f"💾 Writing to {output_path}...")
     
     with open(output_path, 'w', encoding='utf-8') as f:
