@@ -16,12 +16,38 @@ def load_master_glossary():
     with open(glossary_path) as f:
         return json.load(f)
 
-def format_chapter_name(chapter):
-    """Format chapter name for display."""
+def format_chapter_link(chapter):
+    """Format chapter name as Quarto cross-reference link."""
     if not chapter:
         return ""
-    # Convert underscores to spaces and title case
-    return chapter.replace("_", " ").title()
+    # Convert chapter name to @sec- format with proper section ID
+    # Map chapter names to their section IDs
+    chapter_mapping = {
+        "introduction": "@sec-introduction",
+        "ml_systems": "@sec-ml-systems", 
+        "dl_primer": "@sec-dl-primer",
+        "dnn_architectures": "@sec-dnn-architectures",
+        "frameworks": "@sec-frameworks",
+        "training": "@sec-training",
+        "benchmarking": "@sec-benchmarking",
+        "data_engineering": "@sec-data-engineering", 
+        "hw_acceleration": "@sec-hw-acceleration",
+        "efficient_ai": "@sec-efficient-ai",
+        "optimizations": "@sec-optimizations",
+        "ops": "@sec-ops",
+        "ondevice_learning": "@sec-ondevice-learning",
+        "robust_ai": "@sec-robust-ai",
+        "privacy_security": "@sec-privacy-security",
+        "responsible_ai": "@sec-responsible-ai",
+        "sustainable_ai": "@sec-sustainable-ai",
+        "ai_for_good": "@sec-ai-for-good",
+        "workflow": "@sec-workflow",
+        "conclusion": "@sec-conclusion",
+        "frontiers": "@sec-frontiers",
+        "generative_ai": "@sec-generative-ai"
+    }
+    
+    return chapter_mapping.get(chapter, f"@sec-{chapter.replace('_', '-')}")
 
 def generate_glossary_qmd(glossary_data):
     """Generate the glossary QMD content."""
@@ -79,11 +105,11 @@ def generate_glossary_qmd(glossary_data):
             
             if appears_in and len(appears_in) > 1:
                 # Multiple chapters - list them all
-                formatted_chapters = [format_chapter_name(ch) for ch in appears_in]
+                formatted_chapters = [format_chapter_link(ch) for ch in appears_in]
                 content.append(f"  *Appears in: {', '.join(formatted_chapters)}*")
             elif chapter_source:
                 # Single primary chapter
-                formatted_chapter = format_chapter_name(chapter_source)
+                formatted_chapter = format_chapter_link(chapter_source)
                 content.append(f"  *Chapter: {formatted_chapter}*")
             
             # Add cross-references if available
