@@ -48,7 +48,7 @@ When making replacements:
   - "deep learning" ≠ "hierarchical learning" (different concepts!)
   - "neural network" ≠ "statistical model" (one is a subset)
 - **Smart replacements that preserve meaning**: 
-  - "neural network" → "learning system" or "computational model"
+  - "neural network" → "computational model" (avoid "learning system")
   - "deep learning" → Keep as-is in historical context
   - "GPT-3" → "large language model" (category, same concept)
 - **When in doubt**: Keep original text and let footnote agent clarify
