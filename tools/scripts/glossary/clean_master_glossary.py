@@ -73,13 +73,13 @@ def merge_chapter_info(appears_in_lists, chapter_sources):
     else:
         return "", []
 
-def clean_master_glossary():
+def clean_global_glossary():
     """Clean up the master glossary."""
     print("🧹 Cleaning Master Glossary")
     print("=" * 50)
     
     # Load master glossary
-    glossary_path = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/data/master_glossary.json")
+    glossary_path = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/data/global_glossary.json")
     with open(glossary_path) as f:
         data = json.load(f)
     
@@ -144,7 +144,7 @@ def clean_master_glossary():
     # Update metadata
     cleaned_data = {
         "metadata": {
-            "type": "master_glossary",
+            "type": "global_glossary",
             "version": "3.0.0",
             "generated": datetime.now().isoformat(),
             "total_terms": len(cleaned_terms),
@@ -177,7 +177,7 @@ def clean_master_glossary():
 
 def main():
     """Main cleaning function."""
-    cleaned_data = clean_master_glossary()
+    cleaned_data = clean_global_glossary()
     
     print(f"\n📈 Final Statistics:")
     multi_chapter = [t for t in cleaned_data["terms"] if "appears_in" in t]

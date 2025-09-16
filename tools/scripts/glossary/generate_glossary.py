@@ -11,10 +11,10 @@ import re
 from pathlib import Path
 from datetime import datetime
 
-def load_master_glossary():
+def load_global_glossary():
     """Load the master glossary JSON file."""
     project_root = Path(__file__).parent.parent.parent.parent
-    glossary_path = project_root / "quarto/contents/data/master_glossary.json"
+    glossary_path = project_root / "quarto/contents/data/global_glossary.json"
     with open(glossary_path) as f:
         return json.load(f)
 
@@ -194,7 +194,7 @@ def main():
     
     # Load glossary data
     print("📚 Loading master glossary...")
-    glossary_data = load_master_glossary()
+    glossary_data = load_global_glossary()
     total_terms = len(glossary_data["terms"])
     print(f"  → Found {total_terms} terms")
     

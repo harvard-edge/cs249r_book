@@ -237,11 +237,11 @@ def merge_term_definitions(term_entries: List[Dict], canonical_term: str) -> Dic
     
     return merged_entry
 
-def apply_rule_based_consolidation(master_glossary_path: Path) -> Tuple[int, List[Dict]]:
+def apply_rule_based_consolidation(global_glossary_path: Path) -> Tuple[int, List[Dict]]:
     """Apply rule-based consolidation to the master glossary."""
     
     # Load current master glossary
-    with open(master_glossary_path, 'r') as f:
+    with open(global_glossary_path, 'r') as f:
         data = json.load(f)
     
     original_count = len(data['terms'])
@@ -291,7 +291,7 @@ def apply_rule_based_consolidation(master_glossary_path: Path) -> Tuple[int, Lis
     data['metadata']['last_updated'] = 'rule_based_consolidation'
     
     # Save updated glossary
-    with open(master_glossary_path, 'w') as f:
+    with open(global_glossary_path, 'w') as f:
         json.dump(data, f, indent=2)
     
     reduction = original_count - len(consolidated_terms)
@@ -305,7 +305,7 @@ def main():
     print("=" * 60)
     
     project_root = Path(__file__).parent.parent.parent.parent
-    master_path = project_root / "quarto/contents/data/master_glossary.json"
+    master_path = project_root / "quarto/contents/data/global_glossary.json"
     
     # Apply consolidation
     reduction, log = apply_rule_based_consolidation(master_path)

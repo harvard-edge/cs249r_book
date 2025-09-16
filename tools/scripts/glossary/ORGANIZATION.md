@@ -17,14 +17,14 @@ MLSysBook/
 │   │       └── generative_ai_glossary.json
 │   │
 │   ├── data/                              # Aggregated data
-│   │   ├── master_glossary.json           # Master aggregated glossary
-│   │   └── master_glossary.backup.json   # Backup of previous version
+│   │   ├── global_glossary.json           # Global aggregated glossary
+│   │   └── global_glossary.backup.json   # Backup of previous version
 │   │
 │   └── backmatter/glossary/               # Published glossary
 │       └── glossary.qmd                   # Final glossary page
 │
 └── tools/scripts/glossary/                # Processing scripts
-    ├── build_master_glossary.py           # Aggregates chapters → master
+    ├── build_global_glossary.py           # Aggregates chapters → global
     ├── generate_glossary.py               # Generates master → QMD page
     ├── consolidate_similar_terms.py       # Manual consolidation rules
     ├── smart_consolidation.py             # LLM-based similarity detection
@@ -37,7 +37,7 @@ MLSysBook/
 ## Data Flow
 
 ```
-Chapter Glossaries → Master Glossary → Published Glossary
+Chapter Glossaries → Global Glossary → Published Glossary
       (22 files)         (1 file)         (1 QMD file)
          ↓                   ↓                  ↓
      Source of           Aggregated         Final user-
@@ -53,8 +53,8 @@ Chapter Glossaries → Master Glossary → Published Glossary
 - Status: ✅ All in proper chapter directories
 - Purpose: Source of truth for individual chapter terms
 
-**Master Glossary:**
-- `quarto/contents/data/master_glossary.json`
+**Global Glossary:**
+- `quarto/contents/data/global_glossary.json`
 - Status: ✅ In proper data directory
 - Purpose: Aggregated and deduplicated terms from all chapters
 
@@ -84,7 +84,7 @@ Chapter Glossaries → Master Glossary → Published Glossary
 ## Usage Workflow
 
 1. **Edit terms**: Modify individual chapter glossary JSON files
-2. **Rebuild master**: Run `python3 tools/scripts/glossary/build_master_glossary.py`
+2. **Rebuild master**: Run `python3 tools/scripts/glossary/build_global_glossary.py`
 3. **Generate page**: Run `python3 tools/scripts/glossary/generate_glossary.py`
 4. **Optional cleanup**: Run consolidation scripts for quality improvement
 

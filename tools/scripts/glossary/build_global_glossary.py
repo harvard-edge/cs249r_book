@@ -157,7 +157,7 @@ def aggregate_terms(chapter_data):
     
     return clean_terms
 
-def build_master_glossary():
+def build_global_glossary():
     """Build the master glossary from individual chapter files."""
     print("🔧 Building Master Glossary from Chapter Sources")
     print("=" * 60)
@@ -169,9 +169,9 @@ def build_master_glossary():
     clean_terms = aggregate_terms(chapter_data)
     
     # Build master glossary structure
-    master_glossary = {
+    global_glossary = {
         "metadata": {
-            "type": "master_glossary",
+            "type": "global_glossary",
             "version": "3.0.0",
             "generated": datetime.now().isoformat(),
             "total_terms": len(clean_terms),
@@ -184,7 +184,7 @@ def build_master_glossary():
     
     # Save master glossary
     project_root = Path(__file__).parent.parent.parent.parent  
-    output_path = project_root / "quarto/contents/data/master_glossary.json"
+    output_path = project_root / "quarto/contents/data/global_glossary.json"
     
     # Create backup if exists
     if output_path.exists():
@@ -195,7 +195,7 @@ def build_master_glossary():
     
     print(f"💾 Saving master glossary: {output_path}")
     with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(master_glossary, f, indent=2, ensure_ascii=False)
+        json.dump(global_glossary, f, indent=2, ensure_ascii=False)
     
     # Report statistics
     multi_chapter_terms = [t for t in clean_terms if "appears_in" in t]
@@ -211,11 +211,11 @@ def build_master_glossary():
         chapters = ', '.join(term['appears_in'])
         print(f"  → {term['term']}: {chapters}")
     
-    return master_glossary
+    return global_glossary
 
 def main():
     """Main function."""
-    master_glossary = build_master_glossary()
+    global_glossary = build_global_glossary()
     
     print(f"\n✅ Master glossary successfully built!")
     print(f"Next steps:")

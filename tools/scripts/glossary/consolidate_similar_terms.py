@@ -140,7 +140,7 @@ def main():
     print(f"\n✅ Consolidation complete!")
     print(f"  → Total terms consolidated: {total}")
     print("\nNext steps:")
-    print("  1. Run build_master_glossary.py to rebuild the master")
+    print("  1. Run build_global_glossary.py to rebuild the master")
     print("  2. Run generate_glossary.py to regenerate the glossary page")
 
 if __name__ == "__main__":
