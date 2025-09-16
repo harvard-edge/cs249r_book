@@ -150,7 +150,7 @@ def generate_glossary_qmd(glossary_data):
             content.append(f"**{term_name}**")
             content.append(f": {definition}")
             
-            # Handle chapter references properly
+            # Handle chapter references consistently
             appears_in = term.get("appears_in", [])
             chapter_source = term.get("chapter_source", "")
             
@@ -159,9 +159,9 @@ def generate_glossary_qmd(glossary_data):
                 formatted_chapters = [format_chapter_link(ch) for ch in appears_in]
                 content.append(f"  *Appears in: {', '.join(formatted_chapters)}*")
             elif chapter_source:
-                # Single primary chapter
+                # Single primary chapter - use consistent "Appears in:" label
                 formatted_chapter = format_chapter_link(chapter_source)
-                content.append(f"  *Chapter: {formatted_chapter}*")
+                content.append(f"  *Appears in: {formatted_chapter}*")
             
             # Add cross-references if available
             if term.get("see_also"):
