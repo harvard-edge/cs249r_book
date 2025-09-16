@@ -38,7 +38,7 @@ When agents create branches, prefix with agent name:
 - **Related changes only**: Only commit files related to the current task
 - **Review before committing**: Always check `git diff` before staging
 - **Selective staging**: Use `git add <specific-files>` not `git add -A` when mixing changes
-- **Claude signatures**: ALWAYS add "🤖 Generated with Claude Code" and "Co-Authored-By: Claude" to commits made by Claude
+- **Co-authoring**: Only add co-author signatures when explicitly requested by the user
 
 ### 3.1. Incremental Development Practices
 - **One change at a time**: Make only one type of change per commit (e.g., remove one unused function, move one constant)
