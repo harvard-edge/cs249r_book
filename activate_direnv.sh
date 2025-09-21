@@ -21,3 +21,4 @@ echo "📍 Virtual env: ${VIRTUAL_ENV:-'Not set'}"
 echo "📁 Project root: ${PROJECT_ROOT:-'Not set'}"
 
 
+

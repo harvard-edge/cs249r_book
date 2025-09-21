@@ -138,3 +138,4 @@ cd . && direnv reload
 This setup ensures that every Python project you work on will automatically have its virtual environment activated in both Cursor and your terminal, without any manual intervention! 🎯
 
 
+
