@@ -38,6 +38,7 @@ class BuildCommand:
             True if build succeeded, False otherwise
         """
         console.print(f"[green]🔨 Building full {format_type.upper()} book...[/green]")
+        console.print("[dim]📄 Building all files (full book mode)[/dim]")
         
         # Handle special case for building both HTML and PDF
         if format_type == "both":
@@ -97,6 +98,13 @@ class BuildCommand:
         try:
             # Validate chapters exist
             chapter_files = self.chapter_discovery.validate_chapters(chapter_names)
+            
+            # Show files that will be built
+            console.print("[dim]📄 Files to be rendered:[/dim]")
+            console.print(f"[dim]  • index.qmd[/dim]")
+            for chapter_file in chapter_files:
+                rel_path = chapter_file.relative_to(self.config_manager.book_dir)
+                console.print(f"[dim]  • {rel_path}[/dim]")
             
             # Setup configuration
             config_file = self.config_manager.get_config_file(format_type)
@@ -260,6 +268,11 @@ class BuildCommand:
                     files_to_render.append(str(rel_path))
             else:
                 console.print("[dim]📋 Building index.qmd only[/dim]")
+            
+            # Show files that will be built
+            console.print("[dim]📄 Files to be rendered:[/dim]")
+            for file_path in files_to_render:
+                console.print(f"[dim]  • {file_path}[/dim]")
             
             # Create temporary config for HTML-only build
             config_file = self.config_manager.get_config_file("html")

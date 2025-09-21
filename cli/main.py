@@ -14,13 +14,24 @@ from rich.panel import Panel
 from rich.text import Text
 
 # Import our modular components
-from core.config import ConfigManager
-from core.discovery import ChapterDiscovery
-from commands.build import BuildCommand
-from commands.preview import PreviewCommand
-from commands.doctor import DoctorCommand
-from commands.clean import CleanCommand
-from commands.maintenance import MaintenanceCommand
+try:
+    # When run as installed package
+    from cli.core.config import ConfigManager
+    from cli.core.discovery import ChapterDiscovery
+    from cli.commands.build import BuildCommand
+    from cli.commands.preview import PreviewCommand
+    from cli.commands.doctor import DoctorCommand
+    from cli.commands.clean import CleanCommand
+    from cli.commands.maintenance import MaintenanceCommand
+except ImportError:
+    # When run as local script
+    from core.config import ConfigManager
+    from core.discovery import ChapterDiscovery
+    from commands.build import BuildCommand
+    from commands.preview import PreviewCommand
+    from commands.doctor import DoctorCommand
+    from commands.clean import CleanCommand
+    from commands.maintenance import MaintenanceCommand
 
 console = Console()
 
