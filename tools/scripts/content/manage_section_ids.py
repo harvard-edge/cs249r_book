@@ -657,90 +657,90 @@ def process_markdown_file(file_path, auto_yes=False, force=False, dry_run=False,
                     logging.info(f"    → {new_line.strip()}")
                 continue  # Skip this header
 
-                existing_id_matches = re.findall(r'\{#(sec-[^}]+)\}', line)
-                if existing_id_matches:
-                    existing_id = existing_id_matches[0]
-                    existing_sections.append((title.strip(), existing_id))
-                    file_summary['existing_sections'].append((title.strip(), existing_id))
-                    
-                    if remove_mode:
-                        # Remove the section ID
-                        if auto_yes or force or input(f"\n🗑️  Remove ID for '{title}': {existing_id}? [Y/n]: ").lower() != 'n':
-                            # Remove only the sec- part while preserving other attributes
-                            new_attrs = re.sub(r'#sec-[^}\s]+', '', existing_attrs)
-                            # Clean up any double spaces or empty braces
-                            new_attrs = re.sub(r'\s+', ' ', new_attrs).strip()
-                            if new_attrs == "{}":
-                                new_line = f"{hashes} {title}\n"
-                            else:
-                                new_line = f"{hashes} {title} {new_attrs}\n"
-                            lines[i] = new_line
-                            modified = True
-                            file_summary['modified'] = True
-                            file_summary['removed_ids'].append((title.strip(), existing_id))
-                            logging.info(f"  🗑️  Removed: {title}")
-                            logging.info(f"    {line.strip()}")
-                            logging.info(f"    → {new_line.strip()}")
-                    else:
-                        # Extract section content for content-aware ID generation
-                        section_content = extract_section_content(lines, i, header_level)
-                        
-                        # Generate the new ID in the standard format with parent hierarchy and content
-                        is_chapter = (header_level == 1)
-                        new_id = generate_section_id(title, file_path, chapter_title, section_counter, parent_sections, section_content, is_chapter)
-                        section_counter += 1
-                        
-                        # Check if the existing ID needs to be repaired/updated
-                        is_proper, expected_id = is_properly_formatted_id(existing_id, title, file_path, chapter_title, section_counter)
-                        
-                        # In repair mode, always update to the new format
-                        # In normal mode, only update if the format is improper
-                        should_update = repair_mode or not is_proper
-                        
-                        if should_update:
-                            if existing_id == new_id:
-                                continue  # No change needed, skip
-                            if auto_yes or force or input(f"\n🔄 Update ID for '{title}':\n  From: {existing_id}\n  To:   {new_id}\n  Proceed? [Y/n]: ").lower() != 'n':
-                                # Store the replacement
-                                id_replacements[existing_id] = new_id
-                                # Replace only the sec- part while preserving other attributes
-                                # This handles cases like: {.class #sec-old-id .other-class}
-                                new_attrs = re.sub(r'#sec-[^}\s]+', f'#{new_id}', existing_attrs)
-                                new_line = f"{hashes} {title} {new_attrs}\n"
-                                lines[i] = new_line
-                                modified = True
-                                file_summary['modified'] = True
-                                file_summary['updated_ids'].append((title.strip(), existing_id, new_id))
-                                logging.info(f"  ✓ Updated: {title}")
-                                logging.info(f"    {line.strip()}")
-                                logging.info(f"    → {new_line.strip()}")
-                else:
-                    if not remove_mode:  # Only add IDs if not in remove mode
-                        # Extract section content for content-aware ID generation
-                        section_content = extract_section_content(lines, i, header_level)
-                        
-                        # Generate the new ID in the standard format with parent hierarchy and content
-                        is_chapter = (header_level == 1)
-                        new_id = generate_section_id(title, file_path, chapter_title, section_counter, parent_sections, section_content, is_chapter)
-                        section_counter += 1
-                        # Add ID while preserving other attributes
-                        if existing_attrs:
-                            # Remove any existing ID if present
-                            attrs_without_id = re.sub(r'#sec-[^}]+', '', existing_attrs)
-                            attrs_without_id = attrs_without_id.strip()
-                            if attrs_without_id == "{}":
-                                new_line = f"{hashes} {title} {{#{new_id}}}\n"
-                            else:
-                                new_line = f"{hashes} {title} {attrs_without_id} {{#{new_id}}}\n"
+            existing_id_matches = re.findall(r'\{#(sec-[^}]+)\}', line)
+            if existing_id_matches:
+                existing_id = existing_id_matches[0]
+                existing_sections.append((title.strip(), existing_id))
+                file_summary['existing_sections'].append((title.strip(), existing_id))
+                
+                if remove_mode:
+                    # Remove the section ID
+                    if auto_yes or force or input(f"\n🗑️  Remove ID for '{title}': {existing_id}? [Y/n]: ").lower() != 'n':
+                        # Remove only the sec- part while preserving other attributes
+                        new_attrs = re.sub(r'#sec-[^}\s]+', '', existing_attrs)
+                        # Clean up any double spaces or empty braces
+                        new_attrs = re.sub(r'\s+', ' ', new_attrs).strip()
+                        if new_attrs == "{}":
+                            new_line = f"{hashes} {title}\n"
                         else:
-                            new_line = f"{hashes} {title} {{#{new_id}}}\n"
+                            new_line = f"{hashes} {title} {new_attrs}\n"
                         lines[i] = new_line
                         modified = True
                         file_summary['modified'] = True
-                        file_summary['added_ids'].append((title.strip(), new_id))
-                        logging.info(f"  + Added: {title}")
+                        file_summary['removed_ids'].append((title.strip(), existing_id))
+                        logging.info(f"  🗑️  Removed: {title}")
                         logging.info(f"    {line.strip()}")
                         logging.info(f"    → {new_line.strip()}")
+                else:
+                    # Extract section content for content-aware ID generation
+                    section_content = extract_section_content(lines, i, header_level)
+                    
+                    # Generate the new ID in the standard format with parent hierarchy and content
+                    is_chapter = (header_level == 1)
+                    new_id = generate_section_id(title, file_path, chapter_title, section_counter, parent_sections, section_content, is_chapter)
+                    section_counter += 1
+                        
+                    # Check if the existing ID needs to be repaired/updated
+                    is_proper, expected_id = is_properly_formatted_id(existing_id, title, file_path, chapter_title, section_counter)
+                    
+                    # In repair mode, always update to the new format
+                    # In normal mode, only update if the format is improper
+                    should_update = repair_mode or not is_proper
+                    
+                    if should_update:
+                        if existing_id == new_id:
+                            continue  # No change needed, skip
+                        if auto_yes or force or input(f"\n🔄 Update ID for '{title}':\n  From: {existing_id}\n  To:   {new_id}\n  Proceed? [Y/n]: ").lower() != 'n':
+                            # Store the replacement
+                            id_replacements[existing_id] = new_id
+                            # Replace only the sec- part while preserving other attributes
+                            # This handles cases like: {.class #sec-old-id .other-class}
+                            new_attrs = re.sub(r'#sec-[^}\s]+', f'#{new_id}', existing_attrs)
+                            new_line = f"{hashes} {title} {new_attrs}\n"
+                            lines[i] = new_line
+                            modified = True
+                            file_summary['modified'] = True
+                            file_summary['updated_ids'].append((title.strip(), existing_id, new_id))
+                            logging.info(f"  ✓ Updated: {title}")
+                            logging.info(f"    {line.strip()}")
+                            logging.info(f"    → {new_line.strip()}")
+            else:
+                if not remove_mode:  # Only add IDs if not in remove mode
+                    # Extract section content for content-aware ID generation
+                    section_content = extract_section_content(lines, i, header_level)
+                    
+                    # Generate the new ID in the standard format with parent hierarchy and content
+                    is_chapter = (header_level == 1)
+                    new_id = generate_section_id(title, file_path, chapter_title, section_counter, parent_sections, section_content, is_chapter)
+                    section_counter += 1
+                    # Add ID while preserving other attributes
+                    if existing_attrs:
+                        # Remove any existing ID if present
+                        attrs_without_id = re.sub(r'#sec-[^}]+', '', existing_attrs)
+                        attrs_without_id = attrs_without_id.strip()
+                        if attrs_without_id == "{}":
+                            new_line = f"{hashes} {title} {{#{new_id}}}\n"
+                        else:
+                            new_line = f"{hashes} {title} {attrs_without_id} {{#{new_id}}}\n"
+                    else:
+                        new_line = f"{hashes} {title} {{#{new_id}}}\n"
+                    lines[i] = new_line
+                    modified = True
+                    file_summary['modified'] = True
+                    file_summary['added_ids'].append((title.strip(), new_id))
+                    logging.info(f"  + Added: {title}")
+                    logging.info(f"    {line.strip()}")
+                    logging.info(f"    → {new_line.strip()}")
 
     # Show existing sections even if no changes were made
     if existing_sections:
