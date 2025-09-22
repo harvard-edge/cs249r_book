@@ -22,7 +22,7 @@ _DALL·E 3 Prompt: Create an intricate and colorful representation of a System o
 
 _Why do machine learning workloads require specialized hardware architectures, and how do accelerators transform computational bottlenecks into tractable problems?_
 
-Machine learning workloads expose the limitations of general-purpose processors and drive demand for specialized hardware architectures. Neural network operations require massive parallel matrix computations, exhibit predictable memory access patterns, and tolerate reduced precision, characteristics that specialized accelerators exploit for substantial efficiency gains. GPUs provide parallel computation capabilities, TPUs optimize tensor operations, and emerging accelerators target specific neural network primitives. Hardware acceleration transforms computational bottlenecks into manageable workloads, enabling practical deployment of complex models. Understanding acceleration principles enables engineers to select appropriate platforms, optimize implementations, and design systems that maximize computational throughput while managing power consumption and cost constraints.
+Machine learning workloads expose the limitations of general-purpose processors and drive demand for specialized hardware architectures. Neural network operations require massive parallel matrix computations, exhibit predictable memory access patterns, and tolerate reduced precision, characteristics that specialized accelerators exploit for substantial efficiency gains. GPUs provide parallel computation capabilities, TPUs optimize tensor operations, and emerging accelerators target specific neural network primitives. Hardware acceleration transforms computational bottlenecks into manageable workloads, enabling practical deployment of complex models. Understanding acceleration principles enables engineers to select appropriate platforms, optimize implementations, and design systems that maximize computational throughput while managing power consumption and cost constraints. While this chapter focuses on hardware architecture and optimization principles, the operational aspects of deploying acceleration infrastructure—including procurement, cost management, cluster orchestration, and production monitoring—are covered comprehensively in [Chapter @sec-ml-operations].
 
 ::: {.callout-tip title="Learning Objectives"}
 
@@ -41,6 +41,8 @@ Machine learning workloads expose the limitations of general-purpose processors 
 :::
 
 ## Overview {#sec-ai-acceleration-overview-47d1}
+
+Recall from [Chapter @sec-model-optimizations] how software optimization techniques—pruning, quantization, and efficient model architectures—reduce computational and memory requirements. However, even optimized models face fundamental hardware limitations that software alone cannot overcome. The "memory wall" discussed in [Chapter @sec-efficient-ai] becomes a physical reality: moving 1GB of model weights from memory consumes 100-1000x more energy than the actual computation. This is where hardware acceleration becomes essential.
 
 Machine learning has driven a major shift in computer architecture, pushing beyond traditional general-purpose processors toward specialized acceleration. The computational demands of modern machine learning models exceed the capabilities of conventional CPUs, which were designed for sequential execution. Instead, machine learning workloads exhibit massive parallelism, high memory bandwidth requirements, and structured computation patterns that demand purpose-built hardware for efficiency and scalability. Machine Learning Accelerators (ML Accelerators) have emerged as a response to these challenges.
 
@@ -694,6 +696,8 @@ While tensor cores package matrix operations into structured computational units
 
 The concept of systolic arrays was first introduced by Kung and Leiserson[^fn-systolic-origin], who formalized their use in parallel computing architectures for efficient matrix operations [@Kung1982]. Unlike general-purpose execution units, systolic arrays exploit spatial and temporal locality by reusing operands as they propagate through the grid. Google's Tensor Processing Unit (TPU) exemplifies this architectural approach. In the TPUv4, a $128\times128$ systolic array of multiply-accumulate units processes matrix operations by streaming data through the array in a pipelined manner, as shown in @fig-systolic-array.
 
+**Understanding Systolic Array Data Flow**: Think of a systolic array like a "computational heartbeat" where data pulses rhythmically through a grid of processing elements. In @fig-systolic-array, input matrix **A** flows horizontally (left to right) while input matrix **B** flows vertically (top to bottom). Each processing element (PE) performs a multiply-accumulate operation: it multiplies the values flowing through it and adds the result to a partial sum that accumulates the final matrix **C**. The key insight is that each data element gets reused multiple times as it flows through neighboring PEs, dramatically reducing memory bandwidth requirements compared to repeatedly fetching the same data from external memory.
+
 [^fn-systolic-origin]: **Systolic Array Renaissance**: H.T. Kung and Charles Leiserson introduced systolic arrays at CMU in 1979 for VLSI signal processing, but the concept languished for decades due to programming complexity. Google's 2016 TPU resurrection proved these "heartbeat" architectures could deliver massive efficiency gains for neural networks—the TPUv1's 256x256 systolic array achieved 92 TOPS while consuming just 40 watts, making systolic arrays the dominant AI architecture today.
 
 ::: {#fig-systolic-array fig-env="figure" fig-pos="htb"}
@@ -868,6 +872,32 @@ Modern AI processors exhibit a range of design trade-offs based on their intende
 : **AI Processor Configurations**: Modern AI processors prioritize different execution unit characteristics to optimize performance for specific workloads; NVIDIA A100 leverages wide SIMD and tensor cores for training, Google TPUv4 emphasizes high-throughput BF16 matrix multiplication, and Intel Sapphire Rapids focuses on INT8-optimized inference, while apple M1 prioritizes low-power FP16 execution on smaller processing elements. These variations in SIMD width, tensor core size, and processing element count reflect the growing diversity in AI hardware architectures and their targeted applications. {#tbl-execution-units}
 
 @tbl-execution-units highlights how execution unit configurations vary across architectures to optimize for different deep learning workloads. Training accelerators prioritize high-throughput floating-point tensor operations, whereas inference processors focus on low-precision integer execution for efficiency. Meanwhile, mobile accelerators balance precision and power efficiency to meet real-time constraints.
+
+### Cost-Performance Analysis {#sec-ai-acceleration-cost-performance-analysis-8f3d}
+
+While architectural specifications define computational potential, practical deployment decisions require understanding cost-performance trade-offs across different accelerator options. The choice between accelerator types involves balancing upfront hardware costs, operational expenses, and performance characteristics for specific workloads.
+
+@tbl-accelerator-economics provides concrete cost-performance data for representative accelerators, illustrating the economic considerations that drive hardware selection in production environments.
+
++------------------+-----------------+---------------------+----------------------+-----------------------+
+| Accelerator      | List Price (USD)| Peak FLOPS (FP16)   | Memory Bandwidth     | Price/Performance     |
++:=================+:================+:====================+:=====================+:======================+
+| NVIDIA V100      | $9,000          | 125 TFLOPS          | 900 GB/s             | $72/TFLOP             |
++------------------+-----------------+---------------------+----------------------+-----------------------+
+| NVIDIA A100      | $15,000         | 312 TFLOPS          | 1,935 GB/s           | $48/TFLOP             |
++------------------+-----------------+---------------------+----------------------+-----------------------+
+| NVIDIA H100      | $25,000         | 756 TFLOPS          | 3,350 GB/s           | $33/TFLOP             |
++------------------+-----------------+---------------------+----------------------+-----------------------+
+| Google TPUv4     | ~$8,000*        | 275 TFLOPS (BF16)   | 1,200 GB/s           | $29/TFLOP             |
++------------------+-----------------+---------------------+----------------------+-----------------------+
+| Intel H100       | $12,000         | 200 TFLOPS (INT8)   | 800 GB/s            | $60/TFLOP             |
++------------------+-----------------+---------------------+----------------------+-----------------------+
+
+: **Accelerator Cost-Performance Comparison**: Hardware costs must be evaluated against computational capabilities to determine optimal deployment strategies. While newer accelerators like H100 offer better price-performance ratios, total cost of ownership includes power consumption, cooling requirements, and infrastructure costs that significantly impact operational economics. *TPU pricing estimated from cloud rates. {#tbl-accelerator-economics}
+
+**Real-World Cost Implications**: A startup training large language models faces the choice between 8 V100s ($72K) providing 1,000 TFLOPS or 4 A100s ($60K) delivering 1,248 TFLOPS. The A100 configuration offers 25% more compute at 17% lower cost, plus significantly higher memory bandwidth crucial for transformer architectures. However, this analysis excludes infrastructure costs—power (400W per A100), cooling, and data center integration—which can double total operational expenses.
+
+These cost dynamics explain the rapid adoption of newer accelerators despite higher unit prices. The H100's $33/TFLOP represents a 54% improvement over V100's $72/TFLOP, demonstrating how architectural advancement drives economic efficiency. Cloud deployment further complicates the analysis, as providers typically charge $2-4/hour for high-end accelerators, making the break-even point between purchase and rental highly dependent on utilization patterns.
 
 While execution units define the compute potential of an accelerator, their effectiveness is fundamentally constrained by data movement and memory hierarchy. Achieving high utilization of compute resources requires efficient memory systems that minimize data transfer overhead and optimize locality. The next section explores these architectural challenges, focusing on how memory hierarchy impacts AI accelerator performance.
 
@@ -1790,7 +1820,7 @@ In practice, modern AI compilers such as TensorFlow's XLA and PyTorch's TorchScr
 
 Optimizing memory access is a fundamental challenge in AI acceleration. While AI models rely on high-throughput computation, their performance is often constrained by memory bandwidth and intermediate memory writes rather than pure arithmetic operations. Every time an operation produces an intermediate result that must be written to memory and later read back, execution stalls occur due to data movement overhead.
 
-To better understand why kernel fusion is necessary, consider a simple sequence of operations in a machine learning model. Many AI workloads, particularly those involving element-wise transformations, introduce unnecessary intermediate memory writes, leading to increased memory bandwidth consumption and reduced execution efficiency [@nvidia2017gpu].
+Recall from [Chapter @sec-model-optimizations] how software optimization techniques reduce computational requirements. Kernel fusion represents the critical bridge between software optimization and hardware acceleration—it's how the compiler transforms the optimized model operations into hardware-efficient execution patterns. To better understand why kernel fusion is necessary, consider a simple sequence of operations in a machine learning model. Many AI workloads, particularly those involving element-wise transformations, introduce unnecessary intermediate memory writes, leading to increased memory bandwidth consumption and reduced execution efficiency [@nvidia2017gpu].
 
 @lst-naive_execution illustrates a naïve execution model in which each operation is treated as a separate kernel, meaning that each intermediate result is written to memory and then read back for the next operation.
 
