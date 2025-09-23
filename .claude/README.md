@@ -43,7 +43,7 @@
 ## Important Rules
 
 1. **No Auto-Commits**: Agents leave changes unstaged for user review
-2. **Branch Naming**: Use agent prefix (e.g., `footnote/chapter-name`)
+2. **No Auto-Branching**: Agents work on current branch unless explicitly requested
 3. **Knowledge Map**: Always consult to avoid content duplication
 4. **Reviews**: Store in `_reviews/` directory, not committed to repo
 

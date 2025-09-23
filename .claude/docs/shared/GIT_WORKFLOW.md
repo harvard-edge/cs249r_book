@@ -22,8 +22,8 @@ This ensures:
 - `fix/` - For bug fixes
 - `feat/` - For new features
 
-### Agent-Created Branches
-When agents create branches, use the agent name as prefix:
+### Agent Branch Policy
+**Agents should NOT create branches automatically**. Only when explicitly requested:
 - `reviewer/` - Created by reviewer agent
 - `editor/` - Created by editor agent
 - `footnote/` - Created by footnote agent

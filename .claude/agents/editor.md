@@ -28,7 +28,19 @@ Only fix genuine forward references where ML-specific concepts are used before b
 **BEFORE editing any chapter, you MUST read:**
 1. `.claude/docs/shared/CONTEXT.md` - Book philosophy and target audience
 2. `.claude/docs/shared/KNOWLEDGE_MAP.md` - What each chapter teaches
-3. `.claude/docs/shared/GIT_WORKFLOW.md` - Git branching requirements
+
+## OPERATING MODES
+
+**Workflow Mode**: Part of PHASE 2: Structural Corrections (runs SECOND, after paragraph-optimizer)
+**Individual Mode**: Can be called directly to implement specific edits or fixes
+
+- Always work on current branch (no branch creation)
+- In workflow: Read ALL Phase 1 assessment reports:
+  - `.claude/_reviews/batch-gen/{chapter}_reviewer_report.md`
+  - `.claude/_reviews/batch-gen/{chapter}_factcheck_report.md`
+  - `.claude/_reviews/batch-gen/{chapter}_independent_report.md`
+- Implement approved feedback (from reviews or direct user requests)
+- In workflow: Build on paragraph-optimizer's structural fixes
 
 ## Primary Role: Implementation
 
@@ -62,8 +74,8 @@ You receive detailed YAML review reports from the reviewer subagent and execute 
 
 ## Edit Process
 
-### Step 0: Create Branch
-Always create a branch using `editor/` prefix (e.g., `editor/fix-chapter3-refs`)
+### Step 0: Work on Current Branch
+Work on the current branch without creating new branches
 
 ### Step 1: Parse YAML Review Report
 When you receive a review report, it will start with structured YAML data:
@@ -194,7 +206,7 @@ Use Edit tool to replace exactly the text at line 145.
   suggested_fix:
     type: "footnote"
     new_text: "specialized hardware[^ch3-gpu] provides significant acceleration"
-    footnote_text: "[^ch3-gpu]: Graphics Processing Units (GPUs) and other AI accelerators are covered in detail in Chapter 11."
+    footnote_text: "[^ch3-gpu]: Graphics Processing Units (GPUs) and other AI accelerators are covered in detail in [Chapter @sec-hw-acceleration]."
 ```
 **Your Actions:**
 1. Replace "GPUs provide" with "specialized hardware[^ch3-gpu] provides"

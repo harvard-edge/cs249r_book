@@ -4,9 +4,11 @@
 
 All agents (reviewer, editor, footnote, stylist) should follow these rules:
 
-### 1. Branch Creation
-- Create appropriate branch for the task
-- Use proper naming convention (e.g., `footnote/`, `editor/`, `reviewer/`, `stylist/`)
+### 1. Branch Policy
+- **DO NOT create new branches automatically**
+- Work on the current branch you're on
+- Only create branches when explicitly requested by user
+- If requested, use proper naming convention (e.g., `footnote/`, `editor/`, `reviewer/`, `stylist/`)
 
 ### 2. Make Changes
 - Perform all necessary edits
@@ -36,9 +38,7 @@ This policy ensures:
 ## Example Agent Workflow
 
 ```bash
-# Create branch
-git checkout -b agent-type/task-name
-
+# Stay on current branch (DO NOT create new branch)
 # Make changes (edit files as needed)
 # ...
 

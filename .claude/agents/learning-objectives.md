@@ -46,6 +46,17 @@ Structure objectives to progress through cognitive levels:
 - Order from foundational to advanced concepts
 - Ensure each objective maps to specific chapter sections
 
+## OPERATING MODES
+
+**Workflow Mode**: Part of PHASE 4: Final Production (runs THIRD/last in phase and workflow)
+**Individual Mode**: Can be called directly to create/improve learning objectives
+
+- Always work on current branch (no branch creation)
+- Create objectives from finalized, polished content
+- Base objectives on actual chapter material
+- Default output: `.claude/_reviews/batch-gen/{chapter}_objectives.md` (or as specified)
+- In workflow: Final agent in entire workflow
+
 ## Your Workflow
 
 ### Phase 1: Content Analysis

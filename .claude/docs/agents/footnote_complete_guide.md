@@ -97,7 +97,7 @@ cat .claude/docs/shared/KNOWLEDGE_MAP.md
 ```
 
 ### During Work
-1. Create branch: `footnote/chapter-name`
+1. Work on current branch (do NOT create new branch)
 2. Add footnotes following two-phase approach
 3. Verify with catalog script
 4. DO NOT stage or commit (per agent policy)

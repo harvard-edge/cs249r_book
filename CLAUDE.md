@@ -26,12 +26,15 @@ This document defines how Claude Code should work with this repository to mainta
 - `test/` - Test additions or modifications
 - `cleanup/` - Removing unused files or organizing structure
 
-#### Agent-Created Branches
-When agents create branches, prefix with agent name:
-- `reviewer/` - Created by reviewer agent
-- `editor/` - Created by editor agent  
-- `footnote/` - Created by footnote agent
-- `stylist/` - Created by stylist agent
+#### Agent Branch Policy
+**IMPORTANT: Agents should NOT create branches automatically**
+- When running in workflow mode: Work on current branch
+- Only create branches when explicitly requested by user
+- If branch creation is needed, use these prefixes:
+  - `reviewer/` - For reviewer agent tasks
+  - `editor/` - For editor agent tasks  
+  - `footnote/` - For footnote agent tasks
+  - `stylist/` - For stylist agent tasks
 
 ### 3. Commit Organization
 - **Atomic commits**: Each commit should represent one logical change
@@ -86,36 +89,33 @@ git commit -m "refactor: move QUIZ_JSON_SUFFIX to constants section"
 #### When Starting Work
 1. Check current branch: `git branch`
 2. Ensure working directory is clean: `git status`
-3. Create appropriate branch for the task
+3. Work on current branch (only create new branch if explicitly requested)
 4. Make changes related ONLY to that task
 
 #### When Changes Span Multiple Concerns
 If you realize changes involve multiple unrelated tasks:
 1. STOP and assess what you've changed
-2. Create separate branches for each concern
-3. Use `git stash` to temporarily save changes
-4. Apply relevant changes to each branch separately
-5. Commit and merge each branch independently
+2. Only if explicitly requested, create separate branches for each concern
+3. Otherwise, organize commits logically on current branch
+4. Use `git add -p` to stage related changes together
+5. Make atomic commits with clear messages
 
 #### Example Workflow
 ```bash
-# Working on agent updates
-git checkout -b refactor/agent-documentation
+# Working on current branch
+git status  # Check current state
 # ... make agent-related changes ...
 git add .claude/agents/*.md
 git commit -m "refactor: update agent documentation structure"
 
-# Realize you also need to fix footnotes
-git checkout dev
-git checkout -b fix/footnote-references  
+# If you have unrelated changes
 # ... make footnote fixes ...
 git add quarto/contents/core/introduction/introduction.qmd
 git commit -m "fix: update footnote references to use @sec- format"
 
-# Merge each separately
-git checkout dev
-git merge --no-ff refactor/agent-documentation
-git merge --no-ff fix/footnote-references
+# Only create branches if user explicitly requests:
+# User: "Create a feature branch for this new capability"
+# Then: git checkout -b feat/new-capability
 ```
 
 ## File Organization Rules
