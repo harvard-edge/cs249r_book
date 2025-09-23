@@ -1241,13 +1241,17 @@ The adversarial example is generated using the following formula:
 $$
 x_{\text{adv}} = x + \epsilon \cdot \text{sign}\big(\nabla_x J(\theta, x, y)\big)
 $$
-Where:
 
-- $x$ is the original input,
-- $y$ is the true label,
-- $\theta$ represents the model parameters,
-- $J(\theta, x, y)$ is the loss function,
-- $\epsilon$ is a small scalar that controls the magnitude of the perturbation.
+The mathematical formulation exploits the model's gradient information to construct adversarial perturbations. The gradient $\nabla_x J(\theta, x, y)$ quantifies how the loss function changes with respect to each input feature, indicating which input modifications would most effectively increase the model's prediction error. The $\text{sign}(\cdot)$ function extracts the direction of steepest ascent, while the perturbation magnitude $\epsilon$ controls the strength of the modification applied to each input dimension.
+
+Where:
+- $x$ is the original input (e.g., an image of a cat)
+- $y$ is the true label (e.g., "cat")
+- $\theta$ represents the model parameters (the trained weights)
+- $J(\theta, x, y)$ is the loss function measuring how wrong the model is
+- $\epsilon$ is a small scalar controlling perturbation magnitude (typically 0.01-0.3)
+
+These attacks exploit the high-dimensional nature of neural network input spaces, where small perturbations can shift inputs across learned decision boundaries. The effectiveness stems from the complex, non-linear decision surfaces that neural networks learn, which can be sensitive to carefully crafted modifications that remain imperceptible to human observers.
 
 This method allows for fast and efficient generation of adversarial examples by taking a single step in the direction that increases the loss most rapidly, as shown in @fig-gradient-attack.
 
@@ -1342,7 +1346,14 @@ The impact of adversarial attacks on ML systems is significant and multifaceted.
 
 ### Data Poisoning {#sec-robust-ai-data-poisoning-2769}
 
-Data poisoning presents a critical challenge to the integrity and reliability of machine learning systems. By introducing carefully crafted malicious data into the training pipeline, adversaries can subtly manipulate model behavior in ways that are difficult to detect through standard validation procedures. Unlike adversarial examples, which target models at inference time, poisoning attacks exploit upstream components of the system—such as data collection, labeling, or ingestion. As ML systems are increasingly deployed in automated and high-stakes environments, understanding how poisoning occurs and how it propagates through the system is essential for developing effective defenses.
+Data poisoning presents a critical challenge to the integrity and reliability of machine learning systems. By introducing carefully crafted malicious data into the training pipeline, adversaries can subtly manipulate model behavior in ways that are difficult to detect through standard validation procedures.
+
+A key distinction from adversarial attacks emerges in their timing and targeting. While adversarial attacks happen *after* a model is trained (adding noise to test inputs), data poisoning happens *before* training (contaminating the training data itself). This difference is analogous to fooling a trained student during an exam versus giving a student wrong information while they're learning. Both can cause incorrect answers, but they exploit different vulnerabilities at different stages:
+
+- Adversarial attacks target deployed models, affecting inference, and can be detected by monitoring outputs
+- Data poisoning targets training data, affecting learning, and is much harder to detect because the model honestly learned wrong patterns
+
+Unlike adversarial examples, which target models at inference time, poisoning attacks exploit upstream components of the system—such as data collection, labeling, or ingestion. As ML systems are increasingly deployed in automated and high-stakes environments, understanding how poisoning occurs and how it propagates through the system is essential for developing effective defenses.
 
 #### Characteristics {#sec-robust-ai-characteristics-3c33}
 
@@ -2168,7 +2179,33 @@ Dropout, originally designed as a regularization technique to prevent overfittin
 
 Once adversarial examples are detected, various defense strategies can be employed to mitigate their impact and improve the robustness of ML models.
 
-Adversarial training is a technique that involves augmenting the training data with adversarial examples and retraining the model on this augmented dataset. Exposing the model to adversarial examples during training teaches it to classify them correctly and becomes more robust to adversarial attacks. Adversarial training can be performed using various attack methods, such as the [Fast Gradient Sign Method](https://www.tensorflow.org/tutorials/generative/adversarial_fgsm) or Projected Gradient Descent [@madry2017towards].
+Adversarial training is a technique that involves augmenting the training data with adversarial examples and retraining the model on this augmented dataset. Exposing the model to adversarial examples during training teaches it to classify them correctly and becomes more robust to adversarial attacks. @lst-adversarial-training demonstrates the core implementation pattern.
+
+::: {#lst-adversarial-training lst-cap="**Adversarial Training Implementation**: Practical adversarial training using FGSM to generate adversarial examples during training, mixing clean and perturbed data to improve model robustness against gradient-based attacks."}
+```python
+def adversarial_training_step(model, data, labels, epsilon=0.1):
+    # Generate adversarial examples using FGSM
+    data.requires_grad_(True)
+    outputs = model(data)
+    loss = F.cross_entropy(outputs, labels)
+
+    model.zero_grad()
+    loss.backward()
+
+    # Create adversarial perturbation and mix with clean data
+    adv_data = data + epsilon * data.grad.sign()
+    adv_data = torch.clamp(adv_data, 0, 1)
+
+    mixed_data = torch.cat([data, adv_data])
+    mixed_labels = torch.cat([labels, labels])
+
+    return F.cross_entropy(model(mixed_data), mixed_labels)
+```
+:::
+
+The implementation in @lst-adversarial-training generates adversarial examples on-the-fly during training by computing gradients with respect to input data (line 2190), applying the sign function to extract perturbation direction (line 2196), and mixing the resulting adversarial examples with clean training data (lines 2199-2200). The `torch.clamp()` operation ensures pixel values remain valid, while the final concatenation doubles the effective batch size by combining clean and adversarial examples. This approach requires careful tuning of the perturbation budget $\epsilon$ and typically increases training time by 2-3x compared to standard training.
+
+Production deployment patterns, MLOps pipeline integration, and monitoring strategies for robust ML systems are covered in detail in [Chapter @sec-ml-operations], while distributed robustness coordination and fault tolerance at scale are addressed in distributed training contexts within [Chapter @sec-ai-training].
 
 Defensive distillation [@papernot2016distillation] is a technique that trains a second model (the student model) to mimic the behavior of the original model (the teacher model). The student model is trained on the soft labels produced by the teacher model, which are less sensitive to small perturbations. Using the student model for inference can reduce the impact of adversarial perturbations, as the student model learns to generalize better and is less sensitive to adversarial noise.
 
@@ -2540,7 +2577,42 @@ Recall that distribution shifts occur when the data distribution encountered by 
 
 ##### Detection Techniques {#sec-robust-ai-detection-techniques-f976}
 
-Statistical tests can be used to compare the distributions of the training and test data to identify significant differences. Techniques such as the Kolmogorov-Smirnov test or the Anderson-Darling test measure the discrepancy between two distributions and provide a quantitative assessment of the presence of distribution shift. By applying these tests to the input features or the model's predictions, practitioners can detect if there is a statistically significant difference between the training and test distributions.
+Statistical tests can be used to compare the distributions of the training and test data to identify significant differences. @lst-distribution-shift demonstrates a practical implementation for monitoring distribution shift in production:
+
+::: {#lst-distribution-shift lst-cap="**Distribution Shift Detection**: Core statistical methods for monitoring data distribution changes in production, combining Kolmogorov-Smirnov tests for individual features with domain classifier approaches to detect when incoming data differs significantly from training distributions."}
+```{.python}
+from scipy.stats import ks_2samp
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import roc_auc_score
+
+def detect_distribution_shift(reference_data, new_data, threshold=0.05):
+    """Detect distribution shift using statistical tests"""
+
+    # Kolmogorov-Smirnov test for feature-wise comparison
+    ks_pvalues = []
+    for feature_idx in range(new_data.shape[1]):
+        _, p_value = ks_2samp(reference_data[:, feature_idx],
+                             new_data[:, feature_idx])
+        ks_pvalues.append(p_value)
+
+    # Domain classifier to detect overall distributional differences
+    X_combined = np.vstack([reference_data, new_data])
+    y_labels = np.concatenate([np.zeros(len(reference_data)),
+                              np.ones(len(new_data))])
+
+    clf = RandomForestClassifier(n_estimators=50, random_state=42)
+    clf.fit(X_combined, y_labels)
+    domain_auc = roc_auc_score(y_labels, clf.predict_proba(X_combined)[:, 1])
+
+    return {
+        'ks_shift_detected': any(p < threshold for p in ks_pvalues),
+        'domain_shift_detected': domain_auc > 0.8,
+        'severity_score': domain_auc
+    }
+```
+:::
+
+Techniques such as the Kolmogorov-Smirnov test or the Anderson-Darling test measure the discrepancy between two distributions and provide a quantitative assessment of the presence of distribution shift. By applying these tests to the input features or the model's predictions, practitioners can detect if there is a statistically significant difference between the training and test distributions.
 
 Divergence metrics quantify the dissimilarity between two probability distributions. Commonly used divergence metrics include the [Kullback-Leibler (KL) divergence](https://towardsdatascience.com/understanding-kl-divergence-f3ddc8dff254) and the [Jensen-Shannon (JS) divergence](https://medium.com/towards-data-science/how-to-understand-and-use-jensen-shannon-divergence-b10e11b03fd6). By calculating the divergence between the training and test data distributions, practitioners can assess the extent of the distribution shift. High divergence values indicate a significant difference between the distributions, suggesting the presence of a distribution shift.
 
