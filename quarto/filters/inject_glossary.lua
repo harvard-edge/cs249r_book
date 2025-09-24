@@ -119,9 +119,8 @@ local function load_glossary()
     end
   end
   
-  if not loaded_from then
-    io.stderr:write("Warning: No glossary file found\n")
-  end
+  -- Silently continue if no glossary file is found
+  -- This is expected behavior for selective chapter builds
   
   glossary_loaded = true
 end
