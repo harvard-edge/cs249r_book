@@ -274,16 +274,12 @@ class BuildCommand:
             for file_path in files_to_render:
                 console.print(f"[dim]  • {file_path}[/dim]")
             
-            # Create temporary config for HTML-only build
+            # Use surgical approach - modify existing config file directly
             config_file = self.config_manager.get_config_file("html")
-            temp_config_file = self._create_html_only_config(config_file, files_to_render)
+            self._add_render_section(config_file, files_to_render)
             
-            # Setup symlink to temporary config
-            if self.config_manager.active_config.exists() or self.config_manager.active_config.is_symlink():
-                self.config_manager.active_config.unlink()
-            
-            relative_temp_config = temp_config_file.relative_to(self.config_manager.book_dir)
-            self.config_manager.active_config.symlink_to(relative_temp_config)
+            # Ensure symlink points to the HTML config
+            self.config_manager.setup_symlink("html")
             
             # Build HTML
             render_cmd = ["quarto", "render", "--to", "html"]
@@ -308,58 +304,81 @@ class BuildCommand:
             console.print(f"[red]❌ HTML-only build error: {e}[/red]")
             return False
         finally:
-            # Always restore original config
+            # Always remove render section from config
             try:
-                self._restore_html_config()
-                # Clean up temporary config file
-                if 'temp_config_file' in locals() and temp_config_file.exists():
-                    temp_config_file.unlink()
+                config_file = self.config_manager.get_config_file("html")
+                self._remove_render_section(config_file)
             except:
                 pass
     
-    def _create_html_only_config(self, base_config_file: Path, files_to_render: List[str]) -> Path:
-        """Create a temporary Quarto config for HTML-only builds.
+    def _add_render_section(self, config_file: Path, files_to_render: List[str]) -> None:
+        """Add render section to existing config file.
         
         Args:
-            base_config_file: Base HTML configuration file
-            files_to_render: List of files to include in the build
-            
-        Returns:
-            Path to the temporary configuration file
+            config_file: Path to config file to modify
+            files_to_render: List of files to include in render section
         """
-        import yaml
+        # Read current config
+        with open(config_file, 'r', encoding='utf-8') as f:
+            content = f.read()
         
-        # Read the base configuration
-        with open(base_config_file, 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f)
+        lines = content.split('\n')
+        modified_lines = []
+        render_added = False
         
-        # Add project.render configuration to limit files
-        if 'project' not in config:
-            config['project'] = {}
-        
-        config['project']['render'] = files_to_render
-        
-        # Create temporary config file
-        temp_config_file = self.config_manager.book_dir / "_quarto_html_only.yml"
-        
-        with open(temp_config_file, 'w', encoding='utf-8') as f:
-            yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
-        
-        console.print(f"[dim]⚡ Created HTML-only config with {len(files_to_render)} files[/dim]")
-        return temp_config_file
-    
-    def _restore_html_config(self) -> None:
-        """Restore the original HTML configuration."""
-        try:
-            # Remove current symlink
-            if self.config_manager.active_config.exists() or self.config_manager.active_config.is_symlink():
-                self.config_manager.active_config.unlink()
+        for i, line in enumerate(lines):
+            # If we find post-render and haven't added render yet, add it before
+            if not render_added and line.strip().startswith('post-render:'):
+                modified_lines.append('  render:')
+                for file in files_to_render:
+                    modified_lines.append(f'    - {file}')
+                modified_lines.append('')
+                render_added = True
             
-            # Restore HTML config symlink
-            self.config_manager.setup_symlink("html")
-            console.print("[dim]🛡️ Restored original HTML config[/dim]")
+            modified_lines.append(line)
+        
+        # Write modified config
+        with open(config_file, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(modified_lines))
+        
+        console.print(f"[dim]⚡ Added render section with {len(files_to_render)} files[/dim]")
+    
+    def _remove_render_section(self, config_file: Path) -> None:
+        """Remove render section from config file.
+        
+        Args:
+            config_file: Path to config file to modify
+        """
+        try:
+            # Read current config
+            with open(config_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            lines = content.split('\n')
+            modified_lines = []
+            i = 0
+            
+            while i < len(lines):
+                line = lines[i]
+                
+                # Skip render section entirely
+                if line.strip().startswith('render:'):
+                    # Skip this line and all indented lines that follow
+                    i += 1
+                    while i < len(lines) and (lines[i].startswith('    -') or lines[i].strip() == ''):
+                        i += 1
+                    continue
+                
+                modified_lines.append(line)
+                i += 1
+            
+            # Write modified config
+            with open(config_file, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(modified_lines))
+            
+            console.print("[dim]🛡️ Removed render section[/dim]")
         except Exception as e:
-            console.print(f"[yellow]⚠️ Error restoring config: {e}[/yellow]")
+            console.print(f"[yellow]⚠️ Error removing render section: {e}[/yellow]")
 
     def _setup_fast_build_mode(self, config_file: Path, chapter_files: List[Path]) -> None:
         """Setup fast build mode by modifying config for selective chapter builds.
