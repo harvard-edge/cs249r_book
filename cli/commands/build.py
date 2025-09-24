@@ -395,7 +395,7 @@ class BuildCommand:
     def _setup_html_fast_build(self, config_file: Path, chapter_files: List[Path], original_content: str) -> None:
         """Setup HTML fast build using render field."""
         # Build list of files to render
-        files_to_render = ["index.qmd", "contents/backmatter/glossary/glossary.qmd"]
+        files_to_render = ["index.qmd"]
         
         for chapter_file in chapter_files:
             try:
@@ -459,7 +459,7 @@ class BuildCommand:
         """
         # Get list of chapter names to keep
         keep_chapters = set(['index'])  # Always keep index.qmd
-        always_include = {'index.qmd', 'glossary.qmd', 'references.qmd'}  # Always include these
+        always_include = {'index.qmd'}  # Only include index.qmd for selective builds
         
         for chapter_file in chapter_files:
             keep_chapters.add(chapter_file.stem)

@@ -245,8 +245,8 @@ When you run `./binder pdf intro`, the system automatically:
 3. **Builds only the selected content**:
    - ✅ `index.qmd` (always included)
    - ✅ `contents/core/introduction/introduction.qmd` (target chapter)
-   - ✅ `contents/backmatter/glossary/glossary.qmd` (essential)
-   - ✅ `contents/backmatter/references.qmd` (essential)
+   - ❌ `contents/backmatter/glossary/glossary.qmd` (commented out)
+   - ❌ `contents/backmatter/references.qmd` (commented out)
 4. **Restores the original configuration** after build completion
 
 **Example output:**
@@ -256,11 +256,9 @@ When you run `./binder pdf intro`, the system automatically:
 📄 Building chapter(s) as PDF: intro
 🚀 Building 1 chapters (pdf)
 ⚡ Setting up fast build mode...
-📋 Files to build: 4 files
+📋 Files to build: 2 files
 ✓ - index.qmd
 ✓ - contents/core/introduction/introduction.qmd
-✓ - contents/backmatter/glossary/glossary.qmd
-✓ - contents/backmatter/references.qmd
 ✓ Fast build mode configured (PDF/EPUB)
 ```
 
@@ -288,8 +286,8 @@ The selective PDF build system works seamlessly in cloud environments like [mybi
 **What gets built:**
 - Always includes `index.qmd` for proper book structure
 - Includes your target chapter (e.g., `introduction.qmd`)
-- Includes essential backmatter (glossary, references)
 - Comments out all other chapters automatically
+- Comments out backmatter (glossary, references) for minimal builds
 
 ### Configuration Management
 
