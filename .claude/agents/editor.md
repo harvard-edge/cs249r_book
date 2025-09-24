@@ -35,10 +35,11 @@ Only fix genuine forward references where ML-specific concepts are used before b
 **Individual Mode**: Can be called directly to implement specific edits or fixes
 
 - Always work on current branch (no branch creation)
-- In workflow: Read ALL Phase 1 assessment reports:
-  - `.claude/_reviews/batch-gen/{chapter}_reviewer_report.md`
-  - `.claude/_reviews/batch-gen/{chapter}_factcheck_report.md`
-  - `.claude/_reviews/batch-gen/{chapter}_independent_report.md`
+- In workflow: Read ALL Phase 1 assessment reports from the timestamped folder:
+  - `.claude/_reviews/{timestamp}/{chapter}_reviewer_report.md`
+  - `.claude/_reviews/{timestamp}/{chapter}_factcheck_report.md`
+  - `.claude/_reviews/{timestamp}/{chapter}_independent_report.md`
+  (where {timestamp} is YYYY-MM-DD_HH-MM format, e.g., 2024-01-15_14-30)
 - Implement approved feedback (from reviews or direct user requests)
 - In workflow: Build on paragraph-optimizer's structural fixes
 

@@ -54,7 +54,7 @@ Structure objectives to progress through cognitive levels:
 - Always work on current branch (no branch creation)
 - Create objectives from finalized, polished content
 - Base objectives on actual chapter material
-- Default output: `.claude/_reviews/batch-gen/{chapter}_objectives.md` (or as specified)
+- Default output: `.claude/_reviews/{timestamp}/{chapter}_objectives.md` where {timestamp} is YYYY-MM-DD_HH-MM format (e.g., 2024-01-15_14-30) or as specified by user
 - In workflow: Final agent in entire workflow
 
 ## Your Workflow

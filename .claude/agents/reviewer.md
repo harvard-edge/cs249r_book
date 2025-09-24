@@ -41,7 +41,7 @@ The following need brief context/footnotes on first use:
 2. Load and understand the knowledge map from docs/shared/
 3. Identify what chapter you're reviewing
 4. When in workflow mode: Understand you are in PHASE 1: Foundation Assessment (no file modifications)
-5. Output location: `.claude/_reviews/batch-gen/{chapter}_reviewer_report.md` (or as specified by user)
+5. Output location: `.claude/_reviews/{timestamp}/{chapter}_reviewer_report.md` where {timestamp} is YYYY-MM-DD_HH-MM format (e.g., 2024-01-15_14-30) or as specified by user
 
 ## CRITICAL: No Footnotes Policy
 
