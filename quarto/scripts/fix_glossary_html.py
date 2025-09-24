@@ -18,8 +18,9 @@ WHAT THIS SCRIPT DOES:
 ----------------------
 1. Scans ALL HTML files in the build directory after Quarto finishes
 2. Finds unresolved references that appear as: <strong>?@sec-xxx</strong>
-3. Converts them to proper HTML links: <strong><a href="../path/to/chapter.html#sec-xxx">Chapter Title</a></strong>
+3. Converts them to proper HTML links: <strong><a href="../path/to/chapter.html#sec-xxx">Chapter N: Title</a></strong>
 4. Uses a hardcoded mapping of section IDs to HTML paths and titles
+5. Adds "Chapter N:" prefix to HTML links for better readability (PDF rendering adds this automatically)
 
 WHEN IT RUNS:
 -------------
@@ -68,34 +69,35 @@ CHAPTER_MAPPING = {
     "sec-ai-good": "../core/ai_for_good/ai_for_good.html#sec-ai-good",
     "sec-ai-workflow": "../core/workflow/workflow.html#sec-ai-workflow",
     "sec-conclusion": "../core/conclusion/conclusion.html#sec-conclusion",
-    "sec-frontiers-ml-systems": "../core/frontiers/frontiers.html#sec-frontiers-ml-systems",
+    "sec-agi-systems": "../core/frontiers/frontiers.html#sec-agi-systems",
     "sec-generative-ai": "../core/generative_ai/generative_ai.html#sec-generative-ai"
 }
 
 # Chapter titles for readable link text
+# Now includes "Chapter" prefix for better HTML readability
 CHAPTER_TITLES = {
-    "sec-introduction": "Introduction",
-    "sec-ml-systems": "ML Systems", 
-    "sec-dl-primer": "Deep Learning Primer",
-    "sec-dnn-architectures": "DNN Architectures",
-    "sec-ai-frameworks": "AI Frameworks",
-    "sec-ai-training": "AI Training",
-    "sec-benchmarking-ai": "Benchmarking AI",
-    "sec-data-engineering": "Data Engineering",
-    "sec-ai-acceleration": "AI Acceleration",
-    "sec-efficient-ai": "Efficient AI",
-    "sec-model-optimizations": "Model Optimizations",
-    "sec-ml-operations": "ML Operations",
-    "sec-ondevice-learning": "On-Device Learning",
-    "sec-robust-ai": "Robust AI",
-    "sec-security-privacy": "Security & Privacy",
-    "sec-responsible-ai": "Responsible AI",
-    "sec-sustainable-ai": "Sustainable AI",
-    "sec-ai-good": "AI for Good",
-    "sec-ai-workflow": "AI Workflow",
-    "sec-conclusion": "Conclusion",
-    "sec-frontiers-ml-systems": "Frontiers",
-    "sec-generative-ai": "Generative AI"
+    "sec-introduction": "Chapter 1: Introduction",
+    "sec-ml-systems": "Chapter 2: ML Systems", 
+    "sec-dl-primer": "Chapter 3: Deep Learning Primer",
+    "sec-dnn-architectures": "Chapter 4: DNN Architectures",
+    "sec-ai-frameworks": "Chapter 5: AI Frameworks",
+    "sec-ai-training": "Chapter 6: AI Training",
+    "sec-benchmarking-ai": "Chapter 7: Benchmarking AI",
+    "sec-data-engineering": "Chapter 8: Data Engineering",
+    "sec-ai-acceleration": "Chapter 9: AI Acceleration",
+    "sec-efficient-ai": "Chapter 10: Efficient AI",
+    "sec-model-optimizations": "Chapter 11: Model Optimizations",
+    "sec-ml-operations": "Chapter 12: ML Operations",
+    "sec-ondevice-learning": "Chapter 13: On-Device Learning",
+    "sec-robust-ai": "Chapter 14: Robust AI",
+    "sec-security-privacy": "Chapter 15: Security & Privacy",
+    "sec-responsible-ai": "Chapter 16: Responsible AI",
+    "sec-sustainable-ai": "Chapter 17: Sustainable AI",
+    "sec-ai-good": "Chapter 18: AI for Good",
+    "sec-ai-workflow": "Chapter 19: AI Workflow",
+    "sec-conclusion": "Chapter 20: Conclusion",
+    "sec-agi-systems": "Chapter 21: AGI Systems",
+    "sec-generative-ai": "Chapter 22: Generative AI"
 }
 
 def fix_cross_reference_link(match):

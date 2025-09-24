@@ -26,8 +26,9 @@ The **Book Binder** is a self-contained, lightning-fast development CLI for the 
 # Build the complete book (PDF)
 ./binder pdf
 
-# Build a single chapter (PDF)
+# Build a single chapter (PDF) - SELECTIVE BUILD
 ./binder pdf intro
+# ↳ Automatically comments out all chapters except index.qmd and introduction.qmd
 
 # Publish the book
 ./binder publish
@@ -234,6 +235,61 @@ chapters:
   - contents/core/target-chapter.qmd
   # - contents/core/other-chapter.qmd  # Commented for fast build
 ```
+
+#### Selective PDF Chapter Building
+
+When you run `./binder pdf intro`, the system automatically:
+
+1. **Creates a backup** of the original PDF configuration
+2. **Comments out all chapters** except the target chapter and essential files
+3. **Builds only the selected content**:
+   - ✅ `index.qmd` (always included)
+   - ✅ `contents/core/introduction/introduction.qmd` (target chapter)
+   - ✅ `contents/backmatter/glossary/glossary.qmd` (essential)
+   - ✅ `contents/backmatter/references.qmd` (essential)
+4. **Restores the original configuration** after build completion
+
+**Example output:**
+```bash
+./binder pdf intro
+
+📄 Building chapter(s) as PDF: intro
+🚀 Building 1 chapters (pdf)
+⚡ Setting up fast build mode...
+📋 Files to build: 4 files
+✓ - index.qmd
+✓ - contents/core/introduction/introduction.qmd
+✓ - contents/backmatter/glossary/glossary.qmd
+✓ - contents/backmatter/references.qmd
+✓ Fast build mode configured (PDF/EPUB)
+```
+
+This ensures that in Binder environments, you get exactly what you need: a PDF containing only the index and your target chapter, with all other chapters automatically commented out during the build process.
+
+#### Cloud Binder Compatibility
+
+The selective PDF build system works seamlessly in cloud environments like [mybinder.org](https://mybinder.org):
+
+**For cloud Binder users:**
+```bash
+# In a Jupyter terminal or notebook cell
+!./binder pdf intro
+
+# Or using the Python CLI directly
+!python binder pdf intro
+```
+
+**Key benefits for cloud environments:**
+- ✅ **Reduced memory usage** - Only builds essential chapters
+- ✅ **Faster build times** - Skips unnecessary content
+- ✅ **Automatic cleanup** - Restores configuration after build
+- ✅ **No manual editing** - Everything is automated
+
+**What gets built:**
+- Always includes `index.qmd` for proper book structure
+- Includes your target chapter (e.g., `introduction.qmd`)
+- Includes essential backmatter (glossary, references)
+- Comments out all other chapters automatically
 
 ### Configuration Management
 

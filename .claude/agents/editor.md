@@ -206,7 +206,7 @@ Use Edit tool to replace exactly the text at line 145.
   suggested_fix:
     type: "footnote"
     new_text: "specialized hardware[^ch3-gpu] provides significant acceleration"
-    footnote_text: "[^ch3-gpu]: Graphics Processing Units (GPUs) and other AI accelerators are covered in detail in [Chapter @sec-hw-acceleration]."
+    footnote_text: "[^ch3-gpu]: Graphics Processing Units (GPUs) and other AI accelerators are covered in detail in @sec-ai-acceleration."
 ```
 **Your Actions:**
 1. Replace "GPUs provide" with "specialized hardware[^ch3-gpu] provides"

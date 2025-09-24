@@ -56,9 +56,10 @@ You enforce:
 
 ### 4. Cross-Reference Compliance
 You ensure:
-- **MANDATORY**: All chapter references use @sec- format
-- **NEVER** use descriptive references like "Chapter 3" or "the DL Primer chapter"
-- **ALWAYS** use proper Quarto cross-references: @sec-dl-primer, @sec-model-optimizations
+- **MANDATORY**: All chapter references use simple @sec- format
+- **NEVER** use descriptive references like "Chapter 3", "the DL Primer chapter", or "[Chapter @sec-xxx]"
+- **ALWAYS** use simple Quarto cross-references: @sec-dl-primer, @sec-model-optimizations
+- **NO BRACKETS**: Just @sec-xxx, not [@sec-xxx] or [Chapter @sec-xxx]
 
 ## Work on Current Branch
 

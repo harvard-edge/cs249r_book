@@ -61,14 +61,14 @@ The following need brief context/footnotes on first use:
 
 **Needs Footnote (Not Replacement):**
 - Terms mentioned but not explained yet
-- Forward references with "details in [Chapter @sec-training]"
+- Forward references with "details in @sec-ai-training" (just @sec-, not [Chapter @sec-])
 - Common ML terms used in context
 
 **Flag as Issues:**
 - Technical explanations before the concept's chapter
 - Mathematical formulations before proper introduction
 - Implementation details before foundations
-- Architecture specifics (e.g., "CNN uses convolutional layers") before [Chapter @sec-dnn-architectures]
+- Architecture specifics (e.g., "CNN uses convolutional layers") before @sec-dnn-architectures
 
 ## Multi-Perspective Review Process
 
@@ -97,7 +97,7 @@ For EVERY paragraph in the chapter:
 2. **Check KNOWLEDGE_MAP.md** - Verify if technical details belong in this chapter
 3. **Distinguish context from content**:
    - Historical mention of "deep learning" → OK
-   - Explaining how deep learning works → Only in [Chapter @sec-dl-primer]
+   - Explaining how deep learning works → Only in @sec-dl-primer
 4. **Flag real violations** - Technical explanations that come too early
 5. **Suggest appropriate fixes**:
    - Add footnote for forward reference
