@@ -609,6 +609,60 @@ The architectural implications of these hardware constraints extend beyond raw c
 
 [^fn-near-memory-compute]: **Near-Memory Computing**: Places processing units directly adjacent to or within memory arrays, dramatically reducing data movement costs. Traditional von Neumann architectures spend 100-1000x more energy moving data than computing on it. Near-memory designs can perform matrix operations with 10-100x better energy efficiency by eliminating costly memory bus transfers. Critical for edge training where gradient computations require intensive memory access patterns that overwhelm traditional cache hierarchies.
 
+### Hardware-Software Co-Design Constraints {#sec-ondevice-learning-hardware-codesign-constraints}
+
+On-device learning systems must navigate the fundamental physics of mobile computing: power dissipation, thermal limits, and energy budgets. These constraints are not engineering nuisances but fundamental design drivers that determine the feasible space of on-device learning algorithms. Understanding these quantitative constraints enables principled design decisions that balance learning capabilities with system sustainability.
+
+#### Energy and Thermal Constraint Analysis
+
+Mobile devices operate under strict power budgets that directly determine feasible model complexity. The thermal design power (TDP) of mobile processors creates a fundamental constraint that shapes all on-device learning strategies. Modern smartphones typically maintain a sustained TDP of 5W, but can burst to 10W for brief periods before thermal throttling reduces performance by 50% or more. This thermal cycling behavior forces training algorithms to operate in carefully managed burst modes, utilizing peak performance for only 10-30 seconds before backing off to sustainable power levels.
+
+**Mobile Power Budget Hierarchy:**
+- **Smartphone sustained processing:** 2-3W to prevent user-noticeable heating and maintain battery life
+- **Peak training burst mode:** 10W sustainable for 10-30 seconds before thermal throttling
+- **Neural processing units:** 0.5-2W for dedicated AI workloads with optimized power efficiency
+- **CPU AI processing:** 3-5W requiring aggressive thermal management and duty cycling
+
+Power consumption scales dramatically with model size and training complexity. Training operations consume 10-50x more power than inference due to the computational overhead of gradient computation (consuming 40-70% of training power), weight updates (20-30%), and increased data movement between memory hierarchies (10-30%). Mobile devices typically budget only 500-1000mW for sustained ML training to preserve battery life and user experience, effectively limiting training sessions to 10-100 minutes daily under normal usage patterns. This constraint fundamentally shifts the design priority from computational throughput to power efficiency, requiring careful co-optimization of algorithms and hardware utilization patterns.
+
+The thermal implications extend beyond simple power limits. Training workloads generate localized heat that can trigger protective throttling in specific processor cores or accelerator units. Modern mobile SoCs implement sophisticated thermal management, including dynamic voltage and frequency scaling (DVFS)[^fn-dvfs-mobile], core migration between efficiency and performance clusters, and selective shutdown of non-essential processing units. On-device learning systems must integrate with these thermal management frameworks, scheduling training bursts during optimal thermal windows and gracefully degrading when thermal limits are approached.
+
+[^fn-dvfs-mobile]: **Dynamic Voltage and Frequency Scaling (DVFS)**: Modern mobile processors continuously adjust operating voltage and clock frequency based on workload and thermal conditions. During ML training, DVFS can reduce clock speeds by 30-50% when temperature exceeds 70°C, directly impacting training throughput. Effective on-device learning systems monitor thermal state and proactively reduce batch sizes or training intensity to maintain consistent performance rather than experiencing sudden throttling events.
+
+#### Memory Hierarchy Optimization
+
+On-device deployment requires fitting models within severely constrained memory hierarchies that vary dramatically across device categories. These constraints affect not only model storage but also the dynamic memory requirements during training, where activation caching and gradient computation can expand memory footprint by 3-5x compared to inference-only deployment.
+
+**Device Memory Hierarchy:**
+- **iPhone 15 Pro:** 8GB total system memory with approximately 2-4GB available for application workloads
+- **Budget Android devices:** 4GB total system memory with 1-2GB available for ML workloads after OS overhead
+- **IoT embedded systems:** 64MB-1GB total memory, often shared between system tasks and application data
+- **Microcontrollers:** 256KB-2MB SRAM requiring extreme optimization and careful memory management
+
+Memory requirements expand substantially during training beyond static model storage. Standard backpropagation requires caching intermediate activations for each layer during the forward pass, which are then reused during gradient computation in the backward pass. A MobileNetV2 model requiring 14MB for inference may need 50-70MB during training, potentially exceeding the available memory budget on many mobile devices. This expansion necessitates sophisticated model compression techniques that compound multiplicatively: INT8 quantization provides 4x memory reduction, structured pruning achieves 10x parameter reduction, and knowledge distillation enables 5x model size reduction while maintaining accuracy within 2-5% of the original model.
+
+Cache optimization becomes critical with constrained memory pools. Modern mobile SoCs feature complex memory hierarchies with L1 cache (32-64KB), L2 cache (1-8MB), and system memory (4-16GB) exhibiting 10-100x latency differences between levels. Training workloads that exceed cache capacity face dramatic performance degradation due to memory bandwidth bottlenecks. Successful on-device learning systems design data access patterns to maximize cache hit rates, often requiring specialized memory layouts that group related parameters, carefully sized mini-batches that fit within cache constraints, and gradient accumulation strategies that minimize memory bus traffic.
+
+The memory bandwidth limitations become particularly acute during training. While inference workloads primarily read model weights sequentially, training requires bidirectional data flow for gradient computation and weight updates. This increased memory traffic can saturate the memory subsystem, creating bottlenecks that limit training throughput regardless of computational capacity. Advanced implementations employ techniques such as gradient checkpointing[^fn-gradient-checkpointing] to trade computation for memory, and mixed-precision training to reduce bandwidth requirements while maintaining numerical stability.
+
+[^fn-gradient-checkpointing]: **Gradient Checkpointing**: A memory optimization technique that trades computation for memory by recomputing intermediate activations during the backward pass instead of storing them. This can reduce memory requirements by 50-80% at the cost of 20-30% additional computation. Particularly valuable for on-device training where memory is more constrained than compute capacity, enabling training of larger models within fixed memory budgets.
+
+#### Specialized On-Device Architecture Analysis
+
+Different mobile platforms provide distinct acceleration capabilities that determine not only achievable model complexity but also feasible learning paradigms. The architectural differences between these accelerators fundamentally shape the design space for on-device training algorithms, influencing everything from numerical precision choices to gradient computation strategies.
+
+**Current Generation Mobile Accelerators:**
+- **Apple Neural Engine (A17 Pro):** 35 TOPS peak performance specialized for 8-bit and 16-bit operations, optimized for CoreML inference patterns with limited training support
+- **Qualcomm Hexagon DSP (Snapdragon 8 Gen 3):** 45 TOPS with flexible precision support and programmable vector units, enabling mixed-precision training workflows
+- **Google Tensor TPU (Pixel 8):** 14 TOPS optimized for TensorFlow Lite operations with strong INT8 performance and federated learning integration
+- **Energy efficiency comparison:** Dedicated NPUs achieve 1-5 TOPS/W versus general-purpose CPU at 0.1-0.2 TOPS/W
+
+These accelerators determine not just raw performance but feasible learning paradigms and algorithmic approaches. Apple's Neural Engine excels at fixed-precision inference workloads but provides limited support for the dynamic precision requirements of gradient computation, making it more suitable for inference-heavy adaptation techniques like few-shot learning. Qualcomm's Hexagon DSP offers greater training flexibility through its programmable vector units and support for mixed-precision arithmetic, enabling more sophisticated on-device training including full backpropagation on compact models. Google's Tensor TPU integrates tightly with federated learning frameworks and provides optimized communication primitives for distributed training scenarios.
+
+The architectural implications extend beyond computational throughput to memory access patterns and data flow optimization. Training workloads exhibit fundamentally different characteristics than inference: gradient computation requires 3-5x higher memory bandwidth, weight updates create write-heavy access patterns, and optimizer state management demands additional memory allocation. Modern edge accelerators are beginning to address these challenges through specialized hardware features including adaptive precision datapaths that dynamically switch between INT4 for forward passes and FP16 for gradient computation, sparse computation units that accelerate selective parameter updates by skipping zero gradients, and near-memory compute architectures that reduce data movement costs by performing gradient updates directly adjacent to weight storage.
+
+However, most current edge accelerators remain primarily optimized for inference workloads, creating a significant hardware-software co-design opportunity. Future on-device training accelerators will need to efficiently handle the unique demands of local adaptation, including support for dynamic precision scaling, efficient gradient accumulation, and specialized memory hierarchies optimized for the bidirectional data flow patterns characteristic of training workloads. Architecture selection influences everything from model quantization strategies and gradient computation approaches to federated communication protocols and thermal management policies.
+
 ## Model Adaptation {#sec-ondevice-learning-model-adaptation-6a82}
 
 Adapting a machine learning model on the device requires revisiting a core assumption of conventional training: that the entire model must be updated. In resource-constrained environments, this assumption becomes infeasible due to memory, compute, and energy limitations. This differs fundamentally from the centralized training approaches covered in @sec-ai-training. Instead, modern approaches to on-device learning often focus on minimizing the scope of adaptation, updating only a subset of model parameters while reusing the majority of the pretrained architecture. These approaches use the power of transfer learning, starting with a model pretrained (usually offline on large datasets) and efficiently specializing it using the limited local data and compute resources available at the edge. This builds on the architectural principles from @sec-dnn-architectures while applying the optimization strategies from @sec-model-optimizations. This strategy is particularly effective when the pretrained model has already learned useful representations that can be adapted to new tasks or domains. By freezing most of the model parameters and only updating a small subset, we can achieve significant reductions in memory and compute requirements while still allowing for meaningful adaptation.
@@ -1654,9 +1708,113 @@ To mitigate such risks, modern federated ML systems commonly employ protective m
 
 While these techniques enhance privacy, they introduce additional system complexity and tradeoffs between model utility, communication cost, and robustness. A deeper exploration of these attacks, defenses, and their implications for federated and on-device learning is provided in @sec-security-privacy.
 
+### Distributed Systems Coordination {#sec-ondevice-learning-distributed-coordination}
+
+Federated learning transforms machine learning into a massive distributed systems challenge that extends far beyond traditional algorithmic considerations. Coordinating thousands or millions of heterogeneous devices with intermittent connectivity requires sophisticated distributed systems protocols that handle Byzantine failures, network partitions, and communication efficiency at unprecedented scale. These challenges fundamentally differ from the controlled environments of data center distributed training, where high-bandwidth networks and reliable infrastructure enable straightforward coordination protocols.
+
+#### Communication Requirements Analysis
+
+The communication bottleneck represents the primary scalability constraint in federated learning systems. Understanding the quantitative transfer requirements enables principled design decisions about model architectures, update compression strategies, and client participation policies that determine system viability.
+
+**Federated Communication Hierarchy:**
+- **Full model synchronization:** 10-500MB per round for typical deep learning models, prohibitive for mobile networks with limited upload bandwidth
+- **Gradient compression:** 10-100x reduction achievable through quantization, sparsification, and selective gradient transmission
+- **Practical deployments:** 100-1000x compression ratios required, reducing 100MB models to 100KB-1MB updates for mobile viability
+- **Communication frequency:** Critical trade-off between model update freshness and network efficiency constraints
+
+Network infrastructure constraints directly impact participation rates and overall system viability. Modern 4G networks provide upload speeds averaging 5-50 Mbps under optimal conditions, meaning an 8MB model update requires 1.3-13 seconds of sustained transmission. However, real-world mobile networks exhibit extreme variability: rural areas may experience 1 Mbps upload speeds while urban 5G deployments enable 100+ Mbps. This 100x variance in network capability necessitates adaptive communication strategies that optimize for lowest-common-denominator connectivity while enabling high-capability devices to contribute more effectively.
+
+The relationship between communication requirements and participation rates exhibits sharp threshold effects. Empirical studies demonstrate that federated learning systems requiring model transfers exceeding 10MB achieve less than 10% sustained client participation, while systems maintaining updates below 1MB can sustain 40-60% participation rates across diverse mobile populations. This communication efficiency directly translates to model quality improvements: higher participation rates provide better statistical diversity and more robust gradient estimates for global model updates.
+
+Advanced compression techniques become essential for practical deployment. Gradient quantization reduces precision from FP32 to INT8 or even binary representations, achieving 4-32x compression with minimal accuracy loss. Sparsification techniques transmit only the largest gradient components, leveraging the natural sparsity in neural network updates. Top-k gradient selection further reduces communication by transmitting only the most significant parameter updates, while error accumulation ensures that small gradients are not permanently lost.
+
+#### Distributed Coordination Challenges
+
+Federated learning operates at the complex intersection of distributed systems and machine learning, inheriting fundamental challenges from both domains while introducing unique complications that arise from the mobile, heterogeneous, and unreliable nature of edge devices.
+
+**Byzantine Fault Tolerance Requirements:**
+
+- **Device failures:** Clients may crash, lose power, or disconnect during training rounds due to battery depletion or network issues
+- **Malicious updates:** Adversarial clients can provide corrupted gradients designed to degrade global model performance or extract private information
+- **Robust aggregation:** Byzantine-resilient averaging protocols ensure system reliability despite compromised or unreliable participants
+- **Consensus mechanisms:** Coordinate millions of unreliable participants without the overhead of traditional distributed consensus protocols
+
+Network partitions pose particularly acute challenges for federated coordination protocols. Unlike traditional distributed systems operating within reliable data center networks, federated learning must gracefully handle prolonged client disconnection events where devices may remain offline for hours or days while traveling, in poor coverage areas, or simply powered down. Asynchronous coordination protocols enable continued training progress despite missing participants, but must carefully balance staleness (accepting potentially outdated contributions) against freshness (prioritizing recent but potentially sparse updates).
+
+**Fault Recovery and Resilience Strategies:**
+
+- **Checkpoint synchronization:** Periodic global model snapshots enable recovery from server failures and provide rollback points for corrupted training rounds
+- **Partial update handling:** Systems must gracefully handle incomplete training rounds when significant subsets of clients fail or disconnect
+- **State reconciliation:** Clients rejoining after extended offline periods require efficient resynchronization protocols that minimize communication overhead
+- **Dynamic load balancing:** Uneven client availability patterns create computational hotspots that require intelligent load redistribution across available participants
+
+The asynchronous nature of federated coordination introduces additional complexity in maintaining training convergence guarantees. Traditional synchronous training assumes all participants complete each round, but federated systems must handle stragglers and dropouts gracefully. Techniques such as FedAsync[^fn-fedasync] enable asynchronous aggregation where the server continuously updates the global model as client updates arrive, while bounded staleness mechanisms prevent extremely outdated updates from corrupting recent progress.
+
+[^fn-fedasync]: **Asynchronous Federated Learning (FedAsync)**: Enables continuous model updates without waiting for slow or unreliable clients. The server maintains a global model that gets updated immediately when client contributions arrive, using staleness-aware weighting to reduce the influence of outdated updates. This approach can improve convergence speed by 2-5x in heterogeneous environments while maintaining model quality within 1-3% of synchronous training.
+
+#### Scale and Heterogeneity Management
+
+Real-world federated learning deployments exhibit extreme heterogeneity across multiple dimensions simultaneously: hardware capabilities, network conditions, data distributions, and availability patterns. This multi-dimensional heterogeneity fundamentally challenges traditional distributed machine learning assumptions about homogeneous participants operating under similar conditions.
+
+**Multi-Dimensional Device Heterogeneity:**
+- **Computational variation:** 1000x differences in processing power between flagship smartphones and IoT microcontrollers
+- **Memory constraints:** 100-10,000x differences in available RAM across device categories, from 256KB microcontrollers to 16GB smartphones
+- **Energy limitations:** Training sessions must be carefully scheduled around charging patterns, thermal constraints, and battery preservation requirements
+- **Network diversity:** WiFi, 4G, 5G, and satellite connectivity exhibit orders-of-magnitude performance differences in bandwidth, latency, and reliability
+
+Adaptive coordination protocols address this heterogeneity through sophisticated tiered participation strategies that optimize resource utilization across the device spectrum. High-capability devices such as flagship smartphones can perform complex local training with large batch sizes and multiple epochs, while resource-constrained IoT devices contribute through lightweight updates, specialized subtasks, or even simple data aggregation. This creates a natural computational hierarchy where powerful devices act as "super-peers" performing disproportionate computation, while edge devices contribute specialized local knowledge and coverage.
+
+The scale challenges extend far beyond device heterogeneity to fundamental coordination overhead limitations. Traditional distributed consensus algorithms such as Raft or PBFT are designed for dozens of nodes in controlled environments, but federated learning requires coordination among millions of participants across unreliable networks. This necessitates hierarchical coordination architectures where regional aggregation servers reduce communication overhead by performing local consensus before contributing to global aggregation. Edge computing infrastructure provides natural hierarchical coordination points, enabling federated learning systems to leverage existing content delivery networks (CDNs) and mobile edge computing (MEC) deployments for efficient gradient aggregation.
+
+Modern federated systems implement sophisticated client selection strategies that balance statistical diversity with practical constraints. Random sampling ensures unbiased representation but may select many low-capability devices, while capability-based selection improves training efficiency but risks statistical bias. Hybrid approaches use stratified sampling across device tiers, ensuring both statistical representativeness and computational efficiency. These selection strategies must also consider temporal patterns: office workers' devices may be available during specific hours, while IoT sensors provide continuous but limited computational resources.
+
 ## Practical System Design {#sec-ondevice-learning-practical-system-design-7619}
 
 On-device learning presents opportunities for personalization, privacy preservation, and autonomous adaptation, but realizing these benefits in practice requires disciplined system design. Constraints on memory, compute, energy, and observability necessitate careful selection of adaptation mechanisms, training strategies, and deployment safeguards.
+
+### Efficient Learning Under Resource Constraints {#sec-ondevice-learning-efficient-learning-theory}
+
+The constraints of on-device learning mirror fundamental challenges solved by biological intelligence systems, offering theoretical insights into efficient learning design. Understanding these connections enables principled approaches to resource-constrained machine learning that leverage billions of years of evolutionary optimization.
+
+#### Biological Intelligence Comparison
+
+The human brain operates at approximately 20 watts while continuously learning from limited supervision—precisely the efficiency target for on-device learning systems. This remarkable efficiency emerges from several architectural principles that directly inform edge learning design.
+
+**Brain Efficiency Characteristics:**
+- **Power consumption:** 20W total, with ~10W for active learning and memory consolidation
+- **Memory efficiency:** Sparse, distributed representations with only 1-2% of neurons active simultaneously
+- **Learning efficiency:** Few-shot learning from single exposures, continuous adaptation without catastrophic forgetting
+- **Hierarchical processing:** Multi-scale representations from sensory input to abstract reasoning
+
+Biological learning exhibits several features that on-device systems must replicate. Sparse representations ensure efficient use of limited neural resources—only a tiny fraction of brain neurons fire during any cognitive task. This sparsity directly parallels the selective parameter updates and pruned architectures essential for mobile deployment. Event-driven processing minimizes energy consumption by activating computation only when sensory input changes, analogous to opportunistic training during device idle periods.
+
+#### Self-Supervised Learning Opportunities
+
+Mobile devices continuously collect rich sensor streams ideal for self-supervised learning: visual data from cameras, temporal patterns from accelerometers, spatial patterns from GPS, and interaction patterns from touchscreen usage. This abundant unlabeled data enables sophisticated representation learning without external supervision.
+
+**Sensor Data Potential:**
+- **Visual streams:** 30fps video provides 2.6M frames daily for contrastive learning
+- **Motion data:** 100Hz accelerometer generates 8.6M samples daily for temporal pattern detection
+- **Location traces:** GPS trajectories enable spatial representation learning and behavioral prediction
+- **Interaction patterns:** Touch, typing, and app usage create rich behavioral embeddings
+
+Contrastive learning from temporal correlations offers particularly promising opportunities. Consecutive frames from mobile cameras naturally provide positive pairs for visual representation learning, while augmentation techniques create negative examples. Audio streams from microphones enable self-supervised speech representation learning through masking and prediction tasks. Even device orientation and motion data can be used for self-supervised pretraining of activity recognition models.
+
+The biological inspiration extends to continual learning without forgetting. Brains continuously integrate new experiences while retaining decades of memories through mechanisms like synaptic consolidation and replay. On-device systems must implement analogous mechanisms: elastic weight consolidation prevents catastrophic forgetting, experience replay maintains stability during adaptation, and progressive neural architectures expand model capacity as new tasks emerge.
+
+#### Continual Learning Requirements
+
+Real-world on-device deployment demands continual adaptation to changing environments, user behavior, and task requirements. This presents the fundamental challenge of stability-plasticity tradeoff: models must remain stable enough to preserve existing knowledge while plastic enough to learn new patterns.
+
+**Continual Learning Challenges:**
+- **Catastrophic forgetting:** New learning overwrites previously acquired knowledge
+- **Task interference:** Multiple learning objectives compete for limited model capacity
+- **Data distribution shift:** Deployment environments differ significantly from training conditions
+- **Resource constraints:** Limited memory prevents storing all historical data for replay
+
+Meta-learning approaches address these challenges by learning learning algorithms themselves. Model-Agnostic Meta-Learning (MAML) trains models to quickly adapt to new tasks with minimal data—exactly the capability required for personalized on-device adaptation. Few-shot learning techniques enable rapid specialization from small user-specific datasets, while maintaining general capabilities learned during pretraining.
+
+The theoretical foundation suggests that optimal on-device learning systems will combine sparse representations, self-supervised pretraining on sensor data, and meta-learning for rapid adaptation. These principles directly influence practical system design: sparse model architectures reduce memory and compute requirements, self-supervised objectives utilize abundant unlabeled sensor data, and meta-learning enables efficient personalization from limited user interactions.
 
 A key principle in building practical systems is to minimize the adaptation footprint. Full-model fine-tuning is typically infeasible on edge platforms, instead, localized update strategies, including bias-only optimization, residual adapters, and lightweight task-specific heads, should be prioritized. These approaches allow model specialization under resource constraints while mitigating the risks of overfitting or instability.
 
