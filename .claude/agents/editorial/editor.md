@@ -76,6 +76,57 @@ This scale intersects with the sequential nature of autoregressive generation, w
 
 **Avoid standalone paragraphs** that could be reordered without losing meaning. Each paragraph should build on what came before.
 
+### Figure Caption Formatting
+
+**ALWAYS preserve bold titles in figure captions:**
+```markdown
+![**Title of Figure**: Descriptive text explaining what the figure shows and its significance. Source information if applicable.](path/to/image.jpg){#fig-label}
+```
+
+**Examples:**
+```markdown
+![**Cloud Data Center Scale**: Large-scale machine learning systems require centralized infrastructure with massive computational resources and storage capacity.](images/jpg/cloud_ml_tpu.jpeg){#fig-cloudml-example}
+
+![**Mobile Disease Detection**: Example of edge machine learning, where a smartphone app uses a trained model to classify plant diseases directly on the device.](images/png/plantvillage.png){#fig-plantvillage}
+```
+
+### Table Formatting (Grid Structure)
+
+**Tables use grid table format with left alignment:**
+```markdown
++---------------+-----------------------+--------------------------------------+----------------+
+| Category      | Example Device        | Compute                              | Memory         |
++:==============+:======================+:=====================================+:===============+
+| Cloud ML      | Google TPU v4 Pod     | 4096 TPU v4 chips                    | 128 TB+        |
++---------------+-----------------------+--------------------------------------+----------------+
+| Edge ML       | NVIDIA Jetson AGX     | 12-core Arm® Cortex®-A78AE,          | 32 GB LPDDR5   |
+|               | Orin                  | NVIDIA Ampere GPU                    |                |
++---------------+-----------------------+--------------------------------------+----------------+
+```
+
+**Table captions use bold titles and descriptive text:**
+```markdown
+: **Title of Table**: Detailed explanation of what the table shows, its significance, and how to interpret the data. Source information. {#tbl-label}
+```
+
+### Definition Callout Formatting
+
+**Definitions use specific callout-definition format:**
+```markdown
+::: {.callout-definition title="Definition of [Term]"}
+
+**[Term]** refers to [definition with *key concepts* in italics]. [Additional explanation with technical details]. [Capabilities and limitations].
+:::
+```
+
+**Example:**
+```markdown
+::: {.callout-definition title="Definition of Cloud ML"}
+
+**Cloud Machine Learning (Cloud ML)** refers to the deployment of machine learning models on *centralized computing infrastructures*, such as data centers. These systems operate in the *kilowatt to megawatt* power range and utilize *specialized computing systems* to handle *large scale datasets* and train *complex models*. Cloud ML offers *scalability* and *computational capacity*, making it well-suited for tasks requiring extensive resources and collaboration. However, it depends on *consistent connectivity* and may introduce *latency* for real-time applications.
+:::
+```
+
 ### Bullet List Formatting
 
 **Bullets should maintain consistent format:**
@@ -95,8 +146,9 @@ This scale intersects with the sequential nature of autoregressive generation, w
 1. **TikZ Blocks**: Never touch anything within `{.tikz}` code blocks
 2. **Mathematical Equations**: Preserve all LaTeX math
 3. **Code Blocks**: Only fix comments for clarity, never change code
-4. **Figure Captions**: Keep bold titles in figure captions
-5. **Table Structures**: Preserve grid formatting
+4. **Figure Captions**: Keep bold titles in figure captions - this is intentional formatting
+5. **Table Structures**: Preserve grid formatting and left alignment
+6. **Definition Callouts**: Maintain exact callout-definition format with italicized key concepts
 
 ### Converting Listed Content to Prose
 
