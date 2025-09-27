@@ -401,15 +401,19 @@ class BuildCommand:
         with open(backup_file, 'w', encoding='utf-8') as f:
             f.write(original_content)
         
-        # Determine if this is HTML or PDF/EPUB config
-        is_html = 'html' in str(config_file).lower()
+        # Determine format and call appropriate setup function
+        config_name = str(config_file).lower()
         
-        if is_html:
-            # For HTML, use render field approach
+        if 'html' in config_name:
             self._setup_html_fast_build(config_file, chapter_files, original_content)
+        elif 'pdf' in config_name:
+            self._setup_pdf_fast_build(config_file, chapter_files, original_content)
+        elif 'epub' in config_name:
+            self._setup_epub_fast_build(config_file, chapter_files, original_content)
         else:
-            # For PDF/EPUB, use commenting approach
-            self._setup_pdf_epub_fast_build(config_file, chapter_files, original_content)
+            # Fallback to PDF/EPUB approach for unknown formats
+            console.print(f"[yellow]⚠️ Unknown config format, using PDF approach: {config_file}[/yellow]")
+            self._setup_pdf_fast_build(config_file, chapter_files, original_content)
     
     def _setup_html_fast_build(self, config_file: Path, chapter_files: List[Path], original_content: str) -> None:
         """Setup HTML fast build using render field."""
@@ -470,10 +474,10 @@ class BuildCommand:
         
         console.print("[green]✓[/green] Fast build mode configured (HTML)")
     
-    def _setup_pdf_epub_fast_build(self, config_file: Path, chapter_files: List[Path], original_content: str) -> None:
-        """Setup PDF/EPUB fast build by commenting out chapters not being built.
+    def _setup_pdf_fast_build(self, config_file: Path, chapter_files: List[Path], original_content: str) -> None:
+        """Setup PDF fast build by commenting out chapters not being built.
         
-        Note: render field doesn't work for PDF/EPUB. We preserve the structure
+        Note: render field doesn't work for PDF. We preserve the structure
         but comment out files not in the selected list.
         """
         # Get list of chapter names to keep
@@ -569,8 +573,17 @@ class BuildCommand:
                             else:
                                 modified_lines.append(part_line)
                     elif part_has_active_chapters:
-                        # This part has active chapters, so keep structural lines as-is
-                        modified_lines.append(part_line)
+                        # This part has active chapters, so ensure structural lines are uncommented
+                        if 'part:' in part_line or part_stripped.startswith('chapters:'):
+                            # Always ensure part and chapters lines are uncommented when part has active chapters
+                            if part_stripped.startswith('#'):
+                                uncommented = part_line.replace('# ', '', 1).replace('#', '', 1)
+                                modified_lines.append(uncommented)
+                            else:
+                                modified_lines.append(part_line)
+                        else:
+                            # For other lines in the part, keep as-is
+                            modified_lines.append(part_line)
                     else:
                         # This part has no active chapters, comment out all lines in it
                         if not part_stripped.startswith('#') and part_stripped:
@@ -632,7 +645,182 @@ class BuildCommand:
         for file in files_being_built:
             console.print(f"[green]✓[/green] {file}")
         
-        console.print("[green]✓[/green] Fast build mode configured (PDF/EPUB)")
+        console.print("[green]✓[/green] Fast build mode configured (PDF)")
+    
+    def _setup_epub_fast_build(self, config_file: Path, chapter_files: List[Path], original_content: str) -> None:
+        """Setup EPUB fast build by commenting out chapters not being built.
+        
+        EPUB has specific requirements:
+        - Must preserve part structure (parts cannot be commented out if they contain active chapters)
+        - Must uncomment both part and chapters lines when building chapters in that part
+        - Uses same commenting approach as PDF but with stricter part preservation
+        """
+        # Get list of chapter names to keep
+        keep_chapters = set(['index'])  # Always keep index.qmd
+        always_include = {'index.qmd'}  # Only include index.qmd for selective builds
+        
+        for chapter_file in chapter_files:
+            keep_chapters.add(chapter_file.stem)
+        
+        # Track what we're building
+        files_being_built = []
+        
+        # Process config - comment out chapters not being built
+        lines = original_content.split('\n')
+        modified_lines = []
+        
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip()
+            
+            # Check if this is a part declaration
+            if stripped.startswith('- part:') or (stripped.startswith('part:') and not '.qmd' in line):
+                # This is a part - look ahead to see if any chapters in this part should be included
+                part_has_active_chapters = False
+                part_lines = [line]  # Start with the part line
+                j = i + 1
+                
+                # Collect all lines that belong to this part
+                while j < len(lines):
+                    next_line = lines[j]
+                    next_stripped = next_line.strip()
+                    
+                    # Stop if we hit another part or a non-indented line that indicates end of part
+                    if ((next_stripped.startswith('- part:') or 
+                         (next_stripped.startswith('part:') and not '.qmd' in next_line)) or
+                        (next_line and not next_line[0].isspace() and not next_line.startswith('\t') and 
+                         not next_stripped.startswith('#'))):
+                        break
+                    
+                    part_lines.append(next_line)
+                    
+                    # Check if this line has a chapter we want to include
+                    if '.qmd' in next_line:
+                        for chapter_name in keep_chapters:
+                            if f'{chapter_name}/{chapter_name}.qmd' in next_line or f'{chapter_name}.qmd' in next_line:
+                                part_has_active_chapters = True
+                                break
+                        # Also check always_include
+                        for always_file in always_include:
+                            if always_file in next_line:
+                                part_has_active_chapters = True
+                                break
+                    
+                    j += 1
+                
+                # Process all lines in this part
+                for part_line in part_lines:
+                    part_stripped = part_line.strip()
+                    
+                    if '.qmd' in part_line:
+                        # This is a chapter file - check if it should be included
+                        should_include = False
+                        
+                        # Check against always_include files
+                        for always_file in always_include:
+                            if always_file in part_line:
+                                should_include = True
+                                break
+                        
+                        # Check against selected chapters
+                        if not should_include:
+                            for chapter_name in keep_chapters:
+                                if f'{chapter_name}/{chapter_name}.qmd' in part_line or f'{chapter_name}.qmd' in part_line:
+                                    should_include = True
+                                    break
+                        
+                        if should_include:
+                            # Ensure line is not commented
+                            if part_stripped.startswith('#'):
+                                uncommented = part_line.replace('# ', '', 1).replace('#', '', 1)
+                                modified_lines.append(uncommented)
+                                files_being_built.append(part_stripped[2:] if part_stripped.startswith('# ') else part_stripped[1:])
+                            else:
+                                modified_lines.append(part_line)
+                                files_being_built.append(part_stripped[2:] if part_stripped.startswith('- ') else part_stripped)
+                        else:
+                            # Comment out this chapter
+                            if not part_stripped.startswith('#'):
+                                indent = len(part_line) - len(part_line.lstrip())
+                                commented = ' ' * indent + '# ' + part_line.lstrip()
+                                modified_lines.append(commented)
+                            else:
+                                modified_lines.append(part_line)
+                    elif part_has_active_chapters:
+                        # EPUB CRITICAL: This part has active chapters, so ensure structural lines are uncommented
+                        if 'part:' in part_line or part_stripped.startswith('chapters:'):
+                            # Always ensure part and chapters lines are uncommented when part has active chapters
+                            if part_stripped.startswith('#'):
+                                uncommented = part_line.replace('# ', '', 1).replace('#', '', 1)
+                                modified_lines.append(uncommented)
+                            else:
+                                modified_lines.append(part_line)
+                        else:
+                            # For other lines in the part, keep as-is
+                            modified_lines.append(part_line)
+                    else:
+                        # This part has no active chapters, comment out all lines in it
+                        if not part_stripped.startswith('#') and part_stripped:
+                            indent = len(part_line) - len(part_line.lstrip())
+                            commented = ' ' * indent + '# ' + part_line.lstrip()
+                            modified_lines.append(commented)
+                        else:
+                            modified_lines.append(part_line)
+                
+                # Skip ahead since we've processed this whole part
+                i = j - 1
+                
+            elif '.qmd' in line:
+                # This is a standalone .qmd file (not in a part)
+                should_include = False
+                
+                # Check against always_include files
+                for always_file in always_include:
+                    if always_file in line:
+                        should_include = True
+                        break
+                
+                # Check against selected chapters
+                if not should_include:
+                    for chapter_name in keep_chapters:
+                        if f'{chapter_name}/{chapter_name}.qmd' in line or f'{chapter_name}.qmd' in line:
+                            should_include = True
+                            break
+                
+                if should_include:
+                    # Ensure line is not commented
+                    if stripped.startswith('#'):
+                        uncommented = line.replace('# ', '', 1).replace('#', '', 1)
+                        modified_lines.append(uncommented)
+                        files_being_built.append(stripped[2:] if stripped.startswith('# ') else stripped)
+                    else:
+                        modified_lines.append(line)
+                        files_being_built.append(stripped)
+                else:
+                    # Comment out the line
+                    if not stripped.startswith('#'):
+                        indent = len(line) - len(line.lstrip())
+                        commented = ' ' * indent + '# ' + line.lstrip()
+                        modified_lines.append(commented)
+                    else:
+                        modified_lines.append(line)
+            else:
+                # All other lines - copy as-is
+                modified_lines.append(line)
+            
+            i += 1
+        
+        # Write modified config
+        modified_content = '\n'.join(modified_lines)
+        with open(config_file, 'w', encoding='utf-8') as f:
+            f.write(modified_content)
+        
+        console.print(f"[dim]📋 Files to build: {len(files_being_built)} files[/dim]")
+        for file in files_being_built:
+            console.print(f"[green]✓[/green] {file}")
+        
+        console.print("[green]✓[/green] Fast build mode configured (EPUB)")
     
     def _restore_config(self, config_file: Path) -> None:
         """Restore configuration to pristine state."""
