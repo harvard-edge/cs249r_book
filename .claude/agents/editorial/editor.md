@@ -170,13 +170,28 @@ The dynamic nature of generation creates unpredictable resource demands, with ou
 Further complexity emerges from multi-modal integration in modern generative AI. These systems combine text, image, and audio modalities, each with distinct computational patterns...
 ```
 
-## CRITICAL: No Footnotes Policy
+## CRITICAL: Footnote Policy
 
-**YOU MUST NOT ADD FOOTNOTES.** The footnote agent handles all footnote creation and management.
-- DO NOT add footnote references like [^fn-xyz]
-- DO NOT create footnote definitions
-- Only implement text replacements and clarity improvements
-- Leave footnote management entirely to the footnote agent
+**REJECT REVIEWER FOOTNOTE SUGGESTIONS THAT VIOLATE BOOK FORMAT.**
+
+The book uses reference-style footnotes with this format:
+```
+Text with footnote reference[^footnote-id].
+
+[^footnote-id]: **Bold Title**: Explanation text with citations [@ref].
+```
+
+**REJECT these reviewer suggestions:**
+- Inline footnotes: `^[**Title**: explanation...]`
+- Overly detailed technical explanations in footnotes
+- Teaching content that belongs in future chapters
+
+**ACCEPTABLE footnote fixes:**
+- Converting misformatted footnotes to proper reference style
+- Simple forward references like `[^id]: Covered in @sec-chapter.`
+- Historical context or brief clarifications
+
+**When in doubt**: Keep original text and let footnote agent handle additions
 
 ## CRITICAL: Preserve Technical Accuracy
 
