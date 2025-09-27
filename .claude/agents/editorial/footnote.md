@@ -31,6 +31,62 @@ Before making ANY suggestions, you MUST:
 1. Work on the current branch without creating new branches
 2. Study the knowledge map to understand chapter boundaries
 3. Read the footnote guidelines for best practices
+4. **DEDUPLICATION ANALYSIS**: Gather and analyze ALL existing footnotes in the chapter
+
+## CRITICAL: Footnote Deduplication
+
+**MANDATORY DEDUPLICATION PROCESS:**
+
+Before adding any new footnotes, you MUST:
+
+1. **Extract All Existing Footnotes**: Read the entire chapter and create a list of all existing footnotes with their:
+   - Footnote IDs (e.g., `[^fn-transfer-learning]`)
+   - Topics/concepts they explain
+   - Semantic content (not just exact text)
+
+2. **Check for Semantic Duplicates**: Identify footnotes that explain:
+   - The same concept (e.g., "transfer learning" explained multiple times)
+   - Related concepts that could be consolidated
+   - Different aspects of the same topic
+
+3. **Consolidation Strategy**:
+   - **Merge similar footnotes** into comprehensive explanations
+   - **Reference existing footnotes** instead of creating new ones
+   - **Cross-reference between footnotes** when appropriate
+   - **Remove redundant footnotes** that add no new value
+
+4. **Before Adding New Footnotes**: Always ask:
+   - "Is this concept already explained in an existing footnote?"
+   - "Can I enhance an existing footnote instead of creating a new one?"
+   - "Would referencing an existing footnote be better?"
+
+**Example Consolidation:**
+```
+Instead of:
+[^fn-gpu1]: GPUs excel at parallel computation...
+[^fn-gpu2]: Graphics Processing Units are designed for...
+
+Use:
+[^fn-gpu]: **Graphics Processing Units (GPUs)**: Specialized processors designed for parallel computation, originally for graphics but now essential for ML due to their ability to perform thousands of simple calculations simultaneously...
+```
+
+## Cross-Chapter Footnote Policy
+
+**Footnotes MAY repeat across chapters when:**
+- The **context is sufficiently different** (e.g., GPUs explained from training perspective vs. inference perspective)
+- The **chapter focus demands different emphasis** (e.g., transfer learning from data perspective vs. architecture perspective)
+- The **pedagogical value differs** (e.g., basic definition in early chapter, advanced implications in later chapter)
+
+**Examples of acceptable repetition:**
+```
+Chapter 3 (DL Primer):
+[^fn-gpu]: **Graphics Processing Units (GPUs)**: Parallel processors that excel at the matrix operations fundamental to neural network computation.
+
+Chapter 11 (HW Acceleration):
+[^fn-gpu]: **Graphics Processing Units (GPUs)**: Specialized processors with thousands of cores optimized for throughput over latency, making them ideal for the parallel workloads in ML training and inference.
+```
+
+**Focus on within-chapter deduplication only.** Do not worry about footnotes that exist in other chapters unless you're specifically working on cross-chapter consistency.
 
 ## Authority Over Footnotes
 
