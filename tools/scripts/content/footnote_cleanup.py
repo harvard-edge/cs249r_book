@@ -55,7 +55,7 @@ class FootnoteManager:
         self.quiet = quiet
         
         # Regex patterns
-        self.footnote_ref_pattern = re.compile(r'\[\^([^]]+)\](?!:)')  # [^fn-name] but not [^fn-name]:
+        self.footnote_ref_pattern = re.compile(r'\[\^([^]]+)\]')  # [^fn-name] anywhere
         self.footnote_def_pattern = re.compile(r'^\[\^([^]]+)\]:\s*(.+)$', re.MULTILINE)
         
         # Statistics
@@ -105,10 +105,34 @@ class FootnoteManager:
             footnote_defs[footnote_id] = footnote_content
         
         # Find all footnote references and their line numbers
+        nested_refs = []  # Track footnotes that reference other footnotes
+        
         for line_num, line in enumerate(lines):
             for match in self.footnote_ref_pattern.finditer(line):
                 footnote_id = match.group(1)
+                
+                # Check if this match is part of a footnote definition
+                # A footnote definition has the pattern [^id]: at the start of the line
+                def_match = self.footnote_def_pattern.match(line)
+                if def_match and def_match.group(1) == footnote_id:
+                    # This is the definition itself, not a reference
+                    continue
+                elif def_match:
+                    # This is a reference inside another footnote definition
+                    defining_footnote = def_match.group(1)
+                    nested_refs.append({
+                        'defining_footnote': defining_footnote,
+                        'referenced_footnote': footnote_id,
+                        'line_num': line_num + 1
+                    })
+                
                 footnote_refs[footnote_id].append(line_num)
+        
+        # Store nested references for potential warnings
+        if hasattr(self, 'nested_refs'):
+            self.nested_refs.extend(nested_refs)
+        else:
+            self.nested_refs = nested_refs
         
         return footnote_defs, dict(footnote_refs), lines
     
@@ -253,7 +277,7 @@ class FootnoteManager:
         
         return reorganized_content, True
     
-    def validate_footnotes(self, content: str, file_path: Path) -> Tuple[Set[str], Set[str], Set[str]]:
+    def validate_footnotes(self, content: str, file_path: Path) -> Tuple[Set[str], Set[str], Set[str], List[Dict]]:
         """
         Validate footnotes and return issues.
         
@@ -261,7 +285,11 @@ class FootnoteManager:
             undefined_refs: References without definitions
             unused_defs: Definitions without references
             duplicate_defs: Duplicate definitions
+            nested_refs: Footnotes that reference other footnotes
         """
+        # Reset nested refs for this file
+        self.nested_refs = []
+        
         footnote_defs, footnote_refs, lines = self.parse_footnotes(content)
         
         # Find undefined references
@@ -279,13 +307,13 @@ class FootnoteManager:
         
         duplicate_defs = {fn_id for fn_id, count in def_counts.items() if count > 1}
         
-        return undefined_refs, unused_defs, duplicate_defs
+        return undefined_refs, unused_defs, duplicate_defs, self.nested_refs
     
     def clean_footnotes(self, content: str) -> Tuple[str, int]:
         """Clean footnote issues by removing undefined references and unused definitions."""
         footnote_defs, footnote_refs, lines = self.parse_footnotes(content)
         
-        undefined_refs, unused_defs, duplicate_defs = self.validate_footnotes(content, Path("temp"))
+        undefined_refs, unused_defs, duplicate_defs, nested_refs = self.validate_footnotes(content, Path("temp"))
         
         if not undefined_refs and not unused_defs:
             return content, 0
@@ -460,9 +488,9 @@ class FootnoteManager:
                     self.log(f"⏭️  No changes needed: {file_path} ({original_refs} refs, {original_defs} defs)", Colors.BLUE)
             
             elif operation == 'validate':
-                undefined_refs, unused_defs, duplicate_defs = self.validate_footnotes(original_content, file_path)
+                undefined_refs, unused_defs, duplicate_defs, nested_refs = self.validate_footnotes(original_content, file_path)
                 
-                if undefined_refs or unused_defs or duplicate_defs:
+                if undefined_refs or unused_defs or duplicate_defs or nested_refs:
                     self.log(f"❌ Issues found in {file_path}:", Colors.RED)
                     if undefined_refs:
                         self.log(f"   📍 Undefined references: {', '.join(undefined_refs)}", Colors.YELLOW)
@@ -470,8 +498,12 @@ class FootnoteManager:
                         self.log(f"   🗑️  Unused definitions: {', '.join(unused_defs)}", Colors.YELLOW)
                     if duplicate_defs:
                         self.log(f"   🔄 Duplicate definitions: {', '.join(duplicate_defs)}", Colors.YELLOW)
+                    if nested_refs:
+                        self.log(f"   🔗 Nested footnote references:", Colors.YELLOW)
+                        for nested in nested_refs:
+                            self.log(f"      Line {nested['line_num']}: [^{nested['defining_footnote']}] → [^{nested['referenced_footnote']}]", Colors.YELLOW)
                     
-                    self.stats['issues_found'] += len(undefined_refs) + len(unused_defs) + len(duplicate_defs)
+                    self.stats['issues_found'] += len(undefined_refs) + len(unused_defs) + len(duplicate_defs) + len(nested_refs)
                     modified = True
                 else:
                     self.log(f"✅ Valid footnotes: {file_path}", Colors.GREEN)
