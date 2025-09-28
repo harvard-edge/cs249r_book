@@ -665,7 +665,7 @@ v_t = \beta_2 v_{t-1} + (1-\beta_2)\big(\nabla L(\theta_t)\big)^2
 
 The system implications of Adam are more substantial than previous methods. The optimizer must store two additional vectors ($m_t$ and $v_t$) for each parameter, tripling the memory required for optimization state. For a model with 100 million parameters using 32-bit floating-point numbers, the additional memory requirement is approximately 800 MB.
 
-#### System Implications {#sec-ai-training-system-implications-b456}
+#### Optimization Algorithm System Implications {#sec-ai-training-system-implications-b456}
 
 The practical implementation of both classical and advanced optimization methods requires careful consideration of system resources and hardware capabilities. Understanding these implications helps inform algorithm selection and system design choices.
 
@@ -862,9 +862,11 @@ The backpropagation algorithm[^fn-backpropagation] computes gradients by systema
 
 [^fn-backpropagation]: **Backpropagation Algorithm**: Independently rediscovered multiple times, backpropagation was popularized by Rumelhart, Hinton, and Williams in 1986 (though similar ideas appeared in Werbos 1974). This breakthrough enabled training of deep networks by efficiently computing gradients in O(n) time vs. naive O(n²) approaches. Modern implementations require careful memory management—storing all activations for a ResNet-50 consumes 1.2GB per image.
 
-#### Basic Mechanics {#sec-ai-training-basic-mechanics-5c10}
+#### Algorithm Mechanics {#sec-ai-training-algorithm-mechanics-5c10}
 
-During the forward pass, each layer in a neural network performs computations and produces activations. These activations must be stored for use during the backward pass:
+Neural networks learn by adjusting their parameters to reduce errors through the backpropagation algorithm, which computes how much each parameter contributed to the error by systematically moving backward through the network's computational graph.
+
+During the forward pass, each layer performs computations and produces activations that must be stored for the backward pass:
 \begin{gather*}
 z^{(l)} = W^{(l)}a^{(l-1)} + b^{(l)}
 \\
@@ -879,16 +881,10 @@ The backward pass computes gradients by applying the chain rule, starting from t
 \frac{\partial L}{\partial W^{(l)}}=\frac{\partial L}{\partial z^{(l)}}\big(a^{(l-1)}\big)^T
 \end{gather*}
 
-Each gradient computation requires access to stored activations from the forward pass, creating a specific pattern of memory access and computation that training systems must manage efficiently.
-
-#### Backpropagation Mechanics {#sec-ai-training-backpropagation-mechanics-4edd}
-
-Neural networks learn by adjusting their parameters to reduce errors. Backpropagation computes how much each parameter contributed to the error by systematically moving backward through the network's computational graph. This process forms the computational core of the optimization algorithms discussed earlier.
-
-For a network with parameters $W_i$ at each layer, we need to compute $\frac{\partial L}{\partial W_i}$---how much the loss L changes when we adjust each parameter. The computation builds on the core operations covered earlier: matrix multiplications and activation functions, but in reverse order. The chain rule provides a systematic way to organize these computations:
+For a network with parameters $W_i$ at each layer, we need to compute $\frac{\partial L}{\partial W_i}$---how much the loss L changes when we adjust each parameter. The chain rule provides a systematic way to organize these computations:
 $$ \frac{\partial L_{full}}{\partial L_{i}} = \frac{\partial A_{i}}{\partial L_{i}} \frac{\partial L_{i+1}}{\partial A_{i}} ... \frac{\partial A_{n}}{\partial L_{n}} \frac{\partial L_{full}}{\partial A_{n}} $$
 
-This equation reveals key requirements for training systems. Computing gradients for early layers requires information from all later layers, creating specific patterns in data storage and access. These patterns directly influence the efficiency of optimization algorithms like SGD or Adam discussed earlier. Modern training systems use autodifferentiation[^fn-autodiff] to handle these computations automatically, but the underlying system requirements remain the same.
+This equation reveals key requirements for training systems. Computing gradients for early layers requires information from all later layers, creating specific patterns in data storage and access. Each gradient computation requires access to stored activations from the forward pass, creating a specific pattern of memory access and computation that training systems must manage efficiently. These patterns directly influence the efficiency of optimization algorithms like SGD or Adam discussed earlier. Modern training systems use autodifferentiation[^fn-autodiff] to handle these computations automatically, but the underlying system requirements remain the same.
 
 [^fn-autodiff]: **Automatic Differentiation**: Not to be confused with symbolic or numerical differentiation, autodiff constructs a computational graph at runtime and applies the chain rule systematically. PyTorch uses "define-by-run" (dynamic graphs built during forward pass) while TensorFlow v1 used static graphs. This enables complex architectures like RNNs and transformers where graph structure changes dynamically, but requires careful memory management since the entire forward computation graph must be preserved for the backward pass.
 
@@ -934,7 +930,7 @@ The efficiency of these memory management strategies depends heavily on the unde
 
 These hardware considerations guide the implementation of backpropagation in modern training systems. Specialized memory-efficient algorithms for operations like convolutions compute gradients in tiles or chunks, adapting to available memory bandwidth. Dynamic memory management tracks the lifetime of intermediate values throughout the computation graph, deallocating memory as soon as tensors become unnecessary for subsequent computations [@paszke2019pytorch].
 
-### System Implications {#sec-ai-training-system-implications-7e0a}
+### Mathematical Foundations System Implications {#sec-ai-training-system-implications-7e0a}
 
 Efficiently managing the forward pass, backward pass, and parameter updates requires a holistic understanding of how these operations interact with data loading, preprocessing pipelines, and hardware accelerators. For instance, matrix multiplications shape decisions about batch size, data parallelism, and memory allocation, while activation functions influence convergence rates and require careful trade-offs between computational efficiency and learning dynamics.
 
@@ -1524,6 +1520,8 @@ Determining the optimal batch size involves balancing these factors within hardw
 
 ## Pipeline Optimizations {#sec-ai-training-pipeline-optimizations-3397}
 
+Having established the architectural components and mathematical foundations of training pipelines, we now examine specific optimization techniques that address performance bottlenecks in these systems. These optimizations build upon the pipeline architecture concepts we've explored to enhance efficiency at scale.
+
 Training pipeline performance is constrained by three primary bottlenecks that determine overall system efficiency: **data movement latency**, **computational throughput limitations**, and **memory capacity constraints**. These bottlenecks manifest differently across system scales, but their systematic identification and mitigation forms the foundation of effective training optimization.
 
 Understanding these bottlenecks requires adopting a systems perspective that views training as an orchestrated workflow rather than isolated operations. Data movement latency affects how quickly training batches flow from storage to compute units. Computational throughput limitations determine how efficiently mathematical operations execute on available hardware. Memory constraints restrict both model size and the batch sizes that can be processed simultaneously.
@@ -1798,7 +1796,7 @@ minimum width=85]at($(R3)!0.5!(S3)$){Epoch 2};
 
 These optimization techniques demonstrate particular value in scenarios involving large-scale datasets, preprocessing-intensive data, multi-GPU training configurations, or high-latency storage systems. The following section examines the specific mechanics of implementing these techniques in modern training systems.
 
-#### Mechanics {#sec-ai-training-mechanics-939b}
+#### Prefetching Mechanics {#sec-ai-training-mechanics-939b}
 
 Prefetching and overlapping optimize the training pipeline by enabling different stages of data processing and computation to operate concurrently rather than sequentially. These techniques maximize resource utilization by addressing bottlenecks in data transfer and preprocessing.
 
@@ -1827,7 +1825,7 @@ The implementation relies on effective CPU-GPU coordination. The CPU manages dat
 
 These optimization techniques yield particular benefits in scenarios involving slow storage access, complex data preprocessing, or large datasets. The next section examines the specific advantages these techniques offer in different training contexts.
 
-#### Benefits {#sec-ai-training-benefits-e109}
+#### Prefetching Benefits {#sec-ai-training-benefits-e109}
 
 Prefetching and overlapping are powerful techniques that significantly enhance the efficiency of training pipelines by addressing key bottlenecks in data handling and computation. To illustrate the impact of these benefits, @tbl-prefetching presents the following comparison:
 
@@ -1958,7 +1956,7 @@ Modern machine learning frameworks, such as PyTorch and TensorFlow, provide buil
 
 Combining FP16 computation, FP32 accumulation, and loss scaling allows us to achieve mixed-precision training, resulting in a significant reduction in memory usage and computational overhead without compromising the accuracy or stability of the training process. The following sections will explore the practical advantages of this approach and its impact on modern machine learning workflows.
 
-#### Benefits {#sec-ai-training-benefits-fcec}
+#### Mixed-Precision Benefits {#sec-ai-training-benefits-fcec}
 
 Mixed-precision training offers several significant advantages that make it an essential optimization technique for modern machine learning workflows. By reducing memory usage and computational load, it enables practitioners to train larger models, process bigger batches, and achieve faster results, all while maintaining model accuracy and convergence.
 
@@ -2012,7 +2010,7 @@ Training large machine learning models often requires significant memory resourc
 
 Gradient accumulation and activation checkpointing are two techniques designed to address these limitations by optimizing how memory is utilized during training. Both techniques enable researchers and practitioners to train larger and more complex models, making them indispensable tools for modern deep learning workflows. Understanding when to apply these techniques requires careful analysis of memory usage patterns and performance bottlenecks in specific training scenarios.
 
-#### Mechanics {#sec-ai-training-mechanics-fb69}
+#### Gradient Accumulation and Checkpointing Mechanics {#sec-ai-training-mechanics-fb69}
 
 Gradient accumulation and activation checkpointing operate on distinct principles, but both aim to optimize memory usage during training by modifying how forward and backward computations are handled.
 
