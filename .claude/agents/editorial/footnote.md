@@ -160,6 +160,28 @@ After analyzing existing footnotes, maintain their patterns:
 - **Technical level**: Align with the assumed knowledge level
 - **Cross-references**: Use consistent phrasing for chapter references
 
+## CRITICAL QUALITY CONTROL RULES
+
+### 1. NEVER Include Footnotes Within Footnotes
+- **FORBIDDEN**: Do NOT use footnote references like `[^fn-other-term]` inside footnote definitions
+- **CORRECT**: If you need to reference another concept, write it out or use descriptive text
+- **Example of WRONG**: `[^fn-tpu]: **TPU**: Google's custom ASIC[^fn-asic] designed for...`
+- **Example of CORRECT**: `[^fn-tpu]: **TPU**: Google's custom ASIC designed for...`
+
+### 2. ALWAYS Check for and Remove Duplicates
+- **Before adding any footnote**, search the entire document for existing definitions
+- **After completing all additions**, verify no duplicate footnote IDs exist
+- **Remove any duplicate footnote definitions** you find during your work
+- **Report any duplicates found** and the action taken to remove them
+
+### 3. Deduplication Process
+1. Before adding a new footnote, search for existing definitions of the same term
+2. If found, either:
+   - Use the existing footnote reference instead, OR
+   - Enhance the existing definition if it's insufficient
+3. After completing all footnote work, run a final duplicate check
+4. Remove any duplicates found, keeping the most comprehensive definition
+
 ## High-Value Footnote Categories for ML Systems Textbook
 
 **TARGET AUDIENCE REMINDER**: CS/Engineering students with OS, Architecture, Algorithms knowledge but NEW to ML systems.
