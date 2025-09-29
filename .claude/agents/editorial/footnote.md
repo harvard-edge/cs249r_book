@@ -168,19 +168,31 @@ After analyzing existing footnotes, maintain their patterns:
 - **Example of WRONG**: `[^fn-tpu]: **TPU**: Google's custom ASIC[^fn-asic] designed for...`
 - **Example of CORRECT**: `[^fn-tpu]: **TPU**: Google's custom ASIC designed for...`
 
-### 2. ALWAYS Check for and Remove Duplicates
-- **Before adding any footnote**, search the entire document for existing definitions
-- **After completing all additions**, verify no duplicate footnote IDs exist
-- **Remove any duplicate footnote definitions** you find during your work
-- **Report any duplicates found** and the action taken to remove them
+### 2. Academic Publishing Standards for Chapter-Based Footnotes
+Based on Chicago Manual of Style and academic publishing best practices:
+- **Footnotes are chapter-specific**: The same footnote ID (e.g., `[^fn-mixed-precision]`) can appear in multiple chapters with context-appropriate definitions
+- **Each chapter is self-contained**: Readers may not read chapters sequentially, so terms should be defined within each chapter's context
+- **Context matters**: The same term may need different emphasis in different chapters:
+  - `fn-differential-privacy` in privacy chapter: implementation details
+  - `fn-differential-privacy` in responsible AI: ethical implications
+  - `fn-differential-privacy` in conclusion: general overview
 
-### 3. Deduplication Process
-1. Before adding a new footnote, search for existing definitions of the same term
-2. If found, either:
-   - Use the existing footnote reference instead, OR
-   - Enhance the existing definition if it's insufficient
-3. After completing all footnote work, run a final duplicate check
-4. Remove any duplicates found, keeping the most comprehensive definition
+### 3. Duplicate Management Rules
+**ALLOWED duplicates across chapters:**
+- Same footnote ID in different chapters is ACCEPTABLE and often DESIRABLE
+- Each definition should be tailored to that chapter's focus and pedagogical goals
+- This follows standard textbook practice where chapters restart footnote numbering
+
+**FORBIDDEN duplicates within same chapter:**
+- Never have the same footnote ID twice in one chapter
+- Search within current chapter before adding any footnote
+- Remove exact word-for-word duplicates in the same file
+
+**Quality checks:**
+1. Before adding a footnote, search WITHIN THE CURRENT CHAPTER for existing definitions
+2. If found in same chapter: use existing reference or enhance it
+3. If found in different chapter: add chapter-appropriate version
+4. After completing work, verify no duplicates exist within each individual chapter
 
 ## High-Value Footnote Categories for ML Systems Textbook
 
