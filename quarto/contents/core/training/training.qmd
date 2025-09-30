@@ -20,9 +20,9 @@ crossrefs: training_xrefs.json
 
 ## Purpose {.unnumbered}
 
-_How do machine learning training workloads manifest as systems challenges, and what architectural principles guide their efficient implementation?_
+_Why do modern machine learning problems demand fundamentally new approaches to distributed computing and system architecture?_
 
-Training large neural networks creates computational challenges that differ from traditional software workloads. The iterative nature of gradient descent requires repeated passes through large datasets. Combined with massive parameter counts and dataset sizes, this produces distinct patterns of memory access, computation intensity, and communication overhead. These workload characteristics require specialized system designs that balance computational throughput, memory bandwidth, and data movement efficiency. Understanding how training algorithms map to hardware capabilities enables the design of systems that utilize computational resources efficiently, minimize bottlenecks, and scale to handle complex models and datasets. The theoretical foundations for why gradient descent succeeds despite non-convex optimization landscapes are detailed in @sec-dl-primer.
+Machine learning training creates computational demands that exceed the capabilities of single machines, driving the need for distributed systems that coordinate computation across multiple devices, processors, and data centers. Unlike traditional distributed computing problems, training workloads exhibit unique characteristics: massive datasets that cannot fit in memory, models with billions of parameters requiring coordinated updates, and iterative algorithms that demand continuous synchronization across distributed resources. These scale requirements create fundamental systems challenges in memory management, communication efficiency, fault tolerance, and resource scheduling that traditional distributed systems were not designed to handle. As model complexity and dataset sizes continue to grow exponentially, understanding distributed training systems becomes essential for building any machine learning application of practical significance. The systems engineering principles developed for training at scale directly influence deployment architectures, cost structures, and the feasibility of machine learning solutions across industries.
 
 ::: {.callout-tip title="Learning Objectives"}
 
@@ -201,7 +201,7 @@ Training systems function through specialized computational frameworks. The deve
 
 ::: {.callout-definition title="Definition of Training Systems"}
 
-**Machine Learning Training Systems** refer to the specialized computational frameworks that manage and execute the *iterative optimization* of machine learning models. These systems encompass the *software and hardware stack* responsible for processing training data, computing gradients, updating model parameters, and coordinating distributed computation. Training systems operate at multiple scales, from single hardware accelerators to *distributed clusters*, and incorporate components for *data management*, *computation scheduling*, *memory optimization*, and *performance monitoring*. They serve as the foundational infrastructure that enables the systematic development and refinement of machine learning models through empirical training on data.
+Machine learning training systems refer to the specialized computational frameworks that manage and execute the *iterative optimization* of machine learning models. These systems encompass the *software and hardware stack* responsible for processing training data, computing gradients, updating model parameters, and coordinating distributed computation. Training systems operate at multiple scales, from single hardware accelerators to *distributed clusters*, and incorporate components for *data management*, *computation scheduling*, *memory optimization*, and *performance monitoring*. They serve as the foundational infrastructure that enables the systematic development and refinement of machine learning models through empirical training on data.
 :::
 
 Beyond this definition, these training systems provide the core infrastructure required for developing predictive models. They execute the mathematical optimization of model parameters, converting input data into computational representations for tasks such as pattern recognition, language understanding, and decision automation. The training process involves systematic iteration over datasets to minimize error functions and achieve optimal model performance.
@@ -888,7 +888,7 @@ This equation reveals key requirements for training systems. Computing gradients
 
 [^fn-autodiff]: **Automatic Differentiation**: Not to be confused with symbolic or numerical differentiation, autodiff constructs a computational graph at runtime and applies the chain rule systematically. PyTorch uses "define-by-run" (dynamic graphs built during forward pass) while TensorFlow v1 used static graphs. This enables complex architectures like RNNs and transformers where graph structure changes dynamically, but requires careful memory management since the entire forward computation graph must be preserved for the backward pass.
 
-#### Memory Requirements {#sec-ai-training-memory-requirements-0aeb}
+#### Activation Memory Requirements {#sec-ai-training-memory-requirements-0aeb}
 
 Training systems must maintain intermediate values (activations) from the forward pass to compute gradients during the backward pass. This requirement compounds the memory demands of optimization algorithms. For each layer l, the system must store:
 
@@ -1404,7 +1404,7 @@ optimizer.step() # Update parameters
 
 These operations initiate a sequence of memory accesses and computations. The system must load parameters from memory, compute updates using the stored gradients, and write the modified parameters back to memory. Different optimizers vary in their memory requirements and computational patterns, directly affecting system performance and resource utilization.
 
-#### Memory Requirements {#sec-ai-training-memory-requirements-3677}
+#### Optimizer Memory Requirements {#sec-ai-training-memory-requirements-3677}
 
 Gradient descent, the most basic optimization algorithm that we discussed earlier, illustrates the core memory and computation patterns in parameter updates. From a systems perspective, each parameter update must:
 
@@ -1524,7 +1524,7 @@ The optimization process begins with systematic profiling to identify which bott
 
 Once bottlenecks are identified, three core optimization techniques address the primary constraint categories:
 
-1. **Prefetching and Overlapping** targets data movement latency by coordinating data transfer with computation
+1. Prefetching and overlapping targets data movement latency by coordinating data transfer with computation
 2. **Mixed-Precision Training** addresses both computational throughput and memory constraints through reduced precision arithmetic
 3. **Gradient Accumulation and Checkpointing** manages memory constraints by trading computation for memory usage
 
@@ -2296,7 +2296,7 @@ The progression from single-machine to distributed training follows a natural sc
 
 [^fn-distributed-training]: **Distributed Training**: Google's DistBelief (2012) pioneered large-scale distributed neural network training, enabling models with billions of parameters across thousands of machines. This breakthrough led to modern frameworks like Horovod (2017) and PyTorch's DistributedDataParallel, democratizing distributed training for researchers worldwide.
 
-Distributed training addresses this challenge by spreading the workload across multiple machines, which coordinate to train a single model efficiently. This coordination relies on consensus protocols and synchronization primitives to ensure parameter updates remain consistent across nodes. While basic barrier synchronization suffices for research, production deployments require sophisticated fault tolerance, checkpointing, and recovery mechanisms detailed in @sec-ml-operations.
+This coordination relies on consensus protocols and synchronization primitives to ensure parameter updates remain consistent across nodes. While basic barrier synchronization suffices for research, production deployments require sophisticated fault tolerance, checkpointing, and recovery mechanisms covered in later chapters on operational practices.
 
 The path from single-device to distributed training involves distinct complexity stages, each building upon the previous level's challenges. Single GPU training requires only local memory management and straightforward forward/backward passes, establishing the baseline computational patterns. Scaling to multiple GPUs within a single node introduces high-bandwidth communication requirements, typically handled through NVLink[^nvlink] or PCIe connections with NCCL[^nccl] optimization, while preserving the single-machine simplicity of fault tolerance and scheduling.
 
@@ -2558,18 +2558,15 @@ Start with data parallelism when possible—it's simpler to implement and debug.
 
 Before examining specific parallelism strategies, understanding the quantitative metrics that govern distributed training efficiency is essential. These metrics provide the foundation for making informed decisions about scaling strategies, hardware selection, and optimization approaches.
 
-**Communication Overhead Scaling**: AllReduce operations consume 10-40% of total training time in data parallel systems. For BERT-Large on 128 GPUs, communication overhead reaches 35% of total runtime, while GPT-3 scale models experience 55% overhead on 1,024 GPUs. The communication time scales as O(n) for ring-AllReduce and O(log n) for tree-based reduction, making interconnect selection critical for large-scale deployments.
+Communication overhead represents the primary bottleneck in distributed training systems. AllReduce operations consume 10-40% of total training time in data parallel systems, with this overhead increasing significantly at scale. For BERT-Large on 128 GPUs, communication overhead reaches 35% of total runtime, while GPT-3 scale models experience 55% overhead on 1,024 GPUs. The communication time scales as O(n) for ring-AllReduce and O(log n) for tree-based reduction, making interconnect selection critical for large-scale deployments.
 
-**Bandwidth Utilization Requirements**: Efficient distributed training requires 100-400 GB/s aggregate bandwidth per node for transformer models. BERT-Base needs 8 GB parameter synchronization per iteration across 64 GPUs, demanding 200 GB/s sustained bandwidth for <50ms synchronization latency. Language models with 175B parameters require 700 GB/s aggregate bandwidth to maintain 80% parallel efficiency, necessitating InfiniBand HDR or equivalent interconnects.
+The bandwidth requirements for efficient distributed training are substantial, particularly for transformer models. Efficient systems require 100-400 GB/s aggregate bandwidth per node for transformer architectures. BERT-Base needs 8 GB parameter synchronization per iteration across 64 GPUs, demanding 200 GB/s sustained bandwidth for <50ms synchronization latency. Language models with 175B parameters require 700 GB/s aggregate bandwidth to maintain 80% parallel efficiency, necessitating InfiniBand HDR or equivalent interconnects.
 
-**Synchronization Frequency Trade-offs**: Gradient accumulation reduces synchronization frequency but increases memory requirements and may impact convergence. Synchronizing every 4 steps reduces communication overhead by 60% while increasing memory usage by 3x for gradient storage. Asynchronous methods eliminate synchronization costs entirely but introduce staleness that degrades convergence by 15-30% for large learning rates.
+Synchronization frequency presents a fundamental trade-off between communication efficiency and convergence behavior. Gradient accumulation reduces synchronization frequency but increases memory requirements and may impact convergence. Synchronizing every 4 steps reduces communication overhead by 60% while increasing memory usage by 3x for gradient storage. Asynchronous methods eliminate synchronization costs entirely but introduce staleness that degrades convergence by 15-30% for large learning rates.
 
-**Scaling Efficiency Characteristics**:
-- **Linear scaling regime**: 2-32 GPUs typically achieve 85-95% parallel efficiency
-- **Communication bound regime**: 64-256 GPUs achieve 60-80% efficiency with optimal interconnects
-- **Coordination overhead regime**: 512+ GPUs achieve 40-60% efficiency due to collective operation latency
+Scaling efficiency follows predictable patterns across different GPU counts. In the linear scaling regime of 2-32 GPUs, systems typically achieve 85-95% parallel efficiency as communication overhead remains minimal. The communication bound regime emerges at 64-256 GPUs, where efficiency drops to 60-80% even with optimal interconnects. Beyond 512 GPUs, coordination overhead becomes dominant, limiting efficiency to 40-60% due to collective operation latency.
 
-**Hardware-Specific Performance Metrics**: NVIDIA DGX systems with NVLink achieve 600 GB/s bisection bandwidth, enabling 90% parallel efficiency up to 8 GPUs per node. Multi-node scaling requires InfiniBand networks: EDR (100 Gbps) supports efficient training up to 64 nodes, while HDR (200 Gbps) enables scaling to 256+ nodes with >70% efficiency.
+Hardware selection critically impacts these scaling characteristics. NVIDIA DGX systems with NVLink achieve 600 GB/s bisection bandwidth, enabling 90% parallel efficiency up to 8 GPUs per node. Multi-node scaling requires InfiniBand networks, where EDR (100 Gbps) supports efficient training up to 64 nodes, while HDR (200 Gbps) enables scaling to 256+ nodes with >70% efficiency.
 
 These efficiency metrics directly influence the choice of parallelism strategy. Data parallelism works well in the linear scaling regime but becomes communication-bound at scale. Model parallelism addresses memory constraints but introduces sequential dependencies that limit efficiency. Understanding these trade-offs enables architects to select appropriate strategies for their specific workloads.
 

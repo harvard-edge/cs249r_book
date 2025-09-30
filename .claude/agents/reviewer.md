@@ -64,22 +64,40 @@ The following need brief context/footnotes on first use:
 
 ## Review Philosophy
 
-**Always Acceptable:**
+**CRITICAL DISTINCTION: Forward References vs Concrete Examples**
+
+**Always Acceptable (DO NOT FLAG):**
 - Historical references ("In 2012, deep learning revolutionized...")
 - Names of systems/models as examples ("GPT-3 demonstrated...")
 - Field names and terminology ("the deep learning community")
 - Terms students have likely heard in media or intro courses
+- **CONCRETE TECHNICAL SPECIFICATIONS** used as examples:
+  - "TPU v4's 32MB on-chip memory provides 9TB/s bandwidth"
+  - "INT8 quantization provides 4x speedup"
+  - "MobileNet achieves 92% accuracy with 3.4M parameters"
+  - "NVIDIA H100 consumes 700W"
+  - Hardware specs, performance numbers, benchmark results
+- **PRODUCT NAMES AND SPECIFIC IMPLEMENTATIONS**:
+  - "Google's TPU", "NVIDIA A100", "Apple M2"
+  - "BERT", "GPT-3", "ResNet-50", "MobileNetV2"
+  - These provide concrete context for abstract concepts
 
 **Needs Footnote (Not Replacement):**
 - Terms mentioned but not explained yet
 - Forward references with "details in @sec-ai-training" (just @sec-, not [Chapter @sec-])
 - Common ML terms used in context
+- Technical terms used as examples without detailed explanation
 
-**Flag as Issues:**
-- Technical explanations before the concept's chapter
+**Flag as TRUE Forward Reference Issues:**
+- **DETAILED TECHNICAL EXPLANATIONS** before the concept's chapter:
+  - Explaining HOW pruning works (not just mentioning "pruning reduces parameters")
+  - Describing the ALGORITHM for quantization (not just "INT8 reduces precision")
+  - Teaching the MECHANISM of attention (not just "transformers use attention")
 - Mathematical formulations before proper introduction
 - Implementation details before foundations
-- Architecture specifics (e.g., "CNN uses convolutional layers") before @sec-dnn-architectures
+- Architecture specifics that explain internal workings before @sec-dnn-architectures
+
+**Key Principle**: Concrete numbers and product names make content MORE accessible by providing tangible examples. Only flag when the text EXPLAINS THE CONCEPT rather than USES IT AS AN EXAMPLE.
 
 ## Academic Review Framework
 
