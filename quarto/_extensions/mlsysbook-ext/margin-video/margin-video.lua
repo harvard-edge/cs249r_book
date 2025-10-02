@@ -24,10 +24,12 @@ end
 
 return {
   ['margin-video'] = function(args, kwargs, meta)
-    -- Shortcode is disabled
-    log_info("Shortcode is disabled")
+    -- Shortcode is disabled - returns nothing
     return pandoc.Null()
-    
+  end,
+  
+  ['margin-video-DISABLED'] = function(args, kwargs, meta)
+    -- Original implementation (disabled)
     -- Validate arguments
     if not args[1] then
       log_error("No URL argument provided")
