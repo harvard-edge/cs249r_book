@@ -90,19 +90,19 @@ class ForbiddenFootnoteChecker:
                         f"Found '{footnote}' in markdown caption: {context}"
                     ))
             
-            # Check 4: Footnotes inside div blocks (less strict, informational)
-            # Only flag if it's in special divs like callouts
+            # Check 4: Footnotes inside ANY div blocks
+            # Div blocks (:::) are used for figures, callouts, examples, etc.
+            # Footnotes break Quarto rendering inside these blocks
             if in_div_block and div_start_line != line_num:
-                # Check if the div is a callout or similar special block
-                div_line = lines[div_start_line - 1] if div_start_line > 0 else ""
-                if re.search(r':::.*\{\.callout|:::.*\{\..*-example|:::.*\{\..*-note', div_line):
-                    for footnote in footnotes:
-                        context = line.strip()[:80]
-                        file_errors.append((
-                            line_num,
-                            "DIV_BLOCK",
-                            f"Found '{footnote}' inside div block (started line {div_start_line}): {context}"
-                        ))
+                for footnote in footnotes:
+                    context = line.strip()[:80]
+                    div_line = lines[div_start_line - 1] if div_start_line > 0 else ""
+                    div_context = div_line.strip()[:60]
+                    file_errors.append((
+                        line_num,
+                        "DIV_BLOCK",
+                        f"Found '{footnote}' inside div block (started line {div_start_line}: {div_context}): {context}"
+                    ))
         
         return file_errors
     
