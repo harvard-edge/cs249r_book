@@ -310,9 +310,63 @@ For each section of text:
 - Chapter assumes prior knowledge per knowledge map
 - Simple cross-reference would be clearer
 
-## CRITICAL RULE: Footnote Placement
+## 🚨 CRITICAL RULE: Footnote Placement Restrictions
 
-**IMPORTANT FOOTNOTE INSERTION RULES:**
+**BUILD-BREAKING PLACEMENT RULES** (these will cause pre-commit failures):
+
+### ❌ FORBIDDEN LOCATIONS - NEVER ADD FOOTNOTES TO:
+
+1. **Tables**:
+   - NO footnotes in table content or cells
+   - NO footnotes in table headers
+   - NO footnotes anywhere inside markdown tables
+   - **Why**: Breaks Quarto rendering and creates malformed LaTeX/PDF output
+
+2. **Table Captions**:
+   - NO footnotes in any table caption text
+   - Captions using `Table:` or `: Table description` syntax
+   - **Why**: Quarto cannot process footnotes in caption metadata
+
+3. **Figure Captions**:
+   - NO footnotes in any figure caption text
+   - Markdown images: `![caption text](image.png)`
+   - Even for complex technical figures
+   - **Why**: Caption processing breaks with footnote markers
+
+4. **Inside Div Blocks (:::)**:
+   - **NO footnotes in ANY content inside `:::` div blocks**
+   - This includes ALL content between opening `:::` and closing `:::`
+   - Forbidden in:
+     - Callouts (`.callout-note`, `.callout-warning`, etc.)
+     - Examples (`.example`, `.proof`, etc.)
+     - Custom divs (`.definition`, `.theorem`, etc.)
+     - Figures with descriptions
+     - Any styled blocks
+   - **Why**: Quarto's rendering engine cannot process footnotes in div contexts
+
+5. **Embedded Content**:
+   - NO footnotes inside code block descriptions that are in divs
+   - NO footnotes in margin content
+   - NO footnotes in special formatting blocks
+
+### ✅ SAFE LOCATIONS ONLY:
+- Regular paragraph text (outside any div blocks)
+- List items in regular text (outside divs)
+- Inline code explanations in regular paragraphs
+- Main body narrative text
+
+### Pre-Flight Validation:
+Before adding ANY footnote, verify:
+1. ✓ Not inside a `:::` block → **If inside, SKIP the footnote**
+2. ✓ Not in a caption (`![...]` or `Table:`) → **If in caption, SKIP**
+3. ✓ Not in a table cell → **If in table, SKIP**
+4. ✓ If ANY doubt exists → **SKIP the footnote**
+
+**REMEMBER**: Pre-commit hooks will REJECT commits with footnotes in forbidden locations. Better to skip a footnote than break the build.
+
+---
+
+## IMPORTANT FOOTNOTE INSERTION RULES:
 
 1. **Location of footnote definition**: ALWAYS insert the footnote text IMMEDIATELY after the paragraph containing the reference
    - DO NOT accumulate footnotes at the end of the document
