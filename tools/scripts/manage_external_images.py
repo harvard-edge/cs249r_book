@@ -198,10 +198,10 @@ class ImageDownloader:
     
     def generate_filename(self, url: str, fig_id: str, extension: str) -> str:
         """
-        Generate a unique filename based on figure ID and URL hash.
+        Generate a filename based on the original URL filename.
         
-        Creates filenames that are both descriptive and unique to prevent 
-        naming conflicts when different URLs reference similar figure IDs.
+        Extracts the original filename from the URL and uses it, adding a hash
+        suffix only if needed for uniqueness. This makes filenames more descriptive.
         
         Args:
             url (str): Original URL of the image
@@ -209,21 +209,43 @@ class ImageDownloader:
             extension (str): File extension (e.g., 'png', 'jpg')
             
         Returns:
-            str: Generated filename (e.g., 'example_a1b2c3d4.png')
+            str: Generated filename (e.g., 'oranges-frogs.png')
             
         Example:
-            URL: https://example.com/image.png
-            fig_id: fig-neural-network
-            extension: png
-            Result: neural-network_a1b2c3d4.png
+            URL: https://example.com/path/oranges-frogs_abc123.png?params
+            Result: oranges-frogs.png
         """
-        # Remove 'fig-' prefix and use the rest as base name
-        base_name = fig_id.replace('fig-', '')
+        # Parse the URL to get the path
+        parsed_url = urlparse(url)
+        path = parsed_url.path
         
-        # Add URL hash to ensure uniqueness (8 chars should be sufficient)
-        url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
+        # Get the filename from the path
+        original_filename = os.path.basename(path)
         
-        return f"{base_name}_{url_hash}.{extension}"
+        # Remove any existing extension and parameters
+        base_name = original_filename.rsplit('.', 1)[0] if '.' in original_filename else original_filename
+        
+        # Clean up the filename - remove trailing hashes or IDs that are common in CDN URLs
+        # e.g., "oranges-frogs_nHEaTqne53" -> "oranges-frogs"
+        import re
+        # Remove trailing underscore + hash patterns (common in CDN URLs)
+        base_name = re.sub(r'_[a-zA-Z0-9]{8,}$', '', base_name)
+        
+        # If base_name is empty or too short, fall back to fig_id
+        if not base_name or len(base_name) < 3:
+            base_name = fig_id.replace('fig-', '').replace('auto-', '')
+            if not base_name:
+                # Last resort: use URL hash
+                base_name = hashlib.md5(url.encode()).hexdigest()[:12]
+        
+        # Sanitize the filename - keep only alphanumeric, hyphens, and underscores
+        base_name = re.sub(r'[^a-zA-Z0-9_-]', '-', base_name)
+        # Remove multiple consecutive hyphens
+        base_name = re.sub(r'-+', '-', base_name)
+        # Remove leading/trailing hyphens
+        base_name = base_name.strip('-')
+        
+        return f"{base_name}.{extension}"
     
     def download_image(self, url: str, output_path: Path) -> bool:
         """Download image from URL to output path."""
