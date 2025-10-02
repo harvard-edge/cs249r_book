@@ -332,7 +332,7 @@ quarto render --to html
 ```sh
 cd quarto
 ln -sf config/_quarto-pdf.yml _quarto.yml
-quarto render --to titlepage-pdf
+quarto render --to=titlepage-pdf
 ```
 
 #### EPUB version:

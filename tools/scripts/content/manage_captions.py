@@ -321,7 +321,7 @@ class FigureCaptionImprover:
         print(f"\n💡 To fix:")
         print(f"   1. Uncomment these chapters in _quarto.yml, OR")
         print(f"   2. Exclude these directories from processing, OR") 
-        print(f"   3. Run 'quarto render --to titlepage-pdf' after uncommenting")
+        print(f"   3. Run 'quarto render --to=titlepage-pdf' after uncommenting")
         print(f"\n❌ HALTING EXECUTION - Please resolve these issues first.")
         
         return True  # Should halt

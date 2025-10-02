@@ -62,7 +62,7 @@ class BuildCommand:
             raise ValueError(f"Unknown format type: {format_type}")
             
         render_to = render_targets[format_type]
-        render_cmd = ["quarto", "render", "--to", render_to]
+        render_cmd = ["quarto", "render", f"--to={render_to}"]
         
         # Show the command being executed
         cmd_str = " ".join(render_cmd)
@@ -147,7 +147,7 @@ class BuildCommand:
             # Build with project.render configuration
             console.print("[yellow]🔨 Building with fast build configuration...[/yellow]")
             
-            render_cmd = ["quarto", "render", "--to", format_arg]
+            render_cmd = ["quarto", "render", f"--to={format_arg}"]
             cmd_str = " ".join(render_cmd)
             console.print(f"[blue]💻 Command: {cmd_str}[/blue]")
             
@@ -282,7 +282,7 @@ class BuildCommand:
             self.config_manager.setup_symlink("html")
             
             # Build HTML
-            render_cmd = ["quarto", "render", "--to", "html"]
+            render_cmd = ["quarto", "render", "--to=html"]
             cmd_str = " ".join(render_cmd)
             console.print(f"[blue]💻 Command: {cmd_str}[/blue]")
             
