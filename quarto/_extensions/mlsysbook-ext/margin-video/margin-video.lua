@@ -24,7 +24,9 @@ end
 
 return {
   ['margin-video'] = function(args, kwargs, meta)
-    log_info("Processing margin-video shortcode...")
+    -- Shortcode is disabled
+    log_info("Shortcode is disabled")
+    return pandoc.Null()
     
     -- Validate arguments
     if not args[1] then
