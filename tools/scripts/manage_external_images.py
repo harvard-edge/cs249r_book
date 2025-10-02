@@ -114,56 +114,74 @@ class ImageDownloader:
         return qmd_files
     
     def extract_figure_images(self, content: str) -> List[Tuple[str, str, str, str, str]]:
-        """
+        r"""
         Extract markdown images with or without #fig references.
         Returns list of tuples: (full_match, caption, url, fig_id, attributes)
+        
+        Simple strategy: Find ![, then find ALL ](url) patterns up to optional {attrs}.
+        Take the LAST ](url) as the image URL (others are citations).
         """
         matches = []
         
-        # Pattern 1: Images with #fig-identifier
-        # ![caption](url){#fig-identifier other-attributes}
-        pattern_with_fig = r'!\[(.*?)\]\(([^)]+)\)\{#(fig-[^\s}]+)([^}]*)\}'
+        # Simple approach: find ![, capture everything until } or end of line
+        # Then parse the ](url) patterns
+        lines = content.split('\n')
         
-        for match in re.finditer(pattern_with_fig, content):
-            full_match = match.group(0)
-            caption = match.group(1)
-            url = match.group(2)
-            fig_id = match.group(3)
-            attributes = match.group(4).strip()
+        for line in lines:
+            if '![' not in line:
+                continue
             
-            if url.lower().startswith(('http://', 'https://')):
-                matches.append((full_match, caption, url, fig_id, attributes))
-        
-        # Pattern 2: Images without #fig-identifier but with attributes
-        # ![caption](url){width=80% fig-align="center"}
-        pattern_without_fig = r'!\[(.*?)\]\(([^)]+)\)\{(?!#fig-)([^}]+)\}'
-        
-        for match in re.finditer(pattern_without_fig, content):
-            full_match = match.group(0)
-            caption = match.group(1)
-            url = match.group(2)
-            attributes = match.group(3).strip()
-            
-            if url.lower().startswith(('http://', 'https://')):
-                # Generate a fig_id from the URL for filename generation
-                url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
-                fig_id = f"fig-auto-{url_hash}"
-                matches.append((full_match, caption, url, fig_id, attributes))
-        
-        # Pattern 3: Simple images without any attributes
-        # ![caption](url)
-        pattern_simple = r'!\[(.*?)\]\(([^)]+)\)(?!\{)'
-        
-        for match in re.finditer(pattern_simple, content):
-            full_match = match.group(0)
-            caption = match.group(1)
-            url = match.group(2)
-            
-            if url.lower().startswith(('http://', 'https://')):
-                # Generate a fig_id from the URL for filename generation
-                url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
-                fig_id = f"fig-auto-{url_hash}"
-                matches.append((full_match, caption, url, fig_id, ""))
+            # Find all image patterns on this line
+            idx = 0
+            while idx < len(line):
+                start = line.find('![', idx)
+                if start == -1:
+                    break
+                
+                # Find the end: either {...} or next ![
+                end_brace = line.find('}', start)
+                next_img = line.find('![', start + 2)
+                
+                if end_brace != -1 and (next_img == -1 or end_brace < next_img):
+                    end = end_brace + 1
+                elif next_img != -1:
+                    end = next_img
+                else:
+                    end = len(line)
+                
+                full_match = line[start:end]
+                
+                # Find ALL ](url) patterns in this match
+                url_patterns = list(re.finditer(r'\]\(([^)]+)\)', full_match))
+                
+                if url_patterns:
+                    # Take the LAST one - that's the image URL
+                    url = url_patterns[-1].group(1).strip()
+                    
+                    # Parse fig_id and attributes
+                    fig_id = None
+                    attributes = ""
+                    attrs_match = re.search(r'\{([^}]+)\}', full_match)
+                    if attrs_match:
+                        attrs_block = attrs_match.group(1)
+                        fig_match = re.search(r'#(fig-[^\s}]+)', attrs_block)
+                        if fig_match:
+                            fig_id = fig_match.group(1)
+                        attributes = attrs_block.strip()
+                    
+                    # Extract caption
+                    caption_match = re.search(r'!\[([^\]]+)\]', full_match)
+                    caption = caption_match.group(1) if caption_match else ""
+                    
+                    # Only flag external URLs
+                    if url.lower().startswith(('http://', 'https://')):
+                        if not fig_id:
+                            url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
+                            fig_id = f"fig-auto-{url_hash}"
+                        
+                        matches.append((full_match, caption, url, fig_id, attributes))
+                
+                idx = end
                 
         return matches
     
