@@ -115,24 +115,55 @@ class ImageDownloader:
     
     def extract_figure_images(self, content: str) -> List[Tuple[str, str, str, str, str]]:
         """
-        Extract markdown images with #fig references.
+        Extract markdown images with or without #fig references.
         Returns list of tuples: (full_match, caption, url, fig_id, attributes)
         """
-        # Pattern to match: ![caption](url){#fig-identifier other-attributes}
-        # Captures the full attributes section to preserve styling like width=70%
-        pattern = r'!\[(.*?)\]\(([^)]+)\)\{#(fig-[^\s}]+)([^}]*)\}'
         matches = []
         
-        for match in re.finditer(pattern, content):
+        # Pattern 1: Images with #fig-identifier
+        # ![caption](url){#fig-identifier other-attributes}
+        pattern_with_fig = r'!\[(.*?)\]\(([^)]+)\)\{#(fig-[^\s}]+)([^}]*)\}'
+        
+        for match in re.finditer(pattern_with_fig, content):
             full_match = match.group(0)
             caption = match.group(1)
             url = match.group(2)
             fig_id = match.group(3)
-            attributes = match.group(4).strip()  # Additional attributes like width=70%
+            attributes = match.group(4).strip()
             
-            # Check if URL is external (starts with http/https, case insensitive)
             if url.lower().startswith(('http://', 'https://')):
                 matches.append((full_match, caption, url, fig_id, attributes))
+        
+        # Pattern 2: Images without #fig-identifier but with attributes
+        # ![caption](url){width=80% fig-align="center"}
+        pattern_without_fig = r'!\[(.*?)\]\(([^)]+)\)\{(?!#fig-)([^}]+)\}'
+        
+        for match in re.finditer(pattern_without_fig, content):
+            full_match = match.group(0)
+            caption = match.group(1)
+            url = match.group(2)
+            attributes = match.group(3).strip()
+            
+            if url.lower().startswith(('http://', 'https://')):
+                # Generate a fig_id from the URL for filename generation
+                url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
+                fig_id = f"fig-auto-{url_hash}"
+                matches.append((full_match, caption, url, fig_id, attributes))
+        
+        # Pattern 3: Simple images without any attributes
+        # ![caption](url)
+        pattern_simple = r'!\[(.*?)\]\(([^)]+)\)(?!\{)'
+        
+        for match in re.finditer(pattern_simple, content):
+            full_match = match.group(0)
+            caption = match.group(1)
+            url = match.group(2)
+            
+            if url.lower().startswith(('http://', 'https://')):
+                # Generate a fig_id from the URL for filename generation
+                url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
+                fig_id = f"fig-auto-{url_hash}"
+                matches.append((full_match, caption, url, fig_id, ""))
                 
         return matches
     
@@ -273,11 +304,20 @@ class ImageDownloader:
             
             # Create replacement markdown with preserved attributes
             local_path = f"images/{extension}/{filename}"
-            if attributes:
-                # Preserve additional attributes like width=70%
-                replacement = f"![{caption}]({local_path}){{#{fig_id} {attributes}}}"
+            
+            # Only include fig_id if it's not auto-generated
+            if fig_id.startswith("fig-auto-"):
+                # Image didn't have a fig-id originally, don't add one
+                if attributes:
+                    replacement = f"![{caption}]({local_path}){{{attributes}}}"
+                else:
+                    replacement = f"![{caption}]({local_path})"
             else:
-                replacement = f"![{caption}]({local_path}){{#{fig_id}}}"
+                # Image had a fig-id, preserve it
+                if attributes:
+                    replacement = f"![{caption}]({local_path}){{#{fig_id} {attributes}}}"
+                else:
+                    replacement = f"![{caption}]({local_path}){{#{fig_id}}}"
             
             # Check if file already exists
             if output_path.exists():
