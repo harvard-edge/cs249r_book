@@ -925,6 +925,18 @@ Practical DP deployment requires careful consideration of computational trade-of
 
 Increasing the noise to reduce $\epsilon$ may degrade model accuracy, especially in low-data regimes or fine-grained classification tasks. Consequently, DP is often applied selectively—either during training on sensitive datasets or at inference when returning aggregate statistics—to balance privacy with performance goals [@dwork2014algorithmic].
 
+::: {.callout-note title="Concrete Example: Differential Privacy Trade-offs" icon=false}
+Consider training a medical diagnosis model on sensitive patient records. Without differential privacy, the model achieves 94.2% accuracy on test data. Applying DP-SGD with different privacy budgets yields:
+
+- **ε = 10** (weak privacy): 93.1% accuracy (1.1% degradation, 30% training overhead)
+- **ε = 1** (strong privacy): 87.4% accuracy (6.8% degradation, 120% training overhead)
+- **ε = 0.1** (very strong privacy): 76.2% accuracy (18% degradation, 150% training overhead)
+
+The choice depends on regulatory requirements and risk tolerance. Healthcare applications under HIPAA might accept ε = 1 for 87% accuracy, while financial fraud detection requiring 95%+ accuracy might use ε = 10 or forego DP entirely, relying instead on access controls and audit trails.
+
+**Implementation:** Libraries like [Opacus](https://opacus.ai/) (PyTorch) and [TensorFlow Privacy](https://github.com/tensorflow/privacy) provide production-ready DP-SGD implementations. A basic integration requires ~10 lines of code but demands careful privacy accounting to avoid budget exhaustion across training epochs.
+:::
+
 #### Federated Learning {#sec-security-privacy-federated-learning-77ae}
 
 While differential privacy adds mathematical guarantees to data processing, federated learning (FL) offers a complementary approach that reduces privacy risks by restructuring the learning process itself. Rather than aggregating raw data at a central location, FL distributes the training across a set of client devices, each holding local data [@mcmahan2017communicationefficient]. This distributed training paradigm, explored further in @sec-ai-training, requires careful coordination of security measures across multiple participants and infrastructure providers. Clients compute model updates locally and share only parameter deltas with a central server for aggregation:
@@ -933,6 +945,21 @@ $$
 $$
 
 Here, $\theta_{t}^{(k)}$ represents the model update from client $k$, $n_k$ the number of samples held by that client, and $n$ the total number of samples across all clients. This weighted aggregation allows the global model to learn from distributed data without direct access to it. FL reduces the exposure of raw data, but still leaks information through gradients, motivating the use of DP, secure aggregation, and hardware-based protections in federated settings.
+
+::: {.callout-note title="Real-World Example: Google Gboard Federated Learning" icon=false}
+Google's Gboard keyboard uses federated learning to improve next-word prediction across 1+ billion Android devices without collecting typing data. The system works as follows:
+
+1. **Local Training:** Each device trains a small update to the language model using the user's recent typing (typically 100-1000 words)
+2. **Secure Aggregation:** Devices upload encrypted model updates (not raw text) to Google's servers
+3. **Global Update:** The server aggregates thousands of updates, computing an improved global model
+4. **Distribution:** The updated model is pushed back to devices in the next app update
+
+**Privacy Properties:** Individual typing data never leaves the device. Even Google's servers cannot decrypt individual updates, seeing only the aggregated result. The system combines FL with differential privacy (ε ≈ 6) and secure aggregation protocols.
+
+**Performance:** FL achieves 92% of the accuracy of centralized training while eliminating raw data collection. Communication efficiency optimizations (gradient compression, selective participation) reduce bandwidth to ~100 KB per device per day.
+
+**Trade-offs:** FL requires 10-100x more communication rounds than centralized training and introduces 2-5% accuracy degradation. However, for privacy-sensitive applications, these costs are acceptable compared to the alternative of not training at all.
+:::
 
 To address scenarios requiring computation on encrypted data, homomorphic encryption (HE)[^fn-he-breakthrough] and secure multiparty computation (SMPC) allow models to perform inference or training over encrypted inputs. The computational overhead of homomorphic operations often requires the efficiency optimization techniques covered in @sec-efficient-ai to maintain practical performance.
 
@@ -984,6 +1011,32 @@ Having examined individual techniques, it becomes clear that these privacy-prese
 +------------------------+-----------------------+-------------------------+----------------------+------------------------------+------------------------------------------------------------+
 
 : **Privacy-Accuracy Trade-Offs**: Data privacy techniques impose varying computational costs and offer different levels of formal privacy guarantees, requiring practitioners to balance privacy strength with model utility and deployment constraints. The table summarizes key properties—privacy guarantees, computational overhead, maturity, typical use cases, and trade-offs—to guide informed decisions when designing privacy-aware machine learning systems. {#tbl-privacy-technique-comparison}
+
+::: {.callout-tip title="Concept Check: Data Privacy Techniques" icon=false collapse="true"}
+Before proceeding to model-level defenses, verify your understanding of data privacy mechanisms:
+
+**Differential Privacy:**
+- Can you explain why ε = 0.1 provides stronger privacy than ε = 10?
+- What's the primary trade-off when reducing the privacy budget?
+- Why doesn't DP alone guarantee security against all attacks?
+
+**Federated Learning:**
+- How does FL differ from distributed training with centralized data aggregation?
+- What types of information can still leak through gradient updates in FL?
+- Why is FL often combined with differential privacy?
+
+**Homomorphic Encryption vs. SMPC:**
+- When would you choose HE over SMPC, and vice versa?
+- What makes both techniques currently impractical for large-scale model training?
+
+**Decision Question:**
+You're building a medical diagnosis system using patient data from 5 hospitals that cannot share raw records due to HIPAA. The model requires 95%+ accuracy. Which privacy technique(s) would you recommend, and why?
+
+<details>
+<summary>Suggested Approach</summary>
+Federated Learning combined with Differential Privacy (ε ≈ 1-4) offers the best balance. Each hospital trains locally (preserving HIPAA compliance), FL aggregates updates without raw data sharing, and DP provides formal privacy guarantees. While accuracy may drop 2-5%, this is acceptable given regulatory constraints. Pure SMPC or HE would be too computationally expensive for iterative training.
+</details>
+:::
 
 ### Secure Model Design {#sec-security-privacy-secure-model-design-bb33}
 
@@ -1120,6 +1173,38 @@ Once immediate containment is in place, investigation and recovery can begin. Th
 Recovery typically involves retraining or patching the model. This must occur through a secure update process, using signed artifacts, trusted build pipelines, and validated data. To prevent recurrence, the incident should feed back into model evaluation pipelines—updating tests, refining monitoring thresholds, or hardening input defenses. For example, if a prompt injection attack bypassed a content filter in a generative model, retraining might include adversarially crafted prompts, and the prompt validation logic would be updated to reflect newly discovered patterns.
 
 Finally, organizations should establish post-incident review practices. This includes documenting root causes, identifying gaps in detection or response, and updating policies and playbooks. Incident reviews help translate operational failures into actionable improvements across the design-deploy-monitor lifecycle.
+
+::: {.callout-tip title="Concept Check: System-Level Monitoring" icon=false collapse="true"}
+Test your understanding of runtime defenses before moving to hardware security:
+
+**Input Validation:**
+- What are three types of checks you'd implement for a facial recognition API?
+- Why is distributional validation (comparing to training data statistics) valuable?
+- Can input validation prevent all adversarial attacks?
+
+**Output Monitoring:**
+- How does monitoring prediction confidence help detect adversarial inputs?
+- What would trigger an alert in a content moderation system's output monitoring?
+- Why might you monitor prediction entropy in addition to accuracy?
+
+**Integrity Checks:**
+- What's the difference between verifying model hash vs. runtime memory verification?
+- Why should integrity checks use cryptographic signing rather than simple checksums?
+- When would you perform attestation checks in addition to hash verification?
+
+**Incident Response:**
+- Why is model rollback preferred over immediate patching during an active attack?
+- What forensic information should you preserve when isolating a compromised model?
+- How do ML incident responses differ from traditional software incident responses?
+
+**Scenario:**
+Your deployed sentiment analysis model suddenly shows a 15% drop in confidence scores, though accuracy remains stable. Input validation passes, but output monitoring flags the change. What's your response plan?
+
+<details>
+<summary>Suggested Approach</summary>
+1. **Immediate**: Enable shadow deployment with previous model version for comparison, 2. **Investigation**: Check for data drift in inputs (distribution shift?), verify model integrity (hash unchanged?), review recent deployment changes, 3. **Containment**: If confidence drop correlates with specific input patterns, implement temporary input filtering, 4. **Resolution**: If drift detected, consider model retraining; if integrity compromised, rollback immediately. The stable accuracy suggests environmental change rather than direct attack, but confidence degradation could indicate adversarial probing or gradual poisoning attempts.
+</details>
+:::
 
 ### Hardware-based Security {#sec-security-privacy-hardwarebased-security-f0e0}
 
@@ -1510,6 +1595,70 @@ Box6/.style={Box,draw=OrangeLine,fill=OrangeL!50},
 :::
 
 This design flow emphasizes the importance of a comprehensive approach to security, where each layer of the system is fortified against potential threats while remaining adaptable to evolving risks. By integrating these principles into the design and deployment of machine learning systems, organizations can build solutions that are not only effective but also resilient, trustworthy, and aligned with ethical standards.
+
+### Selecting Appropriate Defenses: A Decision Framework {#sec-security-privacy-defense-selection}
+
+Given the breadth of security mechanisms presented, practitioners require systematic methods for selecting appropriate defenses. The choice depends on multiple interacting factors that must be evaluated holistically rather than in isolation.
+
+**Step 1: Threat Model Assessment**
+
+Begin by characterizing potential adversaries and their capabilities:
+
+- **Who are the adversaries?** Nation-states possess unlimited resources and advanced capabilities. Competitors seek intellectual property and strategic advantages. Curious users probe for vulnerabilities. Insider threats combine access with intent. Each adversary type demands different defensive priorities.
+
+- **What capabilities do they have?** White-box attackers with full model access require different defenses than black-box attackers limited to API queries. Physical access enables hardware attacks that remote adversaries cannot execute. Understanding attacker capabilities determines which defense mechanisms provide meaningful protection versus security theater.
+
+- **What assets require protection?** Training data privacy, model intellectual property, inference confidentiality, and system availability each require specialized defenses. Healthcare applications prioritize patient data protection (HIPAA compliance). Financial systems emphasize transaction integrity and fraud prevention. Ranking asset criticality guides defense investment.
+
+- **What is acceptable risk?** Regulatory environments define minimum acceptable security (GDPR, HIPAA, PCI-DSS). Reputational considerations establish higher bars—a data breach that is legally permissible may still be commercially devastating. Risk tolerance determines how much performance degradation and development cost organizations accept for security gains.
+
+**Step 2: Deployment Context Constraints**
+
+Security choices must respect operational realities:
+
+- **Computational Budget:** Cloud deployments afford unlimited horizontal scaling, enabling expensive techniques like homomorphic encryption or extensive monitoring. Edge devices operate under severe constraints—secure enclaves consume precious memory, cryptographic operations drain batteries. Embedded systems may lack security hardware entirely. Defense selection must match available compute resources.
+
+- **Latency Requirements:** Real-time applications (autonomous vehicles, industrial control) tolerate minimal latency overhead. Differential privacy and input validation must execute within millisecond budgets. Batch processing systems (training pipelines, offline analytics) can absorb expensive techniques like secure multi-party computation. Understanding latency budgets constrains feasible defenses.
+
+- **Update Frequency:** Continuously learning systems require runtime security that adapts as models evolve. Static deployments can rely on one-time hardening (model encryption, watermarking). Over-the-air update capabilities enable security patches but introduce new attack surfaces. Update patterns determine whether defenses must be dynamic or can be baked-in.
+
+- **Physical Security:** Data center deployments assume physical security and focus on logical defenses. Field-deployed devices face physical threats (tampering, extraction) requiring hardware security modules and tamper-evident packaging. Public-facing kiosks need different protections than secured facilities.
+
+**Step 3: Regulatory and Compliance Requirements**
+
+Legal mandates establish non-negotiable security baselines:
+
+- **GDPR** (EU): Mandates data minimization, purpose limitation, privacy by design. Differential privacy and federated learning help demonstrate compliance. Cross-border data transfer restrictions favor on-device processing.
+
+- **HIPAA** (Healthcare): Requires access controls, audit logging, encryption at rest and in transit. HSMs for key management and comprehensive logging become mandatory rather than optional.
+
+- **CCPA** (California): Establishes consumer privacy rights including data deletion. Systems must support cryptographic erasure and maintain data provenance.
+
+- **Industry Standards:** Payment Card Industry Data Security Standard (PCI-DSS), Federal Information Security Management Act (FISMA), and sector-specific regulations impose additional requirements. Non-compliance incurs financial penalties and operational restrictions.
+
+**Step 4: Recommended Layered Approach**
+
+Rather than selecting individual defenses, deploy coordinated protection:
+
+1. **Baseline Security (Universal):** All ML systems require authentication, access control, encrypted communications (TLS), audit logging, and basic input validation. These foundational defenses cost little and prevent common attacks. Omitting them constitutes negligence.
+
+2. **Domain-Specific Controls (Context-Dependent):** Healthcare systems add differential privacy for training data and TEEs for inference. Financial systems deploy HSMs for cryptographic operations and extensive transaction monitoring. Public-facing APIs implement rate limiting and behavioral analysis.
+
+3. **Layered Defenses (No Single Point of Failure):** Assume each defense will be bypassed eventually. Differential privacy prevents training data extraction even if models are stolen. Input validation catches adversarial examples even if models lack robustness. Monitoring detects attacks that evade technical defenses. Redundancy ensures attack success requires compromising multiple independent layers.
+
+4. **Validation Through Red-Team Exercises:** Theoretical security assessments miss practical vulnerabilities. Hire adversarial experts to attempt realistic attacks. Document failures and iterate defenses. Treat security as a continuous improvement process rather than one-time implementation.
+
+**Step 5: Trade-Off Optimization**
+
+Security is never free. Quantify costs and benefits:
+
+- **Performance vs. Protection:** If differential privacy reduces accuracy by 5% but enables GDPR compliance, the trade-off may be mandatory. If homomorphic encryption adds 10 seconds of latency to millisecond-budget applications, alternative approaches are required.
+
+- **Development Time vs. Risk Mitigation:** Basic security (authentication, encryption) adds weeks to development. Advanced techniques (federated learning, secure enclaves) require months of specialized engineering. Prioritize defenses by risk reduction per engineering hour.
+
+- **Operational Overhead vs. Attack Detection:** Comprehensive monitoring adds 10-20% infrastructure cost. Intrusion detection systems generate false positives requiring investigation. Balance detection capabilities against operational burden.
+
+The optimal security architecture emerges from systematically evaluating these factors rather than applying techniques prescriptively. Different deployment contexts demand different solutions—recognize this diversity and design accordingly.
 
 The defensive strategies we have examined form a critical foundation for ML system security, but they represent only one side of the security landscape. To design truly robust defenses, security professionals must understand the full spectrum of threats they face, including how adversaries might weaponize machine learning itself. This understanding follows the established security principle that effective defense requires comprehensive threat analysis.
 
