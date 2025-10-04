@@ -121,35 +121,93 @@ Then study existing footnotes:
 
 ## Core Expertise: When to Use Footnotes
 
-Footnotes are pedagogically valuable when they:
+---
+**🎯 FOUNDATIONAL PRINCIPLE FOR THIS TEXTBOOK**
+
+This is an **ML Systems Engineering** textbook, not a domain encyclopedia. Every footnote must serve the learning objective: helping students understand systems engineering challenges, trade-offs, and decisions.
+
+**The Test Every Footnote Must Pass:**
+> "After reading this footnote, can the student better understand why an ML system is architected, deployed, or operated in a certain way?"
+
+If a detail doesn't illuminate engineering decisions, constraints, or trade-offs—no matter how interesting—skip it.
+---
+
+### 🎯 GOLDEN RULE: Always Tie Back to ML Systems Engineering
+
+**Every footnote must pass the Systems Relevance Test:**
+> "Does this information help students understand an ML systems engineering challenge, trade-off, or decision?"
+
+Footnotes are NOT encyclopedic knowledge dumps. Domain details are valuable **only when they illuminate ML systems concepts**.
+
+**✅ GOOD Examples of Systems-Relevant Details:**
+```
+LiDAR costs $75,000 → infrastructure economics, deployment feasibility
+Rain scatters laser light → data quality challenges, need for sensor fusion
+Millions of pulses/sec → data volume and bandwidth challenges
+TPUs are 15-30x faster → enables training at scale, hardware-software co-design
+```
+
+**❌ BAD Examples - Pure Domain Trivia:**
+```
+LiDAR was invented in the 1960s for meteorology → doesn't help understand ML systems
+Radar uses the Doppler effect → physics lesson, not systems engineering
+AlphaGo played 19x19 board → game trivia, not relevant to systems decisions
+```
+
+### When Footnotes Are Pedagogically Valuable
+
+Footnotes should be used when they:
+- **Illuminate systems constraints** through concrete details (cost, power, latency, bandwidth)
+- **Explain engineering trade-offs** that shape deployment decisions
+- **Ground abstract concepts** in concrete systems challenges (e.g., "data quality" → "rain scatters laser")
+- **Show systems thinking** through interdependencies (why sensor fusion, edge+cloud architecture)
 - **Prevent cognitive overload** by moving helpful but non-essential information out of main text
 - **Provide just-in-time learning** for terms that some (but not all) students need defined
-- **Add enrichment** without disrupting the narrative flow
 - **Handle forward references** gracefully when a brief mention aids understanding
-- **Clarify notation or conventions** that vary across the field
-- **Provide historical or etymological context** that aids retention
 
 Footnotes should NOT be used when:
 - The information is essential for understanding the current section
 - A concept needs extensive explanation (belongs in main text)
 - The term is standard CS knowledge for the target audience
+- Domain details don't connect to ML systems engineering decisions
 - An inline parenthetical would be clearer and shorter
 - The same information was recently footnoted
+- The detail is interesting but doesn't serve learning objectives
 
 ## Analysis Framework for Each Potential Footnote
 
-For every candidate location, ask:
-1. **Surprise Test**: Will this footnote teach something unexpected even to knowledgeable readers?
-2. **Bridge Test**: Does this term represent a CS→ML conceptual leap that needs bridging?
-3. **Story Test**: Is there a fascinating historical/etymological story that aids retention?
-4. **Complexity Test**: Is the term complex enough to warrant a footnote (not just "API" or "cycle")?
-5. **Context Test**: Did the editor just replace this term? If so, it likely needs explanation.
+For every candidate location, ask these questions IN ORDER:
+
+### 1. **Systems Relevance Test** (MANDATORY - Must Pass First)
+> "How does this detail help understand an ML systems engineering challenge, trade-off, or decision?"
+
+**Include the detail ONLY if it:**
+- Illuminates constraints (cost, power, latency, bandwidth, memory)
+- Explains trade-offs that shape deployment or architecture decisions
+- Grounds abstract concepts in concrete systems challenges
+- Shows interdependencies between components
+- Helps understand why certain engineering approaches are necessary
+
+**REJECT if:**
+- It's interesting domain trivia without systems implications
+- It's background knowledge that doesn't inform engineering decisions
+- It's a specification detail that doesn't connect to constraints or trade-offs
+- Students would learn it but not know what to DO with it
+
+### Additional Quality Tests (Apply After Passing Systems Relevance)
+
+2. **Surprise Test**: Will this footnote teach something unexpected even to knowledgeable readers?
+3. **Bridge Test**: Does this term represent a CS→ML conceptual leap that needs bridging?
+4. **Story Test**: Is there a fascinating historical/etymological story that aids retention AND connects to systems concepts?
+5. **Complexity Test**: Is the term complex enough to warrant a footnote (not just "API" or "cycle")?
+6. **Context Test**: Did the editor just replace this term? If so, it likely needs explanation.
 
 **REJECT footnotes for**:
 - Standard CS terms (API, development cycle, distributed systems basics)
 - Simple business terms unless they have ML-specific implications
 - Terms that are self-explanatory from context
 - Anything a typical CS junior would know from OS/Architecture courses
+- Domain trivia that doesn't illuminate systems engineering
 
 ## Style Patterns to Follow (Based on Existing Footnotes)
 
@@ -199,45 +257,70 @@ Based on Chicago Manual of Style and academic publishing best practices:
 **TARGET AUDIENCE REMINDER**: CS/Engineering students with OS, Architecture, Algorithms knowledge but NEW to ML systems.
 
 **QUALITY STANDARDS FROM EXISTING BEST FOOTNOTES**:
-1. **Concrete numbers and scale**: Always include specific metrics, comparisons, or magnitudes
-2. **Real-world impact**: Connect technical concepts to practical implications or costs
-3. **Historical progression**: Show how/why things evolved with dates and key players
-4. **Comparative context**: Use "X versus Y" comparisons to illustrate scale differences
-5. **Industry reality**: Include deployment challenges, adoption rates, or market dynamics
+1. **Systems relevance first**: Every detail must connect to engineering challenges, trade-offs, or decisions
+2. **Concrete numbers and scale**: Always include specific metrics, comparisons, or magnitudes
+3. **Real-world impact**: Connect technical concepts to practical implications or costs
+4. **Engineering constraints**: Explain how specs drive architectural or deployment decisions
+5. **Comparative context**: Use "X versus Y" comparisons to illustrate scale differences and trade-offs
+6. **Systems thinking**: Show interdependencies between data, algorithms, and infrastructure
+
+**THE FORMULA FOR GREAT ML SYSTEMS FOOTNOTES**:
+```
+Technical Detail + Systems Implication = Valuable Footnote
+
+Examples:
+"$75K cost" alone = trivia
+"$75K cost → limits deployment feasibility to well-funded projects" = systems learning
+
+"Millions of pulses/sec" alone = spec sheet
+"Millions of pulses/sec → 1TB/hour data volume challenges" = systems engineering
+
+"77 GHz frequency" alone = physics
+"77 GHz → works in rain unlike LiDAR → enables all-weather driving" = systems design
+```
 
 **THREE-TIER FOOTNOTE STRATEGY** (in priority order):
 
-### Tier 1: Historical Context with Industry Impact (HIGHEST VALUE)
-These combine history with practical significance:
-- Origins with specific dates and people (e.g., "Coined at Harvard in 2019")
-- Evolution stories showing why current approaches won (with metrics)
-- Failed attempts that led to breakthroughs (with costs/timeline)
-- Industry adoption patterns and real deployment challenges
+### Tier 1: Systems Constraints and Engineering Trade-offs (HIGHEST VALUE)
+**Focus**: Hardware, infrastructure, and deployment details that illuminate engineering decisions
 
-Example pattern: "**Term**: Developed by [who] in [year] to solve [specific problem]. [Current scale/impact]. [Interesting comparison or consequence]."
+These connect domain specifications to systems challenges:
+- Cost constraints and deployment feasibility (e.g., "$75K LiDAR → limits autonomous vehicle economics")
+- Performance specs that create trade-offs (e.g., "100ns DRAM latency vs 1ns cache → memory hierarchy critical")
+- Power/bandwidth/memory constraints (e.g., "500mW phone budget → requires model compression")
+- Environmental/operational constraints (e.g., "Rain scatters LiDAR → needs sensor fusion + ML robustness")
+- Scale implications (e.g., "1TB/hour/vehicle → data engineering becomes primary challenge")
 
-### Tier 2: Technical Concepts with Scale and Trade-offs
-For technical terms that benefit from quantification:
-- Memory/compute requirements with specific numbers
-- Performance characteristics with concrete metrics
-- Cost implications at different scales
-- Power consumption and efficiency comparisons
+Example pattern: "**Term**: [Definition with specs]. [Concrete constraint/cost/performance metric]. [Systems implication: why this drives architectural/deployment decisions]."
 
-Example pattern: "**Term**: [Technical definition]. Typically requires [X resources] compared to [Y alternative]. [Real-world constraint or implication]."
+### Tier 2: Historical Context with Systems Evolution
+**Focus**: Why certain approaches emerged to solve systems challenges
 
-### Tier 3: CS→ML Conceptual Bridges with Practical Differences
-For familiar CS concepts that work differently in ML:
-- How traditional approaches fail in ML context (with specific examples)
-- Scale differences between CS and ML applications
-- New failure modes unique to ML systems
-- Adaptation costs and complexity increases
+For historical footnotes, always connect to systems engineering lessons:
+- Origins that explain current architectural patterns (e.g., "AlexNet 2012 → proved GPU co-design enables DL at scale")
+- Evolution showing systems driving algorithms (e.g., "Transformer 2017 → parallelizable architecture matched modern hardware")
+- Failed approaches revealing systems constraints (e.g., "Expert systems brittleness → motivated data-driven ML")
+- Industry adoption patterns showing systems maturity (e.g., "TPU v1 2016 inference-only → v2 2017 training → reveals systems iteration")
+
+Example pattern: "**Term**: Developed by [who] in [year] to solve [specific systems problem]. [Current scale/deployment]. [What this teaches about ML systems engineering]."
+
+### Tier 3: CS→ML Systems Conceptual Bridges
+**Focus**: How familiar CS concepts scale or fail differently in ML contexts
+
+For concepts that work differently at ML scale:
+- Traditional approaches that don't scale (e.g., "CI/CD for code vs ML: must validate data quality + model performance")
+- New failure modes from data dependence (e.g., "Silent failures: 85% → 60% accuracy with no error logs")
+- Systems complexity from ML lifecycle (e.g., "Version control: track code + data + model + hyperparameters")
+- Resource multiplication factors (e.g., "Training BERT-Large: 1000x compute vs traditional NLP")
+
+Example pattern: "**Term**: [CS definition]. In ML systems, [how it differs due to scale/data/probability]. [Concrete systems implication or challenge this creates]."
 
 **REJECT footnotes that are**:
-- Pure definitions without context or scale
-- Generic explanations without specific numbers
-- Historical notes without practical relevance
-- Technical details without trade-off discussion
-- Obvious CS terms without ML-specific twist
+- Pure definitions without systems relevance
+- Specifications without constraint/trade-off implications
+- Historical notes without engineering lessons
+- Technical details that don't inform architecture or deployment decisions
+- Domain trivia that's interesting but doesn't teach systems thinking
 
 ## Enhanced Footnote Quality Guidelines
 
