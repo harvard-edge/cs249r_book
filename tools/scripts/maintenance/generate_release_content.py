@@ -35,7 +35,7 @@ from datetime import datetime
 use_ollama = True  # Global flag to track which service to use
 
 CHANGELOG_FILE = "CHANGELOG.md"
-QUARTO_YML_FILE = "book/config/_quarto-pdf.yml"  # Default to PDF config which has chapters structure
+QUARTO_YML_FILE = "quarto/config/_quarto-pdf.yml"  # Default to PDF config which has chapters structure
 GITHUB_REPO_URL = "https://github.com/harvard-edge/cs249r_book/"
 # Removed MAJOR_CHANGE_THRESHOLD since we're organizing by content type now
 OPENAI_DELAY = 1  # seconds between API calls
@@ -214,7 +214,7 @@ def get_changes_in_dev_since(date_start, date_end=None, verbose=False):
     cmd = ["git", "log", "--numstat", "--since", date_start]
     if date_end:
         cmd += ["--until", date_end]
-    cmd += ["origin/dev", "--", "contents/**/*.qmd"]
+    cmd += ["origin/dev", "--", "quarto/contents/**/*.qmd"]
     return run_git_command(cmd, verbose=verbose)
 
 
@@ -771,7 +771,7 @@ if __name__ == "__main__":
     parser.add_argument("-t", "--test", action="store_true", help="Run without writing to file.")
     parser.add_argument("--demo", action="store_true", help="Generate a demo changelog entry with sample data.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output.")
-    parser.add_argument("-q", "--quarto-config", type=str, help="Path to quarto config file (default: book/config/_quarto-pdf.yml)")
+    parser.add_argument("-q", "--quarto-config", type=str, help="Path to quarto config file (default: quarto/config/_quarto-pdf.yml)")
     parser.add_argument("-m", "--model", type=str, default="gemma2:9b", help="Ollama model to use (default: gemma2:9b). Popular options: gemma2:9b, gemma2:27b, llama3.1:8b, llama3.1:70b")
     parser.add_argument("--release-notes", action="store_true", help="Generate release notes instead of changelog entry.")
     parser.add_argument("--version", type=str, help="Version for release notes (required with --release-notes).")

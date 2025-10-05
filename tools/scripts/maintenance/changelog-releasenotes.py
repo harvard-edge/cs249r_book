@@ -19,7 +19,7 @@ RELEASE_NOTES_FILE = "release_notes_v{version}.md"
 # Lab structure from quarto config
 LAB_STRUCTURE = None
 
-def load_lab_structure(quarto_file="book/config/_quarto-html.yml"):
+def load_lab_structure(quarto_file="quarto/config/_quarto-html.yml"):
     """Load lab structure from quarto HTML config file."""
     global LAB_STRUCTURE
     
@@ -317,7 +317,7 @@ For a complete list of all changes, improvements, and updates, see the [detailed
     print(f"✅ Release notes saved to: {filename}")
     return filename
 
-QUARTO_YML_FILE = "book/config/_quarto-pdf.yml"  # Default to PDF config which has chapters structure
+QUARTO_YML_FILE = "quarto/config/_quarto-pdf.yml"  # Default to PDF config which has chapters structure
 GITHUB_REPO_URL = "https://github.com/harvard-edge/cs249r_book/"
 
 
@@ -493,7 +493,7 @@ def get_changes_in_dev_since(date_start, date_end=None, verbose=False):
     cmd = ["git", "log", "--numstat", "--since", date_start]
     if date_end:
         cmd += ["--until", date_end]
-    cmd += ["origin/dev", "--", "contents/**/*.qmd"]
+    cmd += ["origin/dev", "--", "quarto/contents/**/*.qmd"]
     return run_git_command(cmd, verbose=verbose)
 
 
@@ -939,7 +939,7 @@ if __name__ == "__main__":
     parser.add_argument("-t", "--test", action="store_true", help="Run without writing to file.")
     parser.add_argument("--demo", action="store_true", help="Generate a demo changelog entry with sample data.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output.")
-    parser.add_argument("-q", "--quarto-config", type=str, help="Path to quarto config file (default: book/config/_quarto-pdf.yml)")
+    parser.add_argument("-q", "--quarto-config", type=str, help="Path to quarto config file (default: quarto/config/_quarto-pdf.yml)")
     parser.add_argument("--ai-mode", action="store_true", help="Enable AI-generated summaries instead of simple change counts.")
     parser.add_argument("--ollama-url", default="http://localhost:11434", help="Ollama API URL for AI summaries.")
     parser.add_argument("--ollama-model", default="gemma2:9b", help="Ollama model to use for AI summaries.")
@@ -1024,7 +1024,7 @@ if __name__ == "__main__":
     try:
         load_chapter_order(args.quarto_config)
         # Load lab structure from HTML config (not PDF config)
-        load_lab_structure("book/config/_quarto-html.yml")
+        load_lab_structure("quarto/config/_quarto-html.yml")
         
         # Print configuration header
         print("=" * 60)
