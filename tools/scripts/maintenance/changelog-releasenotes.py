@@ -111,6 +111,12 @@ def organize_labs_by_structure(lab_entries):
         # Fallback to flat list if no structure loaded
         return lab_entries
     
+    # Check if entries use AI summaries (don't have "X changes" pattern)
+    # If AI mode, skip organization and return flat list
+    if lab_entries and not re.search(r'(\d+) changes', lab_entries[0]):
+        # AI-generated summaries - return as-is without organization
+        return lab_entries
+    
     # Group lab entries by their hardware platform
     lab_groups = defaultdict(list)
     
@@ -556,6 +562,27 @@ def call_ollama(prompt, model="gemma2:9b", url="http://localhost:11434"):
         print(f"⚠️ Error calling Ollama: {e}")
         return None
 
+def clean_ai_summary(summary):
+    """Remove AI artifacts from generated summaries."""
+    # Remove common AI pleasantries and artifacts
+    artifacts = [
+        r'Let me know if .*?[!.]',
+        r'I can .*? if you[\'d]* like[!.]',
+        r'Feel free to .*?[!.]',
+        r'Please let me know .*?[!.]',
+        r'\s+\n\s*\n',  # Multiple blank lines
+    ]
+    
+    cleaned = summary
+    for pattern in artifacts:
+        cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE | re.DOTALL)
+    
+    # Clean up extra whitespace and newlines
+    cleaned = re.sub(r'\s+', ' ', cleaned)
+    cleaned = cleaned.strip()
+    
+    return cleaned
+
 def generate_ai_summary(chapter_title, commit_messages, file_path, verbose=False):
     """Generate AI summary for a file based on commit messages."""
     if not commit_messages.strip():
@@ -575,7 +602,8 @@ Generate a concise summary (1-2 sentences) that describes the key updates:"""
     ai_summary = call_ollama(prompt)
     
     if ai_summary:
-        return ai_summary
+        # Clean up AI artifacts
+        return clean_ai_summary(ai_summary)
     else:
         # Fallback to simple summary
         commit_count = len([msg for msg in commit_messages.split('\n') if msg.strip()])
@@ -1067,12 +1095,16 @@ if __name__ == "__main__":
                 
                 for line in existing_lines:
                     new_lines.append(line)
-                    # Insert new entry right after the year header
-                    if not inserted and line.strip() == year_header:
+                    # Insert new entry right after the year header (handle both old and new formats)
+                    line_stripped = line.strip()
+                    year_match = (line_stripped == year_header or 
+                                 line_stripped == f"## {current_year}" or
+                                 line_stripped == f"## {current_year} Updates")
+                    if not inserted and year_match:
                         # Add the new entry (without year header since it's already in the file)
                         new_entry_lines = new_entry.strip().splitlines()
                         # Skip the first line (year header) since we're inserting after existing year header
-                        if new_entry_lines and new_entry_lines[0].strip() == year_header:
+                        if new_entry_lines and new_entry_lines[0].strip() in [year_header, f"## {current_year}", f"## {current_year} Updates"]:
                             new_entry_lines = new_entry_lines[1:]
                         new_lines.extend(new_entry_lines)
                         new_lines.append("")  # Add blank line
