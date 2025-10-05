@@ -1,3 +1,5 @@
+_No updates found._
+
 # Changelog
 
 ## 2025
@@ -2298,4 +2300,3 @@
 - `█░░░░` **Embedded Sys**: Updated content
 
 </details>
-
