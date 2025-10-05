@@ -64,7 +64,7 @@ The emergence of neural networks reflects three fundamental shifts that directly
 
 * **Computation**: From simple, sequential operations to massively parallel computations. The scalability of neural networks has driven demand for specialized hardware accelerators[^fn-gpu-parallel] that can efficiently process large models and datasets. Understanding these computational patterns is crucial for optimizing system performance.
 
-[^fn-gpu-parallel]: **GPU (Graphics Processing Unit)**: Originally designed for rendering 3D graphics in 1999 by NVIDIA, GPUs excel at parallel computation with thousands of simple cores (compared to CPUs' 4-16 complex cores). A modern GPU like the NVIDIA A100 contains 6,912 CUDA cores and can perform 312 TFLOPS for FP16 Tensor operations—roughly 20× faster than CPUs for neural network training. This massive parallelism perfectly matches the matrix multiplication operations that dominate deep learning computations.
+[^fn-gpu-parallel]: **GPU (Graphics Processing Unit)**: Originally designed for rendering 3D graphics in 1999 by NVIDIA, GPUs excel at parallel computation with thousands of simple cores (compared to CPUs' 4-16 complex cores). A modern GPU like the NVIDIA A100 contains 6,912 CUDA cores—roughly 20× faster than CPUs for the matrix multiplication operations that dominate neural network training. This massive parallelism perfectly matches deep learning's computational patterns, enabling hundreds of multiply-add operations to execute simultaneously across different data elements.
 
 This chapter bridges mathematical theory and systems implementation by exploring how neural networks process information through layers of interconnected units. We examine the forward propagation that transforms inputs to outputs, the backpropagation that enables learning from errors, and the optimization processes that update millions of parameters. Each mathematical concept directly connects to system considerations: matrix operations determine memory bandwidth requirements, gradient computations dictate numerical precision needs, and optimization algorithms influence convergence time and hardware utilization.
 
@@ -288,25 +288,27 @@ Deep learning, however, reshapes system requirements across multiple dimensions,
 
 The computational paradigm shift becomes immediately apparent when comparing these approaches. Traditional programs follow sequential logic flows. In stark contrast, deep learning requires massive parallel operations on matrices. This shift explains why conventional CPUs, designed for sequential processing, prove inefficient for neural network computations.
 
-This parallel computational model creates new bottlenecks. Neural network parallelism is constrained by the memory wall: while compute scales linearly with parallel units, memory bandwidth scales as sqrt(area). Modern accelerators address this through hierarchical memory systems: L1 caches (1-10MB, 1000 GB/s), L2 caches (10-100MB, 500 GB/s), and specialized scratchpad memories that enable data reuse. TPU v4's 32MB on-chip memory provides 9TB/s bandwidth versus 1TB/s off-chip—a 9x advantage that enables efficient systolic array operation.
+This parallel computational model creates new bottlenecks. The fundamental challenge is the memory wall: while computational capacity can be increased by adding more processing units, memory bandwidth to feed those units doesn't scale as favorably[^fn-memory-hierarchy]. Modern accelerators address this through hierarchical memory systems with multiple cache levels and specialized memory architectures that enable data reuse. The key insight is that keeping data close to where it's processed—in faster, smaller caches rather than slower, larger main memory—dramatically improves performance.
 
-These different memory levels create distinct performance bottlenecks that determine neural network system design. Successful neural network accelerators maximize data reuse within higher levels of the memory hierarchy, often achieving 80%+ cache hit rates through careful dataflow scheduling. The detailed quantitative analysis of memory bandwidth and latency characteristics across different memory levels is covered in @sec-ai-acceleration.
+[^fn-memory-hierarchy]: **Memory Hierarchy Performance**: Modern processors employ multiple memory levels with vastly different access speeds. L1 cache (the fastest, closest to processor) provides data in 1-2 processor clock cycles, L2 cache requires 10-20 cycles, while main memory takes 100+ cycles—creating a 50-100× speed difference. The throughput also varies dramatically: L1 can deliver ~1000 GB/s (gigabytes per second), L2 ~500 GB/s, while main memory provides only ~100 GB/s on CPUs (~1 TB/s on GPUs with specialized high-bandwidth memory). Neural network accelerators succeed by keeping frequently accessed weights in fast cache and reusing them across many computations, often achieving 80%+ cache hit rates through careful scheduling.
 
-Addressing these memory hierarchy challenges, the need for parallel processing has driven the adoption of specialized hardware architectures, ranging from powerful cloud GPUs to specialized mobile processors to Tiny ML accelerators. The specific hardware architectures and their trade-offs for ML workloads are explored in depth in @sec-ai-acceleration, which covers how different processors optimize matrix operations and memory access patterns crucial for neural network performance.
+These memory hierarchy challenges explain why neural network accelerators focus on maximizing data reuse. Rather than repeatedly fetching the same weights from slow main memory, successful designs keep frequently accessed data in fast local storage and carefully schedule operations to minimize data movement. The detailed quantitative analysis of these memory systems and their performance characteristics is covered in @sec-ai-acceleration.
+
+The need for parallel processing has driven the adoption of specialized hardware architectures, ranging from powerful cloud GPUs to specialized mobile processors to Tiny ML accelerators. The specific hardware architectures and their trade-offs for ML workloads are explored in depth in @sec-ai-acceleration, which covers how different processors optimize matrix operations and memory access patterns crucial for neural network performance.
 
 #### Memory Systems {#sec-dl-primer-memory-systems-5119}
 
 The memory requirements present another significant shift. Traditional programs typically maintain small, fixed memory footprints. In contrast, deep learning models must manage parameters across complex memory hierarchies. Memory bandwidth often becomes the primary performance bottleneck, creating particular challenges for resource-constrained systems.
 
-This memory-intensive nature creates performance bottlenecks unique to neural computing. Matrix multiplication—the core neural network operation—is memory bandwidth-bound rather than compute-bound. A typical GEMM operation achieves only 5-15% of peak FLOPS[^fn-dlprimer-flops] on CPUs due to data movement costs. The arithmetic intensity problem: loading a single FP32 weight (4 bytes) enables one multiply-accumulate (2 FLOPS), yielding 0.5 FLOPS/byte, while modern processors provide 10-1000 FLOPS/byte computational capability—a 20-2000× imbalance between available compute and achievable compute.
+This memory-intensive nature creates performance bottlenecks unique to neural computing. Matrix multiplication—the core neural network operation—is often memory bandwidth-bound rather than compute-bound[^fn-memory-bound]. The fundamental issue is that processors can perform computations faster than they can fetch data from memory. Each weight must be loaded from memory to perform a multiplication, and if the memory system can't supply data fast enough, computational units sit idle waiting for values to arrive. This imbalance between computational capability and memory bandwidth explains why simply adding more processing units doesn't proportionally improve performance.
 
-[^fn-dlprimer-flops]: **FLOPS**: Floating Point Operations Per Second measures computational throughput by counting mathematical operations like addition, subtraction, multiplication, and division of decimal numbers. Modern supercomputers achieve exascale performance (10^18 FLOPS), while neural network training requires petascale to exascale compute. For perspective, training GPT-3 [@brown2020language] required approximately 3.14 × 10^23 FLOPS—more computation than was available to the entire world before 1960.
+[^fn-memory-bound]: **Memory-Bound Operations**: Consider a typical matrix multiplication: a processor capable of performing a billion floating-point operations per second requires loading data at 250-500 GB/s (gigabytes per second) to keep computational units fully utilized. However, typical CPU memory bandwidth is only 50-100 GB/s, while even high-end GPUs provide 1-2 TB/s (terabytes per second). This gap means CPUs achieve only 5-15% of peak computational efficiency on neural network operations, while GPUs reach 40-60% through higher bandwidth and better data reuse strategies.
 
-GPUs achieve 40-60% efficiency through higher memory bandwidth (1TB/s vs 100GB/s for CPUs) and massive parallelism (thousands of cores vs 16-64 for CPUs). This bandwidth wall explains why AI accelerators focus on reducing data movement through techniques like systolic arrays and near-memory computing. Energy consumption in neural networks is dominated by data movement, not computation. Moving a 32-bit value from DRAM consumes ~640pJ, while a 32-bit multiplication consumes ~3.7pJ, a 173x difference. This energy hierarchy explains why mobile neural processors use techniques like quantization (8-bit operations consume 4x less energy than 32-bit), pruning (eliminating 90%+ of parameters), and specialized on-chip memory architectures to minimize DRAM access.
+GPUs address this challenge through both higher memory bandwidth and massive parallelism, achieving better utilization than traditional CPUs. However, the underlying constraint remains: energy consumption in neural networks is dominated by data movement, not computation. Moving data from main memory to processing units consumes significantly more energy than the actual mathematical operations. This energy hierarchy explains why specialized processors focus on techniques that reduce data movement, keeping data closer to where it's processed.
 
-To illustrate these energy costs quantitatively: a typical smartphone neural processor like the Apple A17 Pro consumes approximately 2-4 watts during inference, while training the same model on a cloud GPU like NVIDIA H100 consumes 300-700 watts. For perspective, training a small CNN on CIFAR-10 for one epoch requires roughly 0.1 kWh on a V100 GPU, while running inference on 1 million images requires only 0.001 kWh on the same hardware. This 100:1 training-to-inference energy ratio drives the industry focus on efficient deployment architectures.
+This fundamental memory-computation tradeoff manifests differently across deployment scenarios. Cloud servers can afford more memory and power to maximize throughput, while mobile devices must carefully optimize to operate within strict power budgets. Training systems prioritize computational throughput even at higher energy costs, while inference systems emphasize energy efficiency. These different constraints drive different optimization strategies across the ML systems spectrum, ranging from memory-rich cloud deployments to heavily optimized Tiny ML implementations.
 
-This drives different optimization strategies across the ML systems spectrum, ranging from memory-rich cloud deployments to heavily optimized Tiny ML implementations. These memory optimization strategies are detailed in @sec-model-optimizations, which covers techniques like quantization and pruning that reduce memory requirements while preserving model accuracy.
+These memory optimization strategies are detailed in @sec-model-optimizations, which covers techniques like quantization and pruning that reduce memory requirements while preserving model accuracy. The specific hardware architectures and their memory systems are explored in @sec-ai-acceleration.
 
 #### System Scaling {#sec-dl-primer-system-scaling-49fe}
 
@@ -321,11 +323,13 @@ Bridging algorithmic concepts with hardware realities becomes essential. While t
 
 These shifts explain why deep learning has spurred innovations across the entire computing stack. From specialized hardware accelerators to new memory architectures to sophisticated software frameworks, the demands of deep learning continue to reshape computer system design.
 
+Having established both the historical progression from rule-based systems to neural networks and the computational infrastructure this evolution demands, we now examine the foundational inspiration behind these systems. The answer to what neural networks compute begins not with silicon and software, but with biology—specifically, the neural networks in our brains that inspired the artificial neural networks powering modern AI systems.
+
 ## Biological to Artificial Neurons {#sec-dl-primer-biological-artificial-neurons-bb4f}
 
-Having established the systems landscape that deep learning operates within—from the evolution of programming paradigms to the computational demands that drive modern hardware design—we now turn to the foundational question: what are these neural networks actually computing? The answer begins not with silicon, but with biology.
+Having examined how programming paradigms evolved from rules to data-driven learning, and how this evolution drives the computational infrastructure requirements we see today, we now turn to the foundational question: what are these neural networks actually computing? The answer begins not with silicon, but with biology.
 
-The massive computational requirements we just examined—specialized processors, hierarchical memory systems, high-bandwidth data movement—all trace back to a deceptively simple inspiration: the biological neuron. Understanding how nature solves information processing problems with 20 watts of power reveals both the potential and the challenges of artificial neural systems. As we examine biological neurons and their artificial counterparts, watch for a crucial pattern: each biological feature that we choose to implement or approximate creates specific computational demands, linking the dendrite-and-synapse model directly to the FLOPS and memory bandwidth requirements we just discussed.
+The massive computational requirements we just examined—specialized processors, hierarchical memory systems, high-bandwidth data movement—all trace back to a deceptively simple inspiration: the biological neuron. Understanding how nature solves information processing problems with 20 watts of power reveals both the potential and the challenges of artificial neural systems. As we examine biological neurons and their artificial counterparts, watch for a crucial pattern: each biological feature that we choose to implement or approximate creates specific computational demands, linking the dendrite-and-synapse model directly to the processing power and memory bandwidth requirements we just discussed.
 
 This section bridges biological inspiration and systems implementation by examining three key transformations: how biological neurons inspire artificial neuron design (Transition to Artificial Neurons), how neural principles translate into mathematical operations (Computational Translation), and how these operations drive the system requirements we outlined earlier (System Requirements). By the end, you'll understand why implementing even simplified neural computation requires the specialized hardware infrastructure modern ML systems demand.
 
@@ -345,7 +349,9 @@ These biological principles suggest key requirements for artificial neural syste
 
 [^fn-brain-efficiency]: **Brain Energy Efficiency**: The human brain contains approximately 86-100 billion neurons and performs roughly 10^16 operations per second on just 20 watts—equivalent to running a single LED light bulb. In contrast, training GPT-3 [@brown2020language] consumed about 1,287 megawatt-hours of electricity [@strubell2019energy]. This stark efficiency gap drives research into neuromorphic computing and inspired the development of specialized AI chips designed to mimic brain-like processing.
 
-These biological principles have led to two distinct but complementary approaches in artificial intelligence. The first attempts to directly mimic neural structure and function, leading to artificial neural networks and deep learning architectures that structurally resemble biological neural networks. The second takes a more abstract approach, adapting biological principles to work efficiently within the constraints of computer hardware without necessarily copying biological structures exactly. The following sections examine how these approaches manifest in practice, beginning with the basic building block of neural networks: the neuron itself.
+These biological principles have shaped two distinct approaches in artificial intelligence. The first attempts to directly mimic neural structure and function, creating artificial neural networks that structurally resemble biological networks. The second takes a more abstract approach, adapting biological principles to work efficiently within computer hardware constraints without copying biological structures exactly.
+
+To understand how either approach works in practice, we must first examine the fundamental unit that makes neural computation possible: the individual neuron. By understanding how biological neurons process information, we can then see how this process translates into the mathematical operations that drive artificial neural networks.
 
 ### Transition to Artificial Neurons {#sec-dl-primer-transition-artificial-neurons-f44f}
 
@@ -401,15 +407,17 @@ Bridging the gap from biological inspiration to practical implementation, the tr
 
 Despite the apparent speed disadvantage, this computational efficiency emerges from the brain's basic organizational principles. Each neuron acts as a simple processing unit, integrating inputs from thousands of other neurons and producing a binary output signal based on whether this integrated input exceeds a threshold. The connection strengths between neurons, mediated by synapses, are continuously modified through experience. This synaptic plasticity forms the basis for learning and adaptation in biological neural networks.
 
-Replicating biological efficiency in artificial systems requires navigating fundamental trade-offs. While the brain achieves this remarkable efficiency with only 20 watts (as noted earlier), a comparable artificial neural network would require orders of magnitude more power. Current large language models like GPT-4 consume ~1-10 MW during training (50,000-500,000× more power than the brain) and 1-10 kW during inference (50-500× more than the brain). This efficiency gap drives the engineering focus on specialized hardware, quantization techniques, and architectural innovations.
+Replicating biological efficiency in artificial systems requires navigating fundamental trade-offs. While the brain achieves remarkable efficiency with only 20 watts (as noted earlier), comparable artificial neural networks require orders of magnitude more power. Large language models, for example, can consume megawatts during training and kilowatts during inference—thousands to hundreds of thousands of times more power than the brain. This substantial efficiency gap drives the engineering focus on specialized hardware, quantization techniques, and architectural innovations.
 
-Drawing from these organizational insights, these biological principles suggest key computational elements needed in artificial neural systems:
+Drawing from these organizational insights, biological systems suggest several key computational elements needed in artificial neural systems:
 
 * Simple processing units that integrate multiple inputs
 * Adjustable connection strengths between units
 * Nonlinear activation based on input thresholds
 * Parallel processing architecture
 * Learning through modification of connection strengths
+
+The question now becomes: how do we translate these abstract biological principles into concrete mathematical operations that computers can execute?
 
 ### Computational Translation {#sec-dl-primer-computational-translation-1c53}
 
@@ -477,15 +485,15 @@ We can appreciate how the field of deep learning evolved to meet these challenge
 
 [^fn-perceptron]: **Perceptron**: Invented by Frank Rosenblatt in 1957 at Cornell, the perceptron was the first artificial neural network capable of learning. The New York Times famously reported it would be "the embryo of an electronic computer that [the Navy] expects will be able to walk, talk, see, write, reproduce itself and be conscious of its existence." While overly optimistic, this breakthrough laid the foundation for all modern neural networks.
 
-The development of backpropagation algorithms in the 1980s [@rumelhart1986learning], , was a theoretical breakthrough[^fn-dlprimer-backpropagation] and provided a systematic way to train multi-layer networks. The computational demands of this algorithm far exceeded available hardware capabilities. Training even modest networks could take weeks, making experimentation and practical applications challenging. This mismatch between algorithmic requirements and hardware capabilities contributed to a period of reduced interest in neural networks.
+The development of backpropagation algorithms in the 1980s [@rumelhart1986learning] was a theoretical breakthrough[^fn-dlprimer-backpropagation] and provided a systematic way to train multi-layer networks. The computational demands of this algorithm far exceeded available hardware capabilities. Training even modest networks could take weeks, making experimentation and practical applications challenging. This mismatch between algorithmic requirements and hardware capabilities contributed to a period of reduced interest in neural networks.
 
 [^fn-dlprimer-backpropagation]: **Backpropagation**: Published by Rumelhart, Hinton, and Williams in 1986, backpropagation solved the "credit assignment problem"—how to determine which weights in a multi-layer network were responsible for errors. This algorithm, based on the mathematical chain rule, enabled training of deep networks and directly led to the modern AI revolution. Remarkably, a similar algorithm was discovered by Paul Werbos in 1974 but went largely unnoticed.
 
 ![**Computational Growth**: Exponential increases in computational power—initially at a 1.4× rate from 1952–2010, then accelerating to a doubling every 3.4 months from 2012–2022—enabled the scaling of deep learning models. this trend, coupled with a 10-month doubling cycle for large-scale models after 2015, directly addresses the historical bottleneck of training complex neural networks and fueled the recent advances in the field. Source: [@epochai2023trends].](images/png/trends_65d82031.png){#fig-trends fig-pos='htb'}
 
-While we've established the technical foundations of deep learning in earlier sections, the term itself gained prominence in the 2010s, coinciding with significant advances in computational power and data accessibility. The field has grown exponentially, as illustrated in @fig-trends. The graph reveals two remarkable trends: computational capabilities measured in FLOPS[^fn-dlprimer-flops] initially followed a $1.4\times$ improvement pattern from 1952 to 2010, then accelerated to a 3.4-month doubling cycle from 2012 to 2022. Perhaps more striking is the emergence of large-scale models between 2015 and 2022 (not explicitly shown or easily seen in the figure), which scaled 2 to 3 orders of magnitude faster than the general trend, following an aggressive 10-month doubling cycle.
+While we've established the technical foundations of deep learning in earlier sections, the term itself gained prominence in the 2010s, coinciding with significant advances in computational power and data accessibility. The field has grown exponentially, as illustrated in @fig-trends. The graph reveals two remarkable trends: computational capabilities measured in floating-point operations per second (FLOPS) initially followed a $1.4\times$ improvement pattern from 1952 to 2010, then accelerated to a 3.4-month doubling cycle from 2012 to 2022. Perhaps more striking is the emergence of large-scale models between 2015 and 2022 (not explicitly shown or easily seen in the figure), which scaled 2 to 3 orders of magnitude faster than the general trend, following an aggressive 10-month doubling cycle.
 
-The evolutionary trends were driven by parallel advances across three dimensions: data availability, algorithmic innovations, and computing infrastructure. These three factors, namely, data, algorithms, and infrastructure, reinforced each other in a virtuous cycle that continues to drive progress in the field today. As @fig-virtuous-cycle shows, more powerful computing infrastructure enabled processing larger datasets. Larger datasets drove algorithmic innovations. Better algorithms demanded more sophisticated computing systems. This virtuous cycle continues to drive progress in the field today.
+The evolutionary trends were driven by parallel advances across three dimensions: data availability, algorithmic innovations, and computing infrastructure. These three factors reinforced each other in a virtuous cycle that continues to drive progress in the field today. As @fig-virtuous-cycle shows, more powerful computing infrastructure enabled processing larger datasets. Larger datasets drove algorithmic innovations. Better algorithms demanded more sophisticated computing systems.
 
 ::: {#fig-virtuous-cycle fig-env="figure" fig-pos="htb"}
 ```{.tikz}
@@ -1007,21 +1015,7 @@ Line/.style={line width=0.35pt,black!60,-latex}
 
 #### Data Flow and Transformations {#sec-dl-primer-data-flow-transformations-5260}
 
-As data flows through the network, it is transformed at each layer (l) to extract meaningful patterns. Each layer combines the input data using learned weights and biases, then applies an activation function to introduce non-linearity. This process can be written mathematically as:
-$$
-\mathbf{z}^{(l)} = \mathbf{W}^{(l)}\mathbf{x}^{(l-1)} + \mathbf{b}^{(l)}
-$$
-Where:
-
-* $\mathbf{x}^{(l-1)}$ is the input vector from the previous layer
-
-* $\mathbf{W}^{(l)}$ is the weight matrix for the current layer
-
-* $\mathbf{b}^{(l)}$ is the bias vector
-
-* $\mathbf{z}^{(l)}$ is the pre-activation output
-
-Now that we have covered the basics, let's look at how these concepts come together in practice. Neural networks excel at tasks like handwritten digit recognition, where they learn to identify patterns in pixel data and classify images into different categories. This practical example introduces some new concepts that we will explore in more depth soon.
+As data flows through the network, it is transformed at each layer to extract meaningful patterns. The weighted summation and activation process we established for individual neurons scales up: each layer applies these operations in parallel across all its neurons, with outputs from one layer becoming inputs to the next. This creates a hierarchical pipeline where simple features detected in early layers combine into increasingly complex patterns in deeper layers—enabling neural networks to learn sophisticated representations from raw data.
 
 ### Weights and Biases {#sec-dl-primer-weights-biases-71bc}
 
@@ -1031,12 +1025,7 @@ The learnable parameters of neural networks consist primarily of weights and bia
 
 Weights determine how strongly inputs influence neuron outputs. In larger networks, these organize into matrices for efficient computation across layers. For example, in a layer with $n$ input features and $m$ neurons, the weights form a matrix $\mathbf{W} \in \mathbb{R}^{n \times m}$. Each column in this matrix represents the weights for a single neuron in the layer. This organization allows the network to process multiple inputs simultaneously, an essential feature for handling real-world data efficiently.
 
-Let's consider how this extends our previous perceptron equations to handle multiple neurons simultaneously. For a layer of $m$ neurons, instead of computing each neuron's output separately:
-$$
-z_j = \sum_{i=1}^n (x_i \cdot w_{ij}) + b_j
-$$
-
-We can compute all outputs at once using matrix multiplication:
+Recall that for a single neuron, we computed $z = \sum_{i=1}^n (x_i \cdot w_{ij}) + b$. When we have a layer of $m$ neurons, we could compute each neuron's output separately, but matrix operations provide a much more efficient approach. Rather than computing each neuron individually, matrix multiplication enables us to compute all $m$ outputs simultaneously:
 $$
 \mathbf{z} = \mathbf{x}^T\mathbf{W} + \mathbf{b}
 $$
@@ -1435,6 +1424,8 @@ Information flow through the network represents another important consideration.
 
 These design decisions have significant practical implications including memory usage for storing network parameters, computational costs during both training and inference, training behavior and convergence, and the network's ability to generalize to new examples. The optimal balance of these trade-offs depends heavily on the specific problem, available computational resources, and dataset characteristics. Successful network design requires careful consideration of these factors against practical constraints.
 
+With our understanding of network architecture established—how neurons connect into layers, how layers stack into networks, and how design choices affect computational requirements—we can now address the central question: how do these networks learn? The architecture provides the structure, but the learning process brings that structure to life by discovering the weight values that enable accurate predictions.
+
 ::: {.callout-note title="Systems Perspective: Architecture Shapes Deployment Feasibility"}
 **From Design to Deployment**: Every architectural decision—number of layers, layer widths, connection patterns—directly determines memory requirements and computational cost. A network with 1 million parameters requires roughly 4MB of memory just to store weights, before considering activations during inference. As models grow deeper and wider, their memory footprint and computational demands grow quadratically, not linearly. This mathematical relationship between architecture and resource requirements explains why the same architectural patterns cannot deploy uniformly across all platforms. Systems engineering insight emerges: architectural design must consider target deployment constraints from the outset, as post-hoc compression only partially recovers from architecture-resource mismatches.
 :::
@@ -1463,9 +1454,11 @@ The distribution of parameters affects information flow through layers. In digit
 
 Different architectures may impose specific constraints on parameter organization. Some share weights across network regions to encode position-invariant pattern recognition. Others might restrict certain weights to zero, implementing sparse connectivity patterns.
 
+With our understanding of network architecture, neurons, and parameters established, we can now address the fundamental question: how do these randomly initialized parameters become useful? The answer lies in the learning process that transforms a network from its initial random state into a system capable of making accurate predictions.
+
 ## Learning Process {#sec-dl-primer-learning-process-38a0}
 
-Neural networks learn to perform tasks through a process of training on examples. This process transforms the network from its initial state, where its weights are randomly initialized, to a trained state where the weights encode meaningful patterns from the training data. Understanding this process is essential to both the theoretical foundations and practical implementations of deep learning models.
+Neural networks learn to perform tasks through a process of training on examples. This process transforms the network from its initial state, where weights are randomly initialized as we just discussed, to a trained state where these same weights encode meaningful patterns from the training data. Understanding this process is essential to both the theoretical foundations and practical implementations of deep learning models.
 
 ### Training Overview {#sec-dl-primer-training-overview-1171}
 
@@ -1594,22 +1587,18 @@ When an image of a handwritten digit enters our network, it undergoes a series o
 
 The process begins with the input layer, where each pixel's grayscale value becomes an input feature. For MNIST, this means 784 input values $(28\times 28 = 784)$, each normalized between 0 and 1. These values then propagate forward through the hidden layers, where each neuron combines its inputs according to its learned weights and applies a nonlinear activation function.
 
-From a computational perspective, each forward pass through our MNIST network (784→128→64→10) requires substantial matrix operations. The first layer alone performs 784 × 128 = 100,352 multiply-accumulate operations per sample. With batch size 32, this becomes ~3.2 million operations for the first layer alone, requiring approximately 13MB of memory bandwidth (assuming FP32 weights) and consuming roughly 0.04 milliseconds on a modern GPU.
+From a computational perspective, each forward pass through our MNIST network (784→128→64→10) requires substantial matrix operations. The first layer alone performs nearly 100,000 multiply-accumulate operations per sample. When processing multiple samples in a batch, these operations multiply accordingly, requiring careful management of memory bandwidth and computational resources. Specialized hardware like GPUs can execute these operations efficiently through parallel processing.
 
 #### Layer Computation {#sec-dl-primer-layer-computation-5636}
 
 The forward computation through a neural network proceeds systematically, with each layer transforming its inputs into increasingly abstract representations. In our MNIST network, this transformation process occurs in distinct stages.
 
-At each layer, the computation involves two key steps: a linear transformation of inputs followed by a nonlinear activation. The linear transformation combines all inputs to a neuron using learned weights and a bias term. For a single neuron receiving inputs from the previous layer, this computation takes the form:
-$$
-z = \sum_{i=1}^n w_ix_i + b
-$$
-where $w_i$ represents the weights, $x_i$ the inputs, and $b$ the bias term. For an entire layer of neurons, we can express this more efficiently using matrix operations:
+At each layer, the computation involves two key steps: a linear transformation of inputs followed by a nonlinear activation. The linear transformation applies the same weighted sum operation we've seen before, but now using notation that tracks which layer we're in:
 $$
 \mathbf{Z}^{(l)} = \mathbf{W}^{(l)}\mathbf{A}^{(l-1)} + \mathbf{b}^{(l)}
 $$
 
-Here, $\mathbf{W}^{(l)}$ represents the weight matrix for layer $l$, $\mathbf{A}^{(l-1)}$ contains the activations from the previous layer, and $\mathbf{b}^{(l)}$ is the bias vector.
+Here, $\mathbf{W}^{(l)}$ represents the weight matrix for layer $l$, $\mathbf{A}^{(l-1)}$ contains the activations from the previous layer (the outputs after applying activation functions), and $\mathbf{b}^{(l)}$ is the bias vector. The superscript $(l)$ keeps track of which layer each parameter belongs to.
 
 Following this linear transformation, each layer applies a nonlinear activation function $f$:
 $$
@@ -1700,15 +1689,17 @@ Batch processing introduces important trade-offs. Larger batches enable more eff
 
 The organization of computations also affects performance. Matrix operations can be optimized through careful memory layout and specialized libraries. The choice of activation functions affects both the network's learning capabilities and computational efficiency, as some functions (like ReLU) require less computation than others (like tanh or sigmoid).
 
-To put things into perspective, the MNIST forward pass requires ~200,000 multiply-accumulate operations for our example network. On a 3GHz CPU with 16 cores achieving 10% efficiency for this workload, this takes ~1.25ms. A GPU with 5000 cores at 40% efficiency completes the same computation in 0.01ms, achieving a 125x speedup. Specialized AI accelerators achieve further improvements through reduced precision (INT8 vs FP32 provides 4x speedup), systolic arrays (eliminating weight memory access overhead), and dataflow architectures optimized for neural network computation patterns.
+The computational characteristics of neural networks favor parallel processing architectures. While traditional CPUs can execute these operations, GPUs designed for parallel computation can achieve substantial speedups—often 10-100× faster for matrix operations. Specialized AI accelerators achieve even better efficiency through techniques like reduced precision arithmetic, specialized memory architectures, and dataflow optimizations tailored for neural network computation patterns.
 
-Energy costs vary dramatically across hardware platforms: CPUs consume ~0.3 μJ for this MNIST inference, GPUs ~2.0 μJ (faster but more power-hungry), and edge accelerators like Google's Edge TPU ~0.05 μJ through specialized dataflow. As discussed earlier, this energy disparity stems from the fundamental memory hierarchy challenges where data movement dominates computation costs.
+Energy consumption also varies significantly across hardware platforms. CPUs offer flexibility but consume more energy per operation. GPUs provide high throughput at higher power consumption. Specialized edge accelerators optimize for energy efficiency, achieving the same computations with orders of magnitude less power—a critical consideration for mobile and embedded deployments. This energy disparity stems from the fundamental memory hierarchy challenges where data movement dominates computation costs.
 
-These considerations form the foundation for understanding the system requirements of neural networks, which we will explore in more detail @sec-dnn-architectures.
+These considerations form the foundation for understanding the system requirements of neural networks, which we will explore in more detail in @sec-dnn-architectures.
+
+Now that we understand how neural networks process inputs to generate predictions through forward propagation, a critical question emerges: how do we determine if these predictions are good? The answer lies in loss functions, which provide the mathematical framework for measuring prediction quality.
 
 ### Loss Functions {#sec-dl-primer-loss-functions-d892}
 
-Neural networks learn by measuring and minimizing their prediction errors. Loss functions provide the algorithmic structure for quantifying these errors, serving as the essential feedback mechanism that guides the learning process. Through loss functions, researchers can convert the abstract goal of "making good predictions" into a concrete optimization problem.
+Neural networks learn by measuring and minimizing their prediction errors. Loss functions provide the algorithmic structure for quantifying these errors, serving as the essential feedback mechanism that guides the learning process. Through loss functions, we can convert the abstract goal of "making good predictions" into a concrete optimization problem.
 
 To understand the role of loss functions, let's continue with our MNIST digit recognition example. When the network processes a handwritten digit image, it outputs ten numbers representing its confidence in each possible digit (0-9). The loss function measures how far these predictions deviate from the true answer. For instance, if an image displays a "7", the network should exhibit high confidence for digit "7" and low confidence for all other digits. The loss function penalizes the network when its prediction deviates from this target.
 
@@ -1831,9 +1822,11 @@ The choice of loss function also influences other training decisions:
 * Optimization algorithm behavior
 * Convergence criteria
 
+Once we have quantified the network's prediction errors through loss functions, the next critical step is determining how to adjust the network's weights to reduce these errors. This brings us to backward propagation, the mechanism that enables neural networks to learn from their mistakes.
+
 ### Backward Propagation and Optimization {#sec-dl-primer-backward-propagation-9a49}
 
-Backward propagation, often called backpropagation, is the algorithmic cornerstone of neural network training that enables systematic weight adjustment through gradient-based optimization. This section presents the complete optimization framework, from gradient computation through practical training implementation.
+Backward propagation, often called backpropagation, is the algorithmic cornerstone of neural network training that enables systematic weight adjustment through gradient-based optimization. While loss functions tell us how wrong our predictions are, backpropagation tells us exactly how to fix them. This section presents the complete optimization framework, from gradient computation through practical training implementation.
 
 #### The Backpropagation Algorithm {#sec-dl-primer-backpropagation-algorithm}
 
@@ -1904,16 +1897,16 @@ The practical implementation of backward propagation requires careful considerat
 
 Memory requirements during backward propagation stem from two main sources. First, we need to store the intermediate activations from the forward pass, as these are required for computing gradients. For our MNIST network with a batch size of 32, each layer's activations must be maintained:
 
-* Input layer: $32\times 784$ values (100KB in FP32)
-* Hidden layer 1: $32\times 512$ values (64KB in FP32)
-* Hidden layer 2: $32\times 256$ values (32KB in FP32)
-* Output layer: $32\times 10$ values (1.3KB in FP32)
+* Input layer: $32\times 784$ values (~100KB using 32-bit numbers)
+* Hidden layer 1: $32\times 512$ values (~64KB)
+* Hidden layer 2: $32\times 256$ values (~32KB)
+* Output layer: $32\times 10$ values (~1.3KB)
 
-Second, we must store gradients for each parameter during backward propagation. For our example network with 784×512 + 512×256 + 256×10 = 533,504 total parameters, this requires an additional 2.1MB of memory for gradients, plus 2.1MB for momentum terms in optimizers like Adam[^fn-adam-optimizer], totaling approximately 4.4MB for a modest MNIST network.
+Second, we must store gradients for each parameter during backward propagation. For our example network with approximately 500,000 parameters, this requires several megabytes of memory for gradients. Advanced optimizers like Adam[^fn-adam-optimizer] require additional memory to store momentum terms, roughly doubling the gradient storage requirements.
 
-[^fn-adam-optimizer]: **Adam Optimizer**: Introduced by Diederik Kingma and Jimmy Ba in 2014, Adam (Adaptive Moment Estimation) combines the benefits of two other optimizers: AdaGrad's adaptive learning rates and RMSprop's exponential moving averages. Adam maintains separate learning rates for each parameter and adapts them based on first and second moments of gradients. It requires 2× memory overhead (storing momentum and velocity for each parameter) but typically converges 2-5× faster than basic SGD. Adam became the default optimizer for most deep learning applications due to its robustness across different problems and minimal hyperparameter tuning requirements.
+[^fn-adam-optimizer]: **Adam Optimizer**: Introduced by Diederik Kingma and Jimmy Ba in 2014, Adam (Adaptive Moment Estimation) combines the benefits of two other optimizers: AdaGrad's adaptive learning rates and RMSprop's exponential moving averages. Adam maintains separate learning rates for each parameter and adapts them based on first and second moments of gradients. It requires 2× memory overhead (storing momentum and velocity for each parameter) but typically converges faster than basic SGD. Adam became the default optimizer for most deep learning applications due to its robustness across different problems and minimal hyperparameter tuning requirements.
 
-The memory bandwidth requirements scale with model size and batch size. Each training step for our MNIST network requires loading 533,504 parameters (2.1MB in FP32), storing gradients (2.1MB), and accessing activations (~400KB for batch size 32). At 100 training steps per second, this generates 460MB/s of memory traffic—well within DRAM bandwidth but approaching L3 cache limits. Large transformer models like GPT-3 with 175B parameters require 350GB for weights alone in FP16, saturating even HBM systems at 1-2TB/s during training.
+The memory bandwidth requirements scale with model size and batch size. Each training step requires loading all parameters, storing gradients, and accessing activations—creating substantial memory traffic. For modest networks like our MNIST example, this traffic remains manageable within typical memory system capabilities. However, as models grow larger, memory bandwidth can become a significant bottleneck, with the largest models requiring specialized high-bandwidth memory systems to maintain training efficiency.
 
 Second, we need storage for the gradients themselves. For each layer, we must maintain gradients of similar dimensions to the weights and biases. Taking our previous example of a network with hidden layers of size 128, 256, and 128, this means storing:
 
@@ -2066,7 +2059,13 @@ The operational deployment of neural networks centers on inference—the process
 
 Neural network operation divides into two fundamentally distinct phases that impose markedly different computational requirements and system constraints. Training requires both forward and backward passes through the network to compute gradients and update weights, while inference involves only forward pass computation. This architectural simplification means that each layer performs only one set of operations during inference, transforming inputs to outputs using learned weights without tracking intermediate values for gradient computation, as illustrated in @fig-training-vs-inference.
 
-These computational differences manifest directly in hardware requirements and deployment strategies. Training clusters typically employ high-memory GPUs (80GB+ for large models) with substantial cooling infrastructure, consuming 300-700W per GPU. Inference deployments prioritize latency and energy efficiency across diverse platforms: mobile devices utilize 2-4W neural processors, edge servers deploy specialized inference accelerators like Google's Edge TPU (4 TOPS/W), and cloud services employ inference-optimized instances with reduced precision arithmetic (INT8/FP16) for increased throughput. Production inference systems serving millions of requests daily require sophisticated infrastructure including load balancing, auto-scaling, and failover mechanisms typically unnecessary in training environments.
+These computational differences manifest directly in hardware requirements and deployment strategies. Training clusters typically employ high-memory GPUs[^fn-training-gpu-specs] with substantial cooling infrastructure. Inference deployments prioritize latency and energy efficiency across diverse platforms: mobile devices utilize low-power neural processors (typically 2-4W), edge servers deploy specialized inference accelerators[^fn-edge-accelerators], and cloud services employ inference-optimized instances with reduced numerical precision for increased throughput[^fn-inference-precision]. Production inference systems serving millions of requests daily require sophisticated infrastructure including load balancing, auto-scaling, and failover mechanisms typically unnecessary in training environments.
+
+[^fn-training-gpu-specs]: **Training GPU Requirements**: Modern training GPUs like the NVIDIA A100 or H100 provide 80GB of high-bandwidth memory and consume 300-700W during operation. This high memory capacity accommodates large models and training batches, while the power consumption reflects the intensive parallel computation required for gradient calculations across millions of parameters.
+
+[^fn-edge-accelerators]: **Edge AI Accelerators**: Specialized processors like Google's Edge TPU optimize for inference efficiency, achieving 4 TOPS/W (trillion operations per second per watt of power)—roughly 10-100× more energy-efficient than general-purpose processors for neural network operations. This efficiency enables deployment on battery-powered devices like smartphones and IoT sensors.
+
+[^fn-inference-precision]: **Inference Numerical Precision**: Inference systems often use reduced precision arithmetic—16-bit or 8-bit numbers instead of 32-bit—to increase throughput while maintaining accuracy. This precision reduction exploits the fact that trained models are more robust to numerical approximation than the training process itself. Using 8-bit integers can provide 4× throughput improvement compared to 32-bit floating-point operations.
 
 ::: {#fig-training-vs-inference fig-env="figure" fig-pos="htb"}
 ```{.tikz}
@@ -2516,6 +2515,8 @@ System integration considerations often dominate post-processing design. Output 
 
 This return to traditional computing paradigms completes the hybrid nature of machine learning systems. Just as pre-processing prepared real-world data for neural computation, post-processing adapts neural outputs for real-world use. Understanding this hybrid nature, the interplay between neural and traditional computing, is essential for designing and implementing effective machine learning systems.
 
+We've now covered the complete lifecycle of neural networks: from architectural design through training dynamics to inference deployment. Each concept—neurons, layers, forward propagation, backpropagation, loss functions, optimization—represents a piece of the puzzle. But how do these pieces fit together in practice? The following checkpoint helps you verify your understanding of how these components integrate into complete systems, after which we'll examine a historical case study that brings all these principles to life in a real-world deployment.
+
 ::: {.callout-note title="Checkpoint: Complete Neural Network System" collapse="false"}
 
 Before examining how these concepts integrate in a real-world deployment, verify your understanding of the complete neural network lifecycle:
@@ -2556,6 +2557,8 @@ Before examining how these concepts integrate in a real-world deployment, verify
 :::
 
 ## Historical Case Study: USPS Postal Service {#sec-dl-primer-case-study-usps-postal-service-aa64}
+
+We've explored neural networks from first principles—how neurons compute, how layers transform data, how training adjusts weights, and how inference makes predictions. These concepts might seem abstract, but they all came together in one of the first large-scale neural network deployments: the United States Postal Service's handwritten digit recognition system. This historical example illustrates how the mathematical principles we've studied translate into practical engineering decisions, system trade-offs, and real-world performance constraints.
 
 The theoretical foundations of neural networks find concrete expression in systems that solve real-world problems at scale. The USPS handwritten digit recognition system, deployed in the 1990s, exemplifies this translation from theory to practice. This early production deployment established many principles still relevant in modern ML systems: the importance of robust preprocessing pipelines, the need for confidence thresholds in automated decision-making, and the challenge of maintaining system performance under varying real-world conditions. While today's systems deploy vastly more sophisticated architectures on more capable hardware, examining this foundational case study reveals how the optimization principles established earlier in this chapter combine to create production systems—lessons that scale from 1990s mail sorting to 2025's edge AI deployments.
 
@@ -2641,6 +2644,8 @@ Many practitioners treat neural network training as a mechanical process of feed
 
 Many teams treat model development as separate from system deployment, leading to failures when research prototypes encounter production constraints. A neural network achieving excellent accuracy on clean datasets may fail when integrated with real-time data pipelines, legacy databases, or distributed serving infrastructure. Production systems require consideration of latency budgets, memory constraints, concurrent user loads, and fault tolerance mechanisms that rarely appear in research environments. The transformation from research code to production systems demands careful attention to data preprocessing pipelines, model serialization formats, serving infrastructure scalability, and monitoring systems for detecting performance degradation. Successful deployment requires early collaboration between data science and systems engineering teams to align model requirements with operational constraints.
 
+With these common misconceptions and implementation challenges in mind, we can now synthesize the key insights from our exploration of deep learning fundamentals and their systems implications.
+
 ## Summary {#sec-dl-primer-summary-19d0}
 
 Neural networks transform computational approaches by replacing rule-based programming with adaptive systems that learn patterns from data. Building on the biological-to-artificial neuron mappings explored throughout this chapter, these systems create practical implementations that process complex information and improve performance through experience.
@@ -2662,4 +2667,6 @@ Real-world problems exhibit structure that generic fully-connected networks cann
 
 The next chapter (@sec-dnn-architectures) addresses these limitations by introducing specialized architectures that encode problem structure directly into network design. Convolutional Neural Networks exploit spatial locality for vision tasks, achieving state-of-the-art performance with 10-100× fewer parameters through restricted connections and weight sharing. Recurrent Neural Networks capture temporal dependencies for sequential data through hidden states, though sequential processing creates parallelization challenges. Transformers enable parallel processing of sequences through attention mechanisms, revolutionizing natural language processing while introducing new memory scaling challenges.
 
-Each architectural innovation brings distinct systems engineering trade-offs built on this chapter's foundations. Convolutional layers demand different memory access patterns, recurrent networks face different parallelization constraints, and attention mechanisms create new computational bottlenecks. The mathematical operations remain matrix multiplications and non-linear activations, but their organization fundamentally changes systems requirements. Understanding these specialized architectures represents the next step in ML systems engineering, applying the principles of forward propagation, gradient descent, and activation functions within architectures designed for computational efficiency.
+Each architectural innovation brings distinct systems engineering trade-offs that build directly on the foundations established in this chapter. Convolutional layers demand different memory access patterns than fully-connected layers, recurrent networks face different parallelization constraints, and attention mechanisms create new computational bottlenecks. Importantly, the mathematical operations remain the same matrix multiplications and non-linear activations we've studied, but their organization fundamentally changes systems requirements.
+
+Understanding these specialized architectures represents the natural next step in ML systems engineering—taking the principles of forward propagation, gradient descent, and activation functions we've mastered here and applying them within architectures designed for both computational efficiency and problem-specific structure. The journey from biological inspiration to mathematical formulation to systems implementation continues as we explore how to build neural networks that not only learn effectively but do so within the constraints of real-world computational systems.
