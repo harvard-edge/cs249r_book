@@ -8,6 +8,9 @@ This script validates that footnotes ([^fn-...]) are NOT placed in:
 - Table captions (tbl-cap: "..." or after tables)
 - Inside ::: div blocks (callouts, examples, etc.)
 
+It also checks for inline footnote syntax (^[...]) which should use
+proper reference format ([^fn-name]) instead.
+
 These restrictions prevent Quarto rendering errors and build failures.
 """
 
@@ -23,6 +26,7 @@ class ForbiddenFootnoteChecker:
     def __init__(self):
         self.errors = []
         self.footnote_pattern = re.compile(r'\[\^fn-[\w-]+\]')
+        self.inline_footnote_pattern = re.compile(r'\^\[[^\]]+\]')
         
     def check_file(self, filepath: Path) -> List[Tuple[int, str, str]]:
         """
@@ -51,6 +55,18 @@ class ForbiddenFootnoteChecker:
                     div_start_line = line_num
                 else:
                     in_div_block = False
+            
+            # Check 0: Inline footnotes (^[...]) - should use proper references instead
+            # This check runs independently of other checks
+            inline_footnotes = self.inline_footnote_pattern.findall(line)
+            if inline_footnotes:
+                for inline_fn in inline_footnotes:
+                    context = line.strip()[:80]
+                    file_errors.append((
+                        line_num,
+                        "INLINE_FOOTNOTE",
+                        f"Found inline footnote '{inline_fn}'. Use [^fn-name] reference format instead: {context}"
+                    ))
             
             # Check for footnotes in this line
             footnotes = self.footnote_pattern.findall(line)
@@ -164,11 +180,17 @@ class ForbiddenFootnoteChecker:
         print("  • Table cells (breaks Quarto table rendering)")
         print("  • Figure/table captions (breaks cross-referencing)")
         print("  • Div blocks like callouts (breaks content rendering)")
+        print("\nFootnote formatting violations:")
+        print("  • Inline footnotes ^[...] (must use [^fn-name] reference format)")
         print("\nSee: tools/scripts/genai/prompt.txt for footnote placement rules")
         print("=" * 80 + "\n")
         
         for filepath, errors in all_errors:
-            rel_path = filepath.relative_to(Path.cwd()) if filepath.is_absolute() else filepath
+            try:
+                rel_path = filepath.relative_to(Path.cwd()) if filepath.is_absolute() else filepath
+            except ValueError:
+                # File is outside current directory (e.g., /tmp)
+                rel_path = filepath
             print(f"\n📄 {rel_path}")
             
             # Group by error type
@@ -190,6 +212,8 @@ class ForbiddenFootnoteChecker:
         print("   1. Move footnote to regular paragraph text before/after the table or caption")
         print("   2. Or convert the footnoted information into inline text")
         print("   3. For tables: Add explanation in text before the table instead")
+        print("   4. For inline footnotes ^[...]: Create a proper footnote definition [^fn-name]:")
+        print("      and use [^fn-name] as a reference in the text")
         print()
 
 

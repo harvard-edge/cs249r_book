@@ -74,10 +74,10 @@ class MLSysBookCLI:
         fast_table.add_column("Example", style="dim", width=30)
         
         fast_table.add_row("build [chapter[,ch2,...]]", "Build static files to disk (HTML)", "./binder build intro,ops")
-        fast_table.add_row("html [chapter[,ch2,...]]", "Build HTML with index.qmd + specific files", "./binder html intro")
+        fast_table.add_row("html [chapter[,ch2,...]]", "Build HTML (only specified chapters)", "./binder html intro")
         fast_table.add_row("preview [chapter[,ch2,...]]", "Start live dev server with hot reload", "./binder preview intro")
-        fast_table.add_row("pdf [chapter[,ch2,...]]", "Build static PDF file to disk", "./binder pdf intro")
-        fast_table.add_row("epub [chapter[,ch2,...]]", "Build static EPUB file to disk", "./binder epub intro")
+        fast_table.add_row("pdf [chapter[,ch2,...]]", "Build PDF (only specified chapters)", "./binder pdf intro")
+        fast_table.add_row("epub [chapter[,ch2,...]]", "Build EPUB (only specified chapters)", "./binder epub intro")
         
         # Full Book Commands
         full_table = Table(show_header=True, header_style="bold blue", box=None)
@@ -86,10 +86,10 @@ class MLSysBookCLI:
         full_table.add_column("Example", style="dim", width=30)
         
         full_table.add_row("build", "Build entire book as static HTML", "./binder build")
-        full_table.add_row("html", "Build HTML with index.qmd only", "./binder html")
+        full_table.add_row("html", "Build HTML with ALL chapters in render list", "./binder html")
         full_table.add_row("preview", "Start live dev server for entire book", "./binder preview")
-        full_table.add_row("pdf", "Build entire book as static PDF", "./binder pdf")
-        full_table.add_row("epub", "Build entire book as static EPUB", "./binder epub")
+        full_table.add_row("pdf", "Build full book (auto-uncomments all chapters)", "./binder pdf")
+        full_table.add_row("epub", "Build full book (auto-uncomments all chapters)", "./binder epub")
         
         # Management Commands
         mgmt_table = Table(show_header=True, header_style="bold blue", box=None)
@@ -118,13 +118,13 @@ class MLSysBookCLI:
         examples.append("  ./binder build intro,ml_systems ", style="cyan")
         examples.append("# Build multiple chapters (HTML)\n", style="dim")
         examples.append("  ./binder html intro ", style="cyan")
-        examples.append("# Build HTML with index.qmd + intro chapter\n", style="dim")
+        examples.append("# Build HTML with index.qmd + intro chapter only\n", style="dim")
         examples.append("  ./binder html ", style="cyan")
-        examples.append("# Build HTML with index.qmd only\n", style="dim")
-        examples.append("  ./binder epub intro ", style="cyan")
-        examples.append("# Build single chapter as EPUB\n", style="dim")
+        examples.append("# Build HTML with ALL chapters\n", style="dim")
+        examples.append("  ./binder pdf intro ", style="cyan")
+        examples.append("# Build single chapter as PDF\n", style="dim")
         examples.append("  ./binder pdf ", style="cyan")
-        examples.append("# Build entire book as PDF\n", style="dim")
+        examples.append("# Build entire book as PDF (uncomments all)\n", style="dim")
         
         console.print(Panel(examples, title="💡 Pro Tips", border_style="magenta"))
         

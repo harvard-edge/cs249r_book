@@ -51,36 +51,64 @@ class BuildCommand:
         # Setup config
         config_name = self.config_manager.setup_symlink(format_type)
         
-        # Determine render target
-        render_targets = {
-            "html": "html",
-            "pdf": "titlepage-pdf", 
-            "epub": "epub"
-        }
+        # Get config file
+        config_file = self.config_manager.get_config_file(format_type)
         
-        if format_type not in render_targets:
-            raise ValueError(f"Unknown format type: {format_type}")
+        # Uncomment all files for full build (PDF/EPUB only)
+        if format_type in ["pdf", "epub"]:
+            console.print("[yellow]📝 Uncommenting all chapter files for full book build...[/yellow]")
+            self._uncomment_all_chapters(config_file)
+        
+        # Track if config has been restored to avoid double restoration
+        self._config_restored = False
+        
+        # Setup signal handler to restore config on Ctrl+C
+        def signal_handler(signum, frame):
+            if not self._config_restored and format_type in ["pdf", "epub"]:
+                console.print("\n[yellow]🛡️ Ctrl+C detected - restoring config...[/yellow]")
+                self._restore_config(config_file)
+                self._config_restored = True
+                console.print("[green]✅ Config restored[/green]")
+            sys.exit(0)
+        
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+        
+        try:
+            # Determine render target
+            render_targets = {
+                "html": "html",
+                "pdf": "titlepage-pdf", 
+                "epub": "epub"
+            }
             
-        render_to = render_targets[format_type]
-        render_cmd = ["quarto", "render", f"--to={render_to}"]
-        
-        # Show the command being executed
-        cmd_str = " ".join(render_cmd)
-        console.print(f"[blue]💻 Command: {cmd_str}[/blue]")
-        
-        # Execute build
-        success = self._run_command(
-            render_cmd,
-            cwd=self.config_manager.book_dir,
-            description=f"Building full {format_type.upper()} book"
-        )
-        
-        if success:
-            console.print(f"[green]✅ {format_type.upper()} build completed: {output_dir}/[/green]")
-        else:
-            console.print(f"[red]❌ {format_type.upper()} build failed[/red]")
+            if format_type not in render_targets:
+                raise ValueError(f"Unknown format type: {format_type}")
+                
+            render_to = render_targets[format_type]
+            render_cmd = ["quarto", "render", f"--to={render_to}"]
             
-        return success
+            # Show the command being executed
+            cmd_str = " ".join(render_cmd)
+            console.print(f"[blue]💻 Command: {cmd_str}[/blue]")
+            
+            # Execute build
+            success = self._run_command(
+                render_cmd,
+                cwd=self.config_manager.book_dir,
+                description=f"Building full {format_type.upper()} book"
+            )
+            
+            if success:
+                console.print(f"[green]✅ {format_type.upper()} build completed: {output_dir}/[/green]")
+            else:
+                console.print(f"[red]❌ {format_type.upper()} build failed[/red]")
+                
+            return success
+        finally:
+            # Always restore config for PDF/EPUB builds (unless already restored by signal handler)
+            if format_type in ["pdf", "epub"] and not self._config_restored:
+                self._restore_config(config_file)
     
     def build_chapters(self, chapter_names: List[str], format_type: str = "html") -> bool:
         """Build specific chapters.
@@ -246,7 +274,7 @@ class BuildCommand:
         """Build HTML-only version with index.qmd and specific files of interest.
         
         Args:
-            chapter_names: List of chapter names to include (optional)
+            chapter_names: List of chapter names to include (optional, if None builds all)
             
         Returns:
             True if build succeeded, False otherwise
@@ -257,7 +285,7 @@ class BuildCommand:
             # Always include index.qmd
             files_to_render = ["index.qmd"]
             
-            # Add specified chapters if provided
+            # Add specified chapters if provided, otherwise add ALL chapters
             if chapter_names:
                 console.print(f"[dim]📋 Including chapters: {', '.join(chapter_names)}[/dim]")
                 chapter_files = self.chapter_discovery.validate_chapters(chapter_names)
@@ -267,7 +295,19 @@ class BuildCommand:
                     rel_path = chapter_file.relative_to(self.config_manager.book_dir)
                     files_to_render.append(str(rel_path))
             else:
-                console.print("[dim]📋 Building index.qmd only[/dim]")
+                console.print("[yellow]📝 Adding ALL available chapters to render list...[/yellow]")
+                # Get all available chapters
+                all_chapters = self.chapter_discovery.get_all_chapters()
+                console.print(f"[dim]📋 Found {len(all_chapters)} chapters[/dim]")
+                
+                # Add all chapter files to render list
+                for chapter_name, chapter_file in all_chapters.items():
+                    try:
+                        rel_path = chapter_file.relative_to(self.config_manager.book_dir)
+                        files_to_render.append(str(rel_path))
+                    except ValueError:
+                        # If relative path fails, try to construct it
+                        files_to_render.append(f"contents/core/{chapter_name}/{chapter_name}.qmd")
             
             # Show files that will be built
             console.print("[dim]📄 Files to be rendered:[/dim]")
@@ -821,6 +861,58 @@ class BuildCommand:
             console.print(f"[green]✓[/green] {file}")
         
         console.print("[green]✓[/green] Fast build mode configured (EPUB)")
+    
+    def _uncomment_all_chapters(self, config_file: Path) -> None:
+        """Uncomment all chapter files in the config for full book build.
+        
+        Args:
+            config_file: Path to config file to modify
+        """
+        # Create backup of original config
+        backup_file = config_file.with_suffix('.backup')
+        if backup_file.exists():
+            backup_file.unlink()
+        
+        # Read original config
+        with open(config_file, 'r', encoding='utf-8') as f:
+            original_content = f.read()
+        
+        # Save backup
+        with open(backup_file, 'w', encoding='utf-8') as f:
+            f.write(original_content)
+        
+        # Process config - uncomment all lines with .qmd files
+        lines = original_content.split('\n')
+        modified_lines = []
+        uncommented_count = 0
+        
+        for line in lines:
+            stripped = line.strip()
+            
+            # Check if this is a commented line with a .qmd file
+            if stripped.startswith('#') and '.qmd' in line:
+                # Uncomment the line while preserving indentation
+                # Handle both "# - " and "#- " patterns
+                if '# -' in line:
+                    uncommented = line.replace('# -', '-', 1)
+                elif '#-' in line:
+                    uncommented = line.replace('#-', '-', 1)
+                else:
+                    # Just remove the first # and space
+                    uncommented = line.replace('# ', '', 1).replace('#', '', 1)
+                
+                modified_lines.append(uncommented)
+                uncommented_count += 1
+            else:
+                # Keep line as-is
+                modified_lines.append(line)
+        
+        # Write modified config
+        modified_content = '\n'.join(modified_lines)
+        with open(config_file, 'w', encoding='utf-8') as f:
+            f.write(modified_content)
+        
+        console.print(f"[green]✓[/green] Uncommented {uncommented_count} chapter files")
     
     def _restore_config(self, config_file: Path) -> None:
         """Restore configuration to pristine state."""
