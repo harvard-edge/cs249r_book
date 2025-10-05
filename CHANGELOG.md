@@ -24,13 +24,13 @@ _No updates found._
 - **Chapter 1: Introduction**: The introduction chapter was significantly revised for clarity, flow, and pedagogy. This included removing redundancy, refining content on ML systems engineering, and implementing strategic footnotes to enhance learning.
 - **Chapter 19: AI for Good**: Chapter 19, "AI for Good," received significant improvements in flow and narrative integration with other chapters. Minor content refinements were also made to enhance clarity and accuracy.
 - **Chapter 12: Benchmarking AI**: Chapter 12 on Benchmarking AI was significantly improved with a focus on clarity, flow, and technical accuracy. Updates include addressing reader critiques on performance vs energy efficiency, adding a new TikZ figure, and enhancing content on power measurement and DVFS.
-- **Chapter 20: Conclusion**: Chapter 20 was significantly revamped, transitioning from a chronological review to a principles-based synthesis. Numerous refinements were also made across all chapters, including improved flow, formatting, and content accuracy.
+- **Chapter 21: Conclusion**: The Conclusion chapter was significantly revamped, transitioning from a chronological review to a principles-based synthesis. Numerous refinements were also made across all chapters, including improved flow, formatting, and content accuracy.
 - **Chapter 6: Data Engineering**: The Chapter 6 on Data Engineering was significantly enhanced with real-world context, production reality, and a systems perspective. This update also included improvements to diagrams, formatting, flow, and content accuracy.
 - **Chapter 3: DL Primer**: The Chapter 3 "DL Primer" was significantly revised with a focus on improving clarity, readability, and narrative flow. This included refining content, eliminating redundancy, optimizing footnotes, and strengthening the connection between concepts.
 - **Chapter 4: DNN Architectures**: The Chapter 4 "DNN Architectures" was significantly updated with improved content flow, clarity, and accuracy. This included additions of new TikZ figures, historical context, breakthrough stories, and a decision framework quiz.
 - **Chapter 9: Efficient AI**: Chapter 9, "Efficient AI," was significantly refined with improvements to content flow, organization, and clarity. This included eliminating repetitive content, standardizing section labels and cross-references, and incorporating expert consensus recommendations for DNN architectures.
 - **Chapter 7: AI Frameworks**: The Chapter 7: AI Frameworks content has been significantly refined, including improvements to clarity, narrative flow, cross-references, and the integration of new information about framework evolution and hardware history. The chapter also benefits from standardized formatting, updated glossary terms, and a focus on consistency with academic writing style.
-- **Chapter: Frontiers**: The "Frontiers" chapter underwent significant improvements, including enhanced flow, coherence, conceptual progression, and comprehensive citations. Various other chapters were also refined with optimized text formatting, improved narrative structure, and standardized cross-references throughout the entire textbook.
+- **Chapter 20: Frontiers**: The "Frontiers" chapter underwent significant improvements, including enhanced flow, coherence, conceptual progression, and comprehensive citations. Various other chapters were also refined with optimized text formatting, improved narrative structure, and standardized cross-references throughout the entire textbook.
 - **Chapter 11: AI Acceleration**: The Chapter 11 "AI Acceleration" has been significantly improved with enhanced flow, organization, content clarity, and cross-chapter integration. Key changes include refining the discussion on hardware acceleration, optimizing footnotes for consistency, and implementing new callout definitions for specialized terms.
 - **Chapter 2: ML Systems**: The Chapter 2: ML Systems content was significantly refined with improvements to clarity, flow, and accuracy. Redundancies were removed, deployment paradigms were elaborated, and several figures were updated for better visualization.
 - **Chapter 14: On-Device Learning**: Chapter 14 on On-Device Learning was significantly enhanced based on student feedback, including improvements to the narrative flow, content clarity, and integration with other chapters. This update also incorporates standardized formatting and cross-references for better consistency throughout the textbook.
@@ -44,7 +44,6 @@ _No updates found._
 - **Chapter 5: AI Workflow**: The Chapter 5 "AI Workflow" was significantly refined with improvements to clarity, flow, and pedagogical tools. This includes removing redundancies, standardizing formatting, enhancing cross-references, and incorporating process evolution insights.
 - **Glossary**: This update significantly improves the Glossary by standardizing section labels, removing redundant entries, and implementing consistent cross-references using Quarto features. It also refactors the glossary scripts for improved data flow and organization while adding key AGI terms and ensuring academic formatting standards.
 - **Chapter: Generative Ai**: This update focuses on improving the organization and clarity of the Generative AI chapter. It includes flow optimizations, a reorganized glossary, optimized cross-references, comprehensive concept maps, and consistent section IDs for headers.
-- **Chapter: Emerging Topics**: This update streamlines the file structure by removing the "emerging_topics" directory and improves cross-referencing throughout the textbook. Key additions include optimized cross-references for all chapters, comprehensive concept maps, and section IDs for all headers.
 - **PhD Survival Guide**: This update applies unique section IDs to all headers in the PhD Survival Guide, including chapter headings, improving navigation and referencing within the document.
 - **Best Practices**: This update ensures consistent navigation within the Best Practices document by applying section IDs to all headers, including chapters.
 - **Design Principles**: All headers in the Design Principles document, including chapter headings, now have unique section IDs. This improves navigation and makes it easier to link to specific sections within the document.
@@ -161,12 +160,11 @@ _No updates found._
 - `█████` **Chapter 17: Sustainable AI**: Updates table caption and column header. Added new TikZ figures in chapter 12.
 - `█████` **Chapter 18: Robust AI**: Improved quiz insertion logic and answer extraction, updated some figure captions with added context.
 - `█████` **Chapter 19: AI for Good**: Corrections were made to table captions, figure captions, and quiz answers for clarity.
-- `█████` **Chapter 20: Conclusion**: Renamed 'Conclusion' sections to 'Summary' and added section anchors for self-check answers.
+- `█████` **Chapter 21: Conclusion**: Renamed 'Conclusion' sections to 'Summary' and added section anchors for self-check answers.
 - `███░░` **PhD Survival Guide**: Quiz answers are now correctly inserted before part blocks when needed.
 - `█████` **Index**: Added clickable cover image with PDF download functionality and updated book card messaging to early access preview.
 - `███░░` **404**: Updated content
-- `████░` **Chapter: Emerging Topics**: Added placeholder content for emerging topics.
-- `███░░` **Chapter: Frontiers**: Improved the main page layout by moving the abstract to the beginning, adding a changelog note, and preparing an announcement banner.
+- `███░░` **Chapter 20: Frontiers**: Improved the main page layout by moving the abstract to the beginning, adding a changelog note, and preparing an announcement banner.
 - `██░░░` **Best Practices**: Added summaries for each part of the book.
 - `██░░░` **Design Principles**: Added book part organization.
 - `██░░░` **Foundations**: Added organization of book parts to improve navigation and understanding.
@@ -389,7 +387,7 @@ _No updates found._
 - `█████` **Chapter 17: Sustainable AI**: Added a discussion about Jevon's paradox and its plot to illustrate the concept.
 - `█████` **Chapter 18: Robust AI**: Updated chapter content with new text about robust AI concepts including introductions to poisoning attacks, transient faults and permanent faults. The overview was also improved.
 - `█████` **Chapter 19: AI for Good**: Fixed broken links for improved navigational clarity within the chapter.
-- `████░` **Chapter 20: Conclusion**: Removed extraneous sections from the conclusion.
+- `████░` **Chapter 21: Conclusion**: Removed extraneous sections from the conclusion.
 - `█░░░░` **Chapter: Generative Ai**: Updated content
 - `█████` **Chapter: Old Sus Ai**: Updated content
 
@@ -536,7 +534,7 @@ _No updates found._
 - `██░░░` **Chapter 17: Sustainable AI**: Prechecks now focus specifically on .qmd and .bib files.
 - `███░░` **Chapter 18: Robust AI**: The precheck functionality now selectively operates on qmd and bib files.
 - `█████` **Chapter 19: AI for Good**: Updated the chapter with improvements to precheck functionality.
-- `█░░░░` **Chapter 20: Conclusion**: Updated content
+- `█░░░░` **Chapter 21: Conclusion**: Updated content
 
 </details>
 
@@ -793,7 +791,7 @@ _No updates found._
 - `█░░░░` **Chapter 2: ML Systems**: Updated content
 - `█░░░░` **Chapter 4: DNN Architectures**: Updated content
 - `█░░░░` **Chapter 6: Data Engineering**: Updated content
-- `█░░░░` **Chapter 20: Conclusion**: Updated content
+- `█░░░░` **Chapter 21: Conclusion**: Updated content
 - `█░░░░` **Index**: Fixed mathematical notation errors and improved code examples.
 
 </details>
@@ -811,7 +809,7 @@ _No updates found._
 <summary>**📖 Chapters**</summary>
 
 - `███░░` **Chapter 4: DNN Architectures**: Removed unnecessary commented text.
-- `███░░` **Chapter 20: Conclusion**: Updated content
+- `███░░` **Chapter 21: Conclusion**: Updated content
 - `███░░` **Index**: Added HTML tags to enhance the build process.
 - `██░░░` **Chapter: Generative Ai**: Updated content
 
@@ -851,7 +849,7 @@ _No updates found._
 - `██░░░` **Chapter 17: Sustainable AI**: Purpose statement was updated.
 - `████░` **Chapter 18: Robust AI**: Improved clarity of discussions on BNNs and fault tolerance mechanisms. Refined examples to focus specifically on ML faults and related SDC scenarios.
 - `██░░░` **Chapter 19: AI for Good**: Updated the purpose statement for this chapter.
-- `███░░` **Chapter 20: Conclusion**: Wording was adjusted in Chapter 20 and a reference to Chapter 4 was included.
+- `███░░` **Chapter 21: Conclusion**: Wording was adjusted in Chapter 20 and a reference to Chapter 4 was included.
 - `████░` **Index**: Minor updates were made to clarify the book's motivation.
 - `█████` **Chapter: Dl Architectures**: Updated learning objectives to align with a focus on ML systems and added Colab exercises.
 
@@ -910,7 +908,7 @@ _No updates found._
 - `█░░░░` **Chapter 17: Sustainable AI**: Renamed the introduction section to 'Overview' for clarity.
 - `█░░░░` **Chapter 18: Robust AI**: The Introduction was changed to an Overview.
 - `█░░░░` **Chapter 19: AI for Good**: The Introduction section was renamed to Overview.
-- `█░░░░` **Chapter 20: Conclusion**: Revised Introduction to an Overview as there is one main introduction to the material.
+- `█░░░░` **Chapter 21: Conclusion**: Revised Introduction to an Overview as there is one main introduction to the material.
 - `███░░` **About**: Updated content
 - `█████` **Acknowledgements**: Updated acknowledgements.
 - `███░░` **Index**: Revised preface material for improved organization.
@@ -976,7 +974,7 @@ _No updates found._
 - `███░░` **Chapter 17: Sustainable AI**: Updated content about sustainable AI practices.
 - `███░░` **Chapter 18: Robust AI**: Removed labs content from the chapter.  Updated robustAI content.
 - `███░░` **Chapter 19: AI for Good**: The chapter introduction was revised to an overview and the labs portion was removed.
-- `█░░░░` **Chapter 20: Conclusion**: Revised the Introduction to be an Overview as it is the sole introductory section.
+- `█░░░░` **Chapter 21: Conclusion**: Revised the Introduction to be an Overview as it is the sole introductory section.
 - `████░` **About**: The introduction was moved to the about chapter.
 - `█░░░░` **Acknowledgements**: Updated content
 - `████░` **SocratiQ**: Updated content
@@ -1088,7 +1086,7 @@ _No updates found._
 - `███░░` **Chapter 17: Sustainable AI**: Formatting and stylistic improvements were made to ensure readability.
 - `███░░` **Chapter 18: Robust AI**: Fixed recommended issues within the Robust AI chapter.
 - `██░░░` **Chapter 19: AI for Good**: Updated content
-- `██░░░` **Chapter 20: Conclusion**: Updated content
+- `██░░░` **Chapter 21: Conclusion**: Updated content
 - `█████` **Contributors**: Updated content
 
 </details>
@@ -1135,7 +1133,7 @@ _No updates found._
 - `██░░░` **Chapter 17: Sustainable AI**: Grammar fixes
 - `██░░░` **Chapter 18: Robust AI**: Grammar fixes
 - `█░░░░` **Chapter 19: AI for Good**: Grammar fixes were applied to improve clarity and readability.
-- `█░░░░` **Chapter 20: Conclusion**: Grammar fixes
+- `█░░░░` **Chapter 21: Conclusion**: Grammar fixes
 - `█████` **Contributors**: Updated content
 
 </details>
@@ -1468,7 +1466,7 @@ _No updates found._
 - `███░░` **Chapter 17: Sustainable AI**: Updated content
 - `████░` **Chapter 18: Robust AI**: Fixed citation formatting for improved readability.
 - `███░░` **Chapter 19: AI for Good**: Updated content
-- `██░░░` **Chapter 20: Conclusion**: Updated content
+- `██░░░` **Chapter 21: Conclusion**: Updated content
 - `█████` **Lab: Arduino Image Classification**: Improved image classification lab integration and added necessary files.
 - `████░` **Foreword**: Updated content
 - `███░░` **About**: Disabling comments on certain pages.
@@ -1611,7 +1609,7 @@ _No updates found._
 - `█████` **Chapter 17: Sustainable AI**: Added section headers for cross-referencing, improved figure captions and references, and made stylistic changes to improve readability.
 - `█████` **Chapter 18: Robust AI**: Added a resources section to the chapter and incorporated feedback from a contributor. Minor text fixes, grammar corrections, punctuation edits, and table formatting adjustments were also made.
 - `████░` **Chapter 19: AI for Good**: Added short captions for videos, improved punctuation, and made stylistic changes to text formatting.
-- `█████` **Chapter 20: Conclusion**: Made minor grammar and wording improvements to the conclusion section.
+- `█████` **Chapter 21: Conclusion**: Made minor grammar and wording improvements to the conclusion section.
 - `███░░` **Lab: Arduino Image Classification**: Improved punctuation throughout the document for clarity.
 - `████░` **Foreword**: Made punctuation edits to improve clarity throughout the foreword.
 - `███░░` **Acknowledgements**: Initial draft of the acknowledgements section.

@@ -351,7 +351,8 @@ chapter_lookup = [
     ("contents/core/sustainable_ai/sustainable_ai.qmd", "Sustainable AI", 17),
     ("contents/core/robust_ai/robust_ai.qmd", "Robust AI", 18),
     ("contents/core/ai_for_good/ai_for_good.qmd", "AI for Good", 19),
-    ("contents/core/conclusion/conclusion.qmd", "Conclusion", 20),
+    ("contents/core/frontiers/frontiers.qmd", "Frontiers", 20),
+    ("contents/core/conclusion/conclusion.qmd", "Conclusion", 21),
     
     # LAB sections
     ("contents/labs/overview.qmd", "Labs Overview", 100),
