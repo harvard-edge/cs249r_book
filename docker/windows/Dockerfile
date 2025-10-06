@@ -119,7 +119,17 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION (2025) ===' ; `
     $texLiveBin = Join-Path $texYearDir.FullName 'bin\windows' ; `
     Write-Host "📁 TeX Live bin directory: $texLiveBin" ; `
     `
-    Write-Host '🔧 Adding TeX Live to PATH...' ; `
+    if (-not (Test-Path $texLiveBin)) { `
+        Write-Host "❌ ERROR: TeX Live bin directory not found at: $texLiveBin" ; `
+        throw "TeX Live bin directory not found" ; `
+    } ; `
+    `
+    Write-Host '🔧 Adding TeX Live to Machine PATH permanently...' ; `
+    $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
+    if ($mach -notmatch [regex]::Escape($texLiveBin)) { `
+        [Environment]::SetEnvironmentVariable('PATH', ($texLiveBin + ';' + $mach), 'Machine') ; `
+        Write-Host "✅ TeX Live added to Machine PATH: $texLiveBin" ; `
+    } ; `
     $env:PATH = "$texLiveBin;$env:PATH" ; `
     Write-Host "✅ PATH updated with: $texLiveBin" ; `
     `
@@ -133,9 +143,10 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION (2025) ===' ; `
         `
         Write-Host '🔄 Installing collections...' ; `
         $i = 1 ; `
+        $tlmgrPath = Join-Path $texLiveBin 'tlmgr.bat' ; `
         foreach ($collection in $collections) { `
             Write-Host "📦 [$i/$($collections.Count)] Installing $collection..." ; `
-            & "$texLiveBin\tlmgr.bat" install $collection ; `
+            & $tlmgrPath install $collection 2>&1 | Out-Null ; `
             if ($LASTEXITCODE -eq 0) { `
                 Write-Host "✅ $collection installed successfully" ; `
             } else { `
@@ -149,12 +160,19 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION (2025) ===' ; `
     } ; `
     `
     Write-Host '🔄 Updating tlmgr...' ; `
-    & "$texLiveBin\tlmgr.bat" update --self --all ; `
+    $tlmgrPath = Join-Path $texLiveBin 'tlmgr.bat' ; `
+    & $tlmgrPath update --self --all 2>&1 | Out-Null ; `
     Write-Host '✅ tlmgr updated' ; `
     `
     Write-Host '🔍 Verifying lualatex installation...' ; `
-    & "$texLiveBin\lualatex.exe" --version ; `
-    Write-Host '✅ TeX Live installation verified'
+    $lualatexPath = Join-Path $texLiveBin 'lualatex.exe' ; `
+    if (Test-Path $lualatexPath) { `
+        & $lualatexPath --version | Select-Object -First 2 ; `
+        Write-Host '✅ TeX Live installation verified' ; `
+    } else { `
+        Write-Host "❌ ERROR: lualatex.exe not found at: $lualatexPath" ; `
+        throw "lualatex verification failed" ; `
+    }
 
 # ------------------------------------------------------------
 # PHASE 5: Install Scoop (Package manager setup)
