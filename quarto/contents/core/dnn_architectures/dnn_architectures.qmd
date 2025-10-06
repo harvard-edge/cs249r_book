@@ -52,7 +52,7 @@ The analytical approach builds systematically upon the neural network foundation
 
 ## Multi-Layer Perceptrons: Dense Pattern Processing {#sec-dnn-architectures-multilayer-perceptrons-dense-pattern-processing-259f}
 
-Multi-Layer Perceptrons (MLPs) represent the fully-connected architectures introduced in @sec-dl-primer, now examined through the lens of architectural choice and systems trade-offs. As established in the primer, MLPs process each input element with equal importance through dense connectivity between layers, making them versatile but computationally intensive compared to specialized alternatives. Their computational power was established theoretically by the Universal Approximation Theorem (UAT)[^fn-uat] [@cybenko1989approximation; @hornik1989multilayer], which we encountered as a footnote in @sec-dl-primer—this theorem states that a sufficiently large MLP with non-linear activation functions can approximate any continuous function on a compact domain, given suitable weights and biases.
+Multi-Layer Perceptrons (MLPs) represent the fully-connected architectures introduced in @sec-dl-primer, now examined through the lens of architectural choice and systems trade-offs. MLPs embody a fundamental inductive bias: **they assume no prior structure in the data, allowing any input to relate to any output**. This architectural choice enables maximum flexibility by treating all input relationships as equally plausible, making MLPs versatile but computationally intensive compared to specialized alternatives. Their computational power was established theoretically by the Universal Approximation Theorem (UAT)[^fn-uat] [@cybenko1989approximation; @hornik1989multilayer], which we encountered as a footnote in @sec-dl-primer—this theorem states that a sufficiently large MLP with non-linear activation functions can approximate any continuous function on a compact domain, given suitable weights and biases.
 
 [^fn-uat]: **Universal Approximation Theorem**: Proven independently by Cybenko (1989) and Hornik (1989), this result showed that neural networks could theoretically learn any function, a discovery that reinvigorated interest in neural networks after the "AI Winter" of the 1980s and established mathematical foundations for modern deep learning.
 
@@ -288,10 +288,12 @@ def mlp_layer_matrix(X, W, b):
     # One clean line of math
     return H
 ```
-**Dense Layer Implementation**: Neural networks perform weighted sum and activation functions across layers using matrix operations through The code. This emphasizes the core computational pattern in multi-layer perceptrons.
+This implementation reveals how neural networks perform weighted sum and activation functions across layers using matrix operations. The code emphasizes the core computational pattern in multi-layer perceptrons.
 :::
 
-In contrast, the second implementation, `mlp_layer_compute` (shown in @lst-mlp_layer_compute), exposes the actual computational pattern through nested loops. This version reveals what really happens when we compute a layer's output: we process each sample in the batch, computing each output neuron by accumulating weighted contributions from all inputs.
+To understand the system implications of this architecture, we must look "under the hood" of the high-level framework call. The elegant one-line matrix multiplication `output = matmul(X, W)` is, from the hardware's perspective, a series of nested loops that expose the true computational demands on the system. This translation from logical model to physical execution reveals critical patterns that determine memory access, parallelization strategies, and hardware utilization.
+
+The second implementation, `mlp_layer_compute` (shown in @lst-mlp_layer_compute), exposes the actual computational pattern through nested loops. This version reveals what really happens when we compute a layer's output: we process each sample in the batch, computing each output neuron by accumulating weighted contributions from all inputs.
 
 ::: {#lst-mlp_layer_compute}
 ```{.python}
@@ -301,15 +303,15 @@ def mlp_layer_compute(X, W, b):
         # Compute each output neuron
         for out in range(num_outputs):
             # Initialize with bias
-            Z[batch,out] = b[out]
+            Z[batch, out] = b[out]
             # Accumulate weighted inputs
             for in_ in range(num_inputs):
-                Z[batch,out] += X[batch,in_] * W[in_,out]
+                Z[batch, out] += X[batch, in_] * W[in_, out]
 
     H = activation(Z)
     return H
 ```
-**Core Computational Pattern**: Computes each output neuron by accumulating weighted contributions from all inputs across the batch. This implementation exposes the detailed step-by-step process of how a single layer in a neural network processes data, emphasizing the role of biases and weighted sums in producing outputs.
+This implementation computes each output neuron by accumulating weighted contributions from all inputs across the batch. The detailed step-by-step process exposes how a single layer in a neural network processes data, emphasizing the role of biases and weighted sums in producing outputs.
 :::
 
 This translation from mathematical abstraction to concrete computation exposes how dense matrix multiplication decomposes into nested loops of simpler operations. The outer loop processes each sample in the batch, while the middle loop computes values for each output neuron. Within the innermost loop, the system performs repeated multiply-accumulate operations, combining each input with its corresponding weight.
@@ -342,11 +344,11 @@ The predictable data movement patterns enable strategic data staging and transfe
 
 This analysis of MLP computational demands reveals a crucial insight: while dense connectivity provides universal approximation capabilities, it creates significant inefficiencies when data exhibits inherent structure. This mismatch between architectural assumptions and data characteristics motivated the development of specialized approaches that could exploit structural patterns for computational gain.
 
-## Convolutional Neural Networks: Spatial Pattern Processing {#sec-dnn-architectures-convolutional-neural-networks-spatial-pattern-processing-1d8c}
+## CNNs: Spatial Pattern Processing {#sec-dnn-architectures-convolutional-neural-networks-spatial-pattern-processing-1d8c}
 
 The computational intensity and parameter requirements of MLPs reveal a fundamental mismatch when applied to structured data. Building on the computational complexity considerations outlined in @sec-dnn-architectures-overview-8d17, this inefficiency motivated the development of architectural patterns that exploit inherent data structure.
 
-Convolutional Neural Networks emerged as the solution to this challenge, introducing two key innovations that enhance efficiency for spatially structured data. Parameter sharing allows the same feature detector to be applied across different spatial positions, reducing parameters from millions to thousands while improving generalization. Local connectivity restricts connections to spatially adjacent regions, reflecting the biological insight that nearby pixels are more likely to be related than distant ones.
+Convolutional Neural Networks emerged as the solution to this challenge, embodying a specific inductive bias: **they assume spatial locality and translation invariance, where nearby pixels are related and patterns can appear anywhere**. This architectural assumption enables two key innovations that enhance efficiency for spatially structured data. Parameter sharing allows the same feature detector to be applied across different spatial positions, reducing parameters from millions to thousands while improving generalization. Local connectivity restricts connections to spatially adjacent regions, reflecting the insight that spatial proximity correlates with feature relevance.
 
 These architectural innovations represent a fundamental trade-off in deep learning design: sacrificing the theoretical generality of MLPs for practical efficiency gains when data exhibits known structure. While MLPs treat each input element independently, CNNs exploit spatial relationships to achieve computational savings and improved performance on vision tasks.
 
@@ -695,7 +697,7 @@ As illustrated in @fig-cnn, convolution operations involve sliding a small filte
 \pic at (0.5,1.16) {box={columns=1,rows=1,br=B,ffill=violet!70,linewidth=0.35pt}};
 \end{tikzpicture}}
 ```
-**Convolution Operation**: Neural networks process input data through localized feature extraction using filters that slide across the image to identify patterns regardless of their position.
+The convolution operation processes input data through localized feature extraction using filters that slide across the image to identify patterns regardless of their position.
 :::
 
 ### Computational Mapping {#sec-dnn-architectures-computational-mapping-9108}
@@ -710,42 +712,53 @@ def conv_layer_spatial(input, kernel, bias):
     output = convolution(input, kernel) + bias
     return activation(output)
 ```
-**Convolution Operation**: Neural networks process input data through hierarchical feature extraction using a simple convolution operation that combines a kernel and bias before applying an activation function.
+This hierarchical approach processes input data through feature extraction using a convolution operation that combines a kernel and bias before applying an activation function.
 :::
 
-The second implementation, conv_layer_compute (see @lst-conv_layer_compute), reveals the actual computational pattern: nested loops that process each spatial position, applying the same filter weights to local regions of the input. These nested loops reveal the true nature of convolution's computational structure.
+The bridge between the logical model and physical execution becomes critical for understanding CNN system requirements. While the high-level convolution operation appears as a simple sliding window computation, the hardware must orchestrate complex data movement patterns and exploit spatial locality for efficiency.
+
+The second implementation, conv_layer_compute (see @lst-conv_layer_compute), reveals the actual computational pattern: nested loops that process each spatial position, applying the same filter weights to local regions of the input. These seven nested loops expose the true nature of convolution's computational structure and the optimization opportunities it creates.
 
 ::: {#lst-conv_layer_compute}
 ```python
 def conv_layer_compute(input, kernel, bias):
-  # Loop 1: Process each image in batch
-  for image in range(batch_size):
+    # Loop 1: Process each image in batch
+    for image in range(batch_size):
 
-    # Loop 2&3: Move across image spatially
-    for y in range(height):
-      for x in range(width):
+        # Loop 2&3: Move across image spatially
+        for y in range(height):
+            for x in range(width):
 
-       # Loop 4: Compute each output feature
-       for out_channel in range(num_output_channels):
-         result = bias[out_channel]
+                # Loop 4: Compute each output feature
+                for out_channel in range(num_output_channels):
+                    result = bias[out_channel]
 
-         # Loop 5&6: Move across kernel window
-         for ky in range(kernel_height):
-           for kx in range(kernel_width):
+                    # Loop 5&6: Move across kernel window
+                    for ky in range(kernel_height):
+                        for kx in range(kernel_width):
 
-             # Loop 7: Process each input feature
-             for in_channel in range(num_input_channels):
-             # Get input value from correct window position
-              in_y = y + ky
-              in_x = x + kx
-              # Perform multiply-accumulate operation
-              result += (
-                input[image, in_y, in_x, in_channel]
-                * kernel[ky, kx, in_channel, out_channel]
-              )
+                            # Loop 7: Process each input feature
+                            for in_channel in range(
+                                num_input_channels
+                            ):
+                                # Get input value from correct window position
+                                in_y = y + ky
+                                in_x = x + kx
+                                # Perform multiply-accumulate operation
+                                result += (
+                                    input[
+                                        image, in_y, in_x, in_channel
+                                    ]
+                                    * kernel[
+                                        ky,
+                                        kx,
+                                        in_channel,
+                                        out_channel,
+                                    ]
+                                )
 
-         # Store result for this output position
-         output[image, y, x, out_channel] = result
+                    # Store result for this output position
+                    output[image, y, x, out_channel] = result
 ```
 **Nested Loops**: Convolutional layers process input through multiple nested loops that handle batched images, spatial dimensions, output channels, kernel windows, and input features, revealing the detailed computational structure of convolution operations.
 :::
@@ -789,13 +802,13 @@ The sliding window pattern of convolutions creates a distinctive data movement p
 
 The predictable spatial access pattern enables strategic data movement optimizations. Different architectures handle this movement pattern through specialized mechanisms. CPUs maintain frequently used filter weights in cache while streaming through input features. GPUs employ memory architectures optimized for spatial locality and provide hardware support for efficient sliding window operations. Deep learning frameworks orchestrate these movements by organizing computations to maximize filter weight reuse and minimize redundant feature map accesses.
 
-## Recurrent Neural Networks: Sequential Pattern Processing {#sec-dnn-architectures-recurrent-neural-networks-sequential-pattern-processing-3904}
+## RNNs: Sequential Pattern Processing {#sec-dnn-architectures-recurrent-neural-networks-sequential-pattern-processing-3904}
 
 Convolutional Neural Networks achieved efficiency gains by exploiting spatial locality, yet their architectural assumptions fail when patterns depend on temporal order rather than spatial proximity. While CNNs excel at recognizing \"what\" is present in data through shared feature detectors, they cannot capture \"when\" events occur or how they relate across time. This limitation manifests in domains such as natural language processing, where word meaning depends on sentential context, and time-series analysis, where future values depend on historical patterns.
 
 Sequential data presents a fundamental challenge distinct from spatial processing: patterns can span arbitrary temporal distances, rendering fixed-size kernels ineffective. While spatial convolution leverages the principle that nearby pixels are typically related, temporal relationships operate differently—important connections may span hundreds or thousands of time steps with no correlation to proximity. Traditional feedforward architectures, including CNNs, process each input independently and cannot maintain the temporal context necessary for these long-range dependencies.
 
-Recurrent Neural Networks address this architectural limitation by introducing memory as a fundamental component of the computational model. Rather than processing inputs in isolation, RNNs maintain an internal state that propagates information from previous time steps, enabling the network to condition its current output on historical context. This architecture embodies another trade-off: while CNNs sacrifice theoretical generality for spatial efficiency, RNNs introduce computational dependencies that challenge parallel execution in exchange for temporal processing capabilities.
+Recurrent Neural Networks address this architectural limitation by embodying a temporal inductive bias: **they assume sequential dependence, where the order of information matters and the past influences the present**. This architectural assumption guides the introduction of memory as a fundamental component of the computational model. Rather than processing inputs in isolation, RNNs maintain an internal state that propagates information from previous time steps, enabling the network to condition its current output on historical context. This architecture embodies another trade-off: while CNNs sacrifice theoretical generality for spatial efficiency, RNNs introduce computational dependencies that challenge parallel execution in exchange for temporal processing capabilities.
 
 ::: {.callout-note title="Coverage Note"}
 This section provides focused coverage of RNNs, emphasizing their core contributions to sequential processing and the architectural principles that influenced modern attention mechanisms. While RNNs introduced critical concepts—memory states, temporal dependencies, and sequential computation—contemporary practice increasingly favors attention-based architectures for sequence modeling. We focus on foundational principles rather than extensive implementation variants, dedicating substantial depth to the attention mechanisms and Transformers (@sec-dnn-architectures-attention-mechanisms-dynamic-pattern-processing-566d) that have largely superseded RNNs in production systems while building directly on the insights gained from recurrent architectures.
@@ -827,7 +840,7 @@ This recurrent structure fulfills sequential processing requirements through con
 
 RNNs implement a recursive algorithm where each time step's function call depends on the result of the previous call. Analogous to recursive functions that maintain state through the call stack, RNNs maintain state through their hidden vectors. The mathematical formula $\mathbf{h}_t = f(\mathbf{h}_{t-1}, \mathbf{x}_t)$ directly parallels recursive function definitions where `f(n) = g(f(n-1), input(n))`. This correspondence explains RNN capacity to handle variable-length sequences: just as recursive algorithms process lists of arbitrary length by applying the same function recursively, RNNs process sequences of any length by applying the same recurrent computation.
 
-#### Efficiency Characteristics and Optimization Potential {#sec-dnn-architectures-efficiency-characteristics-optimization-potential-45c0}
+#### Efficiency and Optimization {#sec-dnn-architectures-efficiency-characteristics-optimization-potential-45c0}
 
 Sequential processing creates computational bottlenecks but enables unique efficiency characteristics for memory usage. RNNs achieve constant memory overhead for hidden state storage regardless of sequence length, making them extremely memory-efficient for long sequences. While Transformers require O(n²) memory for sequence length n, RNNs maintain fixed memory usage, enabling processing of sequences thousands of steps long on modest hardware.
 
@@ -924,21 +937,19 @@ As shown in @lst-rnn_layer_step, the `rnn_layer_step` function demonstrates how 
 ::: {#lst-rnn_layer_step}
 ```python
 def rnn_layer_step(x_t, h_prev, W_hh, W_xh, b):
-  # x_t: input at time t (batch_size × input_dim)
-  # h_prev: previous hidden state (batch_size × hidden_dim)
-  # W_hh: recurrent weights (hidden_dim × hidden_dim)
-  # W_xh: input weights (input_dim × hidden_dim)
-  h_t = activation(
-    matmul(h_prev, W_hh)
-    + matmul(x_t, W_xh)
-    + b
-  )
-  return h_t
+    # x_t: input at time t (batch_size × input_dim)
+    # h_prev: previous hidden state (batch_size × hidden_dim)
+    # W_hh: recurrent weights (hidden_dim × hidden_dim)
+    # W_xh: input weights (input_dim × hidden_dim)
+    h_t = activation(matmul(h_prev, W_hh) + matmul(x_t, W_xh) + b)
+    return h_t
 ```
 **RNN Layer Step**: Neural networks process sequential data through transformations that integrate current inputs and past states.
 :::
 
-This simplified view masks the underlying complexity of the nested loops and individual computations shown in the detailed implementation (@lst-rnn_layer_compute). Its actual implementation reveals a more detailed computational reality.
+Understanding RNN system implications requires examining how the elegant mathematical abstraction translates into hardware execution patterns. The simple recurrence relation `h_t = tanh(W_hh h_{t-1} + W_xh x_t + b)` conceals a computational structure that creates unique challenges: sequential dependencies that prevent parallelization, memory access patterns that differ from feedforward networks, and state management requirements that affect system design.
+
+The detailed implementation (@lst-rnn_layer_compute) reveals the computational reality beneath the mathematical abstraction. The nested loop structure exposes how sequential processing creates both limitations and opportunities in system optimization.
 
 ::: {#lst-rnn_layer_compute}
 ```python
@@ -952,16 +963,16 @@ def rnn_layer_compute(x_t, h_prev, W_hh, W_xh, b):
         # (h_prev × W_hh)
         for i in range(hidden_dim):
             for j in range(hidden_dim):
-                h_t[batch,i] += h_prev[batch,j] * W_hh[j,i]
+                h_t[batch, i] += h_prev[batch, j] * W_hh[j, i]
 
         # Loop 3: Compute input contribution (x_t × W_xh)
         for i in range(hidden_dim):
             for j in range(input_dim):
-                h_t[batch,i] += x_t[batch,j] * W_xh[j,i]
+                h_t[batch, i] += x_t[batch, j] * W_xh[j, i]
 
         # Loop 4: Add bias and apply activation
         for i in range(hidden_dim):
-            h_t[batch,i] = activation(h_t[batch,i] + b[i])
+            h_t[batch, i] = activation(h_t[batch, i] + b[i])
 
     return h_t
 ```
@@ -1369,11 +1380,13 @@ Attention mechanisms create computational patterns that differ significantly fro
 ```{.python}
 def attention_layer_matrix(Q, K, V):
     # Q, K, V: (batch_size × seq_len × d_model)
-    scores = matmul(Q, K.transpose(-2, -1)) / \
-             sqrt(d_k)           # Compute attention scores
-    weights = softmax(scores)    # Normalize scores
+    scores = matmul(Q, K.transpose(-2, -1)) / sqrt(
+        d_k
+    )  # Compute attention scores
+    weights = softmax(scores)  # Normalize scores
     output = matmul(weights, V)  # Combine values
     return output
+
 
 # Core computational pattern
 def attention_layer_compute(Q, K, V):
@@ -1389,28 +1402,27 @@ def attention_layer_compute(Q, K, V):
             for j in range(seq_len):
                 # Compute attention score
                 for d in range(d_model):
-                    scores[b,i,j] += Q[b,i,d] * K[b,j,d]
-                scores[b,i,j] /= sqrt(d_k)
+                    scores[b, i, j] += Q[b, i, d] * K[b, j, d]
+                scores[b, i, j] /= sqrt(d_k)
 
         # Apply softmax to scores
         for i in range(seq_len):
-            scores[b,i] = softmax(scores[b,i])
+            scores[b, i] = softmax(scores[b, i])
 
         # Loop 4: Combine values using attention weights
         for i in range(seq_len):
             for j in range(seq_len):
                 for d in range(d_model):
-                    outputs[b, i, d] += (
-                       scores[b, i, j]
-                       * V[b, j, d]
-                    )
+                    outputs[b, i, d] += scores[b, i, j] * V[b, j, d]
 
     return outputs
 ```
 **Attention Mechanism**: Transformer models compute attention through query-key-value interactions, enabling dynamic focus across input sequences for improved language understanding.
 :::
 
-The nested loops in `attention_layer_compute` reveal the true nature of attention's computational pattern (see @lst-attention_layer_compute). The first loop processes each sequence in the batch independently. The second and third loops compute attention scores between all pairs of positions, creating a quadratic computation pattern with respect to sequence length. The fourth loop uses these attention weights to combine values from all positions, producing the final output.
+The translation from attention's mathematical elegance to hardware execution reveals the computational price of dynamic connectivity. While the attention equation `Attention(Q,K,V) = softmax(QK^T/√d_k)V` appears as a straightforward matrix operation, the physical implementation requires orchestrating quadratic numbers of pairwise computations that create fundamentally different system demands than previous architectures.
+
+The nested loops in `attention_layer_compute` expose attention's true computational signature (see @lst-attention_layer_compute). The first loop processes each sequence in the batch independently. The second and third loops compute attention scores between all pairs of positions, creating the quadratic computation pattern that makes attention both powerful and computationally demanding. The fourth loop uses these attention weights to combine values from all positions, completing the dynamic connectivity pattern that defines attention mechanisms.
 
 #### System Implications {#sec-dnn-architectures-system-implications-b5aa}
 
@@ -1434,7 +1446,7 @@ These distinctive characteristics of attention mechanisms in terms of memory, co
 
 While attention mechanisms introduced the concept of dynamic pattern processing, they were initially applied as additions to existing architectures, particularly RNNs for sequence-to-sequence tasks. This hybrid approach still suffered from the fundamental limitations of recurrent architectures: sequential processing constraints that prevented efficient parallelization and difficulties with very long sequences. The breakthrough insight was recognizing that attention mechanisms alone could replace both convolutional and recurrent processing entirely.
 
-Transformers, introduced in the landmark \"Attention is All You Need\" paper[^fn-attention-is-all-you-need] by @vaswani2017attention, represent the culmination of the architectural evolution detailed in @sec-dnn-architectures-overview-8d17 by eliminating all structural constraints in favor of pure content-dependent processing. Rather than adding attention to RNNs, Transformers built the entire architecture around attention mechanisms, introducing self-attention as the primary computational pattern. This architectural decision traded the parameter efficiency of CNNs and the sequential coherence of RNNs for maximum flexibility and parallelizability.
+Transformers, introduced in the landmark \"Attention is All You Need\" paper[^fn-attention-is-all-you-need] by @vaswani2017attention, embody a revolutionary inductive bias: **they assume no prior structure but allow the model to learn all pairwise relationships dynamically based on content**. This architectural assumption represents the culmination of the architectural evolution detailed in @sec-dnn-architectures-overview-8d17 by eliminating all structural constraints in favor of pure content-dependent processing. Rather than adding attention to RNNs, Transformers built the entire architecture around attention mechanisms, introducing self-attention as the primary computational pattern. This architectural decision traded the parameter efficiency of CNNs and the sequential coherence of RNNs for maximum flexibility and parallelizability.
 
 [^fn-attention-is-all-you-need]: **"Attention is All You Need"**: This 2017 paper by Google researchers eliminated recurrence entirely, showing that attention mechanisms alone could achieve state-of-the-art results. The title itself became a rallying cry, and within 5 years, transformer-based models achieved breakthrough performance in language (GPT, BERT), vision (ViT), and beyond. While the basic attention mechanism allows for content-based weighting of information from a source sequence, Transformers extend this idea by applying attention within a single sequence, enabling each element to attend to all other elements including itself.
 
@@ -1442,7 +1454,7 @@ This represents the final step in our architectural journey: from MLPs that conn
 
 #### Algorithmic Structure {#sec-dnn-architectures-algorithmic-structure-1001}
 
-The key innovation in Transformers lies in their use of self-attention layers. In a self-attention layer, the queries, keys, and values are all derived from the same input sequence. This allows the model to weigh the importance of different positions within the same sequence when encoding each position. For instance, in processing the sentence "The animal didn't cross the street because it was too wide," self-attention allows the model to link "it" with "street," capturing long-range dependencies that are challenging for traditional sequential models.
+The key innovation in Transformers lies in their use of self-attention layers. In the self-attention mechanism used by Transformers, the Query, Key, and Value vectors are all derived from the same input sequence. This is the key distinction from earlier attention mechanisms where the query might come from a decoder while the keys and values came from an encoder. By making all components self-referential, self-attention allows the model to weigh the importance of different positions within the same sequence when encoding each position. For instance, in processing the sentence "The animal didn't cross the street because it was too wide," self-attention allows the model to link "it" with "street," capturing long-range dependencies that are challenging for traditional sequential models.
 
 The self-attention mechanism can be expressed mathematically in a form similar to the basic attention mechanism:
 $$
@@ -1471,7 +1483,7 @@ Beyond the mathematical mechanics, attention mechanisms can be understood concep
 
 From an information-theoretic perspective, attention mechanisms implement optimal information aggregation under uncertainty. The attention weights can be viewed as representing uncertainty about which parts of the input contain relevant information for the current processing step. The softmax operation implements a maximum entropy principle: among all possible ways to distribute attention across input positions, softmax selects the distribution with maximum entropy subject to the constraint that similarity scores determine relative importance [@cover2006elements].
 
-#### Efficiency Characteristics and Optimization Potential {#sec-dnn-architectures-efficiency-characteristics-optimization-potential-3953}
+#### Efficiency and Optimization {#sec-dnn-architectures-efficiency-characteristics-optimization-potential-3953}
 
 Attention mechanisms are highly redundant, with many heads learning similar patterns. Head pruning and low-rank attention factorization can reduce computation by 50-80% with careful implementation. Analysis of large Transformer models reveals that most attention heads can be classified into a few common patterns (positional, syntactic, semantic), suggesting that explicit architectural specialization could replace learned redundancy.
 
@@ -1594,9 +1606,8 @@ def self_attention_layer(X, W_Q, W_K, W_V, d_k):
 
     return output
 
-def multi_head_attention(
-    X, W_Q, W_K, W_V, W_O, num_heads, d_k
-):
+
+def multi_head_attention(X, W_Q, W_K, W_V, W_O, num_heads, d_k):
     outputs = []
     for i in range(num_heads):
         head_output = self_attention_layer(
@@ -2333,6 +2344,29 @@ Transformers achieve maximum flexibility through attention mechanisms but pay a 
 
 These complexity patterns create distinct optimal domains for each architecture. MLPs excel when parameter efficiency is not critical, CNNs dominate for moderate-resolution spatial data, RNNs remain viable for very long sequences where memory is constrained, and Transformers excel for complex relational tasks where their computational cost can be justified by superior performance.
 
+### Architectural Comparison Summary {#sec-dnn-architectures-comparison-summary}
+
+The systematic analysis of each architectural family reveals distinct computational signatures that determine their suitability for different deployment scenarios. @tbl-architecture-comparison provides a quantitative comparison across key systems metrics, enabling engineers to make informed trade-offs between model capability and computational constraints.
+
++------------------+------------------+-------------------+-------------------+-------------------+
+| **Metric**       | **MLP**          | **CNN**           | **RNN**           | **Transformer**   |
++:=================+:=================+:==================+:==================+:==================+
+| Parameters       | O(N×M)           | O(K²×C×D)         | O(H²)             | O(N×d²)           |
++------------------+------------------+-------------------+-------------------+-------------------+
+| FLOPs/Sample     | O(N×M)           | O(K²×H×W×C)       | O(T×H²)           | O(N²×d)           |
++------------------+------------------+-------------------+-------------------+-------------------+
+| Memory           | O(B×M)           | O(B×H×W×C)        | O(B×T×H)          | O(B×N²)           |
+| (Activations)    |                  |                   |                   |                   |
++------------------+------------------+-------------------+-------------------+-------------------+
+| Parallelism      | High             | High              | Low (Sequential)  | High              |
++------------------+------------------+-------------------+-------------------+-------------------+
+| Key Bottleneck   | Memory BW        | Memory BW         | Sequential Dep.   | Memory (N²)       |
++------------------+------------------+-------------------+-------------------+-------------------+
+
+: **Quantitative Architecture Comparison**: Computational complexity analysis across four major neural network architectures. Parameters scale with network dimensions (N=neurons, M=inputs, K=kernel size, C=channels, D=depth, H=hidden size, T=time steps, d=model dimension). Memory requirements reflect peak activation storage during training. Parallelism indicates amenability to parallel computation. Key bottlenecks represent primary performance limiting factors in typical deployments. {#tbl-architecture-comparison}
+
+This quantitative framework enables systematic architecture selection by explicitly revealing the scaling behaviors that determine computational feasibility. MLPs and CNNs achieve high parallelism but face memory bandwidth constraints as model size grows. RNNs maintain constant memory usage but sacrifice parallelism for sequential processing. Transformers achieve maximum expressivity but face quadratic memory scaling that limits sequence length. Understanding these trade-offs proves essential for matching architectural choices to deployment constraints.
+
 ### Decision Framework {#sec-dnn-architectures-decision-framework-dbe8}
 
 Effective architecture selection requires balancing multiple competing factors: data characteristics, computational resources, performance requirements, and deployment constraints. While data patterns provide initial guidance and complexity analysis establishes feasibility bounds, final architectural choices often involve nuanced trade-offs demanding systematic evaluation.
@@ -2437,7 +2471,7 @@ Combining different architectural components (such as adding attention layers to
 
 Many architecture decisions optimize for high-end GPU performance without considering the complete system lifecycle from development through deployment. An architecture designed for large-scale compute clusters may be poorly suited for edge deployment due to memory constraints, lack of specialized compute units, or limited parallelization capabilities. Similarly, architectures optimized for inference latency might sacrifice development efficiency, leading to longer development cycles and higher computational costs. Effective architecture selection requires analyzing the entire system stack including compute infrastructure, model compilation and optimization tools, target deployment hardware, and operational constraints. The choice between CNN depth and width, transformer head configurations, or activation functions has cascading effects on memory bandwidth utilization, cache efficiency, and numerical precision requirements that must be considered holistically rather than in isolation.
 
-## Unified Framework: Architectures as Inductive Biases {#sec-dnn-architectures-unified-framework-architectures-inductive-biases-43e5}
+## Unified Framework: Inductive Biases {#sec-dnn-architectures-unified-framework-architectures-inductive-biases-43e5}
 
 The architectural diversity explored—from MLPs to Transformers—can be understood through a unified theoretical framework: each architecture embodies specific inductive biases that constrain the hypothesis space and guide learning toward solutions appropriate for different data types and problem structures.
 

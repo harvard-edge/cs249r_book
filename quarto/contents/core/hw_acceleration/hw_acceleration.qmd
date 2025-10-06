@@ -272,6 +272,68 @@ The evolution from floating-point coprocessors to AI accelerators reveals a cons
 
 The specialization principles established through decades of hardware evolution—identifying dominant operations, creating dedicated datapaths, and optimizing memory access patterns—now guide AI accelerator design. However, neural networks introduce unique characteristics that demand new architectural approaches: massive parallelism in matrix operations, predictable data access patterns enabling prefetching, and tolerance for reduced precision that allows aggressive optimization. Understanding these computational patterns, which we term AI compute primitives, is essential for comprehending how modern accelerators transform the theoretical efficiency gains from @sec-model-optimizations into practical performance improvements.
 
+Before examining these computational primitives in detail, it is valuable to understand the overall architecture that enables their efficient execution. @fig-accelerator-anatomy provides a high-level view of a modern AI accelerator's key components and their relationships.
+
+::: {#fig-accelerator-anatomy fig-env="figure" fig-pos="htb"}
+```{.tikz}
+\begin{tikzpicture}[
+    box/.style={draw, rounded corners=3pt, minimum width=2.5cm, minimum height=1cm, align=center},
+    pe/.style={box, fill=blue!20},
+    mem/.style={box, fill=green!20},
+    compute/.style={box, fill=yellow!20, minimum width=1.5cm, minimum height=0.6cm},
+    control/.style={box, fill=orange!20},
+    interface/.style={box, fill=red!20}
+]
+
+% Memory hierarchy at top
+\node[mem] (hbm) at (0,6) {High-Bandwidth\\Memory\\(HBM)};
+\node[mem] (l2) at (4,5) {L2 Cache\\(Shared)};
+\node[mem] (l1) at (8,4) {L1 Cache\\(Local)};
+
+% Processing element cluster
+\node[pe] (pe1) at (2,2) {PE 0};
+\node[pe] (pe2) at (4,2) {PE 1};
+\node[pe] (pe3) at (6,2) {PE 2};
+\node[pe] (pe4) at (8,2) {PE 3};
+
+% Compute units inside PEs (showing detail for PE1)
+\node[compute] (tensor1) at (1.2,1.2) {Tensor\\Core};
+\node[compute] (vector1) at (2.8,1.2) {Vector\\Unit};
+\node[compute] (sfu1) at (2,0.4) {SFU};
+
+% Show interconnect
+\draw[thick, <->] (pe1) -- (pe2);
+\draw[thick, <->] (pe2) -- (pe3);
+\draw[thick, <->] (pe3) -- (pe4);
+
+% Memory connections
+\draw[thick, ->] (hbm) -- (l2);
+\draw[thick, ->] (l2) -- (l1);
+\draw[thick, ->] (l1) -- (pe4);
+
+% Host interface
+\node[interface] (pcie) at (10,4) {Host Interface\\(PCIe/NVLink)};
+\draw[thick, <->] (l1) -- (pcie);
+
+% Control unit
+\node[control] (ctrl) at (6,0) {Control Unit\\& Scheduler};
+\draw[thick, ->] (ctrl) -- (pe2);
+\draw[thick, ->] (ctrl) -- (pe3);
+
+% Labels for key concepts
+\node[anchor=west, font=\footnotesize] at (0,3.5) {\textbf{Memory Hierarchy:}};
+\node[anchor=west, font=\footnotesize] at (0,3.2) {Data flows from HBM};
+\node[anchor=west, font=\footnotesize] at (0,2.9) {through caches to PEs};
+
+\node[anchor=west, font=\footnotesize] at (9,1.2) {\textbf{Processing Elements:}};
+\node[anchor=west, font=\footnotesize] at (9,0.9) {Contain specialized};
+\node[anchor=west, font=\footnotesize] at (9,0.6) {compute units};
+
+\end{tikzpicture}
+```
+**Anatomy of a Modern AI Accelerator**: AI accelerators integrate specialized processing elements containing tensor cores, vector units, and special function units, supported by a hierarchical memory system from high-bandwidth memory down to local caches. This architecture maximizes data reuse and parallel execution while minimizing energy-intensive data movement, forming the foundation for 100-1000× performance improvements over general-purpose processors.
+:::
+
 ## AI Compute Primitives {#sec-ai-acceleration-ai-compute-primitives-8471}
 
 Understanding how hardware evolved toward AI-specific designs requires examining the computational patterns that drove this specialization. The transition from general-purpose CPUs achieving 100 GFLOPS to specialized accelerators delivering 100,000+ GFLOPS represents more than incremental improvement—it reflects architectural optimization for specific computational patterns that dominate machine learning workloads. These patterns, which we term compute primitives, appear repeatedly across all neural network architectures regardless of application domain or model size.
@@ -305,8 +367,8 @@ for n in range(batch_size):
     for m in range(output_size):
         sum = bias[m]
         for k in range(input_size):
-            sum += input[n,k] * weights[k,m]
-        output[n,m] = activation(sum)
+            sum += input[n, k] * weights[k, m]
+        output[n, m] = activation(sum)
 ```
 :::
 
@@ -325,8 +387,8 @@ Machine learning frameworks hide hardware complexity through high-level abstract
 ::: {#lst-linear_layer_highlevel lst-cap="**Linear Layer**: Neural networks transform input data into a higher-dimensional space using linear mappings to enable complex feature extraction."}
 ```{.python}
 layer = nn.Linear(256, 512)  # 256 inputs to
-                             # 512 outputs
-output = layer(input_tensor) # Process a batch of inputs
+# 512 outputs
+output = layer(input_tensor)  # Process a batch of inputs
 ```
 :::
 
@@ -334,8 +396,8 @@ This abstraction represents a fully connected layer that transforms input featur
 
 ::: {#lst-linear_math_internal lst-cap="**Fully Connected Layer**: Each output is computed as a weighted sum of all inputs plus a bias, followed by an activation function transformation. Linear transformations enable complex model architectures in neural networks."}
 ```{.python}
-Z = matmul(weights, input) + bias # Each output needs all inputs
-output = activation(Z)            # Transform each result
+Z = matmul(weights, input) + bias  # Each output needs all inputs
+output = activation(Z)  # Transform each result
 ```
 :::
 
@@ -426,16 +488,16 @@ Neural network computations decompose into hierarchical matrix operations. As sh
 ::: {#lst-linear_matrix_hierarchy lst-cap="**Matrix Operations**: Neural networks perform transformations using matrix multiplications and biases to achieve output predictions. Training requires careful management of input batches and activation functions to optimize model performance."}
 ```{.python}
 layer = nn.Linear(256, 512)  # Layer transforms 256 inputs to
-                             # 512 outputs
+# 512 outputs
 output = layer(input_batch)  # Process a batch of 32 samples
 
 # Framework Internal: Core operations
-Z = matmul(weights, input)   # Matrix: transforms [256 x 32]
-                             # input to [512 x 32] output
-Z = Z + bias                 # Vector: adds bias to each
-                             # output independently
-output = relu(Z)             # Vector: applies activation to
-                             # each element independently
+Z = matmul(weights, input)  # Matrix: transforms [256 x 32]
+# input to [512 x 32] output
+Z = Z + bias  # Vector: adds bias to each
+# output independently
+output = relu(Z)  # Vector: applies activation to
+# each element independently
 ```
 :::
 
@@ -523,9 +585,7 @@ Non-linear functions play a fundamental role in machine learning by enabling neu
 ::: {#lst-nonlinear_layer lst-cap="**Non-Linear Transformations**: Neural networks process input data through a sequence of linear transformations followed by non-linear activations to capture complex patterns. This layer sequence enhances model expressiveness and learning capabilities."}
 ```{.python}
 layer = nn.Sequential(
-    nn.Linear(256, 512),
-    nn.ReLU(),
-    nn.BatchNorm1d(512)
+    nn.Linear(256, 512), nn.ReLU(), nn.BatchNorm1d(512)
 )
 output = layer(input_tensor)
 ```
@@ -535,12 +595,12 @@ This sequence introduces multiple non-linear transformations that extend beyond 
 
 ::: {#lst-nonlinear_math lst-cap="**Non-linear Transformations**: Neural networks apply linear and non-linear operations to transform input data into meaningful features for learning. Machine learning models leverage these transformations to capture complex patterns in data efficiently."}
 ```{.python}
-Z = matmul(weights, input) + bias    # Linear transformation
-H = max(0, Z)                        # ReLU activation
-mean = reduce_mean(H, axis=0)        # BatchNorm statistics
-var = reduce_mean((H - mean)**2)     # Variance computation
-output = gamma * (H - mean)/sqrt(var + eps) + beta
-                                     # Normalization
+Z = matmul(weights, input) + bias  # Linear transformation
+H = max(0, Z)  # ReLU activation
+mean = reduce_mean(H, axis=0)  # BatchNorm statistics
+var = reduce_mean((H - mean) ** 2)  # Variance computation
+output = gamma * (H - mean) / sqrt(var + eps) + beta
+# Normalization
 ```
 :::
 
@@ -1439,13 +1499,23 @@ Efficient execution of machine learning models on specialized AI acceleration ha
 
 Mapping machine learning models onto AI accelerators presents several challenges due to hardware constraints and the diversity of model architectures. Given the hierarchical memory system of modern accelerators, mapping strategies must carefully manage when and where data is accessed to minimize latency and power overhead while ensuring that compute units remain actively engaged. Poor mapping decisions can lead to underutilized compute resources, excessive data movement, and increased execution time, ultimately reducing overall efficiency.
 
+To understand the complexity of this challenge, consider an analogy: mapping a neural network to an accelerator is like planning a massive, factory-wide assembly process. You have thousands of workers (processing elements) and a complex set of tasks (computations). You must decide which worker does which task (computation placement), where to store the parts they need (memory allocation), and the exact sequence of operations to minimize time spent walking around (dataflow). A small change in the plan can lead to massive differences in factory output. Just as a poorly organized factory might have workers idle while others are overwhelmed, or materials stored too far from where they're needed, a poorly mapped neural network can leave processing elements underutilized while creating memory bottlenecks that stall the entire system.
+
 Mapping encompasses three interrelated aspects that form the foundation of effective AI accelerator design.
 
 - **Computation Placement**: Systematically assigns operations (e.g., matrix multiplications, convolutions) to processing elements to maximize parallelism and reduce idle time.
 - **Memory Allocation**: Carefully determines where model parameters, activations, and intermediate results reside within the memory hierarchy to optimize access efficiency.
 - **Dataflow and Execution Scheduling**: Structures the movement of data between compute units to reduce bandwidth bottlenecks and ensure smooth, continuous execution.
 
-Effective mapping strategies minimize off-chip memory accesses, maximize compute utilization, and efficiently manage data movement across different levels of the memory hierarchy. The following sections explore the key mapping choices that influence execution efficiency and lay the groundwork for optimization strategies that refine these decisions.
+Effective mapping strategies minimize off-chip memory accesses, maximize compute utilization, and efficiently manage data movement across different levels of the memory hierarchy.
+
+::: {.callout-note title="The Role of the Compiler"}
+
+It's important to note that developers rarely perform this complex mapping manually. Instead, a specialized **compiler** (like NVIDIA's NVCC or Google's XLA) takes the high-level model from the framework and automatically explores the mapping search space to find an optimal execution plan for the target hardware. The compiler is the crucial software layer that translates the model's computational graph into an efficient hardware-specific dataflow, balancing the three interrelated aspects of computation placement, memory allocation, and execution scheduling described above. This compiler support is examined in detail in @sec-ai-acceleration-compiler-support-172e.
+
+:::
+
+The following sections explore the key mapping choices that influence execution efficiency and lay the groundwork for optimization strategies that refine these decisions.
 
 ### Computation Placement {#sec-ai-acceleration-computation-placement-ea14}
 
@@ -1704,7 +1774,7 @@ To illustrate the impact of data movement inefficiencies, consider a typical mat
 for i in range(512):
     for j in range(32):
         for k in range(256):
-            Z[i,j] += weights[i,k] * input[k,j]
+            Z[i, j] += weights[i, k] * input[k, j]
 ```
 :::
 
@@ -1716,7 +1786,9 @@ The third challenge involves the accumulation of intermediate results. Since eac
 
 A natural way to mitigate these challenges is to leverage SIMD and SIMT execution models, which allow multiple values to be fetched in parallel. However, even with these optimizations, data movement remains a bottleneck. The issue is not just how quickly data is retrieved but how often it must be moved and where it is placed within the memory hierarchy [@han2016eie].
 
-To address these constraints, accelerators implement dataflow strategies that determine which data remains fixed in memory and which data is streamed dynamically. These strategies aim to maximize reuse of frequently accessed data, thereby reducing the need for redundant memory fetches. The effectiveness of a given dataflow strategy depends on the specific workload—for example, deep convolutional networks benefit from keeping weights stationary, while fully connected layers may require a different approach.
+Given that data movement is 100-1000× more expensive than computation, the single most important goal of an accelerator is to minimize memory access. Dataflow strategies are the architectural patterns designed to achieve this by maximizing data reuse. The question is: which data is most valuable to keep local? This directly addresses the AI Memory Wall challenge examined in @sec-ai-acceleration-ai-memory-wall-173b, where the extreme energy penalty for memory access dominates system performance.
+
+To address these constraints, accelerators implement dataflow strategies that determine which data remains fixed in memory and which data is streamed dynamically. These strategies represent different answers to the fundamental question of data locality: weight-stationary keeps model parameters local, input-stationary maintains activation data, and output-stationary preserves intermediate results. Each approach trades off different memory access patterns to maximize data reuse and minimize the energy-intensive transfers that constitute the primary bottleneck in AI acceleration.
 
 ##### Weight Stationary {#sec-ai-acceleration-weight-stationary-0833}
 
@@ -1735,7 +1807,7 @@ A simplified Weight Stationary implementation for matrix multiplication is illus
 
 for weight_block in weights:  # Load and keep weights stationary
     load_to_local(weight_block)  # Fixed in local storage
-    for input_block in inputs:   # Stream inputs dynamically
+    for input_block in inputs:  # Stream inputs dynamically
         for output_block in outputs:  # Compute results
             output_block += compute(weight_block, input_block)
             # Reuse weights across inputs
@@ -1765,7 +1837,7 @@ A key advantage of the output stationary approach is that it optimizes accumulat
 ## - Final outputs are written only once
 
 for output_block in outputs:  # Keep partial sums stationary
-    accumulator = 0           # Initialize accumulation buffer
+    accumulator = 0  # Initialize accumulation buffer
     for weight_block, input_block in zip(weights, inputs):
         accumulator += compute(weight_block, input_block)
         # Accumulate partial sums
@@ -1798,9 +1870,9 @@ A simplified Input Stationary implementation for matrix multiplication is illust
 ## - Weights stream through dynamically
 ## - Partial sums accumulate and are written out
 
-for input_block in inputs:   # Keep input activations stationary
+for input_block in inputs:  # Keep input activations stationary
     load_to_local(input_block)  # Fixed in local storage
-    for weight_block in weights:   # Stream weights dynamically
+    for weight_block in weights:  # Stream weights dynamically
         for output_block in outputs:  # Compute results
             output_block += compute(weight_block, input_block)
             # Reuse inputs across weights
@@ -1913,10 +1985,10 @@ import torch
 X = torch.randn(1024, 1024).cuda()
 
 ## Step-by-step execution (naïve approach)
-X1 = torch.relu(X)         # Intermediate tensor stored
-                           # in memory
+X1 = torch.relu(X)  # Intermediate tensor stored
+# in memory
 X2 = torch.batch_norm(X1)  # Another intermediate tensor stored
-Y  = 2.0 * X2 + 1.0        # Final result
+Y = 2.0 * X2 + 1.0  # Final result
 ```
 :::
 
@@ -1998,7 +2070,7 @@ for i in range(N):
     for j in range(N):
         for k in range(N):
             C[i, j] += A[i, k] * B[k, j]  # Repeatedly fetching
-                                          # A[i, k] and B[k, j]
+            # A[i, k] and B[k, j]
 ```
 :::
 
@@ -2093,7 +2165,7 @@ for i in range(N):
     for j in range(N):
         for k in range(N):
             C[i, j] += A[i, k] * B[k, j]  # Repeatedly fetching
-                                          # A[i, k] and B[k, j]
+            # A[i, k] and B[k, j]
 ```
 :::
 
@@ -2109,14 +2181,14 @@ Instead of computing one element at a time and constantly moving data in and out
 
 ::: {#lst-tiled_matmul lst-cap="**Tiled Matrix Multiplication**: This approach divides matrices into smaller blocks to optimize memory usage by reusing data within processor cache, thereby improving computational efficiency."}
 ```{.python}
-TILE_SIZE = 32 # Choose a tile size based on
-               # hardware constraints
+TILE_SIZE = 32  # Choose a tile size based on
+# hardware constraints
 
 for i in range(0, N, TILE_SIZE):
     for j in range(0, N, TILE_SIZE):
         for k in range(0, N, TILE_SIZE):
-          # Compute the submatrix
-          # C[i:i+TILE_SIZE, j:j+TILE_SIZE]
+            # Compute the submatrix
+            # C[i:i+TILE_SIZE, j:j+TILE_SIZE]
             for ii in range(i, i + TILE_SIZE):
                 for jj in range(j, j + TILE_SIZE):
                     for kk in range(k, k + TILE_SIZE):
@@ -2147,7 +2219,7 @@ Spatial tiling is illustrated in @lst-tiled_spatial, where the computation proce
 ::: {#lst-tiled_spatial lst-cap="**Spatial Tiling**: Reduces redundant memory accesses by processing matrix tiles sequentially."}
 ```{.python}
 TILE_SIZE = 32  # Tile size chosen based on available
-                # fast memory
+# fast memory
 
 for i in range(0, N, TILE_SIZE):
     for j in range(0, N, TILE_SIZE):

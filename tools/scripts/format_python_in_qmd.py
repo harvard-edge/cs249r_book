@@ -1,12 +1,22 @@
 #!/usr/bin/env python3
 """Format Python code blocks in .qmd files using Black."""
 
+import ast
 import re
 import sys
 from pathlib import Path
 from typing import List
 import subprocess
 import tempfile
+
+
+def is_valid_python(code: str) -> bool:
+    """Check if code string is valid Python syntax."""
+    try:
+        ast.parse(code)
+        return True
+    except SyntaxError:
+        return False
 
 
 def format_python_blocks(content: str, line_length: int = 70) -> str:
@@ -30,32 +40,40 @@ def format_python_blocks(content: str, line_length: int = 70) -> str:
             # Format accumulated Python code with Black
             if python_lines:
                 code = '\n'.join(python_lines)
-                try:
-                    # Write to temp file
-                    with tempfile.NamedTemporaryFile(
-                        mode='w', suffix='.py', delete=False
-                    ) as f:
-                        f.write(code)
-                        temp_path = f.name
-                    
-                    # Run Black
-                    subprocess.run(
-                        ['black', '--line-length', str(line_length), 
-                         '--quiet', temp_path],
-                        check=True
-                    )
-                    
-                    # Read formatted code
-                    with open(temp_path, 'r') as f:
-                        formatted = f.read().rstrip()
-                    
-                    result.extend(formatted.split('\n'))
-                    
-                    # Cleanup
-                    Path(temp_path).unlink()
-                except (subprocess.CalledProcessError, FileNotFoundError):
-                    # If Black fails or isn't installed, keep original
+                
+                # Validate Python syntax before attempting to format
+                if not is_valid_python(code):
+                    # Skip formatting for invalid Python (e.g., shell, pseudocode, etc.)
                     result.extend(python_lines)
+                else:
+                    try:
+                        # Write to temp file
+                        with tempfile.NamedTemporaryFile(
+                            mode='w', suffix='.py', delete=False
+                        ) as f:
+                            f.write(code)
+                            temp_path = f.name
+                        
+                        # Run Black with stderr suppressed
+                        subprocess.run(
+                            ['black', '--line-length', str(line_length), 
+                             '--quiet', temp_path],
+                            check=True,
+                            stderr=subprocess.DEVNULL,
+                            stdout=subprocess.DEVNULL
+                        )
+                        
+                        # Read formatted code
+                        with open(temp_path, 'r') as f:
+                            formatted = f.read().rstrip()
+                        
+                        result.extend(formatted.split('\n'))
+                        
+                        # Cleanup
+                        Path(temp_path).unlink()
+                    except (subprocess.CalledProcessError, FileNotFoundError):
+                        # If Black fails or isn't installed, keep original
+                        result.extend(python_lines)
             
             python_lines = []
             in_python_block = False
