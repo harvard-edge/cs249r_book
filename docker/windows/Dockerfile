@@ -103,9 +103,6 @@ RUN Write-Host '=== STARTING SCOOP INSTALLATION ===' ; `
     [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 ; `
     $OutputEncoding = [System.Text.Encoding]::UTF8 ; `
     Write-Host '🔤 UTF-8 encoding set' ; `
-    Write-Host 'Setting execution policy...' ; `
-    Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force ; `
-    Write-Host '🔐 Execution policy set' ; `
     Write-Host 'Installing Scoop package manager...' ; `
     Invoke-WebRequest -useb get.scoop.sh -outfile 'install.ps1' ; `
     Write-Host '📥 Scoop install script downloaded' ; `
