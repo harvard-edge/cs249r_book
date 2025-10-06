@@ -129,6 +129,89 @@ def parse_row(row: str) -> List[str]:
     return cells
 
 
+def should_bold_first_column(header: str, rows: List[str], caption: str = '') -> bool:
+    """
+    Determine if the first column should be bolded based on table type.
+    
+    Heuristics:
+    1. Comparison/trade-off tables: YES (first column has descriptive categories)
+    2. Data tables: NO (first column contains numeric/simple data)
+    3. Definition tables: YES (first column has terms)
+    
+    Returns True if first column should be bolded.
+    """
+    header_cells = parse_row(header)
+    
+    # If no first column, return False
+    if not header_cells:
+        return False
+    
+    first_header = header_cells[0].replace('**', '').strip().lower()
+    
+    # Check caption for keywords suggesting comparison table
+    caption_lower = caption.lower()
+    comparison_keywords = ['comparison', 'trade-off', 'tradeoff', 'overview', 'summary', 
+                          'criteria', 'characteristics', 'features', 'differences']
+    if any(keyword in caption_lower for keyword in comparison_keywords):
+        return True
+    
+    # Check first column header for descriptive names
+    descriptive_headers = ['criterion', 'criteria', 'aspect', 'feature', 'characteristic',
+                          'dimension', 'metric', 'property', 'attribute', 'technique',
+                          'method', 'approach', 'strategy', 'type', 'category', 'principle',
+                          'challenge', 'issue', 'factor', 'component', 'element']
+    if any(desc in first_header for desc in descriptive_headers):
+        return True
+    
+    # Check first column header for simple data indicators (DON'T bold these)
+    simple_data_headers = ['id', '#', 'number', 'index', 'rank', 'year', 'date', 'time']
+    if any(simple in first_header for simple in simple_data_headers):
+        return False
+    
+    # Analyze first column content
+    first_col_values = []
+    for row in rows:
+        if row.startswith('|'):
+            cells = parse_row(row)
+            if cells and cells[0].strip():
+                first_col_values.append(cells[0].replace('**', '').strip())
+    
+    if not first_col_values:
+        return True  # Default to bolding if no content
+    
+    # Check if first column contains mostly numbers (data table)
+    numeric_count = 0
+    for value in first_col_values:
+        # Remove common non-numeric characters
+        cleaned = value.replace('%', '').replace('$', '').replace(',', '').strip()
+        try:
+            float(cleaned)
+            numeric_count += 1
+        except ValueError:
+            pass
+    
+    if numeric_count > len(first_col_values) * 0.7:  # More than 70% numeric
+        return False
+    
+    # Check if first column values are descriptive (multi-word phrases)
+    descriptive_count = 0
+    for value in first_col_values:
+        # Count words (excluding special characters)
+        words = value.replace('/', ' ').replace('-', ' ').split()
+        if len(words) >= 2:  # Multi-word = descriptive
+            descriptive_count += 1
+    
+    if descriptive_count > len(first_col_values) * 0.5:  # More than 50% descriptive
+        return True
+    
+    # Check for question-like entries (with '?')
+    if any('?' in value for value in first_col_values):
+        return True
+    
+    # Default: bold for comparison-style tables
+    return True
+
+
 def bold_text(text: str) -> str:
     """Add bold markers to text if not already bolded. Returns empty string if text is empty."""
     text = text.strip()
@@ -264,13 +347,20 @@ def format_table(table_data: dict) -> List[str]:
     # Bold all header cells
     header_cells = [bold_text(cell) for cell in header_cells]
     
+    # Determine if first column should be bolded based on table type
+    bold_first_col = should_bold_first_column(
+        table_data['header'], 
+        table_data['rows'], 
+        table_data.get('caption', '')
+    )
+    
     # Parse and prepare data rows (exclude border lines)
     data_rows = []
     for row in table_data['rows']:
         if row.startswith('|'):
             cells = parse_row(row)
-            # Bold first column only if it's not empty
-            if cells and cells[0].strip() and not is_bolded(cells[0]):
+            # Bold first column only if appropriate and not empty
+            if bold_first_col and cells and cells[0].strip() and not is_bolded(cells[0]):
                 cells[0] = bold_text(cells[0])
             data_rows.append(cells)
     
@@ -331,15 +421,23 @@ def check_table_format(table_data: dict) -> List[str]:
         if not is_bolded(cell):
             issues.append(f"Header column {idx + 1} is not bolded: '{cell}'")
     
+    # Determine if first column should be bolded based on table type
+    bold_first_col = should_bold_first_column(
+        table_data['header'], 
+        table_data['rows'], 
+        table_data.get('caption', '')
+    )
+    
     # Parse data rows and check first column (skip empty cells)
-    row_num = 1
-    for row in table_data['rows']:
-        if row.startswith('|'):
-            cells = parse_row(row)
-            # Only check non-empty first column cells
-            if cells and cells[0].strip() and not is_bolded(cells[0]):
-                issues.append(f"First column in row {row_num} is not bolded: '{cells[0]}'")
-            row_num += 1
+    if bold_first_col:
+        row_num = 1
+        for row in table_data['rows']:
+            if row.startswith('|'):
+                cells = parse_row(row)
+                # Only check non-empty first column cells
+                if cells and cells[0].strip() and not is_bolded(cells[0]):
+                    issues.append(f"First column in row {row_num} is not bolded: '{cells[0]}'")
+                row_num += 1
     
     # Check column width consistency
     alignments = extract_alignment(table_data['separator'])
@@ -349,8 +447,8 @@ def check_table_format(table_data: dict) -> List[str]:
     for row in table_data['rows']:
         if row.startswith('|'):
             cells = parse_row(row)
-            # Bold first column only if it's not empty
-            if cells and cells[0].strip() and not is_bolded(cells[0]):
+            # Bold first column only if appropriate and not empty
+            if bold_first_col and cells and cells[0].strip() and not is_bolded(cells[0]):
                 cells[0] = bold_text(cells[0])
             data_rows.append(cells)
     
@@ -373,7 +471,7 @@ def check_table_format(table_data: dict) -> List[str]:
     return issues
 
 
-def process_file(file_path: Path, fix: bool = False) -> Tuple[int, int]:
+def process_file(file_path: Path, fix: bool = False, verbose: bool = False) -> Tuple[int, int]:
     """
     Process a single file to check or fix table formatting.
     
@@ -412,6 +510,20 @@ def process_file(file_path: Path, fix: bool = False) -> Tuple[int, int]:
             
             if table_data:
                 tables_checked += 1
+                
+                # Show detection info in verbose mode
+                if verbose:
+                    bold_first_col = should_bold_first_column(
+                        table_data['header'], 
+                        table_data['rows'], 
+                        table_data.get('caption', '')
+                    )
+                    header_cells = parse_row(table_data['header'])
+                    first_header = header_cells[0] if header_cells else 'N/A'
+                    print(f"  Table at line {i + 1}:")
+                    print(f"    First column: '{first_header}'")
+                    print(f"    Will bold first column: {bold_first_col}")
+                
                 issues = check_table_format(table_data)
                 
                 if issues:
@@ -481,6 +593,9 @@ Examples:
     group.add_argument('--check-all', action='store_true', help='Check all .qmd files')
     group.add_argument('--fix-all', action='store_true', help='Fix all .qmd files')
     
+    parser.add_argument('--verbose', '-v', action='store_true', 
+                       help='Show detailed detection information')
+    
     args = parser.parse_args()
     
     # Determine workspace root (assume script is in tools/scripts/)
@@ -498,11 +613,16 @@ Examples:
             return 1
         
         fix_mode = bool(args.fix)
-        print(f"{'Fixing' if fix_mode else 'Checking'} {file_path.relative_to(workspace_root)}")
+        try:
+            display_path = file_path.relative_to(workspace_root)
+        except ValueError:
+            display_path = file_path
+        print(f"{'Fixing' if fix_mode else 'Checking'} {display_path}")
         
-        tables_checked, tables_with_issues = process_file(file_path, fix=fix_mode)
+        tables_checked, tables_with_issues = process_file(file_path, fix=fix_mode, verbose=args.verbose)
         
-        print(f"  Found {tables_checked} tables, {tables_with_issues} with issues")
+        if not args.verbose:
+            print(f"  Found {tables_checked} tables, {tables_with_issues} with issues")
         
         if not fix_mode and tables_with_issues > 0:
             return 1
@@ -524,11 +644,12 @@ Examples:
         files_with_issues = []
         
         for qmd_file in qmd_files:
-            tables_checked, tables_with_issues = process_file(qmd_file, fix=fix_mode)
+            tables_checked, tables_with_issues = process_file(qmd_file, fix=fix_mode, verbose=args.verbose)
             
             if tables_checked > 0:
                 rel_path = qmd_file.relative_to(workspace_root)
-                print(f"{rel_path}: {tables_checked} tables, {tables_with_issues} with issues")
+                if not args.verbose:
+                    print(f"{rel_path}: {tables_checked} tables, {tables_with_issues} with issues")
                 
                 total_tables += tables_checked
                 total_issues += tables_with_issues
