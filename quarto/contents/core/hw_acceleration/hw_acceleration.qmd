@@ -277,61 +277,62 @@ Before examining these computational primitives in detail, it is valuable to und
 ::: {#fig-accelerator-anatomy fig-env="figure" fig-pos="htb"}
 ```{.tikz}
 \begin{tikzpicture}[
-    box/.style={draw, rounded corners=3pt, minimum width=2.5cm, minimum height=1cm, align=center},
-    pe/.style={box, fill=blue!20},
-    mem/.style={box, fill=green!20},
-    compute/.style={box, fill=yellow!20, minimum width=1.5cm, minimum height=0.6cm},
-    control/.style={box, fill=orange!20},
-    interface/.style={box, fill=red!20}
+    node distance=6mm and 10mm,
+    font=\small\sffamily,
+    box/.style={rectangle, draw, thick, minimum height=1.2cm, minimum width=2.2cm, align=center, rounded corners=3pt},
+    pe/.style={box, fill=blue!10, minimum height=1.5cm, minimum width=2cm},
+    mem/.style={box, fill=green!10},
+    compute/.style={box, fill=yellow!20, minimum width=1.8cm, minimum height=0.8cm, rounded corners=2pt},
+    host/.style={box, fill=gray!10},
+    conn/.style={-latex, thick},
+    bus/.style={latex-latex, line width=2.5mm, draw=gray!40, text=black, font=\tiny\sffamily}
 ]
 
-% Memory hierarchy at top
-\node[mem] (hbm) at (0,6) {High-Bandwidth\\Memory\\(HBM)};
-\node[mem] (l2) at (4,5) {L2 Cache\\(Shared)};
-\node[mem] (l1) at (8,4) {L1 Cache\\(Local)};
+% Main Chip Boundary
+\node[draw, dashed, thick, minimum width=12cm, minimum height=8cm, label={[yshift=-3mm]north:AI Accelerator Chip}] (chip) {};
 
-% Processing element cluster
-\node[pe] (pe1) at (2,2) {PE 0};
-\node[pe] (pe2) at (4,2) {PE 1};
-\node[pe] (pe3) at (6,2) {PE 2};
-\node[pe] (pe4) at (8,2) {PE 3};
+% Host CPU and DRAM (outside the chip, to the left)
+\node[host, left=of chip, xshift=-2.5cm] (cpu) {Host CPU};
+\node[mem, below=of cpu] (dram) {Host DRAM};
+\draw[bus] (cpu.east) -- (chip.west |- cpu) node[midway, above, yshift=2mm] {Host Interface \\ (PCIe/NVLink)};
+\draw[conn, dashed, thin] (dram.north) -- (cpu.south);
 
-% Compute units inside PEs (showing detail for PE1)
-\node[compute] (tensor1) at (1.2,1.2) {Tensor\\Core};
-\node[compute] (vector1) at (2.8,1.2) {Vector\\Unit};
-\node[compute] (sfu1) at (2,0.4) {SFU};
+% High-Bandwidth Memory (HBM) (outside the chip, to the right)
+\node[mem, right=of chip, xshift=2.5cm] (hbm) {High-Bandwidth\\Memory (HBM)};
+\draw[bus] (hbm.west) -- (chip.east |- hbm) node[midway, above, yshift=2mm] {Memory Interface};
 
-% Show interconnect
-\draw[thick, <->] (pe1) -- (pe2);
-\draw[thick, <->] (pe2) -- (pe3);
-\draw[thick, <->] (pe3) -- (pe4);
+% L2 Cache inside the chip
+\node[mem, minimum width=10cm, fill=green!20] (l2) at (chip.center) {L2 Cache (Shared)};
 
-% Memory connections
-\draw[thick, ->] (hbm) -- (l2);
-\draw[thick, ->] (l2) -- (l1);
-\draw[thick, ->] (l1) -- (pe4);
+% Processing Elements (PEs) arranged in a grid
+\matrix[row sep=5mm, column sep=5mm] at (l2.center) {
+    \node[pe] (pe1) {PE}; & \node[pe] (pe2) {PE}; & \node[font=\Huge] (dots) {...}; & \node[pe] (peN) {PE}; \\
+    \node[pe] (peM) {PE}; & \node[pe] (peMN) {PE}; & \node[font=\Huge] (dots2) {...}; & \node[pe] (peLast) {PE}; \\
+};
 
-% Host interface
-\node[interface] (pcie) at (10,4) {Host Interface\\(PCIe/NVLink)};
-\draw[thick, <->] (l1) -- (pcie);
+% Connections from L2 to PEs
+\foreach \p in {pe1, pe2, peN, peM, peMN, peLast} {
+    \draw[conn, thin, gray] (l2) -- (\p);
+}
 
-% Control unit
-\node[control] (ctrl) at (6,0) {Control Unit\\& Scheduler};
-\draw[thick, ->] (ctrl) -- (pe2);
-\draw[thick, ->] (ctrl) -- (pe3);
+% Zoom-in on a Processing Element (PE1)
+\node[draw, thick, fill=blue!5, rounded corners, fit=(pe1), label={[yshift=-1.2cm]below:Processing Element}] (pe_zoom) {};
 
-% Labels for key concepts
-\node[anchor=west, font=\footnotesize] at (0,3.5) {\textbf{Memory Hierarchy:}};
-\node[anchor=west, font=\footnotesize] at (0,3.2) {Data flows from HBM};
-\node[anchor=west, font=\footnotesize] at (0,2.9) {through caches to PEs};
+% Components inside the PE1
+\node[compute] (tensor_core) at (pe1.center) [yshift=0.8cm] {Tensor Core};
+\node[compute] (vector_unit) at (pe1.center) [yshift=-0.8cm] {Vector Unit};
+\node[compute, fill=orange!20] (sfu) at (pe1.center) [xshift=2.2cm] {SFU};
+\node[mem, fill=green!30, minimum width=1.5cm] (l1) at (pe1.center) [xshift=-2.2cm] {L1 Cache /\\Scratchpad};
 
-\node[anchor=west, font=\footnotesize] at (9,1.2) {\textbf{Processing Elements:}};
-\node[anchor=west, font=\footnotesize] at (9,0.9) {Contain specialized};
-\node[anchor=west, font=\footnotesize] at (9,0.6) {compute units};
+% Connections inside the PE
+\draw[conn, thin, dashed] (l1) -- (tensor_core);
+\draw[conn, thin, dashed] (l1) -- (vector_unit);
+\draw[conn, thin, dashed] (tensor_core) -- (sfu);
+\draw[conn, thin, dashed] (vector_unit) -- (sfu);
 
 \end{tikzpicture}
 ```
-**Anatomy of a Modern AI Accelerator**: AI accelerators integrate specialized processing elements containing tensor cores, vector units, and special function units, supported by a hierarchical memory system from high-bandwidth memory down to local caches. This architecture maximizes data reuse and parallel execution while minimizing energy-intensive data movement, forming the foundation for 100-1000× performance improvements over general-purpose processors.
+**Figure 2: Anatomy of a Modern AI Accelerator**: AI accelerators integrate specialized processing elements containing tensor cores, vector units, and special function units, supported by a hierarchical memory system from high-bandwidth memory down to local caches. This architecture maximizes data reuse and parallel execution while minimizing energy-intensive data movement, forming the foundation for 100-1000× performance improvements over general-purpose processors.
 :::
 
 ## AI Compute Primitives {#sec-ai-acceleration-ai-compute-primitives-8471}
@@ -3213,7 +3214,7 @@ While we an overview of the key concepts and challenges in multi-chip AI acceler
 
 Understanding the principles and trade-offs involved in multi-chip AI acceleration enables machine learning engineers and system designers to make informed decisions about how to best deploy and optimize their models. Whether training large language models on TPU pods or deploying computer vision applications on multi-GPU systems, the ability to efficiently map computations to hardware will continue to be a critical factor in realizing the full potential of AI.
 
-## Heterogeneous SoC AI Acceleration {#sec-ai-acceleration-heterogeneous-soc-ai-acceleration-b1bb-ai-acceleration-b1bb}
+## Heterogeneous SoC AI Acceleration {#sec-ai-acceleration-heterogeneous-soc-ai-acceleration-b1bb}
 
 The multi-chip architectures examined in previous sections focused primarily on maximizing computational throughput for data center workloads, where power budgets extend to kilowatts and cooling infrastructure supports rack-scale deployments. However, the hardware acceleration principles established—specialized compute units, memory hierarchy optimization, and workload mapping strategies—must adapt dramatically when deploying AI systems in mobile and edge environments. A smartphone operates within a 2 to 5 watt power budget, autonomous vehicles require deterministic real-time guarantees, and IoT sensors must function for years on battery power. These constraints necessitate heterogeneous System-on-Chip (SoC) architectures that coordinate multiple specialized processors within a single chip while meeting stringent power, thermal, and latency requirements fundamentally different from data center deployments.
 
@@ -3229,7 +3230,7 @@ While Qualcomm's approach emphasizes diverse processor specialization, Apple's v
 
 Beyond these vertically integrated solutions from Qualcomm and Apple, ARM's IP licensing model offers a fundamentally different approach that enables SoC designers to customize processor combinations based on target applications. The Mali-G78 GPU's 24 cores can be paired with Ethos-N78 NPU for balanced general-purpose and AI acceleration, while the Cortex-M55 microcontroller integrates Ethos-U55 microNPU for ultra-low-power edge applications. This modular flexibility allows automotive SoCs to emphasize deterministic real-time processing while smartphone SoCs optimize for interactive performance and battery efficiency.
 
-### Dynamic Workload Distribution Strategies {#sec-ai-acceleration-dynamic-workload-distribution-strategies-7e00-strategies-7e00}
+### Dynamic Workload Distribution Strategies {#sec-ai-acceleration-dynamic-workload-distribution-strategies-7e00}
 
 With multiple specialized processors available on heterogeneous SoCs, the critical challenge becomes intelligently distributing neural network operations across these resources to maximize performance while respecting power and latency constraints.
 
@@ -3254,7 +3255,7 @@ When DVFS alone cannot maintain the power envelope, mobile SoCs implement therma
 
 Beyond real-time power and thermal management, mobile AI systems must also adapt their computational strategies based on battery state and charging status. During low battery conditions, the system may switch from high-accuracy models to efficient approximations, migrate workloads from power-hungry NPU to energy-efficient DSP, or reduce inference frequency while maintaining application responsiveness. Conversely, during charging, the system can enable higher-performance models and increase processing frequency to deliver enhanced user experiences.
 
-### Automotive Heterogeneous AI Systems {#sec-ai-acceleration-automotive-heterogeneous-ai-systems-deda-ai-systems-deda}
+### Automotive Heterogeneous AI Systems {#sec-ai-acceleration-automotive-heterogeneous-ai-systems-deda}
 
 Automotive applications introduce unique heterogeneous computing challenges that combine mobile-style power efficiency with hard real-time guarantees and functional safety requirements—a combination that demands fundamentally different architectural approaches.
 
