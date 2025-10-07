@@ -140,16 +140,12 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
     'tlpdbopt_w32_multi_user 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
     Write-Host '✅ Profile created' ; `
     Write-Host '📋 Profile settings: scheme-full, no docs/sources' ; `
-    Write-Host '🔄 Running TeX Live installer (batch mode)...' ; `
+    Write-Host '🔄 Running TeX Live installer (verbose, no redirects for real-time output)...' ; `
     $installProcess = Start-Process -FilePath $installerPath `
-        -ArgumentList '-profile', $profilePath, '-no-gui', '-non-admin' `
-        -Wait -PassThru -NoNewWindow -RedirectStandardOutput 'C:\temp\texlive-install.log' -RedirectStandardError 'C:\temp\texlive-install-error.log' ; `
+        -ArgumentList '-profile', $profilePath, '-no-gui', '-v' `
+        -Wait -PassThru -NoNewWindow ; `
     if ($installProcess.ExitCode -ne 0) { `
         Write-Host '❌ ERROR: TeX Live installation failed' ; `
-        Write-Host '📋 Installer output:' ; `
-        Get-Content 'C:\temp\texlive-install.log' -ErrorAction SilentlyContinue | Select-Object -Last 50 ; `
-        Write-Host '📋 Installer errors:' ; `
-        Get-Content 'C:\temp\texlive-install-error.log' -ErrorAction SilentlyContinue ; `
         throw "TeX Live installation failed with exit code $($installProcess.ExitCode)" ; `
     } ; `
     Write-Host '✅ TeX Live installed successfully' ; `
