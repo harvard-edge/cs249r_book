@@ -103,14 +103,12 @@ RUN Write-Host '✅ Dependency file copy complete'
 RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
     Write-Host '📦 Using official TeX Live network installer' ; `
     Write-Host '⏰ Installation will take 15-20 minutes' ; `
-    `
     Write-Host '🔄 Downloading TeX Live installer...' ; `
     $installerUrl = 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' ; `
     $installerPath = 'C:\temp\install-tl-windows.exe' ; `
     Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing ; `
     $installerSizeMB = [math]::Round((Get-Item $installerPath).Length / 1MB, 2) ; `
     Write-Host ('✅ Downloaded installer (' + $installerSizeMB + ' MB)') ; `
-    `
     Write-Host '🔧 Creating installation profile...' ; `
     $profilePath = 'C:\temp\texlive.profile' ; `
     'selected_scheme scheme-full' | Out-File -FilePath $profilePath -Encoding ASCII ; `
@@ -142,12 +140,10 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
     'tlpdbopt_w32_multi_user 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
     Write-Host '✅ Profile created' ; `
     Write-Host '📋 Profile settings: scheme-full, no docs/sources' ; `
-    `
     Write-Host '🔄 Running TeX Live installer (batch mode)...' ; `
     $installProcess = Start-Process -FilePath $installerPath `
         -ArgumentList '-profile', $profilePath, '-no-gui', '-non-admin' `
         -Wait -PassThru -NoNewWindow -RedirectStandardOutput 'C:\temp\texlive-install.log' -RedirectStandardError 'C:\temp\texlive-install-error.log' ; `
-    `
     if ($installProcess.ExitCode -ne 0) { `
         Write-Host '❌ ERROR: TeX Live installation failed' ; `
         Write-Host '📋 Installer output:' ; `
@@ -157,7 +153,6 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
         throw "TeX Live installation failed with exit code $($installProcess.ExitCode)" ; `
     } ; `
     Write-Host '✅ TeX Live installed successfully' ; `
-    `
     Write-Host '🔍 Locating TeX Live installation...' ; `
     $texLiveBin = 'C:\texlive\2025\bin\windows' ; `
     if (-not (Test-Path $texLiveBin)) { `
@@ -168,7 +163,6 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
         throw "TeX Live bin directory not found at $texLiveBin" ; `
     } ; `
     Write-Host "✅ TeX Live bin: $texLiveBin" ; `
-    `
     Write-Host '🔧 Adding TeX Live to PATH...' ; `
     $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
     $newPath = $texLiveBin + ';' + $mach ; `
