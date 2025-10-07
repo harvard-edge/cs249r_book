@@ -109,7 +109,8 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
     $installerUrl = 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' ; `
     $installerPath = 'C:\temp\install-tl-windows.exe' ; `
     Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing ; `
-    Write-Host "✅ Downloaded installer ($([math]::Round((Get-Item $installerPath).Length / 1MB, 2)) MB)" ; `
+    $installerSizeMB = [math]::Round((Get-Item $installerPath).Length / 1MB, 2) ; `
+    Write-Host "✅ Downloaded installer ($installerSizeMB MB)" ; `
     `
     Write-Host '🔧 Creating installation profile...' ; `
     $profilePath = 'C:\temp\texlive.profile' ; `
