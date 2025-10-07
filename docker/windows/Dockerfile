@@ -140,13 +140,11 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
     'tlpdbopt_w32_multi_user 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
     Write-Host '✅ Profile created' ; `
     Write-Host '📋 Profile settings: scheme-full, no docs/sources' ; `
-    Write-Host '🔄 Running TeX Live installer (verbose, no redirects for real-time output)...' ; `
-    $installProcess = Start-Process -FilePath $installerPath `
-        -ArgumentList '-profile', $profilePath, '-no-gui', '-v' `
-        -Wait -PassThru -NoNewWindow ; `
-    if ($installProcess.ExitCode -ne 0) { `
+    Write-Host '🔄 Running TeX Live installer (verbose mode for real-time output)...' ; `
+    & $installerPath -profile $profilePath -no-gui -v ; `
+    if ($LASTEXITCODE -ne 0) { `
         Write-Host '❌ ERROR: TeX Live installation failed' ; `
-        throw "TeX Live installation failed with exit code $($installProcess.ExitCode)" ; `
+        throw "TeX Live installation failed with exit code $LASTEXITCODE" ; `
     } ; `
     Write-Host '✅ TeX Live installed successfully' ; `
     Write-Host '🔍 Locating TeX Live installation...' ; `
