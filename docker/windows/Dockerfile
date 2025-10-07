@@ -219,3 +219,35 @@ RUN Write-Host '=== STARTING SCOOP INSTALLATION ===' ; `
     $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
     [Environment]::SetEnvironmentVariable('PATH', ($scoopShims + ';' + $mach), 'Machine') ; `
     Write-Host '🔗 Added Scoop shims to PATH' ; `
+# ------------------------------------------------------------
+# FINAL: Verification of all installations
+# ------------------------------------------------------------
+RUN Write-Host '' ; `
+    Write-Host '============================================' ; `
+    Write-Host '=== INSTALLATION VERIFICATION ===' ; `
+    Write-Host '============================================' ; `
+    Write-Host '' ; `
+    Write-Host '📦 PowerShell Version:' ; `
+    pwsh --version ; `
+    Write-Host '' ; `
+    Write-Host '📦 TeX Live - lualatex:' ; `
+    lualatex --version | Select-Object -First 2 ; `
+    Write-Host '' ; `
+    Write-Host '📦 TeX Live - tlmgr:' ; `
+    tlmgr --version | Select-Object -First 1 ; `
+    Write-Host '' ; `
+    Write-Host '📦 Quarto:' ; `
+    quarto --version ; `
+    Write-Host '' ; `
+    Write-Host '📦 Python:' ; `
+    python --version ; `
+    Write-Host '' ; `
+    Write-Host '📦 R:' ; `
+    Rscript --version 2>&1 | Select-Object -First 1 ; `
+    Write-Host '' ; `
+    Write-Host '📦 Ghostscript:' ; `
+    gs --version ; `
+    Write-Host '' ; `
+    Write-Host '============================================' ; `
+    Write-Host '✅ ALL TOOLS VERIFIED AND READY' ; `
+    Write-Host '============================================'
