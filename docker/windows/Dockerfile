@@ -147,8 +147,9 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
     `
     Write-Host '🔧 Adding TeX Live to PATH...' ; `
     $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
-    [Environment]::SetEnvironmentVariable('PATH', "$texLiveBin;$mach", 'Machine') ; `
-    $env:PATH = "$texLiveBin;$env:PATH" ; `
+    $newPath = $texLiveBin + ';' + $mach ; `
+    [Environment]::SetEnvironmentVariable('PATH', $newPath, 'Machine') ; `
+    $env:PATH = $texLiveBin + ';' + $env:PATH ; `
     Write-Host '✅ PATH updated' ; `
     `
     Write-Host '🔍 Verifying lualatex...' ; `
