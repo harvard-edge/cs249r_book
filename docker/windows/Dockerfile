@@ -218,7 +218,13 @@ RUN Write-Host '=== STARTING SCOOP INSTALLATION ===' ; `
     Write-Host "Scoop shims path: $scoopShims" ; `
     $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
     [Environment]::SetEnvironmentVariable('PATH', ($scoopShims + ';' + $mach), 'Machine') ; `
-    Write-Host '🔗 Added Scoop shims to PATH' ; `
+    Write-Host '🔗 Added Scoop shims to PATH'
+
+# ------------------------------------------------------------
+# Set PATH at Docker image level for all installed tools
+# ------------------------------------------------------------
+ENV PATH="C:\texlive\2025\bin\windows;C:\Program Files\PowerShell\7;C:\Users\ContainerAdministrator\scoop\shims;${PATH}"
+
 # ------------------------------------------------------------
 # FINAL: Verification of all installations
 # ------------------------------------------------------------
