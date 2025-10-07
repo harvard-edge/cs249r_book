@@ -227,10 +227,6 @@ Machine learning computational requirements reveal limitations in traditional pr
 
 [^fn-warp]: **Warp**: NVIDIA's fundamental execution unit of 32 threads that execute the same instruction simultaneously in lock-step. All threads in a warp share instruction fetch and decode, maximizing instruction throughput. If threads diverge (different control flow), the warp becomes inefficient by serializing execution paths. Modern GPUs achieve best performance when threads in a warp access consecutive memory addresses, enabling memory coalescing.
 
-[^fn-opencl]: **OpenCL (Open Computing Language)**: Cross-platform framework for parallel computing across CPUs, GPUs, FPGAs, and other processors. Developed by Apple and standardized by Khronos Group in 2009, OpenCL enables portable code but often sacrifices performance compared to vendor-specific solutions like CUDA or ROCm. While theoretically hardware-agnostic, achieving optimal performance requires hardware-specific tuning, limiting its practical portability advantages.
-
-[^fn-cuda]: **CUDA (Compute Unified Device Architecture)**: NVIDIA's proprietary parallel computing platform and programming model, introduced in 2006. CUDA provides C/C++ extensions and libraries (cuBLAS, cuDNN, cuFFT) that enable efficient GPU programming. Despite being proprietary, CUDA dominates AI development due to mature ecosystem and optimization tools. NVIDIA's $47 billion data center revenue (2024) largely stems from CUDA's software moat that locks developers into NVIDIA hardware.
-
 [^fn-memory-coalescing]: **Memory Coalescing**: Hardware optimization where consecutive threads in a warp access consecutive memory addresses, enabling the memory controller to combine multiple requests into a single efficient transaction. Uncoalesced access (threads accessing scattered addresses) can reduce GPU memory bandwidth by 10-20$\times$. This is why tensor layouts and data organization are crucial for GPU performance—poorly structured data causes expensive scattered memory access patterns.
 
 [^fn-nhwc-nchw]: **NHWC vs NCHW**: Tensor layout formats where letters indicate dimension order: N(batch), H(height), W(width), C(channels). NHWC stores data row-by-row with channels interleaved (CPU-friendly), while NCHW groups all values for each channel together (GPU-friendly). A 224×224 RGB image in NHWC stores as [R1,G1,B1,R2,G2,B2,...] while NCHW stores as [R1,R2,...,G1,G2,...,B1,B2,...]. This seemingly minor difference can impact performance by 2-5$\times$ depending on hardware.
@@ -285,7 +281,7 @@ For AI acceleration, this transition has introduced challenges that extend well 
 
 Scalability drives additional complexity as AI accelerators deploy across diverse environments from high-throughput data centers to resource-constrained edge and mobile devices, requiring tailored performance tuning and energy efficiency strategies. Integration into heterogeneous computing[^fn-heterogeneous] environments demands interoperability that enables specialized units to coordinate effectively with conventional CPUs and GPUs in distributed systems.
 
-[^fn-heterogeneous]: **Heterogeneous Computing**: Computing systems that combine different types of processors (CPUs, GPUs, TPUs, FPGAs) to optimize performance for diverse workloads. Modern data centers mix x86 CPUs for control tasks, GPUs for training, and TPUs for inference. Programming heterogeneous systems requires frameworks like OpenCL[^fn-opencl] or CUDA[^fn-cuda] that can coordinate execution across different architectures, but offers 10-100$\times$ efficiency gains by matching each task to optimal hardware.
+[^fn-heterogeneous]: **Heterogeneous Computing**: Computing systems that combine different types of processors (CPUs, GPUs, TPUs, FPGAs) to optimize performance for diverse workloads. Modern data centers mix x86 CPUs for control tasks, GPUs for training, and TPUs for inference. Programming heterogeneous systems requires frameworks like OpenCL or CUDA that can coordinate execution across different architectures, but offers 10-100$\times$ efficiency gains by matching each task to optimal hardware.
 
 AI accelerators represent a system-level transformation that requires tight hardware-software coupling. This transformation manifests in three specific computational patterns, compute primitives, that drive accelerator design decisions. Understanding these primitives determines the architectural features that enable 100-1000$\times$ performance improvements through coordinated hardware specialization and software optimization strategies examined in subsequent sections.
 
@@ -652,7 +648,7 @@ Neural networks employ matrix operations across diverse architectural patterns b
 
 #### Matrix Computation Types in NNs {#sec-ai-acceleration-matrix-computation-types-nns-0d62}
 
-Matrix operations appear consistently across modern neural architectures, as illustrated in @lst-matrix_patterns.
+Matrix operations appear consistently across modern neural architectures, as illustrated in @lst-matrix_patterns. Convolution operations are transformed into matrix multiplications through the im2col technique[^fn-im2col], enabling efficient execution on hardware optimized for matrix operations.
 
 ::: {#lst-matrix_patterns lst-cap="**Linear Layers**: Layer transformations combine input features to produce hidden representations. Matrix operations in neural networks enable efficient feature extraction and transformation, forming the backbone of many machine learning architectures."}
 ```{.python}
@@ -669,7 +665,7 @@ attention = matmul(Q, K.T)
 # Compare all queries with all keys [query_dim x key_dim]
 
 # Convolutions - Matrix multiply after reshaping
-patches = im2col(input)[^fn-im2col]
+patches = im2col(input)
 # Convert [H x W x C] image to matrix of patches
 output = matmul(kernel, patches)
 # Apply kernels to all patches simultaneously
@@ -865,7 +861,7 @@ st1w z2.s, p0, [x1]     # Store results
 
 Processor architectures continue to expand SIMD capabilities to accommodate increasing computational demands. Intel's Advanced Matrix Extensions (AMX) [@intel2021amx] and ARM's SVE2 architecture [@stephens2017arm] provide flexible SIMD execution, enabling software to scale across different hardware implementations.
 
-To address these limitations, SIMT extends SIMD principles by enabling parallel execution across multiple independent threads, each maintaining its own program counter and architectural state [@lindholm2008nvidia]. This model maps naturally to matrix computations, where each thread processes different portions of a workload while still benefiting from shared instruction execution. In NVIDIA's GPU architectures, each Streaming Multiprocessor (SM)[^fn-streaming-multiprocessor] coordinates thousands of threads executing in parallel, allowing for efficient scaling of neural network computations, as demonstrated in @lst-cuda_simt.
+To address these limitations, SIMT extends SIMD principles by enabling parallel execution across multiple independent threads, each maintaining its own program counter and architectural state [@lindholm2008nvidia]. This model maps naturally to matrix computations, where each thread processes different portions of a workload while still benefiting from shared instruction execution. In NVIDIA's GPU architectures, each Streaming Multiprocessor (SM)[^fn-streaming-multiprocessor] coordinates thousands of threads executing in parallel, allowing for efficient scaling of neural network computations, as demonstrated in @lst-cuda_simt. Threads are organized into warps[^fn-warp], which are the fundamental execution units that enable SIMT efficiency.
 
 ::: {#lst-cuda_simt lst-cap="**SIMT Execution**: Each thread processes a unique output element in parallel, demonstrating how SIMT enables efficient matrix multiplication on GPUs."}
 ```{.c}
@@ -877,7 +873,7 @@ __global__ void matrix_multiply(float* C, float* A, float*
 
     float sum = 0.0f;
     for (int k = 0; k < N; k++) {
-        // Threads in a warp[^fn-warp] execute in parallel
+        // Threads in a warp execute in parallel
         sum += A[row * N + k] * B[k * N + col];
     }
     C[row * N + col] = sum;
@@ -2799,7 +2795,7 @@ The compiler and runtime systems examined thus far optimize execution within sin
 
 The transition from single-chip to multi-chip architectures represents more than simple replication—it requires rethinking how computations distribute across processors, how data flows between chips, and how systems maintain coherence at scale. Where single-chip optimization focuses on maximizing utilization within fixed resources, multi-chip systems must balance computational distribution against communication overhead, memory coherence costs, and synchronization complexity. These challenges fundamentally transform the optimization landscape, requiring new abstractions and techniques beyond those developed for individual accelerators.
 
-Modern AI workloads increasingly demand computational resources that exceed the capabilities of single-chip accelerators. This section examines how AI systems scale from individual processors to multi-chip architectures, analyzing the motivation behind different scaling approaches and their impact on system design. These scaling considerations are fundamental to the distributed training strategies covered in @sec-ai-training and the operational challenges discussed in @sec-ml-operations. The security implications of distributed acceleration, particularly around model protection and data privacy, are examined in @sec-privacy-security. By understanding this progression, we can better appreciate how each component of the AI hardware stack, ranging from compute units to memory systems, must adapt to support large-scale machine learning workloads.
+Modern AI workloads increasingly demand computational resources that exceed the capabilities of single-chip accelerators. This section examines how AI systems scale from individual processors to multi-chip architectures, analyzing the motivation behind different scaling approaches and their impact on system design. These scaling considerations are fundamental to the distributed training strategies covered in @sec-ai-training and the operational challenges discussed in @sec-ml-operations. The security implications of distributed acceleration, particularly around model protection and data privacy, are examined in @sec-security-privacy. By understanding this progression, we can better appreciate how each component of the AI hardware stack, ranging from compute units to memory systems, must adapt to support large-scale machine learning workloads.
 
 The scaling of AI systems follows a natural progression, starting with integration within a single package through chiplet architectures, extending to multi-GPU configurations within a server, expanding to distributed accelerator pods, and culminating in wafer-scale integration. Each approach presents unique trade-offs between computational density, communication overhead, and system complexity. For instance, chiplet architectures maintain high-speed interconnects within a package, while distributed systems sacrifice communication latency for massive parallelism.
 

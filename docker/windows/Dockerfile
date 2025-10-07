@@ -96,9 +96,6 @@ COPY tools/dependencies/tl_packages C:/temp/tl_packages
 COPY docker/windows/verify_r_packages.R C:/temp/verify_r_packages.R
 RUN Write-Host '✅ Dependency file copy complete'
 
-# Copy the pre-generated texlive.profile from the 'prep' stage
-COPY --from=prep C:/temp/texlive.profile C:/temp/texlive.profile
-
 # ------------------------------------------------------------
 # PHASE 4: Install TeX Live (Official network installer)
 # ------------------------------------------------------------
