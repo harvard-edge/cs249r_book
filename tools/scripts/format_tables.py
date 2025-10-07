@@ -1,673 +1,870 @@
 #!/usr/bin/env python3
 """
-Table Formatter for MLSysBook
+Production Table Formatter for MLSysBook
 
-This script formats markdown grid tables to ensure:
-1. All column headers (first row) are bolded
-2. All first column entries are bolded
-3. Column widths are properly calculated based on content
-4. Alignment bars match the actual column widths
-5. Content is left-aligned within cells
+This script formats and validates grid tables in Quarto .qmd files.
+Designed for use in CI/CD pipelines and pre-commit hooks.
+
+Key Features:
+- Smart column header bolding (always, including multiline headers)
+- Intelligent first column bolding (based on content analysis)
+- Proper spacing calculation accounting for bold markers
+- Handles multiline headers, multiline cells, empty cells, and Unicode
+- Comprehensive validation with detailed error reporting
+- Exit codes suitable for CI/CD integration
 
 Usage:
-    python format_tables.py --check <file>      # Check if tables are formatted correctly
-    python format_tables.py --fix <file>        # Format tables in place
-    python format_tables.py --check-all         # Check all .qmd files in contents/core
-    python format_tables.py --fix-all           # Format all .qmd files in contents/core
+    # Check single file
+    python format_tables.py --check -f quarto/contents/core/efficient_ai/efficient_ai.qmd
+    
+    # Fix single file  
+    python format_tables.py --fix -f quarto/contents/core/efficient_ai/efficient_ai.qmd
+    
+    # Check all files in a directory
+    python format_tables.py --check -d quarto/contents/core/optimizations
+    
+    # Fix all chapter files
+    python format_tables.py --fix --all
+    
+    # With text wrapping
+    python format_tables.py --fix --all --max-width 60
+
+Exit Codes:
+    0: Success (all tables properly formatted)
+    1: Formatting issues found
+    2: Validation errors (structural problems)
+    3: File errors
 """
 
 import argparse
-import re
 import sys
-from pathlib import Path
-from typing import List, Tuple, Optional
 import unicodedata
+from pathlib import Path
+from typing import List, Dict, Optional, Tuple
+from dataclasses import dataclass
+from enum import Enum
+
+
+class ExitCode(Enum):
+    """Exit codes for CI/CD integration."""
+    SUCCESS = 0
+    FORMATTING_ISSUES = 1
+    VALIDATION_ERRORS = 2
+    FILE_ERRORS = 3
+
+
+@dataclass
+class TableIssue:
+    """Represents an issue found in a table."""
+    line_num: int
+    severity: str  # 'error' or 'warning'
+    message: str
+
+
+class GridTableParser:
+    """Parser for grid-style markdown tables."""
+    
+    def __init__(self, lines: List[str], start_line: int = 0):
+        self.lines = lines
+        self.start_line = start_line
+        self.issues: List[TableIssue] = []
+        
+        # Parsed components
+        self.header_rows: List[List[str]] = []  # Changed to support multiline headers
+        self.header_cells: List[str] = []  # Kept for backward compatibility (first row)
+        self.data_rows: List[List[str]] = []
+        self.alignments: List[str] = []
+        self.num_columns = 0
+        
+    def parse(self) -> bool:
+        """
+        Parse the table. Returns True if successful, False otherwise.
+        Issues are stored in self.issues.
+        """
+        if not self.lines or not self.lines[0].strip().startswith('+'):
+            self.issues.append(TableIssue(
+                self.start_line, 'error',
+                'Table must start with border line (+----+...)'
+            ))
+            return False
+        
+        try:
+            # Skip first border
+            idx = 1
+            
+            # Parse header rows (may be multiline)
+            if idx >= len(self.lines) or not self.lines[idx].strip().startswith('|'):
+                self.issues.append(TableIssue(
+                    self.start_line + idx, 'error',
+                    'Expected header row after top border'
+                ))
+                return False
+            
+            # Read all header rows until we hit the separator
+            while idx < len(self.lines) and self.lines[idx].strip().startswith('|'):
+                header_row = self._parse_row(self.lines[idx])
+                if not self.header_rows:  # First header row
+                    self.num_columns = len(header_row)
+                    self.header_cells = header_row  # For backward compatibility
+                elif len(header_row) != self.num_columns:
+                    self.issues.append(TableIssue(
+                        self.start_line + idx, 'error',
+                        f'Header row has {len(header_row)} columns, expected {self.num_columns}'
+                    ))
+                    return False
+                self.header_rows.append(header_row)
+                idx += 1
+            
+            if not self.header_rows:
+                self.issues.append(TableIssue(
+                    self.start_line + idx, 'error',
+                    'No header rows found'
+                ))
+                return False
+            
+            # Parse separator with alignments
+            if idx >= len(self.lines) or not self.lines[idx].strip().startswith('+'):
+                self.issues.append(TableIssue(
+                    self.start_line + idx, 'error',
+                    'Expected separator with alignment markers (+:===+...)'
+                ))
+                return False
+            
+            self.alignments = self._extract_alignments(self.lines[idx])
+            if len(self.alignments) != self.num_columns:
+                self.issues.append(TableIssue(
+                    self.start_line + idx, 'error',
+                    f'Alignment count ({len(self.alignments)}) != column count ({self.num_columns})'
+                ))
+                return False
+            idx += 1
+            
+            # Parse data rows
+            while idx < len(self.lines):
+                line = self.lines[idx].strip()
+                if line.startswith('|'):
+                    cells = self._parse_row(line)
+                    if len(cells) != self.num_columns:
+                        self.issues.append(TableIssue(
+                            self.start_line + idx, 'error',
+                            f'Row has {len(cells)} columns, expected {self.num_columns}'
+                        ))
+                        return False
+                    self.data_rows.append(cells)
+                    idx += 1
+                elif line.startswith('+'):
+                    # Border between rows or end of table
+                    idx += 1
+                    if idx >= len(self.lines) or not self.lines[idx].strip().startswith('|'):
+                        # End of table
+                        break
+                else:
+                    # End of table
+                    break
+            
+            return True
+            
+        except Exception as e:
+            self.issues.append(TableIssue(
+                self.start_line, 'error',
+                f'Parsing error: {str(e)}'
+            ))
+            return False
+    
+    def _parse_row(self, row: str) -> List[str]:
+        """Parse a table row into cells."""
+        row = row.strip()
+        if row.startswith('|'):
+            row = row[1:]
+        if row.endswith('|'):
+            row = row[:-1]
+        return [cell.strip() for cell in row.split('|')]
+    
+    def _extract_alignments(self, separator: str) -> List[str]:
+        """Extract alignment from separator line."""
+        parts = separator.strip().split('+')[1:-1]
+        alignments = []
+        
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            has_left = part.startswith(':')
+            has_right = part.endswith(':')
+            
+            if has_left and has_right:
+                alignments.append('center')
+            elif has_left:
+                alignments.append('left')
+            elif has_right:
+                alignments.append('right')
+            else:
+                alignments.append('left')
+        
+        return alignments
 
 
 def display_width(text: str) -> int:
     """
-    Calculate the display width of text, accounting for Unicode characters.
-    
-    Bold markers (**text**) are not counted in display width.
-    East Asian Wide and Fullwidth characters count as 2.
+    Calculate display width of text.
+    Bold markers (**) don't count toward width.
+    Unicode wide characters count as 2.
     """
-    # Remove bold markers for width calculation
-    text = text.replace('**', '')
+    # Remove bold markers
+    clean_text = text.replace('**', '')
     
     width = 0
-    for char in text:
-        if unicodedata.east_asian_width(char) in ('F', 'W'):
+    for char in clean_text:
+        ea_width = unicodedata.east_asian_width(char)
+        if ea_width in ('F', 'W'):  # Fullwidth or Wide
             width += 2
         else:
             width += 1
+    
     return width
 
 
-def parse_table(lines: List[str]) -> Optional[dict]:
-    """
-    Parse a markdown grid table into structured data.
-    
-    Returns:
-        dict with 'start_line', 'end_line', 'header', 'separator', 'rows', 'caption'
-        or None if not a valid table
-    """
-    if not lines or not lines[0].startswith('+'):
-        return None
-    
-    table_data = {
-        'start_line': 0,
-        'end_line': 0,
-        'header_border': '',
-        'header': '',
-        'separator': '',
-        'rows': [],
-        'footer_border': '',
-        'caption': ''
-    }
-    
-    i = 0
-    
-    # First line should be top border
-    if not lines[i].startswith('+'):
-        return None
-    table_data['header_border'] = lines[i]
-    i += 1
-    
-    # Next should be header row
-    if i >= len(lines) or not lines[i].startswith('|'):
-        return None
-    table_data['header'] = lines[i]
-    i += 1
-    
-    # Next should be separator with := for alignment
-    if i >= len(lines) or not lines[i].startswith('+'):
-        return None
-    table_data['separator'] = lines[i]
-    i += 1
-    
-    # Parse data rows
-    while i < len(lines):
-        line = lines[i]
-        if line.startswith('|'):
-            table_data['rows'].append(line)
-            i += 1
-        elif line.startswith('+'):
-            # Row separator or footer
-            if i + 1 < len(lines) and lines[i + 1].startswith('|'):
-                # This is a row separator, include it with the row
-                table_data['rows'].append(line)
-                i += 1
-            else:
-                # This is the footer border
-                table_data['footer_border'] = line
-                i += 1
-                break
-        else:
-            break
-    
-    # Check for caption (starts with : after table)
-    if i < len(lines) and lines[i].strip().startswith(':'):
-        table_data['caption'] = lines[i]
-        i += 1
-    
-    table_data['end_line'] = i
-    
-    return table_data
+def is_bolded(text: str) -> bool:
+    """Check if text is already bolded."""
+    text = text.strip()
+    return (text.startswith('**') and text.endswith('**') and len(text) > 4)
 
 
-def parse_row(row: str) -> List[str]:
-    """Parse a table row into individual cell contents."""
-    # Remove leading and trailing pipes
-    row = row.strip()
-    if row.startswith('|'):
-        row = row[1:]
-    if row.endswith('|'):
-        row = row[:-1]
-    
-    # Split by pipes and strip whitespace
-    cells = [cell.strip() for cell in row.split('|')]
-    return cells
+def add_bold(text: str) -> str:
+    """Add bold markers to text if not already bolded. Returns empty string for empty text."""
+    text = text.strip()
+    if not text:
+        return ''
+    if is_bolded(text):
+        return text
+    return f"**{text}**"
 
 
-def should_bold_first_column(header: str, rows: List[str], caption: str = '') -> bool:
+def remove_bold(text: str) -> str:
+    """Remove bold markers from text."""
+    text = text.strip()
+    if is_bolded(text):
+        return text[2:-2]
+    return text
+
+
+def should_bold_first_column(header_cells: List[str], data_rows: List[List[str]]) -> bool:
     """
-    Determine if the first column should be bolded based on table type.
+    Determine if first column should be bolded based on intelligent analysis.
     
-    Heuristics:
-    1. Comparison/trade-off tables: YES (first column has descriptive categories)
-    2. Data tables: NO (first column contains numeric/simple data)
-    3. Definition tables: YES (first column has terms)
+    Returns True for comparison/definition tables where first column contains:
+    - Category names (Aspect, Technique, Category, Architecture, etc.)
+    - Descriptive multi-word phrases
     
-    Returns True if first column should be bolded.
+    Returns False for data tables where first column contains:
+    - Numbers, IDs, years
+    - Simple enumeration
     """
-    header_cells = parse_row(header)
-    
-    # If no first column, return False
     if not header_cells:
         return False
     
-    first_header = header_cells[0].replace('**', '').strip().lower()
+    first_header = remove_bold(header_cells[0]).lower()
     
-    # Check caption for keywords suggesting comparison table
-    caption_lower = caption.lower()
-    comparison_keywords = ['comparison', 'trade-off', 'tradeoff', 'overview', 'summary', 
-                          'criteria', 'characteristics', 'features', 'differences']
-    if any(keyword in caption_lower for keyword in comparison_keywords):
+    # Keywords that indicate first column should be bolded
+    bold_indicators = [
+        'aspect', 'technique', 'category', 'architecture', 'challenge',
+        'criterion', 'criteria', 'feature', 'characteristic', 'dimension',
+        'metric', 'property', 'attribute', 'method', 'approach', 'strategy',
+        'type', 'principle', 'factor', 'component', 'element', 'term',
+        'concept', 'deployment context', 'system aspect', 'design pattern',
+        'era', 'role', 'threat type', 'mechanism', 'resource type',
+        'storage tier', 'stage', 'characteristic'
+    ]
+    
+    # Check if header matches bold indicators
+    if any(indicator in first_header for indicator in bold_indicators):
         return True
     
-    # Check first column header for descriptive names
-    descriptive_headers = ['criterion', 'criteria', 'aspect', 'feature', 'characteristic',
-                          'dimension', 'metric', 'property', 'attribute', 'technique',
-                          'method', 'approach', 'strategy', 'type', 'category', 'principle',
-                          'challenge', 'issue', 'factor', 'component', 'element']
-    if any(desc in first_header for desc in descriptive_headers):
-        return True
+    # Keywords that indicate DON'T bold
+    no_bold_indicators = [
+        'id', '#', 'number', 'index', 'rank', 'year', 'date', 'time',
+        'count', 'order'
+    ]
     
-    # Check first column header for simple data indicators (DON'T bold these)
-    simple_data_headers = ['id', '#', 'number', 'index', 'rank', 'year', 'date', 'time']
-    if any(simple in first_header for simple in simple_data_headers):
+    if any(indicator in first_header for indicator in no_bold_indicators):
         return False
     
     # Analyze first column content
-    first_col_values = []
-    for row in rows:
-        if row.startswith('|'):
-            cells = parse_row(row)
-            if cells and cells[0].strip():
-                first_col_values.append(cells[0].replace('**', '').strip())
+    if not data_rows:
+        return True  # Default to bolding if no data
+    
+    first_col_values = [row[0] for row in data_rows if row and row[0].strip()]
     
     if not first_col_values:
-        return True  # Default to bolding if no content
+        return True
     
-    # Check if first column contains mostly numbers (data table)
+    # Check if mostly numeric (data table)
     numeric_count = 0
     for value in first_col_values:
-        # Remove common non-numeric characters
-        cleaned = value.replace('%', '').replace('$', '').replace(',', '').strip()
+        clean = remove_bold(value).replace('%', '').replace('$', '').replace(',', '').strip()
         try:
-            float(cleaned)
+            float(clean)
             numeric_count += 1
         except ValueError:
             pass
     
-    if numeric_count > len(first_col_values) * 0.7:  # More than 70% numeric
+    if numeric_count > len(first_col_values) * 0.7:
         return False
     
-    # Check if first column values are descriptive (multi-word phrases)
+    # Check if descriptive (multi-word = comparison table)
     descriptive_count = 0
     for value in first_col_values:
-        # Count words (excluding special characters)
-        words = value.replace('/', ' ').replace('-', ' ').split()
-        if len(words) >= 2:  # Multi-word = descriptive
+        clean = remove_bold(value)
+        words = clean.replace('/', ' ').replace('-', ' ').replace('(', ' ').split()
+        # Filter out empty words
+        words = [w for w in words if w.strip()]
+        if len(words) >= 2:
             descriptive_count += 1
     
-    if descriptive_count > len(first_col_values) * 0.5:  # More than 50% descriptive
-        return True
-    
-    # Check for question-like entries (with '?')
-    if any('?' in value for value in first_col_values):
+    if descriptive_count > len(first_col_values) * 0.4:
         return True
     
     # Default: bold for comparison-style tables
     return True
 
 
-def bold_text(text: str) -> str:
-    """Add bold markers to text if not already bolded. Returns empty string if text is empty."""
-    text = text.strip()
-    # Don't bold empty strings
-    if not text:
-        return ''
-    # Don't double-bold
-    if text.startswith('**') and text.endswith('**'):
-        return text
-    return f"**{text}**"
-
-
-def is_bolded(text: str) -> bool:
-    """Check if text is already bolded."""
-    text = text.strip()
-    return text.startswith('**') and text.endswith('**')
-
-
-def calculate_column_widths(header: str, rows: List[str]) -> List[int]:
+def calculate_column_widths(parser: GridTableParser, 
+                            bold_headers: bool = True,
+                            bold_first_col: bool = False) -> List[int]:
     """
-    Calculate the width needed for each column based on content.
-    
-    Returns list of widths for each column.
+    Calculate required width for each column, accounting for bolding.
     """
-    # Parse all rows to get cell contents
-    all_rows = [parse_row(header)]
-    for row in rows:
-        if row.startswith('|'):
-            all_rows.append(parse_row(row))
+    widths = [0] * parser.num_columns
     
-    # Find number of columns
-    num_cols = len(all_rows[0])
+    # Header widths (with potential bolding)
+    for i, cell in enumerate(parser.header_cells):
+        text = cell
+        if bold_headers and not is_bolded(cell) and cell.strip():
+            text = add_bold(cell)
+        widths[i] = max(widths[i], display_width(text))
     
-    # Calculate max width for each column
-    widths = [0] * num_cols
-    for row in all_rows:
-        for col_idx, cell in enumerate(row):
-            if col_idx < num_cols:
-                width = display_width(cell)
-                widths[col_idx] = max(widths[col_idx], width)
+    # Data row widths
+    for row in parser.data_rows:
+        for i, cell in enumerate(row):
+            text = cell
+            # First column might need bolding (but not if empty - multiline cells)
+            if i == 0 and bold_first_col and cell.strip() and not is_bolded(cell):
+                text = add_bold(cell)
+            widths[i] = max(widths[i], display_width(text))
     
     return widths
 
 
-def extract_alignment(separator: str) -> List[str]:
-    """
-    Extract alignment information from separator line.
-    
-    Returns list of alignments: 'left', 'center', or 'right'
-    """
-    # Split by + to get each column separator
-    parts = separator.split('+')[1:-1]  # Remove empty first and last
-    
-    alignments = []
-    for part in parts:
-        part = part.strip()
-        if part.startswith(':') and part.endswith(':'):
-            alignments.append('center')
-        elif part.startswith(':'):
-            alignments.append('left')
-        elif part.endswith(':'):
-            alignments.append('right')
-        else:
-            alignments.append('left')  # Default
-    
-    return alignments
-
-
 def build_border(widths: List[int]) -> str:
-    """Build a border line like +----+----+----+"""
-    parts = ['-' * (w + 2) for w in widths]  # +2 for spaces around content
+    """Build border line: +----+----+----+"""
+    parts = ['-' * (w + 2) for w in widths]  # +2 for padding spaces
     return '+' + '+'.join(parts) + '+'
 
 
 def build_separator(widths: List[int], alignments: List[str]) -> str:
-    """Build separator line like +:===+:===:+====:+"""
+    """Build separator line: +:===+:===:+====:+
+    
+    The separator must match the border length exactly.
+    Border segment for width W: '-' * (W + 2)  [+2 for padding spaces]
+    So separator segment must also be length (W + 2).
+    """
     parts = []
     for width, align in zip(widths, alignments):
         if align == 'center':
+            # :===: format - colon + equals + colon = W+2
             parts.append(':' + '=' * width + ':')
         elif align == 'left':
-            parts.append(':' + '=' * width)
+            # :==== format - colon + equals = W+2
+            parts.append(':' + '=' * (width + 1))
         elif align == 'right':
-            parts.append('=' * width + ':')
+            # ====: format - equals + colon = W+2
+            parts.append('=' * (width + 1) + ':')
         else:
-            parts.append('=' * width)
+            # ===== format - no alignment markers = W+2
+            parts.append('=' * (width + 2))
     return '+' + '+'.join(parts) + '+'
 
 
 def format_cell(content: str, width: int, alignment: str = 'left') -> str:
-    """
-    Format cell content to fit within the specified width.
+    """Format cell content with proper padding.
     
-    Pads content to match width, accounting for display width.
+    Width is the LITERAL character count (including ** markers if present).
     """
     content = content.strip()
-    display_w = display_width(content)
-    padding_needed = width - display_w
+    content_len = len(content)  # Literal length including **
+    padding = width - content_len
+    
+    if padding < 0:
+        padding = 0
     
     if alignment == 'center':
-        left_pad = padding_needed // 2
-        right_pad = padding_needed - left_pad
+        left_pad = padding // 2
+        right_pad = padding - left_pad
         return ' ' * left_pad + content + ' ' * right_pad
     elif alignment == 'right':
-        return ' ' * padding_needed + content
+        return ' ' * padding + content
     else:  # left
-        return content + ' ' * padding_needed
+        return content + ' ' * padding
 
 
-def format_row(cells: List[str], widths: List[int], alignments: List[str], bold_first: bool = False) -> str:
-    """Format a row with proper cell widths and optional bolding of first column."""
-    formatted_cells = []
-    for idx, (cell, width, align) in enumerate(zip(cells, widths, alignments)):
-        # Bold first column if requested
-        if idx == 0 and bold_first and not is_bolded(cell):
-            cell = bold_text(cell)
-        formatted = format_cell(cell, width, align)
-        formatted_cells.append(formatted)
-    
-    return '| ' + ' | '.join(formatted_cells) + ' |'
-
-
-def format_table(table_data: dict) -> List[str]:
+def wrap_cell_text(text: str, max_width: int) -> List[str]:
     """
-    Format a complete table with proper bolding and column widths.
+    Wrap text to fit within max_width, breaking at natural points.
     
-    Returns formatted table as list of lines.
+    Returns list of lines (wrapped text).
     """
-    # Parse header and rows
-    header_cells = parse_row(table_data['header'])
-    alignments = extract_alignment(table_data['separator'])
+    text = text.strip()
     
-    # Bold all header cells
-    header_cells = [bold_text(cell) for cell in header_cells]
+    # If text fits, no wrapping needed
+    if len(text) <= max_width:
+        return [text]
     
-    # Determine if first column should be bolded based on table type
-    bold_first_col = should_bold_first_column(
-        table_data['header'], 
-        table_data['rows'], 
-        table_data.get('caption', '')
-    )
+    # Find good break points: commas, semicolons, " and ", " or "
+    lines = []
+    current_line = ""
     
-    # Parse and prepare data rows (exclude border lines)
-    data_rows = []
-    for row in table_data['rows']:
-        if row.startswith('|'):
-            cells = parse_row(row)
-            # Bold first column only if appropriate and not empty
-            if bold_first_col and cells and cells[0].strip() and not is_bolded(cells[0]):
-                cells[0] = bold_text(cells[0])
-            data_rows.append(cells)
+    # Split by commas first (most common)
+    parts = text.split(',')
     
-    # Calculate column widths based on all content
-    all_cells = [header_cells] + data_rows
-    num_cols = len(header_cells)
-    widths = [0] * num_cols
+    for i, part in enumerate(parts):
+        part = part.strip()
+        
+        # Add comma back except for last part
+        if i < len(parts) - 1:
+            part_with_comma = part + ','
+        else:
+            part_with_comma = part
+        
+        # Check if adding this part would exceed max_width
+        if not current_line:
+            # First part of line
+            current_line = part_with_comma
+        elif len(current_line + ' ' + part_with_comma) <= max_width:
+            # Fits on current line
+            current_line = current_line + ' ' + part_with_comma
+        else:
+            # Need to start new line
+            lines.append(current_line)
+            current_line = part_with_comma
     
-    for row in all_cells:
-        for col_idx, cell in enumerate(row):
-            if col_idx < num_cols:
-                width = display_width(cell)
-                widths[col_idx] = max(widths[col_idx], width)
+    # Add remaining text
+    if current_line:
+        lines.append(current_line)
+    
+    return lines
+
+
+def wrap_table_rows(data_rows: List[List[str]], max_width: int) -> List[List[str]]:
+    """
+    Wrap cells in data rows that exceed max_width.
+    
+    Creates continuation rows where needed.
+    """
+    if max_width is None:
+        return data_rows
+    
+    wrapped_rows = []
+    
+    for row in data_rows:
+        # Check if any cell needs wrapping
+        needs_wrapping = False
+        wrapped_cells = []
+        max_lines = 1
+        
+        for cell in row:
+            wrapped = wrap_cell_text(cell, max_width)
+            wrapped_cells.append(wrapped)
+            max_lines = max(max_lines, len(wrapped))
+            if len(wrapped) > 1:
+                needs_wrapping = True
+        
+        if not needs_wrapping:
+            # No wrapping needed, keep original row
+            wrapped_rows.append(row)
+        else:
+            # Create multiple rows (one per line)
+            for line_idx in range(max_lines):
+                new_row = []
+                for col_idx, cell_lines in enumerate(wrapped_cells):
+                    if line_idx < len(cell_lines):
+                        new_row.append(cell_lines[line_idx])
+                    else:
+                        # Empty cell for continuation
+                        new_row.append('')
+                wrapped_rows.append(new_row)
+    
+    return wrapped_rows
+
+
+def format_table_lines(parser: GridTableParser, max_width: Optional[int] = None) -> List[str]:
+    """Format a parsed table into properly formatted lines."""
+    # Determine formatting rules
+    bold_headers = True  # Always bold headers
+    bold_first_col = should_bold_first_column(parser.header_cells, parser.data_rows)
+    
+    # Apply text wrapping FIRST (before bolding)
+    wrapped_data = wrap_table_rows(parser.data_rows, max_width)
+    
+    # Prepare ALL header rows (support multiline headers)
+    formatted_header_rows = []
+    for header_row in parser.header_rows:
+        formatted_row = []
+        for cell in header_row:
+            if bold_headers and cell.strip() and not is_bolded(cell):
+                formatted_row.append(add_bold(cell))
+            else:
+                formatted_row.append(cell)
+        formatted_header_rows.append(formatted_row)
+    
+    # Prepare data rows (with wrapping applied)
+    formatted_data = []
+    for row in wrapped_data:
+        new_row = row.copy()
+        # Bold first column only if it has content (preserve empty cells for multiline)
+        if bold_first_col and new_row[0].strip() and not is_bolded(new_row[0]):
+            new_row[0] = add_bold(new_row[0])
+        formatted_data.append(new_row)
+    
+    # Calculate widths based on formatted content
+    # IMPORTANT: Use len() not display_width() because restructuredText counts literal chars including **
+    widths = [0] * parser.num_columns
+    
+    # Header widths (literal length of formatted/bolded text) - check ALL header rows
+    for header_row in formatted_header_rows:
+        for i, cell in enumerate(header_row):
+            widths[i] = max(widths[i], len(cell.strip()))
+    
+    # Data widths (literal length of formatted/bolded text)
+    for row in formatted_data:
+        for i, cell in enumerate(row):
+            widths[i] = max(widths[i], len(cell.strip()))
     
     # Build formatted table
-    formatted = []
+    lines = []
     
     # Top border
-    formatted.append(build_border(widths))
+    lines.append(build_border(widths))
     
-    # Header row
-    formatted.append(format_row(header_cells, widths, alignments, bold_first=False))
+    # ALL Header rows (support multiline)
+    for header_row in formatted_header_rows:
+        header_cells_formatted = []
+        for cell, width, align in zip(header_row, widths, parser.alignments):
+            header_cells_formatted.append(format_cell(cell, width, align))
+        lines.append('| ' + ' | '.join(header_cells_formatted) + ' |')
     
     # Separator
-    formatted.append(build_separator(widths, alignments))
+    lines.append(build_separator(widths, parser.alignments))
     
-    # Data rows with borders
-    for i, row_cells in enumerate(data_rows):
-        formatted.append(format_row(row_cells, widths, alignments, bold_first=False))
-        # Add row separator (border) after each data row except the last
-        if i < len(data_rows) - 1:
-            formatted.append(build_border(widths))
+    # Data rows with borders between them
+    for i, row in enumerate(formatted_data):
+        row_cells_formatted = []
+        for cell, width, align in zip(row, widths, parser.alignments):
+            row_cells_formatted.append(format_cell(cell, width, align))
+        lines.append('| ' + ' | '.join(row_cells_formatted) + ' |')
+        
+        # Add border after each row except the last
+        # BUT: Skip border if next row is a continuation row (empty first cell = multiline cell)
+        if i < len(formatted_data) - 1:
+            next_row = formatted_data[i + 1]
+            # Don't add border if next row's first cell is empty (continuation of multiline cell)
+            if next_row[0].strip():  # Next row starts new content
+                lines.append(build_border(widths))
+            # else: next row is continuation, don't add border
     
     # Footer border
-    formatted.append(build_border(widths))
+    lines.append(build_border(widths))
     
-    # Caption
-    if table_data.get('caption'):
-        formatted.append('')  # Empty line before caption
-        formatted.append(table_data['caption'])
-    
-    return formatted
+    return lines
 
 
-def check_table_format(table_data: dict) -> List[str]:
+def validate_table(parser: GridTableParser, max_width: Optional[int] = None) -> Tuple[bool, List[str]]:
     """
-    Check if a table is properly formatted.
+    Validate table formatting.
     
-    Returns list of issues found (empty if table is correct).
+    Returns:
+        (is_valid, list_of_warnings)
     """
-    issues = []
+    warnings = []
     
-    # Parse header
-    header_cells = parse_row(table_data['header'])
+    # Check header bolding (check ALL header rows for multiline headers)
+    unbolded_headers = []
+    for row_idx, header_row in enumerate(parser.header_rows):
+        for col_idx, cell in enumerate(header_row):
+            if cell.strip() and not is_bolded(cell):
+                # Track column index (1-based for human readability)
+                if (col_idx + 1) not in unbolded_headers:
+                    unbolded_headers.append(col_idx + 1)
     
-    # Check if all headers are bolded
-    for idx, cell in enumerate(header_cells):
-        if not is_bolded(cell):
-            issues.append(f"Header column {idx + 1} is not bolded: '{cell}'")
+    if unbolded_headers:
+        warnings.append(f"Headers not bolded in columns: {', '.join(map(str, sorted(unbolded_headers)))}")
     
-    # Determine if first column should be bolded based on table type
-    bold_first_col = should_bold_first_column(
-        table_data['header'], 
-        table_data['rows'], 
-        table_data.get('caption', '')
-    )
+    # Check first column bolding
+    if should_bold_first_column(parser.header_cells, parser.data_rows):
+        unbolded_first = []
+        for i, row in enumerate(parser.data_rows):
+            if row[0].strip() and not is_bolded(row[0]):
+                unbolded_first.append(i + 1)
+        
+        if unbolded_first:
+            warnings.append(f"First column not bolded in rows: {', '.join(map(str, unbolded_first[:5]))}")
+            if len(unbolded_first) > 5:
+                warnings.append(f"  ... and {len(unbolded_first) - 5} more rows")
     
-    # Parse data rows and check first column (skip empty cells)
-    if bold_first_col:
-        row_num = 1
-        for row in table_data['rows']:
-            if row.startswith('|'):
-                cells = parse_row(row)
-                # Only check non-empty first column cells
-                if cells and cells[0].strip() and not is_bolded(cells[0]):
-                    issues.append(f"First column in row {row_num} is not bolded: '{cells[0]}'")
-                row_num += 1
+    # Check spacing
+    formatted_lines = format_table_lines(parser, max_width)
+    original_borders = [line for line in parser.lines if line.strip().startswith('+')]
+    formatted_borders = [line for line in formatted_lines if line.startswith('+')]
     
-    # Check column width consistency
-    alignments = extract_alignment(table_data['separator'])
-    header_cells_bolded = [bold_text(cell) for cell in header_cells]
+    if original_borders and formatted_borders:
+        if original_borders[0].strip() != formatted_borders[0].strip():
+            warnings.append("Table spacing is incorrect (column widths don't match content)")
     
-    data_rows = []
-    for row in table_data['rows']:
-        if row.startswith('|'):
-            cells = parse_row(row)
-            # Bold first column only if appropriate and not empty
-            if bold_first_col and cells and cells[0].strip() and not is_bolded(cells[0]):
-                cells[0] = bold_text(cells[0])
-            data_rows.append(cells)
-    
-    # Calculate expected widths
-    all_cells = [header_cells_bolded] + data_rows
-    num_cols = len(header_cells)
-    expected_widths = [0] * num_cols
-    
-    for row in all_cells:
-        for col_idx, cell in enumerate(row):
-            if col_idx < num_cols:
-                width = display_width(cell)
-                expected_widths[col_idx] = max(expected_widths[col_idx], width)
-    
-    # Check if current borders match expected widths
-    expected_border = build_border(expected_widths)
-    if table_data['header_border'].strip() != expected_border.strip():
-        issues.append(f"Border widths don't match content widths")
-    
-    return issues
+    return len(warnings) == 0, warnings
 
 
-def process_file(file_path: Path, fix: bool = False, verbose: bool = False) -> Tuple[int, int]:
+def extract_tables_from_file(file_path: Path) -> List[Tuple[int, List[str], int]]:
     """
-    Process a single file to check or fix table formatting.
+    Extract all tables from a file.
     
-    Returns (tables_checked, tables_with_issues)
+    Returns:
+        List of (start_line, table_lines, end_line) tuples
     """
     content = file_path.read_text(encoding='utf-8')
     lines = content.split('\n')
     
-    tables_checked = 0
-    tables_with_issues = 0
-    modified = False
-    
+    tables = []
     i = 0
-    new_lines = []
     
     while i < len(lines):
-        # Check if this might be a table start
-        if lines[i].startswith('+'):
-            # Try to parse table
+        if lines[i].strip().startswith('+') and '---' in lines[i]:
+            # Potential table start
+            start_line = i
             table_lines = []
-            j = i
-            while j < len(lines):
-                if lines[j].strip() == '' and table_lines and not lines[j - 1].startswith(':'):
+            
+            while i < len(lines):
+                line = lines[i].rstrip()
+                if line.startswith(('+', '|')):
+                    table_lines.append(line)
+                    i += 1
+                elif not line and table_lines:
+                    # Empty line after table
                     break
-                if lines[j].startswith(':') and table_lines:
-                    table_lines.append(lines[j])
-                    j += 1
-                    break
-                if lines[j].startswith('+') or lines[j].startswith('|'):
-                    table_lines.append(lines[j])
-                    j += 1
                 else:
                     break
             
-            table_data = parse_table(table_lines)
+            if len(table_lines) >= 5:  # Minimum valid table
+                tables.append((start_line, table_lines, i))
+            else:
+                i = start_line + 1
+        else:
+            i += 1
+    
+    return tables
+
+
+def process_file(file_path: Path, mode: str, verbose: bool = False, max_width: Optional[int] = None) -> Tuple[int, int, int]:
+    """
+    Process a single file.
+    
+    Args:
+        file_path: Path to file
+        mode: 'check' or 'format'
+        verbose: Print detailed info
+    
+    Returns:
+        (tables_found, tables_with_issues, tables_with_errors)
+    """
+    if not file_path.exists():
+        print(f"Error: File not found: {file_path}")
+        return 0, 0, 1
+    
+    try:
+        tables = extract_tables_from_file(file_path)
+    except Exception as e:
+        print(f"Error reading {file_path}: {e}")
+        return 0, 0, 1
+    
+    tables_found = len(tables)
+    tables_with_issues = 0
+    tables_with_errors = 0
+    
+    if mode == 'check':
+        # Validate tables
+        for start_line, table_lines, _ in tables:
+            parser = GridTableParser(table_lines, start_line)
             
-            if table_data:
-                tables_checked += 1
-                
-                # Show detection info in verbose mode
-                if verbose:
-                    bold_first_col = should_bold_first_column(
-                        table_data['header'], 
-                        table_data['rows'], 
-                        table_data.get('caption', '')
-                    )
-                    header_cells = parse_row(table_data['header'])
-                    first_header = header_cells[0] if header_cells else 'N/A'
-                    print(f"  Table at line {i + 1}:")
-                    print(f"    First column: '{first_header}'")
-                    print(f"    Will bold first column: {bold_first_col}")
-                
-                issues = check_table_format(table_data)
-                
-                if issues:
+            if not parser.parse():
+                tables_with_errors += 1
+                print(f"\n{file_path}:{start_line + 1}: Table validation errors:")
+                for issue in parser.issues:
+                    print(f"  {issue.severity.upper()}: {issue.message}")
+            else:
+                is_valid, warnings = validate_table(parser, max_width)
+                if not is_valid:
                     tables_with_issues += 1
-                    if not fix:
-                        print(f"  Issues found in table at line {i + 1}:")
-                        for issue in issues:
-                            print(f"    - {issue}")
-                    else:
-                        # Format the table
-                        formatted = format_table(table_data)
-                        new_lines.extend(formatted)
-                        modified = True
-                else:
-                    # Table is already correct
-                    new_lines.extend(table_lines)
-                
-                i = j
-                continue
+                    if verbose or True:  # Always show in check mode
+                        print(f"\n{file_path}:{start_line + 1}: Table formatting issues:")
+                        for warning in warnings:
+                            print(f"  - {warning}")
+    
+    elif mode == 'format':
+        # Format tables
+        content = file_path.read_text(encoding='utf-8')
+        lines = content.split('\n')
+        new_lines = []
         
-        # Not a table, keep line as is
-        new_lines.append(lines[i])
-        i += 1
+        processed_lines = set()
+        
+        for start_line, table_lines, end_line in tables:
+            parser = GridTableParser(table_lines, start_line)
+            
+            if not parser.parse():
+                # Can't format invalid tables
+                tables_with_errors += 1
+                print(f"\n{file_path}:{start_line + 1}: Cannot format (validation errors):")
+                for issue in parser.issues:
+                    print(f"  {issue.severity.upper()}: {issue.message}")
+                continue
+            
+            is_valid, warnings = validate_table(parser)
+            if not is_valid:
+                tables_with_issues += 1
+                if verbose:
+                    print(f"\n{file_path}:{start_line + 1}: Formatting table...")
+                    for warning in warnings:
+                        print(f"  Fixing: {warning}")
+            
+            # Mark these lines as processed
+            for line_idx in range(start_line, end_line):
+                processed_lines.add(line_idx)
+        
+        # Rebuild file with formatted tables
+        i = 0
+        for start_line, table_lines, end_line in tables:
+            # Copy lines before table
+            while i < start_line:
+                new_lines.append(lines[i])
+                i += 1
+            
+            # Parse and format table
+            parser = GridTableParser(table_lines, start_line)
+            if parser.parse():
+                formatted = format_table_lines(parser, max_width)
+                new_lines.extend(formatted)
+            else:
+                # Keep original if can't parse
+                new_lines.extend(table_lines)
+            
+            i = end_line
+        
+        # Copy remaining lines
+        while i < len(lines):
+            new_lines.append(lines[i])
+            i += 1
+        
+        # Write back
+        if tables_with_issues > 0:
+            file_path.write_text('\n'.join(new_lines), encoding='utf-8')
+            print(f"{file_path}: Formatted {tables_with_issues} tables")
     
-    if fix and modified:
-        # Write back to file
-        file_path.write_text('\n'.join(new_lines), encoding='utf-8')
-        print(f"  Fixed {tables_with_issues} tables")
-    
-    return tables_checked, tables_with_issues
-
-
-def find_qmd_files(base_path: Path) -> List[Path]:
-    """Find all .qmd files in contents/core directory."""
-    core_path = base_path / "quarto" / "contents" / "core"
-    if not core_path.exists():
-        print(f"Error: {core_path} does not exist")
-        return []
-    
-    qmd_files = list(core_path.rglob("*.qmd"))
-    return sorted(qmd_files)
+    return tables_found, tables_with_issues, tables_with_errors
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Format markdown grid tables in MLSysBook",
+        description='Production table formatter for MLSysBook',
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Check a single file
-  python format_tables.py --check quarto/contents/core/optimizations/optimizations.qmd
-  
-  # Fix a single file
-  python format_tables.py --fix quarto/contents/core/optimizations/optimizations.qmd
-  
-  # Check all files
-  python format_tables.py --check-all
-  
-  # Fix all files
-  python format_tables.py --fix-all
-        """
+        epilog=__doc__
     )
     
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('--check', metavar='FILE', help='Check table formatting in a file')
-    group.add_argument('--fix', metavar='FILE', help='Fix table formatting in a file')
-    group.add_argument('--check-all', action='store_true', help='Check all .qmd files')
-    group.add_argument('--fix-all', action='store_true', help='Fix all .qmd files')
+    # File/directory selection (consistent with other scripts)
+    file_group = parser.add_mutually_exclusive_group()
+    file_group.add_argument('-f', '--file', type=str,
+                           help='Process a specific .qmd file')
+    file_group.add_argument('-d', '--directory', type=str,
+                           help='Process all .qmd files in a directory recursively')
+    file_group.add_argument('--all', action='store_true',
+                           help='Process all .qmd files in quarto/contents/core')
     
-    parser.add_argument('--verbose', '-v', action='store_true', 
-                       help='Show detailed detection information')
+    # Action selection
+    action_group = parser.add_mutually_exclusive_group(required=False)
+    action_group.add_argument('--check', action='store_true', 
+                             help='Check formatting only (default)')
+    action_group.add_argument('--fix', action='store_true', 
+                             help='Fix table formatting in place')
+    
+    # Options
+    parser.add_argument('--max-width', type=int, default=None, 
+                       help='Maximum cell width before wrapping (default: no wrapping)')
+    parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
     
     args = parser.parse_args()
     
-    # Determine workspace root (assume script is in tools/scripts/)
+    # Determine mode
+    if args.fix:
+        mode = 'format'
+    else:
+        mode = 'check'  # Default to check
+    
+    # Determine files to process
     script_path = Path(__file__).resolve()
     workspace_root = script_path.parent.parent.parent
+    files_to_process = []
     
-    if args.check or args.fix:
-        # Process single file
-        file_path = Path(args.check or args.fix)
+    if args.file:
+        # Single file
+        file_path = Path(args.file)
         if not file_path.is_absolute():
             file_path = workspace_root / file_path
+        files_to_process = [file_path]
         
-        if not file_path.exists():
-            print(f"Error: File {file_path} does not exist")
-            return 1
+    elif args.directory:
+        # Directory
+        dir_path = Path(args.directory)
+        if not dir_path.is_absolute():
+            dir_path = workspace_root / dir_path
         
-        fix_mode = bool(args.fix)
-        try:
-            display_path = file_path.relative_to(workspace_root)
-        except ValueError:
-            display_path = file_path
-        print(f"{'Fixing' if fix_mode else 'Checking'} {display_path}")
+        if not dir_path.exists():
+            print(f"Error: Directory not found: {dir_path}")
+            return ExitCode.FILE_ERRORS.value
         
-        tables_checked, tables_with_issues = process_file(file_path, fix=fix_mode, verbose=args.verbose)
+        files_to_process = sorted(dir_path.rglob('*.qmd'))
         
-        if not args.verbose:
-            print(f"  Found {tables_checked} tables, {tables_with_issues} with issues")
+    elif args.all:
+        # All chapter files
+        core_path = workspace_root / 'quarto' / 'contents' / 'core'
         
-        if not fix_mode and tables_with_issues > 0:
-            return 1
+        if not core_path.exists():
+            print(f"Error: {core_path} does not exist")
+            return ExitCode.FILE_ERRORS.value
         
-    else:
-        # Process all files
-        qmd_files = find_qmd_files(workspace_root)
-        
-        if not qmd_files:
-            print("No .qmd files found")
-            return 1
-        
-        fix_mode = args.fix_all
-        print(f"{'Fixing' if fix_mode else 'Checking'} {len(qmd_files)} files...")
-        print()
-        
-        total_tables = 0
-        total_issues = 0
-        files_with_issues = []
-        
-        for qmd_file in qmd_files:
-            tables_checked, tables_with_issues = process_file(qmd_file, fix=fix_mode, verbose=args.verbose)
-            
-            if tables_checked > 0:
-                rel_path = qmd_file.relative_to(workspace_root)
-                if not args.verbose:
-                    print(f"{rel_path}: {tables_checked} tables, {tables_with_issues} with issues")
-                
-                total_tables += tables_checked
-                total_issues += tables_with_issues
-                
-                if tables_with_issues > 0:
-                    files_with_issues.append(rel_path)
-        
-        print()
-        print(f"Total: {total_tables} tables checked, {total_issues} with issues")
-        
-        if not fix_mode and total_issues > 0:
-            print()
-            print("Files with formatting issues:")
-            for file_path in files_with_issues:
-                print(f"  - {file_path}")
-            return 1
+        files_to_process = sorted(core_path.rglob('*.qmd'))
     
-    return 0
+    else:
+        parser.print_help()
+        return ExitCode.SUCCESS.value
+    
+    # Process files
+    total_tables = 0
+    total_issues = 0
+    total_errors = 0
+    
+    for file_path in files_to_process:
+        tables, issues, errors = process_file(file_path, mode, args.verbose, args.max_width)
+        total_tables += tables
+        total_issues += issues
+        total_errors += errors
+    
+    # Print summary
+    print(f"\nSummary: {total_tables} tables, {total_issues} with formatting issues, {total_errors} with errors")
+    
+    # Determine exit code
+    if total_errors > 0:
+        return ExitCode.VALIDATION_ERRORS.value
+    elif total_issues > 0 and mode == 'check':
+        return ExitCode.FORMATTING_ISSUES.value
+    else:
+        return ExitCode.SUCCESS.value
 
 
 if __name__ == '__main__':
