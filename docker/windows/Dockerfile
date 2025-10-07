@@ -99,104 +99,75 @@ RUN Write-Host '✅ Dependency file copy complete'
 # ------------------------------------------------------------
 # PHASE 4: Install TeX Live via Chocolatey with full scheme
 # ------------------------------------------------------------
-# ALTERNATIVE: Official network installer (commented out - slower but more control)
-# Uncomment this section and comment out the Chocolatey section below if needed
-#
-# RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
-#     Write-Host '📦 Using official TeX Live network installer' ; `
-#     Write-Host '⏰ Installation will take 15-20 minutes' ; `
-#     `
-#     Write-Host '🔄 Downloading TeX Live installer...' ; `
-#     $installerUrl = 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' ; `
-#     $installerPath = 'C:\temp\install-tl-windows.exe' ; `
-#     Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing ; `
-#     $installerSizeMB = [math]::Round((Get-Item $installerPath).Length / 1MB, 2) ; `
-#     Write-Host ('✅ Downloaded installer (' + $installerSizeMB + ' MB)') ; `
-#     `
-#     Write-Host '🔧 Creating installation profile...' ; `
-#     $profilePath = 'C:\temp\texlive.profile' ; `
-#     'selected_scheme scheme-full' | Out-File -FilePath $profilePath -Encoding ASCII ; `
-#     'TEXDIR C:/texlive/2025' | Add-Content -Path $profilePath -Encoding ASCII ; `
-#     'TEXMFCONFIG C:/texlive/2025/texmf-config' | Add-Content -Path $profilePath -Encoding ASCII ; `
-#     'TEXMFHOME C:/texlive/2025/texmf-home' | Add-Content -Path $profilePath -Encoding ASCII ; `
-#     'TEXMFLOCAL C:/texlive/2025/texmf-local' | Add-Content -Path $profilePath -Encoding ASCII ; `
-#     'TEXMFSYSCONFIG C:/texlive/2025/texmf-config' | Add-Content -Path $profilePath -Encoding ASCII ; `
-#     'TEXMFSYSVAR C:/texlive/2025/texmf-var' | Add-Content -Path $profilePath -Encoding ASCII ; `
-#     'TEXMFVAR C:/texlive/2025/texmf-var' | Add-Content -Path $profilePath -Encoding ASCII ; `
-#     'binary_windows 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
-#     'instopt_adjustpath 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
-#     'instopt_adjustrepo 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
-#     'instopt_letter 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
-#     'instopt_portable 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
-#     'instopt_write18_restricted 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
-#     'tlpdbopt_autobackup 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
-#     'tlpdbopt_backupdir tlpkg/backups' | Add-Content -Path $profilePath -Encoding ASCII ; `
-#     'tlpdbopt_create_formats 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
-#     'tlpdbopt_desktop_integration 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
-#     'tlpdbopt_file_assocs 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
-#     'tlpdbopt_generate_updmap 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
-#     'tlpdbopt_install_docfiles 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
-#     'tlpdbopt_install_srcfiles 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
-#     'tlpdbopt_post_code 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
-#     'tlpdbopt_sys_bin C:/texlive/2025/bin/windows' | Add-Content -Path $profilePath -Encoding ASCII ; `
-#     'tlpdbopt_sys_info C:/texlive/2025/texmf-dist/doc/info' | Add-Content -Path $profilePath -Encoding ASCII ; `
-#     'tlpdbopt_sys_man C:/texlive/2025/texmf-dist/doc/man' | Add-Content -Path $profilePath -Encoding ASCII ; `
-#     'tlpdbopt_w32_multi_user 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
-#     Write-Host '✅ Profile created' ; `
-#     Write-Host '📋 Profile settings: scheme-full, no docs/sources' ; `
-#     `
-#     Write-Host '🔄 Running TeX Live installer (batch mode)...' ; `
-#     $installProcess = Start-Process -FilePath $installerPath `
-#         -ArgumentList '-profile', $profilePath, '-no-gui', '-non-admin' `
-#         -Wait -PassThru -NoNewWindow -RedirectStandardOutput 'C:\temp\texlive-install.log' -RedirectStandardError 'C:\temp\texlive-install-error.log' ; `
-#     `
-#     if ($installProcess.ExitCode -ne 0) { `
-#         Write-Host '❌ ERROR: TeX Live installation failed' ; `
-#         Write-Host '📋 Installer output:' ; `
-#         Get-Content 'C:\temp\texlive-install.log' -ErrorAction SilentlyContinue | Select-Object -Last 50 ; `
-#         Write-Host '📋 Installer errors:' ; `
-#         Get-Content 'C:\temp\texlive-install-error.log' -ErrorAction SilentlyContinue ; `
-#         throw "TeX Live installation failed with exit code $($installProcess.ExitCode)" ; `
-#     } ; `
-#     Write-Host '✅ TeX Live installed successfully' ; `
-#     `
-#     Write-Host '🔍 Locating TeX Live installation...' ; `
-#     $texLiveBin = 'C:\texlive\2025\bin\windows' ; `
-#     if (-not (Test-Path $texLiveBin)) { `
-#         Write-Host '❌ ERROR: TeX Live bin directory not found' ; `
-#         Write-Host '📁 Checking for alternative locations:' ; `
-#         Get-ChildItem 'C:\texlive' -Recurse -Depth 2 -Directory -ErrorAction SilentlyContinue | `
-#             Where-Object { $_.Name -eq 'windows' } | ForEach-Object { Write-Host "  Found: $($_.FullName)" } ; `
-#         throw "TeX Live bin directory not found at $texLiveBin" ; `
-#     } ; `
-#     Write-Host "✅ TeX Live bin: $texLiveBin" ; `
-#     `
-#     Write-Host '🔧 Adding TeX Live to PATH...' ; `
-#     $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
-#     $newPath = $texLiveBin + ';' + $mach ; `
-#     [Environment]::SetEnvironmentVariable('PATH', $newPath, 'Machine') ; `
-#     $env:PATH = $texLiveBin + ';' + $env:PATH ; `
-#     Write-Host '✅ PATH updated' ;
-
-# CURRENT APPROACH: Chocolatey installation (faster, better feedback)
+# CURRENT APPROACH: Official network installer (Chocolatey is broken - missing install-tl.zip)
 RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
-    Write-Host '📦 Installing TeX Live via Chocolatey with FULL scheme...' ; `
-    Write-Host '⏰ This will take 15-20 minutes for full installation' ; `
-    choco install texlive --params "'/scheme:full'" -y ; `
-    Write-Host '✅ TeX Live (full scheme) installed via Chocolatey' ; `
+    Write-Host '📦 Using official TeX Live network installer' ; `
+    Write-Host '⏰ Installation will take 15-20 minutes' ; `
+    `
+    Write-Host '🔄 Downloading TeX Live installer...' ; `
+    $installerUrl = 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' ; `
+    $installerPath = 'C:\temp\install-tl-windows.exe' ; `
+    Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing ; `
+    $installerSizeMB = [math]::Round((Get-Item $installerPath).Length / 1MB, 2) ; `
+    Write-Host ('✅ Downloaded installer (' + $installerSizeMB + ' MB)') ; `
+    `
+    Write-Host '🔧 Creating installation profile...' ; `
+    $profilePath = 'C:\temp\texlive.profile' ; `
+    'selected_scheme scheme-full' | Out-File -FilePath $profilePath -Encoding ASCII ; `
+    'TEXDIR C:/texlive/2025' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'TEXMFCONFIG C:/texlive/2025/texmf-config' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'TEXMFHOME C:/texlive/2025/texmf-home' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'TEXMFLOCAL C:/texlive/2025/texmf-local' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'TEXMFSYSCONFIG C:/texlive/2025/texmf-config' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'TEXMFSYSVAR C:/texlive/2025/texmf-var' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'TEXMFVAR C:/texlive/2025/texmf-var' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'binary_windows 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'instopt_adjustpath 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'instopt_adjustrepo 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'instopt_letter 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'instopt_portable 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'instopt_write18_restricted 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_autobackup 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_backupdir tlpkg/backups' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_create_formats 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_desktop_integration 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_file_assocs 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_generate_updmap 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_install_docfiles 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_install_srcfiles 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_post_code 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_sys_bin C:/texlive/2025/bin/windows' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_sys_info C:/texlive/2025/texmf-dist/doc/info' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_sys_man C:/texlive/2025/texmf-dist/doc/man' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_w32_multi_user 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    Write-Host '✅ Profile created' ; `
+    Write-Host '📋 Profile settings: scheme-full, no docs/sources' ; `
+    `
+    Write-Host '🔄 Running TeX Live installer (batch mode)...' ; `
+    $installProcess = Start-Process -FilePath $installerPath `
+        -ArgumentList '-profile', $profilePath, '-no-gui', '-non-admin' `
+        -Wait -PassThru -NoNewWindow -RedirectStandardOutput 'C:\temp\texlive-install.log' -RedirectStandardError 'C:\temp\texlive-install-error.log' ; `
+    `
+    if ($installProcess.ExitCode -ne 0) { `
+        Write-Host '❌ ERROR: TeX Live installation failed' ; `
+        Write-Host '📋 Installer output:' ; `
+        Get-Content 'C:\temp\texlive-install.log' -ErrorAction SilentlyContinue | Select-Object -Last 50 ; `
+        Write-Host '📋 Installer errors:' ; `
+        Get-Content 'C:\temp\texlive-install-error.log' -ErrorAction SilentlyContinue ; `
+        throw "TeX Live installation failed with exit code $($installProcess.ExitCode)" ; `
+    } ; `
+    Write-Host '✅ TeX Live installed successfully' ; `
     `
     Write-Host '🔍 Locating TeX Live installation...' ; `
-    $texLiveBin = Get-ChildItem -Path 'C:\texlive' -Recurse -Depth 3 -Directory -ErrorAction SilentlyContinue | `
-        Where-Object { $_.Name -eq 'windows' -and $_.FullName -like '*\bin\windows' } | `
-        Select-Object -First 1 -ExpandProperty FullName ; `
-    if (-not $texLiveBin) { `
+    $texLiveBin = 'C:\texlive\2025\bin\windows' ; `
+    if (-not (Test-Path $texLiveBin)) { `
         Write-Host '❌ ERROR: TeX Live bin directory not found' ; `
-        Write-Host '📁 Searching C:\texlive for bin directories:' ; `
-        Get-ChildItem 'C:\texlive' -Recurse -Depth 3 -Directory -ErrorAction SilentlyContinue | `
+        Write-Host '📁 Checking for alternative locations:' ; `
+        Get-ChildItem 'C:\texlive' -Recurse -Depth 2 -Directory -ErrorAction SilentlyContinue | `
             Where-Object { $_.Name -eq 'windows' } | ForEach-Object { Write-Host "  Found: $($_.FullName)" } ; `
-        throw 'TeX Live bin directory not found' ; `
+        throw "TeX Live bin directory not found at $texLiveBin" ; `
     } ; `
-    Write-Host "✅ Found TeX Live bin: $texLiveBin" ; `
+    Write-Host "✅ TeX Live bin: $texLiveBin" ; `
     `
     Write-Host '🔧 Adding TeX Live to PATH...' ; `
     $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
@@ -204,29 +175,37 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
     [Environment]::SetEnvironmentVariable('PATH', $newPath, 'Machine') ; `
     $env:PATH = $texLiveBin + ';' + $env:PATH ; `
     Write-Host '✅ PATH updated' ; `
-    `
-    Write-Host '🔍 Verifying lualatex...' ; `
-    $lualatexPath = Join-Path $texLiveBin 'lualatex.exe' ; `
-    if (Test-Path $lualatexPath) { `
-        & $lualatexPath --version | Select-Object -First 2 ; `
-    } else { `
-        throw "lualatex.exe not found at $lualatexPath" ; `
-    } ; `
-    `
-    Write-Host '📋 Installing additional collections from tl_packages...' ; `
-    if (Test-Path 'C:\temp\tl_packages') { `
-        $collections = Get-Content 'C:\temp\tl_packages' | Where-Object { $_.Trim() -and -not $_.StartsWith('#') } ; `
-        Write-Host "📦 Found $($collections.Count) collections" ; `
-        $tlmgrPath = Join-Path $texLiveBin 'tlmgr.bat' ; `
-        foreach ($collection in $collections) { `
-            Write-Host "  Installing $collection..." ; `
-            & $tlmgrPath install $collection 2>&1 | Out-Null ; `
-        } ; `
-    } ; `
-    `
-    Write-Host '🧹 Cleaning up installer files...' ; `
-    Remove-Item $installerPath, $profilePath -Force -ErrorAction SilentlyContinue ; `
-    Write-Host '✅ TeX Live installation complete'
+
+# ALTERNATIVE: Chocolatey installation (BROKEN - missing install-tl.zip in package)
+# DO NOT USE - Chocolatey texlive package has been broken since Oct 2025
+# Error: "The system cannot find the file specified. C:\ProgramData\chocolatey\lib\texlive\tools\install-tl.zip"
+#
+# RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
+#     Write-Host '📦 Installing TeX Live via Chocolatey with FULL scheme...' ; `
+#     Write-Host '⏰ This will take 15-20 minutes for full installation' ; `
+#     choco install texlive --params "'/scheme:full'" -y ; `
+#     if ($LASTEXITCODE -ne 0) { throw "Chocolatey TeX Live installation failed" } ; `
+#     Write-Host '✅ TeX Live (full scheme) installed via Chocolatey' ; `
+#     `
+#     Write-Host '🔍 Locating TeX Live installation...' ; `
+#     $texLiveBin = Get-ChildItem -Path 'C:\texlive' -Recurse -Depth 3 -Directory -ErrorAction SilentlyContinue | `
+#         Where-Object { $_.Name -eq 'windows' -and $_.FullName -like '*\bin\windows' } | `
+#         Select-Object -First 1 -ExpandProperty FullName ; `
+#     if (-not $texLiveBin) { `
+#         Write-Host '❌ ERROR: TeX Live bin directory not found' ; `
+#         Write-Host '📁 Searching C:\texlive for bin directories:' ; `
+#         Get-ChildItem 'C:\texlive' -Recurse -Depth 3 -Directory -ErrorAction SilentlyContinue | `
+#             Where-Object { $_.Name -eq 'windows' } | ForEach-Object { Write-Host "  Found: $($_.FullName)" } ; `
+#         throw 'TeX Live bin directory not found' ; `
+#     } ; `
+#     Write-Host "✅ Found TeX Live bin: $texLiveBin" ; `
+#     `
+#     Write-Host '🔧 Adding TeX Live to PATH...' ; `
+#     $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
+#     $newPath = $texLiveBin + ';' + $mach ; `
+#     [Environment]::SetEnvironmentVariable('PATH', $newPath, 'Machine') ; `
+#     $env:PATH = $texLiveBin + ';' + $env:PATH ; `
+#     Write-Host '✅ PATH updated'
 
 # ------------------------------------------------------------
 # PHASE 5: Install Scoop (Package manager setup)
