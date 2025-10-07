@@ -110,7 +110,7 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
     $installerPath = 'C:\temp\install-tl-windows.exe' ; `
     Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing ; `
     $installerSizeMB = [math]::Round((Get-Item $installerPath).Length / 1MB, 2) ; `
-    Write-Host "✅ Downloaded installer ($installerSizeMB MB)" ; `
+    Write-Host ('✅ Downloaded installer (' + $installerSizeMB + ' MB)') ; `
     `
     Write-Host '🔧 Creating installation profile...' ; `
     $profilePath = 'C:\temp\texlive.profile' ; `
