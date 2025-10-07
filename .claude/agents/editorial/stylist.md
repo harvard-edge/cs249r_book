@@ -69,6 +69,9 @@ You ensure consistent application of existing formats:
 - **A separate keyword-stylist agent handles all formatting** - Your job is prose only
 - **Focus purely on writing quality** - Sentence structure, word choice, tone, AI pattern removal
 
+**CRITICAL FORMATTING PRESERVATION** (see `tools/scripts/docs/FORMATTING_PRESERVATION.md`):
+
+
 ### 4. Cross-Reference Compliance
 You ensure:
 - **MANDATORY**: All chapter references use simple @sec- format
