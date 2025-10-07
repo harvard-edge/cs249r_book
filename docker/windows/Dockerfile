@@ -141,7 +141,7 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
     Write-Host '✅ Profile created' ; `
     Write-Host '📋 Profile settings: scheme-full, no docs/sources' ; `
     Write-Host '🔄 Running TeX Live installer (verbose, using fast US mirror)...' ; `
-    & $installerPath -profile $profilePath -no-gui -v -repository https://mirrors.rit.edu/CTAN/systems/texlive/tlnet 2>&1 ; `
+    & $installerPath -profile $profilePath -no-gui -v -repository https://mirrors.rit.edu/CTAN/systems/texlive/tlnet ; `
     $exitCode = $LASTEXITCODE ; `
     Write-Host "Installer exit code: $exitCode" ; `
     if ($exitCode -ne 0) { `
