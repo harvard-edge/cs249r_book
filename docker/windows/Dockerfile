@@ -140,11 +140,13 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
     'tlpdbopt_w32_multi_user 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
     Write-Host '✅ Profile created' ; `
     Write-Host '📋 Profile settings: scheme-full, no docs/sources' ; `
-    Write-Host '🔄 Running TeX Live installer (verbose mode for real-time output)...' ; `
-    & $installerPath -profile $profilePath -no-gui -v ; `
-    if ($LASTEXITCODE -ne 0) { `
+    Write-Host '🔄 Running TeX Live installer (verbose, using fast US mirror)...' ; `
+    & $installerPath -profile $profilePath -no-gui -v -repository https://mirrors.rit.edu/CTAN/systems/texlive/tlnet 2>&1 ; `
+    $exitCode = $LASTEXITCODE ; `
+    Write-Host "Installer exit code: $exitCode" ; `
+    if ($exitCode -ne 0) { `
         Write-Host '❌ ERROR: TeX Live installation failed' ; `
-        throw "TeX Live installation failed with exit code $LASTEXITCODE" ; `
+        throw "TeX Live installation failed with exit code $exitCode" ; `
     } ; `
     Write-Host '✅ TeX Live installed successfully' ; `
     Write-Host '🔍 Locating TeX Live installation...' ; `
