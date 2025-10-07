@@ -114,8 +114,36 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
     `
     Write-Host '🔧 Creating installation profile...' ; `
     $profilePath = 'C:\temp\texlive.profile' ; `
-    $profileContent = "selected_scheme scheme-full`nTEXDIR C:/texlive/2025`nTEXMFCONFIG C:/texlive/2025/texmf-config`nTEXMFHOME C:/texlive/2025/texmf-home`nTEXMFLOCAL C:/texlive/2025/texmf-local`nTEXMFSYSCONFIG C:/texlive/2025/texmf-config`nTEXMFSYSVAR C:/texlive/2025/texmf-var`nTEXMFVAR C:/texlive/2025/texmf-var`nbinary_windows 1`ninstopt_adjustpath 1`ninstopt_adjustrepo 1`ninstopt_letter 0`ninstopt_portable 0`ninstopt_write18_restricted 1`ntlpdbopt_autobackup 0`ntlpdbopt_backupdir tlpkg/backups`ntlpdbopt_create_formats 1`ntlpdbopt_desktop_integration 1`ntlpdbopt_file_assocs 1`ntlpdbopt_generate_updmap 0`ntlpdbopt_install_docfiles 0`ntlpdbopt_install_srcfiles 0`ntlpdbopt_post_code 1`ntlpdbopt_sys_bin C:/texlive/2025/bin/windows`ntlpdbopt_sys_info C:/texlive/2025/texmf-dist/doc/info`ntlpdbopt_sys_man C:/texlive/2025/texmf-dist/doc/man`ntlpdbopt_w32_multi_user 0" ; `
-    Set-Content -Path $profilePath -Value $profileContent -Encoding ASCII ; `
+    $profileContent = @"
+selected_scheme scheme-full
+TEXDIR C:/texlive/2025
+TEXMFCONFIG C:/texlive/2025/texmf-config
+TEXMFHOME C:/texlive/2025/texmf-home
+TEXMFLOCAL C:/texlive/2025/texmf-local
+TEXMFSYSCONFIG C:/texlive/2025/texmf-config
+TEXMFSYSVAR C:/texlive/2025/texmf-var
+TEXMFVAR C:/texlive/2025/texmf-var
+binary_windows 1
+instopt_adjustpath 1
+instopt_adjustrepo 1
+instopt_letter 0
+instopt_portable 0
+instopt_write18_restricted 1
+tlpdbopt_autobackup 0
+tlpdbopt_backupdir tlpkg/backups
+tlpdbopt_create_formats 1
+tlpdbopt_desktop_integration 1
+tlpdbopt_file_assocs 1
+tlpdbopt_generate_updmap 0
+tlpdbopt_install_docfiles 0
+tlpdbopt_install_srcfiles 0
+tlpdbopt_post_code 1
+tlpdbopt_sys_bin C:/texlive/2025/bin/windows
+tlpdbopt_sys_info C:/texlive/2025/texmf-dist/doc/info
+tlpdbopt_sys_man C:/texlive/2025/texmf-dist/doc/man
+tlpdbopt_w32_multi_user 0
+"@; `
+    $profileContent | Out-File -FilePath $profilePath -Encoding ASCII ; `
     Write-Host '✅ Profile created' ; `
     Write-Host '📋 Profile settings: scheme-full, no docs/sources' ; `
     `
