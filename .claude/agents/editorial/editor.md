@@ -146,9 +146,10 @@ This scale intersects with the sequential nature of autoregressive generation, w
 1. **TikZ Blocks**: Never touch anything within `{.tikz}` code blocks
 2. **Mathematical Equations**: Preserve all LaTeX math
 3. **Code Blocks**: Only fix comments for clarity, never change code
-4. **Figure Captions**: Keep bold titles in figure captions - this is intentional formatting
+4. **Figure/Table Captions**: ALWAYS keep `**Bold Title**: Explanation` format - this is intentional educational design
 5. **Table Structures**: Preserve grid formatting and left alignment
 6. **Definition Callouts**: Maintain exact callout-definition format with italicized key concepts
+- **Figure/Table Captions MUST be**: `: **Bold Title**: Explanation {#fig-id}` - Consistent visual anchoring
 
 ### Converting Listed Content to Prose
 

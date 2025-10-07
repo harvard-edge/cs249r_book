@@ -98,61 +98,149 @@ RUN Write-Host '✅ Dependency file copy complete'
 # ------------------------------------------------------------
 # PHASE 4: Install TeX Live FIRST (Most complex, fail fast)
 # ------------------------------------------------------------
-RUN Write-Host '=== STARTING TEX LIVE INSTALLATION (2025) ===' ; `
-    Write-Host '📦 Installing TeX Live via Chocolatey...' ; `
-    choco install texlive -y ; `
-    Write-Host '✅ TeX Live installed via Chocolatey' ; `
-    `
-    Write-Host '🔍 Finding TeX Live installation directory...' ; `
-    $texRoot = Join-Path $env:SystemDrive 'texlive' ; `
-    Write-Host "📁 TeX Live root: $texRoot" ; `
-    `
-    Write-Host '🔍 Looking for year-based directories...' ; `
-    $texYearDir = Get-ChildItem $texRoot -Directory | `
-        Where-Object { $_.Name -match '^\d{4}$' } | `
-        Sort-Object Name -Descending | `
-        Select-Object -First 1 ; `
-    Write-Host "📁 Found year directory: $($texYearDir.FullName)" ; `
-    `
-    $texLiveBin = Join-Path $texYearDir.FullName 'bin\windows' ; `
-    Write-Host "📁 TeX Live bin directory: $texLiveBin" ; `
-    `
-    Write-Host '🔧 Adding TeX Live to PATH...' ; `
-    $env:PATH = "$texLiveBin;$env:PATH" ; `
-    Write-Host "✅ PATH updated with: $texLiveBin" ; `
-    `
-    Write-Host '📋 Reading collections from tl_packages...' ; `
-    if (Test-Path 'C:\temp\tl_packages') { `
-        $collections = Get-Content 'C:\temp\tl_packages' | `
-            Where-Object { $_.Trim() -ne '' -and -not $_.Trim().StartsWith('#') } ; `
-        Write-Host "📦 Found $($collections.Count) collections to install" ; `
-        Write-Host '📋 Collections:' ; `
-        $collections | ForEach-Object { Write-Host "  - $_" } ; `
-        `
-        Write-Host '🔄 Installing collections...' ; `
-        $i = 1 ; `
-        foreach ($collection in $collections) { `
-            Write-Host "📦 [$i/$($collections.Count)] Installing $collection..." ; `
-            & "$texLiveBin\tlmgr.bat" install $collection ; `
-            if ($LASTEXITCODE -eq 0) { `
-                Write-Host "✅ $collection installed successfully" ; `
-            } else { `
-                Write-Host "⚠️ Failed to install $collection, continuing..." ; `
-            } ; `
-            $i++ ; `
-        } ; `
-        Write-Host '✅ Collection installation complete' ; `
-    } else { `
-        Write-Host '⚠️ No tl_packages file found, skipping collection installation' ; `
+# OLD APPROACH: Chocolatey (BROKEN - package missing install-tl.zip since Oct 2025)
+# RUN Write-Host '=== STARTING TEX LIVE INSTALLATION (2025) ===' ; `
+#     Write-Host '📦 Installing TeX Live via Chocolatey...' ; `
+#     choco install texlive -y ; `
+#     Write-Host '✅ TeX Live installed via Chocolatey' ; `
+#     `
+#     Write-Host '🔍 Finding TeX Live installation directory...' ; `
+#     $texRoot = Join-Path $env:SystemDrive 'texlive' ; `
+#     Write-Host "📁 TeX Live root: $texRoot" ; `
+#     `
+#     Write-Host '🔍 Looking for year-based directories...' ; `
+#     $texYearDir = Get-ChildItem $texRoot -Directory | `
+#         Where-Object { $_.Name -match '^\d{4}$' } | `
+#         Sort-Object Name -Descending | `
+#         Select-Object -First 1 ; `
+#     Write-Host "📁 Found year directory: $($texYearDir.FullName)" ; `
+#     `
+#     $texLiveBin = Join-Path $texYearDir.FullName 'bin\windows' ; `
+#     Write-Host "📁 TeX Live bin directory: $texLiveBin" ; `
+#     `
+#     Write-Host '🔧 Adding TeX Live to PATH...' ; `
+#     $env:PATH = "$texLiveBin;$env:PATH" ; `
+#     Write-Host "✅ PATH updated with: $texLiveBin" ; `
+#     `
+#     Write-Host '📋 Reading collections from tl_packages...' ; `
+#     if (Test-Path 'C:\temp\tl_packages') { `
+#         $collections = Get-Content 'C:\temp\tl_packages' | `
+#             Where-Object { $_.Trim() -ne '' -and -not $_.Trim().StartsWith('#') } ; `
+#         Write-Host "📦 Found $($collections.Count) collections to install" ; `
+#         Write-Host '📋 Collections:' ; `
+#         $collections | ForEach-Object { Write-Host "  - $_" } ; `
+#         `
+#         Write-Host '🔄 Installing collections...' ; `
+#         $i = 1 ; `
+#         foreach ($collection in $collections) { `
+#             Write-Host "📦 [$i/$($collections.Count)] Installing $collection..." ; `
+#             & "$texLiveBin\tlmgr.bat" install $collection ; `
+#             if ($LASTEXITCODE -eq 0) { `
+#                 Write-Host "✅ $collection installed successfully" ; `
+#             } else { `
+#                 Write-Host "⚠️ Failed to install $collection, continuing..." ; `
+#             } ; `
+#             $i++ ; `
+#         } ; `
+#         Write-Host '✅ Collection installation complete' ; `
+#     } else { `
+#         Write-Host '⚠️ No tl_packages file found, skipping collection installation' ; `
+#     } ; `
+#     `
+#     Write-Host '🔄 Updating tlmgr...' ; `
+#     & "$texLiveBin\tlmgr.bat" update --self --all ; `
+#     Write-Host '✅ tlmgr updated' ; `
+#     `
+#     Write-Host '🔍 Verifying lualatex installation...' ; `
+#     & "$texLiveBin\lualatex.exe" --version ; `
+#     Write-Host '✅ TeX Live installation verified'
+
+# CURRENT APPROACH: Official TeX Live installer (working as of Oct 2025)
+RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
+    Write-Host '📦 Using official TeX Live network installer' ; `
+    Write-Host '⏰ Installation will take 15-20 minutes' ; `
+    Write-Host '🔄 Downloading TeX Live installer...' ; `
+    $installerUrl = 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' ; `
+    $installerPath = 'C:\temp\install-tl-windows.exe' ; `
+    Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing ; `
+    $installerSizeMB = [math]::Round((Get-Item $installerPath).Length / 1MB, 2) ; `
+    Write-Host ('✅ Downloaded installer (' + $installerSizeMB + ' MB)') ; `
+    Write-Host '🔧 Creating installation profile...' ; `
+    $profilePath = 'C:\temp\texlive.profile' ; `
+    'selected_scheme scheme-full' | Out-File -FilePath $profilePath -Encoding ASCII ; `
+    'TEXDIR C:/texlive/2025' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'TEXMFCONFIG C:/texlive/2025/texmf-config' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'TEXMFHOME C:/texlive/2025/texmf-home' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'TEXMFLOCAL C:/texlive/2025/texmf-local' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'TEXMFSYSCONFIG C:/texlive/2025/texmf-config' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'TEXMFSYSVAR C:/texlive/2025/texmf-var' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'TEXMFVAR C:/texlive/2025/texmf-var' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'binary_windows 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'instopt_adjustpath 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'instopt_adjustrepo 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'instopt_letter 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'instopt_portable 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'instopt_write18_restricted 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_autobackup 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_backupdir tlpkg/backups' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_create_formats 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_desktop_integration 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_file_assocs 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_generate_updmap 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_install_docfiles 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_install_srcfiles 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_post_code 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_sys_bin C:/texlive/2025/bin/windows' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_sys_info C:/texlive/2025/texmf-dist/doc/info' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_sys_man C:/texlive/2025/texmf-dist/doc/man' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_w32_multi_user 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    Write-Host '✅ Profile created' ; `
+    Write-Host '📋 Profile settings: scheme-full, no docs/sources' ; `
+    Write-Host '🔄 Running TeX Live installer (verbose, using fast US mirror)...' ; `
+    & $installerPath -profile $profilePath -no-gui -v -repository https://mirrors.rit.edu/CTAN/systems/texlive/tlnet ; `
+    $exitCode = $LASTEXITCODE ; `
+    Write-Host "Installer exit code: $exitCode" ; `
+    if ($exitCode -ne 0) { `
+        Write-Host '❌ ERROR: TeX Live installation failed' ; `
+        throw "TeX Live installation failed with exit code $exitCode" ; `
     } ; `
-    `
-    Write-Host '🔄 Updating tlmgr...' ; `
-    & "$texLiveBin\tlmgr.bat" update --self --all ; `
-    Write-Host '✅ tlmgr updated' ; `
-    `
-    Write-Host '🔍 Verifying lualatex installation...' ; `
-    & "$texLiveBin\lualatex.exe" --version ; `
-    Write-Host '✅ TeX Live installation verified'
+    Write-Host '✅ TeX Live installed successfully' ; `
+    Write-Host '🔍 Locating TeX Live installation...' ; `
+    $texLiveBin = 'C:\texlive\2025\bin\windows' ; `
+    if (-not (Test-Path $texLiveBin)) { `
+        Write-Host '❌ ERROR: TeX Live bin directory not found' ; `
+        Write-Host '📁 Checking for alternative locations:' ; `
+        Get-ChildItem 'C:\texlive' -Recurse -Depth 2 -Directory -ErrorAction SilentlyContinue | `
+            Where-Object { $_.Name -eq 'windows' } | ForEach-Object { Write-Host "  Found: $($_.FullName)" } ; `
+        throw "TeX Live bin directory not found at $texLiveBin" ; `
+    } ; `
+    Write-Host "✅ TeX Live bin: $texLiveBin" ; `
+    Write-Host '🔧 Adding TeX Live to PATH...' ; `
+    $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
+    $newPath = $texLiveBin + ';' + $mach ; `
+    [Environment]::SetEnvironmentVariable('PATH', $newPath, 'Machine') ; `
+    $env:PATH = $texLiveBin + ';' + $env:PATH ; `
+    Write-Host '✅ PATH updated' ; `
+    Write-Host '🔍 Verifying lualatex...' ; `
+    $lualatexPath = Join-Path $texLiveBin 'lualatex.exe' ; `
+    if (Test-Path $lualatexPath) { `
+        & $lualatexPath --version | Select-Object -First 2 ; `
+    } else { `
+        throw "lualatex.exe not found at $lualatexPath" ; `
+    } ; `
+    Write-Host '📋 Installing additional collections from tl_packages...' ; `
+    if (Test-Path 'C:\temp\tl_packages') { `
+        $collections = Get-Content 'C:\temp\tl_packages' | Where-Object { $_.Trim() -and -not $_.StartsWith('#') } ; `
+        Write-Host "📦 Found $($collections.Count) collections" ; `
+        $tlmgrPath = Join-Path $texLiveBin 'tlmgr.bat' ; `
+        foreach ($collection in $collections) { `
+            Write-Host "  Installing $collection..." ; `
+            & $tlmgrPath install $collection 2>&1 | Out-Null ; `
+        } ; `
+    } ; `
+    Write-Host '🧹 Cleaning up installer files...' ; `
+    Remove-Item $installerPath, $profilePath -Force -ErrorAction SilentlyContinue ; `
+    Write-Host '✅ TeX Live installation complete'
 
 # ------------------------------------------------------------
 # PHASE 5: Install Scoop (Package manager setup)
@@ -314,6 +402,24 @@ RUN Write-Host '=== STARTING CLEANUP AND ENVIRONMENT SETUP ===' ; `
     [Environment]::SetEnvironmentVariable('QUARTO_LOG_LEVEL', 'DEBUG', 'Machine') ; `
     Write-Host '🔧 QUARTO_LOG_LEVEL set to DEBUG' ; `
     Write-Host '✅ Cleanup and environment setup complete'
+
+# ------------------------------------------------------------
+# Set PATH at Docker image level for all installed tools
+# ------------------------------------------------------------
+# This is CRITICAL - Machine-level PATH changes in RUN commands don't persist!
+ENV PATH="C:\texlive\2025\bin\windows;C:\Program Files\PowerShell\7;C:\Users\ContainerAdministrator\scoop\shims;${PATH}"
+
+# ------------------------------------------------------------
+# OPTIONAL BACKUP: MiKTeX installation (commented out)
+# ------------------------------------------------------------
+# MiKTeX is a lighter alternative to TeX Live. Uncomment if TeX Live has issues.
+# RUN Write-Host '=== INSTALLING MIKTEX AS BACKUP ===' ; `
+#     scoop bucket add main ; `
+#     scoop install main/miktex ; `
+#     Write-Host '✅ MiKTeX installed via Scoop' ; `
+#     Write-Host 'Verifying MiKTeX...' ; `
+#     miktex --version ; `
+#     Write-Host '✅ MiKTeX verified'
 
 # ------------------------------------------------------------
 # FINAL CHECKS: Comprehensive verification with diagnostics

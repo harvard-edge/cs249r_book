@@ -16,9 +16,9 @@ This workflow takes content that has been recently edited and runs it through th
 1. **Setup** (1 min) - Create directories, branch
 2. **Validation Phase** (2-3 hrs) - Fact-check, citation validation, cross-refs
 3. **Academic Apparatus** (2 hrs) - Footnotes, glossary 
-4. **Editorial Phase** (3-4 hrs) - Editor makes comprehensive improvements
-5. **Final Polish** (2-3 hrs) - Stylist ensures consistency
-6. **Learning Objectives** (1 hr) - Update objectives based on final content (LAST)
+4. **Learning Objectives** (1 hr) - Update objectives based on content
+5. **Editorial Phase** (3-4 hrs) - Editor makes comprehensive improvements
+6. **Final Polish** (2-3 hrs) - Stylist ensures consistency
 7. **Validation** (30 min) - Quality checks, build test
 
 ### Your Execution Process
@@ -85,9 +85,25 @@ wait
 echo "Academic apparatus phase complete."
 ```
 
-#### Phase 3: Editorial Implementation
+#### Phase 3: Learning Objectives
 ```bash
-echo "=== PHASE 3: Running Editor on All Chapters ==="
+echo "=== PHASE 3: Learning Objectives ==="
+for chapter in "${ALL_CHAPTERS[@]}"; do
+  echo "Updating learning objectives for $chapter..."
+  
+  Task --subagent_type learning-objectives \
+    --prompt "Analyze quarto/contents/core/$chapter/$chapter.qmd and create/update learning objectives based on the content. Ensure objectives accurately reflect what the chapter teaches." \
+    > .claude/_reviews/polish_${TIMESTAMP}/objectives/${chapter}_objectives.md &
+done
+
+# Wait for all learning objectives to complete
+wait
+echo "Learning objectives complete."
+```
+
+#### Phase 4: Editorial Implementation
+```bash
+echo "=== PHASE 4: Running Editor on All Chapters ==="
 for chapter in "${ALL_CHAPTERS[@]}"; do
   echo "Editing $chapter..."
   
@@ -108,9 +124,9 @@ done
 echo "Editorial implementation complete."
 ```
 
-#### Phase 4: Final Polish (Stylist)
+#### Phase 5: Final Polish (Stylist)
 ```bash
-echo "=== PHASE 4: Final Polish - Stylist ==="
+echo "=== PHASE 5: Final Polish - Stylist ==="
 for chapter in "${ALL_CHAPTERS[@]}"; do
   echo "Final polish for $chapter..."
   
@@ -125,22 +141,6 @@ for chapter in "${ALL_CHAPTERS[@]}"; do
 done
 
 echo "Style polish complete."
-```
-
-#### Phase 5: Learning Objectives (LAST STEP)
-```bash
-echo "=== PHASE 5: Learning Objectives - FINAL STEP ==="
-for chapter in "${ALL_CHAPTERS[@]}"; do
-  echo "Updating learning objectives for $chapter..."
-  
-  Task --subagent_type learning-objectives \
-    --prompt "Analyze quarto/contents/core/$chapter/$chapter.qmd and create/update learning objectives based on the final polished content. Ensure objectives accurately reflect what the chapter teaches." \
-    > .claude/_reviews/polish_${TIMESTAMP}/objectives/${chapter}_objectives.md &
-done
-
-# Wait for all learning objectives to complete
-wait
-echo "Learning objectives complete."
 ```
 
 #### Phase 6: Commit and Report
@@ -181,9 +181,10 @@ Chapters Processed: 21
 ## Phases Completed
 1. ✅ Validation & Verification (fact-check, citations, cross-refs)
 2. ✅ Academic Apparatus (footnotes, glossary)
-3. ✅ Editorial Implementation (comprehensive improvements)
-4. ✅ Final Polish (stylist pass)
-5. ✅ Learning Objectives (updated based on final content)
+3. ✅ Learning Objectives (updated based on content)
+4. ✅ Editorial Implementation (comprehensive improvements)
+5. ✅ Final Polish (stylist pass)
+6. ✅ Quality Validation (build test, metrics)
 
 ## Reports Generated
 - Fact-check reports: .claude/_reviews/polish_${TIMESTAMP}/factcheck/
