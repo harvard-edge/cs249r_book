@@ -248,6 +248,58 @@ def remove_bold(text: str) -> str:
     return text
 
 
+def detect_column_alignments(header_rows: List[List[str]], data_rows: List[List[str]]) -> List[str]:
+    """
+    Detect optimal alignment for each column based on content.
+    
+    Rules:
+    - Numeric columns (>70% numbers): right-aligned
+    - Text columns: left-aligned
+    - Mixed: left-aligned (default)
+    """
+    if not data_rows or not header_rows:
+        return ['left'] * len(header_rows[0]) if header_rows else []
+    
+    num_columns = len(header_rows[0])
+    alignments = []
+    
+    for col_idx in range(num_columns):
+        # Collect all values in this column (skip empty cells)
+        column_values = []
+        for row in data_rows:
+            if col_idx < len(row):
+                cell = row[col_idx].strip()
+                # Remove bold markers for analysis
+                if cell.startswith('**') and cell.endswith('**'):
+                    cell = cell[2:-2].strip()
+                if cell:  # Skip empty cells
+                    column_values.append(cell)
+        
+        if not column_values:
+            alignments.append('left')
+            continue
+        
+        # Count numeric cells
+        numeric_count = 0
+        for value in column_values:
+            # Remove common formatting: commas, spaces, currency symbols
+            clean_value = value.replace(',', '').replace(' ', '').replace('$', '')
+            # Remove units (W, mW, µW, KB, MB, GB, etc.)
+            clean_value = ''.join(c for c in clean_value if c.isdigit() or c in '.-+<>~')
+            
+            # Check if it's primarily numeric
+            if clean_value and any(c.isdigit() for c in clean_value):
+                numeric_count += 1
+        
+        # If >70% of cells are numeric, right-align
+        if numeric_count / len(column_values) > 0.7:
+            alignments.append('right')
+        else:
+            alignments.append('left')
+    
+    return alignments
+
+
 def should_bold_first_column(header_cells: List[str], data_rows: List[List[str]]) -> bool:
     """
     Determine if first column should be bolded based on intelligent analysis.
@@ -502,6 +554,9 @@ def format_table_lines(parser: GridTableParser, max_width: Optional[int] = None)
     bold_headers = True  # Always bold headers
     bold_first_col = should_bold_first_column(parser.header_cells, parser.data_rows)
     
+    # Auto-detect optimal alignments (text=left, numbers=right)
+    optimal_alignments = detect_column_alignments(parser.header_rows, parser.data_rows)
+    
     # Apply text wrapping FIRST (before bolding)
     wrapped_data = wrap_table_rows(parser.data_rows, max_width)
     
@@ -548,17 +603,17 @@ def format_table_lines(parser: GridTableParser, max_width: Optional[int] = None)
     # ALL Header rows (support multiline)
     for header_row in formatted_header_rows:
         header_cells_formatted = []
-        for cell, width, align in zip(header_row, widths, parser.alignments):
+        for cell, width, align in zip(header_row, widths, optimal_alignments):
             header_cells_formatted.append(format_cell(cell, width, align))
         lines.append('| ' + ' | '.join(header_cells_formatted) + ' |')
     
-    # Separator
-    lines.append(build_separator(widths, parser.alignments))
+    # Separator (use optimal alignments)
+    lines.append(build_separator(widths, optimal_alignments))
     
     # Data rows with borders between them
     for i, row in enumerate(formatted_data):
         row_cells_formatted = []
-        for cell, width, align in zip(row, widths, parser.alignments):
+        for cell, width, align in zip(row, widths, optimal_alignments):
             row_cells_formatted.append(format_cell(cell, width, align))
         lines.append('| ' + ' | '.join(row_cells_formatted) + ' |')
         
