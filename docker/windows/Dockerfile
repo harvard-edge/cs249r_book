@@ -97,82 +97,109 @@ COPY docker/windows/verify_r_packages.R C:/temp/verify_r_packages.R
 RUN Write-Host '✅ Dependency file copy complete'
 
 # ------------------------------------------------------------
-# PHASE 4: Install TeX Live FIRST (Most complex, fail fast)
+# PHASE 4: Install TeX Live (Official network installer)
 # ------------------------------------------------------------
-RUN Write-Host '=== STARTING TEX LIVE INSTALLATION (2025) ===' ; `
-    Write-Host '📦 Installing TeX Live via Chocolatey with FULL scheme...' ; `
-    Write-Host '⏰ This will take 15-20 minutes for full installation' ; `
-    choco install texlive --params "'/scheme:full'" -y ; `
-    Write-Host '✅ TeX Live (full scheme) installed via Chocolatey' ; `
+# Note: Chocolatey texlive package is broken (missing install-tl.zip)
+# Using official installer with batch mode for reliable Docker builds
+RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
+    Write-Host '📦 Using official TeX Live network installer' ; `
+    Write-Host '⏰ Installation will take 15-20 minutes' ; `
     `
-    Write-Host '🔍 Finding TeX Live installation directory...' ; `
-    $texRoot = Join-Path $env:SystemDrive 'texlive' ; `
-    Write-Host "📁 TeX Live root: $texRoot" ; `
+    Write-Host '🔄 Downloading TeX Live installer...' ; `
+    $installerUrl = 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' ; `
+    $installerPath = 'C:\temp\install-tl-windows.exe' ; `
+    Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing ; `
+    Write-Host "✅ Downloaded installer ($([math]::Round((Get-Item $installerPath).Length / 1MB, 2)) MB)" ; `
     `
-    Write-Host '🔍 Looking for year-based directories...' ; `
-    $texYearDir = Get-ChildItem $texRoot -Directory | `
-        Where-Object { $_.Name -match '^\d{4}$' } | `
-        Sort-Object Name -Descending | `
-        Select-Object -First 1 ; `
-    Write-Host "📁 Found year directory: $($texYearDir.FullName)" ; `
+    Write-Host '🔧 Creating installation profile...' ; `
+    $profileContent = @'
+selected_scheme scheme-full
+TEXDIR C:/texlive/2025
+TEXMFCONFIG C:/texlive/2025/texmf-config
+TEXMFHOME C:/texlive/2025/texmf-home
+TEXMFLOCAL C:/texlive/2025/texmf-local
+TEXMFSYSCONFIG C:/texlive/2025/texmf-config
+TEXMFSYSVAR C:/texlive/2025/texmf-var
+TEXMFVAR C:/texlive/2025/texmf-var
+binary_windows 1
+instopt_adjustpath 1
+instopt_adjustrepo 1
+instopt_letter 0
+instopt_portable 0
+instopt_write18_restricted 1
+tlpdbopt_autobackup 0
+tlpdbopt_backupdir tlpkg/backups
+tlpdbopt_create_formats 1
+tlpdbopt_desktop_integration 1
+tlpdbopt_file_assocs 1
+tlpdbopt_generate_updmap 0
+tlpdbopt_install_docfiles 0
+tlpdbopt_install_srcfiles 0
+tlpdbopt_post_code 1
+tlpdbopt_sys_bin C:/texlive/2025/bin/windows
+tlpdbopt_sys_info C:/texlive/2025/texmf-dist/doc/info
+tlpdbopt_sys_man C:/texlive/2025/texmf-dist/doc/man
+tlpdbopt_w32_multi_user 0
+'@ ; `
+    $profilePath = 'C:\temp\texlive.profile' ; `
+    Set-Content -Path $profilePath -Value $profileContent -Encoding ASCII ; `
+    Write-Host '✅ Profile created' ; `
+    Write-Host '📋 Profile settings: scheme-full, no docs/sources' ; `
     `
-    $texLiveBin = Join-Path $texYearDir.FullName 'bin\windows' ; `
-    Write-Host "📁 TeX Live bin directory: $texLiveBin" ; `
+    Write-Host '🔄 Running TeX Live installer (batch mode)...' ; `
+    $installProcess = Start-Process -FilePath $installerPath `
+        -ArgumentList '-profile', $profilePath, '-no-gui', '-non-admin' `
+        -Wait -PassThru -NoNewWindow -RedirectStandardOutput 'C:\temp\texlive-install.log' -RedirectStandardError 'C:\temp\texlive-install-error.log' ; `
     `
+    if ($installProcess.ExitCode -ne 0) { `
+        Write-Host '❌ ERROR: TeX Live installation failed' ; `
+        Write-Host '📋 Installer output:' ; `
+        Get-Content 'C:\temp\texlive-install.log' -ErrorAction SilentlyContinue | Select-Object -Last 50 ; `
+        Write-Host '📋 Installer errors:' ; `
+        Get-Content 'C:\temp\texlive-install-error.log' -ErrorAction SilentlyContinue ; `
+        throw "TeX Live installation failed with exit code $($installProcess.ExitCode)" ; `
+    } ; `
+    Write-Host '✅ TeX Live installed successfully' ; `
+    `
+    Write-Host '🔍 Locating TeX Live installation...' ; `
+    $texLiveBin = 'C:\texlive\2025\bin\windows' ; `
     if (-not (Test-Path $texLiveBin)) { `
-        Write-Host "❌ ERROR: TeX Live bin directory not found at: $texLiveBin" ; `
-        throw "TeX Live bin directory not found" ; `
+        Write-Host '❌ ERROR: TeX Live bin directory not found' ; `
+        Write-Host '📁 Checking for alternative locations:' ; `
+        Get-ChildItem 'C:\texlive' -Recurse -Depth 2 -Directory -ErrorAction SilentlyContinue | `
+            Where-Object { $_.Name -eq 'windows' } | ForEach-Object { Write-Host "  Found: $($_.FullName)" } ; `
+        throw "TeX Live bin directory not found at $texLiveBin" ; `
     } ; `
+    Write-Host "✅ TeX Live bin: $texLiveBin" ; `
     `
-    Write-Host '🔧 Adding TeX Live to Machine PATH permanently...' ; `
+    Write-Host '🔧 Adding TeX Live to PATH...' ; `
     $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
-    if ($mach -notmatch [regex]::Escape($texLiveBin)) { `
-        [Environment]::SetEnvironmentVariable('PATH', ($texLiveBin + ';' + $mach), 'Machine') ; `
-        Write-Host "✅ TeX Live added to Machine PATH: $texLiveBin" ; `
-    } ; `
+    [Environment]::SetEnvironmentVariable('PATH', "$texLiveBin;$mach", 'Machine') ; `
     $env:PATH = "$texLiveBin;$env:PATH" ; `
-    Write-Host "✅ PATH updated with: $texLiveBin" ; `
+    Write-Host '✅ PATH updated' ; `
     `
-    Write-Host '📋 Reading collections from tl_packages...' ; `
-    if (Test-Path 'C:\temp\tl_packages') { `
-        $collections = Get-Content 'C:\temp\tl_packages' | `
-            Where-Object { $_.Trim() -ne '' -and -not $_.Trim().StartsWith('#') } ; `
-        Write-Host "📦 Found $($collections.Count) collections to install" ; `
-        Write-Host '📋 Collections:' ; `
-        $collections | ForEach-Object { Write-Host "  - $_" } ; `
-        `
-        Write-Host '🔄 Installing collections...' ; `
-        $i = 1 ; `
-        $tlmgrPath = Join-Path $texLiveBin 'tlmgr.bat' ; `
-        foreach ($collection in $collections) { `
-            Write-Host "📦 [$i/$($collections.Count)] Installing $collection..." ; `
-            & $tlmgrPath install $collection 2>&1 | Out-Null ; `
-            if ($LASTEXITCODE -eq 0) { `
-                Write-Host "✅ $collection installed successfully" ; `
-            } else { `
-                Write-Host "⚠️ Failed to install $collection, continuing..." ; `
-            } ; `
-            $i++ ; `
-        } ; `
-        Write-Host '✅ Collection installation complete' ; `
-    } else { `
-        Write-Host '⚠️ No tl_packages file found, skipping collection installation' ; `
-    } ; `
-    `
-    Write-Host '🔄 Updating tlmgr...' ; `
-    $tlmgrPath = Join-Path $texLiveBin 'tlmgr.bat' ; `
-    & $tlmgrPath update --self --all 2>&1 | Out-Null ; `
-    Write-Host '✅ tlmgr updated' ; `
-    `
-    Write-Host '🔍 Verifying lualatex installation...' ; `
+    Write-Host '🔍 Verifying lualatex...' ; `
     $lualatexPath = Join-Path $texLiveBin 'lualatex.exe' ; `
     if (Test-Path $lualatexPath) { `
         & $lualatexPath --version | Select-Object -First 2 ; `
-        Write-Host '✅ TeX Live installation verified' ; `
     } else { `
-        Write-Host "❌ ERROR: lualatex.exe not found at: $lualatexPath" ; `
-        throw "lualatex verification failed" ; `
-    }
+        throw "lualatex.exe not found at $lualatexPath" ; `
+    } ; `
+    `
+    Write-Host '📋 Installing additional collections from tl_packages...' ; `
+    if (Test-Path 'C:\temp\tl_packages') { `
+        $collections = Get-Content 'C:\temp\tl_packages' | Where-Object { $_.Trim() -and -not $_.StartsWith('#') } ; `
+        Write-Host "📦 Found $($collections.Count) collections" ; `
+        $tlmgrPath = Join-Path $texLiveBin 'tlmgr.bat' ; `
+        foreach ($collection in $collections) { `
+            Write-Host "  Installing $collection..." ; `
+            & $tlmgrPath install $collection 2>&1 | Out-Null ; `
+        } ; `
+    } ; `
+    `
+    Write-Host '🧹 Cleaning up installer files...' ; `
+    Remove-Item $installerPath, $profilePath -Force -ErrorAction SilentlyContinue ; `
+    Write-Host '✅ TeX Live installation complete'
 
 # ------------------------------------------------------------
 # PHASE 5: Install Scoop (Package manager setup)
