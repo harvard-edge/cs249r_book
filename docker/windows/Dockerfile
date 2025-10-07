@@ -8,47 +8,6 @@
 # - R 4.3.2 + packages via install_packages.R
 # - Verifications: versions, kpsewhich font files, TikZ smoke test
 
-# Stage 1: Prepare TeX Live profile
-FROM mcr.microsoft.com/windows/server:ltsc2022 as prep
-
-SHELL ["powershell.exe", "-NoLogo", "-ExecutionPolicy", "Bypass", "-Command"]
-
-RUN Write-Host 'Creating TeX Live installation profile...' ; `
-    $profilePath = 'C:\\temp\\texlive.profile' ; `
-    $profileContent = @"
-selected_scheme scheme-full
-TEXDIR C:/texlive/2025
-TEXMFCONFIG C:/texlive/2025/texmf-config
-TEXMFHOME C:/texlive/2025/texmf-home
-TEXMFLOCAL C:/texlive/2025/texmf-local
-TEXMFSYSCONFIG C:/texlive/2025/texmf-config
-TEXMFSYSVAR C:/texlive/2025/texmf-var
-TEXMFVAR C:/texlive/2025/texmf-var
-binary_windows 1
-instopt_adjustpath 1
-instopt_adjustrepo 1
-instopt_letter 0
-instopt_portable 0
-instopt_write18_restricted 1
-tlpdbopt_autobackup 0
-tlpdbopt_backupdir tlpkg/backups
-tlpdbopt_create_formats 1
-tlpdbopt_desktop_integration 1
-tlpdbopt_file_assocs 1
-tlpdbopt_generate_updmap 0
-tlpdbopt_install_docfiles 0
-tlpdbopt_install_srcfiles 0
-tlpdbopt_post_code 1
-tlpdbopt_sys_bin C:/texlive/2025/bin/windows
-tlpdbopt_sys_info C:/texlive/2025/texmf-dist/doc/info
-tlpdbopt_sys_man C:/texlive/2025/texmf-dist/doc/man
-tlpdbopt_w32_multi_user 0
-"@; `
-    New-Item -ItemType Directory -Force -Path 'C:\\temp' | Out-Null ; `
-    $profileContent | Out-File -FilePath $profilePath -Encoding ASCII ; `
-    Write-Host 'Profile created at C:\\temp\\texlive.profile'
-
-# Stage 2: Final build
 FROM mcr.microsoft.com/windows/server:ltsc2022
 
 # Use Windows PowerShell initially
@@ -156,9 +115,36 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
     $installerSizeMB = [math]::Round((Get-Item $installerPath).Length / 1MB, 2) ; `
     Write-Host ('✅ Downloaded installer (' + $installerSizeMB + ' MB)') ; `
     `
-    Write-Host '🔧 Using pre-generated installation profile...' ; `
+    Write-Host '🔧 Creating installation profile...' ; `
     $profilePath = 'C:\temp\texlive.profile' ; `
-    Write-Host '✅ Profile located' ; `
+    'selected_scheme scheme-full' | Out-File -FilePath $profilePath -Encoding ASCII ; `
+    'TEXDIR C:/texlive/2025' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'TEXMFCONFIG C:/texlive/2025/texmf-config' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'TEXMFHOME C:/texlive/2025/texmf-home' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'TEXMFLOCAL C:/texlive/2025/texmf-local' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'TEXMFSYSCONFIG C:/texlive/2025/texmf-config' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'TEXMFSYSVAR C:/texlive/2025/texmf-var' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'TEXMFVAR C:/texlive/2025/texmf-var' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'binary_windows 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'instopt_adjustpath 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'instopt_adjustrepo 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'instopt_letter 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'instopt_portable 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'instopt_write18_restricted 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_autobackup 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_backupdir tlpkg/backups' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_create_formats 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_desktop_integration 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_file_assocs 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_generate_updmap 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_install_docfiles 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_install_srcfiles 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_post_code 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_sys_bin C:/texlive/2025/bin/windows' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_sys_info C:/texlive/2025/texmf-dist/doc/info' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_sys_man C:/texlive/2025/texmf-dist/doc/man' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    'tlpdbopt_w32_multi_user 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
+    Write-Host '✅ Profile created' ; `
     Write-Host '📋 Profile settings: scheme-full, no docs/sources' ; `
     `
     Write-Host '🔄 Running TeX Live installer (batch mode)...' ; `
