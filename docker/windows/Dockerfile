@@ -92,13 +92,70 @@ RUN Write-Host '=== STARTING CHOCOLATEY INSTALLATION ===' ; `
 RUN Write-Host '=== STARTING DEPENDENCY FILE COPY ==='
 COPY tools/dependencies/requirements.txt C:/temp/requirements.txt
 COPY tools/dependencies/install_packages.R C:/temp/install_packages.R
-# Note: tl_packages contains TeX Live collections (not used with MiKTeX)
-# MiKTeX uses auto-install to fetch packages on-demand instead
 COPY tools/dependencies/tl_packages C:/temp/tl_packages
 RUN Write-Host '✅ Dependency file copy complete'
 
 # ------------------------------------------------------------
-# PHASE 4: Install Scoop FIRST (Required by MiKTeX and other tools)
+# PHASE 4: Install TeX Live via Chocolatey (Testing if upstream fixed)
+# ------------------------------------------------------------
+RUN Write-Host '=== STARTING TEX LIVE INSTALLATION (2025) ===' ; `
+    Write-Host '📦 Installing TeX Live via Chocolatey...' ; `
+    choco install texlive -y ; `
+    Write-Host '✅ TeX Live installed via Chocolatey' ; `
+    `
+    Write-Host '🔍 Finding TeX Live installation directory...' ; `
+    $texRoot = Join-Path $env:SystemDrive 'texlive' ; `
+    Write-Host "📁 TeX Live root: $texRoot" ; `
+    `
+    Write-Host '🔍 Looking for year-based directories...' ; `
+    $texYearDir = Get-ChildItem $texRoot -Directory | `
+        Where-Object { $_.Name -match '^\d{4}$' } | `
+        Sort-Object Name -Descending | `
+        Select-Object -First 1 ; `
+    Write-Host "📁 Found year directory: $($texYearDir.FullName)" ; `
+    `
+    $texLiveBin = Join-Path $texYearDir.FullName 'bin\windows' ; `
+    Write-Host "📁 TeX Live bin directory: $texLiveBin" ; `
+    `
+    Write-Host '🔧 Adding TeX Live to PATH...' ; `
+    $env:PATH = "$texLiveBin;$env:PATH" ; `
+    Write-Host "✅ PATH updated with: $texLiveBin" ; `
+    `
+    Write-Host '📋 Reading collections from tl_packages...' ; `
+    if (Test-Path 'C:\temp\tl_packages') { `
+        $collections = Get-Content 'C:\temp\tl_packages' | `
+            Where-Object { $_.Trim() -ne '' -and -not $_.Trim().StartsWith('#') } ; `
+        Write-Host "📦 Found $($collections.Count) collections to install" ; `
+        Write-Host '📋 Collections:' ; `
+        $collections | ForEach-Object { Write-Host "  - $_" } ; `
+        `
+        Write-Host '🔄 Installing collections...' ; `
+        $i = 1 ; `
+        foreach ($collection in $collections) { `
+            Write-Host "📦 [$i/$($collections.Count)] Installing $collection..." ; `
+            & "$texLiveBin\tlmgr.bat" install $collection ; `
+            if ($LASTEXITCODE -eq 0) { `
+                Write-Host "✅ $collection installed successfully" ; `
+            } else { `
+                Write-Host "⚠️ Failed to install $collection, continuing..." ; `
+            } ; `
+            $i++ ; `
+        } ; `
+        Write-Host '✅ Collection installation complete' ; `
+    } else { `
+        Write-Host '⚠️ No tl_packages file found, skipping collection installation' ; `
+    } ; `
+    `
+    Write-Host '🔄 Updating tlmgr...' ; `
+    & "$texLiveBin\tlmgr.bat" update --self --all ; `
+    Write-Host '✅ tlmgr updated' ; `
+    `
+    Write-Host '🔍 Verifying lualatex installation...' ; `
+    & "$texLiveBin\lualatex.exe" --version ; `
+    Write-Host '✅ TeX Live installation verified'
+
+# ------------------------------------------------------------
+# PHASE 5: Install Scoop (Package manager setup)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING SCOOP INSTALLATION ===' ; `
     Write-Host 'Setting UTF-8 encoding...' ; `
@@ -131,71 +188,7 @@ RUN Write-Host '=== STARTING SCOOP INSTALLATION ===' ; `
     Write-Host '✅ Scoop installation completed!'
 
 # ------------------------------------------------------------
-# PHASE 5: Install MiKTeX (LaTeX distribution, fail fast)
-# ------------------------------------------------------------
-# OLD APPROACH: Chocolatey (BROKEN - package missing install-tl.zip since Oct 2025)
-# RUN Write-Host '=== STARTING TEX LIVE INSTALLATION (2025) ===' ; `
-#     Write-Host '📦 Installing TeX Live via Chocolatey...' ; `
-#     choco install texlive -y ; `
-#     Write-Host '✅ TeX Live installed via Chocolatey' ; `
-#     `
-#     Write-Host '🔍 Finding TeX Live installation directory...' ; `
-#     $texRoot = Join-Path $env:SystemDrive 'texlive' ; `
-#     Write-Host "📁 TeX Live root: $texRoot" ; `
-#     `
-#     Write-Host '🔍 Looking for year-based directories...' ; `
-#     $texYearDir = Get-ChildItem $texRoot -Directory | `
-#         Where-Object { $_.Name -match '^\d{4}$' } | `
-#         Sort-Object Name -Descending | `
-#         Select-Object -First 1 ; `
-#     Write-Host "📁 Found year directory: $($texYearDir.FullName)" ; `
-#     `
-#     $texLiveBin = Join-Path $texYearDir.FullName 'bin\windows' ; `
-#     Write-Host "📁 TeX Live bin directory: $texLiveBin" ; `
-#     `
-#     Write-Host '🔧 Adding TeX Live to PATH...' ; `
-#     $env:PATH = "$texLiveBin;$env:PATH" ; `
-#     Write-Host "✅ PATH updated with: $texLiveBin" ; `
-#     `
-#     Write-Host '📋 Reading collections from tl_packages...' ; `
-#     if (Test-Path 'C:\temp\tl_packages') { `
-#         $collections = Get-Content 'C:\temp\tl_packages' | `
-#             Where-Object { $_.Trim() -ne '' -and -not $_.Trim().StartsWith('#') } ; `
-#         Write-Host "📦 Found $($collections.Count) collections to install" ; `
-#         Write-Host '📋 Collections:' ; `
-#         $collections | ForEach-Object { Write-Host "  - $_" } ; `
-#         `
-#         Write-Host '🔄 Installing collections...' ; `
-#         $i = 1 ; `
-#         foreach ($collection in $collections) { `
-#             Write-Host "📦 [$i/$($collections.Count)] Installing $collection..." ; `
-#             & "$texLiveBin\tlmgr.bat" install $collection ; `
-#             if ($LASTEXITCODE -eq 0) { `
-#                 Write-Host "✅ $collection installed successfully" ; `
-#             } else { `
-#                 Write-Host "⚠️ Failed to install $collection, continuing..." ; `
-#             } ; `
-#             $i++ ; `
-#         } ; `
-#         Write-Host '✅ Collection installation complete' ; `
-#     } else { `
-#         Write-Host '⚠️ No tl_packages file found, skipping collection installation' ; `
-#     } ; `
-#     `
-#     Write-Host '🔄 Updating tlmgr...' ; `
-#     & "$texLiveBin\tlmgr.bat" update --self --all ; `
-#     Write-Host '✅ tlmgr updated' ; `
-#     `
-#     Write-Host '🔍 Verifying lualatex installation...' ; `
-#     & "$texLiveBin\lualatex.exe" --version ; `
-#     Write-Host '✅ TeX Live installation verified'
-
-# NOTE: LaTeX installation moved to AFTER Quarto (Phase 6.5)
-# All LaTeX distributions that run installers hang in Docker Windows
-# Using Quarto's built-in TinyTeX installation instead (Phase 6.5)
-
-# ------------------------------------------------------------
-# PHASE 5.5: Install Quarto FIRST (Required for TinyTeX installation)
+# PHASE 6: Install Quarto (Main tool)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING QUARTO INSTALLATION ===' ; `
     Write-Host 'Installing Quarto via Scoop...' ; `
@@ -204,72 +197,6 @@ RUN Write-Host '=== STARTING QUARTO INSTALLATION ===' ; `
     Write-Host 'Verifying Quarto installation...' ; `
     quarto --version ; `
     Write-Host '✅ Quarto installation completed!'
-
-# ------------------------------------------------------------
-# PHASE 6: Install LaTeX Distribution
-# ------------------------------------------------------------
-
-# FAILED APPROACH 1: Official TeX Live installer (exits with empty code)
-# RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
-#     $installerUrl = 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' ; `
-#     ... (exits immediately with no error message)
-
-# FAILED APPROACH 2: Chocolatey texlive (missing install-tl.zip, confirmed Oct 8 2025)
-# RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
-#     choco install texlive -y ; `
-#     ... (ERROR: Cannot find file install-tl.zip)
-
-# WORKING APPROACH 3: TinyTeX via Quarto (lightweight, proven working)
-# RUN Write-Host '=== STARTING TINYTEX INSTALLATION ===' ; `
-#     quarto install tinytex --update-path ; `
-#     $tinyTexBin = Join-Path $env:APPDATA 'TinyTeX\bin\windows' ; `
-#     ... (verified working in build #18333063004, 35 min build time)
-
-# CURRENT TEST: MiKTeX via Scoop (testing again after previous hang)
-# Previous attempt hung after download (131+ min), retrying
-RUN Write-Host '=== STARTING MIKTEX INSTALLATION ===' ; `
-    Write-Host '📦 Installing MiKTeX via Scoop...' ; `
-    Write-Host 'This may take 10-15 minutes...' ; `
-    scoop install main/miktex ; `
-    Write-Host '✅ MiKTeX package installed' ; `
-    Write-Host '🔍 Locating MiKTeX installation...' ; `
-    $miktexBin = Get-ChildItem "$env:USERPROFILE\scoop\apps\miktex\current" -Recurse -Directory -Filter 'bin' -ErrorAction SilentlyContinue | `
-        Where-Object { (Test-Path (Join-Path $_.FullName 'lualatex.exe')) } | `
-        Select-Object -First 1 -ExpandProperty FullName ; `
-    if (-not $miktexBin) { `
-        Write-Host '❌ ERROR: MiKTeX bin directory not found' ; `
-        Write-Host '📁 Checking Scoop apps directory:' ; `
-        Get-ChildItem "$env:USERPROFILE\scoop\apps\miktex" -Recurse -Depth 3 -ErrorAction SilentlyContinue | `
-            Where-Object { $_.Name -eq 'lualatex.exe' } | `
-            ForEach-Object { Write-Host "  Found lualatex at: $($_.DirectoryName)" } ; `
-        throw "MiKTeX bin directory not found" ; `
-    } ; `
-    Write-Host "✅ MiKTeX bin: $miktexBin" ; `
-    Write-Host '🔧 Adding MiKTeX to PATH...' ; `
-    $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
-    $newPath = $miktexBin + ';' + $mach ; `
-    [Environment]::SetEnvironmentVariable('PATH', $newPath, 'Machine') ; `
-    $env:PATH = $miktexBin + ';' + $env:PATH ; `
-    Write-Host '✅ PATH updated' ; `
-    Write-Host '🔍 Verifying lualatex...' ; `
-    lualatex --version | Select-Object -First 3 ; `
-    Write-Host '✅ lualatex verified' ; `
-    Write-Host '📋 Configuring MiKTeX for non-interactive use...' ; `
-    $mpm = Join-Path $miktexBin 'mpm.exe' ; `
-    Write-Host "Using mpm at: $mpm" ; `
-    & $mpm --admin --update-db ; `
-    Write-Host '✅ Package database updated' ; `
-    Write-Host '🔧 Enabling automatic package installation...' ; `
-    & $mpm --admin --set-config-value=[MPM]AutoInstall=1 ; `
-    Write-Host '✅ Auto-install enabled (packages will download on-demand)' ; `
-    Write-Host '📦 Installing essential LuaLaTeX packages...' ; `
-    $essentialPkgs = @('luatex', 'lualatex-math', 'fontspec', 'unicode-math', 'luaotfload') ; `
-    foreach ($pkg in $essentialPkgs) { `
-        Write-Host "  Installing $pkg..." ; `
-        & $mpm --admin --install=$pkg 2>&1 | Out-Null ; `
-    } ; `
-    Write-Host '✅ Essential LuaLaTeX packages installed' ; `
-    Write-Host '✅ MiKTeX fully configured for LuaLaTeX'
 
 # ------------------------------------------------------------
 # PHASE 7: Install Ghostscript (required for PDF generation)
