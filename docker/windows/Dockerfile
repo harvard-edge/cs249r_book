@@ -255,9 +255,21 @@ RUN Write-Host '=== STARTING MIKTEX INSTALLATION ===' ; `
     lualatex --version | Select-Object -First 3 ; `
     Write-Host '✅ lualatex verified' ; `
     Write-Host '📋 Configuring MiKTeX for non-interactive use...' ; `
-    initexmf --set-config-value [MPM]AutoInstall=1 ; `
-    Write-Host '✅ Auto-install packages enabled' ; `
-    Write-Host '✅ MiKTeX installation complete'
+    $mpm = Join-Path $miktexBin 'mpm.exe' ; `
+    Write-Host "Using mpm at: $mpm" ; `
+    & $mpm --admin --update-db ; `
+    Write-Host '✅ Package database updated' ; `
+    Write-Host '🔧 Enabling automatic package installation...' ; `
+    & $mpm --admin --set-config-value=[MPM]AutoInstall=1 ; `
+    Write-Host '✅ Auto-install enabled (packages will download on-demand)' ; `
+    Write-Host '📦 Installing essential LuaLaTeX packages...' ; `
+    $essentialPkgs = @('luatex', 'lualatex-math', 'fontspec', 'unicode-math', 'luaotfload') ; `
+    foreach ($pkg in $essentialPkgs) { `
+        Write-Host "  Installing $pkg..." ; `
+        & $mpm --admin --install=$pkg 2>&1 | Out-Null ; `
+    } ; `
+    Write-Host '✅ Essential LuaLaTeX packages installed' ; `
+    Write-Host '✅ MiKTeX fully configured for LuaLaTeX'
 
 # ------------------------------------------------------------
 # PHASE 7: Install Ghostscript (required for PDF generation)
