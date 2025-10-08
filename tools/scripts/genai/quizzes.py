@@ -1354,14 +1354,18 @@ Full lifecycle coverage: data pipelines, training infrastructure, deployment, mo
 
 # 7. LANGUAGE & WRITING STANDARDS
 
-**Academic Tone:**
-- Use academic language and terminology
-- Avoid generic academic terms like "crucial", "various", "it is important to note"
-- Use specific technical terms and concepts
+**Academic Tone - DO NOT WRITE LIKE AN LLM:**
+- Write as a professor would write for a textbook, not as an AI assistant
+- Avoid LLM-style phrases like "delve into", "leverage", "harnessing", "navigating"
+- Avoid corporate jargon like "ecosystem", "landscape", "journey", "empower"
+- Avoid meta-commentary like "Let's explore", "It's worth noting", "In essence"
+- Use academic language and terminology appropriate for technical textbooks
+- Avoid generic academic filler like "crucial", "various", "it is important to note"
+- Use specific technical terms and concepts with precision
 - Use active voice and measurable impacts
-- Use concrete scenarios and examples
-- Use precise language and terminology
-- Use a professional and academic tone
+- Use concrete scenarios and examples from real ML systems
+- Maintain a professional, scholarly tone without being conversational
+- Write as if for peer-reviewed academic publication, not blog posts
 
 **Self-Contained Questions:**
 - No references to "this section" or "as discussed above"
