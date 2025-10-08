@@ -75,6 +75,7 @@ class GridTableParser:
         self.data_rows: List[List[str]] = []
         self.alignments: List[str] = []
         self.num_columns = 0
+        self.row_has_border_after: List[bool] = []  # Track which data rows have borders after them
         
     def parse(self) -> bool:
         """
@@ -152,8 +153,18 @@ class GridTableParser:
                         return False
                     self.data_rows.append(cells)
                     idx += 1
+                    
+                    # Check if next line is a border
+                    if idx < len(self.lines) and self.lines[idx].strip().startswith('+'):
+                        self.row_has_border_after.append(True)
+                        idx += 1  # Skip the border
+                        if idx >= len(self.lines) or not self.lines[idx].strip().startswith('|'):
+                            # End of table
+                            break
+                    else:
+                        self.row_has_border_after.append(False)
                 elif line.startswith('+'):
-                    # Border between rows or end of table
+                    # Unexpected border (shouldn't happen with the logic above, but just in case)
                     idx += 1
                     if idx >= len(self.lines) or not self.lines[idx].strip().startswith('|'):
                         # End of table
@@ -437,26 +448,59 @@ def build_separator(widths: List[int], alignments: List[str]) -> str:
     return '+' + '+'.join(parts) + '+'
 
 
+def escape_html_entities(content: str) -> str:
+    r"""Convert bare < and > to HTML entities (&lt; and &gt;).
+    
+    Preserves:
+    - Already-escaped sequences like \> and \<
+    - HTML tags like <li>, </li>, <ul>, etc.
+    """
+    import re
+    
+    # Temporarily protect escaped sequences and HTML tags
+    content = content.replace('\\>', '\x00ESCAPED_GT\x00')  # Protect \>
+    content = content.replace('\\<', '\x00ESCAPED_LT\x00')  # Protect \<
+    
+    # Protect HTML tags (e.g., <li>, </li>, <ul>, <p>, etc.)
+    # Match opening tags: <tagname> or <tagname attr="value">
+    # Match closing tags: </tagname>
+    # Match self-closing: <tagname />
+    html_tag_pattern = r'</?[a-zA-Z][a-zA-Z0-9]*(?:\s+[^>]*)?/?>'
+    tags = re.findall(html_tag_pattern, content)
+    for i, tag in enumerate(tags):
+        content = content.replace(tag, f'\x00TAG_{i}\x00', 1)
+    
+    # Now convert bare < and >
+    content = content.replace('>', '&gt;')
+    content = content.replace('<', '&lt;')
+    
+    # Restore HTML tags
+    for i, tag in enumerate(tags):
+        content = content.replace(f'\x00TAG_{i}\x00', tag)
+    
+    # Restore escaped sequences
+    content = content.replace('\x00ESCAPED_GT\x00', '\\>')
+    content = content.replace('\x00ESCAPED_LT\x00', '\\<')
+    
+    return content
+
+
 def format_cell(content: str, width: int, alignment: str = 'left') -> str:
     """Format cell content with proper padding.
     
-    Width is the LITERAL character count (including ** markers if present).
+    Width is the LITERAL character count (including ** markers and HTML entities).
+    Always left-aligns content within cells (the alignment parameter only 
+    affects column alignment markers in the separator row).
     """
     content = content.strip()
-    content_len = len(content)  # Literal length including **
+    content_len = len(content)  # Literal length including ** and HTML entities
     padding = width - content_len
     
     if padding < 0:
         padding = 0
     
-    if alignment == 'center':
-        left_pad = padding // 2
-        right_pad = padding - left_pad
-        return ' ' * left_pad + content + ' ' * right_pad
-    elif alignment == 'right':
-        return ' ' * padding + content
-    else:  # left
-        return content + ' ' * padding
+    # Always left-align cell content (padding on right only)
+    return content + ' ' * padding
 
 
 def wrap_cell_text(text: str, max_width: int) -> List[str]:
@@ -565,6 +609,9 @@ def format_table_lines(parser: GridTableParser, max_width: Optional[int] = None)
     for header_row in parser.header_rows:
         formatted_row = []
         for cell in header_row:
+            # First escape HTML entities
+            cell = escape_html_entities(cell)
+            # Then apply bolding if needed
             if bold_headers and cell.strip() and not is_bolded(cell):
                 formatted_row.append(add_bold(cell))
             else:
@@ -574,10 +621,15 @@ def format_table_lines(parser: GridTableParser, max_width: Optional[int] = None)
     # Prepare data rows (with wrapping applied)
     formatted_data = []
     for row in wrapped_data:
-        new_row = row.copy()
-        # Bold first column only if it has content (preserve empty cells for multiline)
-        if bold_first_col and new_row[0].strip() and not is_bolded(new_row[0]):
-            new_row[0] = add_bold(new_row[0])
+        new_row = []
+        for i, cell in enumerate(row):
+            # First escape HTML entities
+            cell = escape_html_entities(cell)
+            # Bold first column only if it has content (preserve empty cells for multiline)
+            if i == 0 and bold_first_col and cell.strip() and not is_bolded(cell):
+                new_row.append(add_bold(cell))
+            else:
+                new_row.append(cell)
         formatted_data.append(new_row)
     
     # Calculate widths based on formatted content
@@ -617,17 +669,13 @@ def format_table_lines(parser: GridTableParser, max_width: Optional[int] = None)
             row_cells_formatted.append(format_cell(cell, width, align))
         lines.append('| ' + ' | '.join(row_cells_formatted) + ' |')
         
-        # Add border after each row except the last
-        # BUT: Skip border if next row is a continuation row (empty first cell = multiline cell)
-        if i < len(formatted_data) - 1:
-            next_row = formatted_data[i + 1]
-            # Don't add border if next row's first cell is empty (continuation of multiline cell)
-            if next_row[0].strip():  # Next row starts new content
-                lines.append(build_border(widths))
-            # else: next row is continuation, don't add border
+        # Add border after this row if the original table had one
+        if i < len(parser.row_has_border_after) and parser.row_has_border_after[i]:
+            lines.append(build_border(widths))
     
-    # Footer border
-    lines.append(build_border(widths))
+    # Footer border (only if last row didn't already have a border)
+    if not (formatted_data and len(parser.row_has_border_after) > 0 and parser.row_has_border_after[-1]):
+        lines.append(build_border(widths))
     
     return lines
 
@@ -673,6 +721,14 @@ def validate_table(parser: GridTableParser, max_width: Optional[int] = None) -> 
     if original_borders and formatted_borders:
         if original_borders[0].strip() != formatted_borders[0].strip():
             warnings.append("Table spacing is incorrect (column widths don't match content)")
+    
+    # Check if any data lines differ (catches alignment changes)
+    original_data_lines = [l.strip() for l in parser.lines if l.strip().startswith('|') and '|' in l[1:]]
+    formatted_data_lines = [l.strip() for l in formatted_lines if l.startswith('|') and '|' in l[1:]]
+    
+    if original_data_lines and formatted_data_lines:
+        if original_data_lines != formatted_data_lines:
+            warnings.append("Cell content alignment needs updating")
     
     return len(warnings) == 0, warnings
 
