@@ -389,13 +389,6 @@ RUN Write-Host '=== STARTING CLEANUP AND ENVIRONMENT SETUP ===' ; `
     Write-Host '✅ Cleanup and environment setup complete'
 
 # ------------------------------------------------------------
-# Set PATH at Docker image level for all installed tools
-# ------------------------------------------------------------
-# This is CRITICAL - Machine-level PATH changes in RUN commands don't persist!
-# Using Scoop's 'current' symlink for version-independent MiKTeX path
-ENV PATH="C:\Users\ContainerAdministrator\scoop\apps\miktex\current\texmfs\install\miktex\bin\x64;C:\Program Files\PowerShell\7;C:\Users\ContainerAdministrator\scoop\shims;${PATH}"
-
-# ------------------------------------------------------------
 # FINAL CHECKS: Comprehensive verification with diagnostics
 # ------------------------------------------------------------
 WORKDIR C:/workspace
