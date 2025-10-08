@@ -92,11 +92,46 @@ RUN Write-Host '=== STARTING CHOCOLATEY INSTALLATION ===' ; `
 RUN Write-Host '=== STARTING DEPENDENCY FILE COPY ==='
 COPY tools/dependencies/requirements.txt C:/temp/requirements.txt
 COPY tools/dependencies/install_packages.R C:/temp/install_packages.R
+# Note: tl_packages contains TeX Live collections (not used with MiKTeX)
+# MiKTeX uses auto-install to fetch packages on-demand instead
 COPY tools/dependencies/tl_packages C:/temp/tl_packages
 RUN Write-Host '✅ Dependency file copy complete'
 
 # ------------------------------------------------------------
-# PHASE 4: Install TeX Live FIRST (Most complex, fail fast)
+# PHASE 4: Install Scoop FIRST (Required by MiKTeX and other tools)
+# ------------------------------------------------------------
+RUN Write-Host '=== STARTING SCOOP INSTALLATION ===' ; `
+    Write-Host 'Setting UTF-8 encoding...' ; `
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 ; `
+    $OutputEncoding = [System.Text.Encoding]::UTF8 ; `
+    Write-Host '🔤 UTF-8 encoding set' ; `
+    Write-Host 'Setting execution policy...' ; `
+    Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force ; `
+    Write-Host '🔐 Execution policy set' ; `
+    Write-Host 'Installing Scoop package manager...' ; `
+    Invoke-WebRequest -useb get.scoop.sh -outfile 'install.ps1' ; `
+    Write-Host '📥 Scoop install script downloaded' ; `
+    & .\install.ps1 -RunAsAdmin ; `
+    Write-Host '📦 Scoop installed' ; `
+    Write-Host 'Adding Scoop shims to PATH...' ; `
+    $scoopShims = Join-Path (Resolve-Path ~).Path 'scoop\shims' ; `
+    Write-Host "Scoop shims path: $scoopShims" ; `
+    $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
+    [Environment]::SetEnvironmentVariable('PATH', ($scoopShims + ';' + $mach), 'Machine') ; `
+    Write-Host '🔗 Added Scoop shims to PATH' ; `
+    Write-Host 'Installing Git (required for buckets)...' ; `
+    scoop install git ; `
+    Write-Host '📦 Git installed' ; `
+    Write-Host 'Adding r-bucket...' ; `
+    scoop bucket add r-bucket https://github.com/cderv/r-bucket.git ; `
+    Write-Host '📦 r-bucket added' ; `
+    Write-Host 'Adding extras bucket...' ; `
+    scoop bucket add extras ; `
+    Write-Host '📦 extras bucket added' ; `
+    Write-Host '✅ Scoop installation completed!'
+
+# ------------------------------------------------------------
+# PHASE 5: Install MiKTeX (LaTeX distribution, fail fast)
 # ------------------------------------------------------------
 # OLD APPROACH: Chocolatey (BROKEN - package missing install-tl.zip since Oct 2025)
 # RUN Write-Host '=== STARTING TEX LIVE INSTALLATION (2025) ===' ; `
@@ -189,40 +224,9 @@ RUN Write-Host '=== STARTING MIKTEX INSTALLATION ===' ; `
     Write-Host '📋 Configuring MiKTeX for non-interactive use...' ; `
     miktexsetup --set-config-value [MPM]AutoInstall=1 ; `
     Write-Host '✅ Auto-install packages enabled' ; `
+    Write-Host '📝 Note: MiKTeX will auto-install packages on-demand' ; `
+    Write-Host '   (tl_packages collections are TeX Live-specific and not used here)' ; `
     Write-Host '✅ MiKTeX installation complete'
-
-# ------------------------------------------------------------
-# PHASE 5: Install Scoop (Package manager setup)
-# ------------------------------------------------------------
-RUN Write-Host '=== STARTING SCOOP INSTALLATION ===' ; `
-    Write-Host 'Setting UTF-8 encoding...' ; `
-    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 ; `
-    $OutputEncoding = [System.Text.Encoding]::UTF8 ; `
-    Write-Host '🔤 UTF-8 encoding set' ; `
-    Write-Host 'Setting execution policy...' ; `
-    Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force ; `
-    Write-Host '🔐 Execution policy set' ; `
-    Write-Host 'Installing Scoop package manager...' ; `
-    Invoke-WebRequest -useb get.scoop.sh -outfile 'install.ps1' ; `
-    Write-Host '📥 Scoop install script downloaded' ; `
-    & .\install.ps1 -RunAsAdmin ; `
-    Write-Host '📦 Scoop installed' ; `
-    Write-Host 'Adding Scoop shims to PATH...' ; `
-    $scoopShims = Join-Path (Resolve-Path ~).Path 'scoop\shims' ; `
-    Write-Host "Scoop shims path: $scoopShims" ; `
-    $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
-    [Environment]::SetEnvironmentVariable('PATH', ($scoopShims + ';' + $mach), 'Machine') ; `
-    Write-Host '🔗 Added Scoop shims to PATH' ; `
-    Write-Host 'Installing Git (required for buckets)...' ; `
-    scoop install git ; `
-    Write-Host '📦 Git installed' ; `
-    Write-Host 'Adding r-bucket...' ; `
-    scoop bucket add r-bucket https://github.com/cderv/r-bucket.git ; `
-    Write-Host '📦 r-bucket added' ; `
-    Write-Host 'Adding extras bucket...' ; `
-    scoop bucket add extras ; `
-    Write-Host '📦 extras bucket added' ; `
-    Write-Host '✅ Scoop installation completed!'
 
 # ------------------------------------------------------------
 # PHASE 6: Install Quarto (Main tool)
