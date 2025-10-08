@@ -206,47 +206,45 @@ RUN Write-Host '=== STARTING QUARTO INSTALLATION ===' ; `
     Write-Host '✅ Quarto installation completed!'
 
 # ------------------------------------------------------------
-# PHASE 6: Install TinyTeX via Quarto (LaTeX distribution)
+# PHASE 6: Install MiKTeX via Scoop (LaTeX distribution)
 # ------------------------------------------------------------
-# FAILED APPROACHES (all hang in Docker Windows):
+# FAILED APPROACHES:
 # - Official TeX Live installer: exits with empty exit code
-# - Chocolatey texlive: missing install-tl.zip
-# - MiKTeX via Scoop: hangs after download (131+ min)
+# - Chocolatey texlive: missing install-tl.zip (confirmed Oct 8 2025)
 #
-# WORKING APPROACH: TinyTeX via Quarto's installer
-# - Specifically designed for automated/Docker installations
-# - Minimal footprint, installs packages on-demand
-# - Official Quarto recommendation, proven in containers
-RUN Write-Host '=== STARTING TINYTEX INSTALLATION ===' ; `
-    Write-Host '📦 Installing TinyTeX via Quarto (recommended for containers)...' ; `
-    Write-Host 'This may take 5-10 minutes...' ; `
-    quarto install tinytex --update-path ; `
-    if ($LASTEXITCODE -ne 0) { `
-        Write-Host '❌ ERROR: TinyTeX installation failed' ; `
-        throw "TinyTeX installation failed with exit code $LASTEXITCODE" ; `
+# CURRENT TEST: MiKTeX via Scoop
+# Previous attempt hung after download (131+ min), testing again
+RUN Write-Host '=== STARTING MIKTEX INSTALLATION ===' ; `
+    Write-Host '📦 Installing MiKTeX via Scoop...' ; `
+    Write-Host 'This may take 10-15 minutes...' ; `
+    scoop install main/miktex ; `
+    Write-Host '✅ MiKTeX package installed' ; `
+    Write-Host '🔍 Locating MiKTeX installation...' ; `
+    $miktexBin = Get-ChildItem "$env:USERPROFILE\scoop\apps\miktex\current" -Recurse -Directory -Filter 'bin' -ErrorAction SilentlyContinue | `
+        Where-Object { (Test-Path (Join-Path $_.FullName 'lualatex.exe')) } | `
+        Select-Object -First 1 -ExpandProperty FullName ; `
+    if (-not $miktexBin) { `
+        Write-Host '❌ ERROR: MiKTeX bin directory not found' ; `
+        Write-Host '📁 Checking Scoop apps directory:' ; `
+        Get-ChildItem "$env:USERPROFILE\scoop\apps\miktex" -Recurse -Depth 3 -ErrorAction SilentlyContinue | `
+            Where-Object { $_.Name -eq 'lualatex.exe' } | `
+            ForEach-Object { Write-Host "  Found lualatex at: $($_.DirectoryName)" } ; `
+        throw "MiKTeX bin directory not found" ; `
     } ; `
-    Write-Host '✅ TinyTeX installed successfully' ; `
-    Write-Host '🔍 Verifying LaTeX installation...' ; `
-    $tinyTexBin = Join-Path $env:APPDATA 'TinyTeX\bin\windows' ; `
-    if (Test-Path $tinyTexBin) { `
-        $env:PATH = $tinyTexBin + ';' + $env:PATH ; `
-        Write-Host "✅ TinyTeX bin found: $tinyTexBin" ; `
-    } else { `
-        Write-Host '⚠️ TinyTeX bin not found at expected location, checking alternatives...' ; `
-        $tinyTexBin = Get-ChildItem $env:APPDATA -Recurse -Directory -Filter 'bin' -ErrorAction SilentlyContinue | `
-            Where-Object { $_.FullName -like '*TinyTeX*' -and (Test-Path (Join-Path $_.FullName 'lualatex.exe')) } | `
-            Select-Object -First 1 -ExpandProperty FullName ; `
-        if ($tinyTexBin) { `
-            $env:PATH = $tinyTexBin + ';' + $env:PATH ; `
-            Write-Host "✅ Found TinyTeX at: $tinyTexBin" ; `
-        } else { `
-            throw 'TinyTeX bin directory not found' ; `
-        } ; `
-    } ; `
+    Write-Host "✅ MiKTeX bin: $miktexBin" ; `
+    Write-Host '🔧 Adding MiKTeX to PATH...' ; `
+    $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
+    $newPath = $miktexBin + ';' + $mach ; `
+    [Environment]::SetEnvironmentVariable('PATH', $newPath, 'Machine') ; `
+    $env:PATH = $miktexBin + ';' + $env:PATH ; `
+    Write-Host '✅ PATH updated' ; `
+    Write-Host '🔍 Verifying lualatex...' ; `
     lualatex --version | Select-Object -First 3 ; `
     Write-Host '✅ lualatex verified' ; `
-    Write-Host '📝 Note: TinyTeX auto-installs packages on-demand via tlmgr' ; `
-    Write-Host '✅ TinyTeX ready for PDF generation'
+    Write-Host '📋 Configuring MiKTeX for non-interactive use...' ; `
+    initexmf --set-config-value [MPM]AutoInstall=1 ; `
+    Write-Host '✅ Auto-install packages enabled' ; `
+    Write-Host '✅ MiKTeX installation complete'
 
 # ------------------------------------------------------------
 # PHASE 7: Install Ghostscript (required for PDF generation)
@@ -369,8 +367,8 @@ RUN Write-Host '=== STARTING CLEANUP AND ENVIRONMENT SETUP ===' ; `
 # Set PATH at Docker image level for all installed tools
 # ------------------------------------------------------------
 # This is CRITICAL - Machine-level PATH changes in RUN commands don't persist!
-# TinyTeX bin path added here (Quarto's LaTeX distribution)
-ENV PATH="C:\Users\ContainerAdministrator\AppData\Roaming\TinyTeX\bin\windows;C:\Program Files\PowerShell\7;C:\Users\ContainerAdministrator\scoop\shims;${PATH}"
+# MiKTeX bin path is added dynamically during installation (varies by version)
+ENV PATH="C:\Program Files\PowerShell\7;C:\Users\ContainerAdministrator\scoop\shims;${PATH}"
 
 # ------------------------------------------------------------
 # FINAL CHECKS: Comprehensive verification with diagnostics
