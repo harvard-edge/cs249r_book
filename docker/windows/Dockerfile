@@ -206,14 +206,27 @@ RUN Write-Host '=== STARTING QUARTO INSTALLATION ===' ; `
     Write-Host '✅ Quarto installation completed!'
 
 # ------------------------------------------------------------
-# PHASE 6: Install MiKTeX via Scoop (LaTeX distribution)
+# PHASE 6: Install LaTeX Distribution
 # ------------------------------------------------------------
-# FAILED APPROACHES:
-# - Official TeX Live installer: exits with empty exit code
-# - Chocolatey texlive: missing install-tl.zip (confirmed Oct 8 2025)
-#
-# CURRENT TEST: MiKTeX via Scoop
-# Previous attempt hung after download (131+ min), testing again
+
+# FAILED APPROACH 1: Official TeX Live installer (exits with empty code)
+# RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
+#     $installerUrl = 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' ; `
+#     ... (exits immediately with no error message)
+
+# FAILED APPROACH 2: Chocolatey texlive (missing install-tl.zip, confirmed Oct 8 2025)
+# RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
+#     choco install texlive -y ; `
+#     ... (ERROR: Cannot find file install-tl.zip)
+
+# WORKING APPROACH 3: TinyTeX via Quarto (lightweight, proven working)
+# RUN Write-Host '=== STARTING TINYTEX INSTALLATION ===' ; `
+#     quarto install tinytex --update-path ; `
+#     $tinyTexBin = Join-Path $env:APPDATA 'TinyTeX\bin\windows' ; `
+#     ... (verified working in build #18333063004, 35 min build time)
+
+# CURRENT TEST: MiKTeX via Scoop (testing again after previous hang)
+# Previous attempt hung after download (131+ min), retrying
 RUN Write-Host '=== STARTING MIKTEX INSTALLATION ===' ; `
     Write-Host '📦 Installing MiKTeX via Scoop...' ; `
     Write-Host 'This may take 10-15 minutes...' ; `
