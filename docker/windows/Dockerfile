@@ -227,17 +227,17 @@ RUN Write-Host '=== STARTING TINYTEX INSTALLATION ===' ; `
     } ; `
     Write-Host '✅ TinyTeX installed successfully' ; `
     Write-Host '🔍 Verifying LaTeX installation...' ; `
-    $tinyTexBin = "$env:APPDATA\TinyTeX\bin\windows" ; `
+    $tinyTexBin = Join-Path $env:APPDATA 'TinyTeX\bin\windows' ; `
     if (Test-Path $tinyTexBin) { `
-        $env:PATH = "$tinyTexBin;" + $env:PATH ; `
+        $env:PATH = $tinyTexBin + ';' + $env:PATH ; `
         Write-Host "✅ TinyTeX bin found: $tinyTexBin" ; `
     } else { `
         Write-Host '⚠️ TinyTeX bin not found at expected location, checking alternatives...' ; `
-        $tinyTexBin = Get-ChildItem "$env:APPDATA" -Recurse -Directory -Filter 'bin' -ErrorAction SilentlyContinue | `
+        $tinyTexBin = Get-ChildItem $env:APPDATA -Recurse -Directory -Filter 'bin' -ErrorAction SilentlyContinue | `
             Where-Object { $_.FullName -like '*TinyTeX*' -and (Test-Path (Join-Path $_.FullName 'lualatex.exe')) } | `
             Select-Object -First 1 -ExpandProperty FullName ; `
         if ($tinyTexBin) { `
-            $env:PATH = "$tinyTexBin;" + $env:PATH ; `
+            $env:PATH = $tinyTexBin + ';' + $env:PATH ; `
             Write-Host "✅ Found TinyTeX at: $tinyTexBin" ; `
         } else { `
             throw 'TinyTeX bin directory not found' ; `
