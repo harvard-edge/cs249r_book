@@ -96,7 +96,7 @@ COPY tools/dependencies/tl_packages C:/temp/tl_packages
 RUN Write-Host '✅ Dependency file copy complete'
 
 # ------------------------------------------------------------
-# PHASE 4: Install TeX Live via Chocolatey (Testing if upstream fixed)
+# PHASE 4: Install TeX Live FIRST (Most complex, fail fast)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING TEX LIVE INSTALLATION (2025) ===' ; `
     Write-Host '📦 Installing TeX Live via Chocolatey...' ; `
