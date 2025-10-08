@@ -3940,6 +3940,44 @@ def run_verify_mode_simple(file_path):
             if source_file:
                 if os.path.exists(source_file):
                     print(f"✅ Found corresponding QMD file: {source_file}")
+                    
+                    # Validate section IDs match between quiz and QMD
+                    try:
+                        with open(source_file, 'r', encoding='utf-8') as qmd_f:
+                            qmd_content = qmd_f.read()
+                        
+                        qmd_sections = extract_sections_with_ids(qmd_content)
+                        if qmd_sections:
+                            # Create sets of section IDs for comparison
+                            qmd_section_ids = {s['section_id'] for s in qmd_sections}
+                            quiz_section_ids = {s['section_id'] for s in sections}
+                            
+                            # Check for mismatches
+                            quiz_not_in_qmd = quiz_section_ids - qmd_section_ids
+                            qmd_not_in_quiz = qmd_section_ids - quiz_section_ids
+                            
+                            print(f"\n📋 Section ID Validation:")
+                            if not quiz_not_in_qmd and not qmd_not_in_quiz:
+                                print(f"   ✅ All section IDs match perfectly")
+                            else:
+                                if quiz_not_in_qmd:
+                                    print(f"   ❌ Quiz sections NOT found in QMD file:")
+                                    for section_id in sorted(quiz_not_in_qmd):
+                                        # Find section title from quiz data
+                                        section_title = next((s['section_title'] for s in sections if s['section_id'] == section_id), 'Unknown')
+                                        print(f"      - {section_id} ({section_title})")
+                                
+                                if qmd_not_in_quiz:
+                                    print(f"   ⚠️  QMD sections NOT found in quiz file:")
+                                    for section_id in sorted(qmd_not_in_quiz):
+                                        # Find section title from QMD data
+                                        section_title = next((s['section_title'] for s in qmd_sections if s['section_id'] == section_id), 'Unknown')
+                                        print(f"      - {section_id} ({section_title})")
+                        else:
+                            print(f"\n⚠️  Could not extract sections from QMD file for validation")
+                            
+                    except Exception as e:
+                        print(f"\n⚠️  Could not validate section IDs: {str(e)}")
                 else:
                     print(f"⚠️  QMD file not found: {source_file}")
             else:
@@ -3977,6 +4015,44 @@ def run_verify_mode_simple(file_path):
                 quiz_path = os.path.join(os.path.dirname(file_path), quiz_file)
                 if os.path.exists(quiz_path):
                     print(f"✅ Found corresponding quiz file: {quiz_path}")
+                    
+                    # Validate section IDs match between QMD and quiz
+                    try:
+                        with open(quiz_path, 'r', encoding='utf-8') as quiz_f:
+                            quiz_data = json.load(quiz_f)
+                        
+                        quiz_sections = quiz_data.get('sections', [])
+                        if quiz_sections:
+                            # Create sets of section IDs for comparison
+                            qmd_section_ids = {s['section_id'] for s in sections}
+                            quiz_section_ids = {s['section_id'] for s in quiz_sections}
+                            
+                            # Check for mismatches
+                            quiz_not_in_qmd = quiz_section_ids - qmd_section_ids
+                            qmd_not_in_quiz = qmd_section_ids - quiz_section_ids
+                            
+                            print(f"\n📋 Section ID Validation:")
+                            if not quiz_not_in_qmd and not qmd_not_in_quiz:
+                                print(f"   ✅ All section IDs match perfectly")
+                            else:
+                                if quiz_not_in_qmd:
+                                    print(f"   ❌ Quiz sections NOT found in QMD file:")
+                                    for section_id in sorted(quiz_not_in_qmd):
+                                        # Find section title from quiz data
+                                        section_title = next((s['section_title'] for s in quiz_sections if s['section_id'] == section_id), 'Unknown')
+                                        print(f"      - {section_id} ({section_title})")
+                                
+                                if qmd_not_in_quiz:
+                                    print(f"   ⚠️  QMD sections NOT found in quiz file:")
+                                    for section_id in sorted(qmd_not_in_quiz):
+                                        # Find section title from QMD data
+                                        section_title = next((s['section_title'] for s in sections if s['section_id'] == section_id), 'Unknown')
+                                        print(f"      - {section_id} ({section_title})")
+                        else:
+                            print(f"\n⚠️  Could not extract sections from quiz file for validation")
+                            
+                    except Exception as e:
+                        print(f"\n⚠️  Could not validate section IDs: {str(e)}")
                 else:
                     print(f"⚠️  The quiz file '{quiz_file}' referenced in the frontmatter of {file_path} does not exist.")
             else:
