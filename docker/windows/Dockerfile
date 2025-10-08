@@ -155,92 +155,41 @@ RUN Write-Host '✅ Dependency file copy complete'
 #     & "$texLiveBin\lualatex.exe" --version ; `
 #     Write-Host '✅ TeX Live installation verified'
 
-# CURRENT APPROACH: Official TeX Live installer (working as of Oct 2025)
-RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
-    Write-Host '📦 Using official TeX Live network installer' ; `
-    Write-Host '⏰ Installation will take 15-20 minutes' ; `
-    Write-Host '🔄 Downloading TeX Live installer...' ; `
-    $installerUrl = 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl-windows.exe' ; `
-    $installerPath = 'C:\temp\install-tl-windows.exe' ; `
-    Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing ; `
-    $installerSizeMB = [math]::Round((Get-Item $installerPath).Length / 1MB, 2) ; `
-    Write-Host ('✅ Downloaded installer (' + $installerSizeMB + ' MB)') ; `
-    Write-Host '🔧 Creating installation profile...' ; `
-    $profilePath = 'C:\temp\texlive.profile' ; `
-    'selected_scheme scheme-full' | Out-File -FilePath $profilePath -Encoding ASCII ; `
-    'TEXDIR C:/texlive/2025' | Add-Content -Path $profilePath -Encoding ASCII ; `
-    'TEXMFCONFIG C:/texlive/2025/texmf-config' | Add-Content -Path $profilePath -Encoding ASCII ; `
-    'TEXMFHOME C:/texlive/2025/texmf-home' | Add-Content -Path $profilePath -Encoding ASCII ; `
-    'TEXMFLOCAL C:/texlive/2025/texmf-local' | Add-Content -Path $profilePath -Encoding ASCII ; `
-    'TEXMFSYSCONFIG C:/texlive/2025/texmf-config' | Add-Content -Path $profilePath -Encoding ASCII ; `
-    'TEXMFSYSVAR C:/texlive/2025/texmf-var' | Add-Content -Path $profilePath -Encoding ASCII ; `
-    'TEXMFVAR C:/texlive/2025/texmf-var' | Add-Content -Path $profilePath -Encoding ASCII ; `
-    'binary_windows 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
-    'instopt_adjustpath 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
-    'instopt_adjustrepo 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
-    'instopt_letter 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
-    'instopt_portable 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
-    'instopt_write18_restricted 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
-    'tlpdbopt_autobackup 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
-    'tlpdbopt_backupdir tlpkg/backups' | Add-Content -Path $profilePath -Encoding ASCII ; `
-    'tlpdbopt_create_formats 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
-    'tlpdbopt_desktop_integration 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
-    'tlpdbopt_file_assocs 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
-    'tlpdbopt_generate_updmap 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
-    'tlpdbopt_install_docfiles 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
-    'tlpdbopt_install_srcfiles 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
-    'tlpdbopt_post_code 1' | Add-Content -Path $profilePath -Encoding ASCII ; `
-    'tlpdbopt_sys_bin C:/texlive/2025/bin/windows' | Add-Content -Path $profilePath -Encoding ASCII ; `
-    'tlpdbopt_sys_info C:/texlive/2025/texmf-dist/doc/info' | Add-Content -Path $profilePath -Encoding ASCII ; `
-    'tlpdbopt_sys_man C:/texlive/2025/texmf-dist/doc/man' | Add-Content -Path $profilePath -Encoding ASCII ; `
-    'tlpdbopt_w32_multi_user 0' | Add-Content -Path $profilePath -Encoding ASCII ; `
-    Write-Host '✅ Profile created' ; `
-    Write-Host '📋 Profile settings: scheme-full, no docs/sources' ; `
-    Write-Host '🔄 Running TeX Live installer (verbose, using fast US mirror)...' ; `
-    & $installerPath -profile $profilePath -no-gui -v -repository https://mirrors.rit.edu/CTAN/systems/texlive/tlnet ; `
-    $exitCode = $LASTEXITCODE ; `
-    Write-Host "Installer exit code: $exitCode" ; `
-    if ($exitCode -ne 0) { `
-        Write-Host '❌ ERROR: TeX Live installation failed' ; `
-        throw "TeX Live installation failed with exit code $exitCode" ; `
+# CURRENT APPROACH: MiKTeX via Scoop (Official TeX Live installer fails in Docker)
+# Note: Both official TeX Live installer and Chocolatey texlive package are broken in this environment
+# - Official installer exits immediately with empty exit code
+# - Chocolatey package missing install-tl.zip
+# MiKTeX is the most reliable LaTeX distribution for Windows containers
+RUN Write-Host '=== STARTING MIKTEX INSTALLATION ===' ; `
+    Write-Host '📦 Installing MiKTeX via Scoop (designed for Windows)...' ; `
+    scoop install main/miktex ; `
+    Write-Host '✅ MiKTeX package installed' ; `
+    Write-Host '🔍 Locating MiKTeX installation...' ; `
+    $miktexBin = Get-ChildItem "$env:USERPROFILE\scoop\apps\miktex\current" -Recurse -Directory -Filter 'bin' -ErrorAction SilentlyContinue | `
+        Where-Object { (Test-Path (Join-Path $_.FullName 'lualatex.exe')) } | `
+        Select-Object -First 1 -ExpandProperty FullName ; `
+    if (-not $miktexBin) { `
+        Write-Host '❌ ERROR: MiKTeX bin directory not found' ; `
+        Write-Host '📁 Checking Scoop apps directory:' ; `
+        Get-ChildItem "$env:USERPROFILE\scoop\apps\miktex" -Recurse -Depth 3 -ErrorAction SilentlyContinue | `
+            Where-Object { $_.Name -eq 'lualatex.exe' } | `
+            ForEach-Object { Write-Host "  Found lualatex at: $($_.DirectoryName)" } ; `
+        throw "MiKTeX bin directory not found" ; `
     } ; `
-    Write-Host '✅ TeX Live installed successfully' ; `
-    Write-Host '🔍 Locating TeX Live installation...' ; `
-    $texLiveBin = 'C:\texlive\2025\bin\windows' ; `
-    if (-not (Test-Path $texLiveBin)) { `
-        Write-Host '❌ ERROR: TeX Live bin directory not found' ; `
-        Write-Host '📁 Checking for alternative locations:' ; `
-        Get-ChildItem 'C:\texlive' -Recurse -Depth 2 -Directory -ErrorAction SilentlyContinue | `
-            Where-Object { $_.Name -eq 'windows' } | ForEach-Object { Write-Host "  Found: $($_.FullName)" } ; `
-        throw "TeX Live bin directory not found at $texLiveBin" ; `
-    } ; `
-    Write-Host "✅ TeX Live bin: $texLiveBin" ; `
-    Write-Host '🔧 Adding TeX Live to PATH...' ; `
+    Write-Host "✅ MiKTeX bin: $miktexBin" ; `
+    Write-Host '🔧 Adding MiKTeX to PATH...' ; `
     $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
-    $newPath = $texLiveBin + ';' + $mach ; `
+    $newPath = $miktexBin + ';' + $mach ; `
     [Environment]::SetEnvironmentVariable('PATH', $newPath, 'Machine') ; `
-    $env:PATH = $texLiveBin + ';' + $env:PATH ; `
+    $env:PATH = $miktexBin + ';' + $env:PATH ; `
     Write-Host '✅ PATH updated' ; `
     Write-Host '🔍 Verifying lualatex...' ; `
-    $lualatexPath = Join-Path $texLiveBin 'lualatex.exe' ; `
-    if (Test-Path $lualatexPath) { `
-        & $lualatexPath --version | Select-Object -First 2 ; `
-    } else { `
-        throw "lualatex.exe not found at $lualatexPath" ; `
-    } ; `
-    Write-Host '📋 Installing additional collections from tl_packages...' ; `
-    if (Test-Path 'C:\temp\tl_packages') { `
-        $collections = Get-Content 'C:\temp\tl_packages' | Where-Object { $_.Trim() -and -not $_.StartsWith('#') } ; `
-        Write-Host "📦 Found $($collections.Count) collections" ; `
-        $tlmgrPath = Join-Path $texLiveBin 'tlmgr.bat' ; `
-        foreach ($collection in $collections) { `
-            Write-Host "  Installing $collection..." ; `
-            & $tlmgrPath install $collection 2>&1 | Out-Null ; `
-        } ; `
-    } ; `
-    Write-Host '🧹 Cleaning up installer files...' ; `
-    Remove-Item $installerPath, $profilePath -Force -ErrorAction SilentlyContinue ; `
-    Write-Host '✅ TeX Live installation complete'
+    lualatex --version | Select-Object -First 3 ; `
+    Write-Host '✅ lualatex verified' ; `
+    Write-Host '📋 Configuring MiKTeX for non-interactive use...' ; `
+    miktexsetup --set-config-value [MPM]AutoInstall=1 ; `
+    Write-Host '✅ Auto-install packages enabled' ; `
+    Write-Host '✅ MiKTeX installation complete'
 
 # ------------------------------------------------------------
 # PHASE 5: Install Scoop (Package manager setup)
@@ -407,19 +356,8 @@ RUN Write-Host '=== STARTING CLEANUP AND ENVIRONMENT SETUP ===' ; `
 # Set PATH at Docker image level for all installed tools
 # ------------------------------------------------------------
 # This is CRITICAL - Machine-level PATH changes in RUN commands don't persist!
-ENV PATH="C:\texlive\2025\bin\windows;C:\Program Files\PowerShell\7;C:\Users\ContainerAdministrator\scoop\shims;${PATH}"
-
-# ------------------------------------------------------------
-# OPTIONAL BACKUP: MiKTeX installation (commented out)
-# ------------------------------------------------------------
-# MiKTeX is a lighter alternative to TeX Live. Uncomment if TeX Live has issues.
-# RUN Write-Host '=== INSTALLING MIKTEX AS BACKUP ===' ; `
-#     scoop bucket add main ; `
-#     scoop install main/miktex ; `
-#     Write-Host '✅ MiKTeX installed via Scoop' ; `
-#     Write-Host 'Verifying MiKTeX...' ; `
-#     miktex --version ; `
-#     Write-Host '✅ MiKTeX verified'
+# MiKTeX bin path is added dynamically during installation (varies by version)
+ENV PATH="C:\Program Files\PowerShell\7;C:\Users\ContainerAdministrator\scoop\shims;${PATH}"
 
 # ------------------------------------------------------------
 # FINAL CHECKS: Comprehensive verification with diagnostics
