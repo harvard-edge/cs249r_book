@@ -19,7 +19,7 @@ RELEASE_NOTES_FILE = "release_notes_v{version}.md"
 # Lab structure from quarto config
 LAB_STRUCTURE = None
 
-def load_lab_structure(quarto_file="book/config/_quarto-html.yml"):
+def load_lab_structure(quarto_file="quarto/config/_quarto-html.yml"):
     """Load lab structure from quarto HTML config file."""
     global LAB_STRUCTURE
     
@@ -109,6 +109,12 @@ def organize_labs_by_structure(lab_entries):
     """Organize lab entries according to the structure from quarto config."""
     if not LAB_STRUCTURE:
         # Fallback to flat list if no structure loaded
+        return lab_entries
+    
+    # Check if entries use AI summaries (don't have "X changes" pattern)
+    # If AI mode, skip organization and return flat list
+    if lab_entries and not re.search(r'(\d+) changes', lab_entries[0]):
+        # AI-generated summaries - return as-is without organization
         return lab_entries
     
     # Group lab entries by their hardware platform
@@ -317,7 +323,7 @@ For a complete list of all changes, improvements, and updates, see the [detailed
     print(f"✅ Release notes saved to: {filename}")
     return filename
 
-QUARTO_YML_FILE = "book/config/_quarto-pdf.yml"  # Default to PDF config which has chapters structure
+QUARTO_YML_FILE = "quarto/config/_quarto-pdf.yml"  # Default to PDF config which has chapters structure
 GITHUB_REPO_URL = "https://github.com/harvard-edge/cs249r_book/"
 
 
@@ -345,7 +351,8 @@ chapter_lookup = [
     ("contents/core/sustainable_ai/sustainable_ai.qmd", "Sustainable AI", 17),
     ("contents/core/robust_ai/robust_ai.qmd", "Robust AI", 18),
     ("contents/core/ai_for_good/ai_for_good.qmd", "AI for Good", 19),
-    ("contents/core/conclusion/conclusion.qmd", "Conclusion", 20),
+    ("contents/core/frontiers/frontiers.qmd", "Frontiers", 20),
+    ("contents/core/conclusion/conclusion.qmd", "Conclusion", 21),
     
     # LAB sections
     ("contents/labs/overview.qmd", "Labs Overview", 100),
@@ -493,7 +500,7 @@ def get_changes_in_dev_since(date_start, date_end=None, verbose=False):
     cmd = ["git", "log", "--numstat", "--since", date_start]
     if date_end:
         cmd += ["--until", date_end]
-    cmd += ["origin/dev", "--", "contents/**/*.qmd"]
+    cmd += ["origin/dev", "--", "quarto/contents/**/*.qmd"]
     return run_git_command(cmd, verbose=verbose)
 
 
@@ -556,6 +563,27 @@ def call_ollama(prompt, model="gemma2:9b", url="http://localhost:11434"):
         print(f"⚠️ Error calling Ollama: {e}")
         return None
 
+def clean_ai_summary(summary):
+    """Remove AI artifacts from generated summaries."""
+    # Remove common AI pleasantries and artifacts
+    artifacts = [
+        r'Let me know if .*?[!.]',
+        r'I can .*? if you[\'d]* like[!.]',
+        r'Feel free to .*?[!.]',
+        r'Please let me know .*?[!.]',
+        r'\s+\n\s*\n',  # Multiple blank lines
+    ]
+    
+    cleaned = summary
+    for pattern in artifacts:
+        cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE | re.DOTALL)
+    
+    # Clean up extra whitespace and newlines
+    cleaned = re.sub(r'\s+', ' ', cleaned)
+    cleaned = cleaned.strip()
+    
+    return cleaned
+
 def generate_ai_summary(chapter_title, commit_messages, file_path, verbose=False):
     """Generate AI summary for a file based on commit messages."""
     if not commit_messages.strip():
@@ -575,7 +603,8 @@ Generate a concise summary (1-2 sentences) that describes the key updates:"""
     ai_summary = call_ollama(prompt)
     
     if ai_summary:
-        return ai_summary
+        # Clean up AI artifacts
+        return clean_ai_summary(ai_summary)
     else:
         # Fallback to simple summary
         commit_count = len([msg for msg in commit_messages.split('\n') if msg.strip()])
@@ -939,7 +968,7 @@ if __name__ == "__main__":
     parser.add_argument("-t", "--test", action="store_true", help="Run without writing to file.")
     parser.add_argument("--demo", action="store_true", help="Generate a demo changelog entry with sample data.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output.")
-    parser.add_argument("-q", "--quarto-config", type=str, help="Path to quarto config file (default: book/config/_quarto-pdf.yml)")
+    parser.add_argument("-q", "--quarto-config", type=str, help="Path to quarto config file (default: quarto/config/_quarto-pdf.yml)")
     parser.add_argument("--ai-mode", action="store_true", help="Enable AI-generated summaries instead of simple change counts.")
     parser.add_argument("--ollama-url", default="http://localhost:11434", help="Ollama API URL for AI summaries.")
     parser.add_argument("--ollama-model", default="gemma2:9b", help="Ollama model to use for AI summaries.")
@@ -1024,7 +1053,7 @@ if __name__ == "__main__":
     try:
         load_chapter_order(args.quarto_config)
         # Load lab structure from HTML config (not PDF config)
-        load_lab_structure("book/config/_quarto-html.yml")
+        load_lab_structure("quarto/config/_quarto-html.yml")
         
         # Print configuration header
         print("=" * 60)
@@ -1067,12 +1096,16 @@ if __name__ == "__main__":
                 
                 for line in existing_lines:
                     new_lines.append(line)
-                    # Insert new entry right after the year header
-                    if not inserted and line.strip() == year_header:
+                    # Insert new entry right after the year header (handle both old and new formats)
+                    line_stripped = line.strip()
+                    year_match = (line_stripped == year_header or 
+                                 line_stripped == f"## {current_year}" or
+                                 line_stripped == f"## {current_year} Updates")
+                    if not inserted and year_match:
                         # Add the new entry (without year header since it's already in the file)
                         new_entry_lines = new_entry.strip().splitlines()
                         # Skip the first line (year header) since we're inserting after existing year header
-                        if new_entry_lines and new_entry_lines[0].strip() == year_header:
+                        if new_entry_lines and new_entry_lines[0].strip() in [year_header, f"## {current_year}", f"## {current_year} Updates"]:
                             new_entry_lines = new_entry_lines[1:]
                         new_lines.extend(new_entry_lines)
                         new_lines.append("")  # Add blank line

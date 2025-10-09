@@ -16,11 +16,14 @@ on chapter position.
 FEATURES:
 ---------
 - AI-powered quiz generation with chapter-aware difficulty progression
+- Dynamic concept extraction from external YAML files referenced in frontmatter
+- Cumulative knowledge tracking from previous chapters
+- Section-level knowledge boundary enforcement
 - Interactive GUI for reviewing and editing questions
 - Robust quiz insertion with reverse-order processing (prevents line number conflicts)
 - Quiz removal and cleanup from markdown files
 - File validation and verification with comprehensive error checking
-- Support for multiple question types (MCQ, TF, SHORT, FILL, ORDER, CALC)
+- Support for multiple question types (MCQ, TF, SHORT, FILL, ORDER)  # CALC disabled
 - Automatic frontmatter management
 - Backup and dry-run capabilities for safe operation
 
@@ -34,11 +37,14 @@ MODES OF OPERATION:
 
 USAGE EXAMPLES:
 ---------------
-# Generate quizzes for a single chapter
+# Generate quizzes for a single chapter (uses OpenAI gpt-4o by default)
 python quizzes.py --mode generate -f contents/core/introduction/introduction.qmd
 
+# Generate quizzes using local Ollama instead
+python quizzes.py --mode generate -f chapter.qmd --provider ollama
+
 # Generate quizzes for all chapters in a directory
-python quizzes.py --mode generate -d contents/core/
+python quizzes.py --mode generate -d contents/core/ --parallel
 
 # Review quizzes with GUI
 python quizzes.py --mode review -f introduction_quizzes.json
@@ -49,13 +55,25 @@ python quizzes.py --mode clean --backup -f introduction.qmd
 # Verify quiz file structure
 python quizzes.py --mode verify -f introduction_quizzes.json
 
-CHAPTER PROGRESSION:
--------------------
+CHAPTER PROGRESSION & CONCEPT TRACKING:
+---------------------------------------
 The tool automatically detects chapter position and adjusts question difficulty:
 - Chapters 1-5: Foundational concepts and basic understanding
 - Chapters 6-10: Intermediate complexity with practical applications
 - Chapters 11-15: Advanced topics requiring system-level reasoning
 - Chapters 16-20: Specialized topics requiring integration across concepts
+
+Concept Extraction (Topics-Covered Approach):
+- Reads topics_covered from external YAML files (e.g., introduction_concepts.yml)
+- Referenced via 'concepts:' field in chapter QMD frontmatter
+- Uses structured topics_covered format: topic names with organized subtopics
+- Provides optimal balance of specificity and efficiency for quiz generation
+- Falls back to concept_map structure (primary/secondary concepts) if available
+- Accumulates topic knowledge from all previous chapters for context
+- Ensures questions only use knowledge available up to current section
+
+The topics_covered approach generates 33% more questions with better practical focus
+compared to traditional concept hierarchies, making it the preferred method.
 
 QUESTION TYPES:
 --------------
@@ -64,7 +82,7 @@ QUESTION TYPES:
 - SHORT: Short answer questions for deeper reflection
 - FILL: Fill-in-the-blank for specific terminology
 - ORDER: Sequencing questions for processes/workflows
-- CALC: Mathematical calculation questions
+# - CALC: Mathematical calculation questions (DISABLED - placeholder for future)
 
 FILE STRUCTURE:
 --------------
@@ -89,10 +107,25 @@ Quiz files are stored as JSON with the following structure:
   ]
 }
 
+LLM PROVIDERS:
+-------------
+- OpenAI (default): Uses OpenAI API for quiz generation
+  - Requires OPENAI_API_KEY environment variable
+  - Default model: gpt-4o
+  - Available models: gpt-4o, gpt-4o-mini, gpt-3.5-turbo
+  
+- Ollama: Uses local Ollama instance for quiz generation
+  - No API key required - runs locally
+  - Default model: llama3.2:3b (when using --provider ollama)
+  - Recommended models: llama3.1:8b (balanced), mistral:7b (fast)
+  - Default URL: http://localhost:11434
+  - Install: https://ollama.ai
+
 DEPENDENCIES:
 ------------
 - openai: For AI-powered quiz generation
-- gradio: For the interactive GUI
+- requests: For Ollama API communication
+- gradio: For the interactive GUI (optional)
 - jsonschema: For JSON validation
 - pyyaml: For YAML frontmatter processing
 - argparse: For command-line interface
@@ -102,12 +135,18 @@ MAINTENANCE:
 - Global variables at the top control patterns and constants
 - Question type configuration is easily modifiable
 - System prompts can be updated for different requirements
-- Chapter mapping can be adjusted for different book structures
+- Chapter ordering defined in CHAPTER_ORDER for consistency
+- Concept maps extracted from external YAML files referenced in frontmatter
+- Knowledge boundaries enforced at prompt and system levels
 
-AUTHOR: [Your Name]
-VERSION: 1.0
-DATE: [Current Date]
+AUTHOR: ML Systems Textbook Team
+VERSION: 2.0 (Dynamic Concept Extraction)
+DATE: 2025
 """
+
+# ============================================================================
+# IMPORTS AND DEPENDENCIES
+# ============================================================================
 
 import argparse
 import os
@@ -121,12 +160,503 @@ import concurrent.futures
 import threading
 import time
 import sys
+import requests
 
 # Gradio imports
-import gradio as gr
+try:
+    import gradio as gr
+except ImportError:
+    gr = None
 
 # JSON Schema validation
 from jsonschema import validate, ValidationError
+
+# Define question types
+# CALC is temporarily disabled - kept as placeholder for future use
+QUESTION_TYPES = ["MCQ", "TF", "SHORT", "FILL", "ORDER"]  # CALC removed from active generation
+NON_MCQ_TYPES = ["TF", "SHORT", "FILL", "ORDER"]  # CALC removed from active generation
+ALL_QUESTION_TYPES_WITH_CALC = ["MCQ", "TF", "SHORT", "FILL", "ORDER", "CALC"]  # For compatibility
+
+# Schema for individual quiz_data responses from LLM
+QUIZ_DATA_SCHEMA = {
+    "oneOf": [
+        {
+            "type": "object",
+            "properties": {
+                "quiz_needed": {"type": "boolean", "const": False},
+                "rationale": {"type": "string"}
+            },
+            "required": ["quiz_needed", "rationale"],
+            "additionalProperties": False
+        },
+        {
+            "type": "object",
+            "properties": {
+                "quiz_needed": {"type": "boolean", "const": True},
+                "rationale": {
+                    "type": "object",
+                    "properties": {
+                        "focus_areas": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "minItems": 2,
+                            "maxItems": 3
+                        },
+                        "question_strategy": {"type": "string"},
+                        "difficulty_progression": {"type": "string"},
+                        "integration": {"type": "string"},
+                        "ranking_explanation": {"type": "string"}
+                    },
+                    "required": ["focus_areas", "question_strategy", "difficulty_progression", "integration", "ranking_explanation"],
+                    "additionalProperties": False
+                },
+                "questions": {
+                    "type": "array",
+                    "items": {
+                        "oneOf": [
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "question_type": {"type": "string", "const": "MCQ"},
+                                    "question": {"type": "string"},
+                                    "choices": {
+                                        "type": "array",
+                                        "items": {"type": "string"},
+                                        "minItems": 3,
+                                        "maxItems": 5
+                                    },
+                                    "answer": {"type": "string"},
+                                    "learning_objective": {"type": "string"}
+                                },
+                                "required": ["question_type", "question", "choices", "answer", "learning_objective"],
+                                "additionalProperties": False
+                            },
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "question_type": {
+                                        "type": "string",
+                                        "enum": NON_MCQ_TYPES
+                                    },
+                                    "question": {"type": "string"},
+                                    "answer": {"type": "string"},
+                                    "learning_objective": {"type": "string"}
+                                },
+                                "required": ["question_type", "question", "answer", "learning_objective"],
+                                "additionalProperties": False
+                            }
+                        ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 5
+                }
+            },
+            "required": ["quiz_needed", "rationale", "questions"],
+            "additionalProperties": False
+        }
+    ]
+}
+
+# ============================================================================
+# LLM CLIENT WRAPPERS
+# Provides unified interface for different LLM providers (OpenAI, Ollama).
+# ============================================================================
+
+class OllamaClient:
+    """Simple wrapper for Ollama API to match OpenAI client interface."""
+    
+    def __init__(self, base_url="http://localhost:11434"):
+        self.base_url = base_url
+        self.chat = self
+        self.completions = self
+    
+    def create(self, model, messages, temperature=0.4, response_format=None, **kwargs):
+        """Create a chat completion using Ollama API."""
+        # Convert OpenAI format to Ollama format
+        prompt = ""
+        for msg in messages:
+            if msg["role"] == "system":
+                prompt += f"System: {msg['content']}\n\n"
+            elif msg["role"] == "user":
+                prompt += f"User: {msg['content']}\n\n"
+            elif msg["role"] == "assistant":
+                prompt += f"Assistant: {msg['content']}\n\n"
+        
+        # Add instruction for JSON if requested
+        if response_format and response_format.get("type") == "json_object":
+            prompt += "\nIMPORTANT: Respond with valid JSON only.\n\nAssistant: "
+        else:
+            prompt += "Assistant: "
+        
+        # Call Ollama API
+        response = requests.post(
+            f"{self.base_url}/api/generate",
+            json={
+                "model": model,
+                "prompt": prompt,
+                "temperature": temperature,
+                "stream": False,
+                "format": "json" if response_format and response_format.get("type") == "json_object" else None
+            }
+        )
+        
+        if response.status_code != 200:
+            raise Exception(f"Ollama API error: {response.status_code} - {response.text}")
+        
+        result = response.json()
+        
+        # Wrap in OpenAI-like response format
+        class Message:
+            def __init__(self, content):
+                self.content = content
+        
+        class Choice:
+            def __init__(self, content):
+                self.message = Message(content)
+        
+        class Response:
+            def __init__(self, content):
+                self.choices = [Choice(content)]
+        
+        return Response(result.get("response", ""))
+
+# ============================================================================
+# LLM JUDGE FOR QUALITY EVALUATION
+# ============================================================================
+
+from enum import Enum
+from dataclasses import dataclass
+from typing import Dict, List
+
+class QuestionQuality(Enum):
+    EXCELLENT = "excellent"
+    GOOD = "good" 
+    NEEDS_IMPROVEMENT = "needs_improvement"
+    REJECT = "reject"
+
+@dataclass
+class QuestionEvaluation:
+    quality: QuestionQuality
+    score: float  # 0-100
+    issues: List[str]
+    suggestions: List[str]
+    should_regenerate: bool
+
+class QuizQuestionJudge:
+    """LLM-based judge for evaluating quiz question quality"""
+    
+    def __init__(self, client, model_type="default"):
+        """
+        Initialize judge with an LLM client
+        
+        Args:
+            client: LLM client (OpenAI or Ollama)
+            model_type: "fast", "default", or "thorough"
+        """
+        self.client = client
+        self.model_type = model_type
+        
+        # Model configurations for different evaluation depths
+        self.model_configs = {
+            "fast": {
+                "model": "llama3.2:3b",  # Ollama fast model
+                "temperature": 0.1,
+                "max_tokens": 500
+            },
+            "default": {
+                "model": "llama3.1:8b",  # Ollama balanced model  
+                "temperature": 0.2,
+                "max_tokens": 1000
+            },
+            "thorough": {
+                "model": "gpt-4o-mini",  # OpenAI for thorough evaluation
+                "temperature": 0.3,
+                "max_tokens": 1500
+            }
+        }
+    
+    def _get_type_specific_criteria(self, question_type: str) -> str:
+        """Get evaluation criteria specific to question type"""
+        
+        criteria = {
+            # CALC disabled - keeping structure for compatibility
+            "CALC": """
+- CALC Questions (DISABLED):
+  * Must have 2-4 calculation steps (not single multiplication)
+  * Must use ML-specific formulas (not just arithmetic)
+  * Should lead to system insights (not just numbers)
+  * Numbers should be realistic for the domain
+  * REJECT if: Single-step like "1TB × 8 = ?", "$3 × 10 = ?", "500 × 0.2 = ?"
+""",
+            "MCQ": """
+- MCQ Questions:
+  * All distractors must be plausible
+  * No "all of the above" or "none of the above"
+  * Choices should test understanding, not trick students
+  * One clearly correct answer
+""",
+            "SHORT": """
+- SHORT Answer:
+  * Should require explanation, not just listing
+  * Answer length appropriate (2-4 sentences)
+  * Tests conceptual understanding
+""",
+            "TF": """
+- True/False:
+  * Should address common misconceptions
+  * Not trivially obvious
+  * Explanation must clarify why
+""",
+            "FILL": """
+- Fill-in-the-blank:
+  * Blank should be for key technical term
+  * Context should make answer unambiguous
+  * Not just vocabulary testing
+""",
+            "ORDER": """
+- Ordering Questions:
+  * Steps must have logical sequence
+  * No arbitrary orderings
+  * Tests process understanding
+  * QUESTION FORMAT: Items numbered (1), (2), (3) - keep brief
+  * ANSWER FORMAT: "The correct order is: (2) Item B, (1) Item A, (3) Item C." 
+  * CRITICAL: Always include BOTH numbers AND item names in answer for readability
+  * NEVER put explanations/definitions in the question items
+"""
+        }
+        
+        return criteria.get(question_type, "No specific criteria for this type")
+    
+    def create_evaluation_prompt(self, question: Dict, chapter_info: Dict) -> str:
+        """Create the evaluation prompt for the LLM judge"""
+        
+        return f"""You are an expert quiz question evaluator for a Machine Learning Systems textbook.
+Evaluate the following quiz question for quality, difficulty appropriateness, and pedagogical value.
+
+CHAPTER CONTEXT:
+- Chapter: {chapter_info.get('title', 'Unknown')}
+- Chapter Number: {chapter_info.get('number', 0)} of 20
+- Target Audience: Senior undergraduate and graduate students
+- Section: {chapter_info.get('section', 'Unknown')}
+
+QUESTION TO EVALUATE:
+Type: {question.get('question_type', 'Unknown')}
+Question: {question.get('question', '')}
+{"Choices: " + json.dumps(question.get('choices', [])) if question.get('choices') else ''}
+Answer: {question.get('answer', '')}
+Learning Objective: {question.get('learning_objective', '')}
+
+EVALUATION CRITERIA:
+
+1. **Difficulty Appropriateness** (25 points)
+   - Is the difficulty appropriate for senior undergrad/grad students?
+   - Does it match the chapter progression (early chapters easier)?
+   # - For CALC: (DISABLED)
+
+2. **Question Clarity** (20 points)
+   - Is the question unambiguous?
+   - Are all terms clearly defined?
+   - Is the language precise and academic?
+
+3. **Answer Quality** (20 points)
+   - Is the answer correct and complete?
+   - Does it explain the reasoning?
+   - For MCQ: Are distractors plausible but clearly wrong?
+
+4. **Learning Value** (20 points)
+   - Does it test understanding, not memorization?
+   - Does it connect to real ML systems concepts?
+   - Is the learning objective meaningful?
+
+5. **Technical Accuracy** (15 points)
+   - Are all technical details correct?
+   - Are formulas/calculations accurate?
+   - Is terminology used correctly?
+
+SPECIAL CHECKS FOR QUESTION TYPES:
+
+{self._get_type_specific_criteria(question.get('question_type', ''))}
+
+OUTPUT FORMAT (JSON):
+{{
+  "quality": "excellent|good|needs_improvement|reject",
+  "score": 0-100,
+  "issues": ["list of specific problems"],
+  "suggestions": ["list of improvement suggestions"],
+  "should_regenerate": true|false,
+  "detailed_scores": {{
+    "difficulty": 0-25,
+    "clarity": 0-20,
+    "answer": 0-20,
+    "learning_value": 0-20,
+    "accuracy": 0-15
+  }},
+  "reasoning": "Brief explanation of the evaluation"
+}}
+
+Evaluate the question and provide your assessment:"""
+
+    def evaluate_question(self, question: Dict, chapter_info: Dict) -> QuestionEvaluation:
+        """
+        Evaluate a single question using the LLM judge
+        
+        Args:
+            question: The question dictionary
+            chapter_info: Context about the chapter
+            
+        Returns:
+            QuestionEvaluation object with quality assessment
+        """
+        
+        # Create the evaluation prompt
+        prompt = self.create_evaluation_prompt(question, chapter_info)
+        
+        # Get model configuration
+        config = self.model_configs[self.model_type]
+        
+        try:
+            # Call the LLM
+            if isinstance(self.client, OllamaClient):
+                # For Ollama, use the configured model
+                response = self.client.chat.completions.create(
+                    model=config["model"],
+                    messages=[
+                        {"role": "system", "content": "You are an expert educational content evaluator."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=config["temperature"],
+                    response_format={"type": "json_object"}
+                )
+            else:
+                # For OpenAI
+                response = self.client.chat.completions.create(
+                    model=config["model"],
+                    messages=[
+                        {"role": "system", "content": "You are an expert educational content evaluator."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=config["temperature"],
+                    max_tokens=config["max_tokens"],
+                    response_format={"type": "json_object"}
+                )
+            
+            # Parse the response
+            result = json.loads(response.choices[0].message.content)
+            
+            # Create evaluation object
+            return QuestionEvaluation(
+                quality=QuestionQuality(result.get("quality", "needs_improvement")),
+                score=result.get("score", 50),
+                issues=result.get("issues", []),
+                suggestions=result.get("suggestions", []),
+                should_regenerate=result.get("should_regenerate", False)
+            )
+            
+        except Exception as e:
+            print(f"Error evaluating question: {e}")
+            # Return a default evaluation on error
+            return QuestionEvaluation(
+                quality=QuestionQuality.NEEDS_IMPROVEMENT,
+                score=50,
+                issues=["Could not evaluate question due to error"],
+                suggestions=["Manual review recommended"],
+                should_regenerate=False
+            )
+
+def get_llm_client(args):
+    """
+    Initialize the appropriate LLM client based on provider argument.
+    
+    Args:
+        args: Command line arguments with provider and model info
+        
+    Returns:
+        Client instance (OpenAI or OllamaClient)
+    """
+    # Set default model if not specified
+    if args.model is None:
+        if args.provider == "ollama":
+            args.model = "llama3.2:3b"  # Default Ollama model with specific tag
+        else:
+            args.model = "gpt-4o"  # Default OpenAI model
+    
+    if args.provider == "ollama":
+        print(f"Using Ollama with model: {args.model}")
+        return OllamaClient(base_url=args.ollama_url)
+    else:
+        print(f"Using OpenAI with model: {args.model}")
+        return OpenAI()
+
+# ============================================================================
+# PROMPTS AND TEMPLATES
+# ============================================================================
+# All prompts are centralized here for easy maintenance and modification.
+# These prompts control the behavior of quiz generation and classification.
+
+PROMPTS = {
+    # Section classification prompt for preprocessing
+    "classification": {
+        "system": "You are an expert educational content classifier for ML Systems textbooks.",
+        "user_template": """Analyze the following section from an ML Systems textbook and classify it into ONE of these categories:
+
+1. TECHNICAL_COMPUTATIONAL - Contains formulas, calculations, metrics, quantitative analysis
+2. ARCHITECTURAL_DESIGN - System architecture, neural network layers, design patterns
+3. CONCEPTUAL_FOUNDATIONAL - Core concepts, definitions, principles, theories
+4. PROCESS_WORKFLOW - Procedures, workflows, pipelines, sequential steps
+5. TRADEOFF_ANALYSIS - Comparing options, analyzing trade-offs, pros and cons
+6. IMPLEMENTATION_PRACTICAL - Implementation details, code examples, practical applications
+7. BACKGROUND_CONTEXTUAL - Historical context, motivation, overview, introduction
+
+Also provide:
+- confidence: Your confidence level (0.0 to 1.0)
+- content_hints: Guidance for quiz generation based on the content type
+- quiz_likelihood: HIGH, MEDIUM, or LOW based on educational value
+- contextual_notes: Specific observations about the content
+
+Section Title: {section_title}
+
+Section Content (first 1000 chars):
+{section_content}
+
+Respond in JSON format:
+{{
+    "classification": "CATEGORY_NAME",
+    "confidence": 0.0,
+    "content_hints": "string",
+    "quiz_likelihood": "HIGH/MEDIUM/LOW",
+    "contextual_notes": "string"
+}}"""
+    },
+    
+    # Section analysis template for adding to user prompt
+    "section_analysis_template": """
+## SECTION ANALYSIS:
+**Classification:** {section_type} (confidence: {confidence:.1%})
+**Description:** {description}
+
+**Content Guidance:** {content_hints}
+
+**Contextual Notes:** {contextual_notes}
+
+**Quiz Likelihood:** {quiz_likelihood}""",
+    
+    # Main quiz generation system prompt
+    "quiz_generation": {
+        "system": None,  # Will be set below after QUESTION_GUIDELINES is defined
+        "difficulty_chapter_guide": """
+Chapters 1-5: Foundational concepts (simpler questions, focus on understanding)
+Chapters 6-10: Intermediate complexity (practical applications, deeper analysis)
+Chapters 11-15: Advanced topics (system-level reasoning, integration)
+Chapters 16-20: Specialized topics (cutting-edge, research-oriented)"""
+    }
+}
+
+# ============================================================================
+# CONFIGURATION CONSTANTS
+# ============================================================================
+
+# File naming constants
+QUIZ_JSON_SUFFIX = '_quizzes.json'
 
 # Callout class names for quiz insertion
 QUIZ_QUESTION_CALLOUT_CLASS = ".callout-quiz-question"
@@ -162,15 +692,15 @@ SECTION_PATTERN = r"^##\s+(.+?)(\s*\{[^}]*\})?\s*$"
 QUESTION_TYPE_CONFIG = [
     {
         "type": "MCQ",
-        "description": "Best for checking definitions, comparisons, and system behaviors. Provide 3–5 options with plausible distractors. The `answer` field must explain why the correct choice is correct."
+        "description": "Best for checking definitions, comparisons, and system behaviors. Provide 3–5 options with plausible distractors. Answer format: 'The correct answer is [letter]: [choice text]. This is correct because [explanation]. [Why other options are incorrect or incomplete].'"
     },
     {
         "type": "TF",
-        "description": "Good for testing basic understanding or challenging misconceptions. The `answer` must include a justification."
+        "description": "Good for testing basic understanding or challenging misconceptions. Answer format: 'True/False. This is [true/false] because [clear explanation]. [Additional context or example if helpful].'"
     },
     {
         "type": "SHORT",
-        "description": "Encourages deeper reflection. Works well for \"Why is X necessary?\" or \"What would happen if...?\" questions."
+        "description": "Encourages deeper reflection. Works well for \"Why is X necessary?\" or \"What would happen if...?\" questions. Answer format: '[Main answer in 1-2 sentences]. For example, [concrete example or scenario]. This is important because [practical implication].'"
     },
     {
         "type": "FILL",
@@ -178,16 +708,17 @@ QUESTION_TYPE_CONFIG = [
     },
     {
         "type": "ORDER",
-        "description": "Excellent for reinforcing processes or workflows. The `question` should list the items to be ordered, and the `answer` should present them in the correct sequence with explanations if necessary."
-    },
-    {
-        "type": "CALC",
-        "description": "For questions requiring mathematical calculation (e.g., performance estimates, metric calculations). The `answer` should show the steps of the calculation."
+        "description": "Excellent for reinforcing processes or workflows. Question format: 'Order the following [criterion]: (1) Item A, (2) Item B, (3) Item C.' Keep items concise. Answer format: 'The correct order is: (2) Item B, (1) Item A, (3) Item C. [Explanation].' MUST include item names with numbers for clarity."
     }
+    # CALC type disabled - keeping structure for future use
+    # {
+    #     "type": "CALC",
+    #     "description": "For questions requiring mathematical calculation..."
+    # }
 ]
 
 # Dynamically generate the list of non-MCQ question types for the schema enum
-NON_MCQ_TYPES = [q["type"] for q in QUESTION_TYPE_CONFIG if q["type"] != "MCQ"]
+# NON_MCQ_TYPES already defined above with QUESTION_TYPES
 
 # Dynamically generate question guidelines for the system prompt
 QUESTION_GUIDELINES = "\n".join(
@@ -386,170 +917,504 @@ QUIZ_FILE_SCHEMA = {
     "additionalProperties": False
 }
 
+# ============================================================================
+# SECTION CLASSIFICATION SYSTEM
+# Defines content categories for intelligent question type selection.
+# Each category provides hints about appropriate question types based on
+# the nature of the content (technical, conceptual, procedural, etc.)
+# ============================================================================
+
+SECTION_TAXONOMY = {
+    "TECHNICAL_COMPUTATIONAL": {
+        "description": "Sections with formulas, calculations, metrics, and quantitative analysis",
+        "indicators": [
+            "calculate", "formula", "equation", "bytes", "parameters", 
+            "flops", "latency", "throughput", "bandwidth", "memory",
+            "quantization", "precision", "fp32", "int8", "fp16", "compression",
+            "reduction", "speedup", "efficiency", "utilization", "percentage"
+        ],
+        "content_patterns": [
+            r"\d+\s*[×x]\s*\d+",  # Multiplication patterns
+            r"\d+\s*(?:MB|GB|KB|bytes)",  # Memory sizes
+            r"\d+%",  # Percentages
+            r"=\s*\d+",  # Equations with results
+        ],
+        "content_hints": "This section contains formulas, calculations, and metrics. Consider MCQ for comparing approaches and SHORT for explaining numerical trade-offs and implications.",
+        "quiz_likelihood": "HIGH"
+    },
+    
+    "ARCHITECTURAL_DESIGN": {
+        "description": "System architecture, neural network layers, design patterns",
+        "indicators": [
+            "architecture", "layer", "component", "module", "pipeline",
+            "design pattern", "structure", "framework", "system", "network",
+            "convolution", "attention", "transformer", "embedding", "decoder"
+        ],
+        "content_patterns": [
+            r"(?:input|hidden|output)\s+layer",
+            r"\d+\s*(?:neurons?|units?|channels?)",
+            r"(?:CNN|RNN|LSTM|GRU|transformer)",
+        ],
+        "content_hints": "This section covers system design and neural network architectures. Consider MCQ for architecture comparisons and SHORT for design decisions and parameter implications.",
+        "quiz_likelihood": "HIGH"
+    },
+    
+    "CONCEPTUAL_FOUNDATIONAL": {
+        "description": "Core concepts, definitions, principles, theories",
+        "indicators": [
+            "concept", "principle", "definition", "fundamental",
+            "theory", "approach", "method", "technique", "paradigm",
+            "understanding", "foundation", "basis", "core"
+        ],
+        "content_patterns": [
+            r"is defined as",
+            r"refers to",
+            r"can be described as",
+        ],
+        "content_hints": "This section introduces fundamental concepts and definitions. MCQ and TF questions work well for testing understanding, SHORT for explaining relationships.",
+        "quiz_likelihood": "MEDIUM"
+    },
+    
+    "PROCESS_WORKFLOW": {
+        "description": "Procedures, workflows, pipelines, sequential steps",
+        "indicators": [
+            "process", "workflow", "pipeline", "steps", "procedure",
+            "lifecycle", "phase", "stage", "sequence", "iteration",
+            "first", "then", "next", "finally", "subsequently"
+        ],
+        "content_patterns": [
+            r"step\s+\d+",
+            r"phase\s+\d+",
+            r"\d+\.\s+\w+",  # Numbered lists
+        ],
+        "content_hints": "This section describes sequential processes and workflows. ORDER questions are particularly effective here, along with MCQ for phase identification.",
+        "quiz_likelihood": "HIGH"
+    },
+    
+    "TRADEOFF_ANALYSIS": {
+        "description": "Comparing options, analyzing tradeoffs, pros and cons",
+        "indicators": [
+            "tradeoff", "trade-off", "versus", "comparison", "advantage", 
+            "disadvantage", "benefit", "limitation", "constraint", "balance",
+            "pros", "cons", "however", "although", "while"
+        ],
+        "content_patterns": [
+            r"(?:advantages?|benefits?)\s+(?:and|vs\.?)\s+(?:disadvantages?|limitations?)",
+            r"on one hand.*on the other",
+            r"while.*however",
+        ],
+        "content_hints": "This section analyzes trade-offs and comparisons. SHORT questions excel at exploring trade-offs, MCQ for identifying best options and quantitative comparisons.",
+        "quiz_likelihood": "HIGH"
+    },
+    
+    "IMPLEMENTATION_PRACTICAL": {
+        "description": "Implementation details, code examples, practical applications",
+        "indicators": [
+            "implement", "code", "example", "practice", "deploy",
+            "production", "real-world", "application", "use case",
+            "practical", "hands-on", "exercise", "demonstration"
+        ],
+        "content_patterns": [
+            r"```[\s\S]*?```",  # Code blocks
+            r"def\s+\w+\(",  # Function definitions
+            r"class\s+\w+",  # Class definitions
+        ],
+        "content_hints": "This section covers practical implementation details. Consider questions about real-world applications, deployment challenges, and practical considerations.",
+        "quiz_likelihood": "HIGH"
+    },
+    
+    "BACKGROUND_CONTEXTUAL": {
+        "description": "Historical context, key breakthroughs, evolution of the field",
+        "indicators": [
+            "history", "evolution", "background", "motivation",
+            "overview", "introduction", "context", "origin",
+            "development", "emergence", "historical", "timeline",
+            "breakthrough", "milestone", "seminal", "landmark", "pioneering"
+        ],
+        "content_patterns": [
+            r"in\s+\d{4}",  # Years
+            r"(?:early|late)\s+\d{4}s",
+            r"historically",
+            r"\d+\.?\d*%\s+(?:error|accuracy)",  # Performance metrics
+            r"(?:breakthrough|milestone|revolutionized|transformed)",  # Impact words
+        ],
+        "content_hints": "This section provides historical context. If it contains significant milestones or breakthroughs that shaped the field, consider testing key dates, innovations, and their impact.",
+        "quiz_likelihood": "VARIES"  # Depends on educational significance
+    }
+}
+
+# ============================================================================
+# FEATURE EXTRACTION UTILITIES
+# Functions for analyzing content characteristics to guide classification.
+# ============================================================================
+
+def extract_content_features(section_content, section_title=""):
+    """
+    Extract measurable features from section content for classification.
+    
+    Args:
+        section_content (str): The content of the section
+        section_title (str): The title of the section
+        
+    Returns:
+        dict: Features extracted from the content
+    """
+    content_lower = section_content.lower()
+    title_lower = section_title.lower()
+    
+    features = {
+        "content": section_content,
+        "content_lower": content_lower,
+        "title_lower": title_lower,
+        "word_count": len(section_content.split()),
+        "has_math": bool(re.search(r'\$.*?\$|\\\[.*?\\\]', section_content)),
+        "has_code": '```' in section_content,
+        "has_numbers": bool(re.search(r'\d+', section_content)),
+        "has_formulas": bool(re.search(r'[=×÷+\-*/]', section_content)),
+        "has_percentages": bool(re.search(r'\d+%', section_content)),
+        "has_memory_units": bool(re.search(r'\d+\s*(?:MB|GB|KB|bytes)', section_content, re.I)),
+        "subsection_count": section_content.count('###'),
+        "list_items": section_content.count('\n-') + section_content.count('\n*') + section_content.count('\n1.'),
+        "emphasis_phrases": section_content.count('**') // 2,
+        "code_blocks": section_content.count('```') // 2,
+    }
+    
+    # Count technical terms
+    technical_terms = 0
+    tech_keywords = ['algorithm', 'model', 'network', 'layer', 'parameter', 'training', 
+                     'inference', 'optimization', 'gradient', 'loss', 'accuracy', 'precision']
+    for term in tech_keywords:
+        technical_terms += content_lower.count(term)
+    features['technical_terms'] = technical_terms
+    
+    return features
+
+def classify_section_type(features):
+    """
+    Classify a section into one of the taxonomy categories.
+    
+    Args:
+        features (dict): Features extracted from section content
+        
+    Returns:
+        tuple: (section_type, confidence_score, scores_dict)
+    """
+    scores = {}
+    content_lower = features.get('content_lower', '')
+    title_lower = features.get('title_lower', '')
+    
+    for section_type, config in SECTION_TAXONOMY.items():
+        score = 0.0
+        
+        # Check indicators in content and title
+        for indicator in config['indicators']:
+            if indicator in content_lower:
+                score += 1.0
+            if indicator in title_lower:
+                score += 0.5  # Title matches are worth half
+        
+        # Check content patterns
+        for pattern in config.get('content_patterns', []):
+            matches = len(re.findall(pattern, features.get('content', ''), re.I))
+            score += min(matches * 0.5, 3.0)  # Cap pattern contribution
+        
+        # Apply feature-based boosts
+        if section_type == "TECHNICAL_COMPUTATIONAL":
+            if features.get('has_math'): score += 3.0
+            if features.get('has_formulas'): score += 2.0
+            if features.get('has_numbers'): score += 1.0
+            if features.get('has_percentages'): score += 1.5
+            if features.get('has_memory_units'): score += 2.0
+            
+        elif section_type == "ARCHITECTURAL_DESIGN":
+            if features.get('has_code'): score += 1.0
+            if 'layer' in content_lower or 'network' in content_lower: score += 2.0
+            
+        elif section_type == "PROCESS_WORKFLOW":
+            if features.get('list_items', 0) > 5: score += 2.0
+            if 'step' in content_lower: score += 2.0
+            if 'first' in content_lower and 'then' in content_lower: score += 1.5
+            
+        elif section_type == "IMPLEMENTATION_PRACTICAL":
+            if features.get('code_blocks', 0) > 0: score += 3.0
+            if features.get('has_code'): score += 2.0
+            
+        elif section_type == "BACKGROUND_CONTEXTUAL":
+            if re.search(r'in\s+\d{4}', features.get('content', '')): score += 2.0
+            if 'history' in title_lower or 'evolution' in title_lower: score += 3.0
+        
+        scores[section_type] = score
+    
+    # Find the best match
+    if sum(scores.values()) == 0:
+        # Default to conceptual if no clear match
+        return "CONCEPTUAL_FOUNDATIONAL", 0.0, scores
+    
+    best_type = max(scores, key=scores.get)
+    total_score = sum(scores.values())
+    confidence = scores[best_type] / total_score if total_score > 0 else 0.0
+    
+    # If confidence is too low, default to conceptual
+    if confidence < 0.3:
+        best_type = "CONCEPTUAL_FOUNDATIONAL"
+    
+    return best_type, confidence, scores
+
+def get_section_generation_hints(section_type, features):
+    """
+    Get generation hints based on section type and features.
+    
+    Args:
+        section_type (str): The classified section type
+        features (dict): Content features
+        
+    Returns:
+        dict: Generation hints for the AI
+    """
+    config = SECTION_TAXONOMY.get(section_type, SECTION_TAXONOMY["CONCEPTUAL_FOUNDATIONAL"])
+    
+    hints = {
+        "section_type": section_type,
+        "section_description": config["description"],
+        "content_hints": config.get("content_hints", ""),
+        "quiz_likelihood": config.get("quiz_likelihood", "MEDIUM"),
+        "contextual_guidance": ""
+    }
+    
+    # Add contextual guidance based on specific features
+    if section_type == "TECHNICAL_COMPUTATIONAL":
+        if features.get('has_numbers') and features.get('has_formulas'):
+            hints["contextual_guidance"] = "The section contains numerical examples and formulas that could be used for calculation questions."
+        elif features.get('has_memory_units'):
+            hints["contextual_guidance"] = "Memory and storage calculations appear to be discussed."
+            
+    elif section_type == "ARCHITECTURAL_DESIGN":
+        if features.get('has_code'):
+            hints["contextual_guidance"] = "Code examples suggest opportunities for implementation-focused questions."
+        if 'parameter' in features.get('content_lower', ''):
+            hints["contextual_guidance"] = "Neural network parameters are discussed - consider parameter counting questions."
+            
+    elif section_type == "PROCESS_WORKFLOW":
+        if features.get('list_items', 0) > 3:
+            hints["contextual_guidance"] = "The sequential nature of the content is well-suited for ORDER questions."
+            
+    elif section_type == "BACKGROUND_CONTEXTUAL":
+        content = features.get('content', '')
+        # Check for indicators of important historical content
+        has_metrics = bool(re.search(r'\d+\.?\d*%', content))  # Performance metrics
+        has_specific_years = bool(re.search(r'(?:19|20)\d{2}', content))  # Specific years
+        has_impact_words = any(word in content.lower() for word in ['breakthrough', 'revolutionized', 'transformed', 'milestone'])
+        
+        if has_metrics or (has_specific_years and has_impact_words):
+            hints["contextual_guidance"] = "This appears to contain significant milestones with specific metrics or dates that students should know."
+            hints["quiz_likelihood"] = "HIGH"  # Upgrade likelihood for important history
+        elif has_specific_years:
+            hints["contextual_guidance"] = "Chronological developments are mentioned."
+        else:
+            hints["contextual_guidance"] = "General historical overview - evaluate educational significance."
+            
+    elif section_type == "TRADEOFF_ANALYSIS":
+        if 'however' in features.get('content_lower', '') or 'although' in features.get('content_lower', ''):
+            hints["contextual_guidance"] = "Clear trade-offs are discussed that could be explored in questions."
+    
+    return hints
+
 SYSTEM_PROMPT = f"""
-You are a professor and an educational content specialist with deep expertise in machine learning systems. You are tasked with creating pedagogically sound self-check questions for the university-level introduction to machine learning systems textbook.
+You are a professor and educational content specialist creating pedagogically sound self-check questions for a university-level machine learning systems textbook.
 
-**TARGET AUDIENCE:**
-This textbook is designed for:
-- Advanced undergraduate students (juniors/seniors) in Computer Science, Engineering, or related fields
-- Graduate students (Masters/PhD) in Computer Science, Data Science, or related disciplines
-- Students with varying backgrounds in machine learning - some may have taken ML theory courses, others may be learning ML concepts alongside systems concepts
-- Students with basic programming experience (Python preferred) and understanding of algorithms and data structures
+# 1. CONTEXT & AUDIENCE
 
-**ASSUMED PREREQUISITES:**
-- Basic programming experience (Python preferred)
-- Understanding of algorithms and data structures
-- Mathematical fundamentals (algebra, basic calculus concepts)
-- Basic computer architecture concepts
-- **Note: Students may have varying levels of ML theory background - some may be learning ML concepts for the first time in this course**
+**Target Audience:**
+- Advanced undergraduate (junior/senior) and graduate/MS/PhD students in CS/Engineering
+- Varying ML backgrounds (some learning ML concepts for first time)
+- Prerequisites: Programming (Python), algorithms, data structures, basic math, computer architecture
 
-Your task is to first evaluate whether a self-check would be pedagogically valuable for the given section, and if so, generate 1 to 5 self-check questions and answers. Decide the number of questions based on the section's length and complexity. Each chapter has about 10 sections. So be careful not to generate too many questions.
+**ML Systems Focus:**
+Full lifecycle coverage: data pipelines, training infrastructure, deployment, monitoring, serving, scaling, reliability, operational concerns. Emphasize system-level reasoning over algorithmic theory.
 
-## ML Systems Focus
+# 2. EVALUATION CRITERIA - Should This Section Have a Quiz?
 
-Machine learning systems encompasses the full lifecycle: data pipelines, model training infrastructure, deployment, monitoring, serving, scaling, reliability, and operational concerns. Focus on system-level reasoning rather than algorithmic theory. When ML concepts are introduced, explain them clearly without assuming deep prior knowledge.
+**Create a quiz (1-5 questions) if the section:**
+- First determine if the section warrants a quiz
+- Introduces technical concepts, system components, or operational implications
+- Presents design decisions, tradeoffs, or common misconceptions
+- Requires application of concepts to real scenarios
+- Builds critically on previous knowledge
 
-## Self-Check Evaluation Criteria
+**Create minimal quiz (1-2 questions) for:**
+- Overview sections → Test concept connections
+- Summary sections → Test integration/synthesis
+- Introduction sections → Test motivation/context
 
-First, evaluate if this section warrants a self-check by considering:
-1. Does it contain concepts that students need to actively understand and apply?
-2. Are there potential misconceptions that need to be addressed?
-3. Does it present system design tradeoffs or operational implications?
-4. Does it build on previous knowledge in ways that should be reinforced?
+**Skip quiz (quiz_needed: false) only for:**
+- Pure bibliography/references
+- Figures/tables without explanatory text
+- Transition paragraphs between topics
+- Purely descriptive content without actionable concepts
 
-**CRITICAL: If the section does not introduce technical tradeoffs, system components, or operational implications, set quiz_needed: false and justify.**
+# 3. QUESTION DESIGN PRINCIPLES
 
-**Sections that typically DO NOT need self-checks:**
-- Pure introductions or context-setting sections
-- Sections that primarily provide historical context or motivation
-- Sections that are purely descriptive without actionable concepts
-- Overview sections without technical depth
-- Motivational or high-level conceptual sections (e.g., "AI Pervasiveness," "Looking Ahead")
+**Difficulty Progression (REQUIRED):**
+1. First question: Foundational understanding (definitions, basic concepts)
+2. Middle questions: Application and analysis
+3. Last question: Integration, synthesis, or system design
 
-**Sections that typically DO need self-checks:**
-- Sections introducing new technical concepts or system components
-- Sections presenting design decisions, tradeoffs, or operational considerations
-- Sections addressing common pitfalls or misconceptions
-- Sections requiring application of concepts to real scenarios
-- Sections building on previous knowledge in critical ways
+**Content Requirements:**
+- Focus on system-level reasoning and tradeoffs
+- Test understanding of implications, not arithmetic
+- Include at least one practical application question per technical section
+- Connect to real ML systems scenarios
+- For sections building on previous chapters: Include connection questions
 
-## Chapter-Level Variety and Coherence
+**Context Awareness:**
+- Reference prerequisites clearly (e.g., "Building on Chapter 3's gradient descent...")
+- Ensure questions are self-contained and can stand alone
+- Don't assume knowledge not yet covered
 
-When previous self-check context is provided for the chapter:
-- **Analyze the existing questions** to understand what concepts and question types have been covered
-- **Ensure conceptual variety** - avoid repeating the same learning objectives or approaches
-- **Complement rather than duplicate** - if similar concepts appear, approach them from different angles
-- **Maintain chapter coherence** - questions should build on each other while covering distinct aspects
-- **Balance question types** - if previous sections used mostly MCQs, consider SHORT, FILL, or other types
-- **Focus on different system aspects** - if previous questions focused on tradeoffs, focus on implementation, operational concerns, or real-world applications
+# 4. QUESTION TYPES & FORMATTING
 
-## Question Guidelines
+**Available Types:** MCQ, TF, SHORT, FILL, ORDER
 
-**Content Focus:**
-- Prioritize system-level reasoning: tradeoffs in deployment environments, impact of data pipeline design on model accuracy, scaling infrastructure for inference workloads, etc.
-- Include quantitative analysis when applicable: resource consumption calculations, performance trade-off analysis, scaling estimates, cost comparisons, latency budgets, throughput analysis
-- Include at least one question about design tradeoffs or operational implications
-- Address common misconceptions when applicable
-- Connect to practical ML systems scenarios
-- Check whether similar concepts have been addressed in earlier sections and avoid repetition unless extending or applying in novel ways
+**When to Use Each Type:**
+- **MCQ**: Comparing architectures, identifying patterns, deployment strategies (3-5 options)
+- **TF**: Challenging misconceptions, testing system constraints understanding
+- **SHORT**: Explaining tradeoffs, justifying decisions, analyzing scenarios
+- **FILL**: Specific technical terms (only when precise recall required)
+- **ORDER**: Workflows, pipelines, lifecycle phases (must have logical sequence)
+
+**Format Requirements:**
+- **MCQ**: 
+  - Answer: "The correct answer is [LETTER]. [30-50 word explanation]"
+  - Distribute correct answers evenly across A, B, C, D
+  - All distractors must be plausible
+- **TF**: 
+  - Answer: "True/False. [20-40 word justification]"
+  - Must address misconceptions
+- **SHORT**: 
+  - Answer: [50-100 words, concise but complete]
+  - Must encourage synthesis/justification
+- **FILL**: 
+  - Answer: "[term]. [15-30 word explanation]"
+  - Blank marked with ____
+- **ORDER**: 
+  - Question: "Order the following: (1) Item A, (2) Item B, (3) Item C"
+  - Answer: "The correct order is: (2) Item B, (1) Item A, (3) Item C. [40-80 word explanation]"
+  - CRITICAL: Include both numbers AND item names in answer for readability
 
 **Question Types (use a variety based on content):**
 {QUESTION_GUIDELINES}
 
-**When to use different question types:**
-- **CALC questions for:** Memory or storage requirements, latency calculations for multi-tier architectures, power consumption estimates, cost analysis for deployment options, throughput calculations for data pipelines, scaling factor analysis
-- **MCQ questions for:** Comparing system architectures, identifying appropriate design patterns, selecting deployment strategies
-- **SHORT questions for:** Explaining system tradeoffs, justifying design decisions, analyzing failure scenarios
-- **FILL questions for:** Specific technical terminology, protocol names, architectural components (only when precise recall is required)
-- **TF questions for:** Challenging common misconceptions, testing understanding of system constraints
-- **ORDER questions for:** System deployment workflows, data pipeline stages, model lifecycle phases
+# 5. ANTI-PATTERNS TO AVOID
 
-**Question Type Specifics:**
-- **MCQ**: Provide 3-5 plausible distractors. The correct answer should not be obvious from the question stem alone. Do not embed options (e.g., A, B, C) in the question string; use the choices array instead. **CRITICAL: Distribute correct answers evenly across choices (A, B, C, D) to avoid guessing patterns. Do NOT favor any particular choice - ensure equal distribution. If you have 4 MCQ questions, aim for one correct answer for each letter (A, B, C, D). IMPORTANT: Randomize the position of correct answers. Use all four choices (A, B, C, D) across your MCQs. AVOID: Questions where the answer is obvious (e.g., "Which pillar focuses on training?" with "Training" as a choice).**
-- **SHORT**: Should encourage synthesis or justification (e.g., "Explain why X matters in Y context").
-- **FILL**: Should test key terms, but avoid placing the answer immediately before or after the blank. Use only when the term is central and non-obvious.
-- **TF**: Must include justification that addresses common misconceptions and explains why the statement matters in ML systems context.
-- **ORDER**: Focus on processes where sequence matters for system outcomes.
-- **CALC**: Include real-world context and explain the practical significance of the result. Must include realistic parameters, show calculation steps clearly, and explain what the numerical result means for system design decisions.
+**Never use:**
+- ❌ "All/None of the above" in MCQ
+- ❌ FILL blanks at sentence beginning/end
+- ❌ Obviously true/false TF statements
+- ❌ Pure memorization questions
+- ❌ Answer appearing in question
+- ❌ Ambiguous FILL questions
+- ❌ Arbitrary ORDER sequences
+- ❌ Obvious answers (e.g., "Which focuses on training?" → "Training")
+- ❌ Context-dependent phrases ("in this section", "as discussed above")
+- ❌ Trivial arithmetic calculations
 
-## Language and Writing Guidelines
+**Section-Reference Anti-Patterns (CRITICAL):**
+- ❌ "What is mentioned in the section?" - Tests reading, not understanding
+- ❌ "According to the text..." - Pure recall, not learning
+- ❌ "What does the section say about..." - Section-dependent, not self-contained
+- ❌ "What are the goals mentioned?" - Lists from text, not conceptual understanding
+- ❌ "As described in this section..." - Breaks self-containment
+- ❌ "The section identifies..." - Focus on content recall, not knowledge
 
-**Use precise technical language:**
-- Avoid generic academic terms like "crucial," "essential," "vital," "various," "numerous"
-- Replace vague phrases like "in the context of," "in terms of," "with regard to" with specific technical scenarios
-- Eliminate academic filler like "it is important to note," "furthermore," "moreover"
-- Use specific technical impacts instead of general importance statements
-- Frame questions with concrete technical situations rather than abstract contexts
+**Knowledge Boundary Rules (IMPORTANT):**
+- ✅ USE: Knowledge from previous chapters (provided in context)
+- ✅ USE: Content from the current section being processed
+- ❌ AVOID: Concepts from later sections in the same chapter
+- ❌ AVOID: References to material "coming up" or "discussed later"
+- 💡 Each quiz should be answerable with ONLY: prior chapter knowledge + current section content
 
-**Direct technical framing:**
-- Start with specific deployment scenarios, system constraints, or technical requirements
-- Use active voice and precise terminology
-- Focus on measurable impacts and specific system behaviors
-- Replace qualitative importance with quantitative or specific technical relationships
+**Instead, write questions that:**
+- ✓ Test conceptual understanding, not memory of specific text
+- ✓ Could be answered by someone who understands the concept but hasn't read this exact section
+- ✓ Focus on applying knowledge, not recalling what was written
+- ✓ Are self-contained and don't reference "the section" or "the text"
 
-**Quality Standards:**
-- For `MCQ` questions, the `answer` string MUST start with `The correct answer is [LETTER].` followed by an explanation of why this choice is correct. Do NOT repeat the answer text in the explanation. In MCQ explanations, do not rephrase the question or answer. Instead, explain why the correct answer is correct in light of other distractors.
-- **Maintain a professional textbook tone** - Use clear, academically appropriate language suitable for university-level instruction
-- **Avoid basic definitional questions** - Focus on application, analysis, and system-level implications rather than simple recall
-- **Keep answers concise** - Aim for 50-100 words per answer explanation, not 75-150 words
-- **Every answer must include a "why" — not just what is right, but why it matters in an ML system context**
-- Use the first question to address the most foundational or essential system insight from the section
-- If multiple questions are included, ensure they span distinct ideas (e.g., tradeoffs, lifecycle stages, deployment implications)
-- Progress from basic understanding to application/analysis when multiple questions are used
-- **At least one question per quiz should apply the concept to a real-world systems scenario, such as latency tradeoffs, retraining risks, or data pipeline bottlenecks**
-- **CRITICAL: Make questions self-contained and holistic**
-  - Avoid phrases like "in this section," "as discussed above," "from the text," or any other context-dependent references
-  - Questions should be able to stand alone and provide complete learning value when viewed in isolation
-  - Include necessary context within the question itself rather than assuming the reader has just read the section
-  - Frame questions to be educational and complete learning experiences on their own
-  - Use phrases like "When designing ML systems," "For machine learning applications," etc.
+# 6. REFLECTION & ENGAGEMENT
 
-**CRITICAL ANTI-PATTERNS TO AVOID:**
-- Questions where the answer is obvious from the question itself or is trivially inferable
-- **BAD EXAMPLE: "Which pillar focuses on AI training?" with choices A) Data B) Training C) Deployment D) Operations - the answer "Training" is obvious from the question**
-- MCQs where distractors are implausible or where the answer is telegraphed
-- **MCQ answer bias - DO NOT default to B or any particular choice. Ensure equal distribution across A, B, C, D**
-- Questions that test surface-level recall without deeper understanding
-- Questions where multiple reasonable answers could be correct
-- Questions that simply repeat information from the text without requiring analysis
-- Questions that test trivial facts rather than conceptual understanding
-- Questions where the explanation just restates what's already obvious from the question
-- Questions that reference "this section," "as discussed above," "from the text," or other context-dependent phrases
-- Questions that assume the reader has just read the section and can't stand alone as complete learning experiences
-- Generic academic filler language and vague contextual phrases
-- Imprecise qualifiers instead of specific technical terms
+**Personal Application (include 1 per quiz when relevant):**
+- "How might you apply [concept] in your own ML project?"
+- "What trade-offs would you consider when implementing [system]?"
+- "In your experience with [related technology], how does this compare?"
 
-**Bloom's Taxonomy Mix:**
-- Remember: Key terms and concepts
-- Understand: Explain implications and relationships  
-- Apply: Use concepts in new scenarios
-- Analyze: Compare approaches and identify tradeoffs
-- Evaluate: Justify design decisions
-- Create: Propose solutions to system challenges
+**Answer Enhancement Requirements:**
+- **Explanatory reasoning**: Include "because" or "since" in answers to explain why
+- **Concrete examples**: Add "For example," or "e.g.," to illustrate concepts
+- **Practical implications**: End with "This is important because..." or "In practice..."
+- **Connection to real systems**: Reference actual ML systems or scenarios when possible
 
-**Integration Guidelines:**
-- When appropriate, build on concepts introduced in earlier sections to show how foundational ideas evolve into more complex system-level considerations
-- Ensure questions collectively cover the section's main learning objectives
-- Questions should reinforce different facets of system-level thinking
+# 7. LANGUAGE & WRITING STANDARDS
 
-**Quality Check**
-Before finalizing, ensure:
-- Questions test different aspects of the content (avoid redundancy)
-- At least one question addresses system-level implications
-- Questions are appropriate for the textbook's target audience
-- Answer explanations help reinforce learning, not just state correctness
-- The response strictly follows the JSON schema provided above
-- No questions fall into the anti-patterns listed above
-- Questions are distinct, avoid overlap, and reinforce different facets of system-level thinking
-- Language is precise and technical rather than generic or academic filler
-- If previous self-check context was provided: Do these questions complement rather than duplicate previous questions? Do they use different question types and focus areas?
+**Academic Tone - DO NOT WRITE LIKE AN LLM:**
+- Write as a professor would write for a textbook, not as an AI assistant
+- Avoid LLM-style phrases like "delve into", "leverage", "harnessing", "navigating"
+- Avoid corporate jargon like "ecosystem", "landscape", "journey", "empower"
+- Avoid meta-commentary like "Let's explore", "It's worth noting", "In essence"
+- Use academic language and terminology appropriate for technical textbooks
+- Avoid generic academic filler like "crucial", "various", "it is important to note"
+- Use specific technical terms and concepts with precision
+- Use active voice and measurable impacts
+- Use concrete scenarios and examples from real ML systems
+- Maintain a professional, scholarly tone without being conversational
+- Write as if for peer-reviewed academic publication, not blog posts
+
+**Self-Contained Questions:**
+- No references to "this section" or "as discussed above"
+- Include necessary context within the question
+- Questions must stand alone as complete learning experiences
+
+# 8. QUALITY CHECKLIST
+
+**Before finalizing, verify:**
+✓ Questions follow difficulty progression (basic → application → integration)
+✓ Answer lengths match word counts (MCQ: 30-50, SHORT: 50-100, etc.)
+✓ At least one practical application question
+✓ No anti-patterns present
+✓ Questions test understanding, not memorization
+✓ Previous chapter connections included where relevant
+✓ Questions are distinct and self-contained
+✓ Technical language is precise
+✓ MCQ answers distributed evenly across A, B, C, D
+
+**Chapter Coherence (when previous quizzes provided):**
+- Analyze existing questions
+- Ensure conceptual variety
+- Complement, don't duplicate
+- Balance question types
+- Focus on different system aspects
+
+# 8. JSON OUTPUT REQUIREMENTS
+
+**MUST return valid JSON with:**
+- "quiz_needed": boolean (not string)
+- "rationale": 
+  - If true: object with {{focus_areas, question_strategy, difficulty_progression, integration, ranking_explanation}}
+  - If false: string explaining why
+- "questions": array (only if quiz_needed is true)
+
+**Practical Application (REQUIRED for technical sections):**
+Include at least one:
+- "In a production system..." scenario
+- "What would happen if..." analysis
+- System design trade-off question
+- Real-world application
+- "Consider a scenario where..." problem
 
 ## Required JSON Schema
 
 You MUST return a valid JSON object that strictly follows this schema:
 
 ```json
-{json.dumps(JSON_SCHEMA, indent=2)}
+{json.dumps(QUIZ_DATA_SCHEMA, indent=2)}
 ```
 
 ## Output Format
@@ -833,6 +1698,645 @@ def extract_sections_with_ids(markdown_text):
     
     return sections
 
+# ============================================================================
+# PROMPT BUILDER AND CONTEXT MANAGEMENT
+# Centralized prompt construction with clean template architecture.
+# ============================================================================
+
+class ChapterContext:
+    """Centralized chapter information management."""
+    
+    def __init__(self, chapter_number=None, chapter_title=None, section_title=None):
+        self.chapter_number = chapter_number
+        self.chapter_title = chapter_title or 'Unknown'
+        self.section_title = section_title or 'Unknown Section'
+        self.book_outline = build_book_outline_from_quarto_yml()
+        self.total_chapters = len(self.book_outline) if self.book_outline else 20
+        
+    def get_difficulty_tier(self):
+        """Get difficulty tier based on chapter position."""
+        if not self.chapter_number:
+            return 'intermediate'
+        if self.chapter_number <= 5:
+            return 'foundational'
+        elif self.chapter_number <= 10:
+            return 'intermediate'
+        elif self.chapter_number <= 15:
+            return 'advanced'
+        else:
+            return 'specialized'
+    
+    def get_difficulty_guidelines(self):
+        """Get difficulty guidelines for current chapter."""
+        tier = self.get_difficulty_tier()
+        guidelines = {
+            'foundational': """Focus on foundational concepts and basic understanding.
+Emphasize core definitions and fundamental principles.
+Questions should test comprehension of basic ML systems concepts.
+Avoid overly complex scenarios or advanced technical details.
+Establish building blocks for later chapters.""",
+            
+            'intermediate': """Intermediate complexity with practical applications.
+Questions should test understanding of technical implementation.
+Include questions about tradeoffs and design decisions.
+Connect concepts to real-world ML system scenarios.
+Build upon foundational concepts from earlier chapters.""",
+            
+            'advanced': """Advanced topics requiring system-level reasoning.
+Questions should test deep understanding of optimization and operational concerns.
+Focus on integration of multiple concepts from earlier chapters.
+Emphasize practical implications and real-world challenges.
+Prepare for specialized topics in final chapters.""",
+            
+            'specialized': """Specialized topics requiring integration across multiple concepts.
+Questions should test synthesis of knowledge from throughout the book.
+Focus on ethical, societal, and advanced operational considerations.
+Emphasize critical thinking about ML systems in broader contexts.
+Integrate concepts from all previous chapters."""
+        }
+        return guidelines.get(tier, guidelines['intermediate'])
+    
+    def get_chapter_progression(self):
+        """Get chapter's position in book progression."""
+        if not self.chapter_number or not self.book_outline:
+            return {}
+            
+        progression = {
+            'current': f"Chapter {self.chapter_number}: {self.chapter_title}",
+            'position': f"{self.chapter_number} of {self.total_chapters}",
+            'builds_upon': [],
+            'connects_to': []
+        }
+        
+        # Previous chapters this builds upon
+        if self.chapter_number > 1:
+            for i in range(max(1, self.chapter_number - 3), self.chapter_number):
+                if i <= len(self.book_outline):
+                    progression['builds_upon'].append(f"Chapter {i}: {self.book_outline[i-1]}")
+        
+        # Upcoming chapters this connects to
+        if self.chapter_number < self.total_chapters:
+            for i in range(self.chapter_number + 1, min(self.chapter_number + 4, self.total_chapters + 1)):
+                if i <= len(self.book_outline):
+                    progression['connects_to'].append(f"Chapter {i}: {self.book_outline[i-1]}")
+        
+        return progression
+    
+    def get_previous_chapter_concepts(self, all_chapter_concepts=None):
+        """Get accumulated topics from ONLY previous chapters (not current) for building upon prior knowledge.
+        
+        Uses topics_covered data when available, falls back to concept_map.
+        """
+        # For chapter 1, there's no prior knowledge
+        if not self.chapter_number or self.chapter_number <= 1:
+            return ""
+        
+        if not all_chapter_concepts:
+            return ""
+        
+        # Accumulate knowledge from chapters BEFORE the current one (not including current)
+        accumulated_topics = []
+        accumulated_concepts = {
+            'primary_concepts': [],
+            'secondary_concepts': [],
+            'technical_terms': [],
+            'methodologies': [],
+            'applications': []
+        }
+        
+        # Collect knowledge ONLY from chapters 1 to (current - 1)
+        for ch_num in range(1, self.chapter_number):  # This stops BEFORE current chapter
+            if ch_num in all_chapter_concepts:
+                chapter_data = all_chapter_concepts[ch_num]
+                
+                if chapter_data.get('type') == 'topics_covered':
+                    # Use topics_covered format (preferred)
+                    topics = chapter_data.get('data', [])
+                    accumulated_topics.extend(topics)
+                
+                elif chapter_data.get('type') == 'concept_map':
+                    # Fallback to concept_map format
+                    concept_map = chapter_data.get('data', {})
+                    for key in accumulated_concepts:
+                        if key in concept_map:
+                            accumulated_concepts[key].extend(concept_map[key])
+                
+                else:
+                    # Legacy format (direct concept_map)
+                    for key in accumulated_concepts:
+                        if key in chapter_data:
+                            accumulated_concepts[key].extend(chapter_data[key])
+        
+        # Build knowledge context
+        if not accumulated_topics and not any(accumulated_concepts.values()):
+            return ""
+        
+        knowledge_context = "\n# ASSUMED PRIOR KNOWLEDGE FROM PREVIOUS CHAPTERS\n"
+        
+        # Format topics_covered data (preferred)
+        if accumulated_topics:
+            knowledge_context += "\n## Topics Previously Covered:\n"
+            for topic_entry in accumulated_topics[:15]:  # Limit to prevent overwhelming
+                topic_name = topic_entry.get('topic', 'Unknown Topic')
+                knowledge_context += f"• {topic_name}\n"
+            
+            if len(accumulated_topics) > 15:
+                knowledge_context += f"... and {len(accumulated_topics) - 15} more topics\n"
+        
+        # Format concept_map data as fallback
+        elif any(accumulated_concepts.values()):
+            # Remove duplicates
+            for key in accumulated_concepts:
+                seen = set()
+                unique = []
+                for item in accumulated_concepts[key]:
+                    if item not in seen:
+                        seen.add(item)
+                        unique.append(item)
+                accumulated_concepts[key] = unique
+            
+            if accumulated_concepts['primary_concepts']:
+                knowledge_context += f"\n## Core Concepts Already Covered:\n"
+                knowledge_context += f"{', '.join(accumulated_concepts['primary_concepts'][:20])}\n"
+            
+            if accumulated_concepts['methodologies']:
+                knowledge_context += f"\n## Methodologies Previously Introduced:\n"
+                knowledge_context += f"{', '.join(accumulated_concepts['methodologies'][:15])}\n"
+        
+        knowledge_context += "\n## Implications for Quiz Design:\n"
+        knowledge_context += "- You can reference these topics without extensive explanation\n"
+        knowledge_context += "- Build upon this foundation with more advanced questions\n"
+        knowledge_context += "- Test integration and application of prior knowledge\n"
+        knowledge_context += "- Avoid re-testing basic understanding of these topics\n"
+        knowledge_context += "- Create questions that connect current content to previous knowledge\n"
+        
+        return knowledge_context
+    
+    def format_context(self, all_chapter_concepts=None):
+        """Format all chapter context as a structured string."""
+        progression = self.get_chapter_progression()
+        difficulty_tier = self.get_difficulty_tier().title()
+        
+        context = f"""# CHAPTER CONTEXT
+- **Chapter**: {self.chapter_number or 'N/A'} - {self.chapter_title}
+- **Section**: {self.section_title}
+- **Book Position**: Chapter {progression.get('position', 'Unknown')}
+- **Difficulty Tier**: {difficulty_tier}
+"""
+        
+        if progression.get('builds_upon'):
+            context += "\n## Builds Upon\n"
+            for chapter in progression['builds_upon']:
+                context += f"- {chapter}\n"
+        
+        if progression.get('connects_to'):
+            context += "\n## Connects To\n"
+            for chapter in progression['connects_to']:
+                context += f"- {chapter}\n"
+        
+        # Add current chapter topics if available
+        if all_chapter_concepts and self.chapter_number and self.chapter_number in all_chapter_concepts:
+            chapter_data = all_chapter_concepts[self.chapter_number]
+            
+            if chapter_data.get('type') == 'topics_covered':
+                topics = chapter_data.get('data', [])
+                if topics:
+                    context += "\n## Chapter Topics Coverage\n"
+                    for topic_entry in topics[:10]:  # Limit to prevent overwhelming
+                        topic_name = topic_entry.get('topic', 'Unknown Topic')
+                        subtopics = topic_entry.get('subtopics', [])
+                        context += f"• **{topic_name}**: {', '.join(subtopics[:5])}"
+                        if len(subtopics) > 5:
+                            context += f" (+{len(subtopics)-5} more)"
+                        context += "\n"
+                    
+                    if len(topics) > 10:
+                        context += f"... and {len(topics) - 10} more topic areas\n"
+        
+        context += f"\n## Difficulty Guidelines\n{self.get_difficulty_guidelines()}\n"
+        
+        return context
+
+
+def extract_all_chapter_concepts(base_path="quarto/contents/core", verbose=False):
+    """Pre-extract all chapter topics_covered data for efficient quiz generation.
+    
+    Reads topics_covered from external YAML files referenced in chapter frontmatter.
+    Uses the chapter ordering from the active quarto config file.
+    The topics_covered approach provides the optimal balance of specificity and 
+    efficiency for generating high-quality self-check questions.
+    
+    Args:
+        base_path: Path to the directory containing chapter folders
+        verbose: Whether to print debug information
+    
+    Returns:
+        Dictionary mapping chapter numbers to their topics_covered data
+    """
+    import yaml
+    import os
+    import glob
+    
+    all_concepts = {}
+    
+    # Try to get chapter order from quarto config first
+    chapter_order = []
+    if os.path.exists(QUARTO_YML_PATH):
+        try:
+            ordered_files = get_qmd_order_from_quarto_yml(QUARTO_YML_PATH)
+            # Extract chapter names from file paths
+            for qmd_file in ordered_files:
+                # Extract chapter name from path like 'contents/core/introduction/introduction.qmd'
+                parts = qmd_file.split('/')
+                if len(parts) >= 2:
+                    chapter_name = parts[-2] if parts[-2] != parts[-1].replace('.qmd', '') else parts[-2]
+                    if chapter_name not in chapter_order:
+                        chapter_order.append(chapter_name)
+            if verbose and chapter_order:
+                print(f"  📋 Using chapter order from {os.path.basename(QUARTO_YML_PATH)}")
+        except Exception as e:
+            if verbose:
+                print(f"  ⚠️ Could not get chapter order from quarto config: {e}")
+    
+    # Fallback to default order if quarto config parsing failed
+    if not chapter_order:
+        chapter_order = [
+            'introduction', 'ml_systems', 'dl_primer', 'dnn_architectures',
+            'data_engineering', 'frameworks', 'training', 'optimizations',
+            'hw_acceleration', 'benchmarking', 'ops', 'workflow',
+            'ondevice_learning', 'robust_ai', 'privacy_security',
+            'responsible_ai', 'sustainable_ai', 'ai_for_good',
+            'frontiers', 'conclusion'
+        ]
+        if verbose:
+            print("  📋 Using default chapter order")
+    
+    # Create a mapping from chapter name to number
+    chapter_name_to_number = {name: idx + 1 for idx, name in enumerate(chapter_order)}
+    
+    # Get all chapter directories
+    chapter_dirs = sorted(glob.glob(os.path.join(base_path, "*/")))
+    
+    for chapter_dir in chapter_dirs:
+        chapter_name = os.path.basename(os.path.dirname(chapter_dir))
+        
+        # Skip non-chapter directories
+        if chapter_name not in chapter_name_to_number:
+            continue
+        
+        chapter_number = chapter_name_to_number[chapter_name]
+        
+        # Find the main .qmd file (same name as directory)
+        main_qmd = os.path.join(chapter_dir, f"{chapter_name}.qmd")
+        
+        # If not found, try to get any .qmd file
+        if not os.path.exists(main_qmd):
+            qmd_files = glob.glob(os.path.join(chapter_dir, "*.qmd"))
+            if qmd_files:
+                main_qmd = qmd_files[0]
+            else:
+                continue
+        
+        try:
+            with open(main_qmd, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Parse YAML frontmatter to get the concepts file reference
+            if content.startswith('---'):
+                end_marker = content.find('---', 3)
+                if end_marker != -1:
+                    frontmatter_str = content[3:end_marker]
+                    frontmatter = yaml.safe_load(frontmatter_str)
+                    
+                    # Get the concepts file reference
+                    concepts_file = frontmatter.get('concepts')
+                    if concepts_file:
+                        # Build the full path to the concepts file
+                        concepts_path = os.path.join(chapter_dir, concepts_file)
+                        
+                        # Read the external concepts file
+                        if os.path.exists(concepts_path):
+                            with open(concepts_path, 'r', encoding='utf-8') as cf:
+                                concepts_data = yaml.safe_load(cf)
+                                
+                            # Extract topics_covered (preferred) or fallback to concept_map
+                            topics_covered = concepts_data.get('topics_covered', [])
+                            if topics_covered:
+                                # Store topics_covered data by chapter number
+                                all_concepts[chapter_number] = {
+                                    'type': 'topics_covered',
+                                    'data': topics_covered
+                                }
+                                if verbose:
+                                    print(f"  📚 Loaded {len(topics_covered)} topics from Chapter {chapter_number}: {chapter_name} ({concepts_file})")
+                            else:
+                                # Fallback to concept_map if topics_covered not available
+                                concept_map = concepts_data.get('concept_map', {})
+                                if concept_map:
+                                    all_concepts[chapter_number] = {
+                                        'type': 'concept_map',
+                                        'data': concept_map
+                                    }
+                                    if verbose:
+                                        print(f"  ⚠️ Fallback to concept_map for Chapter {chapter_number}: {chapter_name} (topics_covered not found)")
+                        else:
+                            if verbose:
+                                print(f"  ⚠️ Concepts file not found: {concepts_path}")
+                    else:
+                        if verbose:
+                            print(f"  ℹ️ No concepts reference in {chapter_name}")
+        except Exception as e:
+            if verbose:
+                print(f"  ⚠️ Could not load concepts from {chapter_name}: {str(e)}")
+            continue
+    
+    return all_concepts
+
+class PromptBuilder:
+    """Centralized prompt construction with template-based architecture."""
+    
+    def __init__(self, all_chapter_concepts=None):
+        # System prompt is now static and doesn't need dynamic injection
+        self.system_prompt = SYSTEM_PROMPT
+        # Store pre-extracted chapter concepts
+        self.all_chapter_concepts = all_chapter_concepts or {}
+        
+    def build_user_prompt_with_context(self, section_text, chapter_context, previous_quizzes=None):
+        """Build user prompt with all context information."""
+        
+        # Format chapter context (including current chapter topics_covered)
+        chapter_info = chapter_context.format_context(self.all_chapter_concepts)
+        
+        # Get accumulated concepts from previous chapters
+        previous_concepts = chapter_context.get_previous_chapter_concepts(self.all_chapter_concepts)
+        
+        # Build previous quiz context if available
+        previous_context = self._format_previous_quizzes(previous_quizzes)
+        
+        # Section classification hints
+        section_hints = self._get_section_classification_hints(section_text)
+        
+        # Add section boundary notice if processing a later section
+        section_boundary_notice = ""
+        if previous_quizzes:
+            section_boundary_notice = """# KNOWLEDGE BOUNDARIES
+Note: You are processing section {0} of this chapter. Use ONLY:
+- Knowledge from previous chapters (provided above)
+- Content from THIS specific section
+- DO NOT reference or assume knowledge from later sections in this chapter
+""".format(len(previous_quizzes) + 1)
+        
+        # Construct the complete user prompt
+        user_prompt = f"""{chapter_info}
+
+{previous_concepts}
+
+{section_boundary_notice}
+
+# SECTION CONTENT
+{section_text}
+
+{section_hints}
+
+{previous_context}
+
+# TASK
+Generate a self-check quiz with 1 to 5 well-structured questions based on this section.
+Focus on the key concepts and ensure questions align with the difficulty tier and chapter progression.
+Questions should be answerable using ONLY the knowledge available up to this point.
+Return your response in the specified JSON format.
+"""
+        
+        return user_prompt.strip()
+    
+    def _format_previous_quizzes(self, previous_quizzes):
+        """Format previous quiz information to avoid overlap."""
+        if not previous_quizzes:
+            return ""
+        
+        context = """# PREVIOUS SECTIONS IN THIS CHAPTER
+Avoid conceptual overlap with these existing questions:\n\n"""
+        
+        for i, quiz_data in enumerate(previous_quizzes, 1):
+            if quiz_data.get('quiz_needed', False):
+                questions = quiz_data.get('questions', [])
+                if questions:
+                    context += f"## Section {i}\n"
+                    for j, question in enumerate(questions, 1):
+                        q_type = question.get('question_type', 'Unknown')
+                        q_text = question.get('question', '')[:100]  # Truncate for brevity
+                        context += f"- Q{j} ({q_type}): {q_text}...\n"
+                    context += "\n"
+        
+        if context != """# PREVIOUS SECTIONS IN THIS CHAPTER
+Avoid conceptual overlap with these existing questions:\n\n""":
+            context += """## Variety Guidelines
+- Use different question types than those already used
+- Focus on different aspects of the content
+- Approach similar concepts from different angles
+- Ensure complementary learning objectives\n"""
+        else:
+            return ""  # No previous quizzes to consider
+        
+        return context
+    
+    def _get_section_classification_hints(self, section_text):
+        """Analyze section content to provide classification hints."""
+        hints = []
+        
+        # Check for code blocks
+        if '```' in section_text:
+            hints.append("Contains code examples - consider implementation questions")
+        
+        # Check for mathematical content
+        if any(marker in section_text for marker in ['$', '\\[', '\\(', 'equation']):
+            hints.append("Contains mathematical content - consider conceptual understanding")
+        
+        # Check for figures/diagrams
+        if any(marker in section_text for marker in ['![', 'Figure', 'Diagram', 'Table']):
+            hints.append("Contains visual elements - consider interpretation questions")
+        
+        # Check for lists/enumerations
+        if any(marker in section_text for marker in ['1.', '2.', '- ', '* ']):
+            hints.append("Contains enumerated concepts - consider ordering or classification")
+        
+        # Check for comparisons
+        if any(word in section_text.lower() for word in ['versus', 'vs', 'compared to', 'difference', 'tradeoff']):
+            hints.append("Contains comparisons - consider tradeoff questions")
+        
+        if hints:
+            return "# CONTENT HINTS\n" + "\n".join(f"- {hint}" for hint in hints)
+        return ""
+
+# ============================================================================
+# LLM INTERACTION UTILITIES
+# Functions for calling LLM APIs and handling responses.
+# ============================================================================
+
+def fix_ollama_response_format(data):
+    """
+    Fix common format issues in Ollama responses to match expected schema.
+    
+    Ollama models may not perfectly follow the schema, so this function
+    normalizes common variations to match our expected format.
+    
+    Args:
+        data (dict): The raw response from Ollama
+        
+    Returns:
+        dict: Fixed response data matching the expected schema
+    """
+    if not isinstance(data, dict):
+        return data
+    
+    # First check if response has wrong field names (answers -> choices, correct_answer -> answer)
+    if 'questions' in data and isinstance(data['questions'], list):
+        for question in data['questions']:
+            # Fix 'answers' field to 'choices' for MCQ
+            if 'answers' in question and 'choices' not in question:
+                question['choices'] = question['answers']
+                del question['answers']
+            
+            # Fix 'correct_answer' field to proper answer format
+            if 'correct_answer' in question:
+                correct = question['correct_answer']
+                del question['correct_answer']
+                
+                # Determine question type if not present
+                if 'question_type' not in question:
+                    if 'choices' in question:
+                        question['question_type'] = 'MCQ'
+                    else:
+                        question['question_type'] = 'SHORT'
+                
+                # Format answer based on type
+                if question.get('question_type') == 'MCQ' and 'choices' in question:
+                    # Find which choice matches the correct answer
+                    choices = question['choices']
+                    if isinstance(correct, str):
+                        # Check if it's a letter (A, B, C, D)
+                        if len(correct) == 1 and correct in 'ABCD':
+                            question['answer'] = f"The correct answer is {correct}."
+                        # Check if it's a number as string
+                        elif correct.isdigit():
+                            idx = int(correct) - 1
+                            if 0 <= idx < len(choices):
+                                letter = chr(65 + idx)
+                                question['answer'] = f"The correct answer is {letter}."
+                        # Otherwise it's the actual answer text
+                        else:
+                            # Find which choice matches
+                            for i, choice in enumerate(choices):
+                                if choice == correct or correct in choice:
+                                    letter = chr(65 + i)
+                                    question['answer'] = f"The correct answer is {letter}."
+                                    break
+                            else:
+                                # Default to first choice if no match
+                                question['answer'] = f"The correct answer is A."
+                    elif isinstance(correct, list):
+                        # Multiple correct answers - convert to string
+                        question['answer'] = ', '.join(correct)
+                else:
+                    # For non-MCQ questions, use the correct answer as is
+                    if isinstance(correct, list):
+                        question['answer'] = ', '.join(correct)
+                    else:
+                        question['answer'] = str(correct)
+            
+            # Add learning objective if missing
+            if 'learning_objective' not in question and 'question' in question:
+                question['learning_objective'] = "Understand key concepts from the section"
+    
+    # Continue with existing fixes
+    # Fix question format if needed
+    if 'questions' in data and isinstance(data['questions'], list):
+        for question in data['questions']:
+            # Fix question_type field name (type -> question_type)
+            if 'type' in question and 'question_type' not in question:
+                question['question_type'] = question['type'].upper()
+                del question['type']
+            
+            # Normalize question type case
+            if 'question_type' in question:
+                q_type = question['question_type'].upper()
+                # Fix common variations
+                if q_type == 'MULTIPLE_CHOICE':
+                    q_type = 'MCQ'
+                elif q_type == 'TRUE_FALSE':
+                    q_type = 'TF'
+                elif q_type == 'SHORT_ANSWER':
+                    q_type = 'SHORT'
+                elif q_type == 'FILL_IN_THE_BLANK':
+                    q_type = 'FILL'
+                question['question_type'] = q_type
+            
+            # Fix MCQ answer format
+            if question.get('question_type') == 'MCQ' and 'answer' in question:
+                answer = question['answer']
+                # Check if answer starts with letter format like "A)" or "D)"
+                import re
+                letter_match = re.match(r'^([A-D])\)', answer)
+                if letter_match:
+                    letter = letter_match.group(1)
+                    # Extract the rest as explanation
+                    explanation = answer[3:].strip()
+                    # Remove duplicate letter if present
+                    explanation = re.sub(r'^[A-D]\.?\s*', '', explanation)
+                    # If no explanation, use the choice text
+                    if not explanation or explanation == letter:
+                        choices = question.get('choices', [])
+                        choice_index = ord(letter) - ord('A')
+                        if 0 <= choice_index < len(choices):
+                            explanation = choices[choice_index]
+                    question['answer'] = f"The correct answer is {letter}. {explanation}"
+                elif not answer.startswith("The correct answer is"):
+                    # Try to detect which choice is indicated
+                    for i, choice in enumerate(question.get('choices', [])):
+                        if answer.lower() in choice.lower() or choice.lower() in answer.lower():
+                            letter = chr(65 + i)  # A, B, C, D
+                            question['answer'] = f"The correct answer is {letter}. {answer}"
+                            break
+    
+    # Fix rationale format if it's a string instead of object
+    if data.get('quiz_needed') and 'rationale' in data:
+        if isinstance(data['rationale'], str):
+            # Convert string rationale to object format
+            data['rationale'] = {
+                'focus_areas': ['Key concepts from the section'],
+                'question_strategy': 'Mixed question types for comprehensive assessment',
+                'difficulty_progression': 'Progressive difficulty from basic to advanced',
+                'integration': 'Questions build on foundational concepts',
+                'ranking_explanation': 'Questions ordered by importance and difficulty'
+            }
+        elif isinstance(data['rationale'], dict):
+            # Ensure all required fields exist
+            defaults = {
+                'focus_areas': ['Key concepts from the section'],
+                'question_strategy': 'Mixed question types for comprehensive assessment',
+                'difficulty_progression': 'Progressive difficulty from basic to advanced',
+                'integration': 'Questions build on foundational concepts',
+                'ranking_explanation': 'Questions ordered by importance and difficulty'
+            }
+            for key, default_value in defaults.items():
+                if key not in data['rationale'] or not data['rationale'][key]:
+                    data['rationale'][key] = default_value
+            
+            # Ensure focus_areas is a list with 2-3 items
+            if 'focus_areas' in data['rationale']:
+                if isinstance(data['rationale']['focus_areas'], str):
+                    data['rationale']['focus_areas'] = [data['rationale']['focus_areas']]
+                elif not isinstance(data['rationale']['focus_areas'], list):
+                    data['rationale']['focus_areas'] = ['Key concepts from the section']
+                
+                # Ensure 2-3 items in focus_areas
+                if len(data['rationale']['focus_areas']) < 2:
+                    data['rationale']['focus_areas'].append('Understanding core principles')
+                if len(data['rationale']['focus_areas']) > 3:
+                    data['rationale']['focus_areas'] = data['rationale']['focus_areas'][:3]
+    
+    return data
+
 def call_openai(client, system_prompt, user_prompt, model="gpt-4o"):
     """
     Make an API call to OpenAI for quiz generation.
@@ -862,7 +2366,8 @@ def call_openai(client, system_prompt, user_prompt, model="gpt-4o"):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            temperature=0.4
+            temperature=0.4,
+            response_format={"type": "json_object"}
         )
         content = response.choices[0].message.content
         try:
@@ -874,19 +2379,36 @@ def call_openai(client, system_prompt, user_prompt, model="gpt-4o"):
             else:
                 return {"quiz_needed": False, "rationale": "No JSON found in response"}
         
-        # Validate the response against JSON_SCHEMA
+        # Fix Ollama response format if using Ollama client
+        if isinstance(client, OllamaClient):
+            data = fix_ollama_response_format(data)
+        
+        # Validate the response against QUIZ_DATA_SCHEMA
         try:
-            validate(instance=data, schema=JSON_SCHEMA)
+            validate(instance=data, schema=QUIZ_DATA_SCHEMA)
         except ValidationError as e:
-            print(f"⚠️  Warning: AI response doesn't match schema: {e.message}")
-            # Return a fallback response
-            return {"quiz_needed": False, "rationale": f"Schema validation failed: {e.message}"}
+            print(f"⚠️  Schema validation error: {e.message}")
+            print(f"    Response data: {json.dumps(data, indent=2)}")
+            # For Ollama, try to fix and re-validate
+            if isinstance(client, OllamaClient):
+                print("    Attempting additional fixes for Ollama response...")
+                data = fix_ollama_response_format(data)
+                try:
+                    validate(instance=data, schema=QUIZ_DATA_SCHEMA)
+                    print("    ✓ Fixed and validated successfully!")
+                except ValidationError as e2:
+                    print(f"    ✗ Still invalid after fixes: {e2.message}")
+                    raise e2
+            else:
+                raise e
         
         return data
     except APIError as e:
-        return {"quiz_needed": False, "rationale": f"API error: {str(e)}"}
+        raise Exception(f"API error: {str(e)}")
+    except ValidationError as e:
+        raise Exception(f"Schema validation failed: {str(e)}")
     except Exception as e:
-        return {"quiz_needed": False, "rationale": f"Unexpected error: {str(e)}"}
+        raise
 
 def validate_individual_quiz_response(data):
     """
@@ -953,163 +2475,43 @@ def validate_individual_quiz_response(data):
     
     return True
 
-def build_user_prompt(section_title, section_text, chapter_number=None, chapter_title=None, previous_quizzes=None):
+def build_user_prompt(section_title, section_text, chapter_number=None, chapter_title=None, previous_quizzes=None, all_chapter_concepts=None):
     """
-    Build a user prompt with chapter context and previous quiz data for variety.
+    Build a user prompt using the new PromptBuilder architecture.
     
-    This function constructs the user prompt sent to the AI, incorporating
-    chapter-specific context, difficulty guidelines, and previous quiz data
-    to ensure variety and avoid overlap within the chapter.
+    This is a compatibility wrapper that uses the new centralized PromptBuilder
+    and ChapterContext classes for cleaner prompt construction.
     
     Args:
         section_title (str): Title of the section being processed
         section_text (str): Content of the section
         chapter_number (int, optional): Chapter number (1-20)
         chapter_title (str, optional): Chapter title
-        previous_quizzes (list, optional): List of previous quiz data from earlier sections in this chapter
+        previous_quizzes (list, optional): List of previous quiz data
+        all_chapter_concepts (dict, optional): Pre-extracted concept maps from all chapters
         
     Returns:
-        str: Formatted user prompt with chapter context, difficulty guidelines, and previous quiz context
-        
-    Note:
-        - Chapters 1-5: Foundational concepts and basic understanding
-        - Chapters 6-10: Intermediate complexity with practical applications
-        - Chapters 11-15: Advanced topics requiring system-level reasoning
-        - Chapters 16-20: Specialized topics requiring integration across concepts
-        - Previous quiz data helps avoid redundancy and ensures variety
-        - Uses global BOOK_OUTLINE to connect concepts across chapters and build progression
+        str: Formatted user prompt with all context
     """
-    # Define chapter progression context
-    chapter_context = ""
-    difficulty_guidelines = ""
-    book_progression_context = ""
+    # Create chapter context
+    chapter_context = ChapterContext(
+        chapter_number=chapter_number,
+        chapter_title=chapter_title,
+        section_title=section_title
+    )
     
-    if chapter_number is not None:
-        # Ensure book outline is built
-        book_outline = build_book_outline_from_quarto_yml()
-        
-        if book_outline:
-            chapter_context = f"""
-**Chapter Context:**
-This is Chapter {chapter_number}: {chapter_title or 'Unknown'} in a {len(book_outline)}-chapter textbook on Machine Learning Systems.
-The book progresses from foundational concepts to advanced topics and operational concerns.
-"""
-            
-            # Add book outline context for better progression understanding using dynamic BOOK_OUTLINE
-            book_progression_context = f"""
-**Book Progression Context:**
-This chapter builds upon and connects to the broader textbook structure:
-
-"""
-            # Show previous chapters that this builds upon
-            if chapter_number > 1:
-                book_progression_context += "**Builds upon:**\n"
-                for i in range(1, chapter_number):
-                    if i <= len(book_outline):
-                        book_progression_context += f"- Chapter {i}: {book_outline[i-1]}\n"
-                book_progression_context += "\n"
-            
-            # Show upcoming chapters this connects to
-            if chapter_number < len(book_outline):
-                book_progression_context += "**Connects to:**\n"
-                for i in range(chapter_number + 1, min(chapter_number + 4, len(book_outline) + 1)):
-                    if i <= len(book_outline):
-                        book_progression_context += f"- Chapter {i}: {book_outline[i-1]}\n"
-                book_progression_context += "\n"
-            
-            book_progression_context += """
-**Progression Guidelines:**
-- Questions should acknowledge concepts from earlier chapters where relevant
-- Build upon foundational knowledge established in previous chapters
-- Prepare students for more advanced topics in upcoming chapters
-- Create connections that show how ML systems concepts evolve and integrate
-"""
-        else:
-            # No book outline available
-            chapter_context = f"""
-**Chapter Context:**
-This is Chapter {chapter_number}: {chapter_title or 'Unknown'} in a Machine Learning Systems textbook.
-"""
-            book_progression_context = ""
-        
-        # Progressive difficulty guidelines based on chapter position
-        if chapter_number <= 5:
-            difficulty_guidelines = """
-**Chapter Difficulty Guidelines (Chapters 1-5):**
-- Focus on foundational concepts and basic understanding
-- Emphasize core definitions and fundamental principles
-- Questions should test comprehension of basic ML systems concepts
-- Avoid overly complex scenarios or advanced technical details
-- Establish building blocks for later chapters
-"""
-        elif chapter_number <= 10:
-            difficulty_guidelines = """
-**Chapter Difficulty Guidelines (Chapters 6-10):**
-- Intermediate complexity with practical applications
-- Questions should test understanding of technical implementation
-- Include questions about tradeoffs and design decisions
-- Connect concepts to real-world ML system scenarios
-- Build upon foundational concepts from Chapters 1-5
-"""
-        elif chapter_number <= 15:
-            difficulty_guidelines = """
-**Chapter Difficulty Guidelines (Chapters 11-15):**
-- Advanced topics requiring system-level reasoning
-- Questions should test deep understanding of optimization and operational concerns
-- Focus on integration of multiple concepts from earlier chapters
-- Emphasize practical implications and real-world challenges
-- Prepare for specialized topics in final chapters
-"""
-        else:
-            difficulty_guidelines = """
-**Chapter Difficulty Guidelines (Chapters 16-20):**
-- Specialized topics requiring integration across multiple concepts
-- Questions should test synthesis of knowledge from throughout the book
-- Focus on ethical, societal, and advanced operational considerations
-- Emphasize critical thinking about ML systems in broader contexts
-- Integrate concepts from all previous chapters
-"""
+    # Use PromptBuilder to construct the prompt with chapter concepts
+    prompt_builder = PromptBuilder(all_chapter_concepts=all_chapter_concepts)
     
-    # Build previous quiz context if available
-    previous_quiz_context = ""
-    if previous_quizzes and len(previous_quizzes) > 0:
-        previous_quiz_context = f"""
-**Previous Quiz Context (Avoid Overlap):**
-The following sections in this chapter already have quizzes. Ensure your questions are distinct and avoid conceptual overlap:
-
-"""
-        for i, quiz_data in enumerate(previous_quizzes, 1):
-            if quiz_data.get('quiz_needed', False):
-                questions = quiz_data.get('questions', [])
-                previous_quiz_context += f"\nSection {i} Questions:\n"
-                for j, question in enumerate(questions, 1):
-                    q_type = question.get('question_type', 'Unknown')
-                    q_text = question.get('question', '')
-                    previous_quiz_context += f"  Q{j} ({q_type}): {q_text}\n"
-                previous_quiz_context += "\n"
-        
-        previous_quiz_context += """
-**Variety Guidelines:**
-- Use different question types than those already used in this chapter
-- Focus on different aspects of the content (e.g., if previous questions focused on tradeoffs, focus on implementation or operational concerns)
-- Ensure your questions complement rather than repeat the learning objectives covered in previous sections
-- If similar concepts appear, approach them from a different angle or application context
-- Consider how this section's concepts connect to and build upon earlier chapters
-"""
+    # Add section header to the text
+    full_section_text = f"**Section: {section_title}**\n\n{section_text}"
     
-    return f"""
-This section is titled "{section_title}".
+    return prompt_builder.build_user_prompt_with_context(
+        section_text=full_section_text,
+        chapter_context=chapter_context,
+        previous_quizzes=previous_quizzes
+    )
 
-{chapter_context}
-{book_progression_context}
-{difficulty_guidelines}
-{previous_quiz_context}
-
-Section content:
-{section_text}
-
-Generate a self-check quiz with 1 to 5 well-structured questions and answers based on this section. Include a rationale explaining your question generation strategy and focus areas. Return your response in the specified JSON format.
-""".strip()
 def regenerate_section_quiz(client, section_title, section_text, current_quiz_data, user_prompt, chapter_number=None, chapter_title=None, previous_quizzes=None):
     """
     Regenerate quiz questions for a section with custom instructions.
@@ -1173,7 +2575,11 @@ Please regenerate the quiz questions following these specific instructions while
     
     return response
 
-# Gradio Application
+# ============================================================================
+# GRADIO GUI APPLICATION
+# Interactive web interface for reviewing and editing quiz questions.
+# ============================================================================
+
 class QuizEditorGradio:
     """
     Gradio-based GUI for reviewing and editing quiz questions.
@@ -1473,7 +2879,7 @@ class QuizEditorGradio:
             return f"Error saving file: {str(e)}"
     
     def save_changes_with_checkboxes(self, checkbox_states):
-        """Save the current quiz data with removed questions based on checkbox states"""
+        """Save the current quiz data with hidden/shown status based on checkbox states"""
         if not self.quiz_data or not self.sections:
             return "No data to save"
         
@@ -1485,7 +2891,10 @@ class QuizEditorGradio:
         # Create a copy of the data to modify
         modified_data = json.loads(json.dumps(self.quiz_data))
         
-        # Remove unchecked questions from each section
+        # Update hidden status for unchecked questions in each section
+        questions_hidden_count = 0
+        questions_shown_count = 0
+        
         for section in modified_data['sections']:
             section_id = section['section_id']
             quiz_data = section.get('quiz_data', {})
@@ -1494,26 +2903,41 @@ class QuizEditorGradio:
                 questions = quiz_data.get('questions', [])
                 question_states = self.question_states.get(section_id, [True] * len(questions))
                 
-                # Keep only checked questions
-                kept_questions = []
+                # Update hidden status for each question
                 for i, question in enumerate(questions):
-                    if i < len(question_states) and question_states[i]:
-                        kept_questions.append(question)
-                
-                # Update the questions list
-                quiz_data['questions'] = kept_questions
-        
-        # Remove any section where quiz_needed is true but questions is empty
-        modified_data['sections'] = [
-            s for s in modified_data['sections']
-            if not (s.get('quiz_data', {}).get('quiz_needed', False) and len(s.get('quiz_data', {}).get('questions', [])) == 0)
-        ]
+                    if i < len(question_states):
+                        if not question_states[i]:
+                            # Unchecked - hide the question
+                            if not question.get('hidden', False):
+                                question['hidden'] = True
+                                question['_manually_hidden'] = True
+                                question['_hidden_at'] = datetime.now().isoformat()
+                                questions_hidden_count += 1
+                        else:
+                            # Checked - ensure it's visible
+                            if question.get('hidden', False):
+                                # Was hidden, now showing
+                                del question['hidden']
+                                question['_manually_shown'] = True
+                                question['_shown_at'] = datetime.now().isoformat()
+                                questions_shown_count += 1
+                            # Remove any manual hiding markers if question is checked
+                            if '_manually_hidden' in question:
+                                del question['_manually_hidden']
         
         # Save to the original file
         try:
             with open(self.initial_file_path, 'w', encoding='utf-8') as f:
                 json.dump(modified_data, f, indent=2, ensure_ascii=False)
-            return f"Saved changes to {os.path.basename(self.initial_file_path)}"
+            
+            # Create informative message
+            status_msg = f"Saved changes to {os.path.basename(self.initial_file_path)}"
+            if questions_hidden_count > 0:
+                status_msg += f"\n📝 {questions_hidden_count} question(s) hidden (reversible)"
+            if questions_shown_count > 0:
+                status_msg += f"\n✅ {questions_shown_count} question(s) restored"
+            
+            return status_msg
         except Exception as e:
             return f"Error saving file: {str(e)}"
     
@@ -1823,7 +3247,7 @@ def create_gradio_interface(initial_file_path=None):
             with gr.Column(scale=1):
                 prev_btn = gr.Button("← Previous", size="lg")
             with gr.Column(scale=1):
-                save_btn = gr.Button("💾 Save & Exit", size="lg", variant="primary")
+                save_btn = gr.Button("💾 Save Changes", size="lg", variant="primary")
             with gr.Column(scale=1):
                 next_btn = gr.Button("Next →", size="lg")
         
@@ -1946,6 +3370,8 @@ def create_gradio_interface(initial_file_path=None):
         
         # Save handler - directly save changes
         def save_changes(*checkbox_values):
+            import datetime
+            
             if editor.sections and editor.current_section_index < len(editor.sections):
                 current_section = editor.sections[editor.current_section_index]
                 section_id = current_section['section_id']
@@ -1956,22 +3382,51 @@ def create_gradio_interface(initial_file_path=None):
                 editor.question_states[section_id] = list(checkbox_values[:num_questions])
             
             # Count total changes across all sections
-            total_questions_removed = 0
+            total_questions_hidden = 0
+            total_questions_visible = 0
+            total_questions_before = 0
+            sections_modified = []
+            
             for section in editor.sections:
                 section_id = section['section_id']
+                section_title = section.get('section_title', 'Unknown')
                 quiz_data = section.get('quiz_data', {})
                 questions = quiz_data.get('questions', []) if quiz_data.get('quiz_needed', False) else []
-                question_states = editor.question_states.get(section_id, [True] * len(questions))
-                removed_count = sum(1 for state in question_states if not state)
-                total_questions_removed += removed_count
+                
+                if questions:
+                    total_questions_before += len(questions)
+                    question_states = editor.question_states.get(section_id, [True] * len(questions))
+                    hidden_count = sum(1 for i, state in enumerate(question_states) if i < len(questions) and not state)
+                    visible_count = sum(1 for i, state in enumerate(question_states) if i < len(questions) and state)
+                    total_questions_hidden += hidden_count
+                    total_questions_visible += visible_count
+                    if hidden_count > 0:
+                        sections_modified.append(f"  {section_title}: {hidden_count} hidden, {visible_count} visible")
+            
+            # Print to command line for visibility
+            print("\n" + "="*60)
+            print(f"SAVING QUIZ - {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            print("="*60)
+            print(f"File: {os.path.basename(editor.initial_file_path)}")
+            print(f"Total questions: {total_questions_before}")
+            print(f"Hidden: {total_questions_hidden}, Visible: {total_questions_visible}")
+            
+            if sections_modified:
+                print("\nModified sections:")
+                for mod in sections_modified:
+                    print(mod)
             
             # Save the changes
             result = editor.save_changes_with_checkboxes(list(checkbox_values))
             
-            if total_questions_removed > 0:
-                return f"{result}\n\nRemoved {total_questions_removed} question(s) total."
+            # Print save result
+            print(f"\n✅ {result}")
+            print("="*60 + "\n")
+            
+            if total_questions_hidden > 0:
+                return f"✅ {result}\n\n📝 {total_questions_hidden} question(s) hidden (reversible)\n✅ {total_questions_visible} question(s) remain visible\n\n**Note:** Hidden questions are preserved in the JSON but won't appear in quizzes.\n**To restore:** Check the boxes and save again.\n\n**To exit:** Close browser tab and press Ctrl+C in terminal"
             else:
-                return f"{result}\n\nAll questions kept."
+                return f"✅ {result}\n\nAll {total_questions_before} questions remain visible.\n\n**To exit:** Close browser tab and press Ctrl+C in terminal"
         
         # Confirmed save handler
         def confirmed_save(confirm_save, *checkbox_values):
@@ -2006,8 +3461,8 @@ def create_gradio_interface(initial_file_path=None):
             section_text = editor.get_full_section_content(current_section)
             
             try:
-                # Initialize OpenAI client
-                client = OpenAI()
+                # Initialize LLM client
+                client = get_llm_client(args)
                 
                 # Call regeneration function
                 new_quiz_data = regenerate_section_quiz(
@@ -2107,12 +3562,16 @@ def show_usage_examples():
     and their applications.
     """
     print("\n=== Usage Examples ===")
-    print("\n1. Generate quizzes from a markdown file:")
-    print("   python quizzes.py --mode generate -f chapter1.qmd")
-    print("   python quizzes.py --mode generate -f chapter1.qmd -o my_quizzes.json")
-    print("   python quizzes.py --mode generate -d ./chapters/")
+    print("\n1. Generate quizzes from a markdown file (uses OpenAI gpt-4o by default):")
+    print("   python quizzes.py --mode generate -f chapter1.qmd  # Uses OpenAI gpt-4o")
+    print("   python quizzes.py --mode generate -f chapter1.qmd --model gpt-4o-mini  # Use faster model")
+    print("   python quizzes.py --mode generate -f chapter1.qmd --evaluate  # With quality evaluation")
+    print("   python quizzes.py --mode generate -f chapter1.qmd --provider ollama  # Use local Ollama")
     print("   python quizzes.py --mode generate -d ./chapters/ --parallel")
-    print("   python quizzes.py --mode generate -d ./chapters/ --parallel --max-workers 2")
+    print("   python quizzes.py --mode generate -d ./chapters/ --parallel --max-workers 2 --evaluate")
+    print("   python quizzes.py --mode generate -d ./chapters/ --quarto-config pdf  # Use PDF chapter order")
+    print("   python quizzes.py --mode generate -d ./chapters/ --quarto-config html  # Use HTML chapter order")
+    print("   # Note: Automatically uses topics_covered from YAML concept files for optimal quiz generation")
     
     print("\n2. Review existing quizzes with GUI:")
     print("   python quizzes.py --mode review -f quizzes.json")
@@ -2134,8 +3593,25 @@ def show_usage_examples():
     print("   python quizzes.py --mode clean --backup -f chapter1.qmd")
     print("   python quizzes.py --mode clean --dry-run -d ./chapters/")
     
+    print("\n6. Evaluate existing quizzes and hide poor questions:")
+    print("   python quizzes.py --mode evaluate -f quizzes.json --dry-run  # Preview changes")
+    print("   python quizzes.py --mode evaluate -f quizzes.json  # Uses OpenAI gpt-4o")
+    print("   python quizzes.py --mode evaluate -f quizzes.json --provider ollama  # Use local Ollama")
+    print("   python quizzes.py --mode evaluate -d ./quiz_files/  # Evaluate all files")
+    print("   # Rejected questions (score < 40) are marked as hidden")
+    print("   # Hidden questions won't appear when quizzes are injected")
+    
     print("\n⚠️  IMPORTANT: You must specify either -f (file) or -d (directory) for all modes.")
     print("   The tool automatically detects file types (JSON vs QMD) and performs the appropriate action.")
+    print("\n📚 CONCEPT TRACKING: The tool automatically uses topics_covered from YAML concept files")
+    print("   referenced in chapter frontmatter (e.g., concepts: introduction_concepts.yml)")
+    print("   This provides optimal quiz generation with structured topic coverage and")
+    print("   cumulative knowledge tracking across chapters.")
+
+# ============================================================================
+# MAIN ENTRY POINT
+# Command-line interface and argument parsing for the quiz generation system.
+# ============================================================================
 
 def main():
     """
@@ -2161,7 +3637,7 @@ def main():
         - Provides comprehensive help and usage examples
     """
     parser = argparse.ArgumentParser(
-        description="Quiz generation and management tool for markdown files.",
+        description="Quiz generation and management tool for markdown files. Uses topics_covered from YAML concept files for optimal quiz generation.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -2181,19 +3657,29 @@ Examples:
 
 Note: You must specify either -f (file) or -d (directory) for all modes.
 The tool will automatically detect file types (JSON vs QMD) and perform the appropriate action.
+Uses topics_covered from YAML concept files for structured quiz generation.
 Use --parallel for faster directory processing (one thread per file).
         """
     )
-    parser.add_argument("--mode", choices=["generate", "review", "insert", "verify", "clean"], 
+    parser.add_argument("--mode", choices=["generate", "review", "insert", "verify", "clean", "evaluate"], 
                        required=False, help="Mode of operation")
     parser.add_argument("-f", "--file", help="Path to a file (.qmd, .md, or .json)")
     parser.add_argument("-d", "--directory", help="Path to directory")
-    parser.add_argument("--model", default="gpt-4o", help="OpenAI model to use (generate mode only)")
+    parser.add_argument("--provider", default="openai", choices=["openai", "ollama"], 
+                       help="LLM provider to use (default: openai)")
+    parser.add_argument("--model", default=None, 
+                       help="Model to use (default: llama3.2 for Ollama, gpt-4o for OpenAI)")
+    parser.add_argument("--ollama-url", default="http://localhost:11434", 
+                       help="Ollama API URL (default: http://localhost:11434)")
     parser.add_argument("-o", "--output", default="quizzes.json", help="Path to output JSON file (generate mode only)")
+    parser.add_argument("--quarto-config", default="html", choices=["html", "pdf", "epub", "auto"],
+                       help="Which _quarto-*.yml config to use for chapter ordering (default: html). 'auto' uses _quarto.yml symlink.")
     parser.add_argument("--backup", action="store_true", help="Create backup files before cleaning")
     parser.add_argument("--dry-run", action="store_true", help="Show what would be done without making changes")
     parser.add_argument("--parallel", action="store_true", help="Process multiple files in parallel (directory mode only)")
     parser.add_argument("--max-workers", type=int, default=None, help="Maximum number of parallel workers (default: number of files, max 4)")
+    parser.add_argument("--verbose", action="store_true", help="Show detailed output during processing")
+    parser.add_argument("--evaluate", action="store_true", help="Enable LLM judge to evaluate question quality (generate mode only)")
     parser.add_argument("--examples", action="store_true", help="Show usage examples")
     args = parser.parse_args()
 
@@ -2219,6 +3705,14 @@ Use --parallel for faster directory processing (one thread per file).
     
     if args.max_workers and not args.parallel:
         print("Warning: --max-workers is only effective when used with --parallel")
+    
+    # Set the quarto config path based on user choice
+    quarto_path = set_quarto_yml_path(args.quarto_config)
+    if args.verbose:
+        print(f"Using Quarto config: {quarto_path}")
+    if not os.path.exists(quarto_path):
+        print(f"Warning: Quarto config file not found: {quarto_path}")
+        print("Chapter ordering may not work correctly.")
 
     # Determine file type and route to appropriate function
     if args.file:
@@ -2237,6 +3731,9 @@ Use --parallel for faster directory processing (one thread per file).
             elif args.mode == "clean":
                 print("Error: Clean mode requires a .qmd file, not a .json file")
                 return
+            elif args.mode == "evaluate":
+                # Evaluate existing quiz JSON file
+                evaluate_existing_quiz_file(args.file, args)
         elif file_ext in ['.qmd', '.md']:
             # QMD/MD file - treat as markdown file
             if args.mode == "generate":
@@ -2266,6 +3763,8 @@ Use --parallel for faster directory processing (one thread per file).
             run_verify_mode_directory(args.directory)
         elif args.mode == "clean":
             run_clean_mode_directory(args.directory, args)
+        elif args.mode == "evaluate":
+            evaluate_directory(args.directory, args)
 
 def run_generate_mode_simple(qmd_file, args):
     """
@@ -2441,6 +3940,44 @@ def run_verify_mode_simple(file_path):
             if source_file:
                 if os.path.exists(source_file):
                     print(f"✅ Found corresponding QMD file: {source_file}")
+                    
+                    # Validate section IDs match between quiz and QMD
+                    try:
+                        with open(source_file, 'r', encoding='utf-8') as qmd_f:
+                            qmd_content = qmd_f.read()
+                        
+                        qmd_sections = extract_sections_with_ids(qmd_content)
+                        if qmd_sections:
+                            # Create sets of section IDs for comparison
+                            qmd_section_ids = {s['section_id'] for s in qmd_sections}
+                            quiz_section_ids = {s['section_id'] for s in sections}
+                            
+                            # Check for mismatches
+                            quiz_not_in_qmd = quiz_section_ids - qmd_section_ids
+                            qmd_not_in_quiz = qmd_section_ids - quiz_section_ids
+                            
+                            print(f"\n📋 Section ID Validation:")
+                            if not quiz_not_in_qmd and not qmd_not_in_quiz:
+                                print(f"   ✅ All section IDs match perfectly")
+                            else:
+                                if quiz_not_in_qmd:
+                                    print(f"   ❌ Quiz sections NOT found in QMD file:")
+                                    for section_id in sorted(quiz_not_in_qmd):
+                                        # Find section title from quiz data
+                                        section_title = next((s['section_title'] for s in sections if s['section_id'] == section_id), 'Unknown')
+                                        print(f"      - {section_id} ({section_title})")
+                                
+                                if qmd_not_in_quiz:
+                                    print(f"   ⚠️  QMD sections NOT found in quiz file:")
+                                    for section_id in sorted(qmd_not_in_quiz):
+                                        # Find section title from QMD data
+                                        section_title = next((s['section_title'] for s in qmd_sections if s['section_id'] == section_id), 'Unknown')
+                                        print(f"      - {section_id} ({section_title})")
+                        else:
+                            print(f"\n⚠️  Could not extract sections from QMD file for validation")
+                            
+                    except Exception as e:
+                        print(f"\n⚠️  Could not validate section IDs: {str(e)}")
                 else:
                     print(f"⚠️  QMD file not found: {source_file}")
             else:
@@ -2478,6 +4015,44 @@ def run_verify_mode_simple(file_path):
                 quiz_path = os.path.join(os.path.dirname(file_path), quiz_file)
                 if os.path.exists(quiz_path):
                     print(f"✅ Found corresponding quiz file: {quiz_path}")
+                    
+                    # Validate section IDs match between QMD and quiz
+                    try:
+                        with open(quiz_path, 'r', encoding='utf-8') as quiz_f:
+                            quiz_data = json.load(quiz_f)
+                        
+                        quiz_sections = quiz_data.get('sections', [])
+                        if quiz_sections:
+                            # Create sets of section IDs for comparison
+                            qmd_section_ids = {s['section_id'] for s in sections}
+                            quiz_section_ids = {s['section_id'] for s in quiz_sections}
+                            
+                            # Check for mismatches
+                            quiz_not_in_qmd = quiz_section_ids - qmd_section_ids
+                            qmd_not_in_quiz = qmd_section_ids - quiz_section_ids
+                            
+                            print(f"\n📋 Section ID Validation:")
+                            if not quiz_not_in_qmd and not qmd_not_in_quiz:
+                                print(f"   ✅ All section IDs match perfectly")
+                            else:
+                                if quiz_not_in_qmd:
+                                    print(f"   ❌ Quiz sections NOT found in QMD file:")
+                                    for section_id in sorted(quiz_not_in_qmd):
+                                        # Find section title from quiz data
+                                        section_title = next((s['section_title'] for s in quiz_sections if s['section_id'] == section_id), 'Unknown')
+                                        print(f"      - {section_id} ({section_title})")
+                                
+                                if qmd_not_in_quiz:
+                                    print(f"   ⚠️  QMD sections NOT found in quiz file:")
+                                    for section_id in sorted(qmd_not_in_quiz):
+                                        # Find section title from QMD data
+                                        section_title = next((s['section_title'] for s in sections if s['section_id'] == section_id), 'Unknown')
+                                        print(f"      - {section_id} ({section_title})")
+                        else:
+                            print(f"\n⚠️  Could not extract sections from quiz file for validation")
+                            
+                    except Exception as e:
+                        print(f"\n⚠️  Could not validate section IDs: {str(e)}")
                 else:
                     print(f"⚠️  The quiz file '{quiz_file}' referenced in the frontmatter of {file_path} does not exist.")
             else:
@@ -2501,35 +4076,7 @@ def run_clean_mode_simple(qmd_file, args):
     print("=== Quiz Clean Mode (Single File) ===")
     clean_single_file(qmd_file, args)
 
-def run_clean_mode_directory(directory, args):
-    """
-    Clean all quizzes from all QMD files in a directory.
-    
-    Args:
-        directory (str): Path to the directory containing QMD files
-        args (argparse.Namespace): Command line arguments
-    """
-    print("=== Quiz Clean Mode (Directory) ===")
-    clean_directory(directory, args)
 
-def run_verify_mode_directory(directory_path):
-    """
-    Verify all quiz files in a directory.
-    
-    This function would perform verification on all quiz files in a
-    directory. Currently a placeholder for future implementation.
-    
-    Args:
-        directory_path (str): Path to the directory to verify
-        
-    Note:
-        This functionality is not yet implemented. It would involve:
-        - Finding all JSON and QMD files in the directory
-        - Running verification on each file
-        - Providing a summary report
-    """
-    print("=== Quiz Verify Mode (Directory) ===")
-    run_verify_directory(directory_path)
 
 def extract_quiz_metadata(content):
     """Extract quiz file name from YAML frontmatter using proper YAML parsing"""
@@ -2615,7 +4162,494 @@ def extract_chapter_info(file_path):
     
     return None, None
 
-def generate_for_file(qmd_file, args):
+# ============================================================================
+# THREE-PHASE QUIZ GENERATION PIPELINE
+# Core pipeline functions that implement the quiz generation workflow:
+# 1. Pre-processing: Classify content and generate hints
+# 2. Processing: Generate quiz questions using LLM
+# 3. Post-processing: Redistribute MCQ answers for balance
+# ============================================================================
+
+def pre_process_section(section, client=None, model=None, verbose=False, parallel=False):
+    """
+    PHASE 1: PRE-PROCESSING
+    Analyze section content using LLM, classify it, and prepare metadata for quiz generation.
+    
+    Args:
+        section: Dictionary with section_title and section_text
+        client: Optional LLM client for classification
+        model: Optional model name for classification
+        
+    Returns:
+        dict: Metadata about the section including classification and generation hints
+    """
+    try:
+        # If no client provided, use basic feature extraction (backward compatible)
+        if not client:
+            # Fallback to basic analysis
+            word_count = len(section.get('section_text', '').split())
+            return {
+                'section_type': 'GENERAL',
+                'type_confidence': 0.0,
+                'generation_hints': {
+                    'content_hints': 'General educational content',
+                    'quiz_likelihood': 'MEDIUM',
+                    'contextual_guidance': f'Section contains {word_count} words'
+                }
+            }
+        
+        # Use LLM to classify the section
+        classification_prompt = PROMPTS["classification"]["user_template"].format(
+            section_title=section.get('section_title', ''),
+            section_content=section.get('section_text', '')[:1000]
+        )
+        
+        # Call LLM for classification
+        response = client.chat.completions.create(
+            model=model or "gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": PROMPTS["classification"]["system"]},
+                {"role": "user", "content": classification_prompt}
+            ],
+            temperature=0.3,
+            response_format={"type": "json_object"}
+        )
+        
+        # Parse response
+        classification_result = json.loads(response.choices[0].message.content)
+        
+        # Build the preprocessing result
+        result = {
+            'section_type': classification_result.get('classification', 'GENERAL'),
+            'type_confidence': classification_result.get('confidence', 0.0),
+            'generation_hints': {
+                'content_hints': classification_result.get('content_hints', ''),
+                'quiz_likelihood': classification_result.get('quiz_likelihood', 'MEDIUM'),
+                'contextual_guidance': classification_result.get('contextual_notes', '')
+            }
+        }
+        
+        # Log classification (only if verbose or not parallel)
+        if (verbose or not parallel) and result['type_confidence'] > 0:
+            print(f"     Classification: {result['section_type']} (confidence: {result['type_confidence']:.2f})")
+            if result['generation_hints'].get('quiz_likelihood') == 'HIGH':
+                print(f"     → High likelihood of quiz generation")
+            if result['generation_hints'].get('contextual_guidance'):
+                print(f"     → {result['generation_hints'].get('contextual_guidance')}")
+        
+        return result
+        
+    except Exception as e:
+        # If classification fails, return minimal metadata
+        if verbose or not parallel:
+            print(f"     Warning: Classification failed ({str(e)}), using defaults")
+        return {
+            'section_type': 'GENERAL',
+            'type_confidence': 0.0,
+            'generation_hints': {
+                'content_hints': 'Unable to classify - using general guidance',
+                'quiz_likelihood': 'MEDIUM',
+                'contextual_guidance': ''
+            }
+        }
+
+def process_section(client, section, chapter_context, previous_quizzes, args, preprocessing_metadata=None, verbose=False, parallel=False, all_chapter_concepts=None):
+    """
+    PHASE 2: PROCESSING
+    Main quiz generation phase - generates questions using OpenAI.
+    
+    Args:
+        client: OpenAI client
+        section: Dictionary with section info
+        chapter_context: Chapter number and title
+        previous_quizzes: List of previous quiz data
+        args: Command line arguments
+        preprocessing_metadata: Optional metadata from pre_process_section
+        all_chapter_concepts: Pre-extracted concept maps from all chapters
+        
+    Returns:
+        dict: Quiz response from OpenAI
+    """
+    chapter_number, chapter_title = chapter_context
+    
+    # Build user prompt with chapter context and previous quiz data
+    user_prompt = build_user_prompt(
+        section['section_title'], 
+        section['section_text'],
+        chapter_number,
+        chapter_title,
+        previous_quizzes,
+        all_chapter_concepts
+    )
+    
+    # Add preprocessing hints if available
+    if preprocessing_metadata and preprocessing_metadata.get('generation_hints'):
+        hints = preprocessing_metadata['generation_hints']
+        section_type = preprocessing_metadata.get('section_type', 'UNKNOWN')
+        
+        # Add classification context to the prompt
+        classification_context = PROMPTS["section_analysis_template"].format(
+            section_type=section_type,
+            confidence=preprocessing_metadata.get('type_confidence', 0),
+            description=hints.get('section_description', ''),
+            content_hints=hints.get('content_hints', ''),
+            contextual_notes=hints.get('contextual_guidance', ''),
+            quiz_likelihood=hints.get('quiz_likelihood', 'MEDIUM')
+        )
+        
+        user_prompt += classification_context
+    
+    # Call OpenAI
+    try:
+        response = call_openai(client, SYSTEM_PROMPT, user_prompt, args.model)
+        return response
+    except Exception as e:
+        if verbose or not parallel:
+            print(f"  ❌ Error generating quiz: {str(e)}")
+        return {"quiz_needed": False, "rationale": f"Generation error: {str(e)}"}
+
+def redistribute_mcq_answers(response, verbose=False, parallel=False):
+    """
+    Redistribute MCQ answers to ensure balanced distribution across A, B, C, D.
+    
+    Args:
+        response: Quiz response containing questions
+        verbose: Whether to print verbose output
+        parallel: Whether running in parallel mode
+        
+    Returns:
+        dict: Modified response with redistributed MCQ answers
+    """
+    import random
+    import re
+    
+    if not response.get('quiz_needed', False):
+        return response
+    
+    questions = response.get('questions', [])
+    mcq_questions = [q for q in questions if q.get('question_type') == 'MCQ']
+    
+    if not mcq_questions:
+        return response
+    
+    # Analyze current MCQ answer distribution
+    current_distribution = {'A': 0, 'B': 0, 'C': 0, 'D': 0}
+    for q in mcq_questions:
+        answer_text = q.get('answer', '')
+        # Extract current answer position (e.g., "The correct answer is B.")
+        match = re.search(r'The correct answer is ([A-D])', answer_text)
+        if match:
+            current_distribution[match.group(1)] += 1
+    
+    if verbose or not parallel:
+        print(f"     Current MCQ distribution: {current_distribution}")
+    
+    # Create a balanced distribution of answer positions
+    positions = ['A', 'B', 'C', 'D']
+    target_positions = []
+    
+    # For each MCQ, assign a position trying to balance the distribution
+    for i in range(len(mcq_questions)):
+        # Try to use each position equally
+        if i < 4:
+            # First 4 questions: use each position once
+            available = [p for p in positions if p not in target_positions]
+            if available:
+                target_positions.append(random.choice(available))
+            else:
+                target_positions.append(random.choice(positions))
+        else:
+            # After first 4: choose randomly but prefer less-used positions
+            counts = {p: target_positions.count(p) for p in positions}
+            min_count = min(counts.values())
+            least_used = [p for p, c in counts.items() if c == min_count]
+            target_positions.append(random.choice(least_used))
+    
+    # Apply the new positions to MCQ questions
+    mcq_index = 0
+    for q in questions:
+        if q.get('question_type') == 'MCQ':
+            if mcq_index < len(target_positions):
+                new_position = target_positions[mcq_index]
+                
+                # Find current correct answer position
+                answer_text = q.get('answer', '')
+                match = re.search(r'The correct answer is ([A-D])', answer_text)
+                
+                if match:
+                    current_position = match.group(1)
+                    
+                    if current_position != new_position:
+                        # Need to shuffle the choices
+                        choices = q.get('choices', [])
+                        if len(choices) == 4:
+                            # Get indices
+                            current_idx = ord(current_position) - ord('A')
+                            new_idx = ord(new_position) - ord('A')
+                            
+                            # Swap the choices
+                            if 0 <= current_idx < 4 and 0 <= new_idx < 4:
+                                choices[current_idx], choices[new_idx] = choices[new_idx], choices[current_idx]
+                                q['choices'] = choices
+                                
+                                # Update the answer text
+                                q['answer'] = re.sub(
+                                    r'The correct answer is [A-D]',
+                                    f'The correct answer is {new_position}',
+                                    answer_text
+                                )
+                
+                mcq_index += 1
+    
+    # Report final distribution
+    final_distribution = {'A': 0, 'B': 0, 'C': 0, 'D': 0}
+    for i, pos in enumerate(target_positions):
+        if i < len(mcq_questions):
+            final_distribution[pos] += 1
+    
+    if verbose or not parallel:
+        print(f"     Redistributed MCQ answers: {final_distribution}")
+    
+    return response
+
+def balance_tf_answers(response, verbose=False, parallel=False):
+    """
+    Balance True/False answers to ensure approximately 50/50 distribution.
+    
+    Args:
+        response: Quiz response containing questions
+        verbose: Whether to print verbose output
+        parallel: Whether running in parallel mode
+        
+    Returns:
+        dict: Modified response with balanced T/F answers
+    """
+    import random
+    
+    if not response.get('quiz_needed', False):
+        return response
+    
+    questions = response.get('questions', [])
+    tf_questions = [q for q in questions if q.get('question_type') == 'TF']
+    
+    if not tf_questions:
+        return response
+    
+    # Analyze current T/F distribution
+    current_distribution = {'True': 0, 'False': 0}
+    for q in tf_questions:
+        answer_text = q.get('answer', '').lower()
+        if 'true' in answer_text.split('.')[0]:  # Check first sentence
+            current_distribution['True'] += 1
+        else:
+            current_distribution['False'] += 1
+    
+    if verbose or not parallel:
+        print(f"     Current T/F distribution: True={current_distribution['True']}, False={current_distribution['False']}")
+    
+    # If already balanced (within 1), return as is
+    diff = abs(current_distribution['True'] - current_distribution['False'])
+    if diff <= 1:
+        return response
+    
+    # Determine how many to flip
+    total_tf = len(tf_questions)
+    target_true = total_tf // 2
+    target_false = total_tf - target_true
+    
+    # Identify which questions to flip
+    to_flip_to_true = max(0, target_true - current_distribution['True'])
+    to_flip_to_false = max(0, target_false - current_distribution['False'])
+    
+    # Flip some questions
+    if to_flip_to_true > 0:
+        false_questions = [q for q in tf_questions if 'false' in q.get('answer', '').lower().split('.')[0]]
+        questions_to_flip = random.sample(false_questions, min(to_flip_to_true, len(false_questions)))
+        for q in questions_to_flip:
+            # Negate the question to flip the answer
+            original_question = q['question']
+            if 'True or False:' in original_question:
+                statement = original_question.replace('True or False:', '').strip()
+                # Simple negation - this is basic but works for most cases
+                if statement.startswith('The '):
+                    q['question'] = f"True or False: It is not the case that {statement[4:].lower()}"
+                else:
+                    q['question'] = f"True or False: It is not true that {statement.lower()}"
+            # Flip the answer
+            q['answer'] = q['answer'].replace('False', 'True').replace('false', 'true')
+    
+    elif to_flip_to_false > 0:
+        true_questions = [q for q in tf_questions if 'true' in q.get('answer', '').lower().split('.')[0]]
+        questions_to_flip = random.sample(true_questions, min(to_flip_to_false, len(true_questions)))
+        for q in questions_to_flip:
+            # Negate the question to flip the answer
+            original_question = q['question']
+            if 'True or False:' in original_question:
+                statement = original_question.replace('True or False:', '').strip()
+                # Simple negation
+                if statement.startswith('The '):
+                    q['question'] = f"True or False: It is not the case that {statement[4:].lower()}"
+                else:
+                    q['question'] = f"True or False: It is not true that {statement.lower()}"
+            # Flip the answer
+            q['answer'] = q['answer'].replace('True', 'False').replace('true', 'false')
+    
+    # Recalculate distribution
+    final_distribution = {'True': 0, 'False': 0}
+    for q in tf_questions:
+        answer_text = q.get('answer', '').lower()
+        if 'true' in answer_text.split('.')[0]:
+            final_distribution['True'] += 1
+        else:
+            final_distribution['False'] += 1
+    
+    if verbose or not parallel:
+        print(f"     Balanced T/F distribution: True={final_distribution['True']}, False={final_distribution['False']}")
+    
+    return response
+
+def evaluate_question_quality(response, client, chapter_info, args, verbose=False, parallel=False):
+    """
+    Evaluate the quality of quiz questions using LLM judge.
+    
+    Args:
+        response: Quiz response containing questions
+        client: LLM client for evaluation
+        chapter_info: Dictionary with chapter title, number, and section
+        args: Command line arguments
+        verbose: Whether to print verbose output
+        parallel: Whether running in parallel mode
+        
+    Returns:
+        dict: Modified response with evaluation notes and potentially regenerated questions
+    """
+    if not response.get('quiz_needed', False):
+        return response
+    
+    if not getattr(args, 'evaluate', False):
+        return response
+    
+    if verbose or not parallel:
+        print("     🔍 Evaluating question quality...")
+    
+    # Initialize judge if not already done
+    if not hasattr(thread_local, 'judge'):
+        # Use same client but with judge model configuration
+        judge_model_type = "default" if args.provider == "ollama" else "thorough"
+        thread_local.judge = QuizQuestionJudge(client, judge_model_type)
+    
+    # Evaluate and potentially regenerate questions
+    evaluated_questions = []
+    questions_to_regenerate = []
+    hidden_count = 0
+    kept_count = 0
+    quality_stats = {
+        QuestionQuality.EXCELLENT: 0,
+        QuestionQuality.GOOD: 0,
+        QuestionQuality.NEEDS_IMPROVEMENT: 0,
+        QuestionQuality.REJECT: 0
+    }
+    
+    for q_idx, question in enumerate(response.get('questions', [])):
+        evaluation = thread_local.judge.evaluate_question(question, chapter_info)
+        quality_stats[evaluation.quality] += 1
+        
+        # Print evaluation result
+        quality_emoji = {
+            QuestionQuality.EXCELLENT: "✨",
+            QuestionQuality.GOOD: "✅",
+            QuestionQuality.NEEDS_IMPROVEMENT: "⚠️",
+            QuestionQuality.REJECT: "❌"
+        }
+        if verbose:
+            print(f"       Q{q_idx+1} ({question.get('question_type')}): {quality_emoji[evaluation.quality]} Score: {evaluation.score:.0f}/100")
+        
+        if evaluation.quality == QuestionQuality.REJECT:
+            # Hide rejected questions
+            question['hidden'] = True
+            question['_evaluation'] = {
+                'score': evaluation.score,
+                'quality': evaluation.quality.value,
+                'issues': evaluation.issues[:3],  # Keep top 3 issues
+                'evaluated_at': datetime.now().isoformat()
+            }
+            hidden_count += 1
+            evaluated_questions.append(question)
+        elif evaluation.quality in [QuestionQuality.EXCELLENT, QuestionQuality.GOOD]:
+            kept_count += 1
+            evaluated_questions.append(question)
+        elif evaluation.should_regenerate:
+            questions_to_regenerate.append({
+                'original': question,
+                'issues': evaluation.issues,
+                'suggestions': evaluation.suggestions
+            })
+            # For now, add a comment to the question indicating it needs review
+            question['_evaluation_note'] = f"NEEDS REVIEW: {', '.join(evaluation.issues[:2])}"
+            evaluated_questions.append(question)
+        else:  # NEEDS_IMPROVEMENT but salvageable
+            # Add evaluation note but keep the question
+            question['_evaluation_note'] = f"Could be improved: {', '.join(evaluation.suggestions[:2])}"
+            kept_count += 1
+            evaluated_questions.append(question)
+    
+    # Update response with evaluated questions
+    response['questions'] = evaluated_questions
+    
+    # Report quality statistics and summary
+    if verbose or not parallel:
+        print(f"     Quality: ✨{quality_stats[QuestionQuality.EXCELLENT]} ✅{quality_stats[QuestionQuality.GOOD]} ⚠️{quality_stats[QuestionQuality.NEEDS_IMPROVEMENT]} ❌{quality_stats[QuestionQuality.REJECT]}")
+        
+        # Report kept vs hidden
+        if hidden_count > 0:
+            print(f"     Result: {kept_count} kept, {hidden_count} hidden")
+        else:
+            print(f"     Result: All {kept_count} questions kept")
+        
+        # Report regeneration needs
+        if questions_to_regenerate and verbose:
+            print(f"     ⚠️  {len(questions_to_regenerate)} question(s) flagged for regeneration")
+    
+    return response
+
+def post_process_section(response, client=None, chapter_info=None, args=None, verbose=False, parallel=False):
+    """
+    PHASE 3: POST-PROCESSING
+    Orchestrate all post-processing steps for quiz questions.
+    
+    Args:
+        response: Quiz response containing questions
+        client: LLM client (optional, for evaluation)
+        chapter_info: Chapter context (optional, for evaluation)
+        args: Command line arguments (optional, for evaluation)
+        verbose: Whether to print verbose output
+        parallel: Whether running in parallel mode
+        
+    Returns:
+        dict: Modified response after all post-processing steps
+    """
+    if not response.get('quiz_needed', False):
+        return response
+    
+    # Step 1: Redistribute MCQ answers for balance
+    response = redistribute_mcq_answers(response, verbose=verbose, parallel=parallel)
+    
+    # Step 2: Balance True/False answers for 50/50 distribution
+    response = balance_tf_answers(response, verbose=verbose, parallel=parallel)
+    
+    # Step 3: Evaluate question quality (if enabled and parameters provided)
+    if client and chapter_info and args:
+        response = evaluate_question_quality(response, client, chapter_info, args,
+                                            verbose=verbose, parallel=parallel)
+    
+    # Future steps can be added here as separate function calls
+    # response = validate_calculations(response)
+    # response = check_learning_objectives(response)
+    # response = ensure_difficulty_progression(response)
+    
+    return response
+
+def generate_for_file(qmd_file, args, all_chapter_concepts=None):
     """
     Generate quizzes for a single QMD file.
     
@@ -2627,6 +4661,7 @@ def generate_for_file(qmd_file, args):
     Args:
         qmd_file (str): Path to the QMD file to process
         args (argparse.Namespace): Command line arguments including model and output
+        all_chapter_concepts (dict, optional): Pre-extracted concept maps. If None, will extract them.
         
     Note:
         - Automatically detects chapter number and title for difficulty progression
@@ -2634,7 +4669,15 @@ def generate_for_file(qmd_file, args):
         - Creates structured JSON output with metadata
         - Passes previous quiz data to each section for variety and coherence
     """
-    print(f"Generating quizzes for: {qmd_file}")
+    # Extract just the filename for cleaner display
+    file_name = os.path.basename(qmd_file)
+    print(f"\n📚 Generating quizzes for: {file_name}")
+    
+    # Pre-extract all chapter concepts for context if not provided
+    if all_chapter_concepts is None:
+        if args.verbose:
+            print("  📖 Loading chapter concept maps...")
+        all_chapter_concepts = extract_all_chapter_concepts(verbose=args.verbose)
     
     try:
         # Read the QMD file
@@ -2650,12 +4693,13 @@ def generate_for_file(qmd_file, args):
         # Extract chapter info
         chapter_number, chapter_title = extract_chapter_info(qmd_file)
         
-        print(f"Found {len(sections)} sections")
-        if chapter_number:
-            print(f"Chapter {chapter_number}: {chapter_title}")
+        if not getattr(args, 'parallel', False):
+            if chapter_number:
+                print(f"  📖 Chapter {chapter_number}: {chapter_title}")
+            print(f"  📝 Found {len(sections)} sections to process")
         
-        # Initialize OpenAI client
-        client = OpenAI()
+        # Initialize LLM client
+        client = get_llm_client(args)
         
         # Generate quizzes for each section, passing previous quiz data
         quiz_sections = []
@@ -2664,28 +4708,76 @@ def generate_for_file(qmd_file, args):
         previous_quizzes = []  # Track previous quiz data for variety
         
         for i, section in enumerate(sections):
-            print(f"\nProcessing section {i+1}/{len(sections)}: {section['section_title']}")
+            # Always show section progress for single file processing
+            if not args.verbose:
+                print(f"  📍 Processing section {i+1}/{len(sections)}: {section['section_title']}")
+            else:
+                print(f"\nProcessing section {i+1}/{len(sections)}: {section['section_title']}")
+                print("-" * 40)
             
-            # Build user prompt with chapter context and previous quiz data
-            user_prompt = build_user_prompt(
-                section['section_title'], 
-                section['section_text'],
-                chapter_number,
-                chapter_title,
-                previous_quizzes  # Pass previous quiz data for variety
+            # PHASE 1: PRE-PROCESSING
+            if args.verbose:
+                print("  📊 PRE-PROCESSING: Analyzing section...")
+            metadata = pre_process_section(section, client, args.model, verbose=args.verbose, parallel=False)
+            
+            # PHASE 2: PROCESSING
+            if args.verbose:
+                print("  🤖 PROCESSING: Generating questions...")
+            response = process_section(
+                client, 
+                section,
+                (chapter_number, chapter_title),
+                previous_quizzes,
+                args,
+                metadata,  # Pass preprocessing metadata
+                verbose=args.verbose,
+                parallel=False,
+                all_chapter_concepts=all_chapter_concepts
             )
             
-            # Call OpenAI
-            response = call_openai(client, SYSTEM_PROMPT, user_prompt, args.model)
+            # PHASE 3: POST-PROCESSING
+            if response.get('quiz_needed', False):
+                if args.verbose:
+                    print("  🔄 POST-PROCESSING: Processing generated questions...")
+                
+                # Prepare chapter info for evaluation
+                chapter_info = {
+                    'title': chapter_title if chapter_title else 'Unknown',
+                    'number': chapter_number if chapter_number else 10,
+                    'section': section['section_title']
+                }
+                
+                # Run all post-processing steps
+                response = post_process_section(response, client, chapter_info, args, 
+                                               verbose=args.verbose, parallel=False)
             
             if response.get('quiz_needed', False):
                 sections_with_quizzes += 1
-                print(f"  ✅ Generated quiz with {len(response.get('questions', []))} questions")
+                questions = response.get('questions', [])
+                if args.verbose:
+                    print(f"  ✅ Generated quiz with {len(questions)} questions")
+                    
+                    # Show distribution of question types
+                    type_counts = {}
+                    for q in questions:
+                        q_type = q.get('question_type', 'UNKNOWN')
+                        type_counts[q_type] = type_counts.get(q_type, 0) + 1
+                    if type_counts:
+                        type_str = ', '.join([f"{count} {qtype}" for qtype, count in type_counts.items()])
+                        print(f"     Distribution: {type_str}")
+                else:
+                    # Non-verbose completion indicator
+                    print(f"     ✓ Generated {len(questions)} questions")
+                
                 # Add to previous quizzes for next section
                 previous_quizzes.append(response)
             else:
                 sections_without_quizzes += 1
-                print(f"  ⏭️  No quiz needed: {response.get('rationale', 'No rationale provided')}")
+                if args.verbose:
+                    print(f"  ⏭️  No quiz needed: {response.get('rationale', 'No rationale provided')}")
+                else:
+                    # Non-verbose skip indicator
+                    print(f"     ⏭️  No quiz needed")
                 # Still add to previous quizzes to maintain section count
                 previous_quizzes.append(response)
             
@@ -2721,10 +4813,15 @@ def generate_for_file(qmd_file, args):
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(quiz_data, f, indent=2, ensure_ascii=False)
         
-        print(f"\n✅ Quiz generation complete!")
-        print(f"   - Output file: {output_file}")
-        print(f"   - Sections with quizzes: {sections_with_quizzes}")
-        print(f"   - Sections without quizzes: {sections_without_quizzes}")
+        if not getattr(args, 'parallel', False):
+            total_questions = sum(len(s.get('quiz_data', {}).get('questions', [])) for s in quiz_sections if s.get('quiz_data', {}).get('quiz_needed', False))
+            output_filename = os.path.basename(output_file)
+            print(f"\n✅ Quiz generation complete for {file_name}!")
+            print(f"   📄 Output: {output_filename}")
+            print(f"   ✓ {sections_with_quizzes} sections with quizzes")
+            if sections_without_quizzes > 0:
+                print(f"   ⏭️  {sections_without_quizzes} sections skipped")
+            print(f"   📊 Total: {total_questions} questions generated")
         
         # Update QMD frontmatter
         update_qmd_frontmatter(qmd_file, os.path.basename(output_file))
@@ -2732,8 +4829,28 @@ def generate_for_file(qmd_file, args):
     except Exception as e:
         print(f"❌ Error generating quizzes: {str(e)}")
 
-# Global variable for _quarto.yml path
-QUARTO_YML_PATH = os.path.join(os.getcwd(), '_quarto.yml')
+# Global variable for _quarto.yml path (will be set based on --quarto-config option)
+QUARTO_YML_PATH = os.path.join(os.getcwd(), 'quarto', '_quarto.yml')
+
+def set_quarto_yml_path(config_type="auto"):
+    """Set the QUARTO_YML_PATH based on the config type.
+    
+    Args:
+        config_type: One of 'html', 'pdf', 'epub', or 'auto'
+    
+    Returns:
+        str: The path to the selected quarto config file
+    """
+    global QUARTO_YML_PATH
+    
+    if config_type == "auto":
+        # Use the symlink (default behavior)
+        QUARTO_YML_PATH = os.path.join(os.getcwd(), 'quarto', '_quarto.yml')
+    else:
+        # Use specific config file
+        QUARTO_YML_PATH = os.path.join(os.getcwd(), 'quarto', 'config', f'_quarto-{config_type}.yml')
+    
+    return QUARTO_YML_PATH
 
 # Global book outline for Machine Learning Systems textbook
 # This will be populated automatically from _quarto.yml and QMD files
@@ -2910,6 +5027,11 @@ def extract_chapter_title_from_qmd(qmd_file_path):
         print(f"Warning: Could not extract chapter title from {qmd_file_path}: {e}")
         return None
 
+# ============================================================================
+# BOOK STRUCTURE UTILITIES
+# Functions for building chapter context and book progression information.
+# ============================================================================
+
 def build_book_outline_from_quarto_yml():
     """
     Automatically build the book outline from _quarto.yml and QMD files.
@@ -2987,7 +5109,7 @@ def build_book_outline_from_quarto_yml():
         thread_local.building_outline = False
         return BOOK_OUTLINE
 
-def generate_for_file_parallel(qmd_file, args, progress_tracker=None):
+def generate_for_file_parallel(qmd_file, args, progress_tracker=None, all_chapter_concepts=None):
     """
     Thread-safe version of generate_for_file for parallel processing.
     
@@ -2995,6 +5117,7 @@ def generate_for_file_parallel(qmd_file, args, progress_tracker=None):
         qmd_file (str): Path to QMD file
         args: Command line arguments
         progress_tracker (ProgressTracker): Progress tracker for real-time updates
+        all_chapter_concepts (dict, optional): Pre-extracted concept maps from all chapters
     
     Returns:
         dict: Result summary with success/error info
@@ -3005,12 +5128,25 @@ def generate_for_file_parallel(qmd_file, args, progress_tracker=None):
     file_name = Path(qmd_file).name
     
     try:
-        # Initialize thread-local OpenAI client to avoid sharing between threads
-        if not hasattr(thread_local, 'openai_client'):
-            thread_local.openai_client = OpenAI()
+        # Initialize thread-local LLM client to avoid sharing between threads
+        if not hasattr(thread_local, 'llm_client'):
+            # Create a thread-local copy of args to avoid race conditions
+            import copy
+            thread_args = copy.copy(args)
+            
+            # Make sure model is set before getting client
+            if thread_args.model is None:
+                if thread_args.provider == "ollama":
+                    thread_args.model = "llama3.2:3b"
+                else:
+                    thread_args.model = "gpt-4o"
+            
+            thread_local.llm_client = get_llm_client(thread_args)
+            thread_local.args = thread_args  # Store for later use
         
         # Call the existing generate_for_file logic but with isolated client and progress tracker
-        result = _generate_for_file_with_client(qmd_file, args, thread_local.openai_client, progress_tracker)
+        # Use thread-local args to avoid race conditions
+        result = _generate_for_file_with_client(qmd_file, thread_local.args, thread_local.llm_client, progress_tracker, all_chapter_concepts)
         
         elapsed = time.time() - start_time
         
@@ -3026,24 +5162,38 @@ def generate_for_file_parallel(qmd_file, args, progress_tracker=None):
             **result
         }
     except Exception as e:
+        import traceback
         elapsed = time.time() - start_time
         
         # Mark as failed
         if progress_tracker:
             progress_tracker.complete_file(file_name, False)
         
+        # Get more detailed error information
+        error_msg = str(e)
+        if "model" in error_msg.lower() and "not found" in error_msg.lower():
+            error_msg = f"Model error: {error_msg}. Check that the model is installed or use --model to specify a different one."
+        
         return {
             "file": qmd_file,
             "success": False,
             "elapsed": elapsed,
             "thread_id": thread_id,
-            "error": str(e)
+            "error": error_msg,
+            "traceback": traceback.format_exc() if hasattr(args, 'verbose') and args.verbose else None
         }
 
-def _generate_for_file_with_client(qmd_file, args, client, progress_tracker=None):
+def _generate_for_file_with_client(qmd_file, args, client, progress_tracker=None, all_chapter_concepts=None):
     """
     Core logic of generate_for_file that accepts a specific OpenAI client.
     This allows for thread-safe parallel processing.
+    
+    Args:
+        qmd_file: Path to QMD file
+        args: Command line arguments
+        client: LLM client instance
+        progress_tracker: Progress tracker for updates
+        all_chapter_concepts: Pre-extracted concept maps from all chapters
     """
     file_name = Path(qmd_file).name
     
@@ -3074,17 +5224,36 @@ def _generate_for_file_with_client(qmd_file, args, client, progress_tracker=None
         if progress_tracker:
             progress_tracker.update_file_progress(file_name, i + 1, len(sections))
         
-        # Build user prompt with chapter context and previous quiz data
-        user_prompt = build_user_prompt(
-            section['section_title'], 
-            section['section_text'],
-            chapter_number,
-            chapter_title,
-            previous_quizzes  # Pass previous quiz data for variety
+        # PHASE 1: PRE-PROCESSING
+        metadata = pre_process_section(section, client, args.model, 
+                                      verbose=getattr(args, 'verbose', False), 
+                                      parallel=True)
+        
+        # PHASE 2: PROCESSING
+        response = process_section(
+            client, 
+            section,
+            (chapter_number, chapter_title),
+            previous_quizzes,
+            args,
+            metadata,  # Pass preprocessing metadata
+            verbose=getattr(args, 'verbose', False),
+            parallel=True,
+            all_chapter_concepts=all_chapter_concepts
         )
         
-        # Call OpenAI with provided client
-        response = call_openai(client, SYSTEM_PROMPT, user_prompt, args.model)
+        # PHASE 3: POST-PROCESSING
+        if response.get('quiz_needed', False):
+            # Prepare chapter info for evaluation
+            chapter_info = {
+                'title': chapter_title if chapter_title else 'Unknown',
+                'number': chapter_number if chapter_number else 10,
+                'section': section['section_title']
+            }
+            
+            # Run all post-processing steps
+            response = post_process_section(response, client, chapter_info, args,
+                                           verbose=getattr(args, 'verbose', False), parallel=True)
         
         if response.get('quiz_needed', False):
             sections_with_quizzes += 1
@@ -3137,60 +5306,6 @@ def _generate_for_file_with_client(qmd_file, args, client, progress_tracker=None
         "total_sections": len(sections)
     }
 
-def generate_for_directory(directory, args):
-    """
-    Generate quizzes for all QMD files in a directory, in the order specified by _quarto.yml if present.
-    """
-    print(f"Generating quizzes for directory: {directory}")
-    
-    # Use the global QUARTO_YML_PATH
-    yml_path = QUARTO_YML_PATH
-    if os.path.exists(yml_path):
-        print(f"Using _quarto.yml for chapter order: {yml_path}")
-    else:
-        print("No _quarto.yml found in project root. Using default file order.")
-    ordered_files = []
-    if os.path.exists(yml_path):
-        try:
-            ordered_files = get_qmd_order_from_quarto_yml(yml_path)
-            print(f"Found {len(ordered_files)} .qmd files in _quarto.yml chapters section.")
-        except Exception as e:
-            print(f"⚠️  Could not parse _quarto.yml for chapter order: {e}")
-    
-    # Find all .qmd files in the directory (recursively)
-    qmd_files = []
-    for root, _, files in os.walk(directory):
-        for file in files:
-            if file.endswith('.qmd') or file.endswith('.md'):
-                qmd_files.append(os.path.relpath(os.path.join(root, file), os.getcwd()))
-    
-    # Order files: first those in ordered_files, then the rest
-    ordered_qmds = []
-    seen = set()
-    for f in ordered_files:
-        # Try both as-is and with/without leading './'
-        f_norm = f.lstrip('./')
-        for q in qmd_files:
-            if q == f or q == f_norm or q.endswith(f_norm):
-                ordered_qmds.append(q)
-                seen.add(q)
-                break
-    # Add remaining files not in chapters
-    for q in qmd_files:
-        if q not in seen:
-            ordered_qmds.append(q)
-    
-    if not ordered_qmds:
-        print("❌ No QMD files found in directory")
-        return
-    
-    print(f"Found {len(ordered_qmds)} QMD files (ordered by _quarto.yml where possible)")
-    
-    for qmd_file in ordered_qmds:
-        print(f"\n{'='*60}")
-        base_name = os.path.splitext(os.path.basename(qmd_file))[0]
-        args.output = f"{base_name}_quizzes.json"
-        generate_for_file(qmd_file, args)
 
 def generate_for_directory_parallel(directory, args):
     """
@@ -3204,6 +5319,11 @@ def generate_for_directory_parallel(directory, args):
         args: Command line arguments  
     """
     print(f"🚀 Generating quizzes for directory: {directory} (parallel mode)")
+    
+    # Pre-extract all chapter concepts once for all threads to share
+    if args.verbose:
+        print("  📖 Loading chapter concept maps for all chapters...")
+    all_chapter_concepts = extract_all_chapter_concepts(verbose=args.verbose)
     
     # Use the global QUARTO_YML_PATH
     yml_path = QUARTO_YML_PATH
@@ -3271,7 +5391,7 @@ def generate_for_directory_parallel(directory, args):
             base_name = os.path.splitext(os.path.basename(qmd_file))[0]
             file_args.output = f"{base_name}_quizzes.json"
             
-            future = executor.submit(generate_for_file_parallel, qmd_file, file_args, progress_tracker)
+            future = executor.submit(generate_for_file_parallel, qmd_file, file_args, progress_tracker, all_chapter_concepts)
             future_to_file[future] = qmd_file
         
         # Collect results as they complete
@@ -3327,6 +5447,230 @@ def generate_for_directory_parallel(directory, args):
             print(f"   - {Path(r['file']).name}: {r.get('error', 'Unknown error')}")
     
     print("=" * 80)
+
+# ============================================================================
+# STANDALONE EVALUATION MODE
+# ============================================================================
+
+def evaluate_existing_quiz_file(quiz_file_path, args):
+    """
+    Evaluate an existing quiz JSON file and mark poor questions as hidden.
+    
+    Args:
+        quiz_file_path: Path to the quiz JSON file
+        args: Command line arguments
+        
+    Returns:
+        bool: True if evaluation was successful
+    """
+    print(f"\n📊 Evaluating quiz file: {quiz_file_path}")
+    print("=" * 60)
+    
+    # Load the quiz file
+    try:
+        with open(quiz_file_path, 'r', encoding='utf-8') as f:
+            quiz_data = json.load(f)
+    except Exception as e:
+        print(f"❌ Failed to load quiz file: {e}")
+        return False
+    
+    # Extract chapter info from filename
+    import os
+    chapter_name = os.path.basename(quiz_file_path).replace('_quizzes.json', '')
+    
+    # Map chapter names to numbers (for difficulty progression)
+    chapter_order = [
+        'introduction', 'ai_ml_basics', 'ml_systems', 'dl_primer',
+        'dnn_architectures', 'data_engineering', 'training', 'optimizations',
+        'hw_acceleration', 'benchmarking', 'ops', 'ondevice_learning',
+        'robust_ai', 'privacy_security', 'responsible_ai', 'sustainable_ai',
+        'ai_for_good', 'emerging_topics', 'frontiers', 'conclusion'
+    ]
+    
+    try:
+        chapter_number = chapter_order.index(chapter_name) + 1
+    except ValueError:
+        chapter_number = 10  # Default to middle difficulty
+    
+    chapter_info = {
+        'title': chapter_name.replace('_', ' ').title(),
+        'number': chapter_number,
+        'section': 'Various'
+    }
+    
+    # Initialize LLM client and judge
+    client = get_llm_client(args)
+    judge_model_type = "default" if args.provider == "ollama" else "thorough"
+    judge = QuizQuestionJudge(client, judge_model_type)
+    
+    # Statistics tracking
+    total_questions = 0
+    questions_hidden = 0
+    questions_flagged = 0
+    section_stats = []
+    
+    # Process each section
+    sections = quiz_data.get('sections', [])
+    for section_idx, section in enumerate(sections):
+        section_title = section.get('section_title', 'Unknown')
+        quiz_needed = section.get('quiz_data', {}).get('quiz_needed', False)
+        
+        if not quiz_needed:
+            continue
+            
+        questions = section.get('quiz_data', {}).get('questions', [])
+        if not questions:
+            continue
+            
+        print(f"\n📖 Section {section_idx + 1}/{len(sections)}: {section_title}")
+        print("-" * 40)
+        
+        # Update chapter info with section
+        chapter_info['section'] = section_title
+        
+        section_hidden = 0
+        section_flagged = 0
+        
+        for q_idx, question in enumerate(questions):
+            total_questions += 1
+            
+            # Skip if already hidden
+            if question.get('hidden', False):
+                print(f"   Q{q_idx+1}: Already hidden, skipping...")
+                continue
+            
+            # Evaluate the question
+            evaluation = judge.evaluate_question(question, chapter_info)
+            
+            # Print evaluation result
+            quality_emoji = {
+                QuestionQuality.EXCELLENT: "✨",
+                QuestionQuality.GOOD: "✅",
+                QuestionQuality.NEEDS_IMPROVEMENT: "⚠️",
+                QuestionQuality.REJECT: "❌"
+            }
+            
+            status = f"{quality_emoji[evaluation.quality]} Score: {evaluation.score:.0f}/100"
+            
+            # Decide action based on quality
+            if evaluation.quality == QuestionQuality.REJECT:
+                # Hide rejected questions
+                question['hidden'] = True
+                question['_evaluation'] = {
+                    'score': evaluation.score,
+                    'quality': evaluation.quality.value,
+                    'issues': evaluation.issues[:3],  # Keep top 3 issues
+                    'evaluated_at': datetime.now().isoformat()
+                }
+                questions_hidden += 1
+                section_hidden += 1
+                status += " → HIDDEN"
+                
+            elif evaluation.quality == QuestionQuality.NEEDS_IMPROVEMENT:
+                # Flag but don't hide questions that need improvement
+                question['_needs_improvement'] = True
+                question['_evaluation'] = {
+                    'score': evaluation.score,
+                    'quality': evaluation.quality.value,
+                    'suggestions': evaluation.suggestions[:3],
+                    'evaluated_at': datetime.now().isoformat()
+                }
+                questions_flagged += 1
+                section_flagged += 1
+                status += " → FLAGGED"
+            
+            elif evaluation.quality in [QuestionQuality.EXCELLENT, QuestionQuality.GOOD]:
+                # Mark good questions as reviewed
+                question['_evaluation'] = {
+                    'score': evaluation.score,
+                    'quality': evaluation.quality.value,
+                    'evaluated_at': datetime.now().isoformat()
+                }
+                status += " → OK"
+            
+            print(f"   Q{q_idx+1} ({question.get('question_type')}): {status}")
+            
+            # Print issues for hidden questions
+            if question.get('hidden'):
+                for issue in evaluation.issues[:2]:
+                    print(f"      ❌ {issue}")
+        
+        # Section summary
+        if section_hidden > 0 or section_flagged > 0:
+            print(f"   Section summary: {section_hidden} hidden, {section_flagged} flagged")
+        
+        section_stats.append({
+            'section': section_title,
+            'total': len(questions),
+            'hidden': section_hidden,
+            'flagged': section_flagged
+        })
+    
+    # Save the updated quiz file
+    if not args.dry_run:
+        # Create backup
+        backup_path = quiz_file_path.replace('.json', '_backup.json')
+        with open(backup_path, 'w', encoding='utf-8') as f:
+            with open(quiz_file_path, 'r', encoding='utf-8') as orig:
+                f.write(orig.read())
+        print(f"\n💾 Backup saved to: {backup_path}")
+        
+        # Save updated quiz data
+        with open(quiz_file_path, 'w', encoding='utf-8') as f:
+            json.dump(quiz_data, f, indent=2, ensure_ascii=False)
+        print(f"✅ Updated quiz file saved: {quiz_file_path}")
+    else:
+        print(f"\n🔍 DRY RUN - No changes saved")
+    
+    # Print final summary
+    print("\n" + "=" * 60)
+    print("EVALUATION SUMMARY")
+    print("=" * 60)
+    print(f"Total questions evaluated: {total_questions}")
+    print(f"Questions hidden (rejected): {questions_hidden}")
+    print(f"Questions flagged (needs improvement): {questions_flagged}")
+    print(f"Questions kept: {total_questions - questions_hidden}")
+    
+    if questions_hidden > 0:
+        print(f"\n⚠️  {questions_hidden} questions have been hidden and won't appear in quizzes")
+        print("   These questions had serious issues like:")
+        print("   - Trivial arithmetic (e.g., '1TB × 8 = ?')")
+        print("   - Poor question clarity")
+        print("   - Incorrect answers")
+    
+    if questions_flagged > 0:
+        print(f"\n📝 {questions_flagged} questions flagged for improvement but still visible")
+    
+    return True
+
+def evaluate_directory(directory, args):
+    """
+    Evaluate all quiz JSON files in a directory.
+    
+    Args:
+        directory: Path to directory containing quiz files
+        args: Command line arguments
+        
+    Returns:
+        bool: True if all evaluations were successful
+    """
+    import glob
+    
+    quiz_files = glob.glob(os.path.join(directory, "**/*_quizzes.json"), recursive=True)
+    
+    if not quiz_files:
+        print(f"❌ No quiz files found in {directory}")
+        return False
+    
+    print(f"Found {len(quiz_files)} quiz files to evaluate")
+    
+    success_count = 0
+    for quiz_file in sorted(quiz_files):
+        if evaluate_existing_quiz_file(quiz_file, args):
+            success_count += 1
+    
+    print(f"\n✅ Successfully evaluated {success_count}/{len(quiz_files)} files")
+    return success_count == len(quiz_files)
 
 def clean_slug(title):
     """Creates a URL-friendly slug from a title."""
@@ -3874,25 +6218,6 @@ def clean_directory(directory, args):
     
     print(f"\n✅ Clean operation complete for {len(qmd_files)} files")
 
-def run_verify_directory(directory_path):
-    """
-    Verify all quiz files in a directory.
-    
-    This function would perform verification on all quiz files in a
-    directory. Currently a placeholder for future implementation.
-    
-    Args:
-        directory_path (str): Path to the directory to verify
-        
-    Note:
-        This functionality is not yet implemented. It would involve:
-        - Finding all JSON and QMD files in the directory
-        - Running verification on each file
-        - Providing a summary report
-    """
-    print(f"Verifying quiz files in directory: {directory_path}")
-    # Implementation would go here - this is a placeholder
-    print("❌ Verify directory functionality not yet implemented")
 
 def get_qmd_order_from_quarto_yml(yml_path):
     """Extract the ordered list of .qmd files from the chapters section of _quarto.yml, including commented ones."""
@@ -3956,6 +6281,12 @@ def generate_for_directory(directory, args):
         print(f"Using _quarto.yml for chapter order: {QUARTO_YML_PATH}")
     else:
         print("No _quarto.yml found in project root. Using default file order.")
+    
+    # Pre-extract all chapter concepts once for all files
+    if args.verbose:
+        print("  📖 Loading chapter concept maps for all chapters...")
+    all_chapter_concepts = extract_all_chapter_concepts(verbose=args.verbose)
+    
     ordered_qmds = get_ordered_qmd_files(directory)
     if not ordered_qmds:
         print("❌ No QMD files found in directory")
@@ -3965,7 +6296,7 @@ def generate_for_directory(directory, args):
         print(f"\n{'='*60}")
         base_name = os.path.splitext(os.path.basename(qmd_file))[0]
         args.output = f"{base_name}_quizzes.json"
-        generate_for_file(qmd_file, args)
+        generate_for_file(qmd_file, args, all_chapter_concepts)
 
 def run_clean_mode_directory(directory, args):
     print(f"=== Quiz Clean Mode (Directory) ===")
@@ -4031,8 +6362,6 @@ def run_insert_mode_directory(directory):
         print(f"[{i}/{len(quiz_files)}] Inserting from: {quiz_file}")
         run_insert_mode_simple(quiz_file)
 
-QUIZ_JSON_SUFFIX = '_quizzes.json'
-
 # Add a helper function to find safe insertion points for quiz callouts
 
 def find_safe_insertion_points(markdown_lines):
@@ -4067,7 +6396,6 @@ def find_safe_insertion_points(markdown_lines):
         Headers inside callouts, code blocks, or other div structures are properly
         ignored to ensure insertion points are at actual section boundaries.
     """
-    from re import match
     state = {'inside_code_block': False, 'inside_div_block': False}
     insertion_points = []
     section_title = None

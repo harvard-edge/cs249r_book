@@ -35,7 +35,7 @@ from datetime import datetime
 use_ollama = True  # Global flag to track which service to use
 
 CHANGELOG_FILE = "CHANGELOG.md"
-QUARTO_YML_FILE = "book/config/_quarto-pdf.yml"  # Default to PDF config which has chapters structure
+QUARTO_YML_FILE = "quarto/config/_quarto-pdf.yml"  # Default to PDF config which has chapters structure
 GITHUB_REPO_URL = "https://github.com/harvard-edge/cs249r_book/"
 # Removed MAJOR_CHANGE_THRESHOLD since we're organizing by content type now
 OPENAI_DELAY = 1  # seconds between API calls
@@ -214,7 +214,7 @@ def get_changes_in_dev_since(date_start, date_end=None, verbose=False):
     cmd = ["git", "log", "--numstat", "--since", date_start]
     if date_end:
         cmd += ["--until", date_end]
-    cmd += ["origin/dev", "--", "contents/**/*.qmd"]
+    cmd += ["origin/dev", "--", "quarto/contents/**/*.qmd"]
     return run_git_command(cmd, verbose=verbose)
 
 
@@ -268,7 +268,7 @@ def summarize_changes_with_openai(file_path, commit_messages, verbose=False, max
     if verbose:
         print(f"🤖 Calling {'Ollama' if use_ollama else 'OpenAI'} for: {file_path} -- {chapter_title}")
 
-    prompt = f"""You're writing a changelog entry for a machine learning textbook. Readers and instructors need to know what changed and how important it is.
+    prompt = f"""You're writing a changelog entry for a machine learning textbook. Focus ONLY on changes that benefit readers, students, and instructors.
 
 File: {file_path}
 Chapter: {chapter_title}
@@ -276,21 +276,36 @@ Chapter: {chapter_title}
 Commit messages:
 {commit_messages}
 
+IGNORE these internal/infrastructure changes (don't mention them):
+- Section IDs, headers, navigation improvements
+- CLI help, script naming, formatting updates
+- File reorganization, standardization, cross-references
+- Table formatting, image filename changes
+- Markdown rendering, build system improvements
+- Script standardization, expert feedback incorporation
+
+FOCUS ON these user-facing improvements:
+- New content: concepts, examples, explanations, figures, diagrams
+- Enhanced learning: quizzes, exercises, decision frameworks
+- Improved clarity: better explanations, clearer writing, simplified concepts
+- New features: tools, interactive elements, practical guides
+- Content fixes: corrected equations, updated information, bug fixes
+- Educational improvements: better flow, pedagogical enhancements
+
+Only create an entry if there are meaningful user-facing changes. If changes are purely internal (section IDs, formatting, standardization, etc.), respond with "SKIP: Internal changes only".
+
 The output format will be: `[IMPACT]` **{chapter_title}**: [YOUR SUMMARY]
 
-Since the chapter title is already shown, DO NOT repeat it in your summary. Just state what changed directly.
-
-First, analyze the commits and list the main changes. Then write ONE specific sentence about what changed.
-Finally, rate the importance (1-5 bars). Be realistic about impact - most changes should be Small or Medium:
-- █████ Major: New chapters, sections, or significant rewrites (rare)
-- ████░ Large: Multiple examples, new concepts, substantial updates (uncommon)
-- ███░░ Medium: New examples, clarifications, moderate changes (common)
-- ██░░░ Small: Minor fixes, formatting, small corrections, single example additions (most common)
-- █░░░░ Tiny: Typos, punctuation, very minor tweaks (use this more often)
+Rate importance based on educational impact:
+- █████ Major: New chapters, major concepts, significant educational content (rare)
+- ████░ Large: Multiple new examples, substantial learning improvements (uncommon)
+- ███░░ Medium: New examples, clarifications, moderate content additions (common)
+- ██░░░ Small: Minor content fixes, single example additions (most common)
+- █░░░░ Tiny: Small corrections, minor improvements (rare)
 
 Format your response exactly like this:
-CHANGES: [list 2-3 main changes from commits]
-SUMMARY: [what changed - NO chapter name, just the changes]
+CHANGES: [list 2-3 main USER-FACING changes from commits]
+SUMMARY: [what changed that users care about - NO chapter name, just the changes]
 IMPACT: [█████, ████░, ███░░, ██░░░, or █░░░░]
 
 Example:
@@ -298,23 +313,14 @@ CHANGES: Added transformer architecture section, New attention mechanism diagram
 SUMMARY: Added transformer architecture section with attention mechanism diagrams and corrected backpropagation equations
 IMPACT: ████░
 
-BAD: "Chapter 10 has been updated with new content"
-GOOD: "Added transformer architecture section with attention mechanism diagrams"
-
 GOOD examples:
 - "Added lottery ticket hypothesis section with pruning examples"
-- "New GPU memory optimization diagrams and CUDA code samples" 
+- "New GPU memory optimization diagrams and CUDA code samples"
 - "Expanded federated learning coverage with privacy-preserving techniques"
 - "Fixed mathematical notation in backpropagation equations"
+- "Added decision framework quiz for architecture selection"
 
-BAD examples (don't use):
-- "The chapter has been revised to include..."
-- "Updated with new sections and examples..."
-- "Enhanced with improved clarity and..."
-- "Modified to add new content about..."
-
-Focus on WHAT was added/changed, not HOW it was changed. Use varied sentence structures.
-Return only the description (no chapter title, no bullet points)."""
+Focus on WHAT was added/changed that improves learning, not internal infrastructure changes."""
 
     for attempt in range(max_retries):
         try:
@@ -341,11 +347,17 @@ Return only the description (no chapter title, no bullet points)."""
             if not summary:
                 return f"- **{chapter_title}**: _(no meaningful changes detected)_"
 
+            # Check if AI decided to skip this entry due to internal-only changes
+            if "SKIP:" in summary or "Internal changes only" in summary:
+                if verbose:
+                    print(f"  ⏭️ Skipping {file_path} - internal changes only")
+                return None
+
             # Parse the new structured format
             import re
             summary_match = re.search(r'SUMMARY:\s*(.+?)(?:\nIMPACT:|$)', summary, re.DOTALL)
             impact_match = re.search(r'IMPACT:\s*([█░]+)', summary)
-            
+
             if summary_match:
                 parsed_summary = summary_match.group(1).strip()
                 # Remove any trailing punctuation
@@ -448,11 +460,15 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False):
             
         print(f"    🤖 Generating summary...")
         summary = summarize_changes_with_openai(file_path, commit_msgs, verbose=verbose, use_ollama=use_ollama, ollama_model=args.model)
-        
+
+        # Skip if AI determined these are internal-only changes
+        if summary is None:
+            continue
+
         # Show the generated summary
         summary_text = summary.replace(f"- **{extract_chapter_title(file_path)}**: ", "")
         print(f"      📝 {summary_text}")
-        
+
         # Categorize by content type
         if "contents/frontmatter/" in file_path:
             frontmatter.append(summary)
@@ -771,7 +787,7 @@ if __name__ == "__main__":
     parser.add_argument("-t", "--test", action="store_true", help="Run without writing to file.")
     parser.add_argument("--demo", action="store_true", help="Generate a demo changelog entry with sample data.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output.")
-    parser.add_argument("-q", "--quarto-config", type=str, help="Path to quarto config file (default: book/config/_quarto-pdf.yml)")
+    parser.add_argument("-q", "--quarto-config", type=str, help="Path to quarto config file (default: quarto/config/_quarto-pdf.yml)")
     parser.add_argument("-m", "--model", type=str, default="gemma2:9b", help="Ollama model to use (default: gemma2:9b). Popular options: gemma2:9b, gemma2:27b, llama3.1:8b, llama3.1:70b")
     parser.add_argument("--release-notes", action="store_true", help="Generate release notes instead of changelog entry.")
     parser.add_argument("--version", type=str, help="Version for release notes (required with --release-notes).")

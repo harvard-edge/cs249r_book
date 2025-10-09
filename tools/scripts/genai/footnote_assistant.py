@@ -298,6 +298,7 @@ def show_preview_with_markers(section_text, selected_options, all_footnotes):
 def apply_footnotes(section_text, selected_options, all_footnotes, global_footnote_set):
     """
     Apply selected footnotes to the section, ensuring no duplicates across the document.
+    IMPORTANT: Skips footnotes that would be inserted inside ::: div blocks.
     """
 
     selected_indices = [int(re.match(r'^(\d+)\.', opt).group(1)) - 1 for opt in selected_options if re.match(r'^(\d+)\.', opt)]
@@ -307,6 +308,32 @@ def apply_footnotes(section_text, selected_options, all_footnotes, global_footno
     paragraphs = re.split(r'\n\s*\n', section_text)
     modified_paragraphs = []
     paragraph_footnotes = [[] for _ in paragraphs]
+    
+    # Track which paragraphs are inside div blocks
+    lines = section_text.split('\n')
+    in_div_block = False
+    div_paragraph_indices = set()
+    
+    current_para_idx = 0
+    empty_line_count = 0
+    
+    for line in lines:
+        # Track div blocks
+        if line.strip().startswith(':::'):
+            in_div_block = not in_div_block
+        
+        # Track paragraph transitions (double newline)
+        if not line.strip():
+            empty_line_count += 1
+            if empty_line_count >= 1:  # Paragraph break
+                current_para_idx += 1
+                empty_line_count = 0
+        else:
+            empty_line_count = 0
+            
+        # Mark this paragraph as being in a div block
+        if in_div_block:
+            div_paragraph_indices.add(current_para_idx)
 
     for idx in selected_indices:
         try:
@@ -319,12 +346,15 @@ def apply_footnotes(section_text, selected_options, all_footnotes, global_footno
                 logging.info(f"Skipping duplicate footnote marker: {marker}")
                 continue  # Skip adding this marker again
 
-            global_footnote_set.add(marker)  # Mark this footnote as used
-
             # Find and modify the paragraph where this phrase appears
             found = False
             for i, paragraph in enumerate(paragraphs):
                 if insert_after in paragraph:
+                    # Check if this paragraph is inside a div block
+                    if i in div_paragraph_indices:
+                        logging.warning(f"Skipping footnote '{marker}' - would be inserted inside div block (paragraph {i+1})")
+                        continue
+                    
                     modified_paragraph = paragraph
 
                     # Handle punctuation positioning
@@ -337,12 +367,13 @@ def apply_footnotes(section_text, selected_options, all_footnotes, global_footno
 
                     paragraphs[i] = modified_paragraph
                     paragraph_footnotes[i].append(f"{marker}: {fn['footnote_text']}")
+                    global_footnote_set.add(marker)  # Mark this footnote as used
                     found = True
                     logging.info(f"Applied footnote {idx} after '{insert_after}' in paragraph {i+1}")
                     break
 
             if not found:
-                logging.warning(f"Could not find phrase '{insert_after}' in any paragraph")
+                logging.warning(f"Could not find phrase '{insert_after}' in any paragraph (or phrase is in div block)")
 
         except Exception as e:
             logging.error(f"Error applying footnote {idx}: {e}")

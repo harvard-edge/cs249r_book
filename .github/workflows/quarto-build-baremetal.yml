@@ -258,25 +258,23 @@ jobs:
         if: matrix.enabled && runner.os == 'Windows'
         shell: pwsh
         run: |
-          # Set UTF-8 encoding for proper emoji display
-          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-          $OutputEncoding = [System.Text.Encoding]::UTF8
-          [Console]::InputEncoding = [System.Text.Encoding]::UTF8
+          # Install Inkscape using exact package ID
+          winget install -e --id Inkscape.Inkscape --accept-source-agreements --accept-package-agreements
+          Write-Output "✅ Inkscape installed via winget"
           
-          # Use winget (Windows default package manager) if available, otherwise fallback to chocolatey
-          try {
-            winget install Inkscape.Inkscape --accept-source-agreements --accept-package-agreements
-            Write-Output "✅ Inkscape installed via winget"
-          } catch {
-            Write-Output "🔄 winget not available, using chocolatey..."
-            choco install inkscape -y
-          }
-          
-          # Add Inkscape to PATH (both installation methods use the same path)
+          # Add Inkscape to PATH for subsequent steps
           echo "C:\Program Files\Inkscape\bin" | Out-File -Append -Encoding UTF8 $env:GITHUB_PATH
           
-          # Verify Inkscape installation
-          inkscape --version
+          # Verify installation using full path (PATH update takes effect in next step)
+          & "C:\Program Files\Inkscape\bin\inkscape.exe" --version
+
+      - name: 🔍 Verify Inkscape PATH (Windows)
+        if: matrix.enabled && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Output "🔍 Verifying Inkscape is available in PATH for Quarto..."
+          $version = inkscape --version
+          Write-Output "✅ Inkscape available: $version"
 
       - name: 🐍 Set up Python
         if: matrix.enabled
@@ -299,26 +297,82 @@ jobs:
       # Install Ghostscript before Python package verification
       - name: 📦 Install Ghostscript (Linux)
         if: matrix.enabled && runner.os == 'Linux'
-        run: sudo apt-get install -y ghostscript
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ghostscript
 
       - name: 📦 Install Ghostscript (Windows)
         if: matrix.enabled && runner.os == 'Windows'
         shell: pwsh
         run: |
-          # Use winget if available, otherwise fallback to chocolatey
-          try {
-            winget install ArtifexSoftware.GhostScript --accept-source-agreements --accept-package-agreements
-            Write-Output "✅ Ghostscript installed via winget"
-          } catch {
-            Write-Output "🔄 winget not available, using chocolatey..."
-            choco install ghostscript -y
+          # Install Scoop (package manager used by Windows containers)
+          if (-not (Get-Command scoop -ErrorAction SilentlyContinue)) {
+            Write-Output "📦 Installing Scoop package manager..."
+            Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+            Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
+          } else {
+            Write-Output "✅ Scoop already installed"
           }
           
-          # Add Ghostscript to PATH (both installation methods use the same path)
-          $gsPath = Get-ChildItem "C:\Program Files\gs" | Sort-Object Name -Descending | Select-Object -First 1
-          $binPath = Join-Path $gsPath.FullName "bin"
-          echo "Adding Ghostscript path: $binPath"
-          echo "$binPath" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding UTF8
+          # Install Ghostscript using Scoop (same as containers)
+          Write-Output "📦 Installing Ghostscript via Scoop..."
+          scoop install ghostscript
+          Write-Output "✅ Ghostscript installed via Scoop"
+          
+          # Verify installation using scoop which (same as container health check)
+          $gsExe = scoop which gswin64c 2>$null
+          if (-not $gsExe) {
+            $gsExe = scoop which gs 2>$null
+          }
+          
+          if ($gsExe) {
+            Write-Output "📁 Ghostscript executable found via Scoop: $gsExe"
+            # Scoop automatically adds to PATH, but let's ensure it's available
+            $binPath = Split-Path $gsExe -Parent
+            Write-Output "📁 Ghostscript bin directory: $binPath"
+          } else {
+            Write-Error "❌ Could not locate Ghostscript installation via Scoop"
+            exit 1
+          }
+
+      - name: 🔍 Verify Ghostscript Installation (Windows)
+        if: matrix.enabled && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Output "🔍 Verifying Ghostscript installation..."
+          
+          # Use same verification logic as container health check
+          $gsExe = $null
+          
+          # Try scoop which first (preferred method)
+          try {
+            $gsExe = scoop which gswin64c 2>$null
+            if (-not $gsExe) {
+              $gsExe = scoop which gs 2>$null
+            }
+          } catch {
+            Write-Output "⚠️ Scoop which failed, trying Get-Command..."
+          }
+          
+          # Fallback to Get-Command if scoop which fails
+          if (-not $gsExe) {
+            $gsCmd = Get-Command "gswin64c.exe" -ErrorAction SilentlyContinue
+            if (-not $gsCmd) {
+              $gsCmd = Get-Command "gs.exe" -ErrorAction SilentlyContinue
+            }
+            if ($gsCmd) {
+              $gsExe = $gsCmd.Source
+            }
+          }
+          
+          if ($gsExe) {
+            Write-Output "📍 Ghostscript executable found at: $gsExe"
+            $version = & $gsExe --version
+            Write-Output "✅ Ghostscript available: $version"
+          } else {
+            Write-Error "❌ Ghostscript executable not found via Scoop or PATH"
+            exit 1
+          }
 
       - name: 📦 Install Python dependencies
         if: matrix.enabled

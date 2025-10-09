@@ -16,7 +16,7 @@
   <!-- Row 2: Access & Ecosystem -->
   [![Website](https://img.shields.io/website?url=https%3A%2F%2Fmlsysbook.ai&label=Website&logo=readthedocs)](https://mlsysbook.ai)
   [![Ecosystem](https://img.shields.io/website?url=https%3A%2F%2Fmlsysbook.org&label=Ecosystem&logo=internet-explorer)](https://mlsysbook.org)
-  [![Paper](https://img.shields.io/badge/Paper-MLSysBook.AI%20Overview-blue?logo=academia)](LINK_TO_PAPER)
+  [![Citation](https://img.shields.io/badge/Cite-IEEE%20CODES%2B%20ISSS%202024-blue?logo=academia)](https://mlsysbook.org)
 
 </p>
 
@@ -270,21 +270,26 @@ MLSysBook/
 - [🤝 Contribution Guidelines](docs/contribute.md) — How to contribute effectively
 
 ### Publishing
+
+Publishing is handled through GitHub Actions workflows for consistent, automated deployment:
+
 ```bash
-# Interactive publishing (recommended)
-./binder publish
+# Build locally to test before publishing
+./binder build        # Build HTML
+./binder pdf          # Build PDF  
+./binder epub         # Build EPUB
 
-# Command-line publishing
-./binder publish "Description" COMMIT_HASH
-
-# Manual workflow (if needed)
-./binder build html && ./binder build pdf
-# Then use GitHub Actions to deploy
+# Publishing happens via GitHub Actions
+# See docs/PUBLISH_LIVE_WORKFLOW.md for details
 ```
 
-**Publishing Options:**
-- **`./binder publish`** — Unified command with interactive and command-line modes
-- **GitHub Actions** — Automated deployment via workflows
+**Publishing Workflow:**
+- **Automated Deployment** — GitHub Actions workflows handle all publishing
+- **Quality Checks** — Automated validation before deployment
+- **Multiple Formats** — HTML, PDF, and EPUB published simultaneously
+- **Preview Deployments** — Pull requests get automatic preview deployments
+
+See [Publishing Documentation](docs/PUBLISH_LIVE_WORKFLOW.md) for detailed instructions.
 
 ### Getting Started
 ```bash
@@ -333,7 +338,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
       <td align="center" valign="top" width="20%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?s=100" width="100px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/hzeljko"><img src="https://avatars.githubusercontent.com/hzeljko?s=100" width="100px;" alt="Zeljko Hrcek"/><br /><sub><b>Zeljko Hrcek</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/Mjrovai"><img src="https://avatars.githubusercontent.com/Mjrovai?s=100" width="100px;" alt="Marcelo Rovai"/><br /><sub><b>Marcelo Rovai</b></sub></a><br /></td>
-      <td align="center" valign="top" width="20%"><a href="https://github.com/jasonjabbour"><img src="https://avatars.githubusercontent.com/jasonjabbour?s=100" width="100px;" alt="jasonjabbour"/><br /><sub><b>jasonjabbour</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/jasonjabbour"><img src="https://avatars.githubusercontent.com/jasonjabbour?s=100" width="100px;" alt="Jason Jabbour"/><br /><sub><b>Jason Jabbour</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/uchendui"><img src="https://avatars.githubusercontent.com/uchendui?s=100" width="100px;" alt="Ikechukwu Uchendu"/><br /><sub><b>Ikechukwu Uchendu</b></sub></a><br /></td>
     </tr>
     <tr>
@@ -468,4 +473,3 @@ Thanks goes to these wonderful people who have contributed to making this resour
 
 Our goal is to educate 1 million AI systems engineers for the future at the edge of AI.
 </div>
-# Trigger build

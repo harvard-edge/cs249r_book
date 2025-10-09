@@ -9,9 +9,47 @@ import re
 
 
 def collapse_blank_lines(content):
-    """Replace multiple consecutive blank lines with a single blank line."""
-    # Replace 3 or more consecutive blank lines with 2 blank lines
-    return re.sub(r'\n\s*\n\s*\n+', '\n\n', content)
+    """Replace multiple consecutive blank lines with a single blank line.
+    
+    Preserves content inside code blocks (```...```) to avoid interfering 
+    with language-specific formatters like Black.
+    """
+    lines = content.split('\n')
+    result = []
+    in_code_block = False
+    blank_count = 0
+    
+    for line in lines:
+        # Detect code block boundaries
+        if line.strip().startswith('```'):
+            in_code_block = not in_code_block
+            # Flush accumulated blank lines before code block
+            if blank_count > 0:
+                result.append('')  # Add single blank line
+                blank_count = 0
+            result.append(line)
+            continue
+        
+        # Inside code blocks, preserve all content including blank lines
+        if in_code_block:
+            result.append(line)
+            continue
+        
+        # Outside code blocks, collapse excessive blank lines
+        if line.strip() == '':
+            blank_count += 1
+        else:
+            # Add at most one blank line
+            if blank_count > 0:
+                result.append('')
+                blank_count = 0
+            result.append(line)
+    
+    # Handle trailing blank lines
+    if blank_count > 0:
+        result.append('')
+    
+    return '\n'.join(result)
 
 
 def main():

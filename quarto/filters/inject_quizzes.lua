@@ -90,38 +90,48 @@ local function process_quiz_questions(questions, section_id)
   local qid   = "quiz-question-" .. clean
   local aid   = "quiz-answer-" .. clean
 
+  local question_num = 0
   for i, q in ipairs(questions) do
-    table.insert(ql, i..". "..q.question)
-    if q.question_type == "MCQ" and q.choices then
-      local choices_line = {}
-      for j, c in ipairs(q.choices) do
-        table.insert(choices_line, "   "..string.char(96+j)..") "..c)
+    -- Skip hidden questions
+    if not q.hidden then
+      question_num = question_num + 1
+      table.insert(ql, question_num..". "..q.question)
+      if q.question_type == "MCQ" and q.choices then
+        local choices_line = {}
+        for j, c in ipairs(q.choices) do
+          table.insert(choices_line, "   "..string.char(96+j)..") "..c)
+        end
+        table.insert(ql, table.concat(choices_line, "\n"))
       end
-      table.insert(ql, table.concat(choices_line, "\n"))
-    end
-    -- build answers
-    table.insert(al, i..". **"..q.question.."**")
-    if q.question_type == "MCQ" and q.choices then
-      local choices_line = {}
-      for j, c in ipairs(q.choices) do
-        table.insert(choices_line, "   "..string.char(96+j)..") "..c)
+      -- build answers
+      table.insert(al, question_num..". **"..q.question.."**")
+      if q.question_type == "MCQ" and q.choices then
+        local choices_line = {}
+        for j, c in ipairs(q.choices) do
+          table.insert(choices_line, "   "..string.char(96+j)..") "..c)
+        end
+        table.insert(al, table.concat(choices_line, "\n"))
+        table.insert(al, "")
       end
-      table.insert(al, table.concat(choices_line, "\n"))
+      table.insert(al, "   *Answer*: "..q.answer)
+      table.insert(al, "")
+      table.insert(al, "   *Learning Objective*: "..q.learning_objective)
       table.insert(al, "")
     end
-    table.insert(al, "   *Answer*: "..q.answer)
-    table.insert(al, "")
-    table.insert(al, "   *Learning Objective*: "..q.learning_objective)
-    table.insert(al, "")
   end
 
-    if FORMAT == "latex" then
-      table.insert(ql, string.format("\\noindent\\hspace*{1.25em}\\hyperref[%s]{\\textbf{See Answer~$\\rightarrow$}}", aid))
-      table.insert(al, string.format("\\noindent\\hspace*{1.25em}\\hyperref[%s]{\\textbf{$\\leftarrow$~Back to Question}}", qid))
-    else
-      table.insert(ql, '<a href="#' .. aid .. '" class="question-label">See Answers →</a>')
-      table.insert(al, '<a href="#' .. qid .. '" class="answer-label">← Back to Questions</a>')
-    end
+  -- Only create quiz divs if there are visible questions
+  if question_num == 0 then
+    return nil, nil
+  end
+
+  if FORMAT == "latex" then
+    table.insert(ql, string.format("\\noindent\\hspace*{1.25em}\\hyperref[%s]{\\textbf{See Answer~$\\rightarrow$}}", aid))
+    table.insert(al, string.format("\\noindent\\hspace*{1.25em}\\hyperref[%s]{\\textbf{$\\leftarrow$~Back to Question}}", qid))
+  else
+    table.insert(ql, '<a href="#' .. aid .. '" class="question-label">See Answers →</a>')
+    table.insert(al, '<a href="#' .. qid .. '" class="answer-label">← Back to Questions</a>')
+  end
 
   return create_quiz_div(qid, "callout-quiz-question", table.concat(ql, "\n\n")),
          create_quiz_div(aid, "callout-quiz-answer",   table.concat(al, "\n\n"))
@@ -417,8 +427,11 @@ local function insert_quizzes(doc)
       local quiz = quiz_sections[current_section_id]
       if quiz then
         local q, a = process_quiz_questions(quiz, current_section_id)
-        current_quiz_block, current_answer_block = q, a
-        quizzes_injected = quizzes_injected + 1
+        -- Only set quiz blocks if questions were not all hidden
+        if q and a then
+          current_quiz_block, current_answer_block = q, a
+          quizzes_injected = quizzes_injected + 1
+        end
       end
       i = i + 1
       goto continue

@@ -18,10 +18,9 @@ from collections import defaultdict
 ALL_LABEL_TYPES = {
     "Figure":   r'(?:\{#|#\|\s*label:\s*|%%\|\s*label:\s*)(fig-[\w-]+)',
     "Table":    r'\{#(tbl-[\w-]+)',
-    #"Section":  r'\{#(sec-[\w-]+)',
+    "Section":  r'\{#(sec-[\w-]+)',
     "Equation": r'\{#(eq-[\w-]+)',
     "Listing":  r'\{[^}]*#(lst-[\w-]+)',
-
 }
 
 REFERENCE_PATTERN = r'@((?:fig|tbl|sec|eq|lst)-[\w-]+)'
@@ -36,7 +35,7 @@ def get_files_to_process(path: Path):
 
 def collect_labels_and_references(files, label_types):
     defined = defaultdict(dict)
-    referenced = set()
+    referenced = {}  # Changed to dict to track file and line number
 
     for file in files:
         lines = file.read_text(encoding="utf-8").splitlines()
@@ -48,16 +47,26 @@ def collect_labels_and_references(files, label_types):
                     defined[label_type][label] = (file, i)
 
             for match in re.finditer(REFERENCE_PATTERN, line):
-                referenced.add(match.group(1))
+                ref = match.group(1)
+                if ref not in referenced:
+                    referenced[ref] = []
+                referenced[ref].append((file, i))
 
     return defined, referenced
 
 def report_unreferenced(defined, referenced):
     unreferenced_labels = []
+    
+    # Get all referenced labels (keys of the referenced dict)
+    referenced_labels = set(referenced.keys())
 
     for label_type, label_map in defined.items():
+        # Skip checking sections for unreferenced labels - it's normal for textbook sections to not be cross-referenced
+        if label_type == "Section":
+            continue
+            
         for label, (file, line) in sorted(label_map.items()):
-            if label not in referenced:
+            if label not in referenced_labels:
                 try:
                     rel_path = file.relative_to(Path.cwd())
                 except ValueError:
@@ -65,12 +74,12 @@ def report_unreferenced(defined, referenced):
                 unreferenced_labels.append((label_type, label, rel_path, line))
 
     if unreferenced_labels:
-        print("🔍 Unreferenced labels found:\n")
+        print("🔍 Unreferenced figures, tables, equations, or listings found:\n")
         for label_type, label, rel_path, line in unreferenced_labels:
             print(f"❌ {label_type:<10}: @{label:<30} ({rel_path}:{line})")
         return False
     else:
-        print("All defined labels are referenced!")
+        print("All figures, tables, equations, and listings are properly referenced!")
         return True
 
 def parse_args():
@@ -93,14 +102,25 @@ def report_unresolved_references(referenced, defined):
         all_defined_labels.update(label_map.keys())
 
     unresolved = []
-    for ref in sorted(referenced):
+    for ref in sorted(referenced.keys()):
         if ref not in all_defined_labels:
-            unresolved.append(ref)
+            # Get all locations where this reference appears
+            locations = referenced[ref]
+            unresolved.append((ref, locations))
 
     if unresolved:
         print("\n🚫 References without matching definitions:\n")
-        for ref in unresolved:
+        for ref, locations in unresolved:
             print(f"❌ @{ref} has no matching {{#{ref}}} label")
+            print(f"   Referenced in:")
+            for file, line in locations[:5]:  # Show first 5 occurrences
+                try:
+                    rel_path = file.relative_to(Path.cwd())
+                except ValueError:
+                    rel_path = file.resolve()
+                print(f"     - {rel_path}:{line}")
+            if len(locations) > 5:
+                print(f"     ... and {len(locations) - 5} more locations")
         return False
     else:
         print("All references have corresponding labels!")
@@ -126,13 +146,18 @@ def main():
 
     defined, referenced = collect_labels_and_references(files, label_types)
 
+    # Print summary statistics
+    total_defined = sum(len(labels) for labels in defined.values())
+    total_referenced = len(referenced)
+    print(f"\n📊 Summary: Found {total_defined} defined labels and {total_referenced} unique references across {len(files)} files")
+
     success1 = report_unreferenced(defined, referenced)
     success2 = report_unresolved_references(referenced, defined)
     success = success1 and success2
     if success:
-        print("All labels and references are correctly defined!")
+        print("\n✅ All labels and references are correctly defined!")
     else:
-        print("❌ Some labels or references are not correctly defined!")
+        print("\n❌ Some labels or references are not correctly defined!")
     print("\n Finished checking labels and references.")
 
     sys.exit(0 if success else 1)

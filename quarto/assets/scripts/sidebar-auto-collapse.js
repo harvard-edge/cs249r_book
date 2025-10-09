@@ -1,10 +1,117 @@
 // Auto-collapse sections and add part dividers
 document.addEventListener('DOMContentLoaded', function() {
-  // Try multiple times with different delays in case DOM is still loading
-  [1000, 2000, 3000].forEach(delay => {
+  
+  // Function to expand sidebar to show current page
+  function expandToCurrentPage() {
+    const currentPath = window.location.pathname;
+    
+    // Extract just the filename for matching
+    const currentFile = currentPath.split('/').pop();
+    
+    // Find the active sidebar link matching current page
+    const sidebarLinks = document.querySelectorAll('#quarto-sidebar .sidebar-link');
+    let activeLink = null;
+    
+    sidebarLinks.forEach(link => {
+      const href = link.getAttribute('href');
+      if (href) {
+        // Get the target file from the href
+        const hrefFile = href.split('/').pop().replace(/\.qmd$/, '.html');
+        
+        // Match by filename
+        if (currentFile === hrefFile) {
+          activeLink = link;
+          // Add active class to highlight current page
+          link.classList.add('active');
+          link.setAttribute('aria-current', 'page');
+        }
+      }
+    });
+    
+    // If we found the active link, expand all parent collapse sections
+    if (activeLink) {
+      let parent = activeLink.parentElement;
+      while (parent && parent !== document.body) {
+        // Look for collapsed sections that need to be expanded
+        if (parent.classList.contains('collapse') && !parent.classList.contains('show')) {
+          parent.classList.add('show');
+          
+          // Find the toggle button for this section and update its aria-expanded
+          const toggleButton = document.querySelector(`[data-bs-target="#${parent.id}"]`);
+          if (toggleButton) {
+            toggleButton.setAttribute('aria-expanded', 'true');
+            toggleButton.classList.remove('collapsed');
+          }
+        }
+        parent = parent.parentElement;
+      }
+      
+      // Scroll the active link into view with smooth behavior
+      // Use a longer delay to ensure expansion animations complete
+      setTimeout(() => {
+        // Try multiple possible scroll containers
+        const sidebar = document.querySelector('#quarto-sidebar') || 
+                       document.querySelector('.sidebar-navigation') ||
+                       document.querySelector('.sidebar');
+        
+        if (sidebar && sidebar.scrollHeight > sidebar.clientHeight) {
+          // Get the position of the active link relative to the sidebar
+          const linkRect = activeLink.getBoundingClientRect();
+          const sidebarRect = sidebar.getBoundingClientRect();
+          
+          // Calculate how much to scroll to center the active link in the sidebar
+          const offset = linkRect.top - sidebarRect.top - (sidebarRect.height / 2) + (linkRect.height / 2);
+          
+          // Smooth scroll the sidebar
+          sidebar.scrollBy({
+            top: offset,
+            behavior: 'smooth'
+          });
+        } else {
+          // Fallback to standard scrollIntoView
+          activeLink.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 500);
+    }
+  }
+  
+  // Add part dividers (do this once, early)
+  setTimeout(() => {
+    const allToggleButtons = document.querySelectorAll('#quarto-sidebar a[data-bs-toggle="collapse"]');
+    
+    allToggleButtons.forEach(button => {
+      const menuText = button.querySelector('.menu-text')?.textContent?.trim();
+      
+      // Add part dividers before major sections
+      const partMappings = {
+        'Systems Foundations': 'Part I',
+        'Design Principles': 'Part II', 
+        'Performance Engineering': 'Part III',
+        'Robust Deployment': 'Part IV',
+        'Trustworthy Systems': 'Part V',
+        'Frontiers of ML Systems': 'Part VI',
+        'Hands-on Labs': 'Part VII'
+      };
+
+      if (partMappings[menuText]) {
+        const sidebarItem = button.closest('.sidebar-item');
+        if (sidebarItem && !sidebarItem.querySelector('.part-divider')) {
+          const partDivider = document.createElement('div');
+          partDivider.className = menuText === 'Hands-on Labs' ? 'part-divider part-labs' : 'part-divider';
+          partDivider.textContent = partMappings[menuText];
+          sidebarItem.insertBefore(partDivider, sidebarItem.firstChild);
+        }
+      }
+    });
+  }, 500);
+  
+  // FIRST: Expand to show current page
+  setTimeout(() => {
+    expandToCurrentPage();
+    
+    // THEN: Collapse sections that DON'T contain the current page
     setTimeout(() => {
-      // Find all collapse toggle buttons in sidebar
-      const allToggleButtons = document.querySelectorAll('.sidebar-navigation a[data-bs-toggle="collapse"]');
+      const allToggleButtons = document.querySelectorAll('#quarto-sidebar a[data-bs-toggle="collapse"]');
 
       allToggleButtons.forEach(button => {
         const target = button.getAttribute('data-bs-target');
@@ -23,35 +130,45 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (shouldCollapse) {
           const targetElement = document.querySelector(target);
-          // Only click if the section is currently expanded
-          if (targetElement && !targetElement.classList.contains('collapse') ||
-              targetElement?.classList.contains('show')) {
+          
+          // Check if this section contains the active page
+          const containsActivePage = targetElement?.querySelector('.sidebar-link.active');
+          
+          // Only collapse if it's expanded AND doesn't contain the active page
+          if (!containsActivePage && targetElement && targetElement.classList.contains('show')) {
             button.click();
           }
         }
-
-        // Add part dividers before major sections
-        const partMappings = {
-          'Systems Foundations': 'Part I',
-          'Design Principles': 'Part II', 
-          'Performance Engineering': 'Part III',
-          'Robust Deployment': 'Part IV',
-          'Trustworthy Systems': 'Part V',
-          'Frontiers of ML Systems': 'Part VI',
-          'Hands-on Labs': 'Part VII'
-        };
-
-        if (partMappings[menuText]) {
-          const sidebarItem = button.closest('.sidebar-item');
-          if (sidebarItem && !sidebarItem.querySelector('.part-divider')) {
-            const partDivider = document.createElement('div');
-            partDivider.className = menuText === 'Hands-on Labs' ? 'part-divider part-labs' : 'part-divider';
-            partDivider.textContent = partMappings[menuText];
-            sidebarItem.insertBefore(partDivider, sidebarItem.firstChild);
-          }
-        }
       });
-    }, delay);
+    }, 400);
+  }, 1000);
+  
+  // Prevent sidebar collapse from hiding the active page
+  // Listen for collapse events and re-expand if needed
+  document.addEventListener('shown.bs.collapse', function(e) {
+    // Small delay to let Bootstrap finish, then ensure active page is visible
+    setTimeout(() => {
+      const activeLink = document.querySelector('.sidebar-navigation .sidebar-link.active');
+      if (activeLink) {
+        const isVisible = activeLink.offsetParent !== null;
+        if (!isVisible) {
+          expandToCurrentPage();
+        }
+      }
+    }, 50);
+  });
+  
+  document.addEventListener('hidden.bs.collapse', function(e) {
+    // Small delay to let Bootstrap finish, then ensure active page is visible
+    setTimeout(() => {
+      const activeLink = document.querySelector('.sidebar-navigation .sidebar-link.active');
+      if (activeLink) {
+        const isVisible = activeLink.offsetParent !== null;
+        if (!isVisible) {
+          expandToCurrentPage();
+        }
+      }
+    }, 50);
   });
 
   // Handle navbar active states
