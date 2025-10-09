@@ -60,6 +60,12 @@ def extract_citation_keys(qmd_file: Path) -> Set[str]:
         # Pattern matches @word with letters, numbers, hyphens, underscores, colons, dots
         citation_keys = set(re.findall(r'@([\w\-_:.]+)', content))
         
+        # Strip trailing punctuation (periods, commas) that might be captured
+        citation_keys = {key.rstrip('.,;:') for key in citation_keys}
+        
+        # Filter out DOI-style citations (start with numbers like 10.1109)
+        citation_keys = {key for key in citation_keys if not re.match(r'^\d+\.\d+', key)}
+        
         # Filter out common false positives that aren't citations
         filtered_keys = {
             key for key in citation_keys 
