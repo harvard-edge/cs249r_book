@@ -4,7 +4,7 @@
 # - Quarto 1.7.31 via ZIP (no MSI)
 # - Python 3.13.1 + requirements
 # - Ghostscript + Inkscape (Chocolatey)
-# - TeX Live pinned to 2025 snapshot + packages from tl_packages
+# - TeX Live 2025.20251008.0+ (pinned version fixes install-tl.zip issue) + packages from tl_packages
 # - R 4.3.2 + packages via install_packages.R
 # - Verifications: versions, kpsewhich font files, TikZ smoke test
 
@@ -99,8 +99,12 @@ RUN Write-Host '✅ Dependency file copy complete'
 # PHASE 4: Install TeX Live FIRST (Most complex, fail fast)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING TEX LIVE INSTALLATION (2025) ===' ; `
-    Write-Host '📦 Installing TeX Live via Chocolatey...' ; `
-    choco install texlive -y ; `
+    Write-Host '📦 Installing TeX Live via Chocolatey (pinned to 2025.20251008.0+)...' ; `
+    choco install texlive --version=2025.20251008.0 -y ; `
+    if ($LASTEXITCODE -ne 0) { `
+        Write-Host '❌ TeX Live installation failed' ; `
+        exit 1 ; `
+    } ; `
     Write-Host '✅ TeX Live installed via Chocolatey' ; `
     `
     Write-Host '🔍 Finding TeX Live installation directory...' ; `
