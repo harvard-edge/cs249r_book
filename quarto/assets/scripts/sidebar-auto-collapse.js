@@ -1,9 +1,64 @@
 // Auto-collapse sections and add part dividers
 document.addEventListener('DOMContentLoaded', function() {
+  
+  // Function to expand sidebar to show current page
+  function expandToCurrentPage() {
+    const currentPath = window.location.pathname;
+    
+    // Find the active sidebar link matching current page
+    const sidebarLinks = document.querySelectorAll('.sidebar-navigation a.sidebar-link');
+    let activeLink = null;
+    
+    sidebarLinks.forEach(link => {
+      const href = link.getAttribute('href');
+      if (href) {
+        // Normalize paths for comparison
+        const normalizedHref = href.replace(/\.qmd$/, '.html').replace(/^\//, '');
+        const normalizedPath = currentPath.replace(/^\//, '');
+        
+        if (normalizedHref === normalizedPath || 
+            normalizedPath.endsWith(normalizedHref) ||
+            normalizedHref.endsWith(normalizedPath)) {
+          activeLink = link;
+          // Add active class to highlight current page
+          link.classList.add('active');
+          link.setAttribute('aria-current', 'page');
+        }
+      }
+    });
+    
+    // If we found the active link, expand all parent collapse sections
+    if (activeLink) {
+      let parent = activeLink.parentElement;
+      while (parent) {
+        // Look for collapsed sections that need to be expanded
+        if (parent.classList.contains('collapse') && !parent.classList.contains('show')) {
+          parent.classList.add('show');
+          
+          // Find the toggle button for this section and update its aria-expanded
+          const toggleButton = document.querySelector(`[data-bs-target="#${parent.id}"]`);
+          if (toggleButton) {
+            toggleButton.setAttribute('aria-expanded', 'true');
+            toggleButton.classList.remove('collapsed');
+          }
+        }
+        parent = parent.parentElement;
+      }
+      
+      // Scroll the active link into view with smooth behavior
+      setTimeout(() => {
+        activeLink.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }, 100);
+    }
+  }
+  
   // Try multiple times with different delays in case DOM is still loading
   [1000, 2000, 3000].forEach(delay => {
     setTimeout(() => {
-      // Find all collapse toggle buttons in sidebar
+      // First, expand to show current page
+      expandToCurrentPage();
+      
+      // Then handle auto-collapse for sections NOT containing current page
       const allToggleButtons = document.querySelectorAll('.sidebar-navigation a[data-bs-toggle="collapse"]');
 
       allToggleButtons.forEach(button => {
@@ -23,9 +78,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (shouldCollapse) {
           const targetElement = document.querySelector(target);
-          // Only click if the section is currently expanded
-          if (targetElement && !targetElement.classList.contains('collapse') ||
-              targetElement?.classList.contains('show')) {
+          
+          // Check if this section contains the active page
+          const containsActivePage = targetElement?.querySelector('.sidebar-link.active');
+          
+          // Only collapse if the section doesn't contain the active page
+          if (!containsActivePage && targetElement && 
+              (!targetElement.classList.contains('collapse') || targetElement?.classList.contains('show'))) {
             button.click();
           }
         }
