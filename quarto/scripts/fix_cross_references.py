@@ -27,7 +27,7 @@ WHEN IT RUNS:
 This script runs as a post-render hook in the Quarto configuration:
   post-render:
     - scripts/clean_svgs.py
-    - scripts/fix-glossary-html.py  # <-- Runs after all HTML is generated
+    - scripts/fix_cross_references.py  # <-- Runs after all HTML is generated
 
 HOW TO USE:
 -----------
@@ -45,78 +45,159 @@ import re
 import sys
 from pathlib import Path
 
-# Chapter mapping from section IDs to their HTML file paths with anchors
-# IMPORTANT: These paths are relative to the glossary location (../core/...)
+# Chapter mapping from section IDs to their absolute paths from build root
+# These are stored as absolute paths from the build root (e.g., contents/core/...)
+# and will be converted to relative paths based on each file's location
 # Update this when adding new chapters to the book
 CHAPTER_MAPPING = {
-    "sec-introduction": "../core/introduction/introduction.html#sec-introduction",
-    "sec-ml-systems": "../core/ml_systems/ml_systems.html#sec-ml-systems", 
-    "sec-dl-primer": "../core/dl_primer/dl_primer.html#sec-dl-primer",
-    "sec-dnn-architectures": "../core/dnn_architectures/dnn_architectures.html#sec-dnn-architectures",
-    "sec-ai-frameworks": "../core/frameworks/frameworks.html#sec-ai-frameworks",
-    "sec-ai-training": "../core/training/training.html#sec-ai-training",
-    "sec-benchmarking-ai": "../core/benchmarking/benchmarking.html#sec-benchmarking-ai",
-    "sec-data-engineering": "../core/data_engineering/data_engineering.html#sec-data-engineering",
-    "sec-ai-acceleration": "../core/hw_acceleration/hw_acceleration.html#sec-ai-acceleration",
-    "sec-efficient-ai": "../core/efficient_ai/efficient_ai.html#sec-efficient-ai",
-    "sec-model-optimizations": "../core/optimizations/optimizations.html#sec-model-optimizations",
-    "sec-ml-operations": "../core/ops/ops.html#sec-ml-operations",
-    "sec-ondevice-learning": "../core/ondevice_learning/ondevice_learning.html#sec-ondevice-learning",
-    "sec-resilient-ai": "../core/robust_ai/robust_ai.html#sec-resilient-ai",
-    "sec-security-privacy": "../core/privacy_security/privacy_security.html#sec-security-privacy",
-    "sec-responsible-ai": "../core/responsible_ai/responsible_ai.html#sec-responsible-ai",
-    "sec-sustainable-ai": "../core/sustainable_ai/sustainable_ai.html#sec-sustainable-ai",
-    "sec-ai-good": "../core/ai_for_good/ai_for_good.html#sec-ai-good",
-    "sec-ai-workflow": "../core/workflow/workflow.html#sec-ai-workflow",
-    "sec-conclusion": "../core/conclusion/conclusion.html#sec-conclusion",
-    "sec-agi-systems": "../core/frontiers/frontiers.html#sec-agi-systems",
-    "sec-generative-ai": "../core/generative_ai/generative_ai.html#sec-generative-ai"
+    # Top-level chapters
+    "sec-introduction": "contents/core/introduction/introduction.html#sec-introduction",
+    "sec-ml-systems": "contents/core/ml_systems/ml_systems.html#sec-ml-systems", 
+    "sec-dl-primer": "contents/core/dl_primer/dl_primer.html#sec-dl-primer",
+    "sec-dnn-architectures": "contents/core/dnn_architectures/dnn_architectures.html#sec-dnn-architectures",
+    "sec-ai-workflow": "contents/core/workflow/workflow.html#sec-ai-workflow",
+    "sec-data-engineering": "contents/core/data_engineering/data_engineering.html#sec-data-engineering",
+    "sec-ai-frameworks": "contents/core/frameworks/frameworks.html#sec-ai-frameworks",
+    "sec-ai-training": "contents/core/training/training.html#sec-ai-training",
+    "sec-efficient-ai": "contents/core/efficient_ai/efficient_ai.html#sec-efficient-ai",
+    "sec-model-optimizations": "contents/core/optimizations/optimizations.html#sec-model-optimizations",
+    "sec-ai-acceleration": "contents/core/hw_acceleration/hw_acceleration.html#sec-ai-acceleration",
+    "sec-benchmarking-ai": "contents/core/benchmarking/benchmarking.html#sec-benchmarking-ai",
+    "sec-ml-operations": "contents/core/ops/ops.html#sec-ml-operations",
+    "sec-ondevice-learning": "contents/core/ondevice_learning/ondevice_learning.html#sec-ondevice-learning",
+    "sec-security-privacy": "contents/core/privacy_security/privacy_security.html#sec-security-privacy",
+    "sec-robust-ai": "contents/core/robust_ai/robust_ai.html#sec-robust-ai",
+    "sec-responsible-ai": "contents/core/responsible_ai/responsible_ai.html#sec-responsible-ai",
+    "sec-sustainable-ai": "contents/core/sustainable_ai/sustainable_ai.html#sec-sustainable-ai",
+    "sec-ai-good": "contents/core/ai_for_good/ai_for_good.html#sec-ai-good",
+    "sec-agi-systems": "contents/core/frontiers/frontiers.html#sec-agi-systems",
+    "sec-conclusion": "contents/core/conclusion/conclusion.html#sec-conclusion",
+    
+    # Subsections - AI Training chapter
+    "sec-ai-training-distributed-systems-8fe8": "contents/core/training/training.html#sec-ai-training-distributed-systems-8fe8",
+    "sec-ai-training-neural-network-computation-73f5": "contents/core/training/training.html#sec-ai-training-neural-network-computation-73f5",
+    "sec-ai-training-optimization-algorithms-506e": "contents/core/training/training.html#sec-ai-training-optimization-algorithms-506e",
+    
+    # Subsections - Efficient AI chapter
+    "sec-efficient-ai-ai-scaling-laws-a043": "contents/core/efficient_ai/efficient_ai.html#sec-efficient-ai-ai-scaling-laws-a043",
+    
+    # Subsections - Model Optimizations chapter
+    "sec-model-optimizations-neural-architecture-search-3915": "contents/core/optimizations/optimizations.html#sec-model-optimizations-neural-architecture-search-3915",
+    "sec-model-optimizations-numerical-precision-a93d": "contents/core/optimizations/optimizations.html#sec-model-optimizations-numerical-precision-a93d",
+    "sec-model-optimizations-pruning-3f36": "contents/core/optimizations/optimizations.html#sec-model-optimizations-pruning-3f36"
 }
 
 # Chapter titles for readable link text
 # Now includes "Chapter" prefix for better HTML readability
 CHAPTER_TITLES = {
+    # Top-level chapters
     "sec-introduction": "Chapter 1: Introduction",
     "sec-ml-systems": "Chapter 2: ML Systems", 
     "sec-dl-primer": "Chapter 3: Deep Learning Primer",
     "sec-dnn-architectures": "Chapter 4: DNN Architectures",
-    "sec-ai-frameworks": "Chapter 5: AI Frameworks",
-    "sec-ai-training": "Chapter 6: AI Training",
-    "sec-benchmarking-ai": "Chapter 7: Benchmarking AI",
-    "sec-data-engineering": "Chapter 8: Data Engineering",
-    "sec-ai-acceleration": "Chapter 9: AI Acceleration",
-    "sec-efficient-ai": "Chapter 10: Efficient AI",
-    "sec-model-optimizations": "Chapter 11: Model Optimizations",
-    "sec-ml-operations": "Chapter 12: ML Operations",
-    "sec-ondevice-learning": "Chapter 13: On-Device Learning",
-    "sec-resilient-ai": "Chapter 14: Robust AI",
+    "sec-ai-workflow": "Chapter 5: AI Workflow",
+    "sec-data-engineering": "Chapter 6: Data Engineering",
+    "sec-ai-frameworks": "Chapter 7: AI Frameworks",
+    "sec-ai-training": "Chapter 8: AI Training",
+    "sec-efficient-ai": "Chapter 9: Efficient AI",
+    "sec-model-optimizations": "Chapter 10: Model Optimizations",
+    "sec-ai-acceleration": "Chapter 11: AI Acceleration",
+    "sec-benchmarking-ai": "Chapter 12: Benchmarking AI",
+    "sec-ml-operations": "Chapter 13: ML Operations",
+    "sec-ondevice-learning": "Chapter 14: On-Device Learning",
     "sec-security-privacy": "Chapter 15: Security & Privacy",
-    "sec-responsible-ai": "Chapter 16: Responsible AI",
-    "sec-sustainable-ai": "Chapter 17: Sustainable AI",
-    "sec-ai-good": "Chapter 18: AI for Good",
-    "sec-ai-workflow": "Chapter 19: AI Workflow",
-    "sec-conclusion": "Chapter 20: Conclusion",
-    "sec-agi-systems": "Chapter 21: AGI Systems",
-    "sec-generative-ai": "Chapter 22: Generative AI"
+    "sec-robust-ai": "Chapter 16: Robust AI",
+    "sec-responsible-ai": "Chapter 17: Responsible AI",
+    "sec-sustainable-ai": "Chapter 18: Sustainable AI",
+    "sec-ai-good": "Chapter 19: AI for Good",
+    "sec-agi-systems": "Chapter 20: AGI Systems",
+    "sec-conclusion": "Chapter 21: Conclusion",
+    
+    # Subsections - AI Training chapter
+    "sec-ai-training-distributed-systems-8fe8": "Distributed Systems",
+    "sec-ai-training-neural-network-computation-73f5": "Neural Network Computation",
+    "sec-ai-training-optimization-algorithms-506e": "Optimization Algorithms",
+    
+    # Subsections - Efficient AI chapter
+    "sec-efficient-ai-ai-scaling-laws-a043": "AI Scaling Laws",
+    
+    # Subsections - Model Optimizations chapter
+    "sec-model-optimizations-neural-architecture-search-3915": "Neural Architecture Search",
+    "sec-model-optimizations-numerical-precision-a93d": "Numerical Precision",
+    "sec-model-optimizations-pruning-3f36": "Pruning"
 }
 
-def fix_cross_reference_link(match):
+def calculate_relative_path(from_file, to_path, build_dir):
+    """
+    Calculate relative path from one HTML file to another.
+    
+    Args:
+        from_file: Path object of the source HTML file
+        to_path: String path from build root (e.g., "contents/core/chapter/file.html#anchor")
+        build_dir: Path object of the build directory root
+    
+    Returns:
+        Relative path string from from_file to to_path
+    """
+    # Split anchor from path
+    if '#' in to_path:
+        target_path_str, anchor = to_path.split('#', 1)
+        anchor = f'#{anchor}'
+    else:
+        target_path_str = to_path
+        anchor = ''
+    
+    # Convert to absolute paths
+    target_abs = build_dir / target_path_str
+    source_abs = from_file
+    
+    # Calculate relative path
+    try:
+        rel_path = Path(target_abs).relative_to(source_abs.parent)
+        # If in same directory or subdirectory, use as is
+        result = str(rel_path).replace('\\', '/')
+    except ValueError:
+        # Need to go up directories
+        # Count how many levels up we need to go
+        source_parts = source_abs.parent.parts
+        target_parts = target_abs.parts
+        
+        # Find common prefix
+        common_length = 0
+        for s, t in zip(source_parts, target_parts):
+            if s == t:
+                common_length += 1
+            else:
+                break
+        
+        # Calculate relative path
+        up_levels = len(source_parts) - common_length
+        down_parts = target_parts[common_length:]
+        
+        rel_parts = ['..'] * up_levels + list(down_parts)
+        result = '/'.join(rel_parts)
+    
+    return result + anchor
+
+def fix_cross_reference_link(match, from_file, build_dir):
     """Replace a single cross-reference link with proper HTML link."""
     full_match = match.group(0)
     sec_ref = match.group(1)
     
-    html_path = CHAPTER_MAPPING.get(sec_ref)
+    abs_path = CHAPTER_MAPPING.get(sec_ref)
     title = CHAPTER_TITLES.get(sec_ref)
     
-    if html_path and title:
+    if abs_path and title:
+        # Calculate relative path from current file to target
+        rel_path = calculate_relative_path(from_file, abs_path, build_dir)
         # Create clean HTML link
-        return f'<a href="{html_path}">{title}</a>'
+        return f'<a href="{rel_path}">{title}</a>'
     else:
         # Keep original if no mapping found
         print(f"⚠️ No mapping found for: {sec_ref}")
         return full_match
 
-def fix_glossary_html(html_content, verbose=False):
+def fix_cross_references(html_content, from_file, build_dir, verbose=False):
     """
     Fix all cross-reference links in HTML content.
     
@@ -139,16 +220,17 @@ def fix_glossary_html(html_content, verbose=False):
     total_matches = len(matches1) + len(matches2)
     
     # Fix Pattern 1 matches
-    fixed_content = re.sub(pattern1, fix_cross_reference_link, html_content)
+    fixed_content = re.sub(pattern1, lambda m: fix_cross_reference_link(m, from_file, build_dir), html_content)
     
-    # Fix Pattern 2 matches with a simpler replacement
+    # Fix Pattern 2 matches with proper relative path calculation
     unmapped_refs = []
     def fix_simple_reference(match):
         sec_ref = match.group(1)
-        html_path = CHAPTER_MAPPING.get(sec_ref)
+        abs_path = CHAPTER_MAPPING.get(sec_ref)
         title = CHAPTER_TITLES.get(sec_ref)
-        if html_path and title:
-            return f'<strong><a href="{html_path}">{title}</a></strong>'
+        if abs_path and title:
+            rel_path = calculate_relative_path(from_file, abs_path, build_dir)
+            return f'<strong><a href="{rel_path}">{title}</a></strong>'
         else:
             unmapped_refs.append(sec_ref)
             return match.group(0)
@@ -171,8 +253,8 @@ def process_html_file(html_file, base_dir):
     except Exception as e:
         return None, 0, []
     
-    # Fix cross-reference links
-    fixed_content, fixed_count, unmapped = fix_glossary_html(html_content)
+    # Fix cross-reference links with proper relative path calculation
+    fixed_content, fixed_count, unmapped = fix_cross_references(html_content, html_file, base_dir)
     
     # Write back fixed content if changes were made
     if fixed_count > 0:

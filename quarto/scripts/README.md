@@ -2,14 +2,14 @@
 
 This directory contains scripts that run after Quarto builds to fix various issues.
 
-## fix_glossary_html.py
+## fix_cross_references.py
 
 ### Problem It Solves
 
 When using **selective rendering** to speed up builds (only building index + introduction instead of all 20+ chapters), Quarto cannot resolve cross-references to chapters that weren't built. This results in broken references appearing as `?@sec-chapter-name` in the HTML output.
 
 This particularly affects:
-- **Glossary**: Contains 800+ cross-references to all chapters
+- **Glossary**: Contains 800+ cross-references to all chapters (hence the original script name)
 - **Introduction**: References many other chapters for context
 - **Any chapter** that references other chapters
 
@@ -29,7 +29,7 @@ The script is configured as a post-render hook in the Quarto configuration files
 project:
   post-render:
     - scripts/clean_svgs.py
-    - scripts/fix_glossary_html.py  # Fixes cross-references
+    - scripts/fix_cross_references.py  # Fixes cross-references
 ```
 
 ### Maintenance
@@ -57,10 +57,10 @@ CHAPTER_TITLES = {
 
 ```bash
 # Test on all HTML files
-python3 scripts/fix_glossary_html.py
+python3 scripts/fix_cross_references.py
 
 # Test on specific file
-python3 scripts/fix_glossary_html.py _build/html/contents/backmatter/glossary/glossary.html
+python3 scripts/fix_cross_references.py _build/html/contents/backmatter/glossary/glossary.html
 ```
 
 ### Output
