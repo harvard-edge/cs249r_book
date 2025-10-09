@@ -1,89 +1,79 @@
-_No updates found._
+## 2025 Updates
 
-# Changelog
-
-## 2025
-
-### 📅 October 05 at 12:34 PM
+### 📅 October 09 at 06:14 PM
 
 <details >
 <summary>**📄 Frontmatter**</summary>
 
-- **Index**: This update refines the AI systems engineering content and improves navigation by adding section IDs to all headers, including chapters. Additionally, the "About the Book" link was updated.
-- **About**: This update focuses on restructuring content within Part IV of "About", clarifying the pedagogical philosophy, and enhancing classroom feedback mechanisms throughout the Foundation chapters. Additionally, sections were reorganized for improved navigation and clarity.
-- **Acknowledgements**: This update primarily focuses on improving the acknowledgements section by adding new contributors, integrating their list into the development pipeline, and converting SVG logos to PNG format for better compatibility. Additional improvements include refining AI systems engineering content and adding support from Netlify and Edge Impulse.
-- **Foreword**: The foreword content has been refined to improve its focus on AI systems engineering concepts and practices. This includes updating existing information and adding new details for greater clarity and relevance.
-- **SocratiQ**: This update introduces section IDs to all headers, including chapters in SocratiQ, improving navigation and searchability. Additionally, it refines the visibility conditions within SocratiQ for better content control and user experience.
-- **Changelog**: This commit introduces format-based control for changelog visibility, allowing greater flexibility in how content is presented and managed. This change improves the structure and organization of the changelog.
+- `███░░` **About**: The book now features a reorganized Part IV for better understanding of AI systems and a refined pedagogical approach emphasizing foundational concepts
+- `███░░` **Foreword**: The foreword now includes refined content related to AI systems engineering concepts and practices
+- `██░░░` **Index**: The book now includes refined content on AI systems engineering and an updated "About the Book" link for easier navigation
+- `██░░░` **SocratiQ**: Improved the visibility and accessibility of SocratiQ content within the textbook
+- `██░░░` **Changelog**: Improved the visibility of certain content and updated how the changelog is displayed
+- `██░░░` **Acknowledgements**: The contributor list has been updated and the acknowledgements now include support from Netlify and Edge Impulse
 
 </details>
 
 <details >
 <summary>**📖 Chapters**</summary>
 
-- **Chapter 1: Introduction**: The introduction chapter was significantly revised for clarity, flow, and pedagogy. This included removing redundancy, refining content on ML systems engineering, and implementing strategic footnotes to enhance learning.
-- **Chapter 19: AI for Good**: Chapter 19, "AI for Good," received significant improvements in flow and narrative integration with other chapters. Minor content refinements were also made to enhance clarity and accuracy.
-- **Chapter 12: Benchmarking AI**: Chapter 12 on Benchmarking AI was significantly improved with a focus on clarity, flow, and technical accuracy. Updates include addressing reader critiques on performance vs energy efficiency, adding a new TikZ figure, and enhancing content on power measurement and DVFS.
-- **Chapter 21: Conclusion**: The Conclusion chapter was significantly revamped, transitioning from a chronological review to a principles-based synthesis. Numerous refinements were also made across all chapters, including improved flow, formatting, and content accuracy.
-- **Chapter 6: Data Engineering**: The Chapter 6 on Data Engineering was significantly enhanced with real-world context, production reality, and a systems perspective. This update also included improvements to diagrams, formatting, flow, and content accuracy.
-- **Chapter 3: DL Primer**: The Chapter 3 "DL Primer" was significantly revised with a focus on improving clarity, readability, and narrative flow. This included refining content, eliminating redundancy, optimizing footnotes, and strengthening the connection between concepts.
-- **Chapter 4: DNN Architectures**: The Chapter 4 "DNN Architectures" was significantly updated with improved content flow, clarity, and accuracy. This included additions of new TikZ figures, historical context, breakthrough stories, and a decision framework quiz.
-- **Chapter 9: Efficient AI**: Chapter 9, "Efficient AI," was significantly refined with improvements to content flow, organization, and clarity. This included eliminating repetitive content, standardizing section labels and cross-references, and incorporating expert consensus recommendations for DNN architectures.
-- **Chapter 7: AI Frameworks**: The Chapter 7: AI Frameworks content has been significantly refined, including improvements to clarity, narrative flow, cross-references, and the integration of new information about framework evolution and hardware history. The chapter also benefits from standardized formatting, updated glossary terms, and a focus on consistency with academic writing style.
-- **Chapter 20: Frontiers**: The "Frontiers" chapter underwent significant improvements, including enhanced flow, coherence, conceptual progression, and comprehensive citations. Various other chapters were also refined with optimized text formatting, improved narrative structure, and standardized cross-references throughout the entire textbook.
-- **Chapter 11: AI Acceleration**: The Chapter 11 "AI Acceleration" has been significantly improved with enhanced flow, organization, content clarity, and cross-chapter integration. Key changes include refining the discussion on hardware acceleration, optimizing footnotes for consistency, and implementing new callout definitions for specialized terms.
-- **Chapter 2: ML Systems**: The Chapter 2: ML Systems content was significantly refined with improvements to clarity, flow, and accuracy. Redundancies were removed, deployment paradigms were elaborated, and several figures were updated for better visualization.
-- **Chapter 14: On-Device Learning**: Chapter 14 on On-Device Learning was significantly enhanced based on student feedback, including improvements to the narrative flow, content clarity, and integration with other chapters. This update also incorporates standardized formatting and cross-references for better consistency throughout the textbook.
-- **Chapter 13: ML Operations**: Chapter 13 on ML Operations was significantly enhanced with new content, including an explanation of Infrastructure as Code for beginners and a section on stakeholder communication. The chapter also received various structural improvements like refined flow, transitions, and standardized formatting for better clarity and readability.
-- **Chapter 10: Model Optimizations**: Chapter 10, "Model Optimizations," received significant updates including content refinements for clarity and accuracy, standardized formatting, pedagogical improvements, and enhanced flow. Additionally, footnote management was improved across all chapters, addressing duplicates and unused references.
-- **Chapter 15: Security & Privacy**: Chapter 15 on Security & Privacy was significantly improved with enhanced flow, added decision frameworks, concrete examples, and concept checks for better learning. The chapter also benefitted from content refinements, clearer explanations, and updated cross-references.
-- **Chapter 16: Responsible AI**: Chapter 16, "Responsible AI," was significantly enhanced with improvements to flow, narrative, and pedagogical elements. This includes adding contextual bridges, refining text clarity, and strengthening the overall message about responsible AI practices.
-- **Chapter 18: Robust AI**: Chapter 18 on Robust AI was significantly enhanced with improvements to flow, narrative arc, and content clarity. This includes expanded explanations on adversarial examples, dropout's role in uncertainty estimation, and transient fault causes.
-- **Chapter 17: Sustainable AI**: Chapter 17 on Sustainable AI was significantly revised, improving its flow, narrative, and content. Updates include addressing redundancies, refining concepts like fallacies and pitfalls, and incorporating optical interconnects into the sustainability discussion.
-- **Chapter 8: AI Training**: Chapter 8, focusing on AI Training, has been significantly improved with enhanced pedagogical elements, clearer flow, and incorporation of GPT-2 lighthouse examples for better understanding. Additionally, cross-references have been added to integrate it more seamlessly with other chapters in the book.
-- **Chapter 5: AI Workflow**: The Chapter 5 "AI Workflow" was significantly refined with improvements to clarity, flow, and pedagogical tools. This includes removing redundancies, standardizing formatting, enhancing cross-references, and incorporating process evolution insights.
-- **Glossary**: This update significantly improves the Glossary by standardizing section labels, removing redundant entries, and implementing consistent cross-references using Quarto features. It also refactors the glossary scripts for improved data flow and organization while adding key AGI terms and ensuring academic formatting standards.
-- **Chapter: Generative Ai**: This update focuses on improving the organization and clarity of the Generative AI chapter. It includes flow optimizations, a reorganized glossary, optimized cross-references, comprehensive concept maps, and consistent section IDs for headers.
-- **PhD Survival Guide**: This update applies unique section IDs to all headers in the PhD Survival Guide, including chapter headings, improving navigation and referencing within the document.
-- **Best Practices**: This update ensures consistent navigation within the Best Practices document by applying section IDs to all headers, including chapters.
-- **Design Principles**: All headers in the Design Principles document, including chapter headings, now have unique section IDs. This improves navigation and makes it easier to link to specific sections within the document.
-- **Foundations**: All headers in the Foundations document, including chapter headings, now have unique section IDs. This enhancement improves navigation and linking within the document.
-- **Impact Outlook**: This update applies unique section IDs to all headers within the Impact Outlook document, including chapter headings. This enhancement improves navigation and readability for users.
+- `███░░` **Chapter 8: AI Training**: The Training chapter now features a smoother flow, practical examples using GPT-2, and improved callout formatting for better readability
+- `███░░` **Chapter 12: Benchmarking AI**: The Benchmarking chapter now has improved clarity, addresses reader critiques about power measurements with a corrected claim and citation, and includes a new TikZ figure for better visualization
+- `███░░` **Chapter 1: Introduction**: The introduction to machine learning systems engineering has been refined, and the textbook now includes considerations for energy efficiency in ML systems. Text clarity and consistency have also been improved throughout
+- `███░░` **Chapter 14: On-Device Learning**: The On-Device Learning chapter has been improved with new content and cross-references based on student feedback
+- `███░░` **Chapter 13: ML Operations**: The ML Operations chapter now includes a beginner-friendly explanation of Infrastructure as Code and incorporates three phases of student feedback for improvement. A new section on stakeholder communication has also been added
+- `███░░` **Chapter 15: Security & Privacy**: The Chapter on Privacy & Security now includes more practical examples and exercises to help readers understand key concepts better. It also delves deeper into ML deployment paradigms and constraints, providing a more comprehensive understanding of the topic. The chapter's structure has been improved for better flow and learning, with added decision frameworks to guide readers through
+- `███░░` **Chapter 16: Responsible AI**: The Responsible AI chapter now features improved flow, clearer explanations, and a more engaging narrative
+- `███░░` **Chapter 17: Sustainable AI**: The Sustainable AI chapter now includes information about optical interconnects, and the Robust AI chapter has been revised for better flow and a stronger narrative
+- `███░░` **Chapter 20: Conclusion**: The Conclusion chapter now offers a more principled overview of the field, with updated definitions and clearer learning objectives
+- `███░░` **Chapter 6: Data Engineering**: The Data Engineering chapter now incorporates real-world production scenarios and a systems perspective. It also includes new equations, citations, a four pillars diagram, and improved narrative flow for better understanding
+- `███░░` **Chapter 3: DL Primer**: The Deep Learning Primer chapter now includes more historical and mathematical context, features clearer explanations and improved writing, and has a more refined flow and formatting
+- `███░░` **Chapter 4: DNN Architectures**: The DNN Architectures chapter now includes a decision framework quiz to help readers choose appropriate architectures and features improved flow with clearer explanations of the im2col technique
+- `███░░` **Chapter 7: AI Frameworks**: The Frameworks chapter now includes Patterson bandwidth specifications, introductory paragraphs for better flow, and a clearer explanation of how to select and compare ML frameworks
+- `███░░` **Chapter: Frontiers**: The Frontiers chapter now includes comprehensive citations and has been significantly improved with enhanced flow, coherence, and conceptual progression. Content refinements have also been made across all core chapters
+- `███░░` **Chapter 2: ML Systems**: The ML Systems chapter now includes a new figure for better visualization, improved writing clarity, and standardized figures for easier understanding
+- `███░░` **Chapter 10: Model Optimizations**: The Model Optimizations chapter now has improved flow and navigation, along with pedagogical enhancements to aid understanding. Formatting has also been standardized for better readability
+- `███░░` **Chapter 5: AI Workflow**: The AI Workflow chapter now has clearer learning objectives and a more focused structure. The chapter better explains how the workflow is used as a scaffold for understanding machine learning concepts, and the DR case study is presented as a more effective teaching tool
+- `███░░` **Chapter 11: AI Acceleration**: The AI Acceleration chapter now features a more detailed explanation of accelerator anatomy, improved introductions to key sections, and a refined discussion on memory allocation
+- `███░░` **Glossary**: The glossary now includes key terms related to Artificial General Intelligence (AGI) and has been refined by removing redundancies and standardizing cross-references for improved clarity
+- `███░░` **Foundations**: The Foundations chapter now includes new content such as concepts, examples, explanations, figures, and diagrams to enhance understanding
+- `███░░` **Chapter: Generative Ai**: The Generative AI chapter now flows more logically, ensuring a smoother learning experience by maintaining engineering insights while respecting the order of concepts. Accidental bold formatting has also been removed for improved readability
+- `███░░` **Chapter: Emerging Topics**: Concept maps are now available for all textbook chapters to aid comprehension. The review GUI is also functional again, allowing students to test their understanding through interactive quizzes
+- `██░░░` **Chapter 19: AI for Good**: The AI for Good chapter now has a smoother flow and better integration with the surrounding content. The theory section also received some minor improvements
+- `██░░░` **Chapter 9: Efficient AI**: Improved the visual presentation of code examples and added a new figure to enhance understanding of concepts in Chapter 9
+- `██░░░` **Chapter 18: Robust AI**: The Robust AI chapter now provides a clearer understanding of adversarial examples and dropout's role in uncertainty estimation. A typo has also been corrected for improved accuracy
+- `█░░░░` **Impact Outlook**: IMPACT: █░░░░
 
 </details>
 
 <details >
 <summary>**🧑‍💻 Labs**</summary>
 
-- **Lab: Arduino Image Classification**: This update improves the structure and navigation of the Lab: Arduino Image Classification document. It applies section IDs to all headers, including chapters, making it easier to reference and navigate specific parts of the lab.
-- **Lab: Arduino Object Detection**: This update refines the Lab: Arduino Object Detection documentation by adding section IDs to all headers, improving navigation within the document. It also includes content and configuration file updates for further enhancement.
-- **Lab: Ide Setup**: This update improves the Lab: Ide Setup document by applying section IDs to all headers, including chapters, for better navigation and link functionality. Additionally, formatting was enhanced with blank lines added after list headings.
-- **Lab: Arduino Image Classification**: The "Arduino Image Classification" lab was updated with clearer image filenames, consistent code highlighting, and improved organization using section IDs. Additionally, scripts were renamed for clarity and minor text edits enhanced readability.
-- **Lab: Arduino Keyword Spotting**: This update enhances the Arduino Keyword Spotting lab by using descriptive filenames for images, switching to external image downloads, and applying section IDs to all headers for easier navigation. Minor text fixes and improvements were also made to enhance readability.
-- **Lab: Arduino Object Detection**: This commit improves clarity and consistency in the object detection lab. It standardizes image filenames, applies section IDs to headers for better navigation, and ensures image paths are correct by downloading external images.
-- **Lab: Pi Large Language Models**: The Lab: Pi Large Language Models now includes downloaded external images, addressing issues with local path references and ensuring correct image display in both web and PDF outputs. Additionally, all headers, including chapters, are now assigned unique section IDs for improved navigation and organization within the document.
-- **Lab: Arduino Object Detection**: This commit focuses on improving the structure and content of the object detection lab. It updates image references, adds section IDs for easier navigation, and removes unnecessary links.
-- **Lab: Arduino Keyword Spotting**: This update enhances the lab's readability and organization by applying section IDs to all headers, including chapters. Additionally, it standardizes script naming conventions within the scripts directory for improved clarity.
-- **Lab: Arduino Motion Classification**: This update improves organization and readability within the lab by applying section IDs to all headers, including chapters. Additionally, script naming conventions have been standardized for better clarity.
-- **Lab: Nicla Vision**: This commit enhances the Lab: Nicla Vision documentation by applying section IDs to all headers, including chapters, improving navigation and searchability within the document.
-- **Lab: Arduino Setup**: This commit enhances Lab: Arduino Setup by applying section IDs to all headers, including chapters, improving navigation and organization within the lab content.
-- **Lab: Kits**: This update enhances Lab: Kits by applying section IDs to all headers, including chapters, improving navigation. Additionally, script names have been standardized for better clarity and organization.
-- **Lab: Labs**: All headers in the Labs document, including chapter headings, now have unique section IDs for improved navigation and linking within the content. This enhancement makes it easier to reference specific sections and improves the overall user experience.
-- **Lab: Arduino Image Classification**: This update improves navigation within the lab by applying section IDs to all headers, including chapters. Additionally, it standardizes image filenames and references for consistency.
-- **Lab: Raspi**: This update applies section IDs to all headers in the Raspi lab content, including chapter headings, improving navigation and organization within the document.
-- **Lab: Arduino Setup**: This commit enhances Lab navigation by applying section IDs to all headers, including chapters. Additionally, it ensures consistent image referencing by converting filenames to lowercase and updating references accordingly.
-- **Lab: Pi Vision Language Models**: This commit introduces section IDs for all headers, including chapters, improving document navigation. Additionally, it standardizes image filenames to lowercase and adjusts references for consistency.
-- **Lab: Grove Vision Ai V2**: This update applies section IDs to all headers within the Grove Vision Ai V2 lab document, including chapters. This improves navigation and organization within the lab guide.
-- **Lab: Arduino Image Classification**: This update improves navigation by adding section IDs to all headers, including chapters. It also ensures consistency in image references by converting all image filenames to lowercase and updating any corresponding links.
-- **Lab: Setup And No Code Apps**: This commit improves readability and navigation by applying section IDs to all headers, including chapters. It also ensures consistency in image references by converting filenames to lowercase and updating corresponding links.
-- **Lab: Arduino Motion Classification**: This commit improves the Lab's structure and organization by applying section IDs to all headers, including chapters. It also fixes image references by converting all image filenames to lowercase.
-- **Lab: Arduino Setup**: This update enhances the lab's organization by applying section IDs to all headers, including chapters. It also addresses image link inconsistencies by converting filenames to lowercase and updating references for consistency.
-- **Lab: Xiao Esp32S3**: This update adds section IDs to all headers in the lab documentation, including chapters, making it easier to navigate and reference specific sections within the document.
-- **Lab: Dsp Spectral Features Block**: This commit added section IDs to all headers within the Lab: Dsp Spectral Features Block, including chapter headers. This improves document navigation and searchability.
-- **Lab: Kws Feature Eng**: This update ensures consistent navigation within the Kws Feature Eng lab by applying section IDs to all headers, including chapters. This improves readability and allows for easier linking and referencing within the document.
+- `██░░░` **Lab: Labs**: Tables in the lab exercises are now formatted consistently for better readability
+- `██░░░` **Lab: Arduino Object Detection**: Images are now locally hosted and the chapter has been improved with expert feedback and formatting updates
+- `██░░░` **Lab: Nicla Vision**: This update enhances navigation and readability within the Nicla Vision lab
+- `██░░░` **Lab: Raspi**: Tables in the Raspi lab have been formatted for improved readability
+- `██░░░` **Lab: Xiao Esp32S3**: Improved clarity and user experience with updated section labels and enhanced CLI help
+- `██░░░` **Lab: Kits**: Tables in the Lab: Kits chapter have been formatted for improved readability
+- `██░░░` **Lab: Arduino Object Detection**: The Arduino Object Detection lab has been updated with expert feedback and formatting improvements for a better learning experience
+- `██░░░` **Lab: Arduino Image Classification**: Expert feedback has been incorporated to improve the clarity and accuracy of the content in this lab. Formatting fixes have also been applied for a better reading experience
+- `██░░░` **Lab: Pi Large Language Models**: The Ollama lab now uses the correct image paths, ensuring consistent display across all platforms including PDF output
+- `██░░░` **Lab: Pi Vision Language Models**: Expert feedback has been incorporated to improve the clarity and accuracy of the content in this lab
+- `██░░░` **Lab: Arduino Image Classification**: The Arduino Image Classification lab now uses locally downloaded images and includes minor text fixes and improvements for a better learning experience
+- `██░░░` **Lab: Arduino Keyword Spotting**: The Keyword Spotting lab has been updated with a new kit and includes minor text fixes and improvements for better clarity
+- `██░░░` **Lab: Arduino Object Detection**: Images in the lab are now sourced locally and have more descriptive filenames
+- `██░░░` **Lab: Arduino Motion Classification**: Scripts in the lab now have a more standardized naming convention, making them easier to understand and use
+- `██░░░` **Lab: Arduino Setup**: Images now have consistent filenames and references are updated for accuracy
+- `██░░░` **Lab: Arduino Image Classification**: Image filenames in the lab have been updated to lowercase for consistency and easier referencing
+- `██░░░` **Lab: Setup And No Code Apps**: Image filenames are now lowercase for consistency and easier referencing
+- `██░░░` **Lab: Arduino Motion Classification**: Image references in the lab are now consistent and accurate
+- `██░░░` **Lab: Arduino Setup**: The Arduino setup lab now includes a missing `loop()` function and updated links for better navigation
 
 </details>
 
+# Changelog
+
+## 2025
 
 ### 📅 August 18
 
