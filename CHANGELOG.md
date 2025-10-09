@@ -1,6 +1,6 @@
 ## 2025 Updates
 
-### 📅 October 09 at 06:14 PM
+### 📅 October 09
 
 <details >
 <summary>**📄 Frontmatter**</summary>
@@ -70,10 +70,6 @@
 - `██░░░` **Lab: Arduino Setup**: The Arduino setup lab now includes a missing `loop()` function and updated links for better navigation
 
 </details>
-
-# Changelog
-
-## 2025
 
 ### 📅 August 18
 
