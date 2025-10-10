@@ -1,6 +1,9 @@
 // Auto-collapse sections and add part dividers
 document.addEventListener('DOMContentLoaded', function() {
   
+  // Track if we're intentionally closing sidebar for mobile navigation
+  let isMobileNavigating = false;
+  
   // Function to expand sidebar to show current page
   function expandToCurrentPage() {
     const currentPath = window.location.pathname;
@@ -30,10 +33,19 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // If we found the active link, expand all parent collapse sections
     if (activeLink) {
+      const sidebar = document.getElementById('quarto-sidebar');
       let parent = activeLink.parentElement;
+      
       while (parent && parent !== document.body) {
-        // Look for collapsed sections that need to be expanded
-        if (parent.classList.contains('collapse') && !parent.classList.contains('show')) {
+        // Stop if we've reached the sidebar itself - don't expand it
+        if (parent === sidebar) {
+          break;
+        }
+        
+        // Look for collapsed sections that need to be expanded (but not the sidebar itself)
+        if (parent.classList.contains('collapse') && 
+            !parent.classList.contains('show') &&
+            !parent.classList.contains('quarto-sidebar-collapse-item')) {
           parent.classList.add('show');
           
           // Find the toggle button for this section and update its aria-expanded
@@ -105,8 +117,9 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   }, 500);
   
-  // FIRST: Expand to show current page
+  // FIRST: Expand to show current page (but don't force sidebar open in desktop view)
   setTimeout(() => {
+    // Only expand sections within sidebar, don't force the sidebar itself to open
     expandToCurrentPage();
     
     // THEN: Collapse sections that DON'T contain the current page
@@ -146,6 +159,13 @@ document.addEventListener('DOMContentLoaded', function() {
   // Prevent sidebar collapse from hiding the active page
   // Listen for collapse events and re-expand if needed
   document.addEventListener('shown.bs.collapse', function(e) {
+    // Don't interfere if we're closing sidebar for mobile navigation
+    if (isMobileNavigating) return;
+    
+    // Only check if this is a collapse event within the sidebar, not the sidebar itself
+    const sidebar = document.getElementById('quarto-sidebar');
+    if (!sidebar || !sidebar.contains(e.target)) return;
+    
     // Small delay to let Bootstrap finish, then ensure active page is visible
     setTimeout(() => {
       const activeLink = document.querySelector('.sidebar-navigation .sidebar-link.active');
@@ -159,6 +179,13 @@ document.addEventListener('DOMContentLoaded', function() {
   });
   
   document.addEventListener('hidden.bs.collapse', function(e) {
+    // Don't interfere if we're closing sidebar for mobile navigation
+    if (isMobileNavigating) return;
+    
+    // Only check if this is a collapse event within the sidebar, not the sidebar itself
+    const sidebar = document.getElementById('quarto-sidebar');
+    if (!sidebar || !sidebar.contains(e.target)) return;
+    
     // Small delay to let Bootstrap finish, then ensure active page is visible
     setTimeout(() => {
       const activeLink = document.querySelector('.sidebar-navigation .sidebar-link.active');
@@ -249,4 +276,41 @@ document.addEventListener('DOMContentLoaded', function() {
     childList: true,
     subtree: true
   });
+
+  // Automatically close sidebar on link click in mobile view
+  function setupMobileSidebarToggle() {
+    const sidebar = document.getElementById('quarto-sidebar');
+    if (!sidebar) return;
+
+    const sidebarToggler = document.querySelector('.quarto-btn-toggle');
+    if (!sidebarToggler) return;
+
+    const sidebarLinks = sidebar.querySelectorAll('a.sidebar-link');
+
+    sidebarLinks.forEach(link => {
+      link.addEventListener('click', (e) => {
+        // Check if sidebar is in mobile/collapsed mode
+        const isSidebarOpen = sidebar.classList.contains('show');
+        
+        // Check if we're in mobile view (sidebar toggle button is visible)
+        const isMobileView = window.getComputedStyle(sidebarToggler).display !== 'none';
+
+        if (isMobileView && isSidebarOpen) {
+          // Set flag to prevent collapse handlers from reopening sidebar
+          isMobileNavigating = true;
+          
+          // Close the sidebar
+          sidebarToggler.click();
+          
+          // Clear flag after navigation completes
+          setTimeout(() => {
+            isMobileNavigating = false;
+          }, 1000);
+        }
+      });
+    });
+  }
+
+  // Run after a short delay to ensure everything is initialized
+  setTimeout(setupMobileSidebarToggle, 500);
 });
