@@ -59,6 +59,24 @@ The **open-source textbook** that teaches you to build real-world AI systems —
 
 ---
 
+### What Makes This Book Special
+
+This project isn’t just a book. It’s a living, evolving effort shaped by a growing community of learners, educators, and builders. Every pull request, note, and idea helps push the boundaries of what AI systems education can look like.
+
+Whether you’re reading a chapter, building a lab, or contributing your first fix (to even a small typo), you’re part of a story that’s bigger than code. This is how we make AI systems' knowledge accessible to everyone.
+
+---
+
+### Start Here
+1. Read Chapter 1 and the overview
+2. Skim the Benchmarking chapter to learn what to measure
+3. Pick a kit and run a lab
+4. Say hello in Introduce Yourself
+
+• Benchmarking chapter: https://www.mlsysbook.ai/contents/core/benchmarking.html
+• Kits and lab setups: https://www.mlsysbook.ai/contents/labs/kits.html
+• Introduce Yourself: https://github.com/harvard-edge/cs249r_book/discussions
+
 ## 📚 What You'll Learn
 
 Go beyond training models — master the **full stack** of real-world ML systems.
@@ -161,13 +179,19 @@ cd cs249r_book
 We welcome contributions from the global community! Here's how you can help:
 
 ### Ways to Contribute
+
 - **📝 Content** — Suggest edits, improvements, or new examples
 - **🛠️ Tools** — Enhance development scripts and automation  
 - **🎨 Design** — Improve figures, diagrams, and visual elements
 - **🌍 Localization** — Translate content for global accessibility
 - **🔧 Infrastructure** — Help with build systems and deployment
 
+### If Something Confuses You
+
+Open a short [issue](https://github.com/harvard-edge/cs249r_book/issues) with the confusing sentence and a one-line suggestion. These reports help the most.
+
 ### Quality Standards
+
 All contributions benefit from automated quality assurance:
 - ✅ **Pre-commit validation** — Automatic cleanup and checks
 - 📋 **Content review** — Formatting and style validation
@@ -179,6 +203,12 @@ All contributions benefit from automated quality assurance:
 ---
 
 ## 🛠️ Development
+
+### Releases and Previews
+
+The dev site is our preview build. The main site publishes on release.
+* Dev: https://harvard-edge.github.io/cs249r_book_dev
+* Main: https://mlsysbook.ai
 
 ### Book Binder CLI (Recommended)
 
