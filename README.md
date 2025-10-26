@@ -33,8 +33,8 @@
 
   <!-- Reader Navigation -->
   **[📖 Read Online](https://mlsysbook.ai)** • 
-  **[💾 Download PDF](https://mlsysbook.ai/pdf)** • 
-  **[💾 Download ePub](https://mlsysbook.ai/epub)** • 
+  **[📄 Download PDF](https://mlsysbook.ai/pdf)** • 
+  **[📓 Download EPUB](https://mlsysbook.ai/epub)** • 
   **[🌐 Explore Ecosystem](https://mlsysbook.org)**
 
 </p>
@@ -73,9 +73,9 @@ Whether you’re reading a chapter, building a lab, or contributing your first f
 3. Pick a kit and run a lab
 4. Say hello in Introduce Yourself
 
-• Benchmarking chapter: https://www.mlsysbook.ai/contents/core/benchmarking.html
-• Kits and lab setups: https://www.mlsysbook.ai/contents/labs/kits.html
-• Introduce Yourself: https://github.com/harvard-edge/cs249r_book/discussions
+• Benchmarking chapter: [https://mlsysbook.ai/contents/core/benchmarking/benchmarking.html](https://mlsysbook.ai/contents/core/benchmarking/benchmarking.html)
+• Kits and lab setups: [https://mlsysbook.ai/contents/labs/shared/kits.html](https://mlsysbook.ai/contents/labs/shared/kits.html)
+• Introduce Yourself: [https://github.com/harvard-edge/cs249r_book/discussions](https://github.com/harvard-edge/cs249r_book/discussions)
 
 ## 📚 What You'll Learn
 
@@ -130,7 +130,8 @@ We've graduated this project from Harvard to enable global access and expand AI 
 
 ### 🎓 Students
 - [📖 Read online](https://mlsysbook.ai)
-- [📄 Download PDF](https://mlsysbook.ai/Machine-Learning-Systems.pdf)
+- [📄 Download PDF](https://mlsysbook.ai/pdf)
+- [📓 Download EPUB](https://mlsysbook.ai/epub)
 - [🧪 Try hands-on labs](https://mlsysbook.org)
 
 ### 👩‍🏫 Educators
@@ -152,8 +153,11 @@ We've graduated this project from Harvard to enable global access and expand AI 
 # Read online (continuously updated)
 open https://mlsysbook.ai
 
-# Or download PDF for offline access
-curl -O https://mlsysbook.ai/Machine-Learning-Systems.pdf
+# Download PDF for offline access
+curl -O https://mlsysbook.ai/pdf
+
+# Download EPUB for e-readers
+curl -O https://mlsysbook.ai/epub
 ```
 
 ### For Contributors
@@ -162,14 +166,26 @@ git clone https://github.com/harvard-edge/cs249r_book.git
 cd cs249r_book
 
 # Quick setup (recommended)
-./binder setup      # Setup environment and dependencies
-./binder doctor     # Check system health
+./binder setup                    # Setup environment and dependencies
+./binder doctor                   # Check system health
 
 # Fast development workflow
-./binder preview intro    # Fast chapter development
-./binder build intro      # Build specific chapter
-./binder build            # Build complete book (HTML)
-./binder help            # See all commands
+./binder preview intro            # Live preview with hot reload
+./binder build intro              # Build specific chapter (HTML)
+./binder html intro               # Build HTML for specific chapter
+./binder pdf intro                # Build PDF for specific chapter
+./binder epub intro               # Build EPUB for specific chapter
+
+# Build complete book
+./binder build                    # Build complete book (HTML)
+./binder html                     # Build all chapters (HTML)
+./binder pdf                      # Build complete book (PDF)
+./binder epub                     # Build complete book (EPUB)
+
+# Help and management
+./binder help                     # See all commands
+./binder list                     # List available chapters
+./binder status                   # Show current status
 ```
 
 ---
@@ -216,29 +232,46 @@ The **Book Binder** is our lightning-fast development CLI for streamlined buildi
 
 ```bash
 # Chapter development (fast iteration)
-./binder preview intro                # Build and preview single chapter
-./binder preview intro,ml_systems     # Build and preview multiple chapters
+./binder preview intro                # Live preview with hot reload
+./binder build intro                  # Build specific chapter (HTML)
+./binder html intro                   # Build HTML for specific chapter
+./binder pdf intro                    # Build PDF for specific chapter
+./binder epub intro                   # Build EPUB for specific chapter
+
+# Multiple chapters at once
+./binder build intro,ml_systems       # Build multiple chapters (HTML)
+./binder html intro,ops               # Build multiple chapters (HTML)
 
 # Complete book building
-./binder build                        # Build complete website (HTML)
+./binder build                        # Build entire book (HTML)
+./binder html                         # Build all chapters (HTML)
 ./binder pdf                          # Build complete PDF
 ./binder epub                         # Build complete EPUB
 
 # Management
 ./binder clean                        # Clean artifacts
+./binder switch pdf                   # Switch active config to PDF
+./binder list                         # List available chapters
 ./binder status                       # Show current status
 ./binder doctor                       # Run health check
+./binder setup                        # Setup environment
+./binder hello                        # Welcome message
+./binder about                        # Project information
 ./binder help                         # Show all commands
 ```
 
 ### Development Commands
 ```bash
 # Book Binder CLI (Recommended)
-./binder setup            # First-time setup
-./binder build            # Build complete HTML book
-./binder pdf              # Build complete PDF book  
-./binder epub             # Build complete EPUB book
-./binder preview intro    # Preview chapter development
+./binder setup                    # First-time setup
+./binder build                    # Build complete HTML book
+./binder html                     # Build all chapters (HTML)
+./binder pdf                      # Build complete PDF book  
+./binder epub                     # Build complete EPUB book
+./binder preview intro            # Live preview chapter development
+./binder build intro              # Build specific chapter
+./binder doctor                   # Run health check
+./binder clean                    # Clean build artifacts
 
 # Traditional setup (if needed)
 python3 -m venv .venv
@@ -251,6 +284,12 @@ pre-commit install
 ```
 MLSysBook/
 ├── binder                   # ⚡ Fast development CLI (recommended)
+├── cli/                     # Modular CLI implementation
+│   ├── commands/            # Command handlers (build, preview, clean, etc.)
+│   ├── core/                # Core components (config, discovery)
+│   ├── formats/             # Format-specific handling
+│   ├── utils/               # CLI utilities
+│   └── main.py              # CLI entry point
 ├── quarto/                  # Main book content (Quarto)
 │   ├── contents/            # Chapter content
 │   │   ├── core/            # Core chapters
@@ -261,7 +300,8 @@ MLSysBook/
 │   ├── _extensions/         # Quarto extensions
 │   ├── config/              # Build configurations
 │   │   ├── _quarto-html.yml # Website build configuration
-│   │   └── _quarto-pdf.yml  # PDF build configuration
+│   │   ├── _quarto-pdf.yml  # PDF build configuration
+│   │   └── _quarto-epub.yml # EPUB build configuration
 │   ├── data/                # Cross-reference and metadata files
 │   ├── assets/              # Images, styles, media
 │   ├── filters/             # Lua filters
@@ -271,7 +311,8 @@ MLSysBook/
 │   ├── scripts/             # Organized development scripts
 │   │   ├── content/         # Content management tools
 │   │   ├── cross_refs/      # Cross-reference management
-│   │   ├── genai/           # AI-assisted content tools
+│   │   ├── glossary/        # Glossary management
+│   │   ├── images/          # Image processing tools
 │   │   ├── maintenance/     # System maintenance scripts
 │   │   ├── testing/         # Test and validation scripts
 │   │   └── utilities/       # General utility scripts
@@ -285,6 +326,7 @@ MLSysBook/
 │   ├── BINDER.md            # Binder CLI guide
 │   ├── BUILD.md             # Build instructions
 │   ├── DEVELOPMENT.md       # Development guide
+│   ├── MAINTENANCE_GUIDE.md # Maintenance and troubleshooting
 │   └── contribute.md        # Contribution guidelines
 ├── CHANGELOG.md             # Project changelog
 ├── CITATION.bib             # Citation information
@@ -310,6 +352,7 @@ Publishing is handled through GitHub Actions workflows for consistent, automated
 ./binder epub         # Build EPUB
 
 # Publishing happens via GitHub Actions
+# Merge to main branch triggers automatic deployment
 # See docs/PUBLISH_LIVE_WORKFLOW.md for details
 ```
 
@@ -318,6 +361,7 @@ Publishing is handled through GitHub Actions workflows for consistent, automated
 - **Quality Checks** — Automated validation before deployment
 - **Multiple Formats** — HTML, PDF, and EPUB published simultaneously
 - **Preview Deployments** — Pull requests get automatic preview deployments
+- **Branch Strategy** — Develop on `dev` branch, merge to `main` for release
 
 See [Publishing Documentation](docs/PUBLISH_LIVE_WORKFLOW.md) for detailed instructions.
 
@@ -326,11 +370,20 @@ See [Publishing Documentation](docs/PUBLISH_LIVE_WORKFLOW.md) for detailed instr
 # First time setup
 ./binder setup
 
+# Welcome and overview
+./binder hello
+
 # Check system health
 ./binder doctor
 
-# Quick preview
+# List available chapters
+./binder list
+
+# Quick preview with hot reload
 ./binder preview intro
+
+# Build a specific chapter
+./binder build intro
 ```
 
 ---
