@@ -39,7 +39,7 @@
 
 </p>
 
-📚 **Hardcopy edition coming 2026 via MIT Press!**
+📚 **Hardcopy edition coming 2026 with MIT Press.**
 
 </div>
 
@@ -47,47 +47,55 @@
 
 ## About This Book
 
-The **open-source textbook** that teaches you to build real-world AI systems — from edge devices to cloud deployment. Originally developed as Harvard University's CS249r course by [Prof. Vijay Janapa Reddi](https://github.com/profvjreddi/homepage), now used by universities and students worldwide.
+The **open source textbook** for learning how to engineer AI systems. It began in Harvard’s CS249r course by [Prof. Vijay Janapa Reddi](https://vijay.seas.harvard.edu). Today, it supports classrooms, study groups, and independent learners around the world.
 
-> **Our mission:** Expand access to AI systems education worldwide — empowering learners, one chapter and one lab at a time.
+> **Mission:** Accessible AI systems education for anyone, anywhere. One chapter at a time.
+
+---
 
 ### Why This Book Exists
 
-*"This grew out of a concern that while students could train AI models, few understood how to build the systems that actually make them work. As AI becomes more capable and autonomous, the critical bottleneck won't be the algorithms - it will be the engineers who can build efficient, scalable, and sustainable systems that safely harness that intelligence."*
+*Many students learn how to train ML models but not how to build and engineer the systems that make those models useful in the real world. As AI becomes more capable, the real bottleneck will not just be algorithms, but engineers who can design efficient, scalable, and sustainable systems that put those algorithms to work responsibly.*
+
+This book is part of a broader personal mission to **educate one million learners worldwide** in the foundations of AI systems engineering. The long term impact of AI will be shaped by a generation of engineers and builders who know how to turn ideas into working systems.
 
 **— Vijay Janapa Reddi**
 
 ---
 
-### What Makes This Book Special
+### What Makes This Book Different
 
-This project isn’t just a book. It’s a living, evolving effort shaped by a growing community of learners, educators, and builders. Every pull request, note, and idea helps push the boundaries of what AI systems education can look like.
+This project is a living textbook. I keep it updated as the field grows, with community input along the way.
 
-Whether you’re reading a chapter, building a lab, or contributing your first fix (to even a small typo), you’re part of a story that’s bigger than code. This is how we make AI systems' knowledge accessible to everyone.
+AI may feel like it is moving at lightning speed, but the engineering building blocks that make it work do not change as quickly as the headlines. This book is built around those stable foundations.
+
+Think of it like LEGO. New sets arrive all the time, but the bricks themselves stay the same. Once you learn how the bricks fit together, you can build anything. Here, those “AI bricks” are the solid systems principles that make AI work.
+
+Whether you are reading a chapter, running a lab, or sharing feedback, you are helping make these ideas more accessible to the next learner. 
+
+Thank you for being a part of the story 🙏
 
 ---
 
 ### Start Here
-1. Read Chapter 1 and the overview
-2. Skim the Benchmarking chapter to learn what to measure
-3. Pick a kit and run a lab
-4. Say hello in Introduce Yourself
 
-• Benchmarking chapter: [https://mlsysbook.ai/contents/core/benchmarking/benchmarking.html](https://mlsysbook.ai/contents/core/benchmarking/benchmarking.html)
-• Kits and lab setups: [https://mlsysbook.ai/contents/labs/shared/kits.html](https://mlsysbook.ai/contents/labs/shared/kits.html)
-• Introduce Yourself: [https://github.com/harvard-edge/cs249r_book/discussions](https://github.com/harvard-edge/cs249r_book/discussions)
+1. Read [Chapter 1](https://www.mlsysbook.ai/contents/core/introduction/introduction.html) and the overview.
+2. Skim the [Benchmarking chapter](https://mlsysbook.ai/contents/core/benchmarking/benchmarking.html) to know what to measure.
+3. Pick a [TinyML kit](https://www.mlsysbook.ai/contents/labs/shared/kits.html) and run a lab.
+4. Say hello in [Introduce Yourself](https://github.com/harvard-edge/cs249r_book/discussions). I will do my best to reply.
 
-## 📚 What You'll Learn
+## 📚 What You Will Learn
 
-Go beyond training models — master the **full stack** of real-world ML systems.
+This textbook gives you a **systems level understanding of machine learning**, bridging the gap between algorithms and the real world infrastructure that makes them work. You will learn how to **design, build, and reason about** the components that make modern AI possible.
 
-| Topic | What You'll Build |
-|-------|------------------|
-| **System Design** | Scalable, maintainable ML architectures |
-| **Data Engineering** | Robust pipelines for collection, labeling, and processing |
-| **Model Deployment** | Production-ready systems from prototypes |
-| **MLOps & Monitoring** | Reliable, continuously operating systems |
-| **Edge AI** | Resource-efficient deployment on mobile, embedded, and IoT |
+| Topic                              | What You Will Learn                                                                            |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------- |
+| **System Design**                  | How to design and structure end-to-end ML systems that are scalable, modular, and maintainable |
+| **Data Engineering**               | How to build reliable pipelines for collection, labeling, and processing                       |
+| **Model Deployment**               | How to turn trained models into robust, production-ready services                              |
+| **MLOps and Monitoring**           | How to operate, monitor, and sustain AI systems over time                                      |
+| **Edge and Embedded AI**           | How to deploy ML on mobile, embedded, and resource-constrained devices                         |
+| **Responsible and Sustainable AI** | How to design systems with privacy, security, and environmental impact in mind                 |
 
 ---
 
@@ -95,54 +103,45 @@ Go beyond training models — master the **full stack** of real-world ML systems
 
 <div align="center">
 
-### Show Your Support
-**Star this repository** to help us demonstrate the value of open AI education to funders and institutions.
+### Show Support
+
+Star the repository. It signals interest and helps us secure resources for open education.
 
 [![Stars](https://img.shields.io/github/stars/harvard-edge/cs249r_book?style=for-the-badge&logo=github&color=gold)](https://github.com/harvard-edge/cs249r_book/stargazers)
 
-**Goal:** 10,000 stars = $100,000 in additional education funding
-
-[**⭐ Star Now**](https://github.com/harvard-edge/cs249r_book) — *takes 2 seconds!*
-
-### Fund the Mission (New!)
-We've graduated this project from Harvard to enable global access and expand AI systems education worldwide. Please help us support educators globally, especially in the Global South, by providing TinyML kits for students, funding workshops, and sustaining our open-source infrastructure.
+### Fund the Mission
+Your support helps provide TinyML kits, workshops, and infrastructure for learners worldwide.
 
 [![Open Collective](https://img.shields.io/badge/💝%20Support%20AI%20Education-Open%20Collective-blue.svg?style=for-the-badge)](https://opencollective.com/mlsysbook)
-
-*From $15/month to sponsor a learner to $250 for workshops — every contribution democratizes AI education.*
 
 </div>
 
 ---
 
-## 🌐 Community & Resources
+## 🌐 Community and Resources
 
 | Resource | Description |
-|----------|-------------|
-| [📚 **Main Site**](https://mlsysbook.org) | Complete learning platform |
-| [🔥 **TinyTorch**](https://mlsysbook.org/tinytorch) | Educational ML framework |
-| [💬 **Discussions**](https://github.com/harvard-edge/cs249r_book/discussions) | Ask questions, share insights |
-| [👥 **Community**](https://mlsysbook.org/community) | Join our global learning community |
+|---|---|
+| [📚 **Main Site**](https://mlsysbook.org) | Course materials, labs, and updates |
+| [🔥 **TinyTorch**](https://mlsysbook.org/tinytorch) | Educational ML framework (🚧 Work in progress) |
+| [💬 **Discussions/Community**](https://github.com/harvard-edge/cs249r_book/discussions) | Questions and ideas |
 
 ---
 
 ## 🎯 For Different Audiences
 
 ### 🎓 Students
-- [📖 Read online](https://mlsysbook.ai)
-- [📄 Download PDF](https://mlsysbook.ai/pdf)
-- [📓 Download EPUB](https://mlsysbook.ai/epub)
-- [🧪 Try hands-on labs](https://mlsysbook.org)
+- [Read online](https://mlsysbook.ai), [PDF](https://mlsysbook.ai/pdf), [EPUB](https://mlsysbook.ai/epub)
+- [Hands-on labs](https://mlsysbook.org)
 
 ### 👩‍🏫 Educators
-- [📋 Course materials](https://mlsysbook.org)
-- [🎯 Instructor resources](https://mlsysbook.org)
-- [💡 Teaching guides](https://mlsysbook.org)
+- [Course materials](https://mlsysbook.org)
+- Teaching guides and instructor notes
 
 ### 🛠️ Contributors
-- [🤝 Contribution guide](docs/contribute.md)
-- [⚡ Development setup](#development)
-- [💬 Join discussions](https://github.com/harvard-edge/cs249r_book/discussions)
+- [Contribution guide](docs/contribute.md)
+- [Development setup](#development)
+- [Join discussions](https://github.com/harvard-edge/cs249r_book/discussions)
 
 ---
 
@@ -150,13 +149,13 @@ We've graduated this project from Harvard to enable global access and expand AI 
 
 ### For Readers
 ```bash
-# Read online (continuously updated)
+# Read online
 open https://mlsysbook.ai
 
-# Download PDF for offline access
+# Download PDF
 curl -O https://mlsysbook.ai/pdf
 
-# Download EPUB for e-readers
+# Download EPUB
 curl -O https://mlsysbook.ai/epub
 ```
 
@@ -165,225 +164,27 @@ curl -O https://mlsysbook.ai/epub
 git clone https://github.com/harvard-edge/cs249r_book.git
 cd cs249r_book
 
-# Quick setup (recommended)
-./binder setup                    # Setup environment and dependencies
-./binder doctor                   # Check system health
-
-# Fast development workflow
-./binder preview intro            # Live preview with hot reload
-./binder build intro              # Build specific chapter (HTML)
-./binder html intro               # Build HTML for specific chapter
-./binder pdf intro                # Build PDF for specific chapter
-./binder epub intro               # Build EPUB for specific chapter
-
-# Build complete book
-./binder build                    # Build complete book (HTML)
-./binder html                     # Build all chapters (HTML)
-./binder pdf                      # Build complete book (PDF)
-./binder epub                     # Build complete book (EPUB)
-
-# Help and management
-./binder help                     # See all commands
-./binder list                     # List available chapters
-./binder status                   # Show current status
-```
-
----
-
-## 🤝 Contributing
-
-We welcome contributions from the global community! Here's how you can help:
-
-### Ways to Contribute
-
-- **📝 Content** — Suggest edits, improvements, or new examples
-- **🛠️ Tools** — Enhance development scripts and automation  
-- **🎨 Design** — Improve figures, diagrams, and visual elements
-- **🌍 Localization** — Translate content for global accessibility
-- **🔧 Infrastructure** — Help with build systems and deployment
-
-### If Something Confuses You
-
-Open a short [issue](https://github.com/harvard-edge/cs249r_book/issues) with the confusing sentence and a one-line suggestion. These reports help the most.
-
-### Quality Standards
-
-All contributions benefit from automated quality assurance:
-- ✅ **Pre-commit validation** — Automatic cleanup and checks
-- 📋 **Content review** — Formatting and style validation
-- 🧪 **Testing** — Build and link verification
-- 👥 **Peer review** — Community feedback
-
-[**Start Contributing →**](docs/contribute.md)
-
----
-
-## 🛠️ Development
-
-### Releases and Previews
-
-The dev site is our preview build. The main site publishes on release.
-* Dev: https://harvard-edge.github.io/cs249r_book_dev
-* Main: https://mlsysbook.ai
-
-### Book Binder CLI (Recommended)
-
-The **Book Binder** is our lightning-fast development CLI for streamlined building and iteration:
-
-```bash
-# Chapter development (fast iteration)
-./binder preview intro                # Live preview with hot reload
-./binder build intro                  # Build specific chapter (HTML)
-./binder html intro                   # Build HTML for specific chapter
-./binder pdf intro                    # Build PDF for specific chapter
-./binder epub intro                   # Build EPUB for specific chapter
-
-# Multiple chapters at once
-./binder build intro,ml_systems       # Build multiple chapters (HTML)
-./binder html intro,ops               # Build multiple chapters (HTML)
-
-# Complete book building
-./binder build                        # Build entire book (HTML)
-./binder html                         # Build all chapters (HTML)
-./binder pdf                          # Build complete PDF
-./binder epub                         # Build complete EPUB
-
-# Management
-./binder clean                        # Clean artifacts
-./binder switch pdf                   # Switch active config to PDF
-./binder list                         # List available chapters
-./binder status                       # Show current status
-./binder doctor                       # Run health check
-./binder setup                        # Setup environment
-./binder hello                        # Welcome message
-./binder about                        # Project information
-./binder help                         # Show all commands
-```
-
-### Development Commands
-```bash
-# Book Binder CLI (Recommended)
-./binder setup                    # First-time setup
-./binder build                    # Build complete HTML book
-./binder html                     # Build all chapters (HTML)
-./binder pdf                      # Build complete PDF book  
-./binder epub                     # Build complete EPUB book
-./binder preview intro            # Live preview chapter development
-./binder build intro              # Build specific chapter
-./binder doctor                   # Run health check
-./binder clean                    # Clean build artifacts
-
-# Traditional setup (if needed)
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r tools/dependencies/requirements.txt
-pre-commit install
-```
-
-### Project Structure
-```
-MLSysBook/
-├── binder                   # ⚡ Fast development CLI (recommended)
-├── cli/                     # Modular CLI implementation
-│   ├── commands/            # Command handlers (build, preview, clean, etc.)
-│   ├── core/                # Core components (config, discovery)
-│   ├── formats/             # Format-specific handling
-│   ├── utils/               # CLI utilities
-│   └── main.py              # CLI entry point
-├── quarto/                  # Main book content (Quarto)
-│   ├── contents/            # Chapter content
-│   │   ├── core/            # Core chapters
-│   │   ├── labs/            # Hands-on labs
-│   │   ├── frontmatter/     # Preface, acknowledgments
-│   │   ├── backmatter/      # References and resources
-│   │   └── parts/           # Book parts and sections
-│   ├── _extensions/         # Quarto extensions
-│   ├── config/              # Build configurations
-│   │   ├── _quarto-html.yml # Website build configuration
-│   │   ├── _quarto-pdf.yml  # PDF build configuration
-│   │   └── _quarto-epub.yml # EPUB build configuration
-│   ├── data/                # Cross-reference and metadata files
-│   ├── assets/              # Images, styles, media
-│   ├── filters/             # Lua filters
-│   ├── scripts/             # Build scripts
-│   └── _quarto.yml          # Active config (symlink)
-├── tools/                   # Development automation
-│   ├── scripts/             # Organized development scripts
-│   │   ├── content/         # Content management tools
-│   │   ├── cross_refs/      # Cross-reference management
-│   │   ├── glossary/        # Glossary management
-│   │   ├── images/          # Image processing tools
-│   │   ├── maintenance/     # System maintenance scripts
-│   │   ├── testing/         # Test and validation scripts
-│   │   └── utilities/       # General utility scripts
-│   ├── dependencies/        # Package requirements  
-│   └── setup/               # Setup and configuration
-├── config/                  # Project configuration
-│   ├── dev/                 # Development configurations
-│   ├── linting/             # Code quality configurations
-│   └── quarto/              # Quarto publishing settings
-├── docs/                    # Documentation
-│   ├── BINDER.md            # Binder CLI guide
-│   ├── BUILD.md             # Build instructions
-│   ├── DEVELOPMENT.md       # Development guide
-│   ├── MAINTENANCE_GUIDE.md # Maintenance and troubleshooting
-│   └── contribute.md        # Contribution guidelines
-├── CHANGELOG.md             # Project changelog
-├── CITATION.bib             # Citation information
-├── pyproject.toml           # Python project configuration
-└── README.md                # This file
-```
-
-### Documentation
-- [⚡ Binder CLI Guide](docs/BINDER.md) — Fast development with the Book Binder
-- [📋 Development Guide](docs/DEVELOPMENT.md) — Comprehensive setup and workflow
-- [🛠️ Maintenance Guide](docs/MAINTENANCE_GUIDE.md) — Daily tasks and troubleshooting  
-- [🔨 Build Instructions](docs/BUILD.md) — Detailed build process
-- [🤝 Contribution Guidelines](docs/contribute.md) — How to contribute effectively
-
-### Publishing
-
-Publishing is handled through GitHub Actions workflows for consistent, automated deployment:
-
-```bash
-# Build locally to test before publishing
-./binder build        # Build HTML
-./binder pdf          # Build PDF  
-./binder epub         # Build EPUB
-
-# Publishing happens via GitHub Actions
-# Merge to main branch triggers automatic deployment
-# See docs/PUBLISH_LIVE_WORKFLOW.md for details
-```
-
-**Publishing Workflow:**
-- **Automated Deployment** — GitHub Actions workflows handle all publishing
-- **Quality Checks** — Automated validation before deployment
-- **Multiple Formats** — HTML, PDF, and EPUB published simultaneously
-- **Preview Deployments** — Pull requests get automatic preview deployments
-- **Branch Strategy** — Develop on `dev` branch, merge to `main` for release
-
-See [Publishing Documentation](docs/PUBLISH_LIVE_WORKFLOW.md) for detailed instructions.
-
-### Getting Started
-```bash
-# First time setup
+# Quick setup
 ./binder setup
-
-# Welcome and overview
-./binder hello
-
-# Check system health
 ./binder doctor
 
-# List available chapters
-./binder list
-
-# Quick preview with hot reload
+# Fast iteration
 ./binder preview intro
-
-# Build a specific chapter
 ./binder build intro
+./binder html intro
+./binder pdf intro
+./binder epub intro
+
+# Build the whole book
+./binder build
+./binder html
+./binder pdf
+./binder epub
+
+# Utilities
+./binder help
+./binder list
+./binder status
 ```
 
 ---
