@@ -81,7 +81,7 @@ Thank you for being a part of the story 🙏
 
 1. Read [Chapter 1](https://www.mlsysbook.ai/contents/core/introduction/introduction.html) and the overview.
 2. Skim the [Benchmarking chapter](https://mlsysbook.ai/contents/core/benchmarking/benchmarking.html) to know what to measure.
-3. Pick a [TinyML kit](https://www.mlsysbook.ai/contents/labs/shared/kits.html) and run a lab.
+3. Pick a [TinyML kit](https://www.mlsysbook.ai/contents/labs/kits.html) and run a lab.
 4. Say hello in [Introduce Yourself](https://github.com/harvard-edge/cs249r_book/discussions). I will do my best to reply.
 
 ## 📚 What You Will Learn
