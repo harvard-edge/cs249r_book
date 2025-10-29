@@ -16,7 +16,7 @@
   <!-- Row 2: Access & Ecosystem -->
   [![Website](https://img.shields.io/website?url=https%3A%2F%2Fmlsysbook.ai&label=Website&logo=readthedocs)](https://mlsysbook.ai)
   [![Ecosystem](https://img.shields.io/website?url=https%3A%2F%2Fmlsysbook.org&label=Ecosystem&logo=internet-explorer)](https://mlsysbook.org)
-  [![Citation](https://img.shields.io/badge/Cite-IEEE%20CODES%2B%20ISSS%202024-blue?logo=academia)](https://mlsysbook.org)
+  [![Citation](https://img.shields.io/badge/Cite-IEEE%20CODES%2B%20ISSS%202024-blue?logo=academia)](#-citation--license)
 
 </p>
 
@@ -128,20 +128,13 @@ Your support helps provide TinyML kits, workshops, and infrastructure for learne
 
 ---
 
-## 🎯 For Different Audiences
+## 🛠️ Contributing
 
-### 🎓 Students
-- [Read online](https://mlsysbook.ai), [PDF](https://mlsysbook.ai/pdf), [EPUB](https://mlsysbook.ai/epub)
-- [Hands-on labs](https://mlsysbook.org)
+Want to improve this resource? We welcome contributions!
 
-### 👩‍🏫 Educators
-- [Course materials](https://mlsysbook.org)
-- Teaching guides and instructor notes
-
-### 🛠️ Contributors
 - [Contribution guide](docs/contribute.md)
 - [Development setup](#development)
-- [Join discussions](https://github.com/harvard-edge/cs249r_book/discussions)
+- Community discussions (see Community Resources above)
 
 ---
 
