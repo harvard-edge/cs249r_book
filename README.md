@@ -123,7 +123,7 @@ Your support helps provide TinyML kits, workshops, and infrastructure for learne
 | Resource | Description |
 |---|---|
 | [📚 **Main Site**](https://mlsysbook.org) | Course materials, labs, and updates |
-| [🔥 **TinyTorch**](https://mlsysbook.org/tinytorch) | Educational ML framework (🚧 Work in progress) |
+| [🔥 **TinyTorch**](https://mlsysbook.github.io/TinyTorch/intro.html) | Educational ML framework (🚧 Work in progress) |
 | [💬 **Discussions/Community**](https://github.com/harvard-edge/cs249r_book/discussions) | Questions and ideas |
 
 ---
