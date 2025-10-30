@@ -211,5 +211,5 @@ grep -n "Machine-Learning-Systems.pdf" .gitignore
 
 - [Development Guide](DEVELOPMENT.md)
 - [Build Process](BUILD.md)
-- [CI/CD Pipeline](CI_CD.md)
-- [Release Management](RELEASES.md) 
+- [Container Builds](CONTAINER_BUILDS.md)
+- [Release Management](RELEASE_PROCESS.md) 
