@@ -21,8 +21,7 @@ python3 scripts/improve_figure_captions.py --build-map -d contents/core/
 ### Cross-Reference Generation
 The `cross_refs/` directory contains scripts for generating AI-powered cross-references with explanations.
 
-📖 **Full documentation**: See [`cross_refs/RECIPE.md`](cross_refs/RECIPE.md) for complete workflow.
-
+📖 **Full documentation**: See [`cross_refs/RECIPE.md`](/tools/scripts/cross_refs/RECIPE.md) for complete workflow.
 ## Python Dependencies
 
 All Python dependencies are managed through the root-level `requirements.txt` file. This ensures consistent package versions across all scripts and the GitHub Actions workflow.
