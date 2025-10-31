@@ -1,4 +1,4 @@
-# Guidlines for contributing to the project
+# Guidelines for contributing to the project
 
 The Machine Learning Systems with TinyML project welcomes contributions from everyone. This project is maintained by a community of contributors from around the world. We appreciate your help!
 
@@ -21,7 +21,7 @@ If there is an open issue for the contribution you would like to make, please co
 
 ### Fork the repository
 
-Fork the repository on GitHub and clone your fork to your local machine. We are following GitHub flow for collabration. Please make sure that your main branch is up to date with the upstream main branch before you start working on your contribution.
+Fork the repository on GitHub and clone your fork to your local machine. We are following GitHub flow for collaboration. Please make sure that your main branch is up to date with the upstream main branch before you start working on your contribution.
 
 ### Clone the forked repository
 
@@ -84,7 +84,7 @@ Please submit the PRs to the `dev`  branch, not `main`.
 
 Open a Pull Request (PR) to merge your changes to the upstream repository. Please add a brief description of your contribution to the PR. Please include the issue number in the description. For example, `Fix typo in the documentation (issue #14)`.
 
-Opening an early PR is encouraged. This will allow us to provide feedback on your contribution and help you improve it. Moreover, Github Actions will run on your PR and will generate the book, so you can download the book and make sure that your contribution is rendered correctly.
+Opening an early PR is encouraged. This will allow us to provide feedback on your contribution and help you improve it. Moreover, GitHub Actions will run on your PR and will generate the book, so you can download the book and make sure that your contribution is rendered correctly.
 
 - If your PR is a work in progress, please add `[WIP]` to the title of the PR. This will let us know that you are still working on your contribution and that you are not ready for a review or merge yet.
 
