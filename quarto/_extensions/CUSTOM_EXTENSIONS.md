@@ -22,7 +22,7 @@ Our custom extensions are **protected by organizing them under the `mlsysbook-ex
   - Custom block types
   - Enhanced PDF rendering
   - MLSysBook-specific configurations
-- **Original**: `ute/custom-numbered-blocks` (https://github.com/ute/quarto-numbered-blocks)
+- **Original**: `ute/custom-numbered-blocks` (https://github.com/ute/custom-numbered-blocks)
 - **Last Updated**: Reorganized into mlsysbook-ext namespace
 
 #### `mlsysbook-ext/titlepage`
