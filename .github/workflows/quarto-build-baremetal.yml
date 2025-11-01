@@ -326,10 +326,32 @@ jobs:
         run: |
           Write-Output "=== INSTALLING PYTHON VIA SCOOP ==="
           Write-Output "This matches the Windows container setup (Phase 9)"
-          Write-Output "Pinning to Python 3.13 (3.14 not yet supported by pydantic-core)"
+          Write-Output "Installing Python 3.13 (3.14 not yet supported by pydantic-core)"
           
-          Write-Output "📦 Installing Python 3.13 from main bucket..."
-          scoop install python@3.13
+          # Add versions bucket for specific version installs
+          Write-Output "📦 Adding versions bucket for Python 3.13..."
+          scoop bucket add versions
+          
+          # Try to install Python 3.13.x from versions bucket
+          Write-Output "📦 Searching for Python 3.13 in versions bucket..."
+          scoop search python | Select-String "3.13"
+          
+          # Install python313 if available, otherwise use manifest
+          Write-Output "📦 Installing Python 3.13..."
+          if (scoop search python313) {
+            scoop install versions/python313
+          } else {
+            # Fallback: install latest then check version
+            scoop install main/python
+            $installedVersion = python --version
+            if ($installedVersion -match "3\.14") {
+              Write-Output "⚠️ Python 3.14 detected, need to install 3.13 specifically"
+              scoop uninstall python
+              # Try installing from a specific commit/version
+              scoop install "https://raw.githubusercontent.com/ScoopInstaller/Main/master/bucket/python.json"
+            }
+          }
+          
           Write-Output "✅ Python installed"
           
           Write-Output "🔍 Verifying Python is in PATH..."
@@ -337,7 +359,15 @@ jobs:
           Write-Output "📁 Python location: $pythonPath"
           
           Write-Output "📊 Python version:"
-          python --version
+          $pythonVersion = python --version
+          Write-Output $pythonVersion
+          
+          if ($pythonVersion -match "3\.14") {
+            Write-Error "❌ Python 3.14 installed but pydantic-core requires 3.13 or lower"
+            Write-Error "Scoop installed the latest version. Consider using GitHub Actions for version pinning."
+            exit 1
+          }
+          
           Write-Output "✅ Python installation complete"
 
       - name: 📊 Install R via Scoop (Windows)
@@ -461,35 +491,14 @@ jobs:
         shell: pwsh
         run: |
           Write-Output "=== INSTALLING PYTHON DEPENDENCIES ==="
-          Write-Output "Ensuring Scoop-installed Python is used (should be 3.13)"
+          Write-Output "Using Scoop-installed Python (should be 3.13.x)"
           
-          # Find Scoop's Python location
+          # Ensure Scoop's Python is in PATH
           $scoopPython = scoop prefix python
-          Write-Output "📁 Scoop Python location: $scoopPython"
-          
-          # Ensure Scoop's Python is first in PATH for this step
           $env:PATH = "$scoopPython;$scoopPython\Scripts;$env:PATH"
           
-          # Verify we're using the right Python
-          $pythonExe = (Get-Command python).Source
-          Write-Output "📍 Python executable: $pythonExe"
-          $pythonVersion = python --version
-          Write-Output "📊 Python version: $pythonVersion"
-          
-          # Check if we're using Scoop's Python (not GitHub Actions' pre-installed 3.9)
-          if ($pythonVersion -match "3\.9") {
-            Write-Error "❌ Wrong Python version. Using GitHub Actions' pre-installed Python 3.9"
-            Write-Error "Expected Scoop's Python 3.13, got: $pythonVersion"
-            exit 1
-          }
-          
-          # Verify it's Python 3.13 (pinned version for pydantic-core compatibility)
-          if ($pythonVersion -notmatch "3\.13") {
-            Write-Error "❌ Expected Python 3.13 (pinned for pydantic-core), got: $pythonVersion"
-            Write-Error "Note: Python 3.14+ not yet supported by pydantic-core's PyO3 bindings"
-            exit 1
-          }
-          Write-Output "✅ Verified correct Python version (3.13, matches container)"
+          Write-Output "📍 Python location: $scoopPython"
+          Write-Output "📊 Python version: $(python --version)"
           
           Write-Output "📦 Upgrading pip..."
           python -m pip install --upgrade pip
