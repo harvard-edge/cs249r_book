@@ -314,7 +314,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
       <td align="center" valign="top" width="20%"><a href="https://github.com/jessicaquaye"><img src="https://avatars.githubusercontent.com/jessicaquaye?s=100" width="100px;" alt="Jessica Quaye"/><br /><sub><b>Jessica Quaye</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/atcheng2"><img src="https://avatars.githubusercontent.com/atcheng2?s=100" width="100px;" alt="Andy Cheng"/><br /><sub><b>Andy Cheng</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/arighosh05"><img src="https://avatars.githubusercontent.com/arighosh05?s=100" width="100px;" alt="Aritra Ghosh"/><br /><sub><b>Aritra Ghosh</b></sub></a><br /></td>
-      <td align="center" valign="top" width="20%"><a href="https://github.com/Jahnic-kb"><img src="https://avatars.githubusercontent.com/Jahnic-kb?s=100" width="100px;" alt="Jahnic-kb"/><br /><sub><b>Jahnic-kb</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/cursoragent"><img src="https://avatars.githubusercontent.com/cursoragent?s=100" width="100px;" alt="Cursor Agent"/><br /><sub><b>Cursor Agent</b></sub></a><br /></td>
     </tr>
     <tr>
       <td align="center" valign="top" width="20%"><a href="https://github.com/bilgeacun"><img src="https://avatars.githubusercontent.com/bilgeacun?s=100" width="100px;" alt="Bilge Acun"/><br /><sub><b>Bilge Acun</b></sub></a><br /></td>
