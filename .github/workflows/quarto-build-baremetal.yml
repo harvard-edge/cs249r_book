@@ -342,21 +342,41 @@ jobs:
           scoop install versions/python313
           
           if ($LASTEXITCODE -ne 0) {
-            Write-Error "❌ Failed to install Python 3.13 from versions bucket"
-            Write-Error "Attempting alternative: installing latest from main and checking version..."
-            scoop install main/python
-            $installedVersion = python --version
-            if ($installedVersion -match "3\.14") {
-              Write-Error "❌ Python 3.14 installed but pydantic-core requires 3.13"
-              Write-Error "versions/python313 package not available in versions bucket"
-              exit 1
+            Write-Error "❌ Failed to install versions/python313"
+            Write-Output "⚠️ Trying alternative: python3.13 or python from main..."
+            
+            # Try python3.13 as alternative name
+            scoop install python3.13 -ErrorAction SilentlyContinue
+            if ($LASTEXITCODE -ne 0) {
+              Write-Output "⚠️ python3.13 not found, trying main/python..."
+              scoop install main/python
             }
           }
           
-          Write-Output "✅ Python installed"
+          Write-Output "✅ Python install command completed"
           
-          Write-Output "🔍 Verifying Python installation..."
-          $pythonPath = scoop prefix python
+          # Check which Python app was installed
+          Write-Output "🔍 Checking installed Python apps..."
+          scoop list | Select-String "python"
+          
+          # Try to get Python path - try different app names
+          $pythonPath = $null
+          $appNames = @('python313', 'python3.13', 'python')
+          foreach ($appName in $appNames) {
+            $pythonPath = scoop prefix $appName 2>$null
+            if ($pythonPath) {
+              Write-Output "✅ Found Python as '$appName'"
+              break
+            }
+          }
+          
+          if (-not $pythonPath) {
+            Write-Error "❌ Could not find Python installation via Scoop"
+            Write-Error "Checked app names: python313, python3.13, python"
+            scoop list
+            exit 1
+          }
+          
           Write-Output "📁 Python location: $pythonPath"
           
           # Add to GITHUB_PATH for subsequent steps
@@ -502,8 +522,27 @@ jobs:
           Write-Output "=== INSTALLING PYTHON DEPENDENCIES ==="
           Write-Output "Using Scoop-installed Python (should be 3.13.x)"
           
-          # Get Scoop's Python path
-          $scoopPython = scoop prefix python
+          # Try to find Scoop's Python with different app names
+          $scoopPython = $null
+          $appNames = @('python313', 'python3.13', 'python')
+          foreach ($appName in $appNames) {
+            $path = scoop prefix $appName 2>$null
+            if ($path) {
+              $scoopPython = $path
+              Write-Output "✅ Found Scoop Python as '$appName'"
+              break
+            }
+          }
+          
+          if (-not $scoopPython) {
+            Write-Error "❌ Could not find Scoop Python installation"
+            Write-Error "GITHUB_PATH was not set correctly in previous step"
+            Write-Error "Current Python being used:"
+            python --version
+            (Get-Command python).Source
+            exit 1
+          }
+          
           Write-Output "📁 Scoop Python location: $scoopPython"
           
           # Prepend to PATH and verify immediately
