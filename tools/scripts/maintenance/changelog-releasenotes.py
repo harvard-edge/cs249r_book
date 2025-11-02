@@ -270,9 +270,8 @@ def generate_release_notes_from_changelog(version, previous_version, description
                 content_improvements.append(item)
     
     # Build the release notes with actual data
-    release_notes = f"""# Release v{version}: {description}
-
-This release focuses on {'content quality improvements, infrastructure enhancements, and addressing community feedback' if len(content_improvements) > len(infrastructure_changes) else 'infrastructure improvements and content refinements'}.
+    # Note: Don't include H1 title - GitHub release UI already shows it
+    release_notes = f"""This release focuses on {'content quality improvements, infrastructure enhancements, and addressing community feedback' if len(content_improvements) > len(infrastructure_changes) else 'infrastructure improvements and content refinements'}.
 
 ## 🎯 Key Highlights
 """
