@@ -347,9 +347,9 @@ chapter_lookup = [
     ("contents/core/ops/ops.qmd", "ML Operations", 13),
     ("contents/core/ondevice_learning/ondevice_learning.qmd", "On-Device Learning", 14),
     ("contents/core/privacy_security/privacy_security.qmd", "Security & Privacy", 15),
-    ("contents/core/responsible_ai/responsible_ai.qmd", "Responsible AI", 16),
-    ("contents/core/sustainable_ai/sustainable_ai.qmd", "Sustainable AI", 17),
-    ("contents/core/robust_ai/robust_ai.qmd", "Robust AI", 18),
+    ("contents/core/robust_ai/robust_ai.qmd", "Robust AI", 16),
+    ("contents/core/responsible_ai/responsible_ai.qmd", "Responsible AI", 17),
+    ("contents/core/sustainable_ai/sustainable_ai.qmd", "Sustainable AI", 18),
     ("contents/core/ai_for_good/ai_for_good.qmd", "AI for Good", 19),
     ("contents/core/frontiers/frontiers.qmd", "Frontiers", 20),
     ("contents/core/conclusion/conclusion.qmd", "Conclusion", 21),
@@ -482,6 +482,19 @@ def extract_chapter_title(file_path):
         return base.replace('_', ' ').replace('.qmd', '').title()
     else:
         return base.replace('_', ' ').replace('.qmd', '').title()
+
+def generate_impact_bar(change_count):
+    """Generate impact bar based on number of line changes (added + removed)."""
+    if change_count >= 225:
+        return "█████"  # Major: 225+ lines
+    elif change_count >= 72:
+        return "████░"  # Large: 72-224 lines
+    elif change_count >= 15:
+        return "███░░"  # Medium: 15-71 lines
+    elif change_count >= 5:
+        return "██░░░"  # Small: 5-14 lines
+    else:
+        return "█░░░░"  # Tiny: 1-4 lines
 
 def sort_by_impact_level(updates):
     def extract_impact_level(update):
@@ -671,14 +684,17 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False, ai
         
         # Generate summary based on AI mode
         chapter_title = extract_chapter_title(file_path)
+        total_changes = added + removed
+        impact_bar = generate_impact_bar(total_changes)
+        
         if ai_mode:
             summary_text = generate_ai_summary(chapter_title, commit_msgs, file_path, verbose=verbose)
-            summary = f"- **{chapter_title}**: {summary_text}"
+            summary = f"- `{impact_bar}` **{chapter_title}**: {summary_text}"
         else:
             # Create simple summary based on file path and commit count
             commit_count = len([msg for msg in commit_msgs.split('\n') if msg.strip()])
             summary_text = f"Updated content with {commit_count} changes"
-            summary = f"- **{chapter_title}**: {summary_text}"
+            summary = f"- `{impact_bar}` **{chapter_title}**: {summary_text}"
         
         # Show the generated summary
         print(f"      📝 {summary_text}")
@@ -969,7 +985,7 @@ if __name__ == "__main__":
     parser.add_argument("--demo", action="store_true", help="Generate a demo changelog entry with sample data.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output.")
     parser.add_argument("-q", "--quarto-config", type=str, help="Path to quarto config file (default: quarto/config/_quarto-pdf.yml)")
-    parser.add_argument("--ai-mode", action="store_true", help="Enable AI-generated summaries instead of simple change counts.")
+    parser.add_argument("--ai-mode", type=lambda x: x.lower() == 'true', default=True, help="Enable AI-generated summaries with detailed breakdowns (default: true). Use --ai-mode=false to disable.")
     parser.add_argument("--ollama-url", default="http://localhost:11434", help="Ollama API URL for AI summaries.")
     parser.add_argument("--ollama-model", default="gemma2:9b", help="Ollama model to use for AI summaries.")
 
