@@ -4392,12 +4392,49 @@ def redistribute_mcq_answers(response, verbose=False, parallel=False):
                                 choices[current_idx], choices[new_idx] = choices[new_idx], choices[current_idx]
                                 q['choices'] = choices
                                 
-                                # Update the answer text
-                                q['answer'] = re.sub(
+                                # Update the answer text: need to swap ALL option references
+                                # Create a temporary placeholder to avoid double-swapping
+                                updated_answer = answer_text
+                                
+                                # First, update "The correct answer is X" part
+                                updated_answer = re.sub(
                                     r'The correct answer is [A-D]',
                                     f'The correct answer is {new_position}',
-                                    answer_text
+                                    updated_answer
                                 )
+                                
+                                # Now swap all references to the two options being swapped
+                                # Use placeholders to avoid double-replacement
+                                placeholder_current = f'__TEMP_PLACEHOLDER_{current_position}__'
+                                placeholder_new = f'__TEMP_PLACEHOLDER_{new_position}__'
+                                
+                                # Replace current_position references with placeholder
+                                updated_answer = re.sub(
+                                    rf'\b[Oo]ption {current_position}\b',
+                                    placeholder_current,
+                                    updated_answer
+                                )
+                                
+                                # Replace new_position references with placeholder
+                                updated_answer = re.sub(
+                                    rf'\b[Oo]ption {new_position}\b',
+                                    placeholder_new,
+                                    updated_answer
+                                )
+                                
+                                # Now swap: placeholder_current becomes new_position
+                                updated_answer = updated_answer.replace(
+                                    placeholder_current,
+                                    f'Option {new_position}'
+                                )
+                                
+                                # And placeholder_new becomes current_position
+                                updated_answer = updated_answer.replace(
+                                    placeholder_new,
+                                    f'Option {current_position}'
+                                )
+                                
+                                q['answer'] = updated_answer
                 
                 mcq_index += 1
     
