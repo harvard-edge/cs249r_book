@@ -19,11 +19,11 @@ import re
 import argparse
 import sys
 from pathlib import Path
-from typing import Set, Dict, List, Tuple
+from typing import Set, Dict, List, Tuple, Optional
 from collections import defaultdict
 
 
-def extract_bibliography_file(qmd_file: Path) -> str | None:
+def extract_bibliography_file(qmd_file: Path) -> Optional[str]:
     """Extract the bibliography file name from a .qmd file's YAML frontmatter."""
     try:
         with open(qmd_file, 'r', encoding='utf-8') as f:
