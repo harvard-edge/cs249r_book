@@ -270,9 +270,8 @@ def generate_release_notes_from_changelog(version, previous_version, description
                 content_improvements.append(item)
     
     # Build the release notes with actual data
-    release_notes = f"""# Release v{version}: {description}
-
-This release focuses on {'content quality improvements, infrastructure enhancements, and addressing community feedback' if len(content_improvements) > len(infrastructure_changes) else 'infrastructure improvements and content refinements'}.
+    # Note: Don't include H1 title - GitHub release UI already shows it
+    release_notes = f"""This release focuses on {'content quality improvements, infrastructure enhancements, and addressing community feedback' if len(content_improvements) > len(infrastructure_changes) else 'infrastructure improvements and content refinements'}.
 
 ## 🎯 Key Highlights
 """
@@ -908,11 +907,10 @@ def generate_changelog(mode="incremental", verbose=False, ai_mode=False, ollama_
 
     def get_latest_gh_pages_commit():
         print("🔍 Looking for latest publication commit...")
-        # Look for actual publication commits, not administrative ones
-        output = run_git_command(["git", "log", "--pretty=format:%H %aI", "--grep=Built site for gh-pages", "origin/gh-pages"], verbose=verbose)
+        # Any commit to gh-pages represents a publication - just get the latest one
+        output = run_git_command(["git", "log", "--pretty=format:%H %aI", "-n", "1", "origin/gh-pages"], verbose=verbose)
         if output.strip():
-            first_line = output.split('\n')[0]
-            parts = first_line.split(" ", 1)
+            parts = output.split(" ", 1)
             result = (parts[0], parts[1]) if len(parts) == 2 else (None, None)
             if result[0]:
                 print(f"  📅 Found latest commit: {result[0][:8]} from {result[1]}")
@@ -922,8 +920,8 @@ def generate_changelog(mode="incremental", verbose=False, ai_mode=False, ollama_
 
     def get_all_gh_pages_commits():
         print("🔍 Scanning all publication commits...")
-        # Look for actual publication commits, not administrative ones
-        output = run_git_command(["git", "log", "--pretty=format:%H %aI", "--grep=Built site for gh-pages", "origin/gh-pages"], verbose=verbose)
+        # Get all commits from gh-pages - each one is a publication
+        output = run_git_command(["git", "log", "--pretty=format:%H %aI", "origin/gh-pages"], verbose=verbose)
         commits = []
         for line in output.splitlines():
             parts = line.split(" ", 1)
