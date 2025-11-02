@@ -14,10 +14,12 @@ The publish-live workflow is designed to handle the publication of your Machine 
   - **Dev Commit**: Specific commit to publish
   - **Confirm**: Type "PUBLISH" to confirm
 
-### 2. Validation & Merge
+### 2. Validation & Version Update
 - ✅ Validates the dev commit exists and is from dev branch
-- ✅ Calculates next version number
-- ✅ Merges dev → main branch
+- ✅ Calculates next version number (based on release type)
+- 📝 **Updates version in `quarto/index.qmd`** (automatic)
+- ✅ Commits version update to dev branch
+- ✅ Merges dev → main branch (includes version update)
 - ✅ Creates release tag
 - ✅ Pushes to main (triggers production build)
 
@@ -37,6 +39,41 @@ The publish-live workflow is designed to handle the publication of your Machine 
 - 📝 Creates draft release for manual editing
 - 🔧 Provides release notes generator script
 - ✏️ Allows custom release notes on GitHub website
+
+## 🔢 Version Number Automation
+
+### How It Works
+The version number displayed on the website is **automatically updated** during the publish workflow:
+
+1. **Workflow calculates version**: Based on release type (patch/minor/major)
+   - Patch: v0.4.1 → v0.4.2 (bug fixes)
+   - Minor: v0.4.1 → v0.5.0 (new features)
+   - Major: v0.4.1 → v1.0.0 (breaking changes)
+
+2. **Updates `quarto/index.qmd`**: 
+   - Modifies the `doi:` field with the new version
+   - Commits to dev branch: "chore: update version to vX.X.X"
+
+3. **Merges to main**: Version update included in the merge
+
+4. **Displays on website**:
+   - Shows as "Version" in the title metadata
+   - Links to GitHub releases page (via JavaScript)
+   - Automatically stays in sync with GitHub releases
+
+### Files Involved
+- **`quarto/index.qmd`**: Contains the version number (doi field)
+- **`quarto/assets/scripts/version-link.js`**: Makes version link to releases page
+- **`.github/workflows/publish-live.yml`**: Updates version automatically
+
+### Manual Override
+If you need to manually update the version (not recommended):
+```yaml
+# In quarto/index.qmd
+doi: "v0.4.1"  # Change this value
+```
+
+**Note**: The next publish will overwrite any manual changes.
 
 ## 📄 PDF Management Strategy
 
