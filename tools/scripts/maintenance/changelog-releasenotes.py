@@ -209,7 +209,7 @@ def extract_latest_changelog_section(changelog_file="CHANGELOG.md"):
 
 
 def generate_release_notes_from_changelog(version, previous_version, description, changelog_entry, verbose=False):
-    """Generate release notes using changelog data."""
+    """Generate release notes using actual changelog data with intelligent categorization."""
     
     if verbose:
         print(f"📝 Generating release notes...")
@@ -218,102 +218,157 @@ def generate_release_notes_from_changelog(version, previous_version, description
         print(f"📋 Description: {description}")
         print(f"📋 Changelog entry length: {len(changelog_entry)} characters")
     
-    # Create release notes template
-    release_notes = f"""## 📚 Release {version}
+    # Parse the changelog entry to extract structured data
+    sections = {
+        'frontmatter': [],
+        'chapters': [],
+        'labs': [],
+        'appendix': []
+    }
+    
+    # Extract sections from changelog
+    current_section = None
+    for line in changelog_entry.split('\n'):
+        line = line.strip()
+        if not line:
+            continue
+            
+        # Detect section headers
+        if '**📄 Frontmatter**' in line:
+            current_section = 'frontmatter'
+        elif '**📖 Chapters**' in line:
+            current_section = 'chapters'
+        elif '**🧑‍💻 Labs**' in line:
+            current_section = 'labs'
+        elif '**📚 Appendix**' in line:
+            current_section = 'appendix'
+        elif line.startswith('- ') and current_section:
+            # Extract the content (remove impact bars if present)
+            clean_line = re.sub(r'`[█░]+`\s*', '', line[2:])  # Remove "- " and impact bars
+            sections[current_section].append(clean_line)
+    
+    if verbose:
+        print(f"📊 Extracted: {len(sections['frontmatter'])} frontmatter, {len(sections['chapters'])} chapters, "
+              f"{len(sections['labs'])} labs, {len(sections['appendix'])} appendix items")
+    
+    # Categorize changes by type
+    content_improvements = []
+    infrastructure_changes = []
+    bug_fixes = []
+    
+    for section_name, items in sections.items():
+        for item in items:
+            lower_item = item.lower()
+            
+            # Categorize by keywords
+            if any(word in lower_item for word in ['fix', 'typo', 'correct', 'resolved', 'bug']):
+                bug_fixes.append(item)
+            elif any(word in lower_item for word in ['workflow', 'build', 'infrastructure', 'ci/cd', 'deploy', 
+                                                      'compression', 'script', 'automation']):
+                infrastructure_changes.append(item)
+            else:
+                content_improvements.append(item)
+    
+    # Build the release notes with actual data
+    release_notes = f"""# Release v{version}: {description}
 
-### 🎯 Key Updates
-- Repository restructuring for better organization
-- Enhanced learning with integrated quizzes
-- Improved content clarity and navigation
+This release focuses on {'content quality improvements, infrastructure enhancements, and addressing community feedback' if len(content_improvements) > len(infrastructure_changes) else 'infrastructure improvements and content refinements'}.
 
-### 📋 Release Information
-- **Type**: Release
-- **Previous Version**: {previous_version}
-- **Published at**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-- **Build Platform**: Linux (HTML + PDF)
+## 🎯 Key Highlights
+"""
+    
+    # Add content improvements section
+    if content_improvements:
+        # Sample up to 8 most important items
+        top_content = content_improvements[:8]
+        release_notes += "\n### 📖 Content Improvements\n"
+        for item in top_content:
+            release_notes += f"* {item}\n"
+    
+    # Add infrastructure section
+    if infrastructure_changes:
+        release_notes += "\n### 🛠️ Infrastructure Enhancements\n"
+        top_infra = infrastructure_changes[:6]
+        for item in top_infra:
+            release_notes += f"* {item}\n"
+    
+    # Add bug fixes section
+    if bug_fixes:
+        release_notes += "\n### 🐛 Bug Fixes\n"
+        top_bugs = bug_fixes[:6]
+        for item in top_bugs:
+            release_notes += f"* {item}\n"
+    
+    # Add summary statistics
+    total_changes = len(sections['frontmatter']) + len(sections['chapters']) + len(sections['labs']) + len(sections['appendix'])
+    
+    release_notes += f"""
+### 📊 Change Summary
+* **Total Updates**: {total_changes} items across all sections
+* **Chapters Updated**: {len(sections['chapters'])} core chapters
+* **Labs Updated**: {len(sections['labs'])} hands-on labs
+* **Frontmatter**: {len(sections['frontmatter'])} updates
+* **Appendix**: {len(sections['appendix'])} updates
 
-### 🔗 Quick Links
-- 🌐 [Web](https://mlsysbook.ai)
-- 📄 [PDF](https://mlsysbook.ai/pdf)
+## 📋 Release Information
+* **Release Date**: {datetime.now().strftime('%B %d, %Y')}
+* **Previous Version**: {previous_version}
+* **Release Type**: {'Patch' if version.count('.') == 2 and version.split('.')[2] != '0' else 'Minor' if version.split('.')[1] != '0' else 'Major'}
 
-### 📖 Detailed Changes
-For a complete list of all changes, improvements, and updates, see the [detailed changelog](https://www.mlsysbook.ai/contents/frontmatter/changelog/changelog).
+## 🔗 Quick Links
+* 🌐 [Web Version](https://mlsysbook.ai)
+* 📄 [PDF Download](https://mlsysbook.ai/pdf)
+* 📚 [EPUB Download](https://mlsysbook.ai/epub)
+* 📖 [Detailed Changelog](https://www.mlsysbook.ai/contents/frontmatter/changelog/changelog)
 
-### 🏗️ Build Information
-- **Platform**: Linux
-- **Outputs**: HTML + PDF
-- **Deployment**: GitHub Pages
-- **PDF Generation**: Quarto with LaTeX
+## 🏗️ Technical Details
+* **Build Platform**: Linux
+* **Formats**: HTML, PDF, EPUB
+* **Deployment**: GitHub Pages
+* **PDF Engine**: Quarto with LaTeX
+
+---
+
+This release represents continuous improvements to the MLSysBook, incorporating feedback from educators, students, and community contributors.
 """
     
     return release_notes
 
 
 def generate_release_notes(version, previous_version, description, verbose=False):
-    """Generate AI-powered release notes and save to file."""
+    """Generate release notes from changelog data with proper error handling."""
     
     print(f"📝 Generating release notes for version {version}...")
     
-
-    
     # First, ensure we have a changelog
     if not os.path.exists(CHANGELOG_FILE):
-        print(f"📝 Changelog not found, generating incremental changelog...")
-        generate_changelog(mode="incremental", verbose=verbose)
+        print(f"❌ Error: Changelog not found at {CHANGELOG_FILE}")
+        print(f"💡 Run: python tools/scripts/maintenance/changelog-releasenotes.py --changelog --incremental")
+        raise FileNotFoundError(f"Changelog file not found: {CHANGELOG_FILE}")
     
-    # Try to extract changelog data
+    # Extract changelog data
     changelog_entry = extract_latest_changelog_section(CHANGELOG_FILE)
     
-    if changelog_entry:
-        print("📝 Using changelog data for release notes generation...")
-        release_notes = generate_release_notes_from_changelog(
-            version=version,
-            previous_version=previous_version,
-            description=description,
-            changelog_entry=changelog_entry,
-            verbose=verbose
-        )
-    else:
-        print("⚠️ No changelog data found, using basic generation...")
-        
-        # Fallback to basic generation
-        if verbose:
-            print(f"🤖 Generating release notes with {model}...")
-            print(f"📋 Version: {version}")
-            print(f"📋 Previous: {previous_version}")
-            print(f"📋 Description: {description}")
-            print("🧪 TEST MODE - Skipping AI generation for faster debugging")
-        
-        # Create the final release notes (test mode - no AI)
-        release_notes = f"""## 📚 Release {version}
-
-### 🎯 Key Updates
-- Repository restructuring for better organization
-- Enhanced learning with integrated quizzes
-- Improved content clarity and navigation
-
-### 📋 Release Information
-- **Type**: Release
-- **Previous Version**: {previous_version}
-- **Published at**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-- **Build Platform**: Linux (HTML + PDF)
-
-### 🔗 Quick Links
-- 🌐 [Web](https://mlsysbook.ai)
-- 📄 [PDF](https://mlsysbook.ai/pdf)
-
-### 📖 Detailed Changes
-For a complete list of all changes, improvements, and updates, see the [detailed changelog](https://www.mlsysbook.ai/contents/frontmatter/changelog/changelog).
-
-### 🏗️ Build Information
-- **Platform**: Linux
-- **Outputs**: HTML + PDF
-- **Deployment**: GitHub Pages
-- **PDF Generation**: Quarto with LaTeX
-
----
-*Test mode - AI generation disabled for faster debugging*
-"""
+    if not changelog_entry:
+        print("❌ Error: No changelog entries found in latest section")
+        print(f"💡 The changelog file exists but appears empty or improperly formatted")
+        raise ValueError("Cannot generate release notes without changelog data")
+    
+    print(f"✅ Found changelog data ({len(changelog_entry)} characters)")
+    print("📝 Parsing changelog and generating release notes...")
+    
+    # Generate release notes from actual changelog data
+    release_notes = generate_release_notes_from_changelog(
+        version=version,
+        previous_version=previous_version,
+        description=description,
+        changelog_entry=changelog_entry,
+        verbose=verbose
+    )
+    
+    if not release_notes or len(release_notes) < 100:
+        print("❌ Error: Generated release notes are too short or empty")
+        raise ValueError("Release notes generation failed to produce valid output")
     
     # Save release notes to file
     filename = RELEASE_NOTES_FILE.format(version=version)
@@ -321,6 +376,8 @@ For a complete list of all changes, improvements, and updates, see the [detailed
         f.write(release_notes)
     
     print(f"✅ Release notes saved to: {filename}")
+    print(f"📊 Generated {len(release_notes)} characters of content")
+    
     return filename
 
 QUARTO_YML_FILE = "quarto/config/_quarto-pdf.yml"  # Default to PDF config which has chapters structure
@@ -347,9 +404,9 @@ chapter_lookup = [
     ("contents/core/ops/ops.qmd", "ML Operations", 13),
     ("contents/core/ondevice_learning/ondevice_learning.qmd", "On-Device Learning", 14),
     ("contents/core/privacy_security/privacy_security.qmd", "Security & Privacy", 15),
-    ("contents/core/responsible_ai/responsible_ai.qmd", "Responsible AI", 16),
-    ("contents/core/sustainable_ai/sustainable_ai.qmd", "Sustainable AI", 17),
-    ("contents/core/robust_ai/robust_ai.qmd", "Robust AI", 18),
+    ("contents/core/robust_ai/robust_ai.qmd", "Robust AI", 16),
+    ("contents/core/responsible_ai/responsible_ai.qmd", "Responsible AI", 17),
+    ("contents/core/sustainable_ai/sustainable_ai.qmd", "Sustainable AI", 18),
     ("contents/core/ai_for_good/ai_for_good.qmd", "AI for Good", 19),
     ("contents/core/frontiers/frontiers.qmd", "Frontiers", 20),
     ("contents/core/conclusion/conclusion.qmd", "Conclusion", 21),
@@ -482,6 +539,19 @@ def extract_chapter_title(file_path):
         return base.replace('_', ' ').replace('.qmd', '').title()
     else:
         return base.replace('_', ' ').replace('.qmd', '').title()
+
+def generate_impact_bar(change_count):
+    """Generate impact bar based on number of line changes (added + removed)."""
+    if change_count >= 225:
+        return "█████"  # Major: 225+ lines
+    elif change_count >= 72:
+        return "████░"  # Large: 72-224 lines
+    elif change_count >= 15:
+        return "███░░"  # Medium: 15-71 lines
+    elif change_count >= 5:
+        return "██░░░"  # Small: 5-14 lines
+    else:
+        return "█░░░░"  # Tiny: 1-4 lines
 
 def sort_by_impact_level(updates):
     def extract_impact_level(update):
@@ -671,14 +741,17 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False, ai
         
         # Generate summary based on AI mode
         chapter_title = extract_chapter_title(file_path)
+        total_changes = added + removed
+        impact_bar = generate_impact_bar(total_changes)
+        
         if ai_mode:
             summary_text = generate_ai_summary(chapter_title, commit_msgs, file_path, verbose=verbose)
-            summary = f"- **{chapter_title}**: {summary_text}"
+            summary = f"- `{impact_bar}` **{chapter_title}**: {summary_text}"
         else:
             # Create simple summary based on file path and commit count
             commit_count = len([msg for msg in commit_msgs.split('\n') if msg.strip()])
             summary_text = f"Updated content with {commit_count} changes"
-            summary = f"- **{chapter_title}**: {summary_text}"
+            summary = f"- `{impact_bar}` **{chapter_title}**: {summary_text}"
         
         # Show the generated summary
         print(f"      📝 {summary_text}")
@@ -969,7 +1042,7 @@ if __name__ == "__main__":
     parser.add_argument("--demo", action="store_true", help="Generate a demo changelog entry with sample data.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output.")
     parser.add_argument("-q", "--quarto-config", type=str, help="Path to quarto config file (default: quarto/config/_quarto-pdf.yml)")
-    parser.add_argument("--ai-mode", action="store_true", help="Enable AI-generated summaries instead of simple change counts.")
+    parser.add_argument("--ai-mode", type=lambda x: x.lower() == 'true', default=True, help="Enable AI-generated summaries with detailed breakdowns (default: true). Use --ai-mode=false to disable.")
     parser.add_argument("--ollama-url", default="http://localhost:11434", help="Ollama API URL for AI summaries.")
     parser.add_argument("--ollama-model", default="gemma2:9b", help="Ollama model to use for AI summaries.")
 

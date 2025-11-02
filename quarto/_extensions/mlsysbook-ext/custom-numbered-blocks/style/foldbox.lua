@@ -26,7 +26,16 @@ blockStart = function (tt, fmt)
   local texEnv = "fbx"
   if #tt.title > 0 then tt.typlabelTag = tt.typlabelTag..": " end
   if fmt =="html" then
-    if tt.collapse =="false" then Open=" open" end
+    -- For ePub (XHTML), use open="open" instead of just open (boolean attribute)
+    -- ePub requires strict XHTML syntax
+    local isEpub = quarto.doc.is_format("epub")
+    if tt.collapse =="false" then 
+      if isEpub then
+        Open=' open="open"'
+      else
+        Open=" open"
+      end
+    end
     if tt.boxstyle =="foldbox.simple" 
       then 
         BoxStyle=" fbx-simplebox fbx-default" 
@@ -59,6 +68,8 @@ end,
 insertPreamble = function(doc, classDefs, fmt)
   local ishtml = quarto.doc.is_format("html")
   local ispdf = quarto.doc.is_format("pdf")
+  local isepub = quarto.doc.is_format("epub")
+  -- Note: ePub format is treated as HTML (fmt="html") since ePub uses HTML internally
   local StyleCSSTeX = {}
   
   -- Set icon path from filter-metadata configuration if available
@@ -125,19 +136,26 @@ insertPreamble = function(doc, classDefs, fmt)
 
   if fmt == "html"
   then 
-    quarto.doc.add_html_dependency({
-      name = 'foldbox',
-      -- version = '0.0.1',
-      --stylesheets = {'style/'..style..'.css'}
-      stylesheets = {'style/foldbox.css'}
-    })
+    -- For ePub, we don't add the foldbox.css dependency as it's not needed
+    -- The styles are defined in the main epub.css file
+    if not isepub then
+      quarto.doc.add_html_dependency({
+        name = 'foldbox',
+        -- version = '0.0.1',
+        --stylesheets = {'style/'..style..'.css'}
+        stylesheets = {'style/foldbox.css'}
+      })
+    end
    elseif fmt == "pdf"
     then
       quarto.doc.use_latex_package("tcolorbox","many")
       quarto.doc.include_file("in-header", 'style/foldbox.tex')
   end
-  if preamblestuff then quarto.doc.include_text("in-header", preamblestuff) end
-  if iconCSS ~= "" then quarto.doc.include_text("in-header", iconCSS) end
+  -- Skip injecting CSS styles for ePub - they're in epub.css already
+  if not isepub then
+    if preamblestuff then quarto.doc.include_text("in-header", preamblestuff) end
+    if iconCSS ~= "" then quarto.doc.include_text("in-header", iconCSS) end
+  end
   return(doc)
 end
 }
