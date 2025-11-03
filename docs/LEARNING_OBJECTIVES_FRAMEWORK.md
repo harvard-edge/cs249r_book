@@ -504,3 +504,6 @@ python sync_objectives.py --chapter introduction --apply
 
 *This framework establishes MLSysBook as the gold standard for pedagogically rigorous technical textbooks with evidence-based learning design.*
 
+
+
+

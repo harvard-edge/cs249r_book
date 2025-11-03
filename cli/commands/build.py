@@ -578,7 +578,16 @@ class BuildCommand:
                 for part_line in part_lines:
                     part_stripped = part_line.strip()
                     
-                    if '.qmd' in part_line:
+                    # Check structural lines FIRST (before .qmd check) to avoid treating part declarations as chapters
+                    if part_has_active_chapters and ('part:' in part_line or part_stripped.startswith('chapters:')):
+                        # This part has active chapters, so ensure structural lines are uncommented
+                        # Always ensure part and chapters lines are uncommented when part has active chapters
+                        if part_stripped.startswith('#'):
+                            uncommented = part_line.replace('# ', '', 1).replace('#', '', 1)
+                            modified_lines.append(uncommented)
+                        else:
+                            modified_lines.append(part_line)
+                    elif '.qmd' in part_line:
                         # This is a chapter file - check if it should be included
                         should_include = False
                         
@@ -613,17 +622,9 @@ class BuildCommand:
                             else:
                                 modified_lines.append(part_line)
                     elif part_has_active_chapters:
-                        # This part has active chapters, so ensure structural lines are uncommented
-                        if 'part:' in part_line or part_stripped.startswith('chapters:'):
-                            # Always ensure part and chapters lines are uncommented when part has active chapters
-                            if part_stripped.startswith('#'):
-                                uncommented = part_line.replace('# ', '', 1).replace('#', '', 1)
-                                modified_lines.append(uncommented)
-                            else:
-                                modified_lines.append(part_line)
-                        else:
-                            # For other lines in the part, keep as-is
-                            modified_lines.append(part_line)
+                        # Part has active chapters but this line is neither structural nor a chapter
+                        # Keep as-is
+                        modified_lines.append(part_line)
                     else:
                         # This part has no active chapters, comment out all lines in it
                         if not part_stripped.startswith('#') and part_stripped:
@@ -753,7 +754,16 @@ class BuildCommand:
                 for part_line in part_lines:
                     part_stripped = part_line.strip()
                     
-                    if '.qmd' in part_line:
+                    # Check structural lines FIRST (before .qmd check) to avoid treating part declarations as chapters
+                    if part_has_active_chapters and ('part:' in part_line or part_stripped.startswith('chapters:')):
+                        # EPUB CRITICAL: This part has active chapters, so ensure structural lines are uncommented
+                        # Always ensure part and chapters lines are uncommented when part has active chapters
+                        if part_stripped.startswith('#'):
+                            uncommented = part_line.replace('# ', '', 1).replace('#', '', 1)
+                            modified_lines.append(uncommented)
+                        else:
+                            modified_lines.append(part_line)
+                    elif '.qmd' in part_line:
                         # This is a chapter file - check if it should be included
                         should_include = False
                         
@@ -788,17 +798,9 @@ class BuildCommand:
                             else:
                                 modified_lines.append(part_line)
                     elif part_has_active_chapters:
-                        # EPUB CRITICAL: This part has active chapters, so ensure structural lines are uncommented
-                        if 'part:' in part_line or part_stripped.startswith('chapters:'):
-                            # Always ensure part and chapters lines are uncommented when part has active chapters
-                            if part_stripped.startswith('#'):
-                                uncommented = part_line.replace('# ', '', 1).replace('#', '', 1)
-                                modified_lines.append(uncommented)
-                            else:
-                                modified_lines.append(part_line)
-                        else:
-                            # For other lines in the part, keep as-is
-                            modified_lines.append(part_line)
+                        # Part has active chapters but this line is neither structural nor a chapter
+                        # Keep as-is
+                        modified_lines.append(part_line)
                     else:
                         # This part has no active chapters, comment out all lines in it
                         if not part_stripped.startswith('#') and part_stripped:

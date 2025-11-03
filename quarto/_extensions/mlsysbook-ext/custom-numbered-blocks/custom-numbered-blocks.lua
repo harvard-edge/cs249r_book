@@ -33,8 +33,10 @@ local pout = quarto.log.output
 
 local ishtml = quarto.doc.is_format("html")
 local ispdf = quarto.doc.is_format("pdf")
+local isepub = quarto.doc.is_format("epub")
 local fmt=""
-if ishtml then fmt="html" elseif ispdf then fmt = "pdf" end
+-- ePub uses HTML internally, so treat it the same as HTML format
+if ishtml or isepub then fmt="html" elseif ispdf then fmt = "pdf" end
 
 -- TODO encapsulate stylez into a doc thing or so
 -- maybe later allow various versions concurrently. 
@@ -279,6 +281,12 @@ local function Meta_initClassDefaults (meta)
 end
  
 local initMeta = function(m)
+  -- Skip this extension entirely for ePub builds
+  -- ePub will use Quarto's native callout rendering with custom CSS
+  if quarto.doc.is_format("epub") then
+    return(m)
+  end
+  
   -- Configuration is now only under filter-metadata
   local config = nil
   if m["filter-metadata"] and m["filter-metadata"]["mlsysbook-ext/custom-numbered-blocks"] then
@@ -717,7 +725,7 @@ end
 
 insertStylesPandoc = function(doc)
   -- if stylez.extractStyleFromYaml then stylez.extractStyleFromYaml() end
-  if stylez.insertPreamble and (quarto.doc.is_format("html") or quarto.doc.is_format("pdf"))
+  if stylez.insertPreamble and (quarto.doc.is_format("html") or quarto.doc.is_format("pdf") or quarto.doc.is_format("epub"))
     then stylez.insertPreamble(doc, fbx.classDefaults, fmt) end
   return(doc)
 end;
@@ -862,6 +870,11 @@ local function Pandoc_makeListof(doc)
     end  
   end
   return(doc)
+end
+
+-- Skip all processing for ePub format - return empty filter list
+if quarto.doc.is_format("epub") then
+  return {}
 end
 
 return{

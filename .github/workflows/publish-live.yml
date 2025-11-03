@@ -528,11 +528,56 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "🚀 **Ready to proceed with merge and publication!**" >> $GITHUB_STEP_SUMMARY
 
+  update-version:
+    name: '📝 Update Version Number'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [validate-inputs, pre-flight-checks]
+    if: github.event.inputs.confirm == 'PUBLISH' && github.event.inputs.testing_mode != 'yes'
+    
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📝 Update Version in index.qmd
+        run: |
+          echo "📝 Updating version number in quarto/index.qmd..."
+          echo "🎯 This automatically updates the version displayed on the website"
+          echo "🔗 The version links to GitHub releases via assets/scripts/version-link.js"
+          echo ""
+          
+          # Switch to dev branch first to update the file
+          git checkout dev
+          git pull origin dev
+          
+          # Find and update the doi line with the new version
+          # The doi field is repurposed to show version (with custom label "Version")
+          # JavaScript makes it link to releases page instead of DOI registry
+          sed -i "s|doi: \".*\"|doi: \"${{ needs.validate-inputs.outputs.new_version }}\"|g" quarto/index.qmd
+          
+          echo "✅ Version updated to ${{ needs.validate-inputs.outputs.new_version }}"
+          echo "📄 Updated line:"
+          cat quarto/index.qmd | grep "doi:" || echo "Could not verify doi field"
+          
+          # Commit the version update
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git add quarto/index.qmd
+          git commit -m "chore: update version to ${{ needs.validate-inputs.outputs.new_version }}" || echo "No changes to commit"
+          git push origin dev
+          
+          echo "✅ Version committed to dev branch"
+          echo "🔄 Next step: merge-to-main will include this version update"
+
   merge-to-main:
     name: '🔄 Merge to Main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [validate-inputs, pre-flight-checks]
+    needs: [validate-inputs, pre-flight-checks, update-version]
     if: github.event.inputs.confirm == 'PUBLISH' && github.event.inputs.testing_mode != 'yes'
     
     steps:
@@ -569,6 +614,10 @@ jobs:
           echo "🔄 Configuring git..."
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          echo "🔄 Fetching latest changes (including version update)..."
+          git fetch origin dev
+          git fetch origin main
           
           echo "🔄 Switching to main branch..."
           git checkout main

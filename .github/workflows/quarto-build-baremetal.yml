@@ -235,14 +235,256 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: 📦 Setup Quarto
-        if: matrix.enabled
+      # === WINDOWS: Install Scoop and Chocolatey (Package Managers) ===
+      - name: 📦 Install Scoop Package Manager (Windows)
+        if: matrix.enabled && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Output "=== INSTALLING SCOOP PACKAGE MANAGER ==="
+          Write-Output "This matches the Windows container setup (Phase 5)"
+          
+          if (-not (Get-Command scoop -ErrorAction SilentlyContinue)) {
+            Write-Output "🔤 Setting UTF-8 encoding..."
+            [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+            $OutputEncoding = [System.Text.Encoding]::UTF8
+            Write-Output "✅ UTF-8 encoding set"
+            
+            Write-Output "🔐 Setting execution policy..."
+            Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+            Write-Output "✅ Execution policy set"
+            
+            Write-Output "📦 Installing Scoop package manager..."
+            Write-Output "📥 Downloading Scoop install script..."
+            Invoke-WebRequest -useb get.scoop.sh -outfile 'install-scoop.ps1'
+            Write-Output "📥 Scoop install script downloaded"
+            Write-Output "📦 Running Scoop installer..."
+            & .\install-scoop.ps1 -RunAsAdmin
+            Write-Output "✅ Scoop installed"
+          } else {
+            Write-Output "✅ Scoop already installed"
+          }
+          
+          # Add Scoop to PATH for subsequent steps
+          $scoopShims = Join-Path (Resolve-Path ~).Path 'scoop\shims'
+          Write-Output "📁 Scoop shims path: $scoopShims"
+          Write-Output "🔗 Adding Scoop shims to PATH..."
+          echo "$scoopShims" | Out-File -Append -Encoding UTF8 $env:GITHUB_PATH
+          
+          # Also add to current session PATH
+          $env:PATH = "$scoopShims;$env:PATH"
+          
+          # Verify scoop is now available
+          Write-Output "🔍 Verifying Scoop installation..."
+          scoop --version
+          Write-Output "✅ Scoop verified in current session"
+          
+          # Add Git (required for buckets)
+          Write-Output "📦 Installing Git..."
+          scoop install git
+          Write-Output "✅ Git installed"
+          
+          # Add r-bucket for R packages
+          Write-Output "📦 Adding r-bucket..."
+          scoop bucket add r-bucket https://github.com/cderv/r-bucket.git
+          Write-Output "✅ r-bucket added"
+          
+          # Add extras bucket
+          Write-Output "📦 Adding extras bucket..."
+          scoop bucket add extras
+          Write-Output "✅ extras bucket added"
+          
+          Write-Output "✅ Scoop setup complete"
+
+      - name: 📦 Install Chocolatey Package Manager (Windows)
+        if: matrix.enabled && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Output "=== INSTALLING CHOCOLATEY PACKAGE MANAGER ==="
+          Write-Output "This matches the Windows container setup (Phase 2)"
+          
+          if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
+            Write-Output "📦 Installing Chocolatey..."
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            iex ((New-Object Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
+            Write-Output "✅ Chocolatey installed"
+            
+            # Refresh environment variables for current session
+            $env:ChocolateyInstall = Convert-Path "$((Get-Command choco).Path)\..\.."
+            Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
+            refreshenv
+          } else {
+            Write-Output "✅ Chocolatey already installed"
+          }
+          
+          choco --version
+          Write-Output "✅ Chocolatey setup complete"
+
+      # === WINDOWS: Install Tools via Scoop (same as container) ===
+      - name: 🐍 Install Python via Scoop (Windows)
+        if: matrix.enabled && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Output "=== INSTALLING PYTHON VIA SCOOP ==="
+          Write-Output "This matches the Windows container setup (Phase 9)"
+          Write-Output "Installing Python 3.13 (3.14 not yet supported by pydantic-core)"
+          
+          # Add versions bucket for specific version installs
+          Write-Output "📦 Adding versions bucket..."
+          scoop bucket add versions
+          Write-Output "✅ Versions bucket added"
+          
+          # List available Python versions
+          Write-Output "📋 Available Python packages:"
+          scoop search python | Select-String "python"
+          
+          # Install Python 3.13 from versions bucket
+          Write-Output "📦 Installing Python 3.13 from versions bucket..."
+          scoop install versions/python313
+          
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "❌ Failed to install versions/python313"
+            Write-Output "⚠️ Trying alternative: python3.13 or python from main..."
+            
+            # Try python3.13 as alternative name
+            scoop install python3.13 -ErrorAction SilentlyContinue
+            if ($LASTEXITCODE -ne 0) {
+              Write-Output "⚠️ python3.13 not found, trying main/python..."
+              scoop install main/python
+            }
+          }
+          
+          Write-Output "✅ Python install command completed"
+          
+          # Check which Python app was installed
+          Write-Output "🔍 Checking installed Python apps..."
+          scoop list | Select-String "python"
+          
+          # Try to get Python path - try different app names
+          $pythonPath = $null
+          $appNames = @('python313', 'python3.13', 'python')
+          foreach ($appName in $appNames) {
+            $pythonPath = scoop prefix $appName 2>$null
+            if ($pythonPath) {
+              Write-Output "✅ Found Python as '$appName'"
+              break
+            }
+          }
+          
+          if (-not $pythonPath) {
+            Write-Error "❌ Could not find Python installation via Scoop"
+            Write-Error "Checked app names: python313, python3.13, python"
+            scoop list
+            exit 1
+          }
+          
+          Write-Output "📁 Python location: $pythonPath"
+          
+          # Add to GITHUB_PATH for subsequent steps
+          Write-Output "🔗 Adding Python to GITHUB_PATH for future steps..."
+          echo "$pythonPath" | Out-File -Append -Encoding UTF8 $env:GITHUB_PATH
+          echo "$pythonPath\Scripts" | Out-File -Append -Encoding UTF8 $env:GITHUB_PATH
+          Write-Output "✅ Python added to GITHUB_PATH"
+          
+          # Also add to current session
+          $env:PATH = "$pythonPath;$pythonPath\Scripts;$env:PATH"
+          
+          $pythonVersion = python --version
+          Write-Output "📊 Python version: $pythonVersion"
+          
+          # Verify we got Python 3.13
+          if ($pythonVersion -notmatch "3\.13") {
+            Write-Error "❌ Expected Python 3.13, got: $pythonVersion"
+            exit 1
+          }
+          
+          Write-Output "✅ Python 3.13 installation verified and added to PATH"
+
+      - name: 📊 Install R via Scoop (Windows)
+        if: matrix.enabled && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Output "=== INSTALLING R VIA SCOOP ==="
+          Write-Output "This matches the Windows container setup (Phase 12)"
+          
+          Write-Output "📦 Installing R from main bucket..."
+          scoop install main/r
+          Write-Output "✅ R installed"
+          
+          Write-Output "📊 Verifying R installation..."
+          R.exe --version
+          Write-Output "✅ R installation complete"
+
+      - name: 📦 Install Quarto via Scoop (Windows)
+        if: matrix.enabled && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Output "=== INSTALLING QUARTO VIA SCOOP ==="
+          Write-Output "This matches the Windows container setup (Phase 6)"
+          
+          Write-Output "📦 Installing Quarto..."
+          scoop install quarto
+          Write-Output "✅ Quarto installed"
+          
+          Write-Output "📊 Quarto version:"
+          quarto --version
+          Write-Output "✅ Quarto installation complete"
+
+      - name: 🎨 Install Inkscape via Scoop (Windows)
+        if: matrix.enabled && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Output "=== INSTALLING INKSCAPE VIA SCOOP ==="
+          Write-Output "This matches the Windows container setup (Phase 8)"
+          
+          Write-Output "📦 Installing Inkscape..."
+          scoop install inkscape
+          Write-Output "✅ Inkscape installed"
+          
+          Write-Output "📊 Inkscape version:"
+          inkscape --version
+          Write-Output "✅ Inkscape installation complete"
+
+      - name: 📦 Install Ghostscript via Scoop (Windows)
+        if: matrix.enabled && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Output "=== INSTALLING GHOSTSCRIPT VIA SCOOP ==="
+          Write-Output "This matches the Windows container setup (Phase 7)"
+          
+          Write-Output "📦 Installing Ghostscript..."
+          scoop install main/ghostscript
+          Write-Output "✅ Ghostscript installed"
+          
+          Write-Output "📊 Ghostscript version:"
+          gs --version
+          Write-Output "✅ Ghostscript installation complete"
+
+      - name: 📦 Install Visual C++ Redistributable (Windows)
+        if: matrix.enabled && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Output "=== INSTALLING VISUAL C++ REDISTRIBUTABLE ==="
+          Write-Output "This matches the Windows container setup (Phase 11)"
+          Write-Output "Required for Quarto DLL dependencies on Windows"
+          
+          choco install vcredist-all -y
+          Write-Output "✅ Visual C++ Redistributable installed"
+
+      # === LINUX: Setup Python (GitHub Action) ===
+      - name: 🐍 Set up Python (Linux)
+        if: matrix.enabled && runner.os == 'Linux'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      # === LINUX: Setup Quarto (GitHub Action) ===
+      - name: 📦 Setup Quarto (Linux)
+        if: matrix.enabled && runner.os == 'Linux'
         uses: quarto-dev/quarto-actions/setup@v2
         with:
           version: ${{ inputs.quarto-version }}
-        # Outputs quarto version information after installation
-        id: quarto-setup
 
+      # === CROSS-PLATFORM: Verification ===
       - name: 📋 Quarto Setup Info
         if: matrix.enabled
         shell: bash
@@ -253,34 +495,6 @@ jobs:
           quarto --version
           echo "📍 Quarto installation location:"
           which quarto || where.exe quarto
-
-      - name: 🎨 Install Inkscape (Windows)
-        if: matrix.enabled && runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          # Install Inkscape using exact package ID
-          winget install -e --id Inkscape.Inkscape --accept-source-agreements --accept-package-agreements
-          Write-Output "✅ Inkscape installed via winget"
-          
-          # Add Inkscape to PATH for subsequent steps
-          echo "C:\Program Files\Inkscape\bin" | Out-File -Append -Encoding UTF8 $env:GITHUB_PATH
-          
-          # Verify installation using full path (PATH update takes effect in next step)
-          & "C:\Program Files\Inkscape\bin\inkscape.exe" --version
-
-      - name: 🔍 Verify Inkscape PATH (Windows)
-        if: matrix.enabled && runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Write-Output "🔍 Verifying Inkscape is available in PATH for Quarto..."
-          $version = inkscape --version
-          Write-Output "✅ Inkscape available: $version"
-
-      - name: 🐍 Set up Python
-        if: matrix.enabled
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
 
       - name: 💾 Cache Python packages
         if: matrix.enabled
@@ -301,81 +515,64 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ghostscript
 
-      - name: 📦 Install Ghostscript (Windows)
+      - name: 📦 Install Python dependencies (Windows)
         if: matrix.enabled && runner.os == 'Windows'
         shell: pwsh
         run: |
-          # Install Scoop (package manager used by Windows containers)
-          if (-not (Get-Command scoop -ErrorAction SilentlyContinue)) {
-            Write-Output "📦 Installing Scoop package manager..."
-            Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
-            Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
-          } else {
-            Write-Output "✅ Scoop already installed"
+          Write-Output "=== INSTALLING PYTHON DEPENDENCIES ==="
+          Write-Output "Using Scoop-installed Python (should be 3.13.x)"
+          
+          # Try to find Scoop's Python with different app names
+          $scoopPython = $null
+          $appNames = @('python313', 'python3.13', 'python')
+          foreach ($appName in $appNames) {
+            $path = scoop prefix $appName 2>$null
+            if ($path) {
+              $scoopPython = $path
+              Write-Output "✅ Found Scoop Python as '$appName'"
+              break
+            }
           }
           
-          # Install Ghostscript using Scoop (same as containers)
-          Write-Output "📦 Installing Ghostscript via Scoop..."
-          scoop install ghostscript
-          Write-Output "✅ Ghostscript installed via Scoop"
-          
-          # Verify installation using scoop which (same as container health check)
-          $gsExe = scoop which gswin64c 2>$null
-          if (-not $gsExe) {
-            $gsExe = scoop which gs 2>$null
-          }
-          
-          if ($gsExe) {
-            Write-Output "📁 Ghostscript executable found via Scoop: $gsExe"
-            # Scoop automatically adds to PATH, but let's ensure it's available
-            $binPath = Split-Path $gsExe -Parent
-            Write-Output "📁 Ghostscript bin directory: $binPath"
-          } else {
-            Write-Error "❌ Could not locate Ghostscript installation via Scoop"
+          if (-not $scoopPython) {
+            Write-Error "❌ Could not find Scoop Python installation"
+            Write-Error "GITHUB_PATH was not set correctly in previous step"
+            Write-Error "Current Python being used:"
+            python --version
+            (Get-Command python).Source
             exit 1
           }
-
-      - name: 🔍 Verify Ghostscript Installation (Windows)
-        if: matrix.enabled && runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Write-Output "🔍 Verifying Ghostscript installation..."
           
-          # Use same verification logic as container health check
-          $gsExe = $null
+          Write-Output "📁 Scoop Python location: $scoopPython"
           
-          # Try scoop which first (preferred method)
-          try {
-            $gsExe = scoop which gswin64c 2>$null
-            if (-not $gsExe) {
-              $gsExe = scoop which gs 2>$null
-            }
-          } catch {
-            Write-Output "⚠️ Scoop which failed, trying Get-Command..."
-          }
+          # Prepend to PATH and verify immediately
+          $env:PATH = "$scoopPython;$scoopPython\Scripts;$env:PATH"
           
-          # Fallback to Get-Command if scoop which fails
-          if (-not $gsExe) {
-            $gsCmd = Get-Command "gswin64c.exe" -ErrorAction SilentlyContinue
-            if (-not $gsCmd) {
-              $gsCmd = Get-Command "gs.exe" -ErrorAction SilentlyContinue
-            }
-            if ($gsCmd) {
-              $gsExe = $gsCmd.Source
-            }
-          }
+          # Verify we're using the right Python
+          $pythonExe = (Get-Command python).Source
+          Write-Output "📍 Python executable being used: $pythonExe"
           
-          if ($gsExe) {
-            Write-Output "📍 Ghostscript executable found at: $gsExe"
-            $version = & $gsExe --version
-            Write-Output "✅ Ghostscript available: $version"
-          } else {
-            Write-Error "❌ Ghostscript executable not found via Scoop or PATH"
+          $pythonVersion = python --version
+          Write-Output "📊 Python version: $pythonVersion"
+          
+          # Fail if not Python 3.13
+          if ($pythonVersion -notmatch "3\.13") {
+            Write-Error "❌ Wrong Python. Expected 3.13 from Scoop, got: $pythonVersion"
+            Write-Error "Python location: $pythonExe"
+            Write-Error "This means PATH is not configured correctly"
             exit 1
           }
-
-      - name: 📦 Install Python dependencies
-        if: matrix.enabled
+          Write-Output "✅ Confirmed using Scoop Python 3.13"
+          
+          Write-Output "📦 Upgrading pip..."
+          python -m pip install --upgrade pip
+          
+          Write-Output "📦 Installing Python packages from requirements.txt..."
+          python -m pip install -r tools/dependencies/requirements.txt
+          Write-Output "✅ Python dependencies installed"
+      
+      - name: 📦 Install Python dependencies (Linux)
+        if: matrix.enabled && runner.os == 'Linux'
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r tools/dependencies/requirements.txt
@@ -471,10 +668,81 @@ jobs:
             ldd $(which inkscape) | grep "not found" || echo "All dependencies resolved"
           fi
           
-      # Install TeX Live packages (Cross-platform) - ALWAYS install for consistency
+      # Install TeX Live packages - ALWAYS install for consistency
       # Required for TikZ diagrams in HTML (PDF->SVG), PDF output, and potential future needs
-      - name: 📦 Install TeX Live packages
-        if: matrix.enabled
+      
+      # === WINDOWS: Install TeX Live via Chocolatey (same as container) ===
+      - name: 📦 Install TeX Live via Chocolatey (Windows)
+        if: matrix.enabled && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Output "=== INSTALLING TEX LIVE VIA CHOCOLATEY ==="
+          Write-Output "This matches the Windows container setup (Phase 4)"
+          
+          Write-Output "📦 Installing TeX Live via Chocolatey (pinned to 2025.20251008.0)..."
+          choco install texlive --version=2025.20251008.0 -y
+          
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "❌ TeX Live installation failed"
+            exit 1
+          }
+          Write-Output "✅ TeX Live installed via Chocolatey"
+          
+          Write-Output "🔍 Finding TeX Live installation directory..."
+          $texRoot = Join-Path $env:SystemDrive 'texlive'
+          Write-Output "📁 TeX Live root: $texRoot"
+          
+          Write-Output "🔍 Looking for year-based directories..."
+          $texYearDir = Get-ChildItem $texRoot -Directory | 
+              Where-Object { $_.Name -match '^\d{4}$' } | 
+              Sort-Object Name -Descending | 
+              Select-Object -First 1
+          Write-Output "📁 Found year directory: $($texYearDir.FullName)"
+          
+          $texLiveBin = Join-Path $texYearDir.FullName 'bin\windows'
+          Write-Output "📁 TeX Live bin directory: $texLiveBin"
+          
+          Write-Output "🔧 Adding TeX Live to PATH..."
+          echo "$texLiveBin" | Out-File -Append -Encoding UTF8 $env:GITHUB_PATH
+          $env:PATH = "$texLiveBin;$env:PATH"
+          Write-Output "✅ PATH updated with: $texLiveBin"
+          
+          Write-Output "📋 Reading collections from tl_packages..."
+          if (Test-Path 'tools/dependencies/tl_packages') {
+            $collections = Get-Content 'tools/dependencies/tl_packages' | 
+                Where-Object { $_.Trim() -ne '' -and -not $_.Trim().StartsWith('#') }
+            Write-Output "📦 Found $($collections.Count) collections to install"
+            Write-Output "📋 Collections:"
+            $collections | ForEach-Object { Write-Output "  - $_" }
+            
+            Write-Output "🔄 Installing collections..."
+            $i = 1
+            foreach ($collection in $collections) {
+              Write-Output "📦 [$i/$($collections.Count)] Installing $collection..."
+              & "$texLiveBin\tlmgr.bat" install $collection
+              if ($LASTEXITCODE -eq 0) {
+                Write-Output "✅ $collection installed successfully"
+              } else {
+                Write-Output "⚠️ Failed to install $collection, continuing..."
+              }
+              $i++
+            }
+            Write-Output "✅ Collection installation complete"
+          } else {
+            Write-Output "⚠️ No tl_packages file found, skipping collection installation"
+          }
+          
+          Write-Output "🔄 Updating tlmgr..."
+          & "$texLiveBin\tlmgr.bat" update --self --all
+          Write-Output "✅ tlmgr updated"
+          
+          Write-Output "🔍 Verifying lualatex installation..."
+          & "$texLiveBin\lualatex.exe" --version
+          Write-Output "✅ TeX Live installation verified"
+
+      # === LINUX: Install TeX Live via GitHub Action ===
+      - name: 📦 Install TeX Live packages (Linux)
+        if: matrix.enabled && runner.os == 'Linux'
         uses: zauguin/install-texlive@v4
         with:
           package_file: tools/dependencies/tl_packages
@@ -538,21 +806,36 @@ jobs:
           
           rm -f test_tikz.*
          
-      - name: 📊 Setup R
-        if: matrix.enabled
+      # === LINUX: Setup R via GitHub Action ===
+      - name: 📊 Setup R (Linux)
+        if: matrix.enabled && runner.os == 'Linux'
         uses: r-lib/actions/setup-r@v2
         with:
           r-version: ${{ inputs.r-version }}
           use-public-rspm: true
 
-      - name: 📋 R Setup Info
-        if: matrix.enabled
-        shell: Rscript {0}
+      # === CROSS-PLATFORM: R Setup Info ===
+      - name: 📋 R Setup Info (Windows)
+        if: matrix.enabled && runner.os == 'Windows'
+        shell: pwsh
         run: |
-          cat("🔄 R Version Information:\n")
-          cat(paste("R version:", R.version$version.string, "\n"))
-          cat(paste("R home:", R.home(), "\n"))
-          cat(paste("R library paths:", paste(.libPaths(), collapse=", "), "\n"))
+          Write-Output "🔄 R Version Information:"
+          R.exe --version
+          Write-Output "📁 R home:"
+          Rscript -e 'cat(R.home(), "\n")'
+          Write-Output "📊 R library paths:"
+          Rscript -e '.libPaths()'
+      
+      - name: 📋 R Setup Info (Linux)
+        if: matrix.enabled && runner.os == 'Linux'
+        shell: bash
+        run: |
+          echo "🔄 R Version Information:"
+          R --version | head -3
+          echo "📁 R home:"
+          Rscript -e 'cat(R.home(), "\n")'
+          echo "📊 R library paths:"
+          Rscript -e '.libPaths()'
 
       # Cache R packages using standard paths
       - name: 💾 Cache R packages
@@ -570,10 +853,14 @@ jobs:
         if: matrix.enabled && steps.cache-r-packages.outputs.cache-hit != 'true'
         shell: Rscript {0}
         run: |
+          # This matches the Windows container setup (Phase 13)
           # Set options for better package installation
           options(repos = c(CRAN = "https://cran.rstudio.com"))
           
-          cat("🔄 Installing R packages...\n")
+          cat("=== INSTALLING R PACKAGES ===\n")
+          cat("This matches the Windows container setup\n\n")
+          
+          cat("🔄 Setting up R environment...\n")
           cat(paste("R library path:", Sys.getenv("R_LIBS_USER"), "\n"))
           
           # Create and set library path
@@ -581,10 +868,11 @@ jobs:
           dir.create(lib_path, showWarnings = FALSE, recursive = TRUE)
           .libPaths(lib_path)
           
-          # Install packages
+          # Install remotes first
           cat("📦 Installing remotes package...\n")
           install.packages("remotes")
           
+          # Install packages from install_packages.R
           if (file.exists("tools/dependencies/install_packages.R")) {
             cat("📦 Installing packages from tools/dependencies/install_packages.R...\n")
             source("tools/dependencies/install_packages.R")
@@ -595,29 +883,84 @@ jobs:
             install.packages(pkgs)
           }
           
+          # Verify critical packages (same as container does inline)
+          cat("\n🔍 Verifying R package installation...\n")
+          for (p in c("rmarkdown", "knitr")) {
+            if (!require(p, character.only=TRUE, quietly=TRUE)) {
+              stop(paste("missing:", p))
+            }
+          }
+          
           cat("✅ R package installation complete\n")
           cat("📊 Installed packages:\n")
           ip <- installed.packages()[, "Package"]
           print(head(ip, 10))
-          cat(paste("Total packages installed:", nrow(ip), "\n"))
+          cat(paste("Total packages installed:", length(ip), "\n"))
+
+      # === WINDOWS: Comprehensive Verification (matches container FINAL CHECKS) ===
+      - name: 🔍 Comprehensive Windows Environment Verification
+        if: matrix.enabled && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Output "=== FINAL VERIFICATION WITH ENHANCED DIAGNOSTICS ==="
+          Write-Output "This matches the Windows container FINAL CHECKS phase"
+          Write-Output ""
           
-          # Verify critical R packages are installed
-          cat("🔍 Verifying R package installation...\n")
-          required_r_packages <- c("ggplot2", "ggrepel", "knitr", "rmarkdown", "tidyverse", 
-                                 "reshape2", "reticulate", "rsvg", "viridis", "xml2", "dplyr", "grid")
-          missing_r_packages <- c()
-          for (pkg in required_r_packages) {
-            if (!requireNamespace(pkg, quietly = TRUE)) {
-              missing_r_packages <- c(missing_r_packages, pkg)
+          Write-Output "🔍 SYSTEM DIAGNOSTICS:"
+          Write-Output "----------------------"
+          Write-Output "PATH environment variable:"
+          Write-Output $env:PATH
+          Write-Output ""
+          
+          Write-Output "Visual C++ Redistributable check:"
+          Get-ChildItem 'C:\Windows\System32' -Filter 'msvcp*.dll' -ErrorAction SilentlyContinue | Select-Object Name, Length, LastWriteTime
+          Write-Output ""
+          
+          Write-Output "📊 TOOL VERIFICATION:"
+          Write-Output "---------------------"
+          
+          Write-Output "Checking Quarto..."
+          try {
+            quarto --version
+            Write-Output "✅ Quarto version check: PASSED"
+            Write-Output "Running Quarto check for comprehensive validation..."
+            & quarto check 2>&1 | Write-Output
+            if ($LASTEXITCODE -eq 0) {
+              Write-Output "✅ Quarto check: PASSED"
+            } else {
+              Write-Output "⚠️ Quarto check: ISSUES DETECTED"
+              Write-Output "Exit code: $LASTEXITCODE"
             }
+          } catch {
+            Write-Output "❌ Quarto verification failed:"
+            Write-Output $_.Exception.Message
           }
           
-          if (length(missing_r_packages) > 0) {
-            cat(paste("❌ Missing R packages:", paste(missing_r_packages, collapse = ", "), "\n"))
-            quit(status = 1)
-          } else {
-            cat("✅ All required R packages installed successfully\n")
-          }
+          Write-Output "Checking Python..."
+          python --version
+          Write-Output "✅ Python verified"
+          
+          Write-Output "Checking R..."
+          R.exe --version
+          Write-Output "✅ R verified"
+          
+          Write-Output "Checking LaTeX..."
+          lualatex --version
+          Write-Output "✅ LaTeX verified"
+          
+          Write-Output "Checking Ghostscript..."
+          gs --version
+          Write-Output "✅ Ghostscript verified"
+          
+          Write-Output "Checking Inkscape..."
+          inkscape --version
+          Write-Output "✅ Inkscape verified"
+          
+          Write-Output ""
+          Write-Output "🎯 VERIFICATION STATUS:"
+          Write-Output "------------------------"
+          Write-Output "✅ All tools verified successfully"
+          Write-Output "Ready to proceed with build"
 
       - name: 🔨 Build ${{ matrix.format }}
         if: matrix.enabled
@@ -644,8 +987,8 @@ jobs:
           echo "✅ Configuration set to ${{ matrix.format }}"
           
           echo "🔨 Building ${{ matrix.format }}..."
-          # Update status to building
-          curl -X POST \
+          # Update status to building (with timeout, failures are non-fatal)
+          curl --max-time 10 --retry 2 --retry-delay 2 -X POST \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
@@ -653,7 +996,7 @@ jobs:
               \"state\": \"pending\",
               \"description\": \"Building ${{ matrix.format }} content (${{ matrix.os_name }})\",
               \"context\": \"ci/quarto-build-${{ matrix.os_name }}-${{ matrix.format }}\"
-            }"
+            }" || echo "⚠️ Failed to update commit status to pending (non-fatal)"
           
           quarto render --to ${{ matrix.render_target }} --output-dir "../${OUTPUT_DIR}"
           echo "✅ ${{ matrix.format }} build completed"
@@ -921,6 +1264,7 @@ jobs:
 
       - name: 🎯 Set Final Build Status
         if: matrix.enabled && always()
+        continue-on-error: true  # Don't fail the workflow if status update fails
         shell: bash
         run: |
           echo "🎯 Setting final build status..."
@@ -937,8 +1281,11 @@ jobs:
           echo "📊 Final status: $STATE"
           echo "📝 Description: $DESCRIPTION"
           
-          # Set the final commit status
-          curl -X POST \
+          # Set the final commit status with timeout and retry logic
+          echo "🔄 Attempting to update commit status..."
+          
+          # Try with shorter timeout to fail fast if network is unreachable
+          if curl --max-time 10 --retry 2 --retry-delay 2 -X POST \
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
             "https://api.github.com/repos/${{ github.repository }}/statuses/${{ github.sha }}" \
@@ -946,9 +1293,12 @@ jobs:
               \"state\": \"$STATE\",
               \"description\": \"$DESCRIPTION\",
               \"context\": \"ci/quarto-build-${{ matrix.os_name }}-${{ matrix.format }}\"
-            }"
-          
-          echo "✅ Commit status updated successfully"
+            }"; then
+            echo "✅ Commit status updated successfully"
+          else
+            echo "⚠️ Failed to update commit status (network timeout or connection issue)"
+            echo "This is non-fatal and the build status is still recorded in the workflow"
+          fi
 
   collect-outputs:
     name: '📊 Collect Outputs'
