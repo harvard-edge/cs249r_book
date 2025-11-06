@@ -55,7 +55,7 @@ The **open source textbook** for learning how to engineer AI systems. It began i
 
 ### Why This Book Exists
 
-*Many students learn how to train ML models but not how to build and engineer the systems that make those models useful in the real world. As AI becomes more capable, the real bottleneck will not just be algorithms, but engineers who can design efficient, scalable, and sustainable systems that put those algorithms to work responsibly.*
+*Students learn how to train ML models, but few learn how to engineer the systems that make those models useful in practice. As AI capabilities grow, progress will depend less on developing new algorithms and more on developing the engineers who can design scalable, efficient, and responsible systems that bring those algorithms to life.*
 
 This book is part of a broader personal mission to **educate one million learners worldwide** in the foundations of AI systems engineering. The long term impact of AI will be shaped by a generation of engineers and builders who know how to turn ideas into working systems.
 
