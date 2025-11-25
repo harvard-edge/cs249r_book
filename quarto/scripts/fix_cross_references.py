@@ -177,18 +177,77 @@ CHAPTER_TITLES = {
     "sec-visionlanguage-models-vlm-introduction-4272": "Visual-Language Models"
 }
 
-def calculate_relative_path(from_file, to_path, build_dir):
+def build_epub_section_mapping(epub_dir):
     """
-    Calculate relative path from one HTML file to another.
-    
+    Build mapping from section IDs to EPUB chapter files by scanning actual chapters.
+
     Args:
-        from_file: Path object of the source HTML file
+        epub_dir: Path to EPUB build directory (_build/epub or extracted EPUB root)
+
+    Returns:
+        Dictionary mapping section IDs to chapter filenames (e.g., {"sec-xxx": "ch004.xhtml"})
+    """
+    mapping = {}
+
+    # Try different possible text directory locations
+    possible_text_dirs = [
+        epub_dir / "text",  # For _build/epub structure
+        epub_dir / "EPUB" / "text",  # For extracted EPUB structure
+    ]
+
+    text_dir = None
+    for dir_path in possible_text_dirs:
+        if dir_path.exists():
+            text_dir = dir_path
+            break
+
+    if not text_dir:
+        return mapping
+
+    # Scan all chapter files
+    for xhtml_file in sorted(text_dir.glob("ch*.xhtml")):
+        try:
+            content = xhtml_file.read_text(encoding='utf-8')
+            # Find all section IDs in this file using regex
+            section_ids = re.findall(r'id="(sec-[^"]+)"', content)
+            for sec_id in section_ids:
+                # Map section ID to chapter filename only (no path, since we're in same dir)
+                mapping[sec_id] = xhtml_file.name
+        except Exception as e:
+            continue
+
+    return mapping
+
+def calculate_relative_path(from_file, to_path, build_dir, epub_mapping=None):
+    """
+    Calculate relative path from one file to another.
+
+    Args:
+        from_file: Path object of the source file
         to_path: String path from build root (e.g., "contents/core/chapter/file.html#anchor")
         build_dir: Path object of the build directory root
-    
+        epub_mapping: Optional dict mapping section IDs to EPUB chapter files
+
     Returns:
         Relative path string from from_file to to_path
     """
+    # For EPUB builds, use chapter-to-chapter mapping
+    if epub_mapping is not None:
+        # Extract section ID from to_path
+        if '#' in to_path:
+            _, anchor_with_hash = to_path.split('#', 1)
+            sec_id = anchor_with_hash  # This is already just the section ID
+
+            # Look up which chapter file contains this section
+            target_chapter = epub_mapping.get(sec_id)
+            if target_chapter:
+                # All chapters are in same directory (text/), so just use filename
+                return f"{target_chapter}#{sec_id}"
+
+        # Fallback: if no mapping found, return original
+        return to_path
+
+    # Original HTML logic for non-EPUB builds
     # Split anchor from path
     if '#' in to_path:
         target_path_str, anchor = to_path.split('#', 1)
@@ -196,11 +255,11 @@ def calculate_relative_path(from_file, to_path, build_dir):
     else:
         target_path_str = to_path
         anchor = ''
-    
+
     # Convert to absolute paths
     target_abs = build_dir / target_path_str
     source_abs = from_file
-    
+
     # Calculate relative path
     try:
         rel_path = Path(target_abs).relative_to(source_abs.parent)
@@ -211,7 +270,7 @@ def calculate_relative_path(from_file, to_path, build_dir):
         # Count how many levels up we need to go
         source_parts = source_abs.parent.parts
         target_parts = target_abs.parts
-        
+
         # Find common prefix
         common_length = 0
         for s, t in zip(source_parts, target_parts):
@@ -219,27 +278,27 @@ def calculate_relative_path(from_file, to_path, build_dir):
                 common_length += 1
             else:
                 break
-        
+
         # Calculate relative path
         up_levels = len(source_parts) - common_length
         down_parts = target_parts[common_length:]
-        
+
         rel_parts = ['..'] * up_levels + list(down_parts)
         result = '/'.join(rel_parts)
-    
+
     return result + anchor
 
-def fix_cross_reference_link(match, from_file, build_dir):
+def fix_cross_reference_link(match, from_file, build_dir, epub_mapping=None):
     """Replace a single cross-reference link with proper HTML link."""
     full_match = match.group(0)
     sec_ref = match.group(1)
-    
+
     abs_path = CHAPTER_MAPPING.get(sec_ref)
     title = CHAPTER_TITLES.get(sec_ref)
-    
+
     if abs_path and title:
         # Calculate relative path from current file to target
-        rel_path = calculate_relative_path(from_file, abs_path, build_dir)
+        rel_path = calculate_relative_path(from_file, abs_path, build_dir, epub_mapping)
         # Create clean HTML link
         return f'<a href="{rel_path}">{title}</a>'
     else:
@@ -247,18 +306,19 @@ def fix_cross_reference_link(match, from_file, build_dir):
         print(f"⚠️ No mapping found for: {sec_ref}")
         return full_match
 
-def fix_cross_references(html_content, from_file, build_dir, verbose=False):
+def fix_cross_references(html_content, from_file, build_dir, epub_mapping=None, verbose=False):
     """
-    Fix all cross-reference links in HTML content.
-    
+    Fix all cross-reference links in HTML/XHTML content.
+
     Quarto generates two types of unresolved references when chapters aren't built:
     1. Full unresolved links: <a href="#sec-xxx" class="quarto-xref"><span class="quarto-unresolved-ref">...</span></a>
     2. Simple unresolved refs: <strong>?@sec-xxx</strong> (more common in selective builds)
+    3. EPUB unresolved refs: <a href="@sec-xxx">Link Text</a> (EPUB-specific)
     """
     # Pattern 1: Match Quarto's full unresolved cross-reference links
     # Example: <a href="#sec-xxx" class="quarto-xref"><span class="quarto-unresolved-ref">sec-xxx</span></a>
     pattern1 = r'<a href="#(sec-[a-zA-Z0-9-]+)" class="quarto-xref"><span class="quarto-unresolved-ref">[^<]*</span></a>'
-    
+
     # Pattern 2: Match simple unresolved references (what we see in selective builds)
     # Example: <strong>?@sec-ml-systems</strong>
     # This is what Quarto outputs when it can't resolve a reference to an unbuilt chapter
@@ -274,10 +334,10 @@ def fix_cross_references(html_content, from_file, build_dir, verbose=False):
     matches2 = re.findall(pattern2, html_content)
     matches3 = re.findall(pattern3, html_content)
     total_matches = len(matches1) + len(matches2) + len(matches3)
-    
+
     # Fix Pattern 1 matches
-    fixed_content = re.sub(pattern1, lambda m: fix_cross_reference_link(m, from_file, build_dir), html_content)
-    
+    fixed_content = re.sub(pattern1, lambda m: fix_cross_reference_link(m, from_file, build_dir, epub_mapping), html_content)
+
     # Fix Pattern 2 matches with proper relative path calculation
     unmapped_refs = []
     def fix_simple_reference(match):
@@ -285,12 +345,12 @@ def fix_cross_references(html_content, from_file, build_dir, verbose=False):
         abs_path = CHAPTER_MAPPING.get(sec_ref)
         title = CHAPTER_TITLES.get(sec_ref)
         if abs_path and title:
-            rel_path = calculate_relative_path(from_file, abs_path, build_dir)
+            rel_path = calculate_relative_path(from_file, abs_path, build_dir, epub_mapping)
             return f'<strong><a href="{rel_path}">{title}</a></strong>'
         else:
             unmapped_refs.append(sec_ref)
             return match.group(0)
-    
+
     fixed_content = re.sub(pattern2, fix_simple_reference, fixed_content)
 
     # Fix Pattern 3 matches (EPUB-specific)
@@ -298,14 +358,25 @@ def fix_cross_references(html_content, from_file, build_dir, verbose=False):
         sec_ref = match.group(1)
         attrs = match.group(2)  # Additional attributes
         link_text = match.group(3)  # Original link text
-        abs_path = CHAPTER_MAPPING.get(sec_ref)
-        title = CHAPTER_TITLES.get(sec_ref)
-        if abs_path:
-            rel_path = calculate_relative_path(from_file, abs_path, build_dir)
-            return f'<a href="{rel_path}"{attrs}>{link_text}</a>'
+
+        # For EPUB with mapping, use direct chapter lookup
+        if epub_mapping:
+            target_chapter = epub_mapping.get(sec_ref)
+            if target_chapter:
+                return f'<a href="{target_chapter}#{sec_ref}"{attrs}>{link_text}</a>'
+            else:
+                unmapped_refs.append(sec_ref)
+                return match.group(0)
         else:
-            unmapped_refs.append(sec_ref)
-            return match.group(0)
+            # Fallback to HTML path resolution
+            abs_path = CHAPTER_MAPPING.get(sec_ref)
+            title = CHAPTER_TITLES.get(sec_ref)
+            if abs_path:
+                rel_path = calculate_relative_path(from_file, abs_path, build_dir, None)
+                return f'<a href="{rel_path}"{attrs}>{link_text}</a>'
+            else:
+                unmapped_refs.append(sec_ref)
+                return match.group(0)
 
     fixed_content = re.sub(pattern3, fix_epub_reference, fixed_content)
 
@@ -314,21 +385,21 @@ def fix_cross_references(html_content, from_file, build_dir, verbose=False):
     remaining2 = re.findall(pattern2, fixed_content)
     remaining3 = re.findall(pattern3, fixed_content)
     fixed_count = total_matches - len(remaining1) - len(remaining2) - len(remaining3)
-    
+
     # Return info about what was fixed
     return fixed_content, fixed_count, unmapped_refs
 
-def process_html_file(html_file, base_dir):
-    """Process a single HTML file to fix cross-references."""
-    # Read HTML content
+def process_html_file(html_file, base_dir, epub_mapping=None):
+    """Process a single HTML/XHTML file to fix cross-references."""
+    # Read file content
     try:
         html_content = html_file.read_text(encoding='utf-8')
     except Exception as e:
         return None, 0, []
-    
+
     # Fix cross-reference links with proper relative path calculation
-    fixed_content, fixed_count, unmapped = fix_cross_references(html_content, html_file, base_dir)
-    
+    fixed_content, fixed_count, unmapped = fix_cross_references(html_content, html_file, base_dir, epub_mapping)
+
     # Write back fixed content if changes were made
     if fixed_count > 0:
         try:
@@ -340,9 +411,10 @@ def process_html_file(html_file, base_dir):
 
 def main():
     """
-    Main entry point. Runs in two modes:
-    1. Post-render hook (no args): Processes HTML or EPUB builds
-    2. Manual mode (with file arg): Processes a specific file
+    Main entry point. Runs in three modes:
+    1. Post-render hook (no args): Processes HTML or EPUB builds from _build/
+    2. Directory mode (dir arg): Processes extracted EPUB directory
+    3. Manual mode (file arg): Processes a specific file
 
     This allows both automatic fixing during builds and manual testing/debugging.
     """
@@ -353,6 +425,7 @@ def main():
         epub_dir = Path("_build/epub")
 
         # Determine build type
+        epub_mapping = None
         if html_dir.exists() and (html_dir / "index.html").exists():
             build_dir = html_dir
             file_pattern = "*.html"
@@ -361,6 +434,19 @@ def main():
             build_dir = epub_dir
             file_pattern = "*.xhtml"
             file_type = "XHTML (EPUB)"
+            # Build EPUB section mapping for dynamic chapter references
+            print("📚 Building EPUB section mapping...")
+            epub_mapping = build_epub_section_mapping(epub_dir)
+            print(f"   Found {len(epub_mapping)} section IDs across chapters")
+        # Check for extracted EPUB structure (EPUB/ directory at current level)
+        elif Path("EPUB").exists() and list(Path("EPUB").rglob("*.xhtml")):
+            build_dir = Path(".")
+            file_pattern = "*.xhtml"
+            file_type = "XHTML (EPUB - extracted)"
+            # Build EPUB section mapping
+            print("📚 Building EPUB section mapping...")
+            epub_mapping = build_epub_section_mapping(Path("."))
+            print(f"   Found {len(epub_mapping)} section IDs across chapters")
         else:
             print("⚠️ No HTML or EPUB build directory found - skipping")
             sys.exit(0)
@@ -379,7 +465,7 @@ def main():
             if any(skip in str(file) for skip in skip_patterns):
                 continue
 
-            rel_path, fixed_count, unmapped = process_html_file(file, build_dir)
+            rel_path, fixed_count, unmapped = process_html_file(file, build_dir, epub_mapping)
             if fixed_count > 0:
                 files_fixed.append((rel_path, fixed_count))
                 total_refs_fixed += fixed_count
@@ -394,16 +480,25 @@ def main():
 
         if all_unmapped:
             print(f"⚠️ Unmapped references: {', '.join(sorted(all_unmapped))}")
-            
+
     elif len(sys.argv) == 2:
-        # Running with explicit file argument
+        # MODE 2: Running with explicit file argument
         html_file = Path(sys.argv[1])
         if not html_file.exists():
             print(f"❌ File not found: {html_file}")
             sys.exit(1)
-        
+
+        # Detect if this is an EPUB file (in text/ directory)
+        epub_mapping = None
+        if 'text' in html_file.parts and html_file.suffix == '.xhtml':
+            # This is an EPUB chapter file, build mapping
+            epub_base = html_file.parent.parent  # Go up from text/ to EPUB/
+            print("📚 Building EPUB section mapping...")
+            epub_mapping = build_epub_section_mapping(epub_base)
+            print(f"   Found {len(epub_mapping)} section IDs across chapters")
+
         print(f"🔗 Fixing cross-reference links in: {html_file}")
-        rel_path, fixed_count, unmapped = process_html_file(html_file, html_file.parent)
+        rel_path, fixed_count, unmapped = process_html_file(html_file, html_file.parent, epub_mapping)
         if fixed_count > 0:
             print(f"✅ Fixed {fixed_count} cross-references")
             if unmapped:
@@ -411,7 +506,7 @@ def main():
         else:
             print(f"✅ No cross-reference fixes needed")
     else:
-        print("Usage: python3 fix-glossary-html.py [<html-file>]")
+        print("Usage: python3 fix_cross_references.py [<html-or-xhtml-file>]")
         sys.exit(1)
 
 if __name__ == "__main__":
