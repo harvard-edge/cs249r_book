@@ -84,7 +84,32 @@ CHAPTER_MAPPING = {
     # Subsections - Model Optimizations chapter
     "sec-model-optimizations-neural-architecture-search-3915": "contents/core/optimizations/optimizations.html#sec-model-optimizations-neural-architecture-search-3915",
     "sec-model-optimizations-numerical-precision-a93d": "contents/core/optimizations/optimizations.html#sec-model-optimizations-numerical-precision-a93d",
-    "sec-model-optimizations-pruning-3f36": "contents/core/optimizations/optimizations.html#sec-model-optimizations-pruning-3f36"
+    "sec-model-optimizations-pruning-3f36": "contents/core/optimizations/optimizations.html#sec-model-optimizations-pruning-3f36",
+
+    # Lab sections - Arduino Nicla Vision
+    "sec-setup-overview-dcdd": "contents/labs/arduino/nicla_vision/setup/setup.html#sec-setup-overview-dcdd",
+    "sec-image-classification-overview-7420": "contents/labs/arduino/nicla_vision/image_classification/image_classification.html#sec-image-classification-overview-7420",
+    "sec-object-detection-overview-9d59": "contents/labs/arduino/nicla_vision/object_detection/object_detection.html#sec-object-detection-overview-9d59",
+    "sec-keyword-spotting-kws-overview-0ae6": "contents/labs/arduino/nicla_vision/kws/kws.html#sec-keyword-spotting-kws-overview-0ae6",
+    "sec-motion-classification-anomaly-detection-overview-b1a8": "contents/labs/arduino/nicla_vision/motion_classification/motion_classification.html#sec-motion-classification-anomaly-detection-overview-b1a8",
+
+    # Lab sections - Seeed XIAO ESP32S3
+    "sec-setup-overview-d638": "contents/labs/seeed/xiao_esp32s3/setup/setup.html#sec-setup-overview-d638",
+    "sec-image-classification-overview-9a37": "contents/labs/seeed/xiao_esp32s3/image_classification/image_classification.html#sec-image-classification-overview-9a37",
+    "sec-object-detection-overview-d035": "contents/labs/seeed/xiao_esp32s3/object_detection/object_detection.html#sec-object-detection-overview-d035",
+    "sec-keyword-spotting-kws-overview-4373": "contents/labs/seeed/xiao_esp32s3/kws/kws.html#sec-keyword-spotting-kws-overview-4373",
+    "sec-motion-classification-anomaly-detection-overview-cb1f": "contents/labs/seeed/xiao_esp32s3/motion_classification/motion_classification.html#sec-motion-classification-anomaly-detection-overview-cb1f",
+
+    # Lab sections - Grove Vision AI V2
+    "sec-setup-nocode-applications-introduction-b740": "contents/labs/seeed/grove_vision_ai_v2/setup_and_no_code_apps/setup_and_no_code_apps.html#sec-setup-nocode-applications-introduction-b740",
+    "sec-image-classification-introduction-59d5": "contents/labs/seeed/grove_vision_ai_v2/image_classification/image_classification.html#sec-image-classification-introduction-59d5",
+
+    # Lab sections - Raspberry Pi
+    "sec-setup-overview-0ec9": "contents/labs/raspi/setup/setup.html#sec-setup-overview-0ec9",
+    "sec-image-classification-overview-3e02": "contents/labs/raspi/image_classification/image_classification.html#sec-image-classification-overview-3e02",
+    "sec-object-detection-overview-1133": "contents/labs/raspi/object_detection/object_detection.html#sec-object-detection-overview-1133",
+    "sec-small-language-models-slm-overview-ef83": "contents/labs/raspi/llm/llm.html#sec-small-language-models-slm-overview-ef83",
+    "sec-visionlanguage-models-vlm-introduction-4272": "contents/labs/raspi/vlm/vlm.html#sec-visionlanguage-models-vlm-introduction-4272"
 }
 
 # Chapter titles for readable link text
@@ -124,7 +149,32 @@ CHAPTER_TITLES = {
     # Subsections - Model Optimizations chapter
     "sec-model-optimizations-neural-architecture-search-3915": "Neural Architecture Search",
     "sec-model-optimizations-numerical-precision-a93d": "Numerical Precision",
-    "sec-model-optimizations-pruning-3f36": "Pruning"
+    "sec-model-optimizations-pruning-3f36": "Pruning",
+
+    # Lab sections - Arduino Nicla Vision
+    "sec-setup-overview-dcdd": "Setup Nicla Vision",
+    "sec-image-classification-overview-7420": "Image Classification",
+    "sec-object-detection-overview-9d59": "Object Detection",
+    "sec-keyword-spotting-kws-overview-0ae6": "Keyword Spotting",
+    "sec-motion-classification-anomaly-detection-overview-b1a8": "Motion Classification and Anomaly Detection",
+
+    # Lab sections - Seeed XIAO ESP32S3
+    "sec-setup-overview-d638": "Setup the XIAOML Kit",
+    "sec-image-classification-overview-9a37": "Image Classification",
+    "sec-object-detection-overview-d035": "Object Detection",
+    "sec-keyword-spotting-kws-overview-4373": "Keyword Spotting",
+    "sec-motion-classification-anomaly-detection-overview-cb1f": "Motion Classification and Anomaly Detection",
+
+    # Lab sections - Grove Vision AI V2
+    "sec-setup-nocode-applications-introduction-b740": "Setup and No-Code Apps",
+    "sec-image-classification-introduction-59d5": "Image Classification",
+
+    # Lab sections - Raspberry Pi
+    "sec-setup-overview-0ec9": "Setup Raspberry Pi",
+    "sec-image-classification-overview-3e02": "Image Classification",
+    "sec-object-detection-overview-1133": "Object Detection",
+    "sec-small-language-models-slm-overview-ef83": "Small Language Models",
+    "sec-visionlanguage-models-vlm-introduction-4272": "Visual-Language Models"
 }
 
 def calculate_relative_path(from_file, to_path, build_dir):
@@ -213,11 +263,17 @@ def fix_cross_references(html_content, from_file, build_dir, verbose=False):
     # Example: <strong>?@sec-ml-systems</strong>
     # This is what Quarto outputs when it can't resolve a reference to an unbuilt chapter
     pattern2 = r'<strong>\?\@(sec-[a-zA-Z0-9-]+)</strong>'
-    
+
+    # Pattern 3: Match EPUB-specific unresolved references
+    # Example: <a href="@sec-xxx">Link Text</a>
+    # This is what Quarto outputs in EPUB when it can't resolve a reference
+    pattern3 = r'<a href="@(sec-[a-zA-Z0-9-]+)"([^>]*)>([^<]*)</a>'
+
     # Count matches before replacement
     matches1 = re.findall(pattern1, html_content)
     matches2 = re.findall(pattern2, html_content)
-    total_matches = len(matches1) + len(matches2)
+    matches3 = re.findall(pattern3, html_content)
+    total_matches = len(matches1) + len(matches2) + len(matches3)
     
     # Fix Pattern 1 matches
     fixed_content = re.sub(pattern1, lambda m: fix_cross_reference_link(m, from_file, build_dir), html_content)
@@ -236,11 +292,28 @@ def fix_cross_references(html_content, from_file, build_dir, verbose=False):
             return match.group(0)
     
     fixed_content = re.sub(pattern2, fix_simple_reference, fixed_content)
-    
+
+    # Fix Pattern 3 matches (EPUB-specific)
+    def fix_epub_reference(match):
+        sec_ref = match.group(1)
+        attrs = match.group(2)  # Additional attributes
+        link_text = match.group(3)  # Original link text
+        abs_path = CHAPTER_MAPPING.get(sec_ref)
+        title = CHAPTER_TITLES.get(sec_ref)
+        if abs_path:
+            rel_path = calculate_relative_path(from_file, abs_path, build_dir)
+            return f'<a href="{rel_path}"{attrs}>{link_text}</a>'
+        else:
+            unmapped_refs.append(sec_ref)
+            return match.group(0)
+
+    fixed_content = re.sub(pattern3, fix_epub_reference, fixed_content)
+
     # Count successful replacements
     remaining1 = re.findall(pattern1, fixed_content)
     remaining2 = re.findall(pattern2, fixed_content)
-    fixed_count = total_matches - len(remaining1) - len(remaining2)
+    remaining3 = re.findall(pattern3, fixed_content)
+    fixed_count = total_matches - len(remaining1) - len(remaining2) - len(remaining3)
     
     # Return info about what was fixed
     return fixed_content, fixed_count, unmapped_refs
@@ -268,46 +341,57 @@ def process_html_file(html_file, base_dir):
 def main():
     """
     Main entry point. Runs in two modes:
-    1. Post-render hook (no args): Processes ALL HTML files in _build/html/
-    2. Manual mode (with file arg): Processes a specific HTML file
-    
+    1. Post-render hook (no args): Processes HTML or EPUB builds
+    2. Manual mode (with file arg): Processes a specific file
+
     This allows both automatic fixing during builds and manual testing/debugging.
     """
     if len(sys.argv) == 1:
         # MODE 1: Running as Quarto post-render hook
-        # This happens automatically after `quarto render`
-        # We process ALL HTML files because unresolved refs can appear anywhere
-        build_dir = Path("_build/html")
-        if not build_dir.exists():
-            print("⚠️ Build directory not found - skipping")
+        # Detect if this is HTML or EPUB build
+        html_dir = Path("_build/html")
+        epub_dir = Path("_build/epub")
+
+        # Determine build type
+        if html_dir.exists() and (html_dir / "index.html").exists():
+            build_dir = html_dir
+            file_pattern = "*.html"
+            file_type = "HTML"
+        elif epub_dir.exists() and list(epub_dir.glob("*.xhtml")):
+            build_dir = epub_dir
+            file_pattern = "*.xhtml"
+            file_type = "XHTML (EPUB)"
+        else:
+            print("⚠️ No HTML or EPUB build directory found - skipping")
             sys.exit(0)
-        
-        # Find all HTML files recursively
-        html_files = list(build_dir.rglob("*.html"))
-        print(f"🔗 [Cross-Reference Fix] Scanning {len(html_files)} HTML files...")
-        
+
+        # Find all files
+        files = list(build_dir.rglob(file_pattern))
+        print(f"🔗 [Cross-Reference Fix] Scanning {len(files)} {file_type} files...")
+
         files_fixed = []
         total_refs_fixed = 0
         all_unmapped = set()
-        
-        for html_file in html_files:
+
+        for file in files:
             # Skip certain files that don't need processing
-            if any(skip in str(html_file) for skip in ['search.html', '404.html', 'site_libs']):
+            skip_patterns = ['search.html', '404.html', 'site_libs', 'nav.xhtml', 'cover.xhtml', 'title_page.xhtml']
+            if any(skip in str(file) for skip in skip_patterns):
                 continue
-            
-            rel_path, fixed_count, unmapped = process_html_file(html_file, build_dir)
+
+            rel_path, fixed_count, unmapped = process_html_file(file, build_dir)
             if fixed_count > 0:
                 files_fixed.append((rel_path, fixed_count))
                 total_refs_fixed += fixed_count
             all_unmapped.update(unmapped)
-        
+
         if files_fixed:
             print(f"✅ Fixed {total_refs_fixed} cross-references in {len(files_fixed)} files:")
             for path, count in files_fixed:
                 print(f"   📄 {path}: {count} refs")
         else:
             print(f"✅ No unresolved cross-references found")
-        
+
         if all_unmapped:
             print(f"⚠️ Unmapped references: {', '.join(sorted(all_unmapped))}")
             
