@@ -4,12 +4,10 @@ Comprehensive Cross-Reference Experimental Framework
 
 This script runs multiple experiments to optimize cross-reference generation:
 1. Section-level granularity analysis
-2. Bidirectional connection testing  
+2. Bidirectional connection testing
 3. Connection density optimization
 4. Pedagogical connection type enhancement
 5. Multi-placement strategy evaluation
-
-Author: Claude Code
 """
 
 import os

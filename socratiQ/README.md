@@ -40,7 +40,7 @@ SocratiQ is an AI-powered learning companion designed to provide an interactive,
 
 #### 2. **Concept Assistance**
 - Select any text from the textbook and ask for explanations
-- Reference sections, sub-sections, and keywords using `@` symbol
+- Reference sections, subsections, and keywords using `@` symbol
 - Get suggestions for related content from the textbook
 - Adjust difficulty level of AI responses
 
@@ -92,7 +92,7 @@ Your feedback helps us improve SocratiQ. You can:
 
 ## Research and Resources
 
-- **Research Paper:** [SocratiQ: A Generative AI-Powered Learning Companion for Personalized Education and Broader Accessibility](link-to-paper)
+- **Research Paper:** [SocratiQ: A Generative AI-Powered Learning Companion for Personalized Education and Broader Accessibility](https://arxiv.org/abs/2502.00341)
 - **AI-Generated Podcast:** Listen to our podcast about SocratiQ
 
 ## Warning

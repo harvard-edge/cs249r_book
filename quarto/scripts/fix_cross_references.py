@@ -84,7 +84,32 @@ CHAPTER_MAPPING = {
     # Subsections - Model Optimizations chapter
     "sec-model-optimizations-neural-architecture-search-3915": "contents/core/optimizations/optimizations.html#sec-model-optimizations-neural-architecture-search-3915",
     "sec-model-optimizations-numerical-precision-a93d": "contents/core/optimizations/optimizations.html#sec-model-optimizations-numerical-precision-a93d",
-    "sec-model-optimizations-pruning-3f36": "contents/core/optimizations/optimizations.html#sec-model-optimizations-pruning-3f36"
+    "sec-model-optimizations-pruning-3f36": "contents/core/optimizations/optimizations.html#sec-model-optimizations-pruning-3f36",
+
+    # Lab sections - Arduino Nicla Vision
+    "sec-setup-overview-dcdd": "contents/labs/arduino/nicla_vision/setup/setup.html#sec-setup-overview-dcdd",
+    "sec-image-classification-overview-7420": "contents/labs/arduino/nicla_vision/image_classification/image_classification.html#sec-image-classification-overview-7420",
+    "sec-object-detection-overview-9d59": "contents/labs/arduino/nicla_vision/object_detection/object_detection.html#sec-object-detection-overview-9d59",
+    "sec-keyword-spotting-kws-overview-0ae6": "contents/labs/arduino/nicla_vision/kws/kws.html#sec-keyword-spotting-kws-overview-0ae6",
+    "sec-motion-classification-anomaly-detection-overview-b1a8": "contents/labs/arduino/nicla_vision/motion_classification/motion_classification.html#sec-motion-classification-anomaly-detection-overview-b1a8",
+
+    # Lab sections - Seeed XIAO ESP32S3
+    "sec-setup-overview-d638": "contents/labs/seeed/xiao_esp32s3/setup/setup.html#sec-setup-overview-d638",
+    "sec-image-classification-overview-9a37": "contents/labs/seeed/xiao_esp32s3/image_classification/image_classification.html#sec-image-classification-overview-9a37",
+    "sec-object-detection-overview-d035": "contents/labs/seeed/xiao_esp32s3/object_detection/object_detection.html#sec-object-detection-overview-d035",
+    "sec-keyword-spotting-kws-overview-4373": "contents/labs/seeed/xiao_esp32s3/kws/kws.html#sec-keyword-spotting-kws-overview-4373",
+    "sec-motion-classification-anomaly-detection-overview-cb1f": "contents/labs/seeed/xiao_esp32s3/motion_classification/motion_classification.html#sec-motion-classification-anomaly-detection-overview-cb1f",
+
+    # Lab sections - Grove Vision AI V2
+    "sec-setup-nocode-applications-introduction-b740": "contents/labs/seeed/grove_vision_ai_v2/setup_and_no_code_apps/setup_and_no_code_apps.html#sec-setup-nocode-applications-introduction-b740",
+    "sec-image-classification-introduction-59d5": "contents/labs/seeed/grove_vision_ai_v2/image_classification/image_classification.html#sec-image-classification-introduction-59d5",
+
+    # Lab sections - Raspberry Pi
+    "sec-setup-overview-0ec9": "contents/labs/raspi/setup/setup.html#sec-setup-overview-0ec9",
+    "sec-image-classification-overview-3e02": "contents/labs/raspi/image_classification/image_classification.html#sec-image-classification-overview-3e02",
+    "sec-object-detection-overview-1133": "contents/labs/raspi/object_detection/object_detection.html#sec-object-detection-overview-1133",
+    "sec-small-language-models-slm-overview-ef83": "contents/labs/raspi/llm/llm.html#sec-small-language-models-slm-overview-ef83",
+    "sec-visionlanguage-models-vlm-introduction-4272": "contents/labs/raspi/vlm/vlm.html#sec-visionlanguage-models-vlm-introduction-4272"
 }
 
 # Chapter titles for readable link text
@@ -124,21 +149,105 @@ CHAPTER_TITLES = {
     # Subsections - Model Optimizations chapter
     "sec-model-optimizations-neural-architecture-search-3915": "Neural Architecture Search",
     "sec-model-optimizations-numerical-precision-a93d": "Numerical Precision",
-    "sec-model-optimizations-pruning-3f36": "Pruning"
+    "sec-model-optimizations-pruning-3f36": "Pruning",
+
+    # Lab sections - Arduino Nicla Vision
+    "sec-setup-overview-dcdd": "Setup Nicla Vision",
+    "sec-image-classification-overview-7420": "Image Classification",
+    "sec-object-detection-overview-9d59": "Object Detection",
+    "sec-keyword-spotting-kws-overview-0ae6": "Keyword Spotting",
+    "sec-motion-classification-anomaly-detection-overview-b1a8": "Motion Classification and Anomaly Detection",
+
+    # Lab sections - Seeed XIAO ESP32S3
+    "sec-setup-overview-d638": "Setup the XIAOML Kit",
+    "sec-image-classification-overview-9a37": "Image Classification",
+    "sec-object-detection-overview-d035": "Object Detection",
+    "sec-keyword-spotting-kws-overview-4373": "Keyword Spotting",
+    "sec-motion-classification-anomaly-detection-overview-cb1f": "Motion Classification and Anomaly Detection",
+
+    # Lab sections - Grove Vision AI V2
+    "sec-setup-nocode-applications-introduction-b740": "Setup and No-Code Apps",
+    "sec-image-classification-introduction-59d5": "Image Classification",
+
+    # Lab sections - Raspberry Pi
+    "sec-setup-overview-0ec9": "Setup Raspberry Pi",
+    "sec-image-classification-overview-3e02": "Image Classification",
+    "sec-object-detection-overview-1133": "Object Detection",
+    "sec-small-language-models-slm-overview-ef83": "Small Language Models",
+    "sec-visionlanguage-models-vlm-introduction-4272": "Visual-Language Models"
 }
 
-def calculate_relative_path(from_file, to_path, build_dir):
+def build_epub_section_mapping(epub_dir):
     """
-    Calculate relative path from one HTML file to another.
-    
+    Build mapping from section IDs to EPUB chapter files by scanning actual chapters.
+
     Args:
-        from_file: Path object of the source HTML file
+        epub_dir: Path to EPUB build directory (_build/epub or extracted EPUB root)
+
+    Returns:
+        Dictionary mapping section IDs to chapter filenames (e.g., {"sec-xxx": "ch004.xhtml"})
+    """
+    mapping = {}
+
+    # Try different possible text directory locations
+    possible_text_dirs = [
+        epub_dir / "text",  # For _build/epub structure
+        epub_dir / "EPUB" / "text",  # For extracted EPUB structure
+    ]
+
+    text_dir = None
+    for dir_path in possible_text_dirs:
+        if dir_path.exists():
+            text_dir = dir_path
+            break
+
+    if not text_dir:
+        return mapping
+
+    # Scan all chapter files
+    for xhtml_file in sorted(text_dir.glob("ch*.xhtml")):
+        try:
+            content = xhtml_file.read_text(encoding='utf-8')
+            # Find all section IDs in this file using regex
+            section_ids = re.findall(r'id="(sec-[^"]+)"', content)
+            for sec_id in section_ids:
+                # Map section ID to chapter filename only (no path, since we're in same dir)
+                mapping[sec_id] = xhtml_file.name
+        except Exception as e:
+            continue
+
+    return mapping
+
+def calculate_relative_path(from_file, to_path, build_dir, epub_mapping=None):
+    """
+    Calculate relative path from one file to another.
+
+    Args:
+        from_file: Path object of the source file
         to_path: String path from build root (e.g., "contents/core/chapter/file.html#anchor")
         build_dir: Path object of the build directory root
-    
+        epub_mapping: Optional dict mapping section IDs to EPUB chapter files
+
     Returns:
         Relative path string from from_file to to_path
     """
+    # For EPUB builds, use chapter-to-chapter mapping
+    if epub_mapping is not None:
+        # Extract section ID from to_path
+        if '#' in to_path:
+            _, anchor_with_hash = to_path.split('#', 1)
+            sec_id = anchor_with_hash  # This is already just the section ID
+
+            # Look up which chapter file contains this section
+            target_chapter = epub_mapping.get(sec_id)
+            if target_chapter:
+                # All chapters are in same directory (text/), so just use filename
+                return f"{target_chapter}#{sec_id}"
+
+        # Fallback: if no mapping found, return original
+        return to_path
+
+    # Original HTML logic for non-EPUB builds
     # Split anchor from path
     if '#' in to_path:
         target_path_str, anchor = to_path.split('#', 1)
@@ -146,11 +255,11 @@ def calculate_relative_path(from_file, to_path, build_dir):
     else:
         target_path_str = to_path
         anchor = ''
-    
+
     # Convert to absolute paths
     target_abs = build_dir / target_path_str
     source_abs = from_file
-    
+
     # Calculate relative path
     try:
         rel_path = Path(target_abs).relative_to(source_abs.parent)
@@ -161,7 +270,7 @@ def calculate_relative_path(from_file, to_path, build_dir):
         # Count how many levels up we need to go
         source_parts = source_abs.parent.parts
         target_parts = target_abs.parts
-        
+
         # Find common prefix
         common_length = 0
         for s, t in zip(source_parts, target_parts):
@@ -169,27 +278,27 @@ def calculate_relative_path(from_file, to_path, build_dir):
                 common_length += 1
             else:
                 break
-        
+
         # Calculate relative path
         up_levels = len(source_parts) - common_length
         down_parts = target_parts[common_length:]
-        
+
         rel_parts = ['..'] * up_levels + list(down_parts)
         result = '/'.join(rel_parts)
-    
+
     return result + anchor
 
-def fix_cross_reference_link(match, from_file, build_dir):
+def fix_cross_reference_link(match, from_file, build_dir, epub_mapping=None):
     """Replace a single cross-reference link with proper HTML link."""
     full_match = match.group(0)
     sec_ref = match.group(1)
-    
+
     abs_path = CHAPTER_MAPPING.get(sec_ref)
     title = CHAPTER_TITLES.get(sec_ref)
-    
+
     if abs_path and title:
         # Calculate relative path from current file to target
-        rel_path = calculate_relative_path(from_file, abs_path, build_dir)
+        rel_path = calculate_relative_path(from_file, abs_path, build_dir, epub_mapping)
         # Create clean HTML link
         return f'<a href="{rel_path}">{title}</a>'
     else:
@@ -197,31 +306,38 @@ def fix_cross_reference_link(match, from_file, build_dir):
         print(f"⚠️ No mapping found for: {sec_ref}")
         return full_match
 
-def fix_cross_references(html_content, from_file, build_dir, verbose=False):
+def fix_cross_references(html_content, from_file, build_dir, epub_mapping=None, verbose=False):
     """
-    Fix all cross-reference links in HTML content.
-    
+    Fix all cross-reference links in HTML/XHTML content.
+
     Quarto generates two types of unresolved references when chapters aren't built:
     1. Full unresolved links: <a href="#sec-xxx" class="quarto-xref"><span class="quarto-unresolved-ref">...</span></a>
     2. Simple unresolved refs: <strong>?@sec-xxx</strong> (more common in selective builds)
+    3. EPUB unresolved refs: <a href="@sec-xxx">Link Text</a> (EPUB-specific)
     """
     # Pattern 1: Match Quarto's full unresolved cross-reference links
     # Example: <a href="#sec-xxx" class="quarto-xref"><span class="quarto-unresolved-ref">sec-xxx</span></a>
     pattern1 = r'<a href="#(sec-[a-zA-Z0-9-]+)" class="quarto-xref"><span class="quarto-unresolved-ref">[^<]*</span></a>'
-    
+
     # Pattern 2: Match simple unresolved references (what we see in selective builds)
     # Example: <strong>?@sec-ml-systems</strong>
     # This is what Quarto outputs when it can't resolve a reference to an unbuilt chapter
     pattern2 = r'<strong>\?\@(sec-[a-zA-Z0-9-]+)</strong>'
-    
+
+    # Pattern 3: Match EPUB-specific unresolved references
+    # Example: <a href="@sec-xxx">Link Text</a>
+    # This is what Quarto outputs in EPUB when it can't resolve a reference
+    pattern3 = r'<a href="@(sec-[a-zA-Z0-9-]+)"([^>]*)>([^<]*)</a>'
+
     # Count matches before replacement
     matches1 = re.findall(pattern1, html_content)
     matches2 = re.findall(pattern2, html_content)
-    total_matches = len(matches1) + len(matches2)
-    
+    matches3 = re.findall(pattern3, html_content)
+    total_matches = len(matches1) + len(matches2) + len(matches3)
+
     # Fix Pattern 1 matches
-    fixed_content = re.sub(pattern1, lambda m: fix_cross_reference_link(m, from_file, build_dir), html_content)
-    
+    fixed_content = re.sub(pattern1, lambda m: fix_cross_reference_link(m, from_file, build_dir, epub_mapping), html_content)
+
     # Fix Pattern 2 matches with proper relative path calculation
     unmapped_refs = []
     def fix_simple_reference(match):
@@ -229,33 +345,61 @@ def fix_cross_references(html_content, from_file, build_dir, verbose=False):
         abs_path = CHAPTER_MAPPING.get(sec_ref)
         title = CHAPTER_TITLES.get(sec_ref)
         if abs_path and title:
-            rel_path = calculate_relative_path(from_file, abs_path, build_dir)
+            rel_path = calculate_relative_path(from_file, abs_path, build_dir, epub_mapping)
             return f'<strong><a href="{rel_path}">{title}</a></strong>'
         else:
             unmapped_refs.append(sec_ref)
             return match.group(0)
-    
+
     fixed_content = re.sub(pattern2, fix_simple_reference, fixed_content)
-    
+
+    # Fix Pattern 3 matches (EPUB-specific)
+    def fix_epub_reference(match):
+        sec_ref = match.group(1)
+        attrs = match.group(2)  # Additional attributes
+        link_text = match.group(3)  # Original link text
+
+        # For EPUB with mapping, use direct chapter lookup
+        if epub_mapping:
+            target_chapter = epub_mapping.get(sec_ref)
+            if target_chapter:
+                return f'<a href="{target_chapter}#{sec_ref}"{attrs}>{link_text}</a>'
+            else:
+                unmapped_refs.append(sec_ref)
+                return match.group(0)
+        else:
+            # Fallback to HTML path resolution
+            abs_path = CHAPTER_MAPPING.get(sec_ref)
+            title = CHAPTER_TITLES.get(sec_ref)
+            if abs_path:
+                rel_path = calculate_relative_path(from_file, abs_path, build_dir, None)
+                return f'<a href="{rel_path}"{attrs}>{link_text}</a>'
+            else:
+                unmapped_refs.append(sec_ref)
+                return match.group(0)
+
+    fixed_content = re.sub(pattern3, fix_epub_reference, fixed_content)
+
     # Count successful replacements
     remaining1 = re.findall(pattern1, fixed_content)
     remaining2 = re.findall(pattern2, fixed_content)
-    fixed_count = total_matches - len(remaining1) - len(remaining2)
-    
+    remaining3 = re.findall(pattern3, fixed_content)
+    fixed_count = total_matches - len(remaining1) - len(remaining2) - len(remaining3)
+
     # Return info about what was fixed
     return fixed_content, fixed_count, unmapped_refs
 
-def process_html_file(html_file, base_dir):
-    """Process a single HTML file to fix cross-references."""
-    # Read HTML content
+def process_html_file(html_file, base_dir, epub_mapping=None):
+    """Process a single HTML/XHTML file to fix cross-references."""
+    # Read file content
     try:
         html_content = html_file.read_text(encoding='utf-8')
     except Exception as e:
         return None, 0, []
-    
+
     # Fix cross-reference links with proper relative path calculation
-    fixed_content, fixed_count, unmapped = fix_cross_references(html_content, html_file, base_dir)
-    
+    fixed_content, fixed_count, unmapped = fix_cross_references(html_content, html_file, base_dir, epub_mapping)
+
     # Write back fixed content if changes were made
     if fixed_count > 0:
         try:
@@ -267,59 +411,94 @@ def process_html_file(html_file, base_dir):
 
 def main():
     """
-    Main entry point. Runs in two modes:
-    1. Post-render hook (no args): Processes ALL HTML files in _build/html/
-    2. Manual mode (with file arg): Processes a specific HTML file
-    
+    Main entry point. Runs in three modes:
+    1. Post-render hook (no args): Processes HTML or EPUB builds from _build/
+    2. Directory mode (dir arg): Processes extracted EPUB directory
+    3. Manual mode (file arg): Processes a specific file
+
     This allows both automatic fixing during builds and manual testing/debugging.
     """
     if len(sys.argv) == 1:
         # MODE 1: Running as Quarto post-render hook
-        # This happens automatically after `quarto render`
-        # We process ALL HTML files because unresolved refs can appear anywhere
-        build_dir = Path("_build/html")
-        if not build_dir.exists():
-            print("⚠️ Build directory not found - skipping")
+        # Detect if this is HTML or EPUB build
+        html_dir = Path("_build/html")
+        epub_dir = Path("_build/epub")
+
+        # Determine build type
+        epub_mapping = None
+        if html_dir.exists() and (html_dir / "index.html").exists():
+            build_dir = html_dir
+            file_pattern = "*.html"
+            file_type = "HTML"
+        elif epub_dir.exists() and list(epub_dir.glob("*.xhtml")):
+            build_dir = epub_dir
+            file_pattern = "*.xhtml"
+            file_type = "XHTML (EPUB)"
+            # Build EPUB section mapping for dynamic chapter references
+            print("📚 Building EPUB section mapping...")
+            epub_mapping = build_epub_section_mapping(epub_dir)
+            print(f"   Found {len(epub_mapping)} section IDs across chapters")
+        # Check for extracted EPUB structure (EPUB/ directory at current level)
+        elif Path("EPUB").exists() and list(Path("EPUB").rglob("*.xhtml")):
+            build_dir = Path(".")
+            file_pattern = "*.xhtml"
+            file_type = "XHTML (EPUB - extracted)"
+            # Build EPUB section mapping
+            print("📚 Building EPUB section mapping...")
+            epub_mapping = build_epub_section_mapping(Path("."))
+            print(f"   Found {len(epub_mapping)} section IDs across chapters")
+        else:
+            print("⚠️ No HTML or EPUB build directory found - skipping")
             sys.exit(0)
-        
-        # Find all HTML files recursively
-        html_files = list(build_dir.rglob("*.html"))
-        print(f"🔗 [Cross-Reference Fix] Scanning {len(html_files)} HTML files...")
-        
+
+        # Find all files
+        files = list(build_dir.rglob(file_pattern))
+        print(f"🔗 [Cross-Reference Fix] Scanning {len(files)} {file_type} files...")
+
         files_fixed = []
         total_refs_fixed = 0
         all_unmapped = set()
-        
-        for html_file in html_files:
+
+        for file in files:
             # Skip certain files that don't need processing
-            if any(skip in str(html_file) for skip in ['search.html', '404.html', 'site_libs']):
+            skip_patterns = ['search.html', '404.html', 'site_libs', 'nav.xhtml', 'cover.xhtml', 'title_page.xhtml']
+            if any(skip in str(file) for skip in skip_patterns):
                 continue
-            
-            rel_path, fixed_count, unmapped = process_html_file(html_file, build_dir)
+
+            rel_path, fixed_count, unmapped = process_html_file(file, build_dir, epub_mapping)
             if fixed_count > 0:
                 files_fixed.append((rel_path, fixed_count))
                 total_refs_fixed += fixed_count
             all_unmapped.update(unmapped)
-        
+
         if files_fixed:
             print(f"✅ Fixed {total_refs_fixed} cross-references in {len(files_fixed)} files:")
             for path, count in files_fixed:
                 print(f"   📄 {path}: {count} refs")
         else:
             print(f"✅ No unresolved cross-references found")
-        
+
         if all_unmapped:
             print(f"⚠️ Unmapped references: {', '.join(sorted(all_unmapped))}")
-            
+
     elif len(sys.argv) == 2:
-        # Running with explicit file argument
+        # MODE 2: Running with explicit file argument
         html_file = Path(sys.argv[1])
         if not html_file.exists():
             print(f"❌ File not found: {html_file}")
             sys.exit(1)
-        
+
+        # Detect if this is an EPUB file (in text/ directory)
+        epub_mapping = None
+        if 'text' in html_file.parts and html_file.suffix == '.xhtml':
+            # This is an EPUB chapter file, build mapping
+            epub_base = html_file.parent.parent  # Go up from text/ to EPUB/
+            print("📚 Building EPUB section mapping...")
+            epub_mapping = build_epub_section_mapping(epub_base)
+            print(f"   Found {len(epub_mapping)} section IDs across chapters")
+
         print(f"🔗 Fixing cross-reference links in: {html_file}")
-        rel_path, fixed_count, unmapped = process_html_file(html_file, html_file.parent)
+        rel_path, fixed_count, unmapped = process_html_file(html_file, html_file.parent, epub_mapping)
         if fixed_count > 0:
             print(f"✅ Fixed {fixed_count} cross-references")
             if unmapped:
@@ -327,7 +506,7 @@ def main():
         else:
             print(f"✅ No cross-reference fixes needed")
     else:
-        print("Usage: python3 fix-glossary-html.py [<html-file>]")
+        print("Usage: python3 fix_cross_references.py [<html-or-xhtml-file>]")
         sys.exit(1)
 
 if __name__ == "__main__":
