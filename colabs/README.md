@@ -1,133 +1,140 @@
-# MLSysBook Interactive Colabs
+# Lens: Interactive ML Systems Analysis Toolkit
 
-This directory contains interactive Google Colab notebooks that complement the MLSysBook textbook, providing hands-on demonstrations of key concepts at strategic learning junctions.
+**Tagline**: See ML systems trade-offs through a new lens
 
-## Overview
+This directory contains the design documentation and planning for **Lens**, the pedagogical framework for interactive ML systems exploration used throughout the textbook.
 
-Each Colab is designed as a **"Concept Bridge"** that:
-- Illuminates a specific concept with minimal, runnable code
-- Shows immediate results connecting theory to observable behavior
-- Complements (not duplicates) TinyTorch hands-on implementation
-- Completes in 5-10 minutes to maintain reading flow
+## What is Lens?
+
+Lens is a lightweight analytical modeling toolkit that:
+- Provides simple analytical models for hardware/network/deployment trade-offs
+- Wraps existing battle-tested tools (Flower, Rooflini, electricityMap)
+- Offers unified API across all chapters and deployment paradigms
+- Builds progressively from simple (Ch02) to complex (Ch18)
+- Focuses on systems thinking and trade-off exploration
+
+**Not a simulator**: Lens uses analytical models (fast, pedagogically focused) rather than cycle-accurate simulation.
+
+## Key Documentation
+
+### Current Planning
+- **[NAMING_DISCUSSION.md](NAMING_DISCUSSION.md)** - Why "Lens" instead of "MLS Simulator"
+- **[MLS_SIMULATOR_BUILD_VS_LEVERAGE.md](MLS_SIMULATOR_BUILD_VS_LEVERAGE.md)** - Build vs leverage analysis, hybrid approach recommendation
+- **[PYTHON_TO_NOTEBOOK_WORKFLOW.md](PYTHON_TO_NOTEBOOK_WORKFLOW.md)** - Python source to Jupyter notebook conversion workflow
+- **[CHAPTER_MAPPING.md](CHAPTER_MAPPING.md)** - Progressive Lens module availability across chapters
+
+### Archive
+- **[archive/](archive/)** - Previous planning iterations (v1-v3 master plans, original vision)
+
+## Framework Architecture
+
+### Hybrid Approach
+**Build analytical models for**:
+- Hardware performance (cloud/edge/mobile/TinyML)
+- Network tier simulation (latency, bandwidth, cost)
+- Drift models and lifecycle management
+- Reliability (SDC, fault injection)
+
+**Wrap existing tools for**:
+- Roofline analysis → Rooflini
+- Federated learning → Flower
+- Carbon modeling → electricityMap API
+- Adversarial attacks → CleverHans/ART
+
+**Inspired by academic tools**:
+- MAESTRO (analytical dataflow cost model)
+- Timeloop (accelerator modeling)
+- SCALE-Sim (systolic array concepts)
+
+## Lens Colabs Structure
+
+Each Lens colab follows the **OERC framework**:
+1. **Observe**: Present a systems scenario/trade-off
+2. **Explore**: Interactive exploration with Lens toolkit
+3. **Reason**: Guided analysis and critical thinking
+4. **Connect**: Link to production systems and research
+
+**Duration**: 20-30 minutes per colab
+
+## Progressive Complexity
+
+- **Ch02**: Simple deployment paradigm comparison (cloud/edge/mobile/TinyML)
+- **Ch11**: Roofline model introduction (Lens becomes central analysis tool)
+- **Ch14**: Federated learning with Flower integration
+- **Ch18**: Multi-dimensional carbon-aware scheduling
+
+## Development Roadmap
+
+### Phase 1: Core Analytical Models (Weeks 1-6)
+- Hardware performance models
+- Network tier simulation
+- Basic workload characterization
+
+### Phase 2: Tool Integration (Weeks 7-11)
+- Roofline wrapper (Rooflini)
+- Federated wrapper (Flower)
+- Carbon API integration
+
+### Phase 3: Pilot Colabs (Weeks 12-14)
+- Ch02: Deployment paradigms
+- Ch11: Roofline analysis
+- Ch14: Federated learning
+
+### Phase 4: Validation (Weeks 15-16)
+- Student testing
+- Accuracy validation (±20% target)
+- Documentation
 
 ## Directory Structure
 
 ```
 colabs/
-├── README.md                          # This file
-├── docs/                              # Documentation and specifications
-│   ├── COLAB_INTEGRATION_PLAN.md      # Complete specifications
-│   ├── COLAB_PLACEMENT_MATRIX.md      # Quick reference table
-│   ├── COLAB_CHAPTER_OUTLINE.md       # Chapter-by-chapter placement
-│   ├── COLAB_TEMPLATE_SPECIFICATION.md # Template standards
-│   ├── COLAB_TEMPLATE_EXAMPLE.md      # Working example
-│   └── COLAB_STANDARDS_SUMMARY.md     # Quick checklist
-├── ch03_dl_primer/                    # Chapter 3 Colabs
-├── ch06_data_engineering/             # Chapter 6 Colabs
-├── ch08_training/                     # Chapter 8 Colabs
-├── ch10_optimizations/                # Chapter 10 Colabs
-│   └── quantization_demo.ipynb        # ✓ Quantization demonstration
-└── [other chapters...]
+├── src/                          # Python source files (version controlled)
+│   ├── ch01_ai_triangle.py       # Chapter 1: AI Triangle colab
+│   ├── ch02_deployment.py        # Chapter 2: Deployment paradigms
+│   └── utils/                    # Reusable utilities
+│       ├── ai_triangle_sim.py    # AI Triangle simulator
+│       └── visualization.py      # Common plotting functions
+│
+├── notebooks/                    # Generated Jupyter notebooks (for students)
+│   ├── ch01_ai_triangle.ipynb    # Ready for Google Colab
+│   ├── ch02_deployment.ipynb
+│   └── ...
+│
+├── docs/                         # Planning and design documentation
+│   ├── NAMING_DISCUSSION.md
+│   ├── PYTHON_TO_NOTEBOOK_WORKFLOW.md
+│   └── ...
+│
+└── README.md                     # This file
 ```
 
-## Available Colabs
+## Workflow for Authors
 
-### Phase 1 (v0.5.0 MVP) - 5 Colabs
+### Creating New Colabs
+1. Write colab as Python file in `colabs/src/chXX_topic.py` using percent format
+2. Use `# %% [markdown]` for text cells, `# %%` for code cells
+3. Extract reusable code to `colabs/src/utils/`
+4. Convert to notebook: `jupytext --to notebook src/chXX_topic.py --output notebooks/chXX_topic.ipynb`
+5. Test in Google Colab
+6. Commit both `.py` (source) and `.ipynb` (distribution)
 
-| Chapter | Colab | Status | Link |
-|---------|-------|--------|------|
-| Ch 3: DL Primer | Gradient Descent Visualization | 🚧 Planned | - |
-| Ch 6: Data Engineering | Data Quality Impact | 🚧 Planned | - |
-| Ch 8: Training | Training Dynamics Explorer | 🚧 Planned | - |
-| Ch 10: Optimizations | Quantization Demo | ✅ Complete | [Open in Colab](link) |
-| Ch 11: Hardware Acceleration | CPU vs GPU vs TPU | 🚧 Planned | - |
+See [PYTHON_TO_NOTEBOOK_WORKFLOW.md](PYTHON_TO_NOTEBOOK_WORKFLOW.md) for details.
 
-### Phase 2 (v0.5.1) - 13 Colabs
-Status: Planned
+## Next Steps
 
-### Phase 3 (v0.5.2) - 10 Colabs
-Status: Planned
-
-**Total Planned**: 28 Colabs across 18 chapters
-
-## Using These Colabs
-
-### For Readers
-
-1. **Read the textbook section first** - Colabs complement, not replace, textbook content
-2. **Click "Open in Colab"** - Launches notebook in Google Colab (free account sufficient)
-3. **Follow the notebook** - Execute cells sequentially
-4. **Experiment** - Modify parameters and explore
-5. **Connect back to theory** - Review textbook with new insights
-
-### For Contributors
-
-1. **Read the documentation** - Start with `docs/COLAB_STANDARDS_SUMMARY.md`
-2. **Follow the template** - Use `docs/COLAB_TEMPLATE_SPECIFICATION.md`
-3. **Review examples** - See `docs/COLAB_TEMPLATE_EXAMPLE.md`
-4. **Test thoroughly** - Must run in < 10 minutes on Colab Free Tier
-5. **Submit PR** - Follow contribution guidelines
-
-## Development Standards
-
-Every MLSysBook Colab must:
-
-- ✅ Have ONE clear learning objective
-- ✅ Complete in < 10 minutes on Colab Free Tier
-- ✅ Connect explicitly to textbook section
-- ✅ Include quantitative results
-- ✅ Follow MLSysBook visual standards
-- ✅ Be reproducible (seeds set)
-- ✅ Include MLSysBook branding
-
-See `docs/COLAB_STANDARDS_SUMMARY.md` for complete checklist.
-
-## Quick Start for Development
-
-```bash
-# 1. Review template
-cat colabs/docs/COLAB_TEMPLATE_SPECIFICATION.md
-
-# 2. Copy and rename template (when available)
-cp colabs/TEMPLATE.ipynb colabs/ch##_chapter/notebook_name.ipynb
-
-# 3. Follow the 10-section structure
-# 4. Test on Colab Free Tier
-# 5. Run pre-publication checklist
-# 6. Submit for review
-```
-
-## Integration with Textbook
-
-Colabs are referenced in the textbook using special callout blocks:
-
-```markdown
-::: {.callout-colab}
-## Interactive Exercise: Quantization in Action
-
-Experience INT8 quantization reducing model size and latency.
-
-**Learning Objective**: Understand quantization trade-offs
-
-**Estimated Time**: 6-8 minutes
-
-[![Open In Colab](badge)](link-to-colab)
-:::
-```
-
-## Support and Feedback
-
-- **Documentation Issues**: [GitHub Issues](https://github.com/harvard-edge/cs249r_book/issues)
-- **Questions**: [GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions)
-- **Book Website**: https://mlsysbook.ai
-
-## License
-
-All Colabs are licensed under **CC BY-NC-SA 4.0** (same as MLSysBook).
+1. ✅ **Created lens-colab-designer agent** - Expert at designing OERC-structured pedagogical notebooks
+2. ✅ **Created colab-writer agent** - Transforms designs into executable notebooks
+3. ✅ **First colab implemented** - Ch01 AI Triangle (Python source + notebook)
+4. ⏳ **Test Ch01 colab** - Upload to Google Colab and validate student experience
+5. ⏳ **Redesign remaining chapters** - Using Lens framework and hybrid tool approach
+6. ⏳ **Prototype Phase 1** - Core analytical models for Ch02 proof-of-concept
+7. ⏳ **Implement Lens package** - `pip install lens-mlsys` or embedded in Colab
 
 ---
 
-**Status**: Phase 1 Development (1/5 Colabs complete)  
-**Last Updated**: November 5, 2025  
-**Maintainer**: MLSysBook Team
+**Total Estimated Colabs**: 45-50 across 20 chapters (consolidated from original 98)
 
+**Package name**: `lens` (or `lens-mlsys` if PyPI conflict)
+
+**Import style**: `from lens import hardware, roofline, federated, carbon`
