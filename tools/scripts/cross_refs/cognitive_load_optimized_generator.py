@@ -13,7 +13,7 @@ Key principles implemented:
 4. Progressive Disclosure: Reveal information as needed
 5. Hyperlink Placement Optimization: Strategic placement for learning outcomes
 
-Author: Claude Code based on 2024 educational research
+Based on 2024 educational research
 """
 
 import os
