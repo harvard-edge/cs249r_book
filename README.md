@@ -365,3 +365,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 
 Our goal is to educate 1 million AI systems engineers for the future at the edge of AI.
 </div>
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=harvard-edge/cs249r_book&type=date&legend=top-left)](https://www.star-history.com/#harvard-edge/cs249r_book&type=date&legend=top-left)
