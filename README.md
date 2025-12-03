@@ -122,9 +122,10 @@ Your support helps provide TinyML kits, workshops, and infrastructure for learne
 
 | Resource | Description |
 |---|---|
-| [📚 **Main Site**](https://mlsysbook.org) | Course materials, labs, and updates |
-| [🔥 **TinyTorch**](https://mlsysbook.github.io/TinyTorch/intro.html) | Educational ML framework (🚧 Work in progress) |
-| [💬 **Discussions/Community**](https://github.com/harvard-edge/cs249r_book/discussions) | Questions and ideas |
+| [📚 **Textbook**](https://mlsysbook.ai) | Interactive online textbook |
+| [🔥 **TinyTorch**](https://tinytorch.ai) | Educational ML framework (🚧 Work in progress) |
+| [🌐 **Ecosystem**](https://mlsysbook.org) | Resources, workshops, and community |
+| [💬 **Discussions**](https://github.com/harvard-edge/cs249r_book/discussions) | Questions and ideas |
 
 ---
 
@@ -157,27 +158,22 @@ curl -O https://mlsysbook.ai/epub
 git clone https://github.com/harvard-edge/cs249r_book.git
 cd cs249r_book
 
-# Quick setup
+# First time setup
 ./binder setup
 ./binder doctor
 
-# Fast iteration
-./binder preview intro
-./binder build intro
-./binder html intro
-./binder pdf intro
-./binder epub intro
+# Daily workflow (most used)
+./binder clean              # Clean build artifacts
+./binder build              # Build HTML book
+./binder preview intro      # Preview chapter with live reload
 
-# Build the whole book
-./binder build
-./binder html
-./binder pdf
-./binder epub
+# Build all formats
+./binder pdf                # Build PDF
+./binder epub               # Build EPUB
 
 # Utilities
-./binder help
-./binder list
-./binder status
+./binder help               # Show all commands
+./binder list               # List chapters
 ```
 
 ---
