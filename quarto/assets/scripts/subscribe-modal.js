@@ -38,15 +38,15 @@
                 <div class="role-options role-options-three-compact">
                   <label class="role-option">
                     <input type="radio" name="metadata__role" value="educator" required>
-                    <span class="role-label">Educator</span>
+                    <span class="role-label">👩‍🏫 Educator</span>
                   </label>
                   <label class="role-option">
                     <input type="radio" name="metadata__role" value="student">
-                    <span class="role-label">Student</span>
+                    <span class="role-label">🎓 Student</span>
                   </label>
                   <label class="role-option">
                     <input type="radio" name="metadata__role" value="industry">
-                    <span class="role-label">Industry</span>
+                    <span class="role-label">💼 Industry</span>
                   </label>
                 </div>
               </div>
