@@ -14,27 +14,31 @@
           <button class="modal-close" data-close-modal aria-label="Close">&times;</button>
           <div class="modal-content">
             <div class="modal-header">
-              <div class="modal-icon">📚</div>
-              <h2 class="modal-title">Get MLSysBook Updates</h2>
-              <p class="modal-subtitle">Be the first to know about new chapters, labs, and resources.</p>
+              <div class="modal-badges">
+                <span class="modal-badge">📚 MLSysBook</span>
+                <span class="modal-badge-plus">+</span>
+                <span class="modal-badge">🔥 TinyTorch</span>
+              </div>
+              <h2 class="modal-title">Stay in the Loop</h2>
+              <p class="modal-subtitle">Get updates on new chapters, hands-on labs, and ML systems resources.</p>
             </div>
             <form id="subscribe-modal-form" class="subscribe-form" action="https://buttondown.email/api/emails/embed-subscribe/mlsysbook" method="post">
               <div class="form-row">
                 <div class="form-group">
                   <label for="modal-first-name">First name</label>
-                  <input type="text" id="modal-first-name" name="metadata__first_name" required placeholder="First name">
+                  <input type="text" id="modal-first-name" name="metadata__first_name" required placeholder="Jane">
                 </div>
                 <div class="form-group">
                   <label for="modal-last-name">Last name</label>
-                  <input type="text" id="modal-last-name" name="metadata__last_name" required placeholder="Last name">
+                  <input type="text" id="modal-last-name" name="metadata__last_name" required placeholder="Smith">
                 </div>
               </div>
               <div class="form-group">
                 <label for="modal-email">Email</label>
-                <input type="email" id="modal-email" name="email" required placeholder="you@example.com">
+                <input type="email" id="modal-email" name="email" required placeholder="jane@university.edu">
               </div>
               <div class="form-group">
-                <label>Role</label>
+                <label>I am a...</label>
                 <div class="role-options role-options-three-compact">
                   <label class="role-option">
                     <input type="radio" name="metadata__role" value="educator" required>
@@ -52,11 +56,11 @@
               </div>
               <div class="form-group">
                 <label for="modal-organization">Organization <span class="optional-label">(optional)</span></label>
-                <input type="text" id="modal-organization" name="metadata__organization" placeholder="University, company, or school">
+                <input type="text" id="modal-organization" name="metadata__organization" placeholder="University or company">
               </div>
               <input type="hidden" name="tag" value="mlsysbook-textbook">
               <button type="submit" class="btn btn-primary subscribe-btn">Subscribe</button>
-              <p class="form-note">No spam. Unsubscribe anytime.</p>
+              <p class="form-note">No spam, ever. Unsubscribe anytime.</p>
             </form>
             <div id="modal-subscribe-success" class="subscribe-success" style="display: none;">
               <div class="success-icon">🎉</div>
@@ -153,9 +157,29 @@
         margin-bottom: 2rem;
       }
 
-      .modal-icon {
-        font-size: 2.5rem;
+      .modal-badges {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
         margin-bottom: 1rem;
+      }
+
+      .modal-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        padding: 0.5rem 0.875rem;
+        background: #f1f5f9;
+        border-radius: 20px;
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: #334155;
+      }
+
+      .modal-badge-plus {
+        color: #94a3b8;
+        font-size: 1rem;
       }
 
       .modal-title {
@@ -367,6 +391,15 @@
       body.quarto-dark .modal-subtitle,
       body.quarto-dark .subscribe-success p {
         color: #cbd5e1;
+      }
+
+      body.quarto-dark .modal-badge {
+        background: #334155;
+        color: #e2e8f0;
+      }
+
+      body.quarto-dark .modal-badge-plus {
+        color: #64748b;
       }
 
       body.quarto-dark .form-group input[type="text"],
