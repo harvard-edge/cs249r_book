@@ -18,7 +18,7 @@
               <h2 class="modal-title">Get MLSysBook Updates</h2>
               <p class="modal-subtitle">Be the first to know about new chapters, labs, and resources.</p>
             </div>
-            <form id="subscribe-modal-form" class="subscribe-form" action="https://buttondown.email/api/emails/embed-subscribe/mlsysbook" method="post" target="_blank">
+            <form id="subscribe-modal-form" class="subscribe-form" action="https://buttondown.email/api/emails/embed-subscribe/mlsysbook" method="post">
               <div class="form-row">
                 <div class="form-group">
                   <label for="modal-first-name">First name</label>
@@ -467,13 +467,13 @@
 
     // Handle form submission
     form.addEventListener('submit', function() {
-      // Let the form submit to Buttondown in new tab
+      // Let the form submit to Buttondown
       setTimeout(() => {
         form.style.display = 'none';
         success.style.display = 'block';
         
-        // Close modal after 3 seconds
-        setTimeout(closeModal, 3000);
+        // Close modal after 5 seconds
+        setTimeout(closeModal, 5000);
       }, 100);
     });
 
