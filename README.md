@@ -109,7 +109,11 @@ Star the repository. It signals interest and helps us secure resources for open 
 
 [![Stars](https://img.shields.io/github/stars/harvard-edge/cs249r_book?style=for-the-badge&logo=github&color=gold)](https://github.com/harvard-edge/cs249r_book/stargazers)
 
-[![Star History Chart](https://api.star-history.com/svg?repos=harvard-edge/cs249r_book&type=Date)](https://star-history.com/#harvard-edge/cs249r_book&Date)
+<a href="https://star-history.com/#harvard-edge/cs249r_book&Date">
+  <img src="https://api.star-history.com/svg?repos=harvard-edge/cs249r_book&type=Date" width="400" alt="Star History Chart">
+</a>
+
+<sub>Each star represents a learner we're reaching. Our goal: 1 million.</sub>
 
 ### Fund the Mission
 Your support helps provide TinyML kits, workshops, and infrastructure for learners worldwide.
