@@ -648,7 +648,7 @@ Once everything is set up, you'll be able to:
 ### Community
 - **[GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions)** - Ask questions and share knowledge
 - **[GitHub Issues](https://github.com/harvard-edge/cs249r_book/issues)** - Report bugs and request features
-- **[MLSysBook.org](https://mlsysbook.org)** - Main website and learning platform
+- **[MLSysBook.ai](https://mlsysbook.ai)** - Main website and learning platform
 
 ### Tools and Scripts
 The `tools/scripts/` directory contains various utilities:
