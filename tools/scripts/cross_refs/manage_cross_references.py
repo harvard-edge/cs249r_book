@@ -416,7 +416,7 @@ def extract_sections(file_path: str, verbose: bool = False, quiet: bool = False)
             # Find matching cleaned content by title similarity
             cleaned_content = None
             for cleaned_title, content in cleaned_sections:
-                # Match by normalized title (remove extra spaces, case insensitive)
+                # Match by normalized title (remove extra spaces, case-insensitive)
                 if _normalize_title(original_title) == _normalize_title(cleaned_title):
                     cleaned_content = content
                     break
