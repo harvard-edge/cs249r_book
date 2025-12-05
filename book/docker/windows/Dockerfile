@@ -90,9 +90,10 @@ RUN Write-Host '=== STARTING CHOCOLATEY INSTALLATION ===' ; `
 # PHASE 3: Copy dependency files (same as quarto-build workflow)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING DEPENDENCY FILE COPY ==='
-COPY tools/dependencies/requirements.txt C:/temp/requirements.txt
-COPY tools/dependencies/install_packages.R C:/temp/install_packages.R
-COPY tools/dependencies/tl_packages C:/temp/tl_packages
+COPY book/tools/dependencies/requirements.txt C:/temp/requirements.txt
+COPY book/tools/dependencies/install_packages.R C:/temp/install_packages.R
+COPY book/tools/dependencies/tl_packages C:/temp/tl_packages
+COPY book/docker/windows/verify_r_packages.R C:/temp/verify_r_packages.R
 RUN Write-Host '✅ Dependency file copy complete'
 
 # ------------------------------------------------------------

@@ -16,18 +16,18 @@ ENV PATH=/usr/local/texlive/bin/x86_64-linux:$PATH
 # === PHASE 0: COPY DEPENDENCY FILES EARLY (for better cache efficiency) ===
 RUN echo "🚀 === STARTING DEPENDENCY FILE COPY ===" && \
     echo "📋 Files to copy (early for cache efficiency):" && \
-    echo "  - tools/dependencies/requirements/ → /tmp/requirements/" && \
-    echo "  - tools/dependencies/requirements-build.txt → /tmp/requirements.txt" && \
-    echo "  - tools/dependencies/install_packages.R → /tmp/install_packages.R" && \
-    echo "  - tools/dependencies/tl_packages → /tmp/tl_packages" && \
-    echo "  - docker/linux/verify_r_packages.R → /tmp/verify_r_packages.R" && \
+    echo "  - book/tools/dependencies/requirements/ → /tmp/requirements/" && \
+    echo "  - book/tools/dependencies/requirements-build.txt → /tmp/requirements.txt" && \
+    echo "  - book/tools/dependencies/install_packages.R → /tmp/install_packages.R" && \
+    echo "  - book/tools/dependencies/tl_packages → /tmp/tl_packages" && \
+    echo "  - book/docker/linux/verify_r_packages.R → /tmp/verify_r_packages.R" && \
     echo "✅ Dependency file copy phase complete"
 
 # Copy dependency files early for better cache efficiency
-COPY tools/dependencies/requirements.txt /tmp/requirements.txt
-COPY tools/dependencies/install_packages.R /tmp/install_packages.R
-COPY tools/dependencies/tl_packages /tmp/tl_packages
-COPY docker/linux/verify_r_packages.R /tmp/verify_r_packages.R
+COPY book/tools/dependencies/requirements.txt /tmp/requirements.txt
+COPY book/tools/dependencies/install_packages.R /tmp/install_packages.R
+COPY book/tools/dependencies/tl_packages /tmp/tl_packages
+COPY book/docker/linux/verify_r_packages.R /tmp/verify_r_packages.R
 
 # Note: Python packages are installed later in Phase 10
 
@@ -463,8 +463,8 @@ RUN echo "🚀 === STARTING R PACKAGE INSTALLATION ===" && \
     start_time=$(date +%s) && \
     \
     echo "Running R setup script with the following files:" && \
-    echo "  - /tmp/install_packages.R" && \
-    echo "  - /tmp/verify_r_packages.R" && \
+    echo "  - /tmp/install_packages.R (from book/tools/dependencies/install_packages.R)" && \
+    echo "  - /tmp/verify_r_packages.R (from book/docker/linux/verify_r_packages.R)" && \
     \
     echo "📦 Installing R packages..." && \
     Rscript /tmp/install_packages.R && \
