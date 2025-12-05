@@ -20,9 +20,9 @@ from typing import Dict, List, Set, Tuple
 
 def load_part_summaries() -> Dict:
     """Load part summaries from YAML file."""
-    yaml_path = Path("quarto/contents/parts/summaries.yml")
+    yaml_path = Path("book/quarto/contents/parts/summaries.yml")
     if not yaml_path.exists():
-        print("❌ Error: quarto/contents/parts/summaries.yml not found")
+        print("❌ Error: book/quarto/contents/parts/summaries.yml not found")
         return {}
     
     try:
@@ -47,10 +47,10 @@ def load_part_summaries() -> Dict:
 def find_qmd_files() -> List[Path]:
     """Find all .qmd files in the quarto directory."""
     qmd_files = []
-    book_dir = Path("quarto")
-    
+    book_dir = Path("book/quarto")
+
     if not book_dir.exists():
-        print("❌ Error: quarto directory not found")
+        print("❌ Error: book/quarto directory not found")
         return []
     
     # Find all .qmd files recursively
