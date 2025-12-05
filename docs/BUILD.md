@@ -536,7 +536,6 @@ If you're still having issues:
 3. **Consult documentation**:
    - [BINDER.md](BINDER.md) - Binder CLI guide
    - [DEVELOPMENT.md](DEVELOPMENT.md) - Development setup
-   - [MAINTENANCE_GUIDE.md](MAINTENANCE_GUIDE.md) - Maintenance tasks
 4. **Ask for help**:
    - GitHub Discussions: https://github.com/harvard-edge/cs249r_book/discussions
    - GitHub Issues: https://github.com/harvard-edge/cs249r_book/issues
