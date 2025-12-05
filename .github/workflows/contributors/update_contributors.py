@@ -413,7 +413,7 @@ def main(_):
     final_result = dict(
         projectName=REPO,
         projectOwner=OWNER,
-        files=["quarto/contents/frontmatter/acknowledgements/acknowledgements.qmd", "README.md"],
+        files=["book/quarto/contents/frontmatter/acknowledgements/acknowledgements.qmd", "README.md"],
         contributors=[
             dict(
                 login=(
