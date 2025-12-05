@@ -1712,10 +1712,10 @@
 - `████░` **Chapter 6: Data Engineering**: Added a 'Resources' section to all QMDs with collapsible intro text for each part.
 - `████░` **Chapter 7: AI Frameworks**: Added a section with introductory text and enabled collapsible sections within the Resources.
 - `████░` **Chapter 8: AI Training**: Added a Resources section at the end of the chapter with introductory text and enabled collapsing functionality for better organization.
-- `███░░` **Chapter 9: Efficient AI**: Added more slides and an 'Resources' section with introductory text that can be collapsed.
+- `███░░` **Chapter 9: Efficient AI**: Added more slides and a 'Resources' section with introductory text that can be collapsed.
 - `████░` **Chapter 10: Model Optimizations**: Added an empty 'Resources' section at the end of each QMD file to allow for future material additions.
 - `███░░` **Chapter 11: AI Acceleration**: Added introductory text for each section within the Resources part and enabled collapsible sections.
-- `███░░` **Chapter 12: Benchmarking AI**: Added an 'Resources' section at the end of all QMDs with intro text and enabled collapsing.
+- `███░░` **Chapter 12: Benchmarking AI**: Added a 'Resources' section at the end of all QMDs with intro text and enabled collapsing.
 - `████░` **Chapter 13: ML Operations**: Added a Resources section at the end of each QMD with introductory text for each part and enabled collapsing.
 - `████░` **Chapter 14: On-Device Learning**: Resources section added to the end of all QMDs,  with collapsible intro text and space for learning materials.
 - `███░░` **Chapter 15: Security & Privacy**: Added a 'Resources' section with intro text and enabled collapsing at the end of all QMDs.

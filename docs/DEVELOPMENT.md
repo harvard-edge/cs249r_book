@@ -2,17 +2,30 @@
 
 This guide covers the development workflow, automated cleanup system, and best practices for contributing to the Machine Learning Systems book.
 
+## 🎯 Essential Commands (Daily Use)
+
+```bash
+./binder clean      # Clean build artifacts
+./binder build      # Build HTML book
+./binder doctor     # Health check & diagnostics
+./binder preview    # Live preview with hot reload
+./binder pdf        # Build PDF
+```
+
 ## 🚀 Quick Start
 
 ```bash
 # First time setup
-./binder setup      # Configure environment and tools
-./binder hello      # Welcome and overview
+./binder setup              # Configure environment and tools
 
-# Daily development
-./binder preview intro    # Preview a chapter
-./binder build - html     # Build complete book
-./binder publish          # Publish to the world
+# Daily workflow (most common commands)
+./binder clean              # Clean build artifacts
+./binder build              # Build HTML (complete book)
+./binder doctor             # Health check
+
+# Preview & development
+./binder preview intro      # Preview a chapter with live reload
+./binder build intro        # Build specific chapter
 ```
 
 ## 🧹 Automated Cleanup System
@@ -33,19 +46,15 @@ The cleanup system removes:
 
 ```bash
 # Regular cleanup (recommended before commits)
-make clean
-./tools/scripts/build/clean.sh
+./binder clean
 
-# See what would be cleaned (safe preview)
-make clean-dry
-./tools/scripts/build/clean.sh --dry-run
+# See what files will be cleaned (safe preview)
+git status
+git clean -xdn
 
-# Deep clean (removes caches, virtual environments)
-make clean-deep
-./tools/scripts/build/clean.sh --deep
-
-# Quiet cleanup (minimal output)
-./tools/scripts/build/clean.sh --quiet
+# Deep clean (removes all build artifacts)
+./binder clean
+git clean -xdf
 ```
 
 ### Pre-Commit Hook
@@ -74,10 +83,10 @@ git commit --no-verify -m "Emergency commit"
 ./binder build - pdf           # Build PDF version
 ./binder publish               # Build and publish
 
-# Using make (legacy)
-make build                     # HTML version
-make build-pdf                 # PDF version
-make build-all                 # All formats
+# Using binder (recommended)
+./binder build                 # HTML version
+./binder pdf                   # PDF version
+./binder epub                  # EPUB version
 ```
 
 ### Development Workflow
@@ -122,8 +131,7 @@ The `./binder setup` command provides a complete environment configuration:
 
 ```bash
 # Start live preview server
-make preview
-cd book && quarto preview
+./binder preview
 
 # The server will automatically reload when you save changes
 ```
@@ -202,16 +210,15 @@ The GitHub Actions workflow will:
 ### Quick Status Check
 
 ```bash
-make check          # Overall project health
-make status         # Detailed project status
+./binder doctor     # Overall project health
+./binder status     # Detailed project status
 git status          # Git repository status
 ```
 
 ### Comprehensive Testing
 
 ```bash
-make test           # Run validation tests
-make lint           # Check for common issues
+./binder doctor     # Run comprehensive health check
 quarto check        # Validate Quarto configuration
 ```
 
@@ -300,9 +307,8 @@ Simply uncomment the chapters and bibliography entries you want to restore.
 ### Getting Help
 
 ```bash
-make help           # Show all commands
-make help-clean     # Detailed cleanup help
-make help-build     # Detailed build help
+./binder help       # Show all commands
+./binder --help     # Detailed help
 ```
 
 ## 🎯 Best Practices
@@ -311,18 +317,19 @@ make help-build     # Detailed build help
 
 ```bash
 git pull            # Get latest changes
-make clean          # Clean workspace
-make check          # Verify health
+./binder clean      # Clean workspace
+./binder doctor     # Verify health
 ```
 
 ### Daily Development Workflow
 
 ```bash
 # 1. Clean and build
-make clean build
+./binder clean
+./binder build
 
 # 2. Start development server
-make preview
+./binder preview
 
 # 3. Make changes to .qmd files
 # 4. Preview updates automatically
@@ -335,25 +342,25 @@ git commit -m "Your message"
 ### Before Major Changes
 
 ```bash
-make clean-deep     # Full cleanup
-make full-clean-build  # Clean build from scratch
-make test           # Run all tests
+./binder clean      # Full cleanup
+./binder build      # Clean build
+./binder doctor     # Run all checks
 ```
 
 ### Release Preparation
 
 ```bash
-make release-check  # Comprehensive validation
-make build-all      # Build all formats
-make check          # Final health check
+./binder doctor     # Comprehensive validation
+./binder build      # Build HTML
+./binder pdf        # Build PDF
+./binder epub       # Build EPUB
 ```
 
 ## ⚙️ Configuration Files
 
-- **`book/_quarto-html.yml`**: HTML website configuration
-- **`book/_quarto-pdf.yml`**: PDF book configuration
-- **`Makefile`**: Development commands
-- **`tools/scripts/build/clean.sh`**: Cleanup script
+- **`quarto/config/_quarto-html.yml`**: HTML website configuration
+- **`quarto/config/_quarto-pdf.yml`**: PDF book configuration
+- **`binder`**: Book Binder CLI (build and development tool)
 - **`.git/hooks/pre-commit`**: Automated cleanup hook
 - **`.gitignore`**: Ignored file patterns
 

@@ -536,7 +536,6 @@ If you're still having issues:
 3. **Consult documentation**:
    - [BINDER.md](BINDER.md) - Binder CLI guide
    - [DEVELOPMENT.md](DEVELOPMENT.md) - Development setup
-   - [MAINTENANCE_GUIDE.md](MAINTENANCE_GUIDE.md) - Maintenance tasks
 4. **Ask for help**:
    - GitHub Discussions: https://github.com/harvard-edge/cs249r_book/discussions
    - GitHub Issues: https://github.com/harvard-edge/cs249r_book/issues
@@ -630,7 +629,7 @@ Once everything is set up, you'll be able to:
 
 ### Next Steps
 1. Read [BINDER.md](BINDER.md) for complete CLI reference
-2. Check [DEVELOPMENT.md](DEVELOPMENT.md) for development guidelines
+2. Check [DEVELOPMENT.md](DEVELOPMENT.md) for development workflow
 3. Review [contribute.md](contribute.md) for contribution guidelines
 4. Join discussions at [GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions)
 
@@ -641,14 +640,13 @@ Once everything is set up, you'll be able to:
 ### Documentation
 - **[BINDER.md](BINDER.md)** - Complete Book Binder CLI reference
 - **[DEVELOPMENT.md](DEVELOPMENT.md)** - Development guidelines and workflow
-- **[MAINTENANCE_GUIDE.md](MAINTENANCE_GUIDE.md)** - Maintenance tasks and troubleshooting
 - **[contribute.md](contribute.md)** - Contribution guidelines
 - **[PUBLISH_LIVE_WORKFLOW.md](PUBLISH_LIVE_WORKFLOW.md)** - Publishing workflow
 
 ### Community
 - **[GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions)** - Ask questions and share knowledge
 - **[GitHub Issues](https://github.com/harvard-edge/cs249r_book/issues)** - Report bugs and request features
-- **[MLSysBook.org](https://mlsysbook.org)** - Main website and learning platform
+- **[MLSysBook.ai](https://mlsysbook.ai)** - Main website and learning platform
 
 ### Tools and Scripts
 The `tools/scripts/` directory contains various utilities:

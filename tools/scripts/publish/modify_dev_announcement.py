@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import List
 import argparse
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 
 def find_html_files_with_announcement(directory: Path) -> List[Path]:
@@ -60,14 +61,16 @@ def modify_announcement_banner(file_path: Path, commit_hash: str = None, commit_
         content = re.sub(r'data-bs-dismiss="alert"', '', content)
         
         # 3. Add development preview text at the beginning of the existing content
-        # Get current UTC time
+        # Get current Eastern Time (EST/EDT)
         try:
-            # Use modern timezone-aware datetime (Python 3.11+)
-            utc_now = datetime.now(datetime.UTC)
-        except AttributeError:
-            # Fallback for older Python versions
+            # Use timezone-aware datetime with Eastern Time
+            eastern = ZoneInfo("America/New_York")
+            eastern_now = datetime.now(eastern)
+            timestamp = eastern_now.strftime("%Y-%m-%d %H:%M %Z")
+        except Exception:
+            # Fallback to UTC if timezone fails
             utc_now = datetime.utcnow()
-        timestamp = utc_now.strftime("%Y-%m-%d %H:%M UTC")
+            timestamp = utc_now.strftime("%Y-%m-%d %H:%M UTC")
         
         commit_info = ""
         if commit_hash and commit_short:

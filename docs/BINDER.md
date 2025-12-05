@@ -388,5 +388,4 @@ The `publish` command provides a complete publishing workflow:
 
 For more details, see:
 - [BUILD.md](BUILD.md) - Complete build instructions
-- [DEVELOPMENT.md](DEVELOPMENT.md) - Development setup
-- [MAINTENANCE_GUIDE.md](MAINTENANCE_GUIDE.md) - Advanced maintenance 
+- [DEVELOPMENT.md](DEVELOPMENT.md) - Development setup and workflow 

@@ -43,7 +43,7 @@ class MaintenanceCommand:
         console.print(f"[blue]🔄 Switching to {format_type.upper()} configuration...[/blue]")
         
         try:
-            # Setup the symlink
+            # Set up the symlink
             config_name = self.config_manager.setup_symlink(format_type)
             console.print(f"[green]✅ Switched to {format_type.upper()} configuration[/green]")
             console.print(f"[dim]🔗 Active config: {config_name}[/dim]")

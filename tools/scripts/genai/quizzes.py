@@ -3642,6 +3642,7 @@ def main():
         epilog="""
 Examples:
   %(prog)s --mode generate -f chapter1.qmd
+  %(prog)s --mode generate -f chapter1.qmd --redistribute-mcq
   %(prog)s --mode generate -d ./some_dir/
   %(prog)s --mode generate -d ./some_dir/ --parallel
   %(prog)s --mode generate -d ./some_dir/ --parallel --max-workers 2
@@ -3659,6 +3660,7 @@ Note: You must specify either -f (file) or -d (directory) for all modes.
 The tool will automatically detect file types (JSON vs QMD) and perform the appropriate action.
 Uses topics_covered from YAML concept files for structured quiz generation.
 Use --parallel for faster directory processing (one thread per file).
+Use --redistribute-mcq to enable MCQ answer redistribution (opt-in, not automatic).
         """
     )
     parser.add_argument("--mode", choices=["generate", "review", "insert", "verify", "clean", "evaluate"], 
@@ -3680,6 +3682,7 @@ Use --parallel for faster directory processing (one thread per file).
     parser.add_argument("--max-workers", type=int, default=None, help="Maximum number of parallel workers (default: number of files, max 4)")
     parser.add_argument("--verbose", action="store_true", help="Show detailed output during processing")
     parser.add_argument("--evaluate", action="store_true", help="Enable LLM judge to evaluate question quality (generate mode only)")
+    parser.add_argument("--redistribute-mcq", action="store_true", help="Redistribute MCQ answers for balanced distribution across A, B, C, D (generate mode only)")
     parser.add_argument("--examples", action="store_true", help="Show usage examples")
     args = parser.parse_args()
 
@@ -4308,6 +4311,48 @@ def process_section(client, section, chapter_context, previous_quizzes, args, pr
             print(f"  ❌ Error generating quiz: {str(e)}")
         return {"quiz_needed": False, "rationale": f"Generation error: {str(e)}"}
 
+def validate_mcq_option_references(question, verbose=False):
+    """
+    Validate that MCQ answer explanations don't incorrectly reference the correct option.
+    
+    Args:
+        question: MCQ question dict with 'answer' and 'choices'
+        verbose: Whether to print validation issues
+        
+    Returns:
+        list: List of issues found (empty if valid)
+    """
+    issues = []
+    answer_text = question.get('answer', '')
+    
+    # Extract correct answer letter
+    match = re.match(r'The correct answer is ([A-D])', answer_text)
+    if not match:
+        return issues
+    
+    correct_letter = match.group(1)
+    
+    # Find all "Options X, Y, and Z" patterns
+    option_patterns = re.findall(r'[Oo]ptions ([A-D](?:,?\s*(?:and\s*)?[A-D])*)', answer_text)
+    for pattern in option_patterns:
+        letters = re.findall(r'[A-D]', pattern)
+        if correct_letter in letters:
+            issues.append(f"Correct answer {correct_letter} is referenced in 'Options {pattern}'")
+    
+    # Find singular "Option X is incorrect/wrong" patterns
+    singular_patterns = re.findall(r'[Oo]ption ([A-D]) is (?:incorrect|wrong)', answer_text)
+    for letter in singular_patterns:
+        if letter == correct_letter:
+            issues.append(f"Correct answer {letter} is referenced as incorrect")
+    
+    # Find "Option X describes..." patterns (when explaining wrong options)
+    describes_patterns = re.findall(r'[Oo]ption ([A-D]) describes', answer_text)
+    for letter in describes_patterns:
+        if letter == correct_letter:
+            issues.append(f"Correct answer {letter} is referenced in wrong options explanation")
+    
+    return issues
+
 def redistribute_mcq_answers(response, verbose=False, parallel=False):
     """
     Redistribute MCQ answers to ensure balanced distribution across A, B, C, D.
@@ -4446,6 +4491,21 @@ def redistribute_mcq_answers(response, verbose=False, parallel=False):
     
     if verbose or not parallel:
         print(f"     Redistributed MCQ answers: {final_distribution}")
+    
+    # Validate that option references are correct after redistribution
+    validation_issues = []
+    for i, q in enumerate(questions, 1):
+        if q.get('question_type') == 'MCQ':
+            issues = validate_mcq_option_references(q, verbose=verbose)
+            if issues:
+                validation_issues.append((i, issues))
+    
+    if validation_issues:
+        if verbose or not parallel:
+            print(f"     ⚠️  Warning: Found {len(validation_issues)} MCQ(s) with option reference issues after redistribution:")
+            for q_num, issues in validation_issues:
+                for issue in issues:
+                    print(f"        Q{q_num}: {issue}")
     
     return response
 
@@ -4668,13 +4728,31 @@ def post_process_section(response, client=None, chapter_info=None, args=None, ve
     if not response.get('quiz_needed', False):
         return response
     
-    # Step 1: Redistribute MCQ answers for balance
-    response = redistribute_mcq_answers(response, verbose=verbose, parallel=parallel)
+    # Step 1: Validate MCQ option references (always run to catch LLM generation issues)
+    questions = response.get('questions', [])
+    validation_issues = []
+    for i, q in enumerate(questions, 1):
+        if q.get('question_type') == 'MCQ':
+            issues = validate_mcq_option_references(q, verbose=verbose)
+            if issues:
+                validation_issues.append((i, issues))
     
-    # Step 2: Balance True/False answers for 50/50 distribution
+    if validation_issues:
+        if verbose or not parallel:
+            print(f"     ⚠️  Warning: Found {len(validation_issues)} MCQ(s) with option reference issues from LLM generation:")
+            for q_num, issues in validation_issues:
+                for issue in issues:
+                    print(f"        Q{q_num}: {issue}")
+            print(f"     💡 Tip: Run the fix_mcq_answer_explanations.py script to automatically fix these issues.")
+    
+    # Step 2: Redistribute MCQ answers for balance (only if flag is set)
+    if args and getattr(args, 'redistribute_mcq', False):
+        response = redistribute_mcq_answers(response, verbose=verbose, parallel=parallel)
+    
+    # Step 3: Balance True/False answers for 50/50 distribution
     response = balance_tf_answers(response, verbose=verbose, parallel=parallel)
     
-    # Step 3: Evaluate question quality (if enabled and parameters provided)
+    # Step 4: Evaluate question quality (if enabled and parameters provided)
     if client and chapter_info and args:
         response = evaluate_question_quality(response, client, chapter_info, args,
                                             verbose=verbose, parallel=parallel)
