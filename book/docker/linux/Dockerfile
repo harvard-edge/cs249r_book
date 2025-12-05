@@ -4,6 +4,13 @@
 
 FROM ubuntu:22.04
 
+# === PATH CONFIGURATION ===
+# Define source paths as build arguments (can be overridden at build time)
+ARG BOOK_ROOT=book
+ARG BOOK_TOOLS=${BOOK_ROOT}/tools
+ARG BOOK_DEPS=${BOOK_TOOLS}/dependencies
+ARG BOOK_DOCKER=${BOOK_ROOT}/docker
+
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
 ENV R_LIBS_USER=/usr/local/lib/R/library
@@ -16,18 +23,19 @@ ENV PATH=/usr/local/texlive/bin/x86_64-linux:$PATH
 # === PHASE 0: COPY DEPENDENCY FILES EARLY (for better cache efficiency) ===
 RUN echo "🚀 === STARTING DEPENDENCY FILE COPY ===" && \
     echo "📋 Files to copy (early for cache efficiency):" && \
-    echo "  - book/tools/dependencies/requirements/ → /tmp/requirements/" && \
-    echo "  - book/tools/dependencies/requirements-build.txt → /tmp/requirements.txt" && \
-    echo "  - book/tools/dependencies/install_packages.R → /tmp/install_packages.R" && \
-    echo "  - book/tools/dependencies/tl_packages → /tmp/tl_packages" && \
-    echo "  - book/docker/linux/verify_r_packages.R → /tmp/verify_r_packages.R" && \
+    echo "  - ${BOOK_DEPS}/requirements.txt → /tmp/requirements.txt" && \
+    echo "  - ${BOOK_DEPS}/install_packages.R → /tmp/install_packages.R" && \
+    echo "  - ${BOOK_DEPS}/tl_packages → /tmp/tl_packages" && \
+    echo "  - ${BOOK_DOCKER}/linux/verify_r_packages.R → /tmp/verify_r_packages.R" && \
     echo "✅ Dependency file copy phase complete"
 
 # Copy dependency files early for better cache efficiency
-COPY book/tools/dependencies/requirements.txt /tmp/requirements.txt
-COPY book/tools/dependencies/install_packages.R /tmp/install_packages.R
-COPY book/tools/dependencies/tl_packages /tmp/tl_packages
-COPY book/docker/linux/verify_r_packages.R /tmp/verify_r_packages.R
+ARG BOOK_DEPS
+COPY ${BOOK_DEPS}/requirements.txt /tmp/requirements.txt
+COPY ${BOOK_DEPS}/install_packages.R /tmp/install_packages.R
+COPY ${BOOK_DEPS}/tl_packages /tmp/tl_packages
+ARG BOOK_DOCKER
+COPY ${BOOK_DOCKER}/linux/verify_r_packages.R /tmp/verify_r_packages.R
 
 # Note: Python packages are installed later in Phase 10
 
