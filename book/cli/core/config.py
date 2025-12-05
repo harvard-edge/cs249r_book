@@ -22,9 +22,13 @@ class ConfigManager:
             root_dir: Root directory of the MLSysBook project
         """
         self.root_dir = Path(root_dir)
-        
+
         # Determine book directory
-        if (self.root_dir / "quarto").exists():
+        if (self.root_dir / "book" / "quarto").exists():
+            # New structure: book/quarto/
+            self.book_dir = self.root_dir / "book" / "quarto"
+        elif (self.root_dir / "quarto").exists():
+            # Old structure or running from book/: quarto/
             self.book_dir = self.root_dir / "quarto"
         else:
             # We're in quarto directory
