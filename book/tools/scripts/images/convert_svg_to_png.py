@@ -26,7 +26,7 @@ import re
 from pathlib import Path
 from typing import List, Tuple, Optional
 
-def find_qmd_references(svg_path: str, search_root: str = "quarto/contents") -> List[Tuple[str, int, str]]:
+def find_qmd_references(svg_path: str, search_root: str = "book/quarto/contents") -> List[Tuple[str, int, str]]:
     """
     Find all QMD files that reference the given SVG file.
     
@@ -150,7 +150,7 @@ def main():
     parser = argparse.ArgumentParser(description="Helper tool for SVG to PNG conversion")
     parser.add_argument('svg_file', help="Path to SVG file to analyze/convert")
     parser.add_argument('--png-file', help="Output PNG file path (default: replace .svg with .png)")
-    parser.add_argument('--search-root', default="quarto/contents", help="Root directory to search for QMD files")
+    parser.add_argument('--search-root', default="book/quarto/contents", help="Root directory to search for QMD files")
     parser.add_argument('--dry-run', action='store_true', help="Show what would be done without making changes")
     parser.add_argument('--find-references', action='store_true', help="Only find and show QMD references, don't convert")
     parser.add_argument('--convert-only', action='store_true', help="Only convert SVG to PNG, don't update references or remove SVG")

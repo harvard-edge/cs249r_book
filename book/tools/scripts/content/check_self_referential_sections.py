@@ -269,22 +269,22 @@ def main():
         epilog="""
 Examples:
   # Check a specific file
-  python check_self_referential_sections.py quarto/contents/core/frameworks/frameworks.qmd
-  
+  python check_self_referential_sections.py book/quarto/contents/core/frameworks/frameworks.qmd
+
   # Check all files in a directory
-  python check_self_referential_sections.py quarto/contents/
-  
+  python check_self_referential_sections.py book/quarto/contents/
+
   # Check with verbose output
-  python check_self_referential_sections.py quarto/contents/ --verbose
+  python check_self_referential_sections.py book/quarto/contents/ --verbose
         """
     )
-    
+
     parser.add_argument(
         'path',
         type=Path,
         nargs='?',
-        default=Path('quarto/contents'),
-        help='Path to file or directory to check (default: quarto/contents)'
+        default=Path('book/quarto/contents'),
+        help='Path to file or directory to check (default: book/quarto/contents)'
     )
     
     parser.add_argument(

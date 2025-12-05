@@ -82,7 +82,7 @@ def rename_images(mappings: dict, dry_run: bool = False):
     
     for local_path, url in mappings.items():
         # Find the actual file
-        files = list(Path('quarto/contents/labs').rglob(local_path))
+        files = list(Path('book/quarto/contents/labs').rglob(local_path))
         
         if not files:
             print(f"   ⚠️  File not found: {local_path}")

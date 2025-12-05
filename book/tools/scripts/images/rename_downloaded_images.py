@@ -155,7 +155,7 @@ def main():
     print("=" * 60)
     
     # Find all qmd files with auto-* images
-    labs_dir = Path('quarto/contents/labs')
+    labs_dir = Path('book/quarto/contents/labs')
     
     if not labs_dir.exists():
         print(f"❌ Directory not found: {labs_dir}")
