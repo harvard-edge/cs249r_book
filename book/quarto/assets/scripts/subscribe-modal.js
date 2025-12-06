@@ -14,10 +14,10 @@
           <button class="modal-close" data-close-modal aria-label="Close">&times;</button>
           <div class="modal-content">
             <div class="modal-header">
-              <div class="modal-badges">
-                <span class="modal-badge">📚 MLSysBook</span>
-                <span class="modal-badge-plus">+</span>
-                <span class="modal-badge">🔥 TinyTorch</span>
+              <div class="modal-brand-row">
+                <span class="modal-brand-item">📚 MLSysBook</span>
+                <span class="modal-brand-plus">+</span>
+                <span class="modal-brand-item">🔥 TinyTorch</span>
               </div>
               <h2 class="modal-title">Stay in the Loop</h2>
               <p class="modal-subtitle">Get updates on new chapters, hands-on labs, and ML systems resources.</p>
@@ -77,7 +77,7 @@
   function createModalCSS() {
     const style = document.createElement('style');
     style.textContent = `
-      /* Modal Overlay and Container - matching ReOrg style */
+      /* Modal Overlay and Container */
       .modal-overlay {
         position: fixed;
         top: 0;
@@ -86,7 +86,7 @@
         bottom: 0;
         background: rgba(15, 23, 42, 0.6);
         backdrop-filter: blur(4px);
-        z-index: 1000;
+        z-index: 10001;
         align-items: center;
         justify-content: center;
         padding: 1rem;
@@ -111,8 +111,8 @@
 
       .modal-container {
         background: white;
-        border-radius: 20px;
-        max-width: 500px;
+        border-radius: 16px;
+        max-width: 440px;
         width: 100%;
         max-height: 90vh;
         overflow-y: auto;
@@ -149,50 +149,56 @@
       }
 
       .modal-content {
-        padding: 2.5rem;
+        padding: 2rem 2.5rem 2.5rem 2.5rem;
       }
 
       .modal-header {
         text-align: center;
-        margin-bottom: 2rem;
+        margin-bottom: 1.5rem;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
       }
 
-      .modal-badges {
-        display: flex;
+      .modal-brand-row {
+        display: inline-flex;
         align-items: center;
         justify-content: center;
         gap: 0.5rem;
         margin-bottom: 1rem;
       }
 
-      .modal-badge {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.25rem;
-        padding: 0.5rem 0.875rem;
-        background: #f1f5f9;
-        border-radius: 20px;
-        font-size: 0.875rem;
-        font-weight: 500;
-        color: #334155;
+      .modal-brand-item {
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: #374151;
+        background: #f3f4f6;
+        padding: 0.3rem 0.6rem;
+        border-radius: 5px;
+        white-space: nowrap;
       }
 
-      .modal-badge-plus {
-        color: #94a3b8;
-        font-size: 1rem;
+      .modal-brand-plus {
+        font-size: 0.9rem;
+        font-weight: 300;
+        color: #9ca3af;
       }
 
       .modal-title {
-        font-size: 1.75rem;
+        font-size: 1.5rem;
         font-weight: 700;
         color: #0f172a;
-        margin-bottom: 0.5rem;
+        margin: 0 0 0.4rem 0;
+        line-height: 1.2;
+        width: 100%;
       }
 
       .modal-subtitle {
-        font-size: 1rem;
-        color: #475569;
+        font-size: 0.9rem;
+        color: #64748b;
         margin: 0;
+        line-height: 1.5;
+        max-width: 320px;
       }
 
       /* Form Styles */
@@ -205,7 +211,16 @@
       .form-row {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 1rem;
+        gap: 0.75rem;
+      }
+      
+      .form-row .form-group {
+        min-width: 0;
+      }
+      
+      .form-row .form-group input {
+        width: 100%;
+        box-sizing: border-box;
       }
 
       .form-group {
@@ -248,7 +263,7 @@
         color: #94a3b8;
       }
 
-      /* Role Options - compact style like ReOrg */
+      /* Role Options - compact style */
       .role-options {
         display: grid;
         grid-template-columns: 1fr 1fr;
@@ -382,6 +397,15 @@
         color: #f1f5f9;
       }
 
+      body.quarto-dark .modal-brand-item {
+        background: #334155;
+        color: #e2e8f0;
+      }
+
+      body.quarto-dark .modal-brand-plus {
+        color: #64748b;
+      }
+
       body.quarto-dark .modal-title,
       body.quarto-dark .form-group label,
       body.quarto-dark .subscribe-success h3 {
@@ -391,15 +415,6 @@
       body.quarto-dark .modal-subtitle,
       body.quarto-dark .subscribe-success p {
         color: #cbd5e1;
-      }
-
-      body.quarto-dark .modal-badge {
-        background: #334155;
-        color: #e2e8f0;
-      }
-
-      body.quarto-dark .modal-badge-plus {
-        color: #64748b;
       }
 
       body.quarto-dark .form-group input[type="text"],
@@ -529,4 +544,3 @@
     initModal();
   }
 })();
-

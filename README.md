@@ -98,23 +98,23 @@ This textbook gives you a **systems level understanding of machine learning**, b
 | **Responsible and Sustainable AI** | How to design systems with privacy, security, and environmental impact in mind                 |
 
 ---
+## Support This Work
 
-## ⭐ Support This Work
+### ⭐ Why GitHub Stars Matter
 
 <div align="center">
 
-### Show Support
-
-Star the repository to join us on the journey.
+*What gets measured gets done.* Every star represents a learner or believer in accessible AI education. We're tracking our way to 1 million learners by 2030. Sponsors match community support with funding that provides TinyML kits, workshops, and infrastructure for learners worldwide.
 
 [![Stars](https://img.shields.io/github/stars/harvard-edge/cs249r_book?style=for-the-badge&logo=github&color=gold)](https://github.com/harvard-edge/cs249r_book/stargazers)
 
 [![Star History Chart](https://api.star-history.com/svg?repos=harvard-edge/cs249r_book&type=Date)](https://star-history.com/#harvard-edge/cs249r_book&Date)
 
-**Tracking our way to 1 million learners.**
+1 ✓ → 10 ✓ → 100 ✓ → 1,000 ✓ → **10,000 ✓** → 100,000 by 2026
 
 ### Fund the Mission
-Your support helps provide TinyML kits, workshops, and infrastructure for learners worldwide.
+
+Your contribution directly supports accessible AI education around the world.
 
 [![Open Collective](https://img.shields.io/badge/💝%20Support%20AI%20Education-Open%20Collective-blue.svg?style=for-the-badge)](https://opencollective.com/mlsysbook)
 
@@ -328,14 +328,26 @@ Thanks goes to these wonderful people who have contributed to making this resour
       <td align="center" valign="top" width="20%"><a href="https://github.com/swilcock0"><img src="https://avatars.githubusercontent.com/swilcock0?s=100" width="100px;" alt="Sam Wilcock"/><br /><sub><b>Sam Wilcock</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/skmur"><img src="https://avatars.githubusercontent.com/skmur?s=100" width="100px;" alt="Sonia Murthy"/><br /><sub><b>Sonia Murthy</b></sub></a><br /></td>
       <td align="center" valign="top" width="20%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/fc4f3460cdfb9365ab59bdeafb06413e?d=identicon&s=100?s=100" width="100px;" alt="Costin-Andrei Oncescu"/><br /><sub><b>Costin-Andrei Oncescu</b></sub></a><br /></td>
-      <td align="center" valign="top" width="20%"><a href="https://github.com/atdang2"><img src="https://avatars.githubusercontent.com/atdang2?s=100" width="100px;" alt="Andy Dang"/><br /><sub><b>Andy Dang</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/0d6b8616427d8b19d425c9808692e347?d=identicon&s=100?s=100" width="100px;" alt="formlsysbookissue"/><br /><sub><b>formlsysbookissue</b></sub></a><br /></td>
     </tr>
     <tr>
-      <td align="center" valign="top" width="20%"><a href="https://github.com/ishanbhattacharya"><img src="https://avatars.githubusercontent.com/ishanbhattacharya?s=100" width="100px;" alt="Ishan Bhattacharya"/><br /><sub><b>Ishan Bhattacharya</b></sub></a><br /></td>
-      <td align="center" valign="top" width="20%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/c4c7c8ca27ba503ba33a5f27d5de4bbd?d=identicon&s=100?s=100" width="100px;" alt="Vijay Edupuganti"/><br /><sub><b>Vijay Edupuganti</b></sub></a><br /></td>
-      <td align="center" valign="top" width="20%"><a href="https://github.com/iangonzalez"><img src="https://avatars.githubusercontent.com/iangonzalez?s=100" width="100px;" alt="Ian Gonzalez"/><br /><sub><b>Ian Gonzalez</b></sub></a><br /></td>
-      <td align="center" valign="top" width="20%"><a href="https://github.com/Gjain234"><img src="https://avatars.githubusercontent.com/Gjain234?s=100" width="100px;" alt="Gauri Jain"/><br /><sub><b>Gauri Jain</b></sub></a><br /></td>
-      <td align="center" valign="top" width="20%"><a href="https://github.com/NicholasLYang"><img src="https://avatars.githubusercontent.com/NicholasLYang?s=100" width="100px;" alt="Nicholas Yang"/><br /><sub><b>Nicholas Yang</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/7cd8d5dfd83071f23979019d97655dc5?d=identicon&s=100?s=100" width="100px;" alt="Annie Laurie Cook"/><br /><sub><b>Annie Laurie Cook</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/b15b6e0e9adf58099905c1a0fd474cb9?d=identicon&s=100?s=100" width="100px;" alt="Vijay Edupuganti"/><br /><sub><b>Vijay Edupuganti</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/f88052cca4f401d9b0f43aed0a53434a?d=identicon&s=100?s=100" width="100px;" alt="Jothi Ramaswamy"/><br /><sub><b>Jothi Ramaswamy</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/35a8d9ffd03f05e79a2c6ce6206a56f2?d=identicon&s=100?s=100" width="100px;" alt="Batur Arslan"/><br /><sub><b>Batur Arslan</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/bd53d146aa888548c8db4da02bf81e7a?d=identicon&s=100?s=100" width="100px;" alt="Curren Iyer"/><br /><sub><b>Curren Iyer</b></sub></a><br /></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/468ef35acc69f3266efd700992daa369?d=identicon&s=100?s=100" width="100px;" alt="Fatima Shah"/><br /><sub><b>Fatima Shah</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/8d8410338458e08bd5e4b96f58e1c217?d=identicon&s=100?s=100" width="100px;" alt="Edward Jin"/><br /><sub><b>Edward Jin</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/28c6123d2c9f75578d3ccdedb0df3d11?d=identicon&s=100?s=100" width="100px;" alt="Tess Watt"/><br /><sub><b>Tess Watt</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/ef139181fe00190f21730f6912532e9e?d=identicon&s=100?s=100" width="100px;" alt="bluebaer7"/><br /><sub><b>bluebaer7</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/a5a47df988ab1720dd706062e523ca32?d=identicon&s=100?s=100" width="100px;" alt="a-saraf"/><br /><sub><b>a-saraf</b></sub></a><br /></td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/c2dc311aa8122d5f5f061e1db14682b1?d=identicon&s=100?s=100" width="100px;" alt="songhan"/><br /><sub><b>songhan</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/4814aad67982ab07a69006a1ce9d2a72?d=identicon&s=100?s=100" width="100px;" alt="jvijay"/><br /><sub><b>jvijay</b></sub></a><br /></td>
+      <td align="center" valign="top" width="20%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/43b1feff77c8a95fd581774fb8ec891f?d=identicon&s=100?s=100" width="100px;" alt="Zishen"/><br /><sub><b>Zishen</b></sub></a><br /></td>
     </tr>
   </tbody>
 </table>
