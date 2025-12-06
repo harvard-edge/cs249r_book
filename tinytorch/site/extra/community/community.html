@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script>
+        // CLIENT-SIDE SECURITY CHECK:
+        // This script prevents unauthorized visual access to the community content.
+        // It does NOT prevent direct download of this HTML file by a determined user.
+        // For true data security, ensure all sensitive data is fetched via authenticated API calls.
+        const token = localStorage.getItem("tinytorch_token");
+        if (!token) {
+            const isCommunitySite = window.location.hostname === 'tinytorch.ai' || (window.location.hostname === 'localhost' && window.location.port === '8000');
+            const basePath = isCommunitySite ? '/community' : '';
+            window.location.href = basePath + '/index.html?action=login&next=community.html'; 
+        }
+    </script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>D3 Pen Outline Globe</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      font-family: 'Courier New', Courier, monospace;
+      
+      /* Base Paper Color */
+      background-color: #f0f4f8;
+      
+      /* Graph Paper Grid Logic */
+      background-image: 
+        linear-gradient(90deg, rgba(0, 0, 0, 0.05) 1px, transparent 1px),
+        linear-gradient(rgba(0, 0, 0, 0.05) 1px, transparent 1px);
+        
+      background-size: 20px 20px;
+    }
+
+    svg {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      cursor: grab; /* Indicate draggable */
+    }
+
+    svg:active {
+      cursor: grabbing;
+    }
+    
+    .label-box {
+      position: absolute;
+      top: 80px;
+      /* Shifted right as requested */
+      left: 80px; 
+      padding: 15px;
+      background: rgba(255, 255, 255, 0.95);
+      border: 1px solid #333;
+      box-shadow: 4px 4px 0px rgba(0,0,0,0.1);
+      z-index: 10;
+      pointer-events: auto; 
+      min-width: 240px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .label-header {
+      border-bottom: 1px dashed #ccc;
+      padding-bottom: 8px;
+    }
+
+    /* Search Input Styling */
+    .search-container {
+      position: relative;
+      width: 100%;
+    }
+
+    .search-input {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 6px;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 12px;
+      border: 1px solid #ccc;
+      outline: none;
+    }
+
+    .search-input:focus {
+      border-color: #ff6600;
+      background: #fffcf5;
+    }
+
+    .search-results {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      width: 100%;
+      background: white;
+      border: 1px solid #ccc;
+      border-top: none;
+      max-height: 150px;
+      overflow-y: auto;
+      z-index: 20;
+      display: none;
+      box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+    }
+
+    .search-item {
+      padding: 6px;
+      font-size: 11px;
+      cursor: pointer;
+      border-bottom: 1px solid #eee;
+    }
+
+    .search-item:hover {
+      background-color: #ffe0b2;
+    }
+
+    /* Key / Legend Styling */
+    .legend-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      color: #555;
+    }
+
+    .legend-dot {
+      width: 8px;
+      height: 8px;
+      background-color: #ff6600;
+      border-radius: 50%;
+      display: inline-block;
+      border: 1px solid #ffcc00;
+      box-shadow: 0 0 2px rgba(255, 102, 0, 0.6);
+    }
+
+    /* Toggle Button Styling */
+    .control-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: white;
+      border: 1px solid #555;
+      padding: 4px 8px;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 11px;
+      cursor: pointer;
+      text-transform: uppercase;
+      transition: all 0.2s;
+      outline: none;
+      width: 100%;
+      justify-content: center;
+    }
+
+    .control-btn:hover {
+      background: #eee;
+      box-shadow: 1px 1px 0px #333;
+      transform: translate(-1px, -1px);
+    }
+    
+    .control-btn:active {
+      transform: translate(0, 0);
+      box-shadow: none;
+    }
+
+    /* Pen Styling for the Globe */
+    .globe-outline-circle {
+      fill: #fff; /* White background for the sphere itself */
+      stroke: #333;
+      stroke-width: 2px;
+      pointer-events: none; /* Ensure globe bg doesn't block markers */
+    }
+
+    .graticule {
+      fill: none;
+      stroke: #ccc; /* Light pencil lines for grid */
+      stroke-width: 0.5px;
+      stroke-dasharray: 2,2; /* Dashed lines for technical feel */
+      pointer-events: none;
+    }
+
+    .country {
+      fill: #fff; /* Paper color fill */
+      stroke: #2c3e50; /* Dark ink stroke */
+      stroke-width: 1.2px;
+      stroke-linejoin: round;
+      stroke-linecap: round;
+      pointer-events: none; /* Let events fall through to globe/markers */
+    }
+
+    /* Particle Marker Styling */
+    .marker {
+      stroke: #ffcc00; /* Lighter orange stroke */
+      stroke-width: 1px;
+      fill: #ff6600; /* Bright orange fill */
+      filter: drop-shadow(0 0 4px rgba(255, 102, 0, 0.6)); /* Glow effect */
+      cursor: pointer;
+      transition: r 0.2s ease, fill 0.2s ease;
+      pointer-events: all !important; /* Force events on markers */
+    }
+    
+    .marker:hover {
+        fill: #ff9900;
+        stroke: #fff;
+    }
+
+    /* Tooltip / Mini Modal Styling */
+    .tooltip {
+      position: absolute;
+      background: #fff;
+      border: 1px solid #333;
+      padding: 12px;
+      border-radius: 4px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s;
+      box-shadow: 4px 4px 0px rgba(0,0,0,0.2);
+      font-family: 'Arial', sans-serif; /* Clean font for data */
+      font-size: 13px;
+      min-width: 150px;
+      z-index: 100; /* High z-index to be sure */
+    }
+
+    .tooltip h3 {
+      margin: 0 0 5px 0;
+      font-size: 14px;
+      color: #333;
+      border-bottom: 1px solid #eee;
+      padding-bottom: 5px;
+    }
+
+    .tooltip .info-row {
+      margin: 4px 0;
+      color: #555;
+    }
+
+    .tooltip .highlight {
+      color: #ff6600;
+      font-weight: bold;
+    }
+  </style>
+
+  <!-- Load D3 and TopoJSON -->
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://unpkg.com/topojson-client@3"></script>
+</head>
+
+<body>
+  <div class="label-box">
+    <div class="label-header">
+      <strong>HELLO WORLD!</strong><br>
+      Tiny Torch Community<br>
+      <small style="color:#777; font-size:10px;">Hover over a node to view user</small>
+    </div>
+    
+    <!-- Search UI -->
+    <div class="search-container">
+      <input type="text" id="user-search" class="search-input" placeholder="Search user..." autocomplete="off">
+      <div id="search-dropdown" class="search-results"></div>
+    </div>
+
+    <button id="rotation-toggle" class="control-btn">
+      <span>&#10074;&#10074;</span> Pause Rotation
+    </button>
+
+    <div class="legend-row">
+      <span class="legend-dot"></span>
+      <span>Tiny Torch Community Member</span>
+    </div>
+  </div>
+
+  <!-- Tooltip Container -->
+  <div id="tooltip" class="tooltip"></div>
+
+  <svg id="globe-svg"></svg>
+
+  <script src="layout.js"></script>
+  <script>
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    
+    // Configuration
+    const config = {
+      speed: 0.3,
+      verticalTilt: -20,
+      scale: Math.min(width, height) / 2.5
+    };
+
+    // Major cities for rough location mapping (used when API lacks exact coords)
+    const CITIES = [
+      {lat: 34.0522, lng: -118.2437, name: "Los Angeles"},
+      {lat: 40.7128, lng: -74.0060, name: "New York"},
+      {lat: 51.5074, lng: -0.1278, name: "London"},
+      {lat: 35.6895, lng: 139.6917, name: "Tokyo"},
+      {lat: -33.8688, lng: 151.2093, name: "Sydney"},
+      {lat: 19.4326, lng: -99.1332, name: "Mexico City"},
+      {lat: -23.5505, lng: -46.6333, name: "Sao Paulo"},
+      {lat: 30.0444, lng: 31.2357, name: "Cairo"},
+      {lat: 28.6139, lng: 77.2090, name: "New Delhi"},
+      {lat: 55.7558, lng: 37.6173, name: "Moscow"},
+      {lat: -1.2921, lng: 36.8219, name: "Nairobi"},
+      {lat: 48.8566, lng: 2.3522, name: "Paris"},
+      {lat: 39.9042, lng: 116.4074, name: "Beijing"},
+      {lat: 13.7563, lng: 100.5018, name: "Bangkok"},
+      {lat: -26.2041, lng: 28.0473, name: "Johannesburg"},
+      {lat: 41.0082, lng: 28.9784, name: "Istanbul"},
+      {lat: 6.5244, lng: 3.3792, name: "Lagos"},
+      {lat: 37.7749, lng: -122.4194, name: "San Francisco"},
+      {lat: 1.3521, lng: 103.8198, name: "Singapore"},
+      {lat: 52.5200, lng: 13.4050, name: "Berlin"},
+      {lat: 22.5726, lng: 88.3639, name: "Kolkata"}
+    ];
+
+    // Fallback data if API fails or returns empty (preserving original demo data)
+    const fallbackLocations = [
+        {"latitude": 22, "longitude": 88, "user": "dev_guru_88", "completed": 85, "institution": "IIT Kharagpur"},
+        {"latitude": 12.61315, "longitude": 38.37723, "user": "ethiopia_code", "completed": 92, "institution": "Addis Ababa Univ"},
+        {"latitude": -30, "longitude": -58, "user": "arg_hacker", "completed": 64, "institution": "Univ of Buenos Aires"},
+        {"latitude": -14.270972, "longitude": -170.132217, "user": "island_coder", "completed": 78, "institution": "Samoa Polytech"},
+        {"latitude": 28.033886, "longitude": 1.659626, "user": "sahara_js", "completed": 45, "institution": "Univ of Algiers"},
+        {"latitude": 40.463667, "longitude": -3.74922, "user": "madrid_frontend", "completed": 99, "institution": "Complutense Univ"},
+        {"latitude": 35.907757, "longitude": 127.766922, "user": "seoul_surfer", "completed": 88, "institution": "KAIST"},
+        {"latitude": 23.634501, "longitude": -102.552784, "user": "mx_fullstack", "completed": 72, "institution": "UNAM"},
+        {"latitude": 42.3736, "longitude": -71.1097, "user": "crimson_dev", "completed": 95, "institution": "Harvard University"}
+    ];
+
+    let locations = []; 
+    const API_URL = "https://zrvmjrxhokwwmjacyhpq.supabase.co/functions/v1/search-profiles";
+
+    const svg = d3.select('#globe-svg');
+    const tooltip = d3.select('#tooltip');
+    
+    // Projection setup
+    const projection = d3.geoOrthographic()
+      .scale(config.scale)
+      .center([0, 0])
+      .translate([width / 2, height / 2]);
+
+    const path = d3.geoPath().projection(projection);
+    const center = [width/2, height/2];
+
+    // State
+    let currentRotation = [0, config.verticalTilt, 0];
+    let isDragging = false;
+    let isPaused = false;
+    let isHovering = false;
+
+    // Groups
+    const globeGroup = svg.append('g');
+    const graticuleGroup = svg.append('g');
+    const mapGroup = svg.append('g');
+    const markerGroup = svg.append('g');
+
+    // 1. Globe Background
+    globeGroup.append("path")
+      .datum({type: "Sphere"})
+      .attr("class", "globe-outline-circle")
+      .attr("d", path);
+
+    // 2. Graticules
+    const graticule = d3.geoGraticule().step([10, 10]);
+    graticuleGroup.append("path")
+      .datum(graticule)
+      .attr("class", "graticule")
+      .attr("d", path);
+
+    // 3. Load World Data
+    d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json')
+      .then(worldData => {
+        mapGroup.selectAll(".country")
+          .data(topojson.feature(worldData, worldData.objects.countries).features)
+          .enter().append("path")
+          .attr("class", "country")
+          .attr("d", path);
+        
+        startAnimation();
+        fetchProfiles(); // Load real data
+      });
+
+    // Helper: Get rough coords from string hash (Deterministic)
+    function getRoughCoords(str) {
+        if (!str) str = "unknown";
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            hash = str.charCodeAt(i) + ((hash << 5) - hash);
+        }
+        const index = Math.abs(hash) % CITIES.length;
+        const city = CITIES[index];
+        // Add jitter (±5 deg) so multiple users in same "rough" location don't overlap perfectly
+        return {
+            latitude: city.lat + (Math.random() - 0.5) * 5,
+            longitude: city.lng + (Math.random() - 0.5) * 5
+        };
+    }
+
+    // API Fetch Logic
+    async function fetchProfiles(query = "") {
+        try {
+            const response = await fetch(API_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ query: query, page: 0, limit: 20 })
+            });
+            
+            if (!response.ok) throw new Error("API Error: " + response.status);
+            const data = await response.json();
+
+            if (Array.isArray(data) && data.length > 0) {
+                locations = data.map(p => {
+                    const coords = getRoughCoords(p.location || p.username);
+                    return {
+                        latitude: coords.latitude,
+                        longitude: coords.longitude,
+                        user: p.username,
+                        completed: "Member", // Data not provided by search API
+                        institution: Array.isArray(p.institution) ? p.institution.join(", ") : (p.institution || "Unknown")
+                    };
+                });
+            } else {
+               // If no results (and no query), use fallback
+               if (!query && locations.length === 0) {
+                   locations = fallbackLocations;
+               } else if (query) {
+                   // If searching and no results, clear map
+                   locations = [];
+               }
+            }
+        } catch (e) {
+            console.warn("Fetch failed, using fallback data.", e);
+            if (locations.length === 0) locations = fallbackLocations;
+        }
+        
+        renderMarkers();
+        if (query) updateSearchDropdown(query);
+    }
+
+    // Drag Behavior
+    const drag = d3.drag()
+      .on("start", () => { isDragging = true; })
+      .on("drag", (event) => {
+        const rotate = projection.rotate();
+        const k = 75 / projection.scale();
+        projection.rotate([ rotate[0] + event.dx * k, rotate[1] - event.dy * k ]);
+        currentRotation = projection.rotate();
+        redraw();
+      })
+      .on("end", () => { isDragging = false; });
+
+    svg.call(drag);
+
+    // Button Logic
+    const toggleBtn = document.getElementById('rotation-toggle');
+    const toggleRotation = () => {
+      isPaused = !isPaused;
+      toggleBtn.innerHTML = isPaused ? 
+        '<span>&#9658;</span> Resume Rotation' : 
+        '<span>&#10074;&#10074;</span> Pause Rotation';
+    };
+    toggleBtn.addEventListener('click', toggleRotation);
+
+    // --- Search Logic ---
+    const searchInput = document.getElementById('user-search');
+    const searchDropdown = document.getElementById('search-dropdown');
+    let debounceTimer;
+
+    searchInput.addEventListener('input', (e) => {
+      const val = e.target.value;
+      clearTimeout(debounceTimer);
+      
+      if (!val) {
+        searchDropdown.style.display = 'none';
+        fetchProfiles(""); // Reset
+        return;
+      }
+
+      debounceTimer = setTimeout(() => {
+          fetchProfiles(val);
+      }, 500); // Debounce API calls
+    });
+    
+    searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+             clearTimeout(debounceTimer);
+             fetchProfiles(searchInput.value);
+             searchDropdown.style.display = 'none';
+        }
+    });
+
+    // Update dropdown with current locations (which are now the search results)
+    function updateSearchDropdown(query) {
+        searchDropdown.innerHTML = '';
+        // Only show first 5-8 in dropdown to avoid clutter
+        const matches = locations.slice(0, 8);
+        
+        if (matches.length > 0) {
+            searchDropdown.style.display = 'block';
+            matches.forEach(match => {
+              const div = document.createElement('div');
+              div.className = 'search-item';
+              div.textContent = match.user;
+              div.onclick = () => {
+                 searchInput.value = match.user;
+                 searchDropdown.style.display = 'none';
+                 focusUser(match);
+              };
+              searchDropdown.appendChild(div);
+            });
+        } else {
+            searchDropdown.style.display = 'none';
+        }
+    }
+
+    // Close dropdown if clicking outside
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.search-container')) {
+            searchDropdown.style.display = 'none';
+        }
+    });
+
+    function focusUser(d) {
+        // Pause rotation so we don't fight the user
+        if (!isPaused) toggleRotation();
+
+        // Target rotation: To center a coordinate [long, lat], we rotate to [-long, -lat]
+        const targetRotation = [-d.longitude, -d.latitude];
+        
+        // Use D3 transition to interpolate the rotation
+        d3.transition()
+          .duration(1500)
+          .tween("rotate", () => {
+             const r = d3.interpolate(projection.rotate(), targetRotation);
+             return (t) => {
+                 projection.rotate(r(t));
+                 currentRotation = projection.rotate(); // Sync state for when we resume
+                 redraw();
+             };
+          });
+    }
+    // ---------------------
+
+    // Animation Loop
+    function startAnimation() {
+      d3.timer(function (elapsed) {
+        if (!isDragging && !isPaused && !isHovering) {
+          currentRotation[0] += config.speed;
+          projection.rotate(currentRotation);
+          redraw();
+        }
+      });
+    }
+
+    function redraw() {
+        svg.selectAll("path").attr("d", path);
+        updateMarkerPositions();
+    }
+
+    // Render Markers (Handles Enter/Exit)
+    function renderMarkers() {
+      const markers = markerGroup.selectAll('circle.marker')
+        .data(locations, d => d.user); // Key by user to ensure smooth transitions
+
+      // Exit
+      markers.exit().transition().duration(500).attr("r", 0).remove();
+
+      // Enter
+      const enter = markers.enter()
+        .append('circle')
+        .attr('class', 'marker')
+        .attr('r', 0) // Start small
+        .on("mouseover", function(event, d) {
+            isHovering = true;
+            d3.select(this).transition().duration(200).attr("r", 7);
+            
+            tooltip.html(`
+                <h3>${d.user}</h3>
+                <div class="info-row">Status: <span class="highlight">${d.completed}</span></div>
+                <div class="info-row"><i>${d.institution}</i></div>
+            `);
+
+            tooltip
+                .style("left", (event.pageX + 15) + "px")
+                .style("top", (event.pageY - 15) + "px")
+                .style("opacity", 1);
+        })
+        .on("mouseout", function() {
+            isHovering = false;
+            d3.select(this).transition().duration(200).attr("r", 4);
+            tooltip.style("opacity", 0);
+        });
+
+      enter.transition().duration(500).attr("r", 4);
+    }
+
+    // Update positions (Run every frame)
+    function updateMarkerPositions() {
+      const markers = markerGroup.selectAll('circle.marker');
+      
+      if (markers.empty()) return;
+
+      markers.each(function(d) {
+        const coordinate = [d.longitude, d.latitude];
+        const gdistance = d3.geoDistance(coordinate, projection.invert(center));
+        const isVisible = gdistance < 1.57; 
+
+        if (isVisible) {
+          const pos = projection(coordinate);
+          d3.select(this)
+            .attr('cx', pos[0])
+            .attr('cy', pos[1])
+            .style('display', 'block');
+        } else {
+          d3.select(this).style('display', 'none');
+        }
+      });
+    }
+
+    // Handle Window Resize
+    window.addEventListener('resize', () => {
+       const w = window.innerWidth;
+       const h = window.innerHeight;
+       svg.attr('width', w).attr('height', h);
+       projection.translate([w/2, h/2]).scale(Math.min(w, h) / 2.5);
+       center[0] = w/2; 
+       center[1] = h/2;
+       redraw();
+    });
+
+  </script>
+</body>
+</html>
