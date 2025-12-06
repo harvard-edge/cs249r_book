@@ -1,0 +1,1443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        // CLIENT-SIDE SECURITY CHECK:
+        // This script prevents unauthorized visual access to the dashboard content.
+        // It does NOT prevent direct download of this HTML file by a determined user.
+        // For true data security, ensure all sensitive data is fetched via authenticated API calls.
+        const token = localStorage.getItem("tinytorch_token");
+        if (!token) {
+            const isCommunitySite = window.location.hostname === 'tinytorch.ai' || (window.location.hostname === 'localhost' && window.location.port === '8000');
+            const basePath = isCommunitySite ? '/community' : '';
+            window.location.href = basePath + '/index.html?action=login&next=dashboard.html'; 
+        }
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Your Tiny Torch Journey</title>
+    <link rel="icon" href="assets/flame.ico" type="image/x-icon">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #fdfcf8; /* Warm paper off-white */
+            font-family: 'Georgia', 'Times New Roman', Times, serif;
+            color: #333;
+            /* Default to hidden for desktop app-feel, changed via JS for mobile */
+            overflow: hidden; 
+        }
+
+        canvas {
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+            cursor: default;
+        }
+
+        #ui-layer {
+            position: fixed; /* Fixed so it stays visible on scroll */
+            top: 80px;
+            left: 40px;
+            z-index: 2;
+            pointer-events: none;
+            background: rgba(253, 252, 248, 0.8);
+            padding: 10px;
+            border-radius: 8px;
+            backdrop-filter: blur(2px);
+        }
+
+        h1 {
+            font-size: 2rem;
+            margin: 0;
+            font-weight: normal;
+            letter-spacing: 1px;
+            color: #222;
+            opacity: 0;
+            animation: fadeIn 2s ease-out forwards;
+        }
+
+        p {
+            font-size: 0.9rem;
+            color: #666;
+            margin-top: 8px;
+            font-style: italic;
+            opacity: 0;
+            animation: fadeIn 2s ease-out 0.5s forwards;
+        }
+
+        @keyframes fadeIn {
+            to { opacity: 1; }
+        }
+
+        /* Label styling */
+        .milestone-label {
+            position: absolute;
+            padding: 8px;
+            color: #333;
+            pointer-events: auto; 
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity 0.8s ease, transform 0.3s ease;
+            width: 140px; 
+            border-radius: 8px;
+            /* Fix: Start off-screen to prevent bunching at 0,0 */
+            top: -1000px;
+            left: -1000px;
+        }
+        
+        .milestone-label:hover {
+            background: rgba(255, 255, 255, 0.9);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            transform: scale(1.05);
+            z-index: 10; 
+        }
+
+        .milestone-label.visible {
+            opacity: 1;
+        }
+
+        /* Fix: Only apply opacity to future labels when they are also visible */
+        .milestone-label.future.visible {
+            opacity: 0.4; 
+        }
+        
+        .milestone-label.future:hover {
+            opacity: 1; 
+        }
+
+        .milestone-label h3 {
+            margin: 0;
+            font-size: 12px;
+            font-weight: bold;
+            color: #000;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .milestone-label span {
+            display: block;
+            font-size: 9px;
+            color: #ff6600; 
+            margin-bottom: 2px;
+            font-family: 'Courier New', Courier, monospace;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        
+        .milestone-label.future span {
+             color: #999; 
+        }
+
+        .milestone-label .desc {
+            margin-top: 2px;
+            font-size: 10px;
+            color: #555;
+            line-height: 1.2;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        /* MODAL STYLES */
+        #modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(5px);
+            z-index: 100;
+            display: none;
+            justify-content: center;
+            align-items: center;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        #modal-content {
+            background: #fff;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            position: relative;
+            transform: translateY(20px);
+            transition: transform 0.3s ease;
+            border: 1px solid #eaeaea;
+        }
+
+        #modal-overlay.active {
+            display: flex;
+            opacity: 1;
+        }
+        
+        #modal-overlay.active #modal-content {
+            transform: translateY(0);
+        }
+
+        #modal-close {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            font-size: 24px;
+            cursor: pointer;
+            color: #999;
+            border: none;
+            background: none;
+        }
+        
+        #modal-close:hover {
+            color: #333;
+        }
+
+        .modal-title {
+            font-size: 1.8rem;
+            margin-bottom: 5px;
+            color: #222;
+        }
+
+        .modal-subtitle {
+            font-size: 1rem;
+            color: #666;
+            margin-bottom: 5px;
+            font-style: italic;
+        }
+
+        .modal-year {
+            color: #ff6600;
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            margin-bottom: 20px;
+            display: block;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            font-size: 0.9rem;
+            margin-bottom: 30px;
+        }
+        
+        th {
+            text-align: left;
+            border-bottom: 2px solid #eee;
+            padding: 10px;
+            color: #888;
+            font-weight: normal;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+        }
+
+        td {
+            padding: 12px 10px;
+            border-bottom: 1px solid #f5f5f5;
+            color: #444;
+        }
+        
+        /* New Community Section Styles */
+        .community-section {
+            border-top: 2px solid #eee;
+            padding-top: 20px;
+        }
+        
+        .community-header {
+            font-size: 1.1rem;
+            color: #222;
+            margin-bottom: 15px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .community-badge {
+            background: #ff6600;
+            color: white;
+            font-size: 0.7rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: sans-serif;
+            text-transform: uppercase;
+        }
+
+        .builder-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 10px;
+            border-bottom: 1px dashed #f0f0f0;
+            font-size: 0.9rem;
+        }
+        .builder-name {
+            color: #555;
+            font-weight: bold;
+        }
+        .builder-date {
+            color: #aaa;
+            font-family: 'Courier New', monospace;
+            font-size: 0.8rem;
+        }
+        
+        /* Status Box Styles */
+        .status-box {
+            position: fixed;
+            top: 220px; /* Moved down to sit below header */
+            left: 40px; /* Moved to left */
+            width: 220px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.95);
+            border: 1px solid #333;
+            box-shadow: 4px 4px 0px rgba(0,0,0,0.1);
+            z-index: 10;
+            font-family: 'Courier New', Courier, monospace;
+            display: none; /* Hidden until loaded */
+        }
+
+        .cli-promo {
+            margin-top: 10px;
+            font-size: 10px;
+            color: #666;
+            background: #f0f0f0;
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px dashed #ccc;
+            line-height: 1.3;
+        }
+        .cli-promo code {
+            display: block;
+            margin-top: 4px;
+            background: #333;
+            color: #fff;
+            padding: 2px 4px;
+            border-radius: 2px;
+            text-align: center;
+        }
+        
+        .status-header {
+            font-weight: bold;
+            border-bottom: 1px dashed #ccc;
+            padding-bottom: 8px;
+            margin-bottom: 10px;
+            font-size: 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .progress-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .progress-circle-svg {
+            width: 40px;
+            height: 40px;
+            transform: rotate(-90deg);
+        }
+
+        .progress-bg {
+            fill: none;
+            stroke: #eee;
+            stroke-width: 4;
+        }
+
+        .progress-bar {
+            fill: none;
+            stroke: #ff6600;
+            stroke-width: 4;
+            stroke-dasharray: 100;
+            stroke-dashoffset: 100; /* Start empty */
+            transition: stroke-dashoffset 1.5s ease-out;
+        }
+
+        .progress-text {
+            font-size: 12px;
+            color: #555;
+        }
+
+        .badge-container {
+            background: #fffcf5;
+            border: 1px solid #eee;
+            padding: 8px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .badge-icon {
+            width: 20px;
+            height: 20px;
+            fill: #ff6600;
+        }
+
+        .badge-info {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .badge-label {
+            font-size: 9px;
+            color: #888;
+            text-transform: uppercase;
+        }
+
+        .badge-name {
+            font-size: 11px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        /* Mobile Specifics */
+        @media (max-width: 768px) {
+            #ui-layer {
+                top: 10px;
+                left: 10px;
+                right: 10px;
+                background: rgba(253, 252, 248, 0.95);
+            }
+            .status-box {
+                top: auto;
+                bottom: 20px;
+                right: 20px;
+                width: auto;
+                max-width: 200px;
+            }
+            h1 { font-size: 1.5rem; }
+            .milestone-label { width: 120px; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="status-box" id="status-box">
+        <div class="status-header">
+            YOUR JOURNEY
+        </div>
+        <div class="progress-container">
+            <svg class="progress-circle-svg" viewBox="0 0 36 36">
+                <path class="progress-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                <path class="progress-bar" id="progress-ring" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+            </svg>
+            <div class="progress-text">
+                <span id="progress-pct">0</span>% Complete
+            </div>
+        </div>
+        
+        <div class="badge-container" id="badge-display" style="display:none;">
+            <svg class="badge-icon" viewBox="0 0 24 24">
+                <path d="M12,2C12,2 6,8 6,13C6,16.31 8.69,19 12,19C15.31,19 18,16.31 18,13C18,8 12,2 12,2M12,17C9.79,17 8,15.21 8,13C8,10.5 10.5,6.5 12,4.5C13.5,6.5 16,10.5 16,13C16,15.21 14.21,17 12,17Z" />
+            </svg>
+            <div class="badge-info">
+                <span class="badge-label">Latest Badge</span>
+                <span class="badge-name" id="badge-name">Beginner</span>
+            </div>
+        </div>
+    </div>
+
+    <div id="ui-layer">
+        <h1>Your Tiny Torch Journey</h1>
+        <p>Current Module: <a id="current-module-link" href="#" style="cursor: pointer; text-decoration: none; color: inherit; pointer-events: auto;">09 Spatial (CNNs)</a></p>
+        <p style="font-size: 0.8rem; color: #aaa; margin-top: 4px;">(Click nodes for details)</p>
+    </div>
+
+    <!-- Labels container -->
+    <div id="labels-container"></div>
+
+    <!-- Modal Structure -->
+    <div id="modal-overlay">
+        <div id="modal-content">
+            <button id="modal-close">&times;</button>
+            <h2 class="modal-title" id="m-title">Title</h2>
+            <div class="modal-subtitle" id="m-subtitle">Module ID</div>
+            <span class="modal-year" id="m-year">Approximate Era</span>
+            <p id="m-desc">Description</p>
+            
+            <table>
+                <thead>
+                    <tr>
+                        <th>Pioneer / Creator</th>
+                        <th>Contribution</th>
+                    </tr>
+                </thead>
+                <tbody id="m-table-body">
+                    <!-- Rows inserted via JS -->
+                </tbody>
+            </table>
+
+            <div class="community-section">
+                <div class="community-header">
+                    Tiny Torch Community
+                    <span class="community-badge">Builders</span>
+                </div>
+                <div id="m-community-list">
+                    <!-- Random builders inserted here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+    <script>
+        window.USER_EMAIL = "kaik@harvard.edu";
+    </script>
+    <script src="layout.js"></script>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const labelsContainer = document.getElementById('labels-container');
+        
+        // Modal Elements
+        const modalOverlay = document.getElementById('modal-overlay');
+        const modalClose = document.getElementById('modal-close');
+        const mTitle = document.getElementById('m-title');
+        const mSubtitle = document.getElementById('m-subtitle');
+        const mYear = document.getElementById('m-year');
+        const mDesc = document.getElementById('m-desc');
+        const mTableBody = document.getElementById('m-table-body');
+        const mCommunityList = document.getElementById('m-community-list');
+
+        let width, height;
+        let isMobile = false;
+        let drawingProgress = 0; // 0 to 1
+        let animationId;
+        let hoveredNodeIndex = -1; 
+        
+        // Configuration
+        const config = {
+            lineColor: '#ff6600',
+            futureColor: '#cccccc',
+            baseLineWidth: 1,     
+            maxLineWidth: 6,      
+            speed: 0.003, 
+            padding: 60,       
+            currentStageIndex: 0 // Initial state, updated by API
+        };
+
+        const MODULE_PAGE_SUFFIX = "_ABOUT.html";
+        const SVG_ICON_STRING = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-left:4px; vertical-align:middle; opacity:0.7;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>`;
+
+        // Data: 20 Modules
+        const milestones = [
+            { 
+                id: "01_tensor", title: "Tensors", year: "1900s", val: 0.05,
+                desc: "Foundation of N-dimensional arrays.",
+                people: [{name: "Gregorio Ricci-Curbastro", role: "Tensor Calculus"}, {name: "Bernhard Riemann", role: "Manifolds"}]
+            },
+            { 
+                id: "02_activations", title: "Activations", year: "1940s", val: 0.10,
+                desc: "ReLU, Sigmoid, Softmax.",
+                people: [{name: "McCulloch & Pitts", role: "Threshold Logic"}, {name: "Vinod Nair", role: "Rectified Linear Units (2010)"}]
+            },
+            { 
+                id: "03_layers", title: "Linear Layers", year: "1958", val: 0.15,
+                desc: "The Perceptron & Dense connections.",
+                people: [{name: "Frank Rosenblatt", role: "The Perceptron"}]
+            },
+            { 
+                id: "04_losses", title: "Loss Functions", year: "1800s", val: 0.18,
+                desc: "MSE, CrossEntropy, Optimization targets.",
+                people: [{name: "Adrien-Marie Legendre", role: "Least Squares"}, {name: "C.E. Shannon", role: "Information Entropy"}]
+            },
+            { 
+                id: "05_autograd", title: "Autograd", year: "1970", val: 0.22,
+                desc: "Automatic Differentiation.",
+                people: [{name: "Seppo Linnainmaa", role: "Reverse Mode AD"}, {name: "Rumelhart et al.", role: "Applied to NN"}]
+            },
+            { 
+                id: "06_optimizers", title: "Optimizers", year: "1951", val: 0.26,
+                desc: "SGD, Adam, Scheduling.",
+                people: [{name: "Robbins & Monro", role: "Stochastic Approximation"}, {name: "Kingma & Ba", role: "Adam (2014)"}]
+            },
+            { 
+                id: "07_training", title: "Training Loops", year: "1986", val: 0.30,
+                desc: "The learning cycle logic.",
+                people: [{name: "Geoffrey Hinton", role: "Backpropagation"}, {name: "Yann LeCun", role: "Early frameworks"}]
+            },
+            { 
+                id: "08_dataloader", title: "Data Pipelines", year: "2010s", val: 0.35,
+                desc: "Efficient batching and pre-fetching.",
+                people: [{name: "Jeff Dean", role: "DistBelief/MapReduce"}, {name: "PyTorch Team", role: "DataLoader utility"}]
+            },
+            { 
+                id: "09_spatial", title: "Spatial (CNN)", year: "1998", val: 0.40,
+                desc: "Conv2d, MaxPool, Vision.",
+                people: [{name: "Yann LeCun", role: "LeNet-5"}, {name: "Alex Krizhevsky", role: "AlexNet (2012)"}]
+            },
+            { 
+                id: "10_tokenization", title: "Tokenization", year: "1950s", val: 0.45,
+                desc: "BPE, WordPiece, Text processing.",
+                people: [{name: "Noam Chomsky", role: "Formal Grammars"}, {name: "Philip Gage", role: "Byte Pair Encoding (1994)"}]
+            },
+            { 
+                id: "11_embeddings", title: "Embeddings", year: "2013", val: 0.50,
+                desc: "Vector representations of meaning.",
+                people: [{name: "Tomas Mikolov", role: "Word2Vec"}, {name: "Yoshua Bengio", role: "Neural Probabilistic Language Model"}]
+            },
+            { 
+                id: "12_attention", title: "Attention", year: "2014", val: 0.55,
+                desc: "Focusing on relevant context.",
+                people: [{name: "Dzmitry Bahdanau", role: "Neural Machine Translation"}, {name: "KyungHyun Cho", role: "Encoder-Decoder"}]
+            },
+            { 
+                id: "13_transformers", title: "Transformers", year: "2017", val: 0.60,
+                desc: "Self-attention blocks.",
+                people: [{name: "Ashish Vaswani", role: "Attention Is All You Need"}, {name: "Noam Shazeer", role: "Architecture Scaling"}]
+            },
+            { 
+                id: "14_profiling", title: "Profiling", year: "2018", val: 0.65,
+                desc: "Bottleneck analysis.",
+                people: [{name: "SysML Community", role: "ML Systems"}, {name: "NVIDIA", role: "Nsight Systems"}]
+            },
+            { 
+                id: "15_quantization", title: "Quantization", year: "2017", val: 0.70,
+                desc: "INT8, FP16, precision reduction.",
+                people: [{name: "Song Han", role: "Deep Compression"}, {name: "Google/Qualcomm", role: "Mobile Inference"}]
+            },
+            { 
+                id: "16_compression", title: "Compression", year: "2016", val: 0.75,
+                desc: "Pruning & Distillation.",
+                people: [{name: "Geoffrey Hinton", role: "Distillation"}, {name: "Lottery Ticket Hypothesis", role: "Frankle & Carbin"}]
+            },
+            { 
+                id: "17_memoization", title: "Memoization", year: "2022", val: 0.80,
+                desc: "KV-Cache for fast inference.",
+                people: [{name: "Pope et al.", role: "Efficiently Scaling Transformers"}, {name: "vLLM Team", role: "PagedAttention"}]
+            },
+            { 
+                id: "18_acceleration", title: "Acceleration", year: "2016", val: 0.85,
+                desc: "Hardware optimization (TPU/GPU).",
+                people: [{name: "NVIDIA", role: "CUDA/Tensor Cores"}, {name: "Google", role: "TPU Architecture"}]
+            },
+            { 
+                id: "19_benchmarking", title: "Benchmarking", year: "2018", val: 0.90,
+                desc: "Performance measurement.",
+                people: [{name: "MLCommons", role: "MLPerf"}, {name: "Stanford DAWN", role: "DawnBench"}]
+            },
+            { 
+                id: "20_capstone", title: "Capstone", year: "2024", val: 1.00,
+                desc: "Complete End-to-End System.",
+                people: [{name: "The Student", role: "System Architect"}, {name: "Open Source", role: "Ecosystem"}]
+            }
+        ];
+
+        // Assign pct and currentRadius
+        milestones.forEach((m, i) => {
+            m.pct = i / (milestones.length - 1);
+            m.currentRadius = isMobile ? 8 : 4; 
+        });
+
+        // --- COMMUNITY DATA INTEGRATION ---
+        async function fetchModuleCompleters(moduleId) {
+             const listEl = document.getElementById('m-community-list');
+             listEl.innerHTML = '<div style="padding:10px; color:#888; font-style:italic;">Loading builders...</div>';
+
+             try {
+                 // Extract numeric ID (e.g. "01_tensor" -> 1)
+                 const numericId = parseInt(moduleId.split('_')[0], 10);
+                 
+                 const response = await fetch(`${SUPABASE_URL}/get-module-completers?module_id=${numericId}`);
+                 
+                 if (!response.ok) throw new Error("Failed to fetch community data");
+                 
+                 const data = await response.json();
+                 
+                 if (!data || data.length === 0) {
+                     listEl.innerHTML = '<div style="padding:10px; color:#aaa; font-style:italic;">No builders yet. Be the first!</div>';
+                     return;
+                 }
+                 
+                 let html = '';
+                 // Show max 5 recent completers
+                 data.slice(0, 5).forEach(user => {
+                     const date = new Date(user.finished_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                     const displayName = user.name || user.username || user.email || "Anonymous";
+                     
+                     let instHtml = "";
+                     if (user.institution) {
+                         const val = Array.isArray(user.institution) ? user.institution[0] : user.institution;
+                         if (val) instHtml = `<span style="color:#999; font-weight:normal; margin-left:6px; font-size:0.8em;">(${val})</span>`;
+                     }
+
+                     html += `
+                        <div class="builder-row">
+                            <div>
+                                <span class="builder-name" 
+                                      style="cursor:pointer; color:#e65100; text-decoration:underline; text-decoration-style:dotted;" 
+                                      onclick="window.openProfileModal('${user.username}')">@${displayName}</span>
+                                ${instHtml}
+                            </div>
+                            <span class="builder-date">Completed ${date}</span>
+                        </div>
+                     `;
+                 });
+                 
+                 listEl.innerHTML = html;
+
+             } catch (e) {
+                 console.error(e);
+                 listEl.innerHTML = '<div style="padding:10px; color:#aaa; font-style:italic;">Unable to load community data.</div>';
+             }
+        }
+
+        // --- MODAL LOGIC ---
+
+        function openModal(data) {
+            mTitle.textContent = data.title;
+            // Make subtitle a link
+            const linkUrl = `${TINYTORCH_AI_URL}/modules/${data.id}${MODULE_PAGE_SUFFIX}`;
+            mSubtitle.innerHTML = `<a href="${linkUrl}" target="_blank" style="color:inherit; text-decoration:none; display:inline-flex; align-items:center;">Module ${data.id}${SVG_ICON_STRING}</a>`;
+            
+            mYear.textContent = `Concept Era: ${data.year}`;
+            mDesc.textContent = data.desc;
+            
+            // Populate Pioneer Table
+            mTableBody.innerHTML = '';
+            data.people.forEach(person => {
+                const row = document.createElement('tr');
+                row.innerHTML = `<td><strong>${person.name}</strong></td><td>${person.role}</td>`;
+                mTableBody.appendChild(row);
+            });
+
+            // Populate Community Section with Real Data
+            fetchModuleCompleters(data.id);
+
+            modalOverlay.classList.add('active');
+        }
+
+        function closeModal() {
+            modalOverlay.classList.remove('active');
+        }
+
+        modalClose.addEventListener('click', closeModal);
+        modalOverlay.addEventListener('click', (e) => {
+            if (e.target === modalOverlay) closeModal();
+        });
+
+        // --- INTERACTION LOGIC ---
+
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const clickY = e.clientY - rect.top;
+
+            // Geometry check differs for mobile vs desktop
+            const hit = checkCollision(clickX, clickY);
+
+            hoveredNodeIndex = hit;
+            canvas.style.cursor = hit !== -1 ? 'pointer' : 'default';
+        });
+
+        canvas.addEventListener('click', (e) => {
+            if (hoveredNodeIndex !== -1) {
+                openModal(milestones[hoveredNodeIndex]);
+            }
+        });
+
+        function checkCollision(mx, my) {
+            // Re-calculate node positions based on current layout
+            for (let i = milestones.length - 1; i >= 0; i--) {
+                const m = milestones[i];
+                const pos = getNodePosition(m, i);
+                
+                // Distance check
+                const dist = Math.sqrt(Math.pow(mx - pos.x, 2) + Math.pow(my - pos.y, 2));
+                
+                if (dist < 20) { 
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        // --- DRAWING & LAYOUT LOGIC ---
+
+        function resize() {
+            // Check mobile breakpoint
+            isMobile = window.innerWidth < 768;
+            
+            if (isMobile) {
+                // Vertical Spiral Mode
+                width = canvas.width = window.innerWidth;
+                // Make height tall enough for 20 items spiral, plus extra bottom padding
+                const itemSpacing = 120;
+                height = canvas.height = Math.max(window.innerHeight, (milestones.length * itemSpacing) + 200 + 100);
+                document.body.style.overflowY = 'auto'; // Enable scroll
+            } else {
+                // Horizontal Landscape Mode
+                width = canvas.width = window.innerWidth;
+                height = canvas.height = window.innerHeight;
+                document.body.style.overflowY = 'hidden'; // Disable scroll
+            }
+
+            createLabels();
+            if (drawingProgress >= 1) {
+                draw(); 
+            }
+        }
+
+        // Unified function to get node X/Y based on mode
+        function getNodePosition(m, index) {
+            if (isMobile) {
+                // Vertical Sine Wave (Spiral-ish)
+                const startY = 150; // Padding top
+                const availableHeight = height - 200;
+                const y = startY + (m.pct * availableHeight);
+                
+                // X oscillates
+                const centerX = width / 2;
+                const amplitude = (width / 2) - 60; // Keep within edges
+                const freq = 4; // Number of full waves down the page
+                const x = centerX + Math.sin(m.pct * Math.PI * freq) * amplitude;
+                
+                return { x, y };
+            } else {
+                // Horizontal Graph (Desktop)
+                const startX = config.padding;
+                const totalWidth = width - (config.padding * 2);
+                const x = startX + (totalWidth * m.pct);
+                
+                // Y calculation (Complexity Curve)
+                // Need to replicate getLineY logic here
+                let progress = (x - startX) / totalWidth;
+                if (progress < 0) progress = 0;
+                if (progress > 1) progress = 1;
+                
+                // Cosine interp logic simplified for node lookup
+                const baseline = height * 0.9;
+                const maxHeight = height * 0.15;
+                const range = baseline - maxHeight;
+                
+                // Interpolate value
+                // Since we store val in milestones, we interpolate between them
+                // But for the exact node, we just map m.val
+                // Wait, the curve interpolates, so the node sits exactly on the curve
+                // For the node itself, its 'x' maps exactly to 'm.pct', so its 'val' is exactly 'm.val'
+                // BUT, my getLineY function does smooth interpolation. 
+                // However, at the exact milestone pct, the value IS m.val.
+                
+                const y = baseline - (m.val * range);
+                return { x, y };
+            }
+        }
+        
+        // Helper for drawing the continuous line
+        function getPathPoint(progress) {
+             if (isMobile) {
+                const startY = 150;
+                const availableHeight = height - 200;
+                const y = startY + (progress * availableHeight);
+                
+                const centerX = width / 2;
+                const amplitude = (width / 2) - 60;
+                const freq = 4;
+                const x = centerX + Math.sin(progress * Math.PI * freq) * amplitude;
+                return {x, y};
+             } else {
+                 const startX = config.padding;
+                 const totalWidth = width - (config.padding * 2);
+                 const x = startX + (totalWidth * progress);
+                 
+                 // Interpolation logic required here for smooth line between nodes
+                 // Find p0 and p1
+                 let p0 = milestones[0];
+                 let p1 = milestones[milestones.length - 1];
+                 for (let i = 0; i < milestones.length - 1; i++) {
+                    if (progress >= milestones[i].pct && progress <= milestones[i+1].pct) {
+                        p0 = milestones[i];
+                        p1 = milestones[i+1];
+                        break;
+                    }
+                 }
+                 const segLen = p1.pct - p0.pct;
+                 const local = (progress - p0.pct) / segLen;
+                 
+                 // Cosine interp
+                 const mu2 = (1 - Math.cos(local * Math.PI)) / 2;
+                 const val = (p0.val * (1 - mu2) + p1.val * mu2);
+                 
+                 const baseline = height * 0.9;
+                 const maxHeight = height * 0.15;
+                 const range = baseline - maxHeight;
+                 const y = baseline - (val * range);
+                 
+                 return {x, y};
+             }
+        }
+
+        function createLabels() {
+            labelsContainer.innerHTML = '';
+            milestones.forEach((m, index) => {
+                const el = document.createElement('div');
+                el.className = 'milestone-label';
+                
+                if (index > config.currentStageIndex) {
+                    el.classList.add('future');
+                }
+
+                el.innerHTML = `
+                    <span>${m.year}</span>
+                    <h3>${m.title}</h3>
+                    <div class="desc">${m.desc}</div>
+                `;
+                
+                // Events
+                el.addEventListener('mouseenter', () => { hoveredNodeIndex = index; });
+                el.addEventListener('mouseleave', () => { hoveredNodeIndex = -1; });
+                el.addEventListener('click', (e) => {
+                    e.stopPropagation(); 
+                    openModal(m);
+                });
+
+                m.el = el;
+                labelsContainer.appendChild(el);
+            });
+        }
+
+        function drawGrid() {
+            // Removed System Complexity Axis as requested
+            // Keep faint timeline axis/guides if desired, or minimal background
+            if(!isMobile) {
+                ctx.strokeStyle = '#f4f4f4';
+                ctx.lineWidth = 1;
+                const startX = config.padding;
+                const totalWidth = width - (config.padding * 2);
+                const baseline = height * 0.9;
+                
+                // Simple Time Axis
+                ctx.beginPath();
+                ctx.moveTo(startX, baseline + 10);
+                ctx.lineTo(startX + totalWidth, baseline + 10);
+                ctx.stroke();
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, width, height);
+            drawGrid();
+
+            // Calculate progress limits
+            const totalLen = 1.0; 
+            const endProgress = drawingProgress; // 0 to 1
+            const splitPct = milestones[config.currentStageIndex].pct;
+
+            // Draw Line
+            // Iteration depends on screen size/resolution. 
+            // We iterate by 't' (0 to 1) instead of pixels to handle both vertical/horizontal uniformly
+            const step = 0.002; 
+            
+            for (let t = 0; t < endProgress; t += step) {
+                let nextT = t + step;
+                if (nextT > endProgress) nextT = endProgress;
+
+                const p1 = getPathPoint(t);
+                const p2 = getPathPoint(nextT);
+
+                // Perspective / Thickness
+                // On Desktop: Thickness grows with progress (Coming closer)
+                // On Mobile: Uniform thickness or slight growth down
+                let currentLineWidth = config.baseLineWidth;
+                if (!isMobile) {
+                    currentLineWidth += (t * config.maxLineWidth);
+                } else {
+                    currentLineWidth = 3; // Thicker constant for mobile visibility
+                }
+
+                ctx.beginPath();
+                ctx.moveTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y);
+
+                if (t < splitPct) {
+                    ctx.strokeStyle = config.lineColor;
+                    ctx.setLineDash([]); 
+                    ctx.lineWidth = currentLineWidth;
+                    ctx.globalAlpha = 1.0;
+                } else {
+                    ctx.strokeStyle = config.futureColor;
+                    ctx.setLineDash([2, 5]); 
+                    ctx.lineWidth = currentLineWidth; 
+                    ctx.globalAlpha = 0.5;
+                }
+                
+                ctx.lineCap = 'round';
+                ctx.stroke();
+            }
+            
+            ctx.setLineDash([]);
+            ctx.globalAlpha = 1.0;
+
+            // Current Stage Pulsing Node
+            if (endProgress >= splitPct) {
+                 const pos = getNodePosition(milestones[config.currentStageIndex], config.currentStageIndex);
+                 const pulse = Math.sin(Date.now() / 200) * 3;
+                 
+                 const isHovered = (config.currentStageIndex === hoveredNodeIndex);
+                 const m = milestones[config.currentStageIndex];
+                 const targetRadius = isHovered ? 14 : 7; 
+                 const animSpeed = 0.4; 
+                 
+                 if (m.currentRadius < targetRadius) {
+                     m.currentRadius = Math.min(m.currentRadius + animSpeed, targetRadius);
+                 } else if (m.currentRadius > targetRadius) {
+                     m.currentRadius = Math.max(m.currentRadius - animSpeed, targetRadius);
+                 }
+
+                 ctx.fillStyle = config.lineColor;
+                 ctx.beginPath();
+                 ctx.arc(pos.x, pos.y, m.currentRadius + pulse, 0, Math.PI*2);
+                 ctx.fill();
+                 
+                 ctx.strokeStyle = config.lineColor;
+                 ctx.lineWidth = 2;
+                 ctx.beginPath();
+                 ctx.arc(pos.x, pos.y, (m.currentRadius + 5) + pulse, 0, Math.PI*2);
+                 ctx.stroke();
+            }
+
+            // Milestone Nodes & Labels
+            milestones.forEach((m, i) => {
+                const pos = getNodePosition(m, i);
+                
+                // Only draw if line has reached here
+                if (drawingProgress >= m.pct) {
+                    
+                    // Skip current node to avoid overlap
+                    // Simple distance check from split point
+                    // We can check index actually
+                    if (i !== config.currentStageIndex) {
+                        const isHovered = (i === hoveredNodeIndex);
+                        const targetRadius = isHovered ? 12 : (isMobile ? 6 : 4); 
+                        const animSpeed = 0.4;
+                        
+                        if (m.currentRadius < targetRadius) {
+                            m.currentRadius = Math.min(m.currentRadius + animSpeed, targetRadius);
+                        } else if (m.currentRadius > targetRadius) {
+                            m.currentRadius = Math.max(m.currentRadius - animSpeed, targetRadius);
+                        }
+                        
+                        ctx.fillStyle = '#fff';
+                        ctx.strokeStyle = i > config.currentStageIndex ? '#ccc' : '#444';
+                        if (isHovered) ctx.strokeStyle = config.lineColor;
+
+                        ctx.lineWidth = isHovered ? 2 : 1;
+
+                        ctx.beginPath();
+                        ctx.arc(pos.x, pos.y, m.currentRadius, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.stroke();
+                    }
+
+                    // Label Positioning
+                    if (m.el) {
+                        m.el.classList.add('visible');
+                        
+                        // Mobile Layout: Labels alternate left/right to save space
+                        if (isMobile) {
+                            const isLeft = i % 2 === 0;
+                            const labelWidth = 120;
+                            const offset = 30;
+                            
+                            m.el.style.top = `${pos.y - 20}px`;
+                            
+                            if (isLeft) {
+                                m.el.style.left = `${pos.x - labelWidth - offset}px`;
+                                m.el.style.textAlign = 'right';
+                            } else {
+                                m.el.style.left = `${pos.x + offset}px`;
+                                m.el.style.textAlign = 'left';
+                            }
+                            
+                            // Guide line
+                            ctx.strokeStyle = '#eee';
+                            ctx.lineWidth = 1;
+                            ctx.beginPath();
+                            ctx.moveTo(pos.x, pos.y);
+                            ctx.lineTo(isLeft ? pos.x - offset : pos.x + offset, pos.y);
+                            ctx.stroke();
+
+                        } else {
+                            // Desktop Layout
+                            const isTop = i % 2 === 0;
+                            const stagger = (i % 4 === 0 || i % 4 === 3) ? (isTop ? -40 : 40) : 0;
+                            const offset = isTop ? -80 : 40;
+                            const labelY = pos.y + offset + stagger;
+                            
+                            // Guide line
+                            ctx.strokeStyle = '#eee';
+                            ctx.lineWidth = 1;
+                            ctx.beginPath();
+                            ctx.moveTo(pos.x, pos.y);
+                            ctx.lineTo(pos.x, isTop ? pos.y - 20 : pos.y + 20); 
+                            ctx.stroke();
+
+                            const labelWidth = 140;
+                            let leftPos = pos.x - (labelWidth / 2);
+                            if (leftPos < 5) leftPos = 5;
+                            if (leftPos + labelWidth > width - 5) leftPos = width - labelWidth - 5;
+
+                            m.el.style.left = `${leftPos}px`;
+                            m.el.style.top = `${labelY}px`;
+                            m.el.style.textAlign = 'center';
+                        }
+                    }
+                }
+            });
+        }
+
+        function animateLoop() {
+            if (drawingProgress < 1) {
+                drawingProgress += config.speed;
+            } else {
+                drawingProgress = 1;
+            }
+            draw();
+            animationId = requestAnimationFrame(animateLoop);
+        }
+
+        // --- USER PROGRESS INTEGRATION ---
+        const SUPABASE_URL = "https://zrvmjrxhokwwmjacyhpq.supabase.co/functions/v1";
+        const NETLIFY_URL = "https://tinytorch.netlify.app";
+        const API_BASE_URL = SUPABASE_URL; // Backwards compatibility
+        const TINYTORCH_AI_URL = "https://tinytorch.ai";
+        
+        const MODULE_MAP = {
+          "01": { id: "01", title: "Tensor Basics", dir: "01_tensor" },
+          "02": { id: "02", title: "Activations (ReLU, Softmax)", dir: "02_activations" },
+          "03": { id: "03", title: "Linear Layers", dir: "03_layers" },
+          "04": { id: "04", title: "Loss Functions", dir: "04_losses" },
+          "05": { id: "05", title: "Automatic Differentiation", dir: "05_autograd" },
+          "06": { id: "06", title: "Optimizers (SGD, Adam)", dir: "06_optimizers" },
+          "07": { id: "07", title: "Training Loops", dir: "07_training" },
+          "08": { id: "08", title: "Data Pipelines", dir: "08_dataloader" },
+          "09": { id: "09", title: "Conv2d & CNNs", dir: "09_spatial" },
+          "10": { id: "10", title: "Text Processing", dir: "10_tokenization" },
+          "11": { id: "11", title: "Embeddings", dir: "11_embeddings" },
+          "12": { id: "12", title: "Multi-head Attention", dir: "12_attention" },
+          "13": { id: "13", title: "Transformer Blocks", dir: "13_transformers" },
+          "14": { id: "14", title: "Profiling", dir: "14_profiling" },
+          "15": { id: "15", title: "Quantization", dir: "15_quantization" },
+          "16": { id: "16", title: "Compression", dir: "16_compression" },
+          "17": { id: "17", title: "Memoization", dir: "17_memoization" },
+          "18": { id: "18", title: "Hardware Optimization", dir: "18_acceleration" },
+          "19": { id: "19", title: "Benchmarking", dir: "19_benchmarking" },
+          "20": { id: "20", title: "Capstone Project", dir: "20_capstone" }
+        };
+
+        async function fetchUserProgress() {
+          let token = localStorage.getItem("tinytorch_token");
+          
+          const forceLogin = () => {
+              console.warn("Session expired or invalid. Redirecting to login...");
+              localStorage.removeItem("tinytorch_token");
+              localStorage.removeItem("tinytorch_refresh_token");
+              localStorage.removeItem("tinytorch_user");
+              
+              const isCommunitySite = window.location.hostname === 'tinytorch.ai' || (window.location.hostname === 'localhost' && window.location.port === '8000');
+              const basePath = isCommunitySite ? '/community' : '';
+              window.location.href = basePath + '/index.html?action=login&next=dashboard.html';
+          };
+
+          if (!token) { 
+              forceLogin();
+              return null;
+          }
+          
+          let detailsData = null;
+          let retryCount = 0;
+          const MAX_RETRIES = 1;
+
+          do {
+              try {
+                // 1. Direct Fetch using Token (Edge Function resolves User ID)
+                const profileRes = await fetch(`${SUPABASE_URL}/get-profile-details`, { 
+                    method: 'GET',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                // Check for 401 OR 400 with specific "Invalid Token" error
+                let needsRefresh = profileRes.status === 401;
+                let errorData = null;
+
+                if (profileRes.status === 400) {
+                    // Clone response to safely check body for specific error message
+                    try {
+                        errorData = await profileRes.clone().json();
+                        if (errorData && errorData.error && errorData.error.includes("Invalid Token")) {
+                            needsRefresh = true;
+                        }
+                    } catch(e) { /* ignore parse error */ }
+                }
+
+                if (needsRefresh && retryCount === 0) {
+                    console.log("Token expired or invalid (400/401). Attempting refresh...");
+                    const refreshToken = localStorage.getItem("tinytorch_refresh_token");
+                    if (!refreshToken) { forceLogin(); return null; }
+
+                    const refreshRes = await fetch(`${NETLIFY_URL}/api/auth/refresh`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ refreshToken })
+                    });
+
+                    if (!refreshRes.ok) { forceLogin(); return null; }
+
+                    const refreshData = await refreshRes.json();
+                    if (refreshData.session) {
+                        token = refreshData.session.access_token;
+                        localStorage.setItem("tinytorch_token", token);
+                        if (refreshData.session.refresh_token) {
+                            localStorage.setItem("tinytorch_refresh_token", refreshData.session.refresh_token);
+                        }
+                        retryCount++;
+                        continue;
+                    } else {
+                        forceLogin();
+                        return null;
+                    }
+                }
+
+                if (!profileRes.ok) {
+                    // If errorData wasn't parsed yet
+                    if (!errorData) {
+                         try { errorData = await profileRes.json(); } catch(e) {}
+                    }
+                    throw new Error(errorData?.error || `Failed to fetch profile from Edge Function: ${profileRes.status}`);
+                }
+                
+                detailsData = await profileRes.json();
+                break; // Success
+
+              } catch (error) {
+                console.error("Error fetching progress:", error);
+                if (retryCount >= MAX_RETRIES || (error.message && !error.message.includes("Invalid Token"))) {
+                    return null;
+                }
+              }
+          } while (retryCount < MAX_RETRIES);
+          
+          if (!detailsData) return null;
+
+            const completedIds = detailsData.completed_modules || []; 
+            const username = detailsData.profile?.username; 
+
+            // Optional: Update local storage if username was missing/different
+            if (username) {
+                // We can treat this as a sync opportunity if desired, but not strictly required for flow
+            }
+
+            // 4. Map to Module Strings
+            const passedModules = new Set();
+            completedIds.forEach(numId => {
+                const idStr = String(numId).padStart(2, '0');
+                if (MODULE_MAP[idStr]) {
+                    passedModules.add(idStr);
+                }
+            });
+
+            // 5. Update CLI Promo if Empty
+            const statusBox = document.getElementById('status-box');
+            if (statusBox && passedModules.size === 0) {
+                const existingPromo = statusBox.querySelector('.cli-promo');
+                if (!existingPromo) {
+                    const promo = document.createElement('div');
+                    promo.className = 'cli-promo';
+                    promo.innerHTML = `
+                        Start your journey! <br>
+                        Submit modules via CLI:
+                        <code>tinytorch submit</code>
+                    `;
+                    statusBox.appendChild(promo);
+                }
+            }
+
+            return {
+                passed_count: passedModules.size,
+                passed_ids: Array.from(passedModules).sort()
+            };
+        }
+
+        // Initialize Progress
+        fetchUserProgress().then(stats => {
+            if (stats) {
+                // Update config
+                // Ensure we don't exceed bounds
+                let nextIndex = stats.passed_count;
+                if (nextIndex >= milestones.length) nextIndex = milestones.length - 1;
+                
+                config.currentStageIndex = nextIndex;
+                
+                const currentModuleLink = document.getElementById('current-module-link');
+                
+                // Update UI Text (Main Header)
+                const m = milestones[nextIndex];
+                if (m) {
+                     const idNum = m.id.split('_')[0];
+                     if (currentModuleLink) {
+                         // Update content with SVG
+                         currentModuleLink.innerHTML = `${idNum} ${m.title}${SVG_ICON_STRING}`;
+                         currentModuleLink.href = `${TINYTORCH_AI_URL}/modules/${m.id}${MODULE_PAGE_SUFFIX}`; // Set the href
+                         currentModuleLink.target = "_blank"; // Open in new tab
+                         currentModuleLink.style.pointerEvents = "auto"; // Ensure clickable over canvas
+                     }
+                }
+
+                // Refresh labels to apply 'future' class correctly
+                createLabels();
+
+                // --- UPDATE STATUS BOX ---
+                const statusBox = document.getElementById('status-box');
+                const progressRing = document.getElementById('progress-ring');
+                const progressPct = document.getElementById('progress-pct');
+                const badgeDisplay = document.getElementById('badge-display');
+                const badgeName = document.getElementById('badge-name');
+
+                if (statusBox) {
+                    statusBox.style.display = 'block';
+                    
+                    // 1. Percentage
+                    const pct = Math.min((stats.passed_count / milestones.length) * 100, 100);
+                    progressPct.textContent = Math.round(pct);
+                    
+                    // SVG Circle Animation (circumference ~100)
+                    // stroke-dashoffset = 100 - pct
+                    setTimeout(() => {
+                        progressRing.style.strokeDashoffset = 100 - pct;
+                    }, 100);
+
+                    // 2. Latest Badge
+                    if (stats.passed_count > 0 && stats.passed_ids.length > 0) {
+                        // Get last passed ID
+                        const lastId = stats.passed_ids[stats.passed_ids.length - 1];
+                        // Find corresponding module name
+                        // The ID in passed_ids is "01", "02" etc.
+                        // milestones.id is "01_tensor", "02_activations" etc.
+                        const lastModule = milestones.find(mod => mod.id.startsWith(lastId));
+                        
+                        if (lastModule) {
+                            badgeDisplay.style.display = 'flex';
+                            badgeName.textContent = lastModule.title;
+                        }
+                    }
+                }
+            }
+        });
+
+        window.addEventListener('resize', resize);
+        resize(); // Initial call
+        animateLoop();
+
+    </script>
+    <!-- Profile Modal (Added via CLI) -->
+    <div id="profile-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(255,255,255,0.9); backdrop-filter:blur(5px); z-index:200; justify-content:center; align-items:center; opacity:0; transition:opacity 0.3s ease;">
+        <div style="background:#fff; padding:40px; border-radius:12px; box-shadow:0 10px 40px rgba(0,0,0,0.1); max-width:500px; width:90%; position:relative; border:1px solid #eaeaea;">
+            <button id="profile-close" style="position:absolute; top:20px; right:20px; border:none; background:none; font-size:24px; cursor:pointer; color:#999;">&times;</button>
+            
+            <div id="p-loading" style="display:block; text-align:center; color:#888;">Loading profile...</div>
+            
+            <div id="p-content" style="display:none;">
+                <h2 id="p-name" style="margin:0 0 5px 0; color:#222;">User Name</h2>
+                <div id="p-meta" style="color:#ff6600; font-family:'Courier New', monospace; font-size:0.9rem; margin-bottom:15px;">@username</div>
+                <p id="p-bio" style="color:#555; font-style:italic; margin-bottom:20px;">Bio goes here...</p>
+                
+                <div style="background:#f9f9f9; padding:15px; border-radius:8px;">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                        <span style="color:#888; font-size:0.8rem; text-transform:uppercase;">Institution</span>
+                        <span id="p-inst" style="font-weight:bold; color:#333;">-</span>
+                    </div>
+                     <div style="display:flex; justify-content:space-between;">
+                        <span style="color:#888; font-size:0.8rem; text-transform:uppercase;">Location</span>
+                        <span id="p-loc" style="font-weight:bold; color:#333;">-</span>
+                    </div>
+                </div>
+                
+                <div style="margin-top:20px; text-align:center;">
+                     <span id="p-modules-count" style="font-size:2rem; font-weight:bold; color:#333;">0</span>
+                     <div style="font-size:0.8rem; color:#888; text-transform:uppercase; letter-spacing:1px;">Modules Completed</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Profile Modal Logic
+        const pModal = document.getElementById('profile-modal');
+        const pClose = document.getElementById('profile-close');
+        const pContent = document.getElementById('p-content');
+        const pLoading = document.getElementById('p-loading');
+        
+        const elName = document.getElementById('p-name');
+        const elMeta = document.getElementById('p-meta');
+        const elBio = document.getElementById('p-bio');
+        const elInst = document.getElementById('p-inst');
+        const elLoc = document.getElementById('p-loc');
+        const elCount = document.getElementById('p-modules-count');
+
+        function closeProfileModal() {
+            pModal.style.opacity = '0';
+            setTimeout(() => { pModal.style.display = 'none'; }, 300);
+        }
+
+        if(pClose) pClose.addEventListener('click', closeProfileModal);
+        if(pModal) pModal.addEventListener('click', (e) => {
+            if (e.target === pModal) closeProfileModal();
+        });
+
+        window.openProfileModal = async function(username) {
+            if(!pModal) return;
+            
+            // Reset UI
+            pModal.style.display = 'flex';
+            void pModal.offsetWidth; // Force reflow
+            pModal.style.opacity = '1';
+            
+            pLoading.style.display = 'block';
+            pContent.style.display = 'none';
+            
+            try {
+                // Ensure API_BASE_URL is available (it is defined in the main script)
+                const baseUrl = typeof API_BASE_URL !== 'undefined' ? API_BASE_URL : "https://zrvmjrxhokwwmjacyhpq.supabase.co/functions/v1";
+                const res = await fetch(`${baseUrl}/get-profile-details?username=${username}`);
+                if(!res.ok) throw new Error("Failed to fetch");
+                
+                const data = await res.json();
+                const p = data.profile || {};
+                const modules = data.completed_modules || [];
+
+                // Fill Data
+                elName.textContent = p.full_name || p.username || p.email || "Unknown User";
+                elMeta.textContent = `@${p.username || p.email || 'N/A'}`;
+                elBio.textContent = p.bio || "No bio available.";
+                
+                let inst = "N/A";
+                if (p.institution) {
+                    inst = Array.isArray(p.institution) ? p.institution[0] : p.institution;
+                }
+                elInst.textContent = inst;
+                
+                elLoc.textContent = p.location || "N/A";
+                elCount.textContent = modules.length;
+
+                pLoading.style.display = 'none';
+                pContent.style.display = 'block';
+
+            } catch (e) {
+                console.error(e);
+                pLoading.textContent = "Failed to load profile.";
+            }
+        };
+    </script>
+</body>
+</html>
