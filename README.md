@@ -98,23 +98,23 @@ This textbook gives you a **systems level understanding of machine learning**, b
 | **Responsible and Sustainable AI** | How to design systems with privacy, security, and environmental impact in mind                 |
 
 ---
+## Support This Work
 
-## ⭐ Support This Work
+### ⭐ Why GitHub Stars Matter
 
 <div align="center">
 
-### Show Support
-
-Star the repository to join us on the journey.
+*What gets measured gets done.* Every star represents a learner or believer in accessible AI education. We're tracking our way to 1 million learners by 2030. Sponsors match community support with funding that provides TinyML kits, workshops, and infrastructure for learners worldwide.
 
 [![Stars](https://img.shields.io/github/stars/harvard-edge/cs249r_book?style=for-the-badge&logo=github&color=gold)](https://github.com/harvard-edge/cs249r_book/stargazers)
 
 [![Star History Chart](https://api.star-history.com/svg?repos=harvard-edge/cs249r_book&type=Date)](https://star-history.com/#harvard-edge/cs249r_book&Date)
 
-**Tracking our way to 1 million learners.**
+1 ✓ → 10 ✓ → 100 ✓ → 1,000 ✓ → **10,000 ✓** → 100,000 by 2026
 
 ### Fund the Mission
-Your support helps provide TinyML kits, workshops, and infrastructure for learners worldwide.
+
+Your contribution directly supports accessible AI education around the world.
 
 [![Open Collective](https://img.shields.io/badge/💝%20Support%20AI%20Education-Open%20Collective-blue.svg?style=for-the-badge)](https://opencollective.com/mlsysbook)
 
