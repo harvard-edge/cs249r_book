@@ -29,12 +29,14 @@ RUN echo "🚀 === STARTING DEPENDENCY FILE COPY ===" && \
     echo "  - ${BOOK_DOCKER}/linux/verify_r_packages.R → /tmp/verify_r_packages.R" && \
     echo "✅ Dependency file copy phase complete"
 
-# Copy dependency files early for better cache efficiency
+# Re-declare ARG variables for COPY commands (ARG scope is per-stage)
 ARG BOOK_DEPS
+ARG BOOK_DOCKER
+
+# Copy dependency files early for better cache efficiency
 COPY ${BOOK_DEPS}/requirements.txt /tmp/requirements.txt
 COPY ${BOOK_DEPS}/install_packages.R /tmp/install_packages.R
 COPY ${BOOK_DEPS}/tl_packages /tmp/tl_packages
-ARG BOOK_DOCKER
 COPY ${BOOK_DOCKER}/linux/verify_r_packages.R /tmp/verify_r_packages.R
 
 # Note: Python packages are installed later in Phase 10

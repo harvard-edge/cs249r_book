@@ -96,12 +96,14 @@ RUN Write-Host '=== STARTING CHOCOLATEY INSTALLATION ===' ; `
 # ------------------------------------------------------------
 # PHASE 3: Copy dependency files (same as quarto-build workflow)
 # ------------------------------------------------------------
-RUN Write-Host '=== STARTING DEPENDENCY FILE COPY ==='
+# Re-declare ARG variables for COPY commands (ARG scope is per-stage)
 ARG BOOK_DEPS
+ARG BOOK_DOCKER
+
+RUN Write-Host '=== STARTING DEPENDENCY FILE COPY ==='
 COPY ${BOOK_DEPS}/requirements.txt C:/temp/requirements.txt
 COPY ${BOOK_DEPS}/install_packages.R C:/temp/install_packages.R
 COPY ${BOOK_DEPS}/tl_packages C:/temp/tl_packages
-ARG BOOK_DOCKER
 COPY ${BOOK_DOCKER}/windows/verify_r_packages.R C:/temp/verify_r_packages.R
 RUN Write-Host '✅ Dependency file copy complete'
 
