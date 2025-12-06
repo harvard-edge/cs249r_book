@@ -1,0 +1,244 @@
+name: '🐳 Build Windows Container'
+
+# This workflow builds the Windows Quarto build container
+# Windows containers are more complex but provide performance benefits
+
+# Prevent multiple builds running simultaneously
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: 'Force rebuild even if no changes'
+        required: false
+        default: false
+        type: boolean
+      no_cache:
+        description: 'Disable Docker build cache (fresh build)'
+        required: false
+        default: false
+        type: boolean
+      container_registry:
+        description: 'Container registry URL'
+        required: false
+        default: 'ghcr.io'
+        type: string
+      container_name:
+        description: 'Container image name'
+        required: false
+        default: 'quarto-windows'
+        type: string
+      container_tag:
+        description: 'Container tag'
+        required: false
+        default: 'latest'
+        type: string
+  workflow_call:
+    inputs:
+      force_rebuild:
+        required: false
+        default: false
+        type: boolean
+      no_cache:
+        required: false
+        default: false
+        type: boolean
+      container_registry:
+        required: false
+        default: 'ghcr.io'
+        type: string
+      container_name:
+        required: false
+        default: 'quarto-windows'
+        type: string
+      container_tag:
+        required: false
+        default: 'latest'
+        type: string
+        
+    outputs:
+      build-status:
+        description: "Container build status (success/failure/skipped)"
+        value: ${{ jobs.build.outputs.build-status }}
+      image-name:
+        description: "Full container image name with registry"
+        value: ${{ jobs.build.outputs.image-name }}
+      image-digest:
+        description: "Container image digest (SHA256)"
+        value: ${{ jobs.build.outputs.image-digest }}
+      cache-hit:
+        description: "Whether build used cache (true/false)"
+        value: ${{ jobs.build.outputs.cache-hit }}
+        
+  # Re-enable automatic triggers
+  schedule:
+    - cron: '0 2 * * 0'  # Weekly rebuild (Sunday at 2am - after Linux container)
+  push:
+    branches: [dev]  # Only trigger on dev branch, not main
+    paths:
+      - 'book/tools/dependencies/**'
+      - 'book/docker/windows/**'
+      - '.github/workflows/book-build-windows-container.yml'
+
+env:
+  # =============================================================================
+  # PATH CONFIGURATION - Uses GitHub Repository Variables (Settings > Variables)
+  # =============================================================================
+  # MLSysBook content lives under book/ to accommodate TinyTorch at root
+  # Use ${{ vars.BOOK_ROOT }}, ${{ vars.BOOK_DOCKER }}, etc. in workflow steps
+  # Variables: BOOK_ROOT, BOOK_DOCKER, BOOK_TOOLS, BOOK_QUARTO, BOOK_DEPS
+  
+  # Container Registry Configuration (configurable via inputs)
+  REGISTRY: ${{ (github.event_name == 'workflow_dispatch' && inputs.container_registry) || 'ghcr.io' }}
+  IMAGE_NAME: ${{ github.repository }}/${{ (github.event_name == 'workflow_dispatch' && inputs.container_name) || 'quarto-windows' }}
+  CONTAINER_TAG: ${{ (github.event_name == 'workflow_dispatch' && inputs.container_tag) || 'latest' }}
+  
+  # Container Build Configuration
+  # Using vars.BOOK_DOCKER (repository variable) - works in all contexts
+  DOCKERFILE_PATH: ./${{ vars.BOOK_DOCKER }}/windows/Dockerfile
+  CONTEXT_PATH: .
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 180 # takes about 2 hours to build on Windows
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      build-status: ${{ steps.build.outputs.build-status }}
+      image-name: ${{ steps.build.outputs.image-name }}
+      image-digest: ${{ steps.build.outputs.image-digest }}
+      cache-hit: ${{ steps.build.outputs.cache-hit }}
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      # Skip Docker Buildx for Windows containers - use native Docker engine
+      # Buildx doesn't properly support Windows containers on GitHub Actions
+      # - name: 🛠️ Set up Docker Buildx
+      #   uses: docker/setup-buildx-action@v3
+
+      - name: 🔐 Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏷️ Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ env.CONTAINER_TAG }}
+
+      - name: 🐳 Build and Push Windows container
+        id: build
+        shell: pwsh
+        # Use native Docker instead of book/docker/build-push-action for Windows containers
+        # Buildx has compatibility issues with Windows containers on GitHub Actions
+        run: |
+          # Extract image name and tag from metadata
+          $IMAGE_TAG = "${{ steps.meta.outputs.tags }}"
+          $NO_CACHE = "${{ github.event_name == 'workflow_dispatch' && inputs.no_cache || false }}"
+          
+          Write-Host "🔨 Building Windows container..."
+          Write-Host "📊 Image: $IMAGE_TAG"
+          Write-Host "📊 Context: ${{ env.CONTEXT_PATH }}"
+          Write-Host "📊 Dockerfile: ${{ env.DOCKERFILE_PATH }}"
+          Write-Host "📊 No Cache: $NO_CACHE"
+          
+          # Build the container using native Docker
+          $buildArgs = @(
+            "build",
+            "--file", "${{ env.DOCKERFILE_PATH }}",
+            "--tag", $IMAGE_TAG
+          )
+          
+          # Add no-cache flag if requested
+          if ($NO_CACHE -eq "true") {
+            $buildArgs += "--no-cache"
+            Write-Host "🚫 Cache disabled - building from scratch"
+          } else {
+            Write-Host "💾 Using Docker cache"
+          }
+          
+          # Add labels from metadata
+          $labels = "${{ steps.meta.outputs.labels }}"
+          if ($labels) {
+            $labels -split "`n" | ForEach-Object {
+              if ($_.Trim()) {
+                $buildArgs += "--label", $_.Trim()
+              }
+            }
+          }
+          
+          # Add context path
+          $buildArgs += "${{ env.CONTEXT_PATH }}"
+          
+          Write-Host "🔨 Running: docker $($buildArgs -join ' ')"
+          & docker @buildArgs
+          
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "❌ Docker build failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+          
+          Write-Host "✅ Build completed successfully"
+          
+          # Push the container
+          Write-Host "📤 Pushing container to registry..."
+          & docker push $IMAGE_TAG
+          
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "❌ Docker push failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+          
+          Write-Host "✅ Push completed successfully"
+          
+          # Get image digest for output
+          $DIGEST = & docker inspect --format='{{index .RepoDigests 0}}' $IMAGE_TAG 2>$null
+          if ($DIGEST -match '@(.+)$') {
+            $DIGEST = $matches[1]
+          } else {
+            $DIGEST = "unknown"
+          }
+          
+          # Set outputs for build summary
+          "digest=$DIGEST" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "cache-hit=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: 📊 Build Summary
+        id: build-summary
+        if: always()
+        shell: pwsh
+        run: |
+          # Determine build status
+          if ("${{ steps.build.outcome }}" -eq "success") {
+            $BUILD_STATUS = "success"
+          } else {
+            $BUILD_STATUS = "failure"
+          }
+          
+          # Extract build information
+          $IMAGE_NAME = "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.CONTAINER_TAG }}"
+          $IMAGE_DIGEST = "${{ steps.build.outputs.digest }}"
+          $CACHE_HIT = "${{ steps.build.outputs.cache-hit }}"
+          
+          "build-status=$BUILD_STATUS" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "image-name=$IMAGE_NAME" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "image-digest=$IMAGE_DIGEST" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "cache-hit=$CACHE_HIT" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          
+          Write-Host "📊 Build Status: $BUILD_STATUS"
+          Write-Host "🐳 Image: $IMAGE_NAME"
+          Write-Host "🔍 Digest: $IMAGE_DIGEST"
+          Write-Host "💾 Cache Hit: $CACHE_HIT"

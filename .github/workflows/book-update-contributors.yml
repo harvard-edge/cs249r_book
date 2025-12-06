@@ -1,0 +1,75 @@
+name: '👥 Update Contributors'
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+# =============================================================================
+# PATH CONFIGURATION - Uses GitHub Repository Variables (Settings > Variables)
+# =============================================================================
+# MLSysBook content lives under book/ to accommodate TinyTorch at root
+# Use ${{ vars.BOOK_ROOT }}, ${{ vars.BOOK_QUARTO }}, etc. in workflow steps
+# Variables: BOOK_ROOT, BOOK_DOCKER, BOOK_TOOLS, BOOK_QUARTO, BOOK_DEPS
+
+jobs:
+  update-contributors:
+    name: Update Contributors List
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r ${{ vars.BOOK_DEPS }}/requirements.txt
+          pip install PyGithub>=1.55
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Update contributors (script)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python ${{ github.workspace }}/.github/workflows/contributors/update_contributors.py
+
+      - name: Update contributors (cli)
+        run: npx --yes all-contributors-cli generate
+
+      - name: Check for changes
+        id: update
+        run: |
+          if git status .all-contributorsrc README.md ${{ vars.BOOK_QUARTO }}/contents/frontmatter/acknowledgements/acknowledgements.qmd --porcelain | grep .; then
+            echo "changes_made=true" >> $GITHUB_OUTPUT
+          else
+            echo "changes_made=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit Changes
+        if: steps.update.outputs.changes_made == 'true'
+        run: |
+          BRANCH_NAME=${GITHUB_HEAD_REF:-$(git rev-parse --abbrev-ref HEAD)}
+          
+          git add .all-contributorsrc README.md ${{ vars.BOOK_QUARTO }}/contents/frontmatter/acknowledgements/acknowledgements.qmd
+          git commit -m "Update contributors list [skip ci]"
+          git pull --rebase origin "$BRANCH_NAME"
+          git push origin "$BRANCH_NAME"
+
+      - name: Report Status
+        run: |
+          if [ "${{ steps.update.outputs.changes_made }}" = "true" ]; then
+            echo "✅ Contributors list has been updated"
+          else
+            echo "ℹ️ No changes were needed for contributors list"
+          fi
