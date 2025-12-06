@@ -100,7 +100,6 @@ RUN Write-Host '=== STARTING CHOCOLATEY INSTALLATION ===' ; `
 ARG BOOK_DEPS
 ARG BOOK_DOCKER
 
-RUN Write-Host '=== STARTING DEPENDENCY FILE COPY ==='
 COPY ${BOOK_DEPS}/requirements.txt C:/temp/requirements.txt
 COPY ${BOOK_DEPS}/install_packages.R C:/temp/install_packages.R
 COPY ${BOOK_DEPS}/tl_packages C:/temp/tl_packages

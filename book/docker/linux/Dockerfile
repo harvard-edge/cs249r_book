@@ -21,14 +21,6 @@ ENV LC_ALL=en_US.UTF-8
 ENV PATH=/usr/local/texlive/bin/x86_64-linux:$PATH
 
 # === PHASE 0: COPY DEPENDENCY FILES EARLY (for better cache efficiency) ===
-RUN echo "🚀 === STARTING DEPENDENCY FILE COPY ===" && \
-    echo "📋 Files to copy (early for cache efficiency):" && \
-    echo "  - ${BOOK_DEPS}/requirements.txt → /tmp/requirements.txt" && \
-    echo "  - ${BOOK_DEPS}/install_packages.R → /tmp/install_packages.R" && \
-    echo "  - ${BOOK_DEPS}/tl_packages → /tmp/tl_packages" && \
-    echo "  - ${BOOK_DOCKER}/linux/verify_r_packages.R → /tmp/verify_r_packages.R" && \
-    echo "✅ Dependency file copy phase complete"
-
 # Re-declare ARG variables for COPY commands (ARG scope is per-stage)
 ARG BOOK_DEPS
 ARG BOOK_DOCKER
