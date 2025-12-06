@@ -14,11 +14,7 @@ FROM mcr.microsoft.com/windows/server:ltsc2022
 SHELL ["powershell.exe", "-NoLogo", "-ExecutionPolicy", "Bypass", "-Command"]
 
 # === PATH CONFIGURATION ===
-# Define source paths as build arguments (can be overridden at build time)
-ARG BOOK_ROOT=book
-ARG BOOK_TOOLS=${BOOK_ROOT}/tools
-ARG BOOK_DEPS=${BOOK_TOOLS}/dependencies
-ARG BOOK_DOCKER=${BOOK_ROOT}/docker
+# Paths are hardcoded since they're stable and ARG scope causes issues in multi-layer builds
 
 # ------------------------------------------------------------
 # PHASE 0: Base dirs and env (same as quarto-build workflow)
@@ -96,14 +92,10 @@ RUN Write-Host '=== STARTING CHOCOLATEY INSTALLATION ===' ; `
 # ------------------------------------------------------------
 # PHASE 3: Copy dependency files (same as quarto-build workflow)
 # ------------------------------------------------------------
-# Re-declare ARG variables for COPY commands (ARG scope is per-stage)
-ARG BOOK_DEPS
-ARG BOOK_DOCKER
-
-COPY ${BOOK_DEPS}/requirements.txt C:/temp/requirements.txt
-COPY ${BOOK_DEPS}/install_packages.R C:/temp/install_packages.R
-COPY ${BOOK_DEPS}/tl_packages C:/temp/tl_packages
-COPY ${BOOK_DOCKER}/windows/verify_r_packages.R C:/temp/verify_r_packages.R
+COPY book/tools/dependencies/requirements.txt C:/temp/requirements.txt
+COPY book/tools/dependencies/install_packages.R C:/temp/install_packages.R
+COPY book/tools/dependencies/tl_packages C:/temp/tl_packages
+COPY book/docker/windows/verify_r_packages.R C:/temp/verify_r_packages.R
 RUN Write-Host '✅ Dependency file copy complete'
 
 # ------------------------------------------------------------

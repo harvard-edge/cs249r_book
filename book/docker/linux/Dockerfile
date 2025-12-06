@@ -5,11 +5,7 @@
 FROM ubuntu:22.04
 
 # === PATH CONFIGURATION ===
-# Define source paths as build arguments (can be overridden at build time)
-ARG BOOK_ROOT=book
-ARG BOOK_TOOLS=${BOOK_ROOT}/tools
-ARG BOOK_DEPS=${BOOK_TOOLS}/dependencies
-ARG BOOK_DOCKER=${BOOK_ROOT}/docker
+# Paths are hardcoded since they're stable and ARG scope causes issues in multi-layer builds
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
@@ -21,15 +17,11 @@ ENV LC_ALL=en_US.UTF-8
 ENV PATH=/usr/local/texlive/bin/x86_64-linux:$PATH
 
 # === PHASE 0: COPY DEPENDENCY FILES EARLY (for better cache efficiency) ===
-# Re-declare ARG variables for COPY commands (ARG scope is per-stage)
-ARG BOOK_DEPS
-ARG BOOK_DOCKER
-
 # Copy dependency files early for better cache efficiency
-COPY ${BOOK_DEPS}/requirements.txt /tmp/requirements.txt
-COPY ${BOOK_DEPS}/install_packages.R /tmp/install_packages.R
-COPY ${BOOK_DEPS}/tl_packages /tmp/tl_packages
-COPY ${BOOK_DOCKER}/linux/verify_r_packages.R /tmp/verify_r_packages.R
+COPY book/tools/dependencies/requirements.txt /tmp/requirements.txt
+COPY book/tools/dependencies/install_packages.R /tmp/install_packages.R
+COPY book/tools/dependencies/tl_packages /tmp/tl_packages
+COPY book/docker/linux/verify_r_packages.R /tmp/verify_r_packages.R
 
 # Note: Python packages are installed later in Phase 10
 
