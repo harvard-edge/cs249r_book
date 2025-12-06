@@ -565,20 +565,20 @@ def sort_by_impact_level(updates):
         return 0  # Default for entries without impact bars
     return sorted(updates, key=extract_impact_level)
 
-def get_changes_in_dev_since(date_start, date_end=None, verbose=False):
+def get_changes_in_dev_since(date_start, date_end=None, verbose=False, branch="dev"):
     cmd = ["git", "log", "--numstat", "--since", date_start]
     if date_end:
         cmd += ["--until", date_end]
-    cmd += ["origin/dev", "--", "quarto/contents/**/*.qmd"]
+    cmd += [f"origin/{branch}", "--", "quarto/contents/**/*.qmd"]
     return run_git_command(cmd, verbose=verbose)
 
 
 
-def get_commit_messages_for_file(file_path, since, until=None, verbose=False):
+def get_commit_messages_for_file(file_path, since, until=None, verbose=False, branch="dev"):
     cmd = ["git", "log", "--pretty=format:%s", "--since", since]
     if until:
         cmd += ["--until", until]
-    cmd += ["origin/dev", "--", file_path]
+    cmd += [f"origin/{branch}", "--", file_path]
     messages = run_git_command(cmd, verbose=verbose)
     
     # Return all commit messages - let AI determine importance
@@ -601,8 +601,8 @@ def format_friendly_date(date_str):
         else:
             # Fallback to space-separated format
             dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z")
-        # Format as "January 28 at 02:36 PM" (full month name)
-        return dt.strftime("%B %d at %I:%M %p")
+        # Format as "January 28" (full month name, no time for consistency)
+        return dt.strftime("%B %d")
     except:
         return date_str
 
@@ -679,11 +679,11 @@ Generate a concise summary (1-2 sentences) that describes the key updates:"""
         commit_count = len([msg for msg in commit_messages.split('\n') if msg.strip()])
         return f"Updated content with {commit_count} changes"
 
-def generate_entry(start_date, end_date=None, verbose=False, is_latest=False, ai_mode=False, ollama_url="http://localhost:11434", ollama_model="gemma2:9b"):
+def generate_entry(start_date, end_date=None, verbose=False, is_latest=False, ai_mode=False, ollama_url="http://localhost:11434", ollama_model="gemma2:9b", branch="dev"):
     if verbose:
-        print(f"📁 Processing changes from {start_date} to {end_date or 'now'}")
-    print(f"🔍 Analyzing Git changes...")
-    changes = get_changes_in_dev_since(start_date, end_date, verbose=verbose)
+        print(f"📁 Processing changes from {start_date} to {end_date or 'now'} on {branch}")
+    print(f"🔍 Analyzing Git changes on {branch} branch...")
+    changes = get_changes_in_dev_since(start_date, end_date, verbose=verbose, branch=branch)
     if not changes.strip():
         print("  ⚠️ No changes found in specified period")
         return None
@@ -700,7 +700,7 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False, ai
         changes_by_file[file_path][0] += added
         changes_by_file[file_path][1] += removed
 
-    current_date = datetime.now().strftime('%B %d at %I:%M %p') if not end_date else format_friendly_date(end_date)
+    current_date = datetime.now().strftime('%B %d') if not end_date else format_friendly_date(end_date)
     entry = f"### 📅 {current_date}\n\n"
 
     frontmatter, chapters, labs, appendix = [], [], [], []
@@ -728,7 +728,7 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False, ai
         if "references.qmd" in file_path:
             continue
             
-        commit_msgs = get_commit_messages_for_file(file_path, start_date, end_date, verbose=verbose)
+        commit_msgs = get_commit_messages_for_file(file_path, start_date, end_date, verbose=verbose, branch=branch)
         
         # Skip if no meaningful commits
         if not commit_msgs.strip():
@@ -771,21 +771,19 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False, ai
     print(f"  🧑‍💻 Labs: {len(labs)} entries")
     print(f"  📚 Appendix: {len(appendix)} entries")
 
-    # Determine if sections should be open or closed
-    # All entries should be closed by default - let users choose what to explore
-    details_state = ""  # Always closed for better UX
+    # All sections closed by default - let users choose what to explore
 
     # Add sections in order: Frontmatter, Chapters, Labs, Appendix
     if frontmatter:
-        entry += f"<details {details_state}>\n<summary>**📄 Frontmatter**</summary>\n\n" + "\n".join(sort_by_impact_level(frontmatter)) + "\n\n</details>\n\n"
+        entry += "<details>\n<summary>**📄 Frontmatter**</summary>\n\n" + "\n".join(sort_by_impact_level(frontmatter)) + "\n\n</details>\n\n"
     if chapters:
-        entry += f"<details {details_state}>\n<summary>**📖 Chapters**</summary>\n\n" + "\n".join(sort_by_impact_level(chapters)) + "\n\n</details>\n\n"
+        entry += "<details>\n<summary>**📖 Chapters**</summary>\n\n" + "\n".join(sort_by_impact_level(chapters)) + "\n\n</details>\n\n"
     if labs:
         # Organize labs according to the structure from quarto config
         organized_labs = organize_labs_by_structure(labs)
-        entry += f"<details {details_state}>\n<summary>**🧑‍💻 Labs**</summary>\n\n" + "\n".join(organized_labs) + "\n\n</details>\n\n"
+        entry += "<details>\n<summary>**🧑‍💻 Labs**</summary>\n\n" + "\n".join(organized_labs) + "\n\n</details>\n\n"
     if appendix:
-        entry += f"<details {details_state}>\n<summary>**📚 Appendix**</summary>\n\n" + "\n".join(sort_by_impact_level(appendix)) + "\n\n</details>\n"
+        entry += "<details>\n<summary>**📚 Appendix**</summary>\n\n" + "\n".join(sort_by_impact_level(appendix)) + "\n\n</details>\n"
 
     # If no content sections were added, return None (empty entry)
     if not frontmatter and not chapters and not labs and not appendix:
@@ -797,7 +795,7 @@ def generate_entry(start_date, end_date=None, verbose=False, is_latest=False, ai
 
 def generate_demo_entry():
     """Generate a demo changelog entry with real data from the repository."""
-    current_date = datetime.now().strftime('%B %d at %I:%M %p')
+    current_date = datetime.now().strftime('%B %d')
     current_year = datetime.now().year
     
     # Get some real file paths from the repository
@@ -897,12 +895,13 @@ def fold_existing_entries(content):
     
     return re.sub(pattern, replacement, content)
 
-def generate_changelog(mode="incremental", verbose=False, ai_mode=False, ollama_url="http://localhost:11434", ollama_model="gemma2:9b"):
+def generate_changelog(mode="incremental", verbose=False, ai_mode=False, ollama_url="http://localhost:11434", ollama_model="gemma2:9b", since_date=None, branch="dev"):
     print("🔄 Starting Git data fetch...")
-    print("  📦 Fetching gh-pages branch...")
-    run_git_command(["git", "fetch", "origin", "gh-pages:refs/remotes/origin/gh-pages"], verbose=verbose)
-    print("  📦 Fetching dev branch...")
-    run_git_command(["git", "fetch", "origin", "dev:refs/remotes/origin/dev"], verbose=verbose)
+    print(f"  📦 Fetching {branch} branch...")
+    run_git_command(["git", "fetch", "origin", f"{branch}:refs/remotes/origin/{branch}"], verbose=verbose)
+    if not since_date:
+        print("  📦 Fetching gh-pages branch...")
+        run_git_command(["git", "fetch", "origin", "gh-pages:refs/remotes/origin/gh-pages"], verbose=verbose)
     print("✅ Git data fetch complete")
 
     def get_latest_gh_pages_commit():
@@ -941,7 +940,13 @@ def generate_changelog(mode="incremental", verbose=False, ai_mode=False, ollama_
             except:
                 return datetime.now().year
 
-    latest_commit, latest_date = get_latest_gh_pages_commit()
+    # Use provided since_date or fall back to gh-pages detection
+    if since_date:
+        print(f"📅 Using provided start date: {since_date}")
+        latest_date = since_date
+        latest_commit = None
+    else:
+        latest_commit, latest_date = get_latest_gh_pages_commit()
 
     if mode == "full":
         if verbose:
@@ -992,7 +997,7 @@ def generate_changelog(mode="incremental", verbose=False, ai_mode=False, ollama_
             pub_year = extract_year_from_date(current_date)
             
             print(f"📅 Processing period {i+1}/{len(unique_dates)-1}: {format_friendly_date(previous_date)} → {format_friendly_date(current_date)} [{pub_year}]")
-            entry = generate_entry(previous_date, current_date, verbose=verbose, is_latest=(i==0))
+            entry = generate_entry(previous_date, current_date, verbose=verbose, is_latest=(i==0), branch=branch)
             if entry:
                 entries_by_year[pub_year].append(entry)
         
@@ -1012,7 +1017,7 @@ def generate_changelog(mode="incremental", verbose=False, ai_mode=False, ollama_
         if verbose:
             print("⚡ Running update mode...")
         print(f"📅 Processing changes since: {format_friendly_date(latest_date) if latest_date else 'beginning'}")
-        entry = generate_entry(latest_date, verbose=verbose, is_latest=True, ai_mode=ai_mode, ollama_url=ollama_url, ollama_model=ollama_model)
+        entry = generate_entry(latest_date, verbose=verbose, is_latest=True, ai_mode=ai_mode, ollama_url=ollama_url, ollama_model=ollama_model, branch=branch)
         if not entry:
             return "_No updates found._"
         
@@ -1033,7 +1038,7 @@ if __name__ == "__main__":
     
     # Changelog mode arguments
     parser.add_argument("--full", action="store_true", help="Regenerate the entire changelog from scratch.")
-    parser.add_argument("--incremental", action="store_true", help="Add new entries since last gh-pages publish.")
+    parser.add_argument("--incremental", action="store_true", help="Add new entries since last publish (uses --since date or falls back to gh-pages).")
     
     # General options
     parser.add_argument("-t", "--test", action="store_true", help="Run without writing to file.")
@@ -1043,6 +1048,8 @@ if __name__ == "__main__":
     parser.add_argument("--ai-mode", type=lambda x: x.lower() == 'true', default=True, help="Enable AI-generated summaries with detailed breakdowns (default: true). Use --ai-mode=false to disable.")
     parser.add_argument("--ollama-url", default="http://localhost:11434", help="Ollama API URL for AI summaries.")
     parser.add_argument("--ollama-model", default="gemma2:9b", help="Ollama model to use for AI summaries.")
+    parser.add_argument("--since", type=str, help="Start date for changelog (ISO format: YYYY-MM-DD). Overrides gh-pages date detection.")
+    parser.add_argument("--branch", type=str, default="dev", help="Branch to analyze for changes (default: dev). Use 'main' for live releases.")
 
     
     # Release notes arguments
@@ -1141,7 +1148,7 @@ if __name__ == "__main__":
 
 
 
-        new_entry = generate_changelog(mode=mode, verbose=args.verbose, ai_mode=args.ai_mode, ollama_url=args.ollama_url, ollama_model=args.ollama_model)
+        new_entry = generate_changelog(mode=mode, verbose=args.verbose, ai_mode=args.ai_mode, ollama_url=args.ollama_url, ollama_model=args.ollama_model, since_date=args.since, branch=args.branch)
 
         if args.test:
             print("🧪 TEST OUTPUT ONLY:\n")

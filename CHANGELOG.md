@@ -1,8 +1,76 @@
 ## 2025 Updates
 
-### 📅 November 02 at 10:55 AM
+### 📅 December 06
 
-<details >
+<details>
+<summary>**📄 Frontmatter**</summary>
+
+- `█████` **Acknowledgements**: The acknowledgements section was updated multiple times to reflect changes in contributor lists.Additionally, a fix was implemented to ensure XHTML compliance in frontmatter files, specifically addressing an issue with ebook loading and display errors.
+- `██░░░` **Foreword**: This commit addresses an issue with epub generation by ensuring that the Foreword file (foreword.qmd) complies with XHTML standards. This helps to maintain consistency and compatibility across different platforms.
+- `██░░░` **Changelog**: This commit focuses on improving the Epub output by ensuring XHTML compliance in frontmatter files. This helps maintain document integrity and consistency for users accessing the content in Epub format.
+- `██░░░` **SocratiQ**: This update ensures that SocratiQ's frontmatter files comply with XHTML standards, improving ePub compatibility and readability.
+- `█░░░░` **Index**: This commit focuses on ensuring XHTML compliance within frontmatter files for epub output, fixing potential issues related to markup validity.
+
+</details>
+
+<details>
+<summary>**📖 Chapters**</summary>
+
+- `█████` **Chapter 6: Data Engineering**: Chapter 6, "Data Engineering," was updated with several improvements. This included fixing typos, standardizing definition titles, and revising definitions for "lifecycle" and "operations" to ensure consistency.
+- `█████` **Chapter 20: Frontiers**: The "Frontiers" chapter received several updates, including improved math formatting, the addition of a chain-of-thought citation, expanded discussion on artificial general intelligence (AGI), and standardized definition titles. Additionally, benchmarking and AGI definitions were revised to a canonical form for clarity and consistency.
+- `████░` **Chapter 1: Introduction**: Chapter 1 received updates to clarify foundational definitions, refine explanations of deep learning and data drift, and improve sentence structure for clarity. Additional changes included fixing typos and addressing formatting issues.
+- `████░` **Chapter 3: DL Primer**: The Chapter 3 DL Primer was updated with several improvements, including correcting errors in weight matrix calculations and forward propagation, standardizing mathematical conventions, and adding missing definitions for key concepts like Backpropagation and Gradient Descent. Additional changes focused on improving clarity, removing redundancies, and ensuring consistent terminology throughout the chapter.
+- `███░░` **Chapter 2: ML Systems**: Chapter 2 on ML Systems received several improvements, including standardized formatting for definition titles, revised deployment paradigm definitions for clarity, and the correction of typos throughout the chapter. These changes enhance readability and accuracy within the ML Systems content.
+- `███░░` **Chapter 4: DNN Architectures**: The commit messages indicate updates to Chapter 4 focusing on consistency and clarity. Key changes include standardizing matrix multiplication conventions, refining definitions for academic tone, and revising neural architecture definitions for a more consistent format.
+- `███░░` **Chapter 8: AI Training**: Chapter 8's AI training content was enhanced with missing definitions for Tier 1 and Tier 2 categories. Additionally, the existing definitions were standardized in format and revised to ensure clarity and consistency.
+- `███░░` **Chapter 10: Model Optimizations**: This update focuses on refining the content in Chapter 10 by correcting typos across several files and standardizing the formatting of definitions related to hardware and optimization techniques.The chapter now features a more consistent and accurate presentation of key terms.
+- `███░░` **Chapter 11: AI Acceleration**: This update focuses on refining content accuracy and consistency in Chapter 11. Key changes include fixing typos, standardizing definition titles, revising hardware and optimization definitions for clarity, and verifying bibliographic information.
+- `██░░░` **Chapter 5: AI Workflow**: Chapter 5's AI Workflow now includes all Tier 1 and Tier 2 definitions, with standardized titles for clarity. Additionally, definitions related to "lifecycle" and "operations" have been revised to ensure consistency and accuracy.
+- `██░░░` **Chapter 7: AI Frameworks**: Chapter 7 on AI Frameworks was updated with several improvements, including fixing typos and standardizing definition titles. Most importantly, key definitions for Tier 1 and Tier 2 frameworks were added and existing lifecycle and operations definitions were revised to a canonical format for clarity.
+- `██░░░` **Chapter 12: Benchmarking AI**: This update focuses on clarifying key concepts within Chapter 12. It corrects typos across three files and revises the definitions of "benchmarking" and "AGI" for greater consistency and accuracy.
+- `██░░░` **Chapter 13: ML Operations**: The ML Operations chapter was updated with standardized definition titles and revised lifecycle and operations definitions for clarity and consistency. Minor typographical errors were also corrected in the document.
+- `██░░░` **Chapter 14: On-Device Learning**: The commit messages indicate that the definitions section in Chapter 14 was updated. Specifically, the titles of definitions were standardized and the descriptions of deployment paradigms were revised for clarity and consistency.
+- `██░░░` **Chapter 15: Security & Privacy**: Chapter 15's content on privacy and security has been updated with standardized formatting for definition titles and revised definitions for the Responsible AI suite. These changes improve clarity and consistency in the documentation.
+- `██░░░` **Chapter 19: AI for Good**: This update focuses on improving clarity and accuracy in Chapter 19. It standardizes definition titles, revises definitions for the Responsible AI suite to be more consistent, and ensures all bibliographic entries have valid DOIs.
+- `█░░░░` **Chapter 9: Efficient AI**: This update streamlines Chapter 9 by standardizing the format for definition titles and revising the wording of key terms related to hardware and optimization techniques within the "Efficient AI" section. These changes improve clarity and consistency in the presentation of essential concepts.
+- `█░░░░` **Chapter 16: Robust AI**: This update standardizes the formatting for definition titles within Chapter 16 and revises the definitions related to the "Responsible AI Suite" to ensure consistency and clarity.
+- `█░░░░` **Chapter 17: Responsible AI**: The "Responsible AI" chapter in Quarto saw improvements to its definition section. This included standardizing the formatting of definition titles and revising the Responsible AI suite definitions for clarity and consistency.
+- `█░░░░` **Chapter 18: Sustainable AI**: This update standardizes the formatting of definition titles within Chapter 18 and revises the definitions for the Responsible AI suite to ensure consistency and clarity.
+
+</details>
+
+<details>
+<summary>**🧑‍💻 Labs**</summary>
+
+- `██░░░` **Lab: Labs**: This commit improves the Lab ebook by converting more `.qmd` file path links within the `labs.qmd` document into section references, enhancing navigation and readability for users.
+- `██░░░` **Lab: Nicla Vision**: This update improves the Nicla Vision Lab documentation by converting file-path links within the lab overviews to section references in ePub format. This change enhances navigation and readability for users accessing the lab through ePub publications.
+- `█░░░░` **Lab: Arduino Object Detection**: This update fixes several typos found across three files related to the Arduino object detection lab. These corrections ensure the accuracy and clarity of the provided information for users.
+- `█░░░░` **Lab: Arduino Keyword Spotting**: This update addresses typos found within the Lab: Arduino Keyword Spotting documentation, ensuring accuracy and clarity for users.
+- `█░░░░` **Lab: Arduino Motion Classification**: This commit addresses typos found in two files within the "Arduino Motion Classification" lab content. The corrections ensure accuracy and clarity in the provided instructions and explanations.
+- `███░░` **Lab: Xiao Esp32S3**: This update fixes an issue with file-path links in the Xiao ESP32S3 Lab's overview sections. It converts these links to section references for improved navigation and readability within the ePub format.
+- `█░░░░` **Lab: Arduino Image Classification**: This commit fixes minor typos found within the "labs" section of the documentation.
+- `██░░░` **Lab: Arduino Keyword Spotting**: This update addresses two issues in the Lab: Arduino Keyword Spotting content. It ensures remote resources are handled correctly within ePub output and removes the deprecated `frameborder` attribute from iframes for improved compatibility.
+- `██░░░` **Lab: Arduino Motion Classification**: This update focuses on improving the Lab's readability and accuracy.It fixes typographical errors in the "labs" section and converts file path links within .qmd files to section references for better navigation in epub format.
+- `███░░` **Lab: Grove Vision Ai V2**: The Lab: Grove Vision Ai V2 content was updated to clearly indicate that object detection is still under development (TBD). Additionally, file path links within lab overviews were replaced with section references for improved readability in epub format.
+- `█░░░░` **Lab: Arduino Image Classification**: Two commits addressed minor issues within the "image_classification" lab. They focused on correcting typos across three files and then two additional files, ensuring accuracy and clarity in the content.
+- `███░░` **Lab: Raspi**: This commit improves the Lab: Raspi Qmd file by fixing how file path links are handled in overviews. It now converts these links to section references, enhancing readability and navigation within the document.
+- `█░░░░` **Lab: Arduino Setup**: This update fixes several typos found across three different files within the Arduino Setup Lab documentation.
+- `█░░░░` **Lab: Arduino Image Classification**: The image classification lab now uses the correct URL to download the "labels.txt" file. This fix ensures the lab functions as intended by providing the necessary data for image recognition.
+- `███░░` **Lab: Arduino Object Detection**: This update addresses numerous typos throughout the Arduino Object Detection lab, particularly focusing on corrections related to the Raspberry Pi instructions and the spelling of the Ultralytics library. These fixes enhance the clarity and accuracy of the lab materials.
+- `██░░░` **Lab: Pi Vision Language Models**: This update focused on improving the clarity and accuracy of the Lab: Pi Vision Language Models documentation.Several typos were corrected across various files within the labs section, ensuring the content is now free of grammatical errors and presents information accurately.
+
+</details>
+
+<details>
+<summary>**🔧 Infrastructure**</summary>
+
+- `█████` **TinyTorch Integration**: TinyTorch, the companion hands-on learning platform, has been integrated into the MLSysBook repository as a monorepo. This includes dedicated CI/CD workflows, the Tito CLI tool for module management, and streamlined deployment configurations.
+
+</details>
+
+### 📅 November 02
+
+<details>
 <summary>**📄 Frontmatter**</summary>
 
 - `█████` **Acknowledgements**: The acknowledgements section was updated to include new contributors, remove outdated entries, and refine contributor information. Additionally, SVG logos were converted to PNG format for better display and Netlify and Edge Impulse were added as corporate supporters.
@@ -14,7 +82,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█████` **Chapter 1: Introduction**: The "Introduction" chapter was significantly revised, clarifying the distinction between machine learning and traditional software, incorporating expert feedback, and refining the narrative flow for a smoother reading experience. Key updates also include improvements to callout definitions, footnote systems, and the overall explanation of training-serving skew.
@@ -49,7 +117,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**🧑‍💻 Labs**</summary>
 
 - `███░░` **Lab: Labs**: This update improves the readability and structure of the Labs documentation. It includes fixing Markdown formatting, standardizing table styles, and adding section IDs to all headers for easier navigation.
@@ -83,7 +151,7 @@
 
 ### 📅 October 09
 
-<details >
+<details>
 <summary>**📄 Frontmatter**</summary>
 
 - `███░░` **About**: The book now features a reorganized Part IV for better understanding of AI systems and a refined pedagogical approach emphasizing foundational concepts
@@ -95,7 +163,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `███░░` **Chapter 8: AI Training**: The Training chapter now features a smoother flow, practical examples using GPT-2, and improved callout formatting for better readability
@@ -127,7 +195,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**🧑‍💻 Labs**</summary>
 
 - `██░░░` **Lab: Labs**: Tables in the lab exercises are now formatted consistently for better readability
@@ -154,7 +222,7 @@
 
 ### 📅 August 18
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█████` **Chapter 2: ML Systems**: Improved writing clarity in the ML systems chapter and added a new TikZ figure for better visualization.
@@ -166,7 +234,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**🧑‍💻 Labs**</summary>
 
 **Seeed XIAO ESP32S3**
@@ -186,7 +254,7 @@
 
 ### 📅 August 06
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `████░` **Index**: Improved text wrapping around book cover images for better space utilization.
@@ -195,7 +263,7 @@
 
 ### 📅 August 05
 
-<details >
+<details>
 <summary>**📄 Frontmatter**</summary>
 
 - `█████` **About**: Modernized About the Book section to reflect current organizational structure.
@@ -205,7 +273,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█████` **Chapter 1: Introduction**: Updated quizzes with new metadata and formatting enhancements.
@@ -241,7 +309,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**🧑‍💻 Labs**</summary>
 
 **Hands-on Labs**
@@ -291,7 +359,7 @@
 
 ### 📅 June 10
 
-<details >
+<details>
 <summary>**📄 Frontmatter**</summary>
 
 - `█░░░░` **About**: Updated SocratiQ page links
@@ -299,7 +367,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `████░` **Chapter 1: Introduction**: Minor grammatical errors were corrected and the language was refined for improved clarity.
@@ -325,7 +393,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**🧑‍💻 Labs**</summary>
 
 **Hands-on Labs**
@@ -351,7 +419,7 @@
 
 ### 📅 May 14
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█████` **Chapter 14: On-Device Learning**: On-device learning content was restructured and clarified for improved understanding.
@@ -360,7 +428,7 @@
 
 ### 📅 May 04
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `███░░` **Chapter 1: Introduction**: Updated content
@@ -384,7 +452,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**🧑‍💻 Labs**</summary>
 
 **Arduino**
@@ -422,7 +490,7 @@
 
 ### 📅 March 25
 
-<details >
+<details>
 <summary>**📄 Frontmatter**</summary>
 
 - `██░░░` **Foreword**: Updated content
@@ -432,7 +500,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█████` **Chapter 1: Introduction**: Minor stylistic edits were made to improve readability.
@@ -460,7 +528,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**🧑‍💻 Labs**</summary>
 
 **Arduino**
@@ -490,7 +558,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**📚 Appendix**</summary>
 
 - `██░░░` **PhD Survival Guide**: Spelling errors were corrected and all broken links were fixed.
@@ -499,7 +567,7 @@
 
 ### 📅 March 03
 
-<details >
+<details>
 <summary>**📄 Frontmatter**</summary>
 
 - `█░░░░` **About**: Updated content
@@ -508,7 +576,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `████░` **Chapter 1: Introduction**: Fixed formatting issues within callout titles.
@@ -533,7 +601,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**🧑‍💻 Labs**</summary>
 
 **Hands-on Labs**
@@ -558,7 +626,7 @@
 
 ### 📅 February 08
 
-<details >
+<details>
 <summary>**📄 Frontmatter**</summary>
 
 - `███░░` **Acknowledgements**: Updated acknowledgements.qmd with contributor information.
@@ -568,7 +636,7 @@
 
 ### 📅 February 07
 
-<details >
+<details>
 <summary>**📄 Frontmatter**</summary>
 
 - `████░` **About**: Updated content
@@ -579,7 +647,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `████░` **Chapter 1: Introduction**: The precheck function now only operates on .qmd and .bib files.
@@ -605,7 +673,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**🧑‍💻 Labs**</summary>
 
 **Hands-on Labs**
@@ -642,7 +710,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**📚 Appendix**</summary>
 
 - `███░░` **PhD Survival Guide**: Updated content
@@ -651,14 +719,14 @@
 
 ### 📅 February 02
 
-<details >
+<details>
 <summary>**📄 Frontmatter**</summary>
 
 - `█████` **Acknowledgements**: Updated content
 
 </details>
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `███░░` **Chapter 1: Introduction**: Callout titles throughout the introduction are now presented in a consistent title block format.
@@ -685,14 +753,14 @@
 
 ### 📅 January 28
 
-<details >
+<details>
 <summary>**📄 Frontmatter**</summary>
 
 - `█████` **Acknowledgements**: Updated content
 
 </details>
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `██░░░` **Chapter 1: Introduction**: Removed a redundant case study.
@@ -709,7 +777,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**🧑‍💻 Labs**</summary>
 
 **Raspberry Pi**
@@ -719,7 +787,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**📚 Appendix**</summary>
 
 - `████░` **PhD Survival Guide**: Added links to helpful resources.
@@ -728,7 +796,7 @@
 
 ### 📅 January 17
 
-<details >
+<details>
 <summary>**📄 Frontmatter**</summary>
 
 - `█░░░░` **About**: Updated content
@@ -737,7 +805,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `██░░░` **Chapter 1: Introduction**: Addresses feedback regarding content clarity.
@@ -750,7 +818,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**🧑‍💻 Labs**</summary>
 
 **Raspberry Pi**
@@ -762,14 +830,14 @@
 
 ### 📅 January 12
 
-<details >
+<details>
 <summary>**📄 Frontmatter**</summary>
 
 - `█████` **Acknowledgements**: Added contributors to acknowledgements.
 
 </details>
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `███░░` **Chapter 1: Introduction**: Fixed an issue with code rendering that was introduced from PDF enhancements.
@@ -781,7 +849,7 @@
 
 ### 📅 January 11
 
-<details >
+<details>
 <summary>**📄 Frontmatter**</summary>
 
 - `███░░` **About**: Updated content
@@ -790,7 +858,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `████░` **Chapter 1: Introduction**: Updated the introduction with footnotes.
@@ -802,14 +870,14 @@
 
 ### 📅 January 09
 
-<details >
+<details>
 <summary>**📄 Frontmatter**</summary>
 
 - `███░░` **Acknowledgements**: Updated acknowledgements with contributor information.
 
 </details>
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `███░░` **Chapter 1: Introduction**: Updated content
@@ -824,7 +892,7 @@
 
 ### 📅 January 07
 
-<details >
+<details>
 <summary>**📄 Frontmatter**</summary>
 
 - `█░░░░` **Foreword**: Tweaked wording for improved clarity.
@@ -832,7 +900,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `███░░` **Chapter 1: Introduction**: Improved the explanation of the differences between AI and ML.
@@ -843,7 +911,7 @@
 
 ### 📅 January 03
 
-<details >
+<details>
 <summary>**📄 Frontmatter**</summary>
 
 - `████░` **Acknowledgements**: Updated acknowledgements.qmd with contributors.
@@ -851,7 +919,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█░░░░` **Chapter 1: Introduction**: Updated content
@@ -865,14 +933,14 @@
 
 ### 📅 January 02
 
-<details >
+<details>
 <summary>**📄 Frontmatter**</summary>
 
 - `████░` **Acknowledgements**: Updated acknowledgements with contributor information.
 
 </details>
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `███░░` **Chapter 4: DNN Architectures**: Removed unnecessary commented text.
@@ -884,7 +952,7 @@
 
 ### 📅 January 01
 
-<details >
+<details>
 <summary>**📄 Frontmatter**</summary>
 
 - `████░` **Foreword**: Updated content
@@ -894,7 +962,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `███░░` **Chapter 1: Introduction**: Changed header formats.
@@ -922,7 +990,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**🧑‍💻 Labs**</summary>
 
 **Hands-on Labs**
@@ -936,11 +1004,11 @@
 
 </details>
 
-## 2024
+## 2024 Updates
 
 ### 📅 November 19
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `████░` **Chapter 15: Security & Privacy**: Improved the explanation of power consumption attacks with clearer figures and less repetitive language. Also added a new federated case study.
@@ -954,7 +1022,7 @@
 
 ### 📅 November 16
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `██░░░` **Chapter 1: Introduction**: Improved formatting consistency for definitions.
@@ -985,7 +1053,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**🧑‍💻 Labs**</summary>
 
 **Arduino**
@@ -1020,7 +1088,7 @@
 
 ### 📅 November 15
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█████` **Chapter 1: Introduction**: Updated introductory text, clarified definitions, added case studies with video/image links, and incorporated feedback to improve the overall flow and content.
@@ -1051,7 +1119,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**🧑‍💻 Labs**</summary>
 
 **Hands-on Labs**
@@ -1091,7 +1159,7 @@
 
 ### 📅 September 20
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `████░` **Chapter 1: Introduction**: Fixed broken figure references.
@@ -1115,7 +1183,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**🧑‍💻 Labs**</summary>
 
 **Hands-on Labs**
@@ -1146,7 +1214,7 @@
 
 ### 📅 September 12
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█░░░░` **Chapter 13: ML Operations**: Updated content
@@ -1158,7 +1226,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**🧑‍💻 Labs**</summary>
 
 **Raspberry Pi**
@@ -1170,7 +1238,7 @@
 
 ### 📅 September 06
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `███░░` **Chapter 16: Responsible AI**: Corrected bibliographic information and text formatting.
@@ -1180,7 +1248,7 @@
 
 ### 📅 September 04
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█░░░░` **Chapter 1: Introduction**: Fixed captions to ensure accuracy on even-numbered pages.
@@ -1205,7 +1273,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**🧑‍💻 Labs**</summary>
 
 **Arduino**
@@ -1220,7 +1288,7 @@
 
 ### 📅 September 02
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█░░░░` **Chapter 2: ML Systems**: Improved sentence flow and clarity.
@@ -1230,7 +1298,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**🧑‍💻 Labs**</summary>
 
 **Raspberry Pi**
@@ -1242,7 +1310,7 @@
 
 ### 📅 August 29
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `███░░` **Chapter 13: ML Operations**: Updated content
@@ -1253,7 +1321,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**🧑‍💻 Labs**</summary>
 
 **Raspberry Pi**
@@ -1269,7 +1337,7 @@
 
 ### 📅 August 27
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `███░░` **Chapter 7: AI Frameworks**: Fixed broken links in the hardware acceleration section.
@@ -1285,7 +1353,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**🧑‍💻 Labs**</summary>
 
 **Hands-on Labs**
@@ -1296,7 +1364,7 @@
 
 ### 📅 August 22
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█░░░░` **Chapter 11: AI Acceleration**: Improved clarity and accuracy of subscript usage examples
@@ -1306,7 +1374,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**🧑‍💻 Labs**</summary>
 
 **Raspberry Pi**
@@ -1322,7 +1390,7 @@
 
 ### 📅 August 21
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `██░░░` **Chapter 1: Introduction**: Updated content
@@ -1352,7 +1420,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**🧑‍💻 Labs**</summary>
 
 **Raspberry Pi**
@@ -1374,7 +1442,7 @@
 
 ### 📅 August 15
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `██░░░` **Chapter 1: Introduction**: Updated content
@@ -1402,7 +1470,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**🧑‍💻 Labs**</summary>
 
 **Seeed XIAO ESP32S3**
@@ -1414,7 +1482,7 @@
 
 ### 📅 August 07
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `████░` **Contributors**: Updated contributors list.
@@ -1423,7 +1491,7 @@
 
 ### 📅 August 06
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█░░░░` **Chapter 1: Introduction**: Added HTML + PDF build functionality
@@ -1451,7 +1519,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**🧑‍💻 Labs**</summary>
 
 **Arduino**
@@ -1481,7 +1549,7 @@
 
 ### 📅 June 25
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█░░░░` **Chapter 3: DL Primer**: Fixed the link to video 3.1.
@@ -1492,7 +1560,7 @@
 
 ### 📅 June 20
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `██░░░` **Chapter 2: ML Systems**: Updated content
@@ -1501,7 +1569,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**🧑‍💻 Labs**</summary>
 
 **Hands-on Labs**
@@ -1512,7 +1580,7 @@
 
 ### 📅 June 19
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `████░` **Chapter 1: Introduction**: Improved introduction material based on feedback.
@@ -1553,7 +1621,7 @@
 
 </details>
 
-<details >
+<details>
 <summary>**🧑‍💻 Labs**</summary>
 
 **Hands-on Labs**
@@ -1585,7 +1653,7 @@
 
 ### 📅 June 11
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `███░░` **Chapter 2: ML Systems**: Improved visual presentation of exercise callouts within the section.
@@ -1612,7 +1680,7 @@
 
 ### 📅 June 02
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `████░` **Contributors**: Updated content
@@ -1621,7 +1689,7 @@
 
 ### 📅 June 01
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `███░░` **Chapter 1: Introduction**: The introduction section now has improved grammar and readability.
@@ -1655,7 +1723,7 @@
 
 ### 📅 May 26
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `████░` **Chapter 1: Introduction**: Added a cover image for the introduction chapter and an image related to Mark's article.  A reference section was added to the introduction chapter.
@@ -1704,7 +1772,7 @@
 
 ### 📅 March 21
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `████░` **Chapter 3: DL Primer**: Added a Resources section to each part of the DL Primer with introductory text and collapsed functionality. Additional slides were also incorporated.
@@ -1731,7 +1799,7 @@
 
 ### 📅 March 13
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `███░░` **Contributors**: Updated content
@@ -1740,7 +1808,7 @@
 
 ### 📅 March 12
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█░░░░` **Chapter 1: Introduction**: Updated content
@@ -1770,7 +1838,7 @@
 
 ### 📅 February 03
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█░░░░` **Chapter 3: DL Primer**: Fixed video rendering issues.
@@ -1787,7 +1855,7 @@
 
 ### 📅 February 02
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `██░░░` **Chapter 3: DL Primer**: Updated image format for PDF builds to PNG.
@@ -1810,7 +1878,7 @@
 
 ### 📅 January 02
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█░░░░` **Chapter 7: AI Frameworks**: Minor syntax errors were corrected in callout-tip elements.
@@ -1819,11 +1887,11 @@
 
 </details>
 
-## 2023
+## 2023 Updates
 
 ### 📅 December 19
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█████` **Chapter 10: Model Optimizations**: Added figures to illustrate model optimization concepts and corrected formatting errors.
@@ -1833,7 +1901,7 @@
 
 ### 📅 December 18
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█░░░░` **Chapter 7: AI Frameworks**: Updated Colab notebooks for AI frameworks examples.
@@ -1846,7 +1914,7 @@
 
 ### 📅 December 13
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█░░░░` **Chapter 7: AI Frameworks**: Colab notebooks for frameworks were updated.
@@ -1861,7 +1929,7 @@
 
 ### 📅 December 12
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `███░░` **Chapter 1: Introduction**: The introduction paragraph was updated to explain scholarly paper links.
@@ -1889,7 +1957,7 @@
 
 ### 📅 December 11
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `███░░` **Chapter 1: Introduction**: The introductory paragraph now explains the purpose of links to scholarly papers.
@@ -1928,7 +1996,7 @@
 
 ### 📅 December 10
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `████░` **Chapter 1: Introduction**: Updated content
@@ -1964,7 +2032,7 @@
 
 ### 📅 December 09
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█░░░░` **Chapter 6: Data Engineering**: Minor improvements were made to references within the chapter.
@@ -1975,7 +2043,7 @@
 
 ### 📅 December 08
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█░░░░` **Chapter 5: AI Workflow**: Fixed figure reference for improved visual clarity.
@@ -1994,7 +2062,7 @@
 
 ### 📅 December 06
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█░░░░` **Chapter 1: Introduction**: Updated content
@@ -2039,7 +2107,7 @@
 
 ### 📅 December 01
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `███░░` **Chapter 6: Data Engineering**: Updated figures and tables within the data engineering section for improved clarity.
@@ -2051,7 +2119,7 @@
 
 ### 📅 November 30
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `███░░` **Chapter 6: Data Engineering**: Updated image descriptions with copyright attribution and added five visuals to enhance learning.
@@ -2069,7 +2137,7 @@
 
 ### 📅 November 22
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `████░` **Chapter 8: AI Training**: Updated backpropagation explanation.
@@ -2082,7 +2150,7 @@
 
 ### 📅 November 17
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `███░░` **Chapter 5: AI Workflow**: Updated text to align with an image illustrating the traditional machine learning workflow and added a corresponding image to the chapter.
@@ -2097,7 +2165,7 @@
 
 ### 📅 November 15
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█████` **Chapter 8: AI Training**: Added training data content, an introduction to neural networks, and placeholders for additional sections.
@@ -2109,7 +2177,7 @@
 
 ### 📅 November 12
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█████` **Contributors**: Fixed a broken link to a book listed in the contributors.
@@ -2118,7 +2186,7 @@
 
 ### 📅 November 10
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `████░` **Chapter 12: Benchmarking AI**: Updated content
@@ -2128,7 +2196,7 @@
 
 ### 📅 November 09
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `███░░` **Chapter 9: Efficient AI**: Updated content
@@ -2142,7 +2210,7 @@
 
 ### 📅 November 07
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `███░░` **Chapter 9: Efficient AI**: Added learning objectives section to guide student understanding.
@@ -2157,7 +2225,7 @@
 
 ### 📅 November 03
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█░░░░` **Object Detection Fomo**: Added Exercise Motion/Anomaly Detection
@@ -2167,7 +2235,7 @@
 
 ### 📅 November 02
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█░░░░` **Chapter 5: AI Workflow**: Updated content
@@ -2184,7 +2252,7 @@
 
 ### 📅 October 31
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█░░░░` **Chapter 3: DL Primer**: Notes within the chapter no longer use collapsible sections.
@@ -2213,7 +2281,7 @@
 
 ### 📅 October 30
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█░░░░` **Chapter 3: DL Primer**: Added DALLE3 figures to enhance visual understanding of concepts.
@@ -2243,7 +2311,7 @@
 
 ### 📅 October 29
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█████` **Chapter 7: AI Frameworks**: Learning objectives were updated.
@@ -2265,7 +2333,7 @@
 
 ### 📅 October 24
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█████` **Chapter 7: AI Frameworks**: Added headings and fixed image formatting in sections 7.1 and 7.2.
@@ -2275,7 +2343,7 @@
 
 ### 📅 October 23
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `████░` **Chapter 7: AI Frameworks**: Added links to frameworks when they are first introduced.
@@ -2287,7 +2355,7 @@
 
 ### 📅 October 17
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█████` **Chapter 7: AI Frameworks**: Updated formatting for ml-frameworks sections.
@@ -2299,7 +2367,7 @@
 
 ### 📅 October 11
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█░░░░` **Chapter 3: DL Primer**: Replaced callout-note with callout-tip for learning objectives.
@@ -2327,7 +2395,7 @@
 
 ### 📅 October 10
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `█████` **Chapter 6: Data Engineering**: Added sections on data storage, version control, licensing, and a conclusion. Updated Data Processing and Data Sourcing sections based on feedback. Added a paragraph about Data Cascades and helpful references.
@@ -2338,7 +2406,7 @@
 
 ### 📅 October 08
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `██░░░` **Chapter 3: DL Primer**: The chapter introduction was enhanced with learning objectives.
@@ -2355,7 +2423,7 @@
 
 ### 📅 October 07
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `██░░░` **Chapter 1: Introduction**: Minor text refinements were made.
@@ -2388,7 +2456,7 @@
 
 ### 📅 September 30
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `██░░░` **Chapter 9: Efficient AI**: Updated content
@@ -2400,7 +2468,7 @@
 
 ### 📅 September 29
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `████░` **Chapter 9: Efficient AI**: Added a draft overview section for the efficient AI chapter.
@@ -2412,7 +2480,7 @@
 
 ### 📅 September 28
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `██░░░` **Chapter 1: Introduction**: Added a section on AI for social good with examples in healthcare and education.
@@ -2424,7 +2492,7 @@
 
 ### 📅 September 27
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `██░░░` **Chapter 1: Introduction**: Added a section discussing how AI can be used for social good.
@@ -2438,7 +2506,7 @@
 
 ### 📅 September 24
 
-<details >
+<details>
 <summary>**📖 Chapters**</summary>
 
 - `███░░` **Chapter 3: DL Primer**: Resolved instances where references were unintentionally removed during copyediting.
