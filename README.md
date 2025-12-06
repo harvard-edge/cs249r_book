@@ -6,7 +6,7 @@
 <p align="center">
 
   <!-- Row 1: Project Health -->
-  [![Build](https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/validate-dev.yml?branch=dev&label=Build&logo=githubactions&cacheSeconds=300)](https://github.com/harvard-edge/cs249r_book/actions/workflows/validate-dev.yml)
+  [![Build](https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&label=Build&logo=githubactions&cacheSeconds=300)](https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml)
   ![Last Commit](https://img.shields.io/github/last-commit/harvard-edge/cs249r_book/dev?label=Last%20Commit&logo=git&cacheSeconds=300)
 
 </p>
@@ -33,6 +33,7 @@
 
   <!-- Reader Navigation -->
   **[📖 Read Online](https://mlsysbook.ai)** •
+  **[🔥 TinyTorch](https://mlsysbook.ai/tinytorch)** •
   **[📄 Download PDF](https://mlsysbook.ai/pdf)** •
   **[📓 Download EPUB](https://mlsysbook.ai/epub)** •
   **[🌐 Explore Ecosystem](https://mlsysbook.org)**
