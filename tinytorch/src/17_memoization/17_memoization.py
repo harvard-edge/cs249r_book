@@ -92,7 +92,6 @@ def profile_naive_generation():
     not when imported (avoiding side effects during imports).
     """
     from tinytorch.perf.profiling import Profiler
-    import matplotlib.pyplot as plt
 
     profiler = Profiler()
 
