@@ -180,6 +180,9 @@ import platform
 from contextlib import contextmanager
 import warnings
 
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.layers import Linear
+
 # Optional dependency for visualization only
 try:
     import matplotlib.pyplot as plt
@@ -2359,20 +2362,20 @@ def demo_benchmarking():
     benchmark = Benchmark(
         models=[layer],
         datasets=[(x, None)],
-        warmup_iterations=3,
-        measurement_iterations=10
+        warmup_runs=3,
+        measurement_runs=10
     )
 
-    results = benchmark.run()
-    result = results[0]
+    results = benchmark.run_latency_benchmark(input_shape=(32, 512))
+    result = list(results.values())[0]
 
     print(f"Model: Linear(512 → 256)")
     print(f"Batch: 32 samples")
     print(f"\nBenchmark Results (10 iterations):")
     print(f"  Mean latency: {result.mean*1000:.2f} ms")
     print(f"  Std dev:      {result.std*1000:.2f} ms")
-    print(f"  Min:          {result.min*1000:.2f} ms")
-    print(f"  Max:          {result.max*1000:.2f} ms")
+    print(f"  Min:          {result.min_val*1000:.2f} ms")
+    print(f"  Max:          {result.max_val*1000:.2f} ms")
 
     print("\n✨ Reliable measurements guide optimization decisions!")
 
