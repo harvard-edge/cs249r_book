@@ -419,6 +419,7 @@ Step 1: Analyze Range              Step 2: Calculate Parameters       Step 3: Ap
 """
 
 # %% nbgrader={"grade": false, "grade_id": "quantize_int8", "solution": true}
+#| export
 def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
     """
     Quantize FP32 tensor to INT8 using symmetric quantization.
@@ -562,6 +563,7 @@ INT8 Values + Parameters → FP32 Reconstruction
 """
 
 # %% nbgrader={"grade": false, "grade_id": "dequantize_int8", "solution": true}
+#| export
 def dequantize_int8(q_tensor: Tensor, scale: float, zero_point: int) -> Tensor:
     """
     Dequantize INT8 tensor back to FP32.
@@ -1017,6 +1019,7 @@ Before Quantization:              After Quantization:
 """
 
 # %% nbgrader={"grade": false, "grade_id": "quantize_model", "solution": true}
+#| export
 def quantize_model(model, calibration_data: Optional[List[Tensor]] = None) -> None:
     """
     Quantize all Linear layers in a model in-place.

@@ -343,6 +343,7 @@ Why this matters: Sparsity directly relates to memory savings, but achieving spe
 """
 
 # %% nbgrader={"grade": false, "grade_id": "measure-sparsity", "solution": true, "schema_version": 3}
+#| export
 def measure_sparsity(model) -> float:
     """
     Calculate the percentage of zero weights in a model.
