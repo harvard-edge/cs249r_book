@@ -1,17 +1,18 @@
 # TinyTorch Book Build Makefile
 # Convenient shortcuts for building HTML and PDF versions
 
-.PHONY: help html pdf clean install test
+.PHONY: help html pdf clean install test restore-emoji
 
 help:
 	@echo "Tiny🔥Torch Build Commands"
 	@echo "=========================="
 	@echo ""
-	@echo "  make html        - Build HTML version (website)"
-	@echo "  make pdf         - Build PDF via LuaLaTeX"
-	@echo "  make clean       - Remove all build artifacts"
-	@echo "  make install     - Install Python dependencies"
-	@echo "  make test        - Test build configuration"
+	@echo "  make html          - Build HTML version (website)"
+	@echo "  make pdf           - Build PDF via XeLaTeX"
+	@echo "  make clean         - Remove all build artifacts"
+	@echo "  make restore-emoji - Restore original markdown files (if build interrupted)"
+	@echo "  make install       - Install Python dependencies"
+	@echo "  make test          - Test build configuration"
 	@echo ""
 
 html:
@@ -19,11 +20,11 @@ html:
 	@jupyter-book build .
 
 pdf:
-	@echo "🔥 Building Tiny🔥Torch PDF via LuaLaTeX..."
+	@echo "🔥 Building Tiny🔥Torch PDF via XeLaTeX..."
 	@echo ""
 	@# Check dependencies
 	@command -v jupyter-book >/dev/null 2>&1 || { echo "❌ Error: jupyter-book not installed. Run: pip install jupyter-book"; exit 1; }
-	@command -v lualatex >/dev/null 2>&1 || { echo "❌ Error: lualatex not found. Install TeX Live from https://www.tug.org/texlive/"; exit 1; }
+	@command -v xelatex >/dev/null 2>&1 || { echo "❌ Error: xelatex not found. Install TeX Live from https://www.tug.org/texlive/"; exit 1; }
 	@echo "✅ Dependencies OK"
 	@echo ""
 	@# Clean previous builds
@@ -34,8 +35,14 @@ pdf:
 	@echo "📚 Generating LaTeX files..."
 	@jupyter-book build . --builder latex --config _config_pdf.yml
 	@echo ""
+	@# Remove emojis for clean professional PDF
+	@echo "🧹 Removing emojis for clean PDF..."
+	@python3 scripts/latex_postprocessor.py
+	@cp _static/logos/fire-emoji.png _build/latex/
+	@cp _static/logos/logo-mlsysbook.png _build/latex/
+	@echo ""
 	@# Compile PDF with XeLaTeX
-	@echo "🔥 Compiling PDF with XeLaTeX (this may take several minutes)..."
+	@echo "🔥 Compiling PDF with XeLaTeX..."
 	@cd _build/latex && latexmk -xelatex -pdf -dvi- -ps- tinytorch-course.tex
 	@echo ""
 	@# Check if build succeeded
@@ -67,6 +74,10 @@ test:
 	@echo "🧪 Testing build configuration..."
 	jupyter-book config sphinx .
 	@echo "✅ Configuration valid"
+
+restore-emoji:
+	@echo "🔄 Restoring original markdown files..."
+	@python3 scripts/emoji_preprocessor.py --restore
 
 # Default target
 .DEFAULT_GOAL := help
