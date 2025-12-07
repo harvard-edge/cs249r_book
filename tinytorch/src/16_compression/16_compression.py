@@ -1624,6 +1624,72 @@ For deploying on a mobile device with 50MB model limit and 100ms latency require
 
 # %% [markdown]
 """
+## 8.5 Verification: Prove Pruning Works
+
+Before running the full integration test, let's create a verification function that
+proves pruning actually creates zeros using real zero counting.
+"""
+
+# %%
+#| export
+def verify_pruning_works(model, target_sparsity=0.8):
+    """
+    Verify pruning actually creates zeros using real zero counting.
+
+    This is NOT a theoretical calculation - we count actual zero values
+    in parameter arrays and honestly report memory footprint (unchanged with dense storage).
+
+    Args:
+        model: Model with pruned parameters (SimpleModel with .parameters())
+        target_sparsity: Expected sparsity ratio (default 0.8 = 80%)
+
+    Returns:
+        dict: Verification results with sparsity, zeros, total, verified
+
+    Example:
+        >>> model = SimpleModel(Linear(100, 50))
+        >>> magnitude_prune(model, sparsity=0.8)
+        >>> results = verify_pruning_works(model, target_sparsity=0.8)
+        >>> assert results['verified']  # Pruning actually works!
+    """
+    print("🔬 Verifying pruning sparsity with actual zero counting...")
+
+    # Count actual zeros in model parameters
+    zeros = sum(np.sum(p.data == 0) for p in model.parameters())
+    total = sum(p.data.size for p in model.parameters())
+    sparsity = zeros / total
+    memory_bytes = sum(p.data.nbytes for p in model.parameters())
+
+    # Display results
+    print(f"   Total parameters: {total:,}")
+    print(f"   Zero parameters: {zeros:,}")
+    print(f"   Active parameters: {total - zeros:,}")
+    print(f"   Sparsity achieved: {sparsity*100:.1f}%")
+    print(f"   Memory footprint: {memory_bytes / MB_TO_BYTES:.2f} MB (unchanged with dense storage)")
+
+    # Verify target met (allow 15% tolerance for structured pruning variations)
+    verified = abs(sparsity - target_sparsity) < 0.15
+    status = '✓' if verified else '✗'
+    print(f"   {status} Meets {target_sparsity*100:.0f}% sparsity target")
+
+    assert verified, f"Sparsity target not met: {sparsity:.2f} vs {target_sparsity:.2f}"
+
+    print(f"\n✅ VERIFIED: {sparsity*100:.1f}% sparsity achieved")
+    print(f"⚠️ Memory saved: 0 MB (dense numpy arrays)")
+    print(f"💡 LEARNING: Compute savings ~{sparsity*100:.1f}% (skip zero multiplications)")
+    print(f"   In production: Use sparse formats (scipy.sparse.csr_matrix) for memory savings")
+
+    return {
+        'sparsity': sparsity,
+        'zeros': zeros,
+        'total': total,
+        'active': total - zeros,
+        'memory_mb': memory_bytes / MB_TO_BYTES,
+        'verified': verified
+    }
+
+# %% [markdown]
+"""
 ## 9. Module Integration Test
 
 Final validation that all compression techniques work together correctly.

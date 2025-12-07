@@ -1624,7 +1624,74 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 6. Module Integration Test
+## 6. Verification: Prove Quantization Works
+
+Before running the full integration test, let's create a verification function that
+proves quantization actually reduces memory using real `.nbytes` measurements.
+"""
+
+# %%
+#| export
+def verify_quantization_works(original_model, quantized_model):
+    """
+    Verify quantization actually reduces memory using real .nbytes measurements.
+
+    This is NOT a theoretical calculation - we measure actual bytes consumed
+    by numpy arrays to prove the optimization is real.
+
+    Args:
+        original_model: Model with FP32 parameters (SimpleModel with .parameters())
+        quantized_model: Model with INT8 quantized parameters (SimpleModel with QuantizedLinear layers)
+
+    Returns:
+        dict: Verification results with actual_reduction, original_mb, quantized_mb
+
+    Example:
+        >>> original = SimpleModel(Linear(100, 50))
+        >>> quantized = SimpleModel(Linear(100, 50))
+        >>> quantize_model(quantized)
+        >>> results = verify_quantization_works(original, quantized)
+        >>> assert results['actual_reduction'] >= 3.5  # Real 4× reduction
+    """
+    print("🔬 Verifying actual memory reduction with .nbytes...")
+
+    # Collect actual bytes from original FP32 model
+    original_bytes = sum(
+        param.data.nbytes for param in original_model.parameters()
+        if hasattr(param, 'data') and hasattr(param.data, 'nbytes')
+    )
+
+    # Collect actual bytes from quantized INT8 model
+    quantized_bytes = sum(
+        layer.q_weight.data.nbytes + (layer.q_bias.data.nbytes if layer.q_bias is not None else 0)
+        for layer in quantized_model.layers
+        if isinstance(layer, QuantizedLinear)
+    )
+
+    # Calculate actual reduction
+    actual_reduction = original_bytes / max(quantized_bytes, 1)
+
+    # Display results
+    print(f"   Original model: {original_bytes / MB_TO_BYTES:.2f} MB (FP32)")
+    print(f"   Quantized model: {quantized_bytes / MB_TO_BYTES:.2f} MB (INT8)")
+    print(f"   Actual reduction: {actual_reduction:.1f}×")
+    print(f"   {'✓' if actual_reduction >= 3.5 else '✗'} Meets 4× reduction target")
+
+    # Verify target met
+    assert actual_reduction >= 3.5, f"Expected ~4× reduction, got {actual_reduction:.1f}×"
+
+    print(f"\n✅ VERIFIED: Quantization achieves real {actual_reduction:.1f}× memory reduction!")
+
+    return {
+        'actual_reduction': actual_reduction,
+        'original_mb': original_bytes / MB_TO_BYTES,
+        'quantized_mb': quantized_bytes / MB_TO_BYTES,
+        'verified': actual_reduction >= 3.5
+    }
+
+# %% [markdown]
+"""
+## 7. Module Integration Test
 
 Final validation that our quantization system works correctly across all components.
 """
