@@ -1,4 +1,4 @@
-# 👥 For Instructors & TAs
+#  For Instructors & TAs
 
 **Complete guide for teaching ML Systems Engineering with TinyTorch**
 
@@ -155,15 +155,15 @@ tito grade export --module MODULE_NAME --output grades.csv
 | 2 | 02 Activations | Non-linearity, Stability | Demo: gradient vanishing/exploding |
 | 3 | 03 Layers | Neural Components | Demo: forward/backward passes |
 | 4 | 04 Losses | Optimization Objectives | Demo: loss landscapes |
-| 5 | 05 Autograd | Auto Differentiation | ⚠️ Most challenging - allocate extra TA hours |
+| 5 | 05 Autograd | Auto Differentiation | ⚠ Most challenging - allocate extra TA hours |
 | 6 | 06 Optimizers | Training Algorithms | Demo: optimizer comparisons |
 | 7 | 07 Training | Complete Training Loop | Milestone: Train first network! |
 | 8 | **Midterm Project** | Build and Train Network | Assessment: End-to-end system |
 | 9 | 08 DataLoader | Data Pipeline | Demo: batching, shuffling |
-| 10 | 09 Spatial | Convolutions, CNNs | ⚠️ High demand - O(N²) complexity |
+| 10 | 09 Spatial | Convolutions, CNNs | ⚠ High demand - O(N²) complexity |
 | 11 | 10 Tokenization | Text Processing | Demo: vocabulary building |
 | 12 | 11 Embeddings | Word Representations | Demo: embedding similarity |
-| 13 | 12 Attention | Attention Mechanisms | ⚠️ Moderate-high demand |
+| 13 | 12 Attention | Attention Mechanisms | ⚠ Moderate-high demand |
 | 14 | 13 Transformers | Transformer Architecture | Milestone: Text generation! |
 | 15 | 14-19 Optimization | Profiling, Quantization | Focus on production trade-offs |
 | 16 | 20 Capstone | **Torch Olympics** | Final Competition |
@@ -435,7 +435,7 @@ ls submitted/*/MODULE/
 ---
 
 <div style="background: #d4edda; border: 1px solid #28a745; padding: 1.5rem; border-radius: 0.5rem; margin: 2rem 0;">
-<h3 style="margin: 0 0 0.5rem 0; color: #155724;">✅ You're Ready to Teach!</h3>
+<h3 style="margin: 0 0 0.5rem 0; color: #155724;">✓ You're Ready to Teach!</h3>
 <p style="margin: 0; color: #155724;">
 With NBGrader integration, automated grading, and comprehensive teaching materials, you have everything needed to run a successful ML systems course.
 </p>

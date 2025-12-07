@@ -1,17 +1,17 @@
 # TinyTorch for Instructors: Complete ML Systems Course
 
 <div style="background: #d4edda; border: 1px solid #28a745; padding: 1.5rem; border-radius: 0.5rem; margin: 2rem 0;">
-<h3 style="margin: 0 0 0.5rem 0; color: #155724;">✅ Classroom Integration Available</h3>
+<h3 style="margin: 0 0 0.5rem 0; color: #155724;">✓ Classroom Integration Available</h3>
 <p style="margin: 0; color: #155724;">TinyTorch includes complete <a href="https://nbgrader.readthedocs.io/" style="color: #155724; text-decoration: underline; font-weight: bold;">NBGrader</a> integration with automated grading workflows. See the <a href="../instructor-guide.html" style="color: #155724; font-weight: bold;">Complete Instructor Guide</a> for setup, grading rubrics, and sample solutions.</p>
 </div>
 
 <div style="background: #e3f2fd; border: 1px solid #2196f3; padding: 1rem; border-radius: 0.5rem; margin: 1rem 0;">
-<strong>📖 Course Vision:</strong> This page describes the planned TinyTorch classroom experience.<br>
-<strong>📖 For Current Usage:</strong> Students should follow the <a href="../student-workflow.html">Student Workflow</a> guide.
+<strong> Course Vision:</strong> This page describes the planned TinyTorch classroom experience.<br>
+<strong> For Current Usage:</strong> Students should follow the <a href="../student-workflow.html">Student Workflow</a> guide.
 </div>
 
 <div style="background: #f8f9fa; border: 1px solid #dee2e6; padding: 2rem; border-radius: 0.5rem; text-align: center; margin: 2rem 0;">
-<h2 style="margin: 0 0 1rem 0; color: #495057;">🏫 Planned: Turn-Key ML Systems Education</h2>
+<h2 style="margin: 0 0 1rem 0; color: #495057;"> Planned: Turn-Key ML Systems Education</h2>
 <p style="font-size: 1.1rem; margin: 0; color: #6c757d;">Transform students from framework users to systems engineers</p>
 </div>
 
@@ -106,7 +106,7 @@
 
 The TinyTorch course consists of 20 progressive modules organized into learning stages.
 
-**📖 See [Complete Course Structure](../chapters/00-introduction.md)** for detailed module descriptions, learning objectives, and prerequisites for each module.
+** See [Complete Course Structure](../chapters/00-introduction.md)** for detailed module descriptions, learning objectives, and prerequisites for each module.
 
 ---
 
@@ -126,16 +126,16 @@ The TinyTorch course consists of 20 progressive modules organized into learning 
 
 ---
 
-## 🚀 Quick Start for Instructors
+##  Quick Start for Instructors
 
 <div style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 0.5rem; padding: 2rem; margin: 2rem 0;">
-<h3 style="margin: 0 0 1rem 0; text-align: center; color: #495057;">⏱️ 30 Minutes to Teaching-Ready Course</h3>
+<h3 style="margin: 0 0 1rem 0; text-align: center; color: #495057;"> 30 Minutes to Teaching-Ready Course</h3>
 <p style="text-align: center; margin: 0 0 1.5rem 0; color: #6c757d;">Three simple steps to transform your ML teaching</p>
 
 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem;">
 
 <div style="background: white; padding: 1.5rem; border-radius: 0.5rem; border: 1px solid #dee2e6;">
-<h4 style="color: #495057; margin: 0 0 0.5rem 0;">1️⃣ Clone & Setup (10 min)</h4>
+<h4 style="color: #495057; margin: 0 0 0.5rem 0;">1⃣ Clone & Setup (10 min)</h4>
 <div style="background: #f8f9fa; padding: 1rem; border-radius: 0.25rem; font-family: monospace; font-size: 0.85rem; margin: 0.5rem 0;">
 git clone TinyTorch<br>
 cd TinyTorch<br>
@@ -146,7 +146,7 @@ pip install -r requirements.txt
 </div>
 
 <div style="background: white; padding: 1.5rem; border-radius: 0.5rem; border: 1px solid #dee2e6;">
-<h4 style="color: #495057; margin: 0 0 0.5rem 0;">2️⃣ Initialize Course (10 min)</h4>
+<h4 style="color: #495057; margin: 0 0 0.5rem 0;">2⃣ Initialize Course (10 min)</h4>
 <div style="background: #f8f9fa; padding: 1rem; border-radius: 0.25rem; font-family: monospace; font-size: 0.85rem; margin: 0.5rem 0;">
 tito nbgrader init<br>
 tito module status --comprehensive
@@ -155,7 +155,7 @@ tito module status --comprehensive
 </div>
 
 <div style="background: white; padding: 1.5rem; border-radius: 0.5rem; border: 1px solid #dee2e6;">
-<h4 style="color: #495057; margin: 0 0 0.5rem 0;">3️⃣ First Assignment (10 min)</h4>
+<h4 style="color: #495057; margin: 0 0 0.5rem 0;">3⃣ First Assignment (10 min)</h4>
 <div style="background: #f8f9fa; padding: 1rem; border-radius: 0.25rem; font-family: monospace; font-size: 0.85rem; margin: 0.5rem 0;">
 tito nbgrader generate 01_tensor<br>
 tito nbgrader release 01_tensor
@@ -166,9 +166,9 @@ tito nbgrader release 01_tensor
 </div>
 
 <div style="text-align: center; margin-top: 1.5rem;">
-<a href="../instructor-guide.html" style="display: inline-block; background: #007bff; color: white; padding: 0.5rem 1rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500; margin-right: 1rem;">📖 Complete Instructor Guide</a>
-<a href="ta-guide.html" style="display: inline-block; background: #28a745; color: white; padding: 0.5rem 1rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500;">👥 TA Guide</a>
-<a href="../testing-framework.html" style="display: inline-block; background: #28a745; color: white; padding: 0.5rem 1rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500;">🧪 Testing Framework Guide</a>
+<a href="../instructor-guide.html" style="display: inline-block; background: #007bff; color: white; padding: 0.5rem 1rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500; margin-right: 1rem;"> Complete Instructor Guide</a>
+<a href="ta-guide.html" style="display: inline-block; background: #28a745; color: white; padding: 0.5rem 1rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500;"> TA Guide</a>
+<a href="../testing-framework.html" style="display: inline-block; background: #28a745; color: white; padding: 0.5rem 1rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500;">▶ Testing Framework Guide</a>
 </div>
 
 </div>
@@ -217,11 +217,11 @@ tito nbgrader release 01_tensor
 
 ## 📞 Next Steps
 
-1. **📖 Review [Course Structure](../chapters/00-introduction.md)** for complete curriculum overview
-2. **🚀 Explore [Student Workflow](../student-workflow.md)** to understand the development cycle
+1. ** Review [Course Structure](../chapters/00-introduction.md)** for complete curriculum overview
+2. ** Explore [Student Workflow](../student-workflow.md)** to understand the development cycle
 3. **💻 Set up your environment** using the [Quick Start Guide](../quickstart-guide.md)
 4. **📧 Contact us** via GitHub Issues for instructor support
 
 ---
 
-*Ready to teach the most comprehensive ML systems course? Let's build something amazing together!* 🎓
+*Ready to teach the most comprehensive ML systems course? Let's build something amazing together!* 

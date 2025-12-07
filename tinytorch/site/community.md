@@ -8,7 +8,7 @@ TinyTorch is more than a course—it's a growing community of students, educator
 
 ## Connect Now
 
-### GitHub Discussions (Available Now ✅)
+### GitHub Discussions (Available Now ✓)
 
 Join conversations with other TinyTorch builders:
 
@@ -27,7 +27,7 @@ Join conversations with other TinyTorch builders:
 
 **Why community matters for TinyTorch:** Unlike watching lectures, building ML systems requires debugging, experimentation, and iteration. The community helps you debug faster, learn trade-offs, stay motivated, and build systems intuition through discussion.
 
-### GitHub Repository (Available Now ✅)
+### GitHub Repository (Available Now ✓)
 
 Star, fork, and contribute to TinyTorch:
 
@@ -38,7 +38,7 @@ Star, fork, and contribute to TinyTorch:
 - **Improve documentation** and examples
 - **Watch releases** for new features
 
-### Share Your Progress (Available Now ✅)
+### Share Your Progress (Available Now ✓)
 
 Help others discover TinyTorch:
 
@@ -61,7 +61,7 @@ Real-time chat and study groups:
 - Office hours with educators
 - Project showcase channels
 
-### Community Dashboard (Available Now ✅)
+### Community Dashboard (Available Now ✓)
 
 Join the global TinyTorch community and see your progress:
 
@@ -88,7 +88,7 @@ tito community stats
 
 **Privacy:** All fields are optional. We use anonymous UUIDs (no personal names). Data is stored locally in your project directory. See [Privacy Policy](../docs/PRIVACY_DATA_RETENTION.md) for details.
 
-### Benchmark & Performance Tracking (Available Now ✅)
+### Benchmark & Performance Tracking (Available Now ✓)
 
 Validate your setup and track performance improvements:
 

@@ -215,9 +215,9 @@ TinyTorch notebooks work with multiple platforms, but **important distinction**:
 ### Online Notebooks (Viewing & Exploration)
 - **Jupyter/MyBinder**: Click "Launch Binder" on any notebook page - great for viewing
 - **Google Colab**: Click "Launch Colab" for GPU access - good for exploration
-- **Marimo**: Click "🍃 Open in Marimo" for reactive notebooks - excellent for learning
+- **Marimo**: Click "~ Open in Marimo" for reactive notebooks - excellent for learning
 
-**⚠️ Important**: Online notebooks are for **viewing and learning**. They don't have the full TinyTorch package installed, so you can't:
+**⚠ Important**: Online notebooks are for **viewing and learning**. They don't have the full TinyTorch package installed, so you can't:
 - Run milestone validation scripts
 - Import from `tinytorch.*` modules
 - Execute full experiments
@@ -237,12 +237,12 @@ pip install -e .  # Install TinyTorch package
 ```
 
 **Why local?**
-- ✅ Full `tinytorch.*` package available
-- ✅ Run milestone validation scripts
-- ✅ Use `tito` CLI commands
-- ✅ Execute complete experiments
-- ✅ Export modules to package
-- ✅ Full development workflow
+- ✓ Full `tinytorch.*` package available
+- ✓ Run milestone validation scripts
+- ✓ Use `tito` CLI commands
+- ✓ Execute complete experiments
+- ✓ Export modules to package
+- ✓ Full development workflow
 
 **Note for NBGrader assignments**: Submit `.ipynb` files (not Marimo's `.py` format) to preserve grading metadata.
 

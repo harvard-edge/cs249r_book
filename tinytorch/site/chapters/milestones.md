@@ -342,7 +342,7 @@ Each milestone includes:
 - 📊 **Memory profiling**: See actual memory usage
 - ⚡ **Performance metrics**: FLOPs, parameters, timing
 - 🧠 **Architectural analysis**: Why this design matters
-- 📈 **Scaling insights**: How performance changes with size
+- ↗ **Scaling insights**: How performance changes with size
 
 ### 4. Reflect and Compare
 
@@ -389,8 +389,7 @@ After completing milestones, explore:
 
 ## Why This Matters
 
-**Most courses teach you to USE frameworks.**  
-**TinyTorch teaches you to UNDERSTAND them.**
+**Most courses teach you to USE frameworks.TinyTorch teaches you to UNDERSTAND them.**
 
 By rebuilding ML history, you gain:
 - 🧠 Deep intuition for how neural networks work
@@ -407,5 +406,5 @@ cd milestones/01_1957_perceptron
 python 02_rosenblatt_trained.py
 ```
 
-**Build the future by understanding the past.** 🚀
+**Build the future by understanding the past.** 
 

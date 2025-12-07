@@ -108,9 +108,9 @@ You need TWO things to start building:
 ## Ready to Begin?
 
 **If you can:**
-1. ✅ Write a Python class with methods
-2. ✅ Explain what matrix multiplication does
-3. ✅ Debug Python code using print statements
+1. ✓ Write a Python class with methods
+2. ✓ Explain what matrix multiplication does
+3. ✓ Debug Python code using print statements
 
 **Then you're ready to start building!**
 
