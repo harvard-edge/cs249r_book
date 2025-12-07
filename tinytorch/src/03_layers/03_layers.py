@@ -347,10 +347,6 @@ class Linear(Layer):
         return output
         ### END SOLUTION
 
-    def __call__(self, x):
-        """Allows the layer to be called like a function."""
-        return self.forward(x)
-
     def parameters(self):
         """
         Return list of trainable parameters.
@@ -563,8 +559,8 @@ class Dropout(Layer):
     """
     Dropout layer for regularization.
 
-    During training: randomly zeros elements with probability p
-    During inference: scales outputs by (1-p) to maintain expected value
+    During training: randomly zeros elements with probability p, scales survivors by 1/(1-p)
+    During inference: passes input through unchanged
 
     This prevents overfitting by forcing the network to not rely on specific neurons.
     """
@@ -591,8 +587,8 @@ class Dropout(Layer):
         """
         Forward pass through dropout layer.
 
-        During training: randomly zeros elements with probability p
-        During inference: scales outputs by (1-p) to maintain expected value
+        During training: randomly zeros elements with probability p, scales survivors by 1/(1-p)
+        During inference: passes input through unchanged
 
         This prevents overfitting by forcing the network to not rely on specific neurons.
 
@@ -707,8 +703,7 @@ class Sequential:
         """Collect all parameters from all layers."""
         params = []
         for layer in self.layers:
-            if hasattr(layer, 'parameters'):
-                params.extend(layer.parameters())
+            params.extend(layer.parameters())
         return params
     
     def __repr__(self):
