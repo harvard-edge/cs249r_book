@@ -30,22 +30,24 @@ pdf:
 	@echo "🧹 Cleaning previous builds..."
 	@jupyter-book clean . --all 2>/dev/null || true
 	@echo ""
-	@# Build PDF
-	@echo "📚 Building LaTeX/PDF (this may take a few minutes)..."
-	@echo "   Using LuaLaTeX engine with Tiny🔥Torch branding"
-	@jupyter-book build . --builder pdflatex --config _config_pdf.yml
+	@# Build LaTeX files
+	@echo "📚 Generating LaTeX files..."
+	@jupyter-book build . --builder latex --config _config_pdf.yml
+	@echo ""
+	@# Compile PDF with XeLaTeX
+	@echo "🔥 Compiling PDF with XeLaTeX (this may take several minutes)..."
+	@cd _build/latex && latexmk -xelatex -pdf -dvi- -ps- tinytorch-course.tex
+	@echo ""
 	@# Check if build succeeded
 	@if [ -f "_build/latex/tinytorch-course.pdf" ]; then \
 		PDF_SIZE=$$(du -h "_build/latex/tinytorch-course.pdf" | cut -f1); \
-		echo ""; \
 		echo "✅ PDF build complete!"; \
 		echo "📄 Output: _build/latex/tinytorch-course.pdf"; \
 		echo "📊 Size: $${PDF_SIZE}"; \
 		echo ""; \
 		echo "To view: open _build/latex/tinytorch-course.pdf"; \
 	else \
-		echo ""; \
-		echo "❌ PDF build failed - check errors above"; \
+		echo "❌ PDF compilation failed - check errors above"; \
 		echo "📝 Check _build/latex/tinytorch-course.log for details"; \
 		exit 1; \
 	fi
