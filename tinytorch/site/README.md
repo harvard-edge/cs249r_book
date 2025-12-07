@@ -1,6 +1,26 @@
-# TinyTorch Documentation
+# Tiny🔥Torch Documentation Site
 
-This directory contains essential documentation for TinyTorch development and usage.
+This directory contains the TinyTorch course website and documentation.
+
+## 🚀 Building the Site
+
+All builds are managed through the Makefile:
+
+```bash
+cd tinytorch/site
+
+# Build HTML website
+make html
+
+# Build PDF (requires LuaLaTeX)
+make pdf
+
+# Clean build artifacts
+make clean
+
+# Install dependencies
+make install
+```
 
 ## 📚 User Documentation
 
