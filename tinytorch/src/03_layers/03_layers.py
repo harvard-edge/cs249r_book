@@ -651,6 +651,66 @@ class Dropout(Layer):
 
 # %% [markdown]
 """
+## SimpleModel - Test Utility for Layer Composition
+
+`SimpleModel` is a minimal container that holds layers for testing and parameter iteration.
+
+**IMPORTANT**: This is NOT a `Sequential` container like PyTorch's `nn.Sequential`.
+TinyTorch teaches explicit layer composition where students see every forward pass step.
+`SimpleModel` is purely a utility for:
+- Collecting parameters from multiple layers
+- Running integration tests
+- Enabling compression/quantization functions that need a model object
+
+Students still build and compose layers explicitly.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "simple-model", "solution": false}
+#| export
+class SimpleModel:
+    """
+    Minimal model container for explicit layer composition.
+    
+    This is a test utility, NOT a Sequential container. Students still build
+    layers explicitly and pass them here for parameter collection and testing.
+    
+    Example:
+        >>> layer1 = Linear(784, 128)
+        >>> activation = ReLU()
+        >>> layer2 = Linear(128, 10)
+        >>> model = SimpleModel(layer1, activation, layer2)
+        >>> output = model.forward(input_tensor)
+        >>> params = model.parameters()  # All parameters from all layers
+    """
+    
+    def __init__(self, *layers):
+        """Initialize with explicit layers."""
+        self.layers = list(layers)
+    
+    def forward(self, x):
+        """Forward pass through all layers sequentially."""
+        for layer in self.layers:
+            x = layer.forward(x)
+        return x
+    
+    def __call__(self, x):
+        """Allow model to be called like a function."""
+        return self.forward(x)
+    
+    def parameters(self):
+        """Collect all parameters from all layers."""
+        params = []
+        for layer in self.layers:
+            if hasattr(layer, 'parameters'):
+                params.extend(layer.parameters())
+        return params
+    
+    def __repr__(self):
+        layer_reprs = ", ".join(repr(layer) for layer in self.layers)
+        return f"SimpleModel({layer_reprs})"
+
+# %% [markdown]
+"""
 ### 🔬 Unit Test: Dropout Layer
 This test validates our Dropout layer implementation works correctly.
 **What we're testing**: Training vs inference behavior, probability scaling, randomness
