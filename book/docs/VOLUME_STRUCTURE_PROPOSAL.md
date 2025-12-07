@@ -47,6 +47,8 @@ The *Machine Learning Systems* textbook will be published as two complementary v
 
 **Total: 14 chapters across 4 parts (all existing content)**
 
+*Early awareness:* include a short Sustainable AI note in Benchmarking or ML Operations to flag energy and carbon impacts without adding another chapter.
+
 ### Volume 1 Narrative Arc
 
 The book progresses from understanding → building → optimizing → deploying → impact:
@@ -81,7 +83,7 @@ Ending on "AI for Good" leaves students with a positive vision of what they can 
 | | 9. Privacy in ML Systems | Existing | Differential privacy, federated learning, secure aggregation |
 | | 10. Security in ML Systems | 🆕 NEW | Supply chain, API security, multi-tenant isolation |
 | | 11. Robust AI | Existing | Adversarial robustness, distribution shift, monitoring |
-| **Part V: Responsible Systems** | | | *Building systems that serve humanity* |
+| **Part V: Stewardship** | | | *Building systems that serve humanity* |
 | | 12. Responsible AI | Existing | Fairness, accountability, transparency at scale |
 | | 13. Sustainable AI | Existing | Energy efficiency, carbon footprint, environmental impact |
 | | 14. Frontiers & Future Directions | Existing | Emerging paradigms, open problems, conclusion |
@@ -150,7 +152,7 @@ Each part addresses constraints rooted in physics, mathematics, or human nature:
 | Parallelism & Coordination | Work must be decomposed and synchronized | Mathematics of parallel computation |
 | Constrained Environments | Resources are always finite | Economics and physics |
 | Adversarial Environments | Attackers and uncertainty exist | Human nature, statistics |
-| Responsible Systems | Technology must serve humanity | Ethics, sustainability |
+| Stewardship | Technology must serve humanity | Ethics, sustainability |
 
 Chapters use current examples (LLMs, transformers, specific hardware) but frame them as instances of these enduring principles.
 
