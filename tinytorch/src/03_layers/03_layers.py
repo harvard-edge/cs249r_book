@@ -651,41 +651,47 @@ class Dropout(Layer):
 
 # %% [markdown]
 """
-## SimpleModel - Test Utility for Layer Composition
+## Sequential - Layer Container for Composition
 
-`SimpleModel` is a minimal container that holds layers for testing and parameter iteration.
+`Sequential` chains layers together, calling forward() on each in order.
 
-**IMPORTANT**: This is NOT a `Sequential` container like PyTorch's `nn.Sequential`.
-TinyTorch teaches explicit layer composition where students see every forward pass step.
-`SimpleModel` is purely a utility for:
-- Collecting parameters from multiple layers
-- Running integration tests
-- Enabling compression/quantization functions that need a model object
+**Progressive Disclosure**: After learning to compose layers explicitly 
+(h = relu(linear1(x)); out = linear2(h)), you can use Sequential for convenience:
 
-Students still build and compose layers explicitly.
+```python
+model = Sequential(Linear(784, 128), ReLU(), Linear(128, 10))
+out = model(x)  # Chains all layers automatically
+```
+
+This is TinyTorch's equivalent of PyTorch's nn.Sequential - simpler but same idea.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "simple-model", "solution": false}
+# %% nbgrader={"grade": false, "grade_id": "sequential", "solution": false}
 #| export
-class SimpleModel:
+class Sequential:
     """
-    Minimal model container for explicit layer composition.
+    Container that chains layers together sequentially.
     
-    This is a test utility, NOT a Sequential container. Students still build
-    layers explicitly and pass them here for parameter collection and testing.
+    After you understand explicit layer composition, Sequential provides
+    a convenient way to bundle layers together.
     
     Example:
-        >>> layer1 = Linear(784, 128)
-        >>> activation = ReLU()
-        >>> layer2 = Linear(128, 10)
-        >>> model = SimpleModel(layer1, activation, layer2)
-        >>> output = model.forward(input_tensor)
+        >>> model = Sequential(
+        ...     Linear(784, 128),
+        ...     ReLU(),
+        ...     Linear(128, 10)
+        ... )
+        >>> output = model(input_tensor)
         >>> params = model.parameters()  # All parameters from all layers
     """
     
     def __init__(self, *layers):
-        """Initialize with explicit layers."""
-        self.layers = list(layers)
+        """Initialize with layers to chain together."""
+        # Accept both Sequential(layer1, layer2) and Sequential([layer1, layer2])
+        if len(layers) == 1 and isinstance(layers[0], (list, tuple)):
+            self.layers = list(layers[0])
+        else:
+            self.layers = list(layers)
     
     def forward(self, x):
         """Forward pass through all layers sequentially."""
@@ -707,7 +713,8 @@ class SimpleModel:
     
     def __repr__(self):
         layer_reprs = ", ".join(repr(layer) for layer in self.layers)
-        return f"SimpleModel({layer_reprs})"
+        return f"Sequential({layer_reprs})"
+
 
 # %% [markdown]
 """

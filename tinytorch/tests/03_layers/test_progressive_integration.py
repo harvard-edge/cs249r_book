@@ -648,7 +648,7 @@ class TestNeuralNetworkReadiness:
             class ParameterizedLayer(Layer):
                 def __init__(self, input_size, output_size):
                     # Neural network parameters
-                    self.weights = Tensor(np.random.randn(input_size, output_size))
+                    self.weight = Tensor(np.random.randn(input_size, output_size))
                     self.bias = Tensor(np.random.randn(output_size))
                 
                 def forward(self, x):
@@ -785,7 +785,7 @@ class TestNeuralNetworkReadiness:
             # Simulate complete neural network workflow
             class MockDenseLayer(Layer):
                 def __init__(self, in_features, out_features):
-                    self.weights = Tensor(np.random.randn(in_features, out_features) * 0.1)
+                    self.weight = Tensor(np.random.randn(in_features, out_features) * 0.1)
                     self.bias = Tensor(np.random.randn(out_features) * 0.1)
                 
                 def forward(self, x):
