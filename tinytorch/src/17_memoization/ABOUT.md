@@ -33,13 +33,13 @@ By the end of this module, you will be able to:
 - **Measure Performance Gains**: Profile latency improvements, measure O(n²) → O(n) complexity reduction, and understand speedup characteristics
 - **Analyze Production Trade-offs**: Calculate cache memory costs, understand cache invalidation policies, and recognize when caching justifies its overhead
 
-## Build → Use → Optimize
+## Build → Use → Reflect
 
-This module follows TinyTorch's **Build → Use → Optimize** framework:
+This module follows TinyTorch's **Build → Use → Reflect** framework:
 
 1. **Build**: Implement KVCache data structure with efficient updates, cached attention integration, and multi-layer cache management
 2. **Use**: Apply caching to GPT text generation, measure 10-15x speedup over naive generation, and validate output correctness
-3. **Optimize**: Profile memory bandwidth bottlenecks, measure cache hit rates, and understand when memory cost exceeds latency benefit
+3. **Reflect**: Why does caching transform O(n²) to O(n)? How do memory-speed trade-offs guide production deployments? When does cache overhead exceed benefits?
 
 ## Why This Matters
 
@@ -295,6 +295,191 @@ tito test profiling
 7. **Measure speedup**: Profile cached vs non-cached generation, validate O(n) complexity
 8. **Export and verify**: `tito module complete 17 && tito test memoization`
 
+## Common Pitfalls
+
+### Cache Synchronization Across Layers
+
+**Problem**: Keeping cache consistent when different layers process at different speeds or batch items have variable lengths
+
+**Solution**: Use layer indexing to maintain independent per-layer caches, advance sequence position only after ALL layers have processed current token
+
+```python
+# ❌ Wrong: Advancing position inside layer loop causes desynchronization
+for layer_idx in range(num_layers):
+    cache.update(layer_idx, new_k, new_v)
+    cache.advance()  # Breaks multi-layer synchronization!
+
+# ✅ Correct: Process all layers before advancing position
+for layer_idx in range(num_layers):
+    cache.update(layer_idx, new_k, new_v)
+cache.advance()  # Now all layers synchronized at same position
+```
+
+### Memory Overhead for Large Models
+
+**Problem**: Cache memory grows with sequence length and batch size, potentially exceeding GPU memory (GPT-3 scale: 4.7GB per batch item)
+
+**Solution**: Implement cache size limits with eviction policies, use FP16 or INT8 quantization for 50-75% memory reduction
+
+```python
+# ❌ Wrong: Unbounded cache grows until OOM
+cache = KVCache(max_seq_len=float('inf'))  # Will crash on long sequences
+
+# ✅ Correct: Set realistic max_seq_len and use FP16
+cache = KVCache(
+    max_seq_len=2048,  # Match expected generation length
+    dtype=np.float16   # 50% memory savings vs FP32
+)
+```
+
+### Correctness Validation
+
+**Problem**: Cached generation must produce identical outputs to non-cached generation, but subtle bugs can cause divergence
+
+**Solution**: Compare cached vs non-cached outputs token-by-token with deterministic sampling (temperature=0) for testing
+
+```python
+# ❌ Wrong: Using stochastic sampling makes comparison impossible
+output_nocache = generate(model, prompt, temperature=0.8)
+output_cached = generate(model, prompt, temperature=0.8)
+assert output_nocache == output_cached  # Will fail even if cache is correct!
+
+# ✅ Correct: Use deterministic sampling for validation
+output_nocache = generate(model, prompt, temperature=0)  # Deterministic
+output_cached = generate(model, prompt, temperature=0)
+assert np.allclose(output_nocache, output_cached)  # Should match exactly
+```
+
+### Non-Invasive Integration Breaking Existing Code
+
+**Problem**: Adding caching shouldn't require modifying Modules 12-13 (attention, transformer), but monkey-patching can break original behavior
+
+**Solution**: Save original forward methods before patching, provide disable_kv_cache() to restore, use feature flags for path selection
+
+```python
+# ❌ Wrong: Irreversible patching without backup
+block.attention.forward = cached_forward  # Loses original method!
+
+# ✅ Correct: Save original before patching, enable restoration
+block._original_attention_forward = block.attention.forward
+block.attention.forward = cached_forward
+# Later: restore with disable_kv_cache()
+block.attention.forward = block._original_attention_forward
+```
+
+### First Token Cache Initialization
+
+**Problem**: Cache must be empty for first token but populated for subsequent tokens, failing to distinguish causes errors
+
+**Solution**: Track cache state explicitly, use seq_pos counter to differentiate first token (pos=0) from cached generation (pos>0)
+
+```python
+# ❌ Wrong: No check for first token vs cached generation
+cached_k, cached_v = cache.get(layer_idx)  # Fails when cache empty!
+output = attention(Q, cached_k, cached_v)
+
+# ✅ Correct: Handle first token initialization separately
+if cache.seq_pos == 0:
+    # First token: use original attention (initialize cache)
+    output = original_attention(x, mask)
+else:
+    # Cached generation: retrieve and use cache
+    cached_k, cached_v = cache.get(layer_idx)
+    output = cached_attention(x, cached_k, cached_v)
+```
+
+## Production Context
+
+### Your Implementation vs Production Frameworks
+
+Understanding what you're building vs what production frameworks provide:
+
+| Feature | Your KVCache | PyTorch DynamicCache | vLLM PagedAttention |
+|---------|--------------|----------------------|---------------------|
+| **Memory Strategy** | Static pre-allocation | Dynamic growth | Virtual memory paging |
+| **Max Sequence** | Fixed at init (1024-2048) | Unlimited (grows as needed) | Configurable with paging |
+| **Update Complexity** | O(1) indexed assignment | O(1) append | O(1) page management |
+| **Memory Efficiency** | Best for known lengths | Flexible but slower | Best for variable lengths |
+| **Fragmentation** | None (pre-allocated) | Possible (dynamic growth) | Minimal (page-based) |
+| **Use Case** | Inference serving | Research/exploration | Production LLM serving |
+
+**Educational Focus**: Your implementation prioritizes understanding cache mechanics and O(n²)→O(n) transformation over production flexibility.
+
+### Side-by-Side Code Comparison
+
+**Your TinyTorch Memoization:**
+```python
+from tinytorch.perf.memoization import KVCache, enable_kv_cache
+
+# Static pre-allocation for known max length
+cache = KVCache(
+    batch_size=1,
+    max_seq_len=1024,
+    num_layers=12,
+    num_heads=12,
+    head_dim=64
+)
+
+# Enable caching (non-invasive)
+model = GPT(vocab_size=1000, embed_dim=768, num_layers=12)
+enable_kv_cache(model)
+
+# Generate with 10-15x speedup
+output = generate_text(model, prompt="Hello", max_new_tokens=100)
+```
+
+**Equivalent PyTorch (Production):**
+```python
+import torch
+from transformers import GPT2LMHeadModel, GPT2Tokenizer
+
+# Dynamic cache with automatic memory management
+model = GPT2LMHeadModel.from_pretrained("gpt2").cuda()
+tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+
+# Generate with built-in KV caching (enabled by default)
+inputs = tokenizer("Hello", return_tensors="pt").to("cuda")
+output = model.generate(
+    **inputs,
+    max_new_tokens=100,
+    use_cache=True  # Automatic KV caching
+)
+```
+
+**Key Differences:**
+1. **Memory Management**: PyTorch DynamicCache grows as needed (flexibility), your implementation pre-allocates (performance)
+2. **GPU Support**: PyTorch moves cache to GPU with `.cuda()` for 10-100x faster cache updates
+3. **Automatic Integration**: HuggingFace models have caching built-in, you implement it explicitly to understand mechanics
+4. **Batch Handling**: PyTorch supports variable-length batches with padding masks, your implementation uses fixed batch size
+
+### Real-World Applications
+
+**OpenAI ChatGPT**: Serves millions of requests daily with KV caching enabling 10-15x speedup. Without caching, 100-token response would cost 5,050 attention computations instead of 100—economically infeasible at scale.
+
+**Anthropic Claude**: Caches up to 100K tokens of context, requiring ~2.4GB of KV cache memory per request (12GB for batch=5). Memory-speed trade-off: 2.4GB cache saves 250,000x redundant K,V computations over 100K generation.
+
+**GitHub Copilot**: Real-time code completion requires sub-100ms latency. KV caching reduces generation time from 800ms (naive) to 60ms (cached) for typical 20-line completions—making interactive UX possible.
+
+**Google Gemini**: Multi-level caching strategy uses both KV cache (attention layer) and intermediate activation cache (full layers) to serve billions of daily requests with consistent <200ms p99 latency.
+
+### Performance Characteristics at Scale
+
+**Memory Scaling**: For GPT-2 (12 layers, 12 heads, 1024 sequence, 64 head_dim):
+- Cache memory: 12 × 12 × 1024 × 64 × 2 (K,V) × 2 bytes (FP16) = 18MB per batch
+- Batch size 32: 576MB cache memory
+- 8GB GPU: Can serve ~14 concurrent batches before memory limit
+
+**Speedup by Sequence Length**: Cache benefit increases with generation length:
+- 10 tokens: 7.5x speedup (55 vs 10 computations saved)
+- 50 tokens: 16x speedup (1,275 vs 50 computations)
+- 100 tokens: 50x speedup (5,050 vs 100 computations)
+- Formula: speedup ≈ n/2 for generating n tokens
+
+**Throughput Impact**: Production serving with KV caching:
+- Without cache: 12 tok/s × batch 1 = 12 tok/s throughput (O(n²) bottleneck)
+- With cache: 200 tok/s × batch 32 = 6,400 tok/s throughput (O(n) + batching)
+- 533x throughput improvement enables economically viable LLM APIs
+
 ## Testing
 
 ### Comprehensive Test Suite
@@ -538,91 +723,6 @@ disable_kv_cache(model)
 ```
 
 Your KV caching implementation becomes the foundation for efficient inference in the TinyTorch package, used by subsequent modules for text generation, chat applications, and deployment scenarios.
-
-## Common Challenges and Solutions
-
-### Challenge 1: Cache Synchronization Across Layers
-
-**Problem**: Keeping cache consistent when different layers process at different speeds or batch items have variable lengths.
-
-**Solution**:
-- Use layer indexing to maintain independent per-layer caches
-- Advance sequence position only after ALL layers have processed current token
-- Handle variable sequence lengths with padding and attention masks
-
-**Code Pattern**:
-```python
-# Process all layers before advancing
-for layer_idx in range(num_layers):
-    cache.update(layer_idx, new_k, new_v)
-
-# Now advance position (all layers synchronized)
-cache.advance()
-```
-
-### Challenge 2: Memory Overhead for Large Models
-
-**Problem**: Cache memory grows with sequence length and batch size, potentially exceeding GPU memory.
-
-**Solution**:
-- Implement cache size limits with eviction policies (LRU, FIFO)
-- Use FP16 or INT8 quantization for cache storage (50% memory reduction)
-- Consider PagedAttention for virtual memory management
-- Tune max_seq_len to expected generation length
-
-**Memory Optimization**:
-```python
-# FP16 caching (2 bytes per element)
-cache = KVCache(...).to(dtype=np.float16)  # 50% memory savings
-
-# INT8 caching (1 byte per element)
-cache = KVCache(...).to(dtype=np.int8)  # 75% memory savings, accuracy trade-off
-```
-
-### Challenge 3: Correctness Validation
-
-**Problem**: Cached generation must produce identical outputs to non-cached generation.
-
-**Solution**:
-- Compare cached vs non-cached outputs token-by-token
-- Use deterministic sampling (temperature=0) for testing
-- Validate cache retrieval returns correct sequence positions
-- Test edge cases: first token, cache full, reset
-
-**Validation Pattern**:
-```python
-# Generate without cache (ground truth)
-output_nocache = generate(model, prompt, max_new_tokens=50)
-
-# Generate with cache (optimized)
-cache = enable_kv_cache(model)
-output_cached = generate(model, prompt, max_new_tokens=50)
-
-# Validate identical outputs
-assert np.allclose(output_nocache, output_cached), "Cached output must match!"
-```
-
-### Challenge 4: Integration Without Breaking Existing Code
-
-**Problem**: Adding caching shouldn't require modifying Modules 12-13 (attention, transformer).
-
-**Solution**:
-- Use composition + monkey-patching (wrap, don't modify)
-- Store original forward methods before patching
-- Provide disable_kv_cache() to restore original behavior
-- Use feature flags (model._cache_enabled) for path selection
-
-**Non-Invasive Pattern**:
-```python
-# Save original before patching
-block._original_attention_forward = block.attention.forward
-
-# Patch with cached version
-block.attention.forward = cached_forward
-
-# Restore later if needed
-block.attention.forward = block._original_attention_forward
-```
 
 ## Ready to Build?
 

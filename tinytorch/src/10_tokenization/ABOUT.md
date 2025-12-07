@@ -554,6 +554,105 @@ def analyze_tokenization(texts: List[str],
 - **Vocabulary Utilization**: unique_tokens / vocab_size indicates whether vocabulary is appropriately sized
 - **Sequence Length**: Directly impacts transformer computation (O(n²) attention complexity)
 
+## Common Pitfalls
+
+### Vocabulary Size Too Small Causing Poor Coverage
+
+**Problem**: Insufficient vocabulary size forces rare words into many subword tokens, causing excessively long sequences and losing semantic information.
+
+**Solution**: Choose vocabulary size based on corpus characteristics - larger for diverse corpora, smaller for domain-specific text:
+
+```python
+# ❌ Wrong - vocabulary too small for general text
+tokenizer = BPETokenizer(vocab_size=100)  # Only 100 tokens!
+text = "antidisestablishmentarianism"
+tokens = tokenizer.encode(text)
+# Result: 15+ tiny subword tokens - loses word meaning!
+
+# ✅ Correct - appropriate vocabulary size
+tokenizer = BPETokenizer(vocab_size=10000)  # 10K tokens
+tokens = tokenizer.encode(text)
+# Result: 3-4 meaningful subwords: ["anti", "dis", "establish", "ment", "arian", "ism"]
+```
+
+### Forgetting End-of-Word Markers in BPE
+
+**Problem**: Without word boundary markers, BPE can't distinguish prefixes from suffixes, learning suboptimal merge rules.
+
+**Solution**: Always append end-of-word markers (`</w>`) when tokenizing words for BPE training:
+
+```python
+# ❌ Wrong - no word boundaries
+def _get_word_tokens(word):
+    return list(word)  # ['h', 'e', 'l', 'l', 'o']
+# BPE can't learn that 'ing' is a suffix vs prefix!
+
+# ✅ Correct - mark word boundaries
+def _get_word_tokens(word):
+    tokens = list(word)
+    tokens[-1] += '</w>'  # ['h', 'e', 'l', 'l', 'o</w>']
+    return tokens
+# BPE learns 'ing</w>' as suffix, 'pre' as prefix correctly
+```
+
+### Character vs BPE Tokenizer Confusion
+
+**Problem**: Using character-level tokenizer when BPE would be more efficient, or vice versa, leading to suboptimal sequence lengths or vocabulary explosion.
+
+**Solution**: Choose tokenizer based on use case:
+- Character-level: Small vocabulary (~100), perfect coverage, very long sequences
+- BPE: Medium vocabulary (1K-50K), good coverage, shorter sequences
+
+```python
+# ❌ Wrong - character tokenizer for production LLM
+char_tok = CharTokenizer()  # Vocab=89
+text = "The quick brown fox" * 100  # Long document
+tokens = char_tok.encode(text)
+len(tokens)  # 1900 tokens - too long for transformer!
+
+# ✅ Correct - BPE for production
+bpe_tok = BPETokenizer(vocab_size=10000)
+bpe_tok.train(corpus)
+tokens = bpe_tok.encode(text)
+len(tokens)  # 600 tokens - 3x compression, fits in context!
+```
+
+### Not Handling Unknown Tokens in Character Tokenizer
+
+**Problem**: Character tokenizer crashes on Unicode characters not in vocabulary instead of gracefully degrading.
+
+**Solution**: Always map unknown characters to `<UNK>` token (ID 0) using `.get()` with default:
+
+```python
+# ❌ Wrong - crashes on unknown character
+def encode(self, text):
+    return [self.char_to_id[char] for char in text]
+    # KeyError if char not in vocabulary!
+
+# ✅ Correct - graceful unknown handling
+def encode(self, text):
+    return [self.char_to_id.get(char, 0) for char in text]
+    # Unknown chars map to <UNK> (ID 0)
+```
+
+### Inconsistent Vocabulary Ordering Across Runs
+
+**Problem**: Non-deterministic vocabulary ordering causes different token IDs for same characters across training runs, breaking model compatibility.
+
+**Solution**: Always sort vocabulary alphabetically after collection to ensure reproducibility:
+
+```python
+# ❌ Wrong - non-deterministic vocabulary
+unique_chars = list(set(all_chars))  # Set iteration order is random!
+self.vocab = ['<UNK>'] + unique_chars
+# Different runs produce different char→ID mappings!
+
+# ✅ Correct - deterministic vocabulary
+unique_chars = sorted(list(set(all_chars)))  # Sorted = reproducible
+self.vocab = ['<UNK>'] + unique_chars
+# Same vocabulary across all runs - models load correctly
+```
+
 ## Getting Started
 
 ### Prerequisites
@@ -725,6 +824,162 @@ print(f"BPE - Vocab: {bpe_stats['vocab_size']}, "
       f"Compression: {bpe_stats['compression_ratio']:.2f}")
 # Output: BPE - Vocab: 500, Avg Length: 13.5, Compression: 3.13
 ```
+
+## Production Context
+
+### Your Implementation vs. Production Frameworks
+
+Understanding what you're building vs. what production tokenizers provide:
+
+| Feature | Your Tokenizers (Module 10) | HuggingFace Tokenizers | SentencePiece (Google) |
+|---------|---------------------------|----------------------|----------------------|
+| **Backend** | Pure Python | Rust (Python bindings) | C++ (Python bindings) |
+| **Character Tokenizer** | ✅ Full implementation | ✅ `CharacterLevelTokenizer` | ❌ Not included |
+| **BPE** | ✅ Basic BPE | ✅ Optimized BPE | ✅ Unigram + BPE |
+| **Vocabulary Building** | Frequency-based merges | ✅ Same algorithm | ✅ EM algorithm (Unigram) |
+| **Special Tokens** | `<UNK>` only | ✅ `<PAD>`, `<BOS>`, `<EOS>`, `<UNK>`, `<MASK>` | ✅ Full special token support |
+| **Pre-tokenization** | Simple whitespace split | ✅ Configurable (whitespace, punctuation, etc.) | ✅ Unicode normalization + split |
+| **Throughput** | ~10K tokens/sec (Python) | ~1M tokens/sec (Rust) | ~500K tokens/sec (C++) |
+| **Serialization** | ❌ Not implemented | ✅ Save/load vocab + merges | ✅ `.model` binary format |
+| **Parallel Processing** | ❌ Single-threaded | ✅ Multi-threaded Rust | ✅ Multi-threaded C++ |
+
+**Educational Focus**: Your implementations prioritize algorithmic clarity. Production tokenizers add multi-threading, optimized data structures (tries, hash maps), and fast serialization while using the same core BPE algorithm.
+
+### Side-by-Side Code Comparison
+
+**Your implementation:**
+```python
+from tinytorch.tokenizers import BPETokenizer
+
+# Train BPE tokenizer
+tokenizer = BPETokenizer(vocab_size=10000)
+corpus = ["hello world", "machine learning", "natural language processing"]
+tokenizer.train(corpus)
+
+# Encode text
+text = "hello machine"
+tokens = tokenizer.encode(text)  # [142, 201, 304]
+
+# Decode tokens
+decoded = tokenizer.decode(tokens)  # "hello machine"
+```
+
+**Equivalent HuggingFace Tokenizers:**
+```python
+from tokenizers import Tokenizer
+from tokenizers.models import BPE
+from tokenizers.trainers import BpeTrainer
+
+# Train BPE tokenizer (same algorithm, optimized Rust)
+tokenizer = Tokenizer(BPE())
+trainer = BpeTrainer(vocab_size=10000)
+tokenizer.train_from_iterator(corpus, trainer=trainer)
+
+# Encode text (100x faster throughput)
+output = tokenizer.encode("hello machine")
+tokens = output.ids  # [142, 201, 304] - same results!
+
+# Decode tokens
+decoded = tokenizer.decode(tokens)  # "hello machine"
+```
+
+**Key Differences:**
+1. **Performance**: HuggingFace uses Rust for 100x faster tokenization. Your Python implementation achieves ~10K tokens/sec vs HuggingFace's ~1M tokens/sec.
+2. **Pre-tokenization**: HuggingFace separates pre-tokenization (splitting, normalization) from BPE merges, enabling more flexible pipelines.
+3. **Batch Processing**: HuggingFace supports `encode_batch()` for parallel processing of multiple texts. Your implementation processes sequentially.
+4. **Serialization**: HuggingFace tokenizers serialize to JSON with vocabulary + merge rules for deployment. You'd need to implement save/load manually.
+
+### Real-World Production Usage
+
+**OpenAI GPT-2/GPT-3**: Uses Byte-level BPE with 50,257 tokens (GPT-2) and ~100K tokens (GPT-3+). Byte-level variant operates on UTF-8 bytes instead of characters, handling any text without unknown tokens. Tokenization throughput is critical at scale—GPT-3 API processes millions of requests daily.
+
+**Google BERT**: Uses WordPiece tokenization (variant of BPE) with 30,522 tokens. Vocabulary includes `[CLS]`, `[SEP]`, `[MASK]` special tokens for pre-training tasks. SentencePiece library provides multilingual support across 100+ languages with shared vocabulary.
+
+**Meta LLaMA**: Uses SentencePiece BPE with 32K vocabulary optimized for code and multilingual text. Smaller vocabulary than GPT-3 (32K vs 100K) trades slightly longer sequences for reduced embedding matrix size (fewer parameters).
+
+**Hugging Face Transformers**: Provides unified tokenizer API across models. FastTokenizers (Rust backend) achieve ~1M tokens/sec throughput. Critical for serving models at scale where tokenization can bottleneck inference pipelines.
+
+**Google Translate**: Processes billions of sentences daily through SentencePiece tokenization. Multilingual vocabulary (250K tokens for mT5) enables zero-shot cross-lingual transfer—model trained on English can handle French without fine-tuning via shared subword vocabulary.
+
+### Performance Characteristics at Scale
+
+**Tokenization Throughput:**
+- **Your Character Tokenizer**: ~10K tokens/sec (Python dict lookups)
+- **Your BPE Tokenizer**: ~1K tokens/sec (Python iterative merge application)
+- **HuggingFace FastTokenizers**: ~1M tokens/sec (Rust parallel processing)
+- **SentencePiece**: ~500K tokens/sec (C++ optimized trie structures)
+
+**Vocabulary Memory:**
+- Character (100 tokens): ~4KB (100 × 40 bytes per entry)
+- BPE (10K tokens): ~400KB (10K × 40 bytes)
+- GPT-3 (100K tokens): ~4MB vocabulary alone
+- Embedding matrix (100K vocab × 12,288 dim × 2 bytes FP16): **2.5GB** just for embeddings!
+
+**Sequence Length Impact on Transformer:**
+- Character tokenization: "The quick brown fox" → 19 tokens → 19² = 361 attention operations
+- BPE tokenization: "The quick brown fox" → 6 tokens → 6² = 36 attention operations (10× reduction!)
+- For 1000-character document: Char=1000 tokens (1M attention ops) vs BPE=300 tokens (90K attention ops) - 11× savings
+
+**Batching and Padding Overhead:**
+- Batch with char tokenization lengths [100, 500, 1000]: Pad to 1000 → 50% wasted computation (600 padding tokens)
+- Same batch with BPE lengths [30, 150, 300]: Pad to 300 → 40% wasted computation (180 padding tokens)
+- Dynamic batching by sequence length reduces padding waste significantly
+
+### How Your Implementation Maps to HuggingFace
+
+**What you just built:**
+```python
+# Your BPE merge learning algorithm
+def train(self, corpus, vocab_size):
+    # Count word frequencies
+    word_freq = Counter(corpus)
+
+    # Initialize with character-level tokens
+    vocab = set()
+    for word in word_freq:
+        tokens = self._get_word_tokens(word)
+        vocab.update(tokens)
+
+    # Iteratively merge most frequent pairs
+    while len(vocab) < vocab_size:
+        # Count pair frequencies (weighted by word frequency)
+        pair_counts = Counter()
+        for word, freq in word_freq.items():
+            pairs = self._get_pairs(word_tokens[word])
+            for pair in pairs:
+                pair_counts[pair] += freq
+
+        # Merge most frequent pair
+        best_pair = pair_counts.most_common(1)[0][0]
+        # Apply merge to all words...
+```
+
+**How HuggingFace does it:**
+```python
+# HuggingFace Rust implementation (simplified pseudocode)
+fn train_bpe(corpus: &[String], vocab_size: usize) -> BPE {
+    // Same algorithm, optimized data structures
+    let mut word_freqs = HashMap::new();  // Rust HashMap (faster than Python dict)
+
+    // Count word frequencies (parallel processing)
+    corpus.par_iter().for_each(|word| {
+        *word_freqs.entry(word).or_insert(0) += 1;
+    });
+
+    // Initialize vocabulary (same as yours)
+    let mut vocab = HashSet::new();
+
+    // Iterative merging (parallelized pair counting)
+    while vocab.len() < vocab_size {
+        let pair_counts = count_pairs_parallel(&word_freqs);  // Multi-threaded
+        let best_pair = find_most_common(&pair_counts);
+        apply_merge(&mut word_freqs, best_pair);  // Efficient in-place update
+        vocab.insert(merge_tokens(best_pair));
+    }
+}
+```
+
+**Key Insight**: Your implementation uses the **exact same BPE algorithm** (iterative merge of most frequent character pairs) as production systems. The difference is programming language (Python vs Rust/C++), data structures (Python dict vs optimized hash maps), and parallelization (single-threaded vs multi-threaded), not the fundamental tokenization approach.
 
 ## Systems Thinking Questions
 

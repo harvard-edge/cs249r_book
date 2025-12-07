@@ -80,6 +80,59 @@ This module follows TinyTorch's **Build → Use → Reflect** framework:
 2. **Use**: Profile complete models to measure characteristics, compare MLP vs attention operations, analyze batch size impact on throughput, and benchmark different architectures
 3. **Reflect**: Where does compute time actually go in transformers? When is your system memory-bound vs compute-bound? How do measurement choices affect optimization decisions?
 
+## Getting Started
+
+### Prerequisites
+
+Ensure you understand the foundations from previous modules:
+
+```bash
+# Activate TinyTorch environment
+source scripts/activate-tinytorch
+
+# Verify prerequisite modules (all modules 1-13)
+tito test tensor
+tito test activations
+tito test transformer
+```
+
+**Why these prerequisites**: You'll profile models built in Modules 1-13. Understanding the implementations helps you interpret profiling results (e.g., why attention is memory-bound).
+
+### Development Workflow
+
+1. **Open the development file**: `modules/14_profiling/profiling_dev.ipynb` or `.py`
+2. **Implement parameter counting**: Walk model structure, sum parameter elements
+3. **Build FLOP counter**: Calculate operations based on layer types and dimensions
+4. **Create memory profiler**: Use tracemalloc to track allocations during forward/backward
+5. **Add timing profiler**: Implement warmup runs, multiple measurements, statistical analysis
+6. **Implement advanced profiling**: Build `profile_forward_pass()` and `profile_backward_pass()` combining all metrics
+7. **Export and verify**: `tito module complete 14 && tito test profiling`
+
+**Development tips**:
+```python
+# Test parameter counting manually first
+layer = Linear(128, 64)
+expected_params = (128 * 64) + 64  # weight + bias = 8256
+actual_params = profiler.count_parameters(layer)
+assert actual_params == expected_params
+
+# Verify FLOP calculations with small examples
+flops = profiler.count_flops(layer, (1, 128))
+expected_flops = 2 * 128 * 64  # matmul FLOPs = 16384
+assert flops == expected_flops
+
+# Check memory profiler returns expected keys
+mem = profiler.measure_memory(layer, (32, 128))
+assert 'parameter_memory_mb' in mem
+assert 'activation_memory_mb' in mem
+assert 'peak_memory_mb' in mem
+
+# Validate latency measurement stability
+latencies = [profiler.measure_latency(layer, input_tensor) for _ in range(3)]
+std_dev = np.std(latencies)
+assert std_dev < np.mean(latencies) * 0.2  # Coefficient of variation < 20%
+```
+
 ## Implementation Guide
 
 ### Core Component: Profiler Class
@@ -417,58 +470,171 @@ mean = np.mean(times)  # = 14.12 ms (misleading!)
 median = np.median(times)  # = 5.2 ms (representative)
 ```
 
-## Getting Started
+## Common Pitfalls
 
-### Prerequisites
+### Single-Measurement Timing Without Warmup
 
-Ensure you understand the foundations from previous modules:
+**Problem**: First measurement includes JIT compilation and cold cache effects, giving misleading latency numbers (10-100x slower than steady-state)
 
-```bash
-# Activate TinyTorch environment
-source scripts/activate-tinytorch
+**Solution**: Always perform warmup runs before timing measurements to stabilize system state (cache warming, JIT compilation, OS scheduling)
 
-# Verify prerequisite modules (all modules 1-13)
-tito test tensor
-tito test activations
-tito test transformer
-```
-
-**Why these prerequisites**: You'll profile models built in Modules 1-13. Understanding the implementations helps you interpret profiling results (e.g., why attention is memory-bound).
-
-### Development Workflow
-
-1. **Open the development file**: `modules/14_profiling/profiling_dev.ipynb` or `.py`
-2. **Implement parameter counting**: Walk model structure, sum parameter elements
-3. **Build FLOP counter**: Calculate operations based on layer types and dimensions
-4. **Create memory profiler**: Use tracemalloc to track allocations during forward/backward
-5. **Add timing profiler**: Implement warmup runs, multiple measurements, statistical analysis
-6. **Implement advanced profiling**: Build `profile_forward_pass()` and `profile_backward_pass()` combining all metrics
-7. **Export and verify**: `tito module complete 14 && tito test profiling`
-
-**Development tips**:
 ```python
-# Test parameter counting manually first
-layer = Linear(128, 64)
-expected_params = (128 * 64) + 64  # weight + bias = 8256
-actual_params = profiler.count_parameters(layer)
-assert actual_params == expected_params
+# ❌ Wrong: Single measurement includes cold start
+start = time.time()
+output = model(input)
+latency = time.time() - start  # Includes JIT compilation overhead
 
-# Verify FLOP calculations with small examples
-flops = profiler.count_flops(layer, (1, 128))
-expected_flops = 2 * 128 * 64  # matmul FLOPs = 16384
-assert flops == expected_flops
-
-# Check memory profiler returns expected keys
-mem = profiler.measure_memory(layer, (32, 128))
-assert 'parameter_memory_mb' in mem
-assert 'activation_memory_mb' in mem
-assert 'peak_memory_mb' in mem
-
-# Validate latency measurement stability
-latencies = [profiler.measure_latency(layer, input_tensor) for _ in range(3)]
-std_dev = np.std(latencies)
-assert std_dev < np.mean(latencies) * 0.2  # Coefficient of variation < 20%
+# ✅ Correct: Warmup runs + multiple measurements
+for _ in range(10):
+    model.forward(input)  # Discard warmup results
+times = []
+for _ in range(100):
+    start = time.perf_counter()
+    model.forward(input)
+    times.append(time.perf_counter() - start)
+latency = np.median(times)  # Robust to outliers
 ```
+
+### Using Mean Instead of Median for Latency
+
+**Problem**: Mean is sensitive to outliers from OS scheduling events, thermal throttling, or background processes, hiding typical performance
+
+**Solution**: Report median latency for typical performance and p95/p99 percentiles for tail latency (user-facing systems)
+
+```python
+# ❌ Wrong: Mean affected by outliers
+times = [5.1, 5.2, 5.0, 5.3, 50.0]  # 50ms outlier from context switch
+mean = np.mean(times)  # = 14.12 ms (misleading!)
+
+# ✅ Correct: Median robust to outliers
+median = np.median(times)  # = 5.2 ms (representative)
+p95 = np.percentile(times, 95)  # = 50.0 ms (tail latency)
+p99 = np.percentile(times, 99)  # = 50.0 ms (worst case)
+```
+
+### Forgetting Scaling Factor in FLOP Calculations
+
+**Problem**: Miscounting operations by missing the "2" in matmul FLOPs (multiply + add per element), underestimating compute by 2x
+
+**Solution**: Remember matmul FLOPs = 2 × M × K × N (one multiply + one add per inner product element)
+
+```python
+# ❌ Wrong: Counting only multiplies
+flops = M * K * N  # Missing the add operations
+
+# ✅ Correct: Count both multiply and add
+flops = 2 * M * K * N  # Each output element: K multiplies + K adds
+```
+
+### Profiling Memory Without Isolating Components
+
+**Problem**: Measuring total memory without breakdown prevents identifying whether parameters, activations, or optimizer state is the bottleneck
+
+**Solution**: Take snapshots at specific execution points (baseline, after forward, after backward, after optimizer) to isolate memory components
+
+```python
+# ❌ Wrong: Single total memory measurement
+total_memory = measure_memory(model, input)  # Can't identify bottleneck
+
+# ✅ Correct: Component-wise memory profiling
+mem = MemoryProfiler()
+mem.snapshot("baseline")
+output = model.forward(input)
+mem.snapshot("after_forward")  # Activation memory = delta
+loss.backward()
+mem.snapshot("after_backward")  # Gradient memory = delta
+optimizer.step()
+mem.snapshot("after_optimizer")  # Optimizer state = delta
+mem.report()  # Shows exactly where memory goes
+```
+
+### Ignoring Batch Size in Performance Analysis
+
+**Problem**: Profiling with batch_size=1 misses parallelization opportunities and gives pessimistic throughput numbers (10-100x lower than production)
+
+**Solution**: Profile across multiple batch sizes to identify optimal throughput-latency trade-off and saturation point
+
+```python
+# ❌ Wrong: Single batch size doesn't show scaling behavior
+latency = profiler.measure_latency(model, input_batch_1)
+throughput = 1 / latency  # Misses batching benefits
+
+# ✅ Correct: Profile batch scaling to find optimal operating point
+for batch_size in [1, 8, 32, 64, 128]:
+    input = generate_batch(batch_size)
+    latency = profiler.measure_latency(model, input)
+    throughput = batch_size / latency
+    efficiency = throughput / batch_size  # Samples/sec normalized
+    print(f"Batch {batch_size}: {throughput:.1f} samples/sec, efficiency {efficiency:.3f}")
+# Identify saturation point where throughput plateaus
+```
+
+## Production Context
+
+### Your Implementation vs Production Profilers
+
+Understanding what you're building versus what production frameworks provide:
+
+| Feature | Your Profiler | PyTorch Profiler | TensorBoard Profiler |
+|---------|---------------|------------------|---------------------|
+| **Backend** | Python tracemalloc + time | C++ instrumentation + CUDA events | TensorFlow XLA profiler |
+| **Parameter Counting** | Explicit tensor.size sum | Exact same formula | Exact same formula |
+| **FLOP Calculation** | Manual formula per layer | Built-in op-level FLOP hooks | XLA HLO instruction analysis |
+| **Memory Profiling** | tracemalloc snapshots | CUDA memory allocator tracking | Device memory timeline |
+| **Timing Method** | time.perf_counter() | CUDA event synchronization | Hardware performance counters |
+| **GPU Support** | CPU-only | Full CUDA profiling | GPU/TPU kernel timelines |
+| **Overhead** | Minimal (snapshot-based) | 2-15% instrumentation cost | Always-on sampling mode |
+| **Visualization** | Print statements | Chrome trace viewer | TensorBoard web UI |
+
+**Educational Focus**: Your implementation teaches profiling fundamentals that apply to all production tools—the parameter counting formulas, FLOP calculations, and statistical timing methodology are identical.
+
+### Side-by-Side Code Comparison
+
+**Your TinyTorch Profiler:**
+```python
+from profiling_dev import Profiler
+
+# Create profiler
+profiler = Profiler()
+
+# Profile forward pass
+profile = profiler.profile_forward_pass(model, input_tensor)
+print(f"Parameters: {profile['parameters']:,}")
+print(f"FLOPs: {profile['flops']:,}")
+print(f"Latency: {profile['latency_ms']:.2f} ms")
+print(f"Memory: {profile['peak_memory_mb']:.2f} MB")
+```
+
+**Equivalent PyTorch Profiler:**
+```python
+import torch
+from torch.profiler import profile, ProfilerActivity
+
+# Profile with PyTorch
+with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+    output = model(input_tensor)
+
+# Print statistics
+print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=10))
+# Exports to Chrome trace viewer for visualization
+prof.export_chrome_trace("trace.json")
+```
+
+**Key Differences:**
+1. **GPU Support**: PyTorch profiles CUDA kernels with nanosecond precision via CUDA events
+2. **Operator-Level Detail**: PyTorch shows every aten op (matmul, conv2d, relu) with timing breakdown
+3. **Memory Timeline**: PyTorch tracks every allocation/deallocation with CUDA memory profiler
+4. **Visualization**: Chrome trace viewer shows interactive timeline of kernel execution
+
+### Real-World Applications
+
+**Google TPU Optimization**: Profile every kernel to measure Model FLOPs Utilization (MFU). Google improved T5 training from 35% to 48% MFU through profiling-guided optimization, saving millions in compute costs. The profiling methodology: measure theoretical FLOPs (your FLOP counter) vs achieved FLOPs (hardware counters), identify bottlenecks, optimize, re-profile.
+
+**OpenAI GPT Training**: Profile memory usage across 96-layer models to identify that activation memory dominates (60-70% of total). Profiling revealed gradient checkpointing could reduce memory by 10× with only 20% compute overhead. Without profiling, the team would have scaled down model size instead of discovering the memory-compute trade-off.
+
+**Meta PyTorch Inference**: Profile operator timelines serving billions of requests to identify kernel launch overhead (1-2ms per operation). Profiling data guided operator fusion strategy, reducing 10 sequential kernels to 2 fused kernels, achieving 2-3× latency reduction. The p99 latency improvements directly translate to user experience quality.
+
+**NVIDIA cuDNN Development**: Use Nsight profiler to analyze warp occupancy (GPU utilization), register pressure (memory limits), and memory bandwidth. Profiling shows cuDNN achieves 90%+ theoretical peak on tensor cores through kernel optimization guided by profiler data. Every kernel improvement starts with profiling to identify the bottleneck (compute, memory, instruction latency).
 
 ## Testing
 

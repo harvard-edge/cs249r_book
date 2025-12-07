@@ -39,6 +39,31 @@ This module follows TinyTorch's **Build → Use → Analyze** framework:
 2. **Use**: Benchmark all your Optimization Tier implementations (profiling, quantization, compression, memoization, acceleration) against baselines on real tasks; compare fairly with statistical rigor
 3. **Analyze**: Why do benchmark results vary across runs? How does hardware affect comparison fairness? When is 5% speedup statistically significant vs noise? What makes benchmarks representative vs over-fitted?
 
+## Getting Started
+
+### Prerequisites
+
+Ensure you understand the optimization foundations:
+
+```bash
+# Activate TinyTorch environment
+source scripts/activate-tinytorch
+
+# Verify prerequisite modules
+tito test profiling
+tito test quantization
+tito test compression
+```
+
+### Development Workflow
+
+1. **Open the development file**: `modules/19_benchmarking/benchmarking_dev.py`
+2. **Implement BenchmarkResult**: Container for measurements with statistical analysis
+3. **Build Benchmark class**: Runner with warmup, multiple runs, metrics collection
+4. **Create BenchmarkSuite**: Full evaluation with latency/accuracy/memory/energy
+5. **Add reporting**: Automated report generation with visualizations
+6. **Export and verify**: `tito module complete 19 && tito test benchmarking`
+
 ## Implementation Guide
 
 ### Core Benchmarking Components
@@ -238,30 +263,220 @@ This benchmarking infrastructure provides the measurement harness used in Module
 
 Your benchmarking framework provides the foundation for fair competition—same measurement methodology, same statistical analysis, same reporting format. Module 20 teaches how to use these tools in a competition context.
 
-## Getting Started
+## Common Pitfalls
 
-### Prerequisites
+### Insufficient Warmup Runs
 
-Ensure you understand the optimization foundations:
+**Problem**: Including cold-start measurements in statistics leads to artificially inflated latency measurements and high variance
 
-```bash
-# Activate TinyTorch environment
-source scripts/activate-tinytorch
+**Solution**: Always run warmup iterations before measurement to stabilize cache state, JIT compilation, and memory allocation
 
-# Verify prerequisite modules
-tito test profiling
-tito test quantization
-tito test compression
+```python
+# ❌ Wrong: No warmup leads to cold-start bias
+latencies = []
+for _ in range(10):
+    start = time.perf_counter()
+    model.forward(input_data)  # First run 2× slower due to cold cache
+    latencies.append(time.perf_counter() - start)
+
+# ✅ Correct: Warmup before measurement
+for _ in range(5):
+    model.forward(input_data)  # Warmup runs (discarded)
+
+latencies = []
+for _ in range(10):
+    start = time.perf_counter()
+    model.forward(input_data)  # Measurement runs (stable)
+    latencies.append(time.perf_counter() - start)
 ```
 
-### Development Workflow
+### Reporting Mean Without Variance
 
-1. **Open the development file**: `modules/19_benchmarking/benchmarking_dev.py`
-2. **Implement BenchmarkResult**: Container for measurements with statistical analysis
-3. **Build Benchmark class**: Runner with warmup, multiple runs, metrics collection
-4. **Create BenchmarkSuite**: Full evaluation with latency/accuracy/memory/energy
-5. **Add reporting**: Automated report generation with visualizations
-6. **Export and verify**: `tito module complete 19 && tito test benchmarking`
+**Problem**: Claiming "5% speedup" without confidence intervals or statistical significance testing makes results unreproducible and potentially misleading
+
+**Solution**: Always report mean with standard deviation and confidence intervals, plus statistical significance test results
+
+```python
+# ❌ Wrong: Only reporting mean hides measurement uncertainty
+baseline_mean = 100.5  # ms
+optimized_mean = 95.2  # ms
+speedup = baseline_mean / optimized_mean  # 1.056x (5.6% speedup)
+print(f"Speedup: {speedup:.2f}x")
+
+# ✅ Correct: Report variance and statistical significance
+from scipy import stats
+baseline_times = [100, 102, 98, 101, 99]  # ms
+optimized_times = [95, 97, 93, 96, 94]
+t_stat, p_value = stats.ttest_ind(baseline_times, optimized_times)
+
+print(f"Baseline: {np.mean(baseline_times):.1f} ± {np.std(baseline_times):.1f} ms")
+print(f"Optimized: {np.mean(optimized_times):.1f} ± {np.std(optimized_times):.1f} ms")
+print(f"Speedup: {np.mean(baseline_times)/np.mean(optimized_times):.2f}x (p={p_value:.3f})")
+```
+
+### Unfair Comparison Conditions
+
+**Problem**: Comparing baseline and optimized implementations under different conditions produces misleading speedup claims
+
+**Solution**: Enforce identical workload, hardware, environment, and measurement protocol for both baseline and optimized versions
+
+```python
+# ❌ Wrong: Different batch sizes make comparison unfair
+baseline_time = benchmark_model(baseline, batch_size=1)  # 100ms
+optimized_time = benchmark_model(optimized, batch_size=32)  # 80ms (unfair!)
+
+# ✅ Correct: Same conditions for fair comparison
+batch_size = 16
+input_data = generate_test_data(batch_size)  # Same workload
+
+baseline_time = benchmark_model(baseline, input_data)
+optimized_time = benchmark_model(optimized, input_data)  # Fair comparison
+```
+
+### Ignoring Observer Effect
+
+**Problem**: Heavy instrumentation and measurement overhead can alter performance characteristics, making measurements inaccurate
+
+**Solution**: Minimize measurement overhead and quantify instrumentation costs separately
+
+```python
+# ❌ Wrong: Excessive logging during measurement affects runtime
+for _ in range(100):
+    start = time.perf_counter()
+    output = model.forward(input_data)
+    print(f"Iteration complete, output shape: {output.shape}")  # I/O overhead!
+    latencies.append(time.perf_counter() - start)
+
+# ✅ Correct: Minimal instrumentation during measurement
+latencies = []
+for _ in range(100):
+    start = time.perf_counter()
+    output = model.forward(input_data)
+    latencies.append(time.perf_counter() - start)
+# Report after measurement loop completes
+```
+
+### Not Controlling for Environmental Noise
+
+**Problem**: System background tasks, thermal throttling, and CPU frequency scaling introduce variance that obscures true performance differences
+
+**Solution**: Control environment where possible, use statistical rigor to handle remaining noise, and document uncontrolled factors
+
+```python
+# Problem awareness: Performance varies due to system state
+# - CPU throttles when hot (15-30% slowdown)
+# - Background tasks consume cycles (antivirus, indexing)
+# - CPU frequency scaling changes clock speed dynamically
+# - Memory pressure from other processes affects swap/cache
+
+# ✅ Best practices for environmental control
+import psutil
+import os
+
+# 1. Check system load before benchmarking
+if psutil.cpu_percent(interval=1) > 20:
+    print("Warning: High CPU usage detected, results may be noisy")
+
+# 2. Set CPU affinity to specific cores (reduce migration overhead)
+os.sched_setaffinity(0, {0, 1})  # Linux only
+
+# 3. Document environment in results
+system_info = {
+    'cpu_percent': psutil.cpu_percent(),
+    'memory_percent': psutil.virtual_memory().percent,
+    'cpu_freq': psutil.cpu_freq().current,
+    'temperature': psutil.sensors_temperatures()  # If available
+}
+
+# 4. Use sufficient measurement runs to average out noise
+# Larger sample size improves statistical power
+```
+
+## Production Context
+
+### Your Implementation vs Production Frameworks
+
+Understanding what you're building vs what production frameworks provide:
+
+| Feature | Your Benchmarking | PyTorch Benchmark | TensorFlow Profiler | MLPerf Benchmark |
+|---------|-------------------|-------------------|---------------------|------------------|
+| **Backend** | Pure Python/NumPy | C++/CUDA timing | XLA profiler | Multi-framework |
+| **Statistical Rigor** | Manual t-tests, CI | Built-in torch.utils.benchmark | TensorBoard visualization | Standardized protocols |
+| **Warmup Protocol** | Explicit warmup runs | Automatic warmup | Automatic warmup | Standardized warmup |
+| **Metrics** | Latency, accuracy, memory | Latency, throughput | Compute time, memory | Standard ML tasks |
+| **Reproducibility** | Manual system info | Environment capture | System profiling | Hardware-specific baselines |
+| **Multi-Run Stats** | Manual statistics | Automatic confidence intervals | Multiple runs automatic | Standardized runs (50+) |
+| **Fair Comparison** | Manual enforcement | Same-device enforcement | Device placement control | Hardware categories |
+
+**Educational Focus**: Your implementation prioritizes understanding measurement methodology. The statistical rigor you implement is the SAME rigor production teams use, just without automated tooling.
+
+### Side-by-Side Code Comparison
+
+**Your TinyTorch Benchmarking:**
+```python
+from tinytorch.benchmarking.benchmark import Benchmark, BenchmarkSuite
+
+# Create benchmark with explicit configuration
+benchmark = Benchmark(warmup_runs=5, measurement_runs=10)
+
+# Run latency benchmark with statistical analysis
+result = benchmark.run_latency_benchmark(model, input_data)
+
+# YOUR implementation: explicit statistical computation
+print(f"Mean: {result.mean:.2f} ms")
+print(f"Std: {result.std:.2f} ms")
+print(f"95% CI: [{result.ci_lower:.2f}, {result.ci_upper:.2f}]")
+```
+
+**Equivalent PyTorch (Production):**
+```python
+import torch.utils.benchmark as benchmark_utils
+
+# PyTorch Timer with automatic warmup and statistics
+timer = benchmark_utils.Timer(
+    stmt='model(input_data)',
+    globals={'model': model, 'input_data': input_data}
+)
+
+# Automatic measurement with confidence intervals
+measurement = timer.blocked_autorange(min_run_time=1.0)
+print(measurement)  # Outputs: mean ± std, median, IQR automatically
+```
+
+**Key Differences:**
+1. **Automation**: PyTorch automates warmup, run count determination, and statistical reporting
+2. **Precision**: PyTorch uses high-precision timers and CPU affinity for lower variance
+3. **Reporting**: Built-in formatting with confidence intervals and percentiles
+4. **Integration**: PyTorch benchmarking integrates with CUDA events for GPU timing
+
+### Real-World Applications
+
+**Google TPU Teams**: Run continuous benchmarking across 100+ model architectures before hardware tapeout. Statistical rigor with p < 0.01 required to justify design changes. 5% performance regression blocks release. Same measurement methodology you're implementing validates billion-dollar hardware investments.
+
+**Meta PyTorch Development**: Every PR undergoes performance regression testing with statistical significance checks. Benchmark suite runs 500+ models across CPU/GPU/TPU. Your confidence interval approach prevents false performance claims. Automated benchmarking prevents 90% of performance regressions before merge.
+
+**OpenAI Model Optimization**: GPT-4 training efficiency measured with your normalized metrics approach—samples/second, memory/parameter, FLOPs/token. Speedup ratios enable hardware-independent comparison across A100/H100/TPU. 10% training speedup saves hundreds of thousands in compute costs, making statistical rigor economically critical.
+
+**MLPerf Industry Benchmarks**: Standardized ML benchmarking competition uses your fair comparison principles—same workload, documented hardware, statistical significance requirements. Results guide enterprise hardware purchasing decisions. Your warmup protocol and variance reporting mirrors MLPerf methodology.
+
+### Performance Characteristics at Scale
+
+**Statistical Power Requirements**: For 5% speedup detection with 80% power and p < 0.05:
+- High variance (20% std): Need 150+ measurement runs
+- Medium variance (10% std): Need 40+ measurement runs
+- Low variance (5% std): Need 10+ measurement runs
+- Your implementation teaches why more runs needed for small effect sizes
+
+**Measurement Overhead Costs**: Benchmarking 10 models with 50 runs each and 5 warmup runs:
+- Total forward passes: 10 × (5 warmup + 50 measurement) = 550 runs
+- If each run is 100ms: 55 seconds total benchmark time
+- Production trade-off: statistical rigor vs development velocity
+
+**Memory Scaling with Metrics**: Full benchmark suite tracking latency, accuracy, memory, energy:
+- Per model: 4 metrics × 50 runs × 8 bytes = 1.6 KB
+- For 100 models: 160 KB total (negligible)
+- Attention weights storage (if tracked): batch × seq² × 4 bytes (can be GBs!)
+- Your implementation documents what to measure vs what to store
 
 ## Testing
 

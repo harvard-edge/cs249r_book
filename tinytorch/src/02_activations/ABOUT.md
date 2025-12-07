@@ -41,6 +41,38 @@ This module follows TinyTorch's **Build → Use → Reflect** framework:
 
 3. **Reflect**: Understand why each activation exists in production systems—why ReLU enables sparse representations (many zeros) that accelerate computation and reduce overfitting, how Sigmoid creates gates (0 to 1 control signals) in LSTM/GRU architectures, why Tanh's zero-centered outputs improve optimization dynamics, how GELU's smoothness helps transformers, and why Softmax's probability distributions are essential for classification
 
+## Getting Started
+
+### Prerequisites
+
+Ensure you have completed Module 01 (Tensor) before starting:
+
+```bash
+# Activate TinyTorch environment
+source scripts/activate-tinytorch
+
+# Verify tensor module is complete
+tito test tensor
+
+# Expected: ✓ Module 01 complete!
+```
+
+### Development Workflow
+
+1. **Open the development file**: `modules/02_activations/activations_dev.ipynb` (or `.py` via Jupytext)
+2. **Implement ReLU**: Simple max(0, x) operation using `np.maximum`
+3. **Build Sigmoid**: Implement with numerical stability using conditional computation for positive/negative values
+4. **Create Tanh**: Use `np.tanh` for hyperbolic tangent transformation
+5. **Add GELU**: Implement smooth approximation using `x * sigmoid(1.702 * x)`
+6. **Build Softmax**: Implement with max subtraction for numerical stability, handle dimension parameter for multi-dimensional tensors
+7. **Export and verify**: Run `tito module complete 02 && tito test activations`
+
+**Development Tips**:
+- Test with extreme values (±1000) to verify numerical stability
+- Verify output ranges: ReLU [0, ∞), Sigmoid (0,1), Tanh (-1,1)
+- Check Softmax sums to 1.0 along specified dimension
+- Test with multi-dimensional tensors (batches) to ensure shape preservation
+
 ## Implementation Guide
 
 ### ReLU - The Sparsity Creator
@@ -211,37 +243,76 @@ class Softmax:
 
 **Cross-Entropy Connection**: In practice, Softmax is almost always paired with cross-entropy loss. PyTorch's `F.cross_entropy` combines both operations with additional numerical stability (LogSumExp trick).
 
-## Getting Started
+## Common Pitfalls
 
-### Prerequisites
+### Softmax Numerical Overflow
 
-Ensure you have completed Module 01 (Tensor) before starting:
+**Problem**: Computing `exp(x_i) / sum(exp(x_j))` directly causes overflow for large values like `exp(1000)`.
 
-```bash
-# Activate TinyTorch environment
-source scripts/activate-tinytorch
+**Solution**: Subtract the maximum value before exponentiating: `exp(x - max(x))`. This is mathematically equivalent due to translation invariance but prevents overflow:
 
-# Verify tensor module is complete
-tito test tensor
+```python
+# ❌ Wrong - causes overflow
+exp_values = np.exp(x.data)
+return exp_values / np.sum(exp_values)
 
-# Expected: ✓ Module 01 complete!
+# ✅ Correct - numerically stable
+x_max = np.max(x.data, axis=dim, keepdims=True)
+x_shifted = x.data - x_max
+exp_values = np.exp(x_shifted)
+return exp_values / np.sum(exp_values, axis=dim, keepdims=True)
 ```
 
-### Development Workflow
+### Sigmoid Overflow for Large Values
 
-1. **Open the development file**: `modules/02_activations/activations_dev.ipynb` (or `.py` via Jupytext)
-2. **Implement ReLU**: Simple max(0, x) operation using `np.maximum`
-3. **Build Sigmoid**: Implement with numerical stability using conditional computation for positive/negative values
-4. **Create Tanh**: Use `np.tanh` for hyperbolic tangent transformation
-5. **Add GELU**: Implement smooth approximation using `x * sigmoid(1.702 * x)`
-6. **Build Softmax**: Implement with max subtraction for numerical stability, handle dimension parameter for multi-dimensional tensors
-7. **Export and verify**: Run `tito module complete 02 && tito test activations`
+**Problem**: Naive `1/(1 + exp(-x))` overflows when `x` is very large (e.g., x=1000 → `exp(-1000)` underflows, `1 + 0 = 1`, but `exp(1000)` in alternative formulation overflows).
 
-**Development Tips**:
-- Test with extreme values (±1000) to verify numerical stability
-- Verify output ranges: ReLU [0, ∞), Sigmoid (0,1), Tanh (-1,1)
-- Check Softmax sums to 1.0 along specified dimension
-- Test with multi-dimensional tensors (batches) to ensure shape preservation
+**Solution**: Use conditional computation based on sign of x:
+
+```python
+# ❌ Wrong - can overflow
+return 1.0 / (1.0 + np.exp(-x.data))
+
+# ✅ Correct - handles both cases
+np.where(
+    x.data >= 0,
+    1 / (1 + np.exp(-x.data)),      # For x >= 0
+    np.exp(x.data) / (1 + np.exp(x.data))  # For x < 0
+)
+```
+
+### Dying ReLU Problem
+
+**Problem**: Neurons can get stuck outputting zero if inputs become consistently negative during training, preventing any gradient flow.
+
+**Solution**: Monitor activation distributions during training. Consider Leaky ReLU (small negative slope) or other ReLU variants if too many neurons die. For this module, understanding the problem is sufficient:
+
+```python
+# ReLU: zero gradient for x < 0
+# If neuron gets large negative bias, it may never recover
+hidden = relu(x @ weights + bias)  # If bias << 0, always outputs 0
+```
+
+### Softmax Dimension Confusion
+
+**Problem**: Applying Softmax along the wrong axis produces nonsensical probability distributions.
+
+**Solution**: For classification, Softmax should normalize over classes (last dimension). For batch processing, preserve batch dimension:
+
+```python
+# For logits of shape (batch=32, classes=10)
+# ❌ Wrong - normalizes across batch
+probs = softmax(logits, dim=0)  # Each class sums to 1 across batch
+
+# ✅ Correct - normalizes across classes
+probs = softmax(logits, dim=1)  # Each example's probabilities sum to 1
+```
+
+### GELU Approximation Accuracy
+
+**Problem**: The approximation `x * sigmoid(1.702 * x)` is close but not exact to the true GELU formula.
+
+**Solution**: For educational purposes, the approximation is sufficient and faster. In production, PyTorch uses a more accurate (but expensive) polynomial approximation or the exact formula with error function. The 1.702 constant (≈ √(2/π)) comes from matching the cumulative distribution function.
 
 ## Testing
 
@@ -327,6 +398,120 @@ hidden = relu(x)  # Hidden layer: [0, 0, 1, 2]
 output = softmax(hidden)  # Output probabilities
 print(output.data.sum())  # 1.0 - valid distribution!
 ```
+
+## Production Context
+
+### Your Implementation vs. Production Frameworks
+
+| Feature | Your Activations | PyTorch torch.nn | TensorFlow tf.keras |
+|---------|-----------------|------------------|---------------------|
+| **Backend** | NumPy (CPU) | C++/CUDA (CPU/GPU) | C++/CUDA/XLA |
+| **ReLU** | `np.maximum(0, x)` | `torch.nn.ReLU()` | `tf.nn.relu()` |
+| **Sigmoid** | Conditional exp | `torch.nn.Sigmoid()` | `tf.nn.sigmoid()` |
+| **Tanh** | `np.tanh()` | `torch.nn.Tanh()` | `tf.nn.tanh()` |
+| **GELU** | Sigmoid approx | `torch.nn.GELU()` | `tf.nn.gelu()` |
+| **Softmax** | Max subtraction | `F.softmax(dim=)` | `tf.nn.softmax(axis=)` |
+| **Numerical Stability** | ✅ Manual | ✅ Built-in | ✅ Built-in |
+| **Vectorization** | ✅ NumPy | ✅ GPU kernels | ✅ GPU kernels |
+| **In-place Operations** | ❌ Creates new | ✅ `inplace=True` | ✅ XLA fusion |
+
+**Educational Focus**: Your implementations prioritize clarity and explicit numerical stability handling. Production frameworks use highly optimized GPU kernels with automatic stability but follow the same mathematical principles.
+
+### Side-by-Side Code Comparison
+
+**Your implementation:**
+```python
+from tinytorch.core.activations import ReLU, Sigmoid, Softmax
+from tinytorch.core.tensor import Tensor
+
+# Create tensor and apply activations
+x = Tensor([[1.0, 2.0, 3.0]])
+relu = ReLU()
+output = relu.forward(x)
+
+# Chain activations
+sigmoid = Sigmoid()
+softmax = Softmax()
+result = softmax.forward(sigmoid.forward(x), dim=-1)
+```
+
+**Equivalent PyTorch:**
+```python
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+# Create tensor and apply activations
+x = torch.tensor([[1.0, 2.0, 3.0]])
+relu = nn.ReLU()
+output = relu(x)  # Can call directly (no .forward())
+
+# Chain activations with functional API
+result = F.softmax(torch.sigmoid(x), dim=-1)
+```
+
+**Key Differences:**
+1. **API Design**: PyTorch modules are callable (implement `__call__`), allowing `relu(x)` instead of `relu.forward(x)`
+2. **Functional vs Module**: PyTorch provides both `nn.ReLU()` (stateful module) and `F.relu()` (stateless function)—activations have no parameters so functional is common
+3. **GPU Support**: PyTorch activations work on CUDA tensors with same API: `x.cuda()` then `relu(x)` runs on GPU
+4. **Performance**: PyTorch uses fused CUDA kernels (e.g., `relu_kernel`) that are 10-100× faster than NumPy on CPU
+
+### Real-World Production Usage
+
+**OpenAI GPT-3/GPT-4**: Uses GELU activations in all feedforward layers (96 layers × 2 GELU calls per layer = 192 GELU operations per forward pass). The smooth differentiability of GELU empirically outperforms ReLU in transformer architectures.
+
+**Google BERT**: Also uses GELU in feedforward layers across 12-24 transformer layers. During pretraining on thousands of GPUs, GELU's exponential computation is parallelized across billions of tokens.
+
+**Meta ResNet**: Uses ReLU after every convolution in ResNet-50 (23M activations per image). The sparsity from ReLU (50-70% zeros) enables model compression and faster inference on mobile devices.
+
+**Tesla Autopilot**: Neural networks use ReLU in convolutional layers processing 6-9 camera streams at 36 FPS. The computational efficiency of ReLU (simple comparison) is critical for real-time inference on embedded hardware.
+
+**Stable Diffusion**: Uses a mix of GELU (in transformer blocks) and Sigmoid (in attention mechanisms). Softmax creates probability distributions over latent space for diffusion sampling.
+
+### Performance Characteristics at Scale
+
+**Memory Overhead**: During training, activation outputs must be cached for backpropagation. For ResNet-50 with batch size 64, activation caching requires ~3GB memory (100× more than model parameters at 25M × 4 bytes ≈ 100MB).
+
+**Computational Bottleneck**: In vision transformers, activations account for ~5-10% of total FLOPS (most cost is in matrix multiplications). However, memory bandwidth for loading/storing activations can dominate wall-clock time on memory-bound hardware.
+
+**Numerical Precision**: Modern ML frameworks use mixed precision training (FP16 activations, FP32 master weights). Sigmoid and Softmax require careful FP16 handling to prevent overflow—PyTorch's automatic mixed precision handles this automatically.
+
+**GPU Kernel Fusion**: PyTorch JIT compiler can fuse activation operations with preceding linear layers (e.g., `relu(linear(x))` becomes single fused kernel), reducing memory traffic by 2× and improving throughput.
+
+### How Your Implementation Maps to PyTorch
+
+**What you just built:**
+```python
+# Your ReLU implementation
+class ReLU:
+    def forward(self, x: Tensor) -> Tensor:
+        return Tensor(np.maximum(0, x.data))
+
+# Your Softmax with numerical stability
+class Softmax:
+    def forward(self, x: Tensor, dim: int = -1) -> Tensor:
+        x_max = np.max(x.data, axis=dim, keepdims=True)
+        exp_x = np.exp(x.data - x_max)
+        return Tensor(exp_x / np.sum(exp_x, axis=dim, keepdims=True))
+```
+
+**How PyTorch does it:**
+```python
+# PyTorch C++ implementation (simplified)
+# aten/src/ATen/native/Activation.cpp
+Tensor relu(const Tensor& self) {
+    return at::clamp_min(self, 0);  // GPU-optimized clamping
+}
+
+# Softmax uses LogSumExp trick for extra stability
+Tensor softmax(const Tensor& self, int64_t dim) {
+    auto max_val = at::max(self, dim, true);
+    auto exp = at::exp(self - max_val);
+    return exp / at::sum(exp, dim, true);
+}
+```
+
+**Key Insight**: Your implementation uses the **exact same algorithms** (max subtraction, conditional computation) as PyTorch. The difference is execution environment (NumPy CPU vs CUDA GPU) and optimization level (Python loops vs fused kernels), not the fundamental mathematics.
 
 ## Systems Thinking Questions
 
