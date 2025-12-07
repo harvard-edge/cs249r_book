@@ -1,7 +1,7 @@
 ---
 title: "Attention - The Mechanism That Powers Modern AI"
 description: "Build scaled dot-product and multi-head attention mechanisms from scratch"
-difficulty: "$\bigstar$$\bigstar$$\bigstar$"
+difficulty: "●●●"
 time_estimate: "5-6 hours"
 prerequisites: ["01_tensor", "02_activations", "03_layers", "11_embeddings"]
 next_steps: ["13_transformers"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 12. Attention - The Mechanism That Powers Modern AI
 
-**ARCHITECTURE TIER** | Difficulty: $\bigstar$$\bigstar$$\bigstar$ (3/4) | Time: 5-6 hours
+**ARCHITECTURE TIER** | Difficulty: ●●● (3/4) | Time: 5-6 hours
 
 ## Overview
 

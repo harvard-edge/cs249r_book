@@ -1,7 +1,7 @@
 ---
 title: "Autograd"
 description: "Build the automatic differentiation engine that powers neural network training"
-difficulty: "$\bigstar$$\bigstar$$\bigstar$$\bigstar$"
+difficulty: "●●●●"
 time_estimate: "8-10 hours"
 prerequisites: ["01_tensor", "02_activations", "03_layers", "04_losses"]
 next_steps: ["06_optimizers"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 05. Autograd
 
-**FOUNDATION TIER** | Difficulty: $\bigstar$$\bigstar$$\bigstar$$\bigstar$ (4/4) | Time: 8-10 hours
+**FOUNDATION TIER** | Difficulty: ●●●● (4/4) | Time: 8-10 hours
 
 ## Overview
 

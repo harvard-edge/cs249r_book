@@ -1,7 +1,7 @@
 ---
 title: "Quantization - Reduced Precision for Efficiency"
 description: "INT8 quantization fundamentals, calibration strategies, and accuracy-efficiency trade-offs"
-difficulty: "$\bigstar$$\bigstar$$\bigstar$"
+difficulty: "●●●"
 time_estimate: "5-6 hours"
 prerequisites: ["Profiling"]
 next_steps: ["Compression"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 15. Quantization - Reduced Precision for Efficiency
 
-**OPTIMIZATION TIER** | Difficulty: $\bigstar$$\bigstar$$\bigstar$ (3/4) | Time: 5-6 hours
+**OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 5-6 hours
 
 ## Overview
 

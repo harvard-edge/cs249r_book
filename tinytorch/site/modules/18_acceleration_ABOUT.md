@@ -1,7 +1,7 @@
 ---
 title: "Acceleration - CPU Vectorization & Cache Optimization"
 description: "Master hardware-aware optimization through BLAS vectorization, cache-friendly algorithms, and roofline analysis"
-difficulty: "$\bigstar$$\bigstar$$\bigstar$"
+difficulty: "●●●"
 time_estimate: "6-8 hours"
 prerequisites: ["Profiling"]
 next_steps: ["Benchmarking"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 18. Acceleration - CPU Vectorization & Cache Optimization
 
-**OPTIMIZATION TIER** | Difficulty: $\bigstar$$\bigstar$$\bigstar$ (3/4) | Time: 6-8 hours
+**OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 6-8 hours
 
 ## Overview
 

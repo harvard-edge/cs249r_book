@@ -1,7 +1,7 @@
 ---
 title: "Compression - Pruning and Model Compression"
 description: "Implement pruning techniques to reduce model size while preserving accuracy"
-difficulty: "$\bigstar$$\bigstar$$\bigstar$"
+difficulty: "●●●"
 time_estimate: "5-6 hours"
 prerequisites: ["15_quantization"]
 next_steps: ["17_memoization"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 16. Compression - Pruning and Model Compression
 
-**OPTIMIZATION TIER** | Difficulty: $\bigstar$$\bigstar$$\bigstar$ (3/4) | Time: 5-6 hours
+**OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 5-6 hours
 
 ## Overview
 

@@ -1,7 +1,7 @@
 ---
 title: "Tokenization - Text to Numerical Sequences"
 description: "Build character-level and BPE tokenizers that convert text into token sequences for language models"
-difficulty: "$\bigstar$$\bigstar$"
+difficulty: "●●"
 time_estimate: "4-5 hours"
 prerequisites: ["Tensor"]
 next_steps: ["Embeddings"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 10. Tokenization - Text to Numerical Sequences
 
-**ARCHITECTURE TIER** | Difficulty: $\bigstar$$\bigstar$ (2/4) | Time: 4-5 hours
+**ARCHITECTURE TIER** | Difficulty: ●● (2/4) | Time: 4-5 hours
 
 ## Overview
 

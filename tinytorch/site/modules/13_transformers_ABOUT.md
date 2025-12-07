@@ -1,7 +1,7 @@
 ---
 title: "Transformers - Complete GPT Architecture"
 description: "Build decoder-only transformer architecture for autoregressive text generation"
-difficulty: "$\bigstar$$\bigstar$$\bigstar$$\bigstar$"
+difficulty: "●●●●"
 time_estimate: "6-8 hours"
 prerequisites: ["Embeddings", "Attention"]
 next_steps: ["Profiling (Optimization Tier)"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 13. Transformers - Complete GPT Architecture
 
-**ARCHITECTURE TIER** | Difficulty: $\bigstar$$\bigstar$$\bigstar$$\bigstar$ (4/4) | Time: 6-8 hours
+**ARCHITECTURE TIER** | Difficulty: ●●●● (4/4) | Time: 6-8 hours
 
 ## Overview
 

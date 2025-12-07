@@ -1,7 +1,7 @@
 ---
 title: "Loss Functions"
 description: "Build MSE and CrossEntropy loss functions with numerical stability for regression and classification"
-difficulty: "$\bigstar$$\bigstar$ (2/4)"
+difficulty: "●● (2/4)"
 time_estimate: "3-4 hours"
 prerequisites: ["01_tensor", "02_activations", "03_layers"]
 next_steps: ["05_autograd"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 04. Loss Functions
 
-**FOUNDATION TIER** | Difficulty: $\bigstar$$\bigstar$ (2/4) | Time: 3-4 hours
+**FOUNDATION TIER** | Difficulty: ●● (2/4) | Time: 3-4 hours
 
 ## Overview
 

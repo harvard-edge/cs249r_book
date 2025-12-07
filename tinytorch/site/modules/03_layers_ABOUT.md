@@ -1,7 +1,7 @@
 ---
 title: "Layers"
 description: "Build the fundamental neural network building blocks: Linear layers with weight initialization and Dropout for regularization"
-difficulty: "$\bigstar$$\bigstar$"
+difficulty: "●●"
 time_estimate: "4-5 hours"
 prerequisites: ["01_tensor", "02_activations"]
 next_steps: ["04_losses"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 03. Layers
 
-**FOUNDATION TIER** | Difficulty: $\bigstar$$\bigstar$ (2/4) | Time: 4-5 hours
+**FOUNDATION TIER** | Difficulty: ●● (2/4) | Time: 4-5 hours
 
 ## Overview
 

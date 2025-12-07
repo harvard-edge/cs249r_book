@@ -1,7 +1,7 @@
 ---
 title: "Activations"
 description: "Neural network activation functions enabling non-linear learning"
-difficulty: "$\bigstar$$\bigstar$"
+difficulty: "●●"
 time_estimate: "3-4 hours"
 prerequisites: ["01_tensor"]
 next_steps: ["03_layers"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 02. Activations
 
-**FOUNDATION TIER** | Difficulty: $\bigstar$$\bigstar$ (2/4) | Time: 3-4 hours
+**FOUNDATION TIER** | Difficulty: ●● (2/4) | Time: 3-4 hours
 
 ## Overview
 

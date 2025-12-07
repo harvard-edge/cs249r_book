@@ -1,7 +1,7 @@
 ---
 title: "Capstone - Submission Infrastructure"
 description: "Build professional benchmarking workflows that generate standardized submissions for ML competitions"
-difficulty: "$\bigstar$$\bigstar$$\bigstar$$\bigstar$"
+difficulty: "●●●●"
 time_estimate: "5-8 hours"
 prerequisites: ["Module 19 - Benchmarking", "Modules 14-18 - Optimization Techniques"]
 next_steps: ["Milestone 05 - TinyGPT", "Wake Vision Competition"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 20. Capstone - Submission Infrastructure
 
-**OPTIMIZATION TIER CAPSTONE** | Difficulty: $\bigstar$$\bigstar$$\bigstar$$\bigstar$ (4/4) | Time: 5-8 hours
+**OPTIMIZATION TIER CAPSTONE** | Difficulty: ●●●● (4/4) | Time: 5-8 hours
 
 ## Overview
 

@@ -1,7 +1,7 @@
 ---
 title: "Optimizers"
 description: "Gradient-based parameter optimization algorithms - SGD, Adam, and AdamW"
-difficulty: "$\bigstar$$\bigstar$$\bigstar$$\bigstar$"
+difficulty: "●●●●"
 time_estimate: "6-8 hours"
 prerequisites: ["tensor", "autograd"]
 next_steps: ["training"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 06. Optimizers
 
-**FOUNDATION TIER** | Difficulty: $\bigstar$$\bigstar$$\bigstar$$\bigstar$ (4/4) | Time: 6-8 hours
+**FOUNDATION TIER** | Difficulty: ●●●● (4/4) | Time: 6-8 hours
 
 ## Overview
 

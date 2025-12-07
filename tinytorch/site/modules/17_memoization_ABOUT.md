@@ -1,7 +1,7 @@
 ---
 title: "Memoization - Computational Reuse for Inference"
 description: "Transform O(n²) transformer generation into O(n) through KV caching, achieving 10-15x speedup"
-difficulty: "$\bigstar$$\bigstar$$\bigstar$ (3/4)"
+difficulty: "●●● (3/4)"
 time_estimate: "4-5 hours"
 prerequisites: ["Transformers", "Profiling", "Quantization", "Compression"]
 next_steps: ["Acceleration"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 17. Memoization - Computational Reuse for Inference
 
-**OPTIMIZATION TIER** | Difficulty: $\bigstar$$\bigstar$$\bigstar$ (3/4) | Time: 4-5 hours
+**OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 4-5 hours
 
 ## Overview
 

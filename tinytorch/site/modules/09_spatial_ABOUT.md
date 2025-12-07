@@ -1,7 +1,7 @@
 ---
 title: "Spatial Operations"
 description: "Build CNNs from scratch - implement Conv2d, pooling, and spatial processing for computer vision"
-difficulty: "$\bigstar$$\bigstar$$\bigstar$"
+difficulty: "●●●"
 time_estimate: "6-8 hours"
 prerequisites: ["Tensor", "Activations", "Layers", "DataLoader"]
 next_steps: ["Tokenization"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 09. Spatial Operations
 
-**ARCHITECTURE TIER** | Difficulty: $\bigstar$$\bigstar$$\bigstar$ (3/4) | Time: 6-8 hours
+**ARCHITECTURE TIER** | Difficulty: ●●● (3/4) | Time: 6-8 hours
 
 ## Overview
 

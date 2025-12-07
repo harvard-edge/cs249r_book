@@ -1,7 +1,7 @@
 ---
 title: "Profiling - Performance Measurement for ML Systems"
 description: "Build profilers that measure parameters, FLOPs, memory, and latency to guide optimization decisions"
-difficulty: "$\bigstar$$\bigstar$$\bigstar$"
+difficulty: "●●●"
 time_estimate: "5-6 hours"
 prerequisites: ["Modules 01-13 - Complete ML implementation stack"]
 next_steps: ["Module 15 - Quantization"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 14. Profiling - Performance Measurement for ML Systems
 
-**OPTIMIZATION TIER** | Difficulty: $\bigstar$$\bigstar$$\bigstar$ (3/4) | Time: 5-6 hours
+**OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 5-6 hours
 
 ## Overview
 

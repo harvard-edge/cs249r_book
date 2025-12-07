@@ -1,7 +1,7 @@
 ---
 title: "Tensor"
 description: "Build the fundamental N-dimensional array data structure that powers all machine learning"
-difficulty: "$\bigstar$"
+difficulty: "●"
 time_estimate: "4-6 hours"
 prerequisites: []
 next_steps: ["02_activations"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 01. Tensor
 
-**FOUNDATION TIER** | Difficulty: $\bigstar$ (1/4) | Time: 4-6 hours
+**FOUNDATION TIER** | Difficulty: ● (1/4) | Time: 4-6 hours
 
 ## Overview
 

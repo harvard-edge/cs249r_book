@@ -1,7 +1,7 @@
 ---
 title: "Training"
 description: "Complete training loops with scheduling, gradient clipping, and checkpointing"
-difficulty: "$\bigstar$$\bigstar$$\bigstar$$\bigstar$"
+difficulty: "●●●●"
 time_estimate: "6-8 hours"
 prerequisites: ["tensor", "activations", "layers", "losses", "autograd", "optimizers"]
 next_steps: ["dataloader"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 07. Training
 
-**FOUNDATION TIER** | Difficulty: $\bigstar$$\bigstar$$\bigstar$$\bigstar$ (4/4) | Time: 6-8 hours
+**FOUNDATION TIER** | Difficulty: ●●●● (4/4) | Time: 6-8 hours
 
 ## Overview
 

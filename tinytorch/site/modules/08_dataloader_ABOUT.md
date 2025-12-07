@@ -1,7 +1,7 @@
 ---
 title: "DataLoader - Data Pipeline Engineering"
 description: "Build production-grade data loading infrastructure for efficient ML training"
-difficulty: "$\bigstar$$\bigstar$$\bigstar$"
+difficulty: "●●●"
 time_estimate: "4-5 hours"
 prerequisites: ["Tensor", "Layers", "Training"]
 next_steps: ["Spatial (CNNs)"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 08. DataLoader
 
-**ARCHITECTURE TIER** | Difficulty: $\bigstar$$\bigstar$$\bigstar$ (3/4) | Time: 4-5 hours
+**ARCHITECTURE TIER** | Difficulty: ●●● (3/4) | Time: 4-5 hours
 
 ## Overview
 
