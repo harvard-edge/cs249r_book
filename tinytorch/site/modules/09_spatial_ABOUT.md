@@ -1,7 +1,7 @@
 ---
 title: "Spatial Operations"
 description: "Build CNNs from scratch - implement Conv2d, pooling, and spatial processing for computer vision"
-difficulty: "⭐⭐⭐"
+difficulty: "$\bigstar$$\bigstar$$\bigstar$"
 time_estimate: "6-8 hours"
 prerequisites: ["Tensor", "Activations", "Layers", "DataLoader"]
 next_steps: ["Tokenization"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 09. Spatial Operations
 
-**ARCHITECTURE TIER** | Difficulty: ⭐⭐⭐ (3/4) | Time: 6-8 hours
+**ARCHITECTURE TIER** | Difficulty: $\bigstar$$\bigstar$$\bigstar$ (3/4) | Time: 6-8 hours
 
 ## Overview
 
@@ -279,11 +279,11 @@ python -m pytest tests/ -k spatial -v
 
 ### Test Coverage Areas
 
-- ✅ **Conv2d Shape Propagation**: Verifies output dimensions match formula (H+2P-K)//S+1 for various kernel sizes, strides, and padding
-- ✅ **Weight Sharing Validation**: Confirms same filter applies at all spatial positions, achieving parameter reduction vs dense layers
-- ✅ **Pooling Correctness**: Tests MaxPool extracts maximum values and AvgPool computes correct averages across windows
-- ✅ **Translation Invariance**: Verifies CNNs detect features regardless of spatial position through weight sharing
-- ✅ **Complete CNN Pipeline**: End-to-end test processing CIFAR-10 images through Conv → Pool → Flatten → Dense architecture
+- ✓ **Conv2d Shape Propagation**: Verifies output dimensions match formula (H+2P-K)//S+1 for various kernel sizes, strides, and padding
+- ✓ **Weight Sharing Validation**: Confirms same filter applies at all spatial positions, achieving parameter reduction vs dense layers
+- ✓ **Pooling Correctness**: Tests MaxPool extracts maximum values and AvgPool computes correct averages across windows
+- ✓ **Translation Invariance**: Verifies CNNs detect features regardless of spatial position through weight sharing
+- ✓ **Complete CNN Pipeline**: End-to-end test processing CIFAR-10 images through Conv → Pool → Flatten → Dense architecture
 
 ### Inline Testing & Validation
 
@@ -295,25 +295,25 @@ cd /Users/VJ/GitHub/TinyTorch/modules/09_spatial
 python spatial_dev.py
 
 # Expected output:
-🔬 Unit Test: Conv2d...
-✅ Sliding window convolution works correctly
-✅ Weight sharing applied at all positions
-✅ Output shape matches calculated dimensions
-✅ Parameter count: 896 (vs 32,000 for dense layer)
-📈 Progress: Conv2d forward pass implemented
+ Unit Test: Conv2d...
+ Sliding window convolution works correctly
+ Weight sharing applied at all positions
+ Output shape matches calculated dimensions
+ Parameter count: 896 (vs 32,000 for dense layer)
+ Progress: Conv2d forward pass implemented
 
-🔬 Unit Test: Pooling Operations...
-✅ MaxPool2d extracts maximum values correctly
-✅ AvgPool2d computes averages correctly
-✅ Spatial dimensions reduced by factor of kernel_size
-✅ Translation invariance property verified
-📈 Progress: Pooling layers implemented
+ Unit Test: Pooling Operations...
+ MaxPool2d extracts maximum values correctly
+ AvgPool2d computes averages correctly
+ Spatial dimensions reduced by factor of kernel_size
+ Translation invariance property verified
+ Progress: Pooling layers implemented
 
-🔬 Unit Test: SimpleCNN Integration...
-✅ Forward pass through all layers successful
-✅ Output shape: (32, 10) for 10 CIFAR-10 classes
-✅ Total parameters: ~500K (efficient!)
-📈 Progress: CNN architecture complete
+ Unit Test: SimpleCNN Integration...
+ Forward pass through all layers successful
+ Output shape: (32, 10) for 10 CIFAR-10 classes
+ Total parameters: ~500K (efficient!)
+ Progress: CNN architecture complete
 ```
 
 ### Manual Testing Examples
@@ -447,21 +447,21 @@ Choose your preferred way to engage with this module:
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card} 🚀 Launch Binder
+```{grid-item-card}  Launch Binder
 :link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/09_spatial/spatial_dev.ipynb
 :class-header: bg-light
 
 Run this module interactively in your browser. No installation required!
 ```
 
-```{grid-item-card} ⚡ Open in Colab
+```{grid-item-card}  Open in Colab
 :link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/09_spatial/spatial_dev.ipynb
 :class-header: bg-light
 
 Use Google Colab for GPU access and cloud compute power.
 ```
 
-```{grid-item-card} 📖 View Source
+```{grid-item-card}  View Source
 :link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/09_spatial/spatial_dev.ipynb
 :class-header: bg-light
 
@@ -470,7 +470,7 @@ Browse the Jupyter notebook source and understand the implementation.
 
 ````
 
-```{admonition} 💾 Save Your Progress
+```{admonition}  Save Your Progress
 :class: tip
 **Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
 ```

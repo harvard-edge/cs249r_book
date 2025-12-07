@@ -1,7 +1,7 @@
 ---
 title: "Compression - Pruning and Model Compression"
 description: "Implement pruning techniques to reduce model size while preserving accuracy"
-difficulty: "⭐⭐⭐"
+difficulty: "$\bigstar$$\bigstar$$\bigstar$"
 time_estimate: "5-6 hours"
 prerequisites: ["15_quantization"]
 next_steps: ["17_memoization"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 16. Compression - Pruning and Model Compression
 
-**OPTIMIZATION TIER** | Difficulty: ⭐⭐⭐ (3/4) | Time: 5-6 hours
+**OPTIMIZATION TIER** | Difficulty: $\bigstar$$\bigstar$$\bigstar$ (3/4) | Time: 5-6 hours
 
 ## Overview
 
@@ -300,31 +300,31 @@ python -m pytest tests/ -k compression -v
 
 ### Test Coverage Areas
 
-- ✅ **Sparsity measurement**: Correctly counts zero vs total parameters
-- ✅ **Magnitude pruning**: Achieves target sparsity with appropriate threshold selection
-- ✅ **Structured pruning**: Removes entire channels, creates block sparsity patterns
-- ✅ **Knowledge distillation**: Combines soft and hard losses with temperature scaling
-- ✅ **Low-rank approximation**: Reduces parameters through SVD factorization
-- ✅ **Compression pipeline**: Sequential application preserves functionality
+- ✓ **Sparsity measurement**: Correctly counts zero vs total parameters
+- ✓ **Magnitude pruning**: Achieves target sparsity with appropriate threshold selection
+- ✓ **Structured pruning**: Removes entire channels, creates block sparsity patterns
+- ✓ **Knowledge distillation**: Combines soft and hard losses with temperature scaling
+- ✓ **Low-rank approximation**: Reduces parameters through SVD factorization
+- ✓ **Compression pipeline**: Sequential application preserves functionality
 
 ### Inline Testing & Validation
 
 The module includes comprehensive validation:
 
 ```python
-🔬 Unit Test: Measure Sparsity...
-✅ measure_sparsity works correctly!
+ Unit Test: Measure Sparsity...
+ measure_sparsity works correctly!
 
-🔬 Unit Test: Magnitude Prune...
-✅ magnitude_prune works correctly!
+ Unit Test: Magnitude Prune...
+ magnitude_prune works correctly!
 
-🔬 Unit Test: Structured Prune...
-✅ structured_prune works correctly!
+ Unit Test: Structured Prune...
+ structured_prune works correctly!
 
-🔬 Integration Test: Complete compression pipeline...
-✅ Achieved 82.5% sparsity with 2 techniques
+ Integration Test: Complete compression pipeline...
+ Achieved 82.5% sparsity with 2 techniques
 
-📊 Progress: Compression module ✓
+ Progress: Compression module ✓
 ```
 
 ### Manual Testing Examples
@@ -390,21 +390,21 @@ Choose your preferred way to engage with this module:
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card} 🚀 Launch Binder
+```{grid-item-card}  Launch Binder
 :link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/16_compression/compression_dev.ipynb
 :class-header: bg-light
 
 Run this module interactively in your browser. No installation required!
 ```
 
-```{grid-item-card} ⚡ Open in Colab
+```{grid-item-card}  Open in Colab
 :link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/16_compression/compression_dev.ipynb
 :class-header: bg-light
 
 Use Google Colab for GPU access and cloud compute power.
 ```
 
-```{grid-item-card} 📖 View Source
+```{grid-item-card}  View Source
 :link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/16_compression/compression_dev.py
 :class-header: bg-light
 
@@ -413,7 +413,7 @@ Browse the Python source code and understand the implementation.
 
 ````
 
-```{admonition} 💾 Save Your Progress
+```{admonition}  Save Your Progress
 :class: tip
 **Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
 ```

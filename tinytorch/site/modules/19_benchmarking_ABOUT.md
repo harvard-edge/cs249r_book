@@ -1,7 +1,7 @@
 ---
 title: "Benchmarking - Fair Performance Comparison"
 description: "Statistical rigor and standardized metrics for optimization validation"
-difficulty: "⭐⭐⭐"
+difficulty: "$\bigstar$$\bigstar$$\bigstar$"
 time_estimate: "5-6 hours"
 prerequisites: ["Profiling", "All optimization techniques"]
 next_steps: ["Competition (Capstone)"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 19. Benchmarking - Fair Performance Comparison
 
-**OPTIMIZATION TIER** | Difficulty: ⭐⭐⭐ (3/4) | Time: 5-6 hours
+**OPTIMIZATION TIER** | Difficulty: $\bigstar$$\bigstar$$\bigstar$ (3/4) | Time: 5-6 hours
 
 ## Overview
 
@@ -279,38 +279,38 @@ python -m pytest tests/ -k benchmarking -v
 
 ### Test Coverage Areas
 
-- ✅ **Statistical Calculations**: Mean, std, median, confidence intervals computed correctly
-- ✅ **Multiple Runs**: Warmup and measurement phases work properly
-- ✅ **Normalized Metrics**: Speedup, compression, efficiency calculated accurately
-- ✅ **Fair Comparison**: Same workload enforcement, baseline vs optimized
-- ✅ **Result Serialization**: BenchmarkResult converts to dict for storage
-- ✅ **Visualization**: Plots generate with proper formatting and error bars
-- ✅ **System Info**: Metadata captured for reproducibility
-- ✅ **Pareto Analysis**: Optimal trade-off points identified correctly
+- ✓ **Statistical Calculations**: Mean, std, median, confidence intervals computed correctly
+- ✓ **Multiple Runs**: Warmup and measurement phases work properly
+- ✓ **Normalized Metrics**: Speedup, compression, efficiency calculated accurately
+- ✓ **Fair Comparison**: Same workload enforcement, baseline vs optimized
+- ✓ **Result Serialization**: BenchmarkResult converts to dict for storage
+- ✓ **Visualization**: Plots generate with proper formatting and error bars
+- ✓ **System Info**: Metadata captured for reproducibility
+- ✓ **Pareto Analysis**: Optimal trade-off points identified correctly
 
 ### Inline Testing & Validation
 
 The module includes comprehensive unit tests:
 
 ```python
-🔬 Unit Test: BenchmarkResult...
-✅ Mean calculation correct: 3.0
-✅ Std calculation matches statistics module
-✅ Confidence intervals bound mean
-✅ Serialization preserves data
-📈 Progress: BenchmarkResult ✓
+ Unit Test: BenchmarkResult...
+ Mean calculation correct: 3.0
+ Std calculation matches statistics module
+ Confidence intervals bound mean
+ Serialization preserves data
+ Progress: BenchmarkResult ✓
 
-🔬 Unit Test: Benchmark latency...
-✅ Warmup runs executed before measurement
-✅ Multiple measurement runs collected
-✅ Results include mean ± CI
-📈 Progress: Benchmark ✓
+ Unit Test: Benchmark latency...
+ Warmup runs executed before measurement
+ Multiple measurement runs collected
+ Results include mean ± CI
+ Progress: Benchmark ✓
 
-🔬 Unit Test: BenchmarkSuite...
-✅ All benchmark types run (latency, accuracy, memory, energy)
-✅ Results organized by metric type
-✅ Visualizations generated
-📈 Progress: BenchmarkSuite ✓
+ Unit Test: BenchmarkSuite...
+ All benchmark types run (latency, accuracy, memory, energy)
+ Results organized by metric type
+ Visualizations generated
+ Progress: BenchmarkSuite ✓
 ```
 
 ### Manual Testing Examples

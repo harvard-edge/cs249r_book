@@ -1,7 +1,7 @@
 ---
 title: "Quantization - Reduced Precision for Efficiency"
 description: "INT8 quantization fundamentals, calibration strategies, and accuracy-efficiency trade-offs"
-difficulty: "⭐⭐⭐"
+difficulty: "$\bigstar$$\bigstar$$\bigstar$"
 time_estimate: "5-6 hours"
 prerequisites: ["Profiling"]
 next_steps: ["Compression"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 15. Quantization - Reduced Precision for Efficiency
 
-**OPTIMIZATION TIER** | Difficulty: ⭐⭐⭐ (3/4) | Time: 5-6 hours
+**OPTIMIZATION TIER** | Difficulty: $\bigstar$$\bigstar$$\bigstar$ (3/4) | Time: 5-6 hours
 
 ## Overview
 
@@ -306,12 +306,12 @@ python -m pytest tests/ -k quantization -v
 
 ### Test Coverage Areas
 
-- ✅ **Quantization Correctness**: FP32 → INT8 → FP32 roundtrip error bounds (< 0.5% mean error)
-- ✅ **Memory Reduction**: Verify 4× reduction in model size (weights + biases)
-- ✅ **Symmetric vs Asymmetric**: Both schemes produce valid INT8 in [-128, 127]
-- ✅ **Calibration Impact**: Percentile clipping reduces quantization error vs naive min/max
-- ✅ **QuantizedLinear Equivalence**: Output matches FP32 Linear within tolerance (< 1% difference)
-- ✅ **Model-Level Quantization**: Full network quantization preserves accuracy (< 2% degradation)
+- ✓ **Quantization Correctness**: FP32 → INT8 → FP32 roundtrip error bounds (< 0.5% mean error)
+- ✓ **Memory Reduction**: Verify 4× reduction in model size (weights + biases)
+- ✓ **Symmetric vs Asymmetric**: Both schemes produce valid INT8 in [-128, 127]
+- ✓ **Calibration Impact**: Percentile clipping reduces quantization error vs naive min/max
+- ✓ **QuantizedLinear Equivalence**: Output matches FP32 Linear within tolerance (< 1% difference)
+- ✓ **Model-Level Quantization**: Full network quantization preserves accuracy (< 2% degradation)
 
 ### Inline Testing & Quantization Analysis
 
@@ -319,16 +319,16 @@ The module includes comprehensive validation with real-time feedback:
 
 ```python
 # Example inline test output
-🔬 Unit Test: quantize_int8()...
-✅ Symmetric quantization: range [-128, 127] ✓
-✅ Scale calculation: max_val / 127 = 0.0234 ✓
-✅ Roundtrip error: 0.31% mean error ✓
-📈 Progress: quantize_int8() ✓
+ Unit Test: quantize_int8()...
+ Symmetric quantization: range [-128, 127] ✓
+ Scale calculation: max_val / 127 = 0.0234 ✓
+ Roundtrip error: 0.31% mean error ✓
+ Progress: quantize_int8() ✓
 
-🔬 Unit Test: QuantizedLinear...
-✅ Memory reduction: 145KB → 36KB (4.0×) ✓
-✅ Output equivalence: 0.43% max difference vs FP32 ✓
-📈 Progress: QuantizedLinear ✓
+ Unit Test: QuantizedLinear...
+ Memory reduction: 145KB → 36KB (4.0×) ✓
+ Output equivalence: 0.43% max difference vs FP32 ✓
+ Progress: QuantizedLinear ✓
 ```
 
 ### Manual Testing Examples

@@ -1,7 +1,7 @@
 ---
 title: "Layers"
 description: "Build the fundamental neural network building blocks: Linear layers with weight initialization and Dropout for regularization"
-difficulty: "⭐⭐"
+difficulty: "$\bigstar$$\bigstar$"
 time_estimate: "4-5 hours"
 prerequisites: ["01_tensor", "02_activations"]
 next_steps: ["04_losses"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 03. Layers
 
-**FOUNDATION TIER** | Difficulty: ⭐⭐ (2/4) | Time: 4-5 hours
+**FOUNDATION TIER** | Difficulty: $\bigstar$$\bigstar$ (2/4) | Time: 4-5 hours
 
 ## Overview
 
@@ -171,13 +171,13 @@ python -m pytest tests/ -k layers -v
 
 ### Test Coverage Areas
 
-- ✅ **Linear Layer Functionality**: Verify `y = xW + b` computation with correct matrix dimensions and broadcasting
-- ✅ **Xavier Initialization**: Ensure weights scaled by `sqrt(1/in_features)` for gradient stability
-- ✅ **Parameter Management**: Confirm `parameters()` returns all trainable tensors with `requires_grad=True`
-- ✅ **Dropout Training Mode**: Validate probabilistic masking with correct `1/(1-p)` scaling
-- ✅ **Dropout Inference Mode**: Verify passthrough behavior without modification during evaluation
-- ✅ **Layer Composition**: Test multi-layer forward passes with mixed layer types
-- ✅ **Edge Cases**: Handle empty batches, single samples, no-bias configurations, and probability boundaries
+- ✓ **Linear Layer Functionality**: Verify `y = xW + b` computation with correct matrix dimensions and broadcasting
+- ✓ **Xavier Initialization**: Ensure weights scaled by `sqrt(1/in_features)` for gradient stability
+- ✓ **Parameter Management**: Confirm `parameters()` returns all trainable tensors with `requires_grad=True`
+- ✓ **Dropout Training Mode**: Validate probabilistic masking with correct `1/(1-p)` scaling
+- ✓ **Dropout Inference Mode**: Verify passthrough behavior without modification during evaluation
+- ✓ **Layer Composition**: Test multi-layer forward passes with mixed layer types
+- ✓ **Edge Cases**: Handle empty batches, single samples, no-bias configurations, and probability boundaries
 
 ### Inline Testing & Validation
 
@@ -185,27 +185,27 @@ The module includes comprehensive inline tests with educational feedback:
 
 ```python
 # Example inline test output
-🔬 Unit Test: Linear Layer...
-✅ Linear layer computes y = xW + b correctly
-✅ Weight initialization within expected Xavier range
-✅ Bias initialized to zeros
-✅ Output shape matches expected dimensions (32, 256)
-✅ Parameter list contains weight and bias tensors
-📈 Progress: Linear Layer ✓
+ Unit Test: Linear Layer...
+ Linear layer computes y = xW + b correctly
+ Weight initialization within expected Xavier range
+ Bias initialized to zeros
+ Output shape matches expected dimensions (32, 256)
+ Parameter list contains weight and bias tensors
+ Progress: Linear Layer ✓
 
-🔬 Unit Test: Dropout Layer...
-✅ Inference mode passes through unchanged
-✅ Training mode zeros ~50% of elements
-✅ Survivors scaled by 1/(1-p) = 2.0
-✅ Zero dropout (p=0.0) preserves all values
-✅ Full dropout (p=1.0) zeros everything
-📈 Progress: Dropout Layer ✓
+ Unit Test: Dropout Layer...
+ Inference mode passes through unchanged
+ Training mode zeros ~50% of elements
+ Survivors scaled by 1/(1-p) = 2.0
+ Zero dropout (p=0.0) preserves all values
+ Full dropout (p=1.0) zeros everything
+ Progress: Dropout Layer ✓
 
-🔬 Integration Test: Multi-layer Network...
-✅ 3-layer network processes batch: (32, 784) → (32, 10)
-✅ Parameter count: 235,146 parameters across 6 tensors
-✅ All parameters have requires_grad=True
-📈 Progress: Layer Composition ✓
+ Integration Test: Multi-layer Network...
+ 3-layer network processes batch: (32, 784) → (32, 10)
+ Parameter count: 235,146 parameters across 6 tensors
+ All parameters have requires_grad=True
+ Progress: Layer Composition ✓
 ```
 
 ### Manual Testing Examples
@@ -280,21 +280,21 @@ Choose your preferred way to engage with this module:
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card} 🚀 Launch Binder
+```{grid-item-card}  Launch Binder
 :link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/03_layers/layers_dev.ipynb
 :class-header: bg-light
 
 Run this module interactively in your browser. No installation required!
 ```
 
-```{grid-item-card} ⚡ Open in Colab
+```{grid-item-card}  Open in Colab
 :link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/03_layers/layers_dev.ipynb
 :class-header: bg-light
 
 Use Google Colab for GPU access and cloud compute power.
 ```
 
-```{grid-item-card} 📖 View Source
+```{grid-item-card}  View Source
 :link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/03_layers/layers_dev.py
 :class-header: bg-light
 
@@ -303,7 +303,7 @@ Browse the Python source code and understand the implementation.
 
 ````
 
-```{admonition} 💾 Save Your Progress
+```{admonition}  Save Your Progress
 :class: tip
 **Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
 

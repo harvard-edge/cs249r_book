@@ -1,7 +1,7 @@
 ---
 title: "Capstone - Submission Infrastructure"
 description: "Build professional benchmarking workflows that generate standardized submissions for ML competitions"
-difficulty: "⭐⭐⭐⭐"
+difficulty: "$\bigstar$$\bigstar$$\bigstar$$\bigstar$"
 time_estimate: "5-8 hours"
 prerequisites: ["Module 19 - Benchmarking", "Modules 14-18 - Optimization Techniques"]
 next_steps: ["Milestone 05 - TinyGPT", "Wake Vision Competition"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 20. Capstone - Submission Infrastructure
 
-**OPTIMIZATION TIER CAPSTONE** | Difficulty: ⭐⭐⭐⭐ (4/4) | Time: 5-8 hours
+**OPTIMIZATION TIER CAPSTONE** | Difficulty: $\bigstar$$\bigstar$$\bigstar$$\bigstar$ (4/4) | Time: 5-8 hours
 
 ## Overview
 
@@ -193,7 +193,7 @@ def generate_submission(
 def save_submission(submission: Dict[str, Any], filepath: str):
     """Save submission to JSON file with proper formatting."""
     Path(filepath).write_text(json.dumps(submission, indent=2))
-    print(f"✅ Submission saved to: {filepath}")
+    print(f" Submission saved to: {filepath}")
     return filepath
 ```
 
@@ -312,7 +312,7 @@ def run_optimization_workflow_example():
     # Display improvements
     if 'improvements' in submission:
         imp = submission['improvements']
-        print(f"\n  📈 Results:")
+        print(f"\n   Results:")
         print(f"     Speedup: {imp['speedup']:.2f}x")
         print(f"     Compression: {imp['compression_ratio']:.2f}x")
         print(f"     Accuracy Δ: {imp['accuracy_delta']*100:+.1f}%")
@@ -320,7 +320,7 @@ def run_optimization_workflow_example():
     # Step 6: Save submission
     save_submission(submission, "optimization_submission.json")
 
-    print("\n✅ Complete optimization workflow demonstrated!")
+    print("\n Complete optimization workflow demonstrated!")
     return submission
 ```
 
@@ -457,74 +457,74 @@ tito test capstone
 python -m pytest tests/ -k capstone -v
 
 # Expected output:
-# ✅ test_simple_mlp - Model creation and forward pass
-# ✅ test_benchmark_report - Metrics collection and storage
-# ✅ test_submission_generation - JSON creation
-# ✅ test_submission_schema - Schema validation
-# ✅ test_submission_with_optimization - Before/after comparison
-# ✅ test_improvements_calculation - Speedup/compression/accuracy
-# ✅ test_json_serialization - File saving and loading
+#  test_simple_mlp - Model creation and forward pass
+#  test_benchmark_report - Metrics collection and storage
+#  test_submission_generation - JSON creation
+#  test_submission_schema - Schema validation
+#  test_submission_with_optimization - Before/after comparison
+#  test_improvements_calculation - Speedup/compression/accuracy
+#  test_json_serialization - File saving and loading
 ```
 
 ### Test Coverage Areas
 
-- ✅ **SimpleMLP Model**: Forward pass, parameter counting, output shape validation
-- ✅ **BenchmarkReport**: Metric collection, system info capture, statistical measurement
-- ✅ **Submission Generation**: Schema structure, field presence, type validation
-- ✅ **Schema Validation**: Required fields, value ranges, type correctness
-- ✅ **Optimization Comparison**: Improvements calculation, technique tracking
-- ✅ **JSON Serialization**: File writing, round-trip preservation, formatting
+- ✓ **SimpleMLP Model**: Forward pass, parameter counting, output shape validation
+- ✓ **BenchmarkReport**: Metric collection, system info capture, statistical measurement
+- ✓ **Submission Generation**: Schema structure, field presence, type validation
+- ✓ **Schema Validation**: Required fields, value ranges, type correctness
+- ✓ **Optimization Comparison**: Improvements calculation, technique tracking
+- ✓ **JSON Serialization**: File writing, round-trip preservation, formatting
 
 ### Inline Testing & Validation
 
 The module includes comprehensive unit tests:
 
 ```python
-🔬 Unit Test: SimpleMLP...
-✅ Model creation with custom parameters
-✅ Parameter count: 263 (10×20 + 20 + 20×3 + 3)
-✅ Forward pass output shape: (5, 3)
-✅ No NaN values in output
-📈 Progress: SimpleMLP ✓
+ Unit Test: SimpleMLP...
+ Model creation with custom parameters
+ Parameter count: 263 (10×20 + 20 + 20×3 + 3)
+ Forward pass output shape: (5, 3)
+ No NaN values in output
+ Progress: SimpleMLP ✓
 
-🔬 Unit Test: BenchmarkReport...
-✅ Model name and timestamp set correctly
-✅ System info collected (platform, python_version, numpy_version)
-✅ Metrics: parameter_count, model_size_mb, accuracy, latency, throughput
-✅ Metric types and ranges validated
-📈 Progress: BenchmarkReport ✓
+ Unit Test: BenchmarkReport...
+ Model name and timestamp set correctly
+ System info collected (platform, python_version, numpy_version)
+ Metrics: parameter_count, model_size_mb, accuracy, latency, throughput
+ Metric types and ranges validated
+ Progress: BenchmarkReport ✓
 
-🔬 Unit Test: Submission Generation...
-✅ Baseline submission structure complete
-✅ Version, type, timestamp, system_info, baseline present
-✅ Student name included when provided
-📈 Progress: generate_submission() ✓
+ Unit Test: Submission Generation...
+ Baseline submission structure complete
+ Version, type, timestamp, system_info, baseline present
+ Student name included when provided
+ Progress: generate_submission() ✓
 
-🔬 Unit Test: Submission Schema...
-✅ Required fields present
-✅ Field types correct (str, dict, float, int)
-✅ Baseline and metrics structure validated
-✅ System info contains platform and python_version
-📈 Progress: Schema validation ✓
+ Unit Test: Submission Schema...
+ Required fields present
+ Field types correct (str, dict, float, int)
+ Baseline and metrics structure validated
+ System info contains platform and python_version
+ Progress: Schema validation ✓
 
-🔬 Unit Test: Submission with Optimization...
-✅ Optimized section present with techniques
-✅ Improvements section with speedup, compression, accuracy_delta
-✅ Techniques list matches input
-📈 Progress: Optimization comparison ✓
+ Unit Test: Submission with Optimization...
+ Optimized section present with techniques
+ Improvements section with speedup, compression, accuracy_delta
+ Techniques list matches input
+ Progress: Optimization comparison ✓
 
-🔬 Unit Test: Improvements Calculation...
-✅ Speedup: 2.0x (baseline 10.0ms / optimized 5.0ms)
-✅ Compression: 2.0x (baseline 4.0MB / optimized 2.0MB)
-✅ Accuracy delta: -0.05 (0.75 - 0.80)
-📈 Progress: Improvements math ✓
+ Unit Test: Improvements Calculation...
+ Speedup: 2.0x (baseline 10.0ms / optimized 5.0ms)
+ Compression: 2.0x (baseline 4.0MB / optimized 2.0MB)
+ Accuracy delta: -0.05 (0.75 - 0.80)
+ Progress: Improvements math ✓
 
-🔬 Unit Test: JSON Serialization...
-✅ File created and exists
-✅ JSON valid and loadable
-✅ Structure preserved (version, student_name, metrics)
-✅ Round-trip serialization successful
-📈 Progress: File I/O ✓
+ Unit Test: JSON Serialization...
+ File created and exists
+ JSON valid and loadable
+ Structure preserved (version, student_name, metrics)
+ Round-trip serialization successful
+ Progress: File I/O ✓
 ```
 
 ### Manual Testing Examples
@@ -655,21 +655,21 @@ Choose your preferred way to engage with this capstone:
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card} 🚀 Launch Binder
+```{grid-item-card}  Launch Binder
 :link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/20_capstone/20_capstone.py
 :class-header: bg-light
 
 Run this capstone interactively in your browser. No installation required!
 ```
 
-```{grid-item-card} ⚡ Open in Colab
+```{grid-item-card}  Open in Colab
 :link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/20_capstone/20_capstone.ipynb
 :class-header: bg-light
 
 Use Google Colab for cloud compute power and easy sharing.
 ```
 
-```{grid-item-card} 📖 View Source
+```{grid-item-card}  View Source
 :link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/20_capstone/20_capstone.py
 :class-header: bg-light
 
@@ -678,7 +678,7 @@ Browse the Python source code and understand the implementation.
 
 ````
 
-```{admonition} 💡 Local Development Recommended
+```{admonition}  Local Development Recommended
 :class: tip
 This capstone involves benchmarking workflows that benefit from consistent hardware and persistent results. Local setup provides better control over measurement conditions and faster iteration cycles.
 

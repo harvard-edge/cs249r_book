@@ -1,7 +1,7 @@
 ---
 title: "Training"
 description: "Complete training loops with scheduling, gradient clipping, and checkpointing"
-difficulty: "⭐⭐⭐⭐"
+difficulty: "$\bigstar$$\bigstar$$\bigstar$$\bigstar$"
 time_estimate: "6-8 hours"
 prerequisites: ["tensor", "activations", "layers", "losses", "autograd", "optimizers"]
 next_steps: ["dataloader"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 07. Training
 
-**FOUNDATION TIER** | Difficulty: ⭐⭐⭐⭐ (4/4) | Time: 6-8 hours
+**FOUNDATION TIER** | Difficulty: $\bigstar$$\bigstar$$\bigstar$$\bigstar$ (4/4) | Time: 6-8 hours
 
 ## Overview
 
@@ -504,21 +504,21 @@ Choose your preferred way to engage with this module:
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card} 🚀 Launch Binder
+```{grid-item-card}  Launch Binder
 :link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/07_training/training.ipynb
 :class-header: bg-light
 
 Run this module interactively in your browser. No installation required!
 ```
 
-```{grid-item-card} ⚡ Open in Colab
+```{grid-item-card}  Open in Colab
 :link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/07_training/training.ipynb
 :class-header: bg-light
 
 Use Google Colab for GPU access and cloud compute power.
 ```
 
-```{grid-item-card} 📖 View Source
+```{grid-item-card}  View Source
 :link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/07_training/training.py
 :class-header: bg-light
 
@@ -527,7 +527,7 @@ Browse the Python source code and understand the implementation.
 
 ````
 
-```{admonition} 💾 Save Your Progress
+```{admonition}  Save Your Progress
 :class: tip
 **Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
 

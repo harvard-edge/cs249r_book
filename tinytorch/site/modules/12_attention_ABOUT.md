@@ -1,7 +1,7 @@
 ---
 title: "Attention - The Mechanism That Powers Modern AI"
 description: "Build scaled dot-product and multi-head attention mechanisms from scratch"
-difficulty: "⭐⭐⭐"
+difficulty: "$\bigstar$$\bigstar$$\bigstar$"
 time_estimate: "5-6 hours"
 prerequisites: ["01_tensor", "02_activations", "03_layers", "11_embeddings"]
 next_steps: ["13_transformers"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 12. Attention - The Mechanism That Powers Modern AI
 
-**ARCHITECTURE TIER** | Difficulty: ⭐⭐⭐ (3/4) | Time: 5-6 hours
+**ARCHITECTURE TIER** | Difficulty: $\bigstar$$\bigstar$$\bigstar$ (3/4) | Time: 5-6 hours
 
 ## Overview
 
@@ -346,37 +346,37 @@ python modules/12_attention/attention_dev.py
 
 ### Test Coverage Areas
 
-- ✅ **Attention Scores Computation**: Verifies QK^T produces correct shapes and values
-- ✅ **Numerical Stability**: Confirms 1/√d_k scaling prevents softmax saturation
-- ✅ **Probability Normalization**: Validates attention weights sum to 1.0 per query
-- ✅ **Causal Masking**: Tests that future positions get zero attention weight
-- ✅ **Multi-Head Configuration**: Checks head splitting, parallel processing, and concatenation
-- ✅ **Shape Preservation**: Ensures input shape equals output shape
-- ✅ **Gradient Flow**: Verifies differentiability through attention computation graph
-- ✅ **Computational Complexity**: Profiles O(n²) scaling with increasing sequence length
+- ✓ **Attention Scores Computation**: Verifies QK^T produces correct shapes and values
+- ✓ **Numerical Stability**: Confirms 1/√d_k scaling prevents softmax saturation
+- ✓ **Probability Normalization**: Validates attention weights sum to 1.0 per query
+- ✓ **Causal Masking**: Tests that future positions get zero attention weight
+- ✓ **Multi-Head Configuration**: Checks head splitting, parallel processing, and concatenation
+- ✓ **Shape Preservation**: Ensures input shape equals output shape
+- ✓ **Gradient Flow**: Verifies differentiability through attention computation graph
+- ✓ **Computational Complexity**: Profiles O(n²) scaling with increasing sequence length
 
 ### Inline Testing & Complexity Analysis
 
 The module includes comprehensive validation and performance analysis:
 
 ```python
-🔬 Unit Test: Scaled Dot-Product Attention...
-✅ Attention scores computed correctly (QK^T shape verified)
-✅ Scaling factor 1/√d_k applied
-✅ Softmax normalization verified (each row sums to 1.0)
-✅ Output shape matches expected (batch, seq, d_model)
-✅ Causal masking blocks future positions correctly
-📈 Progress: Scaled Dot-Product Attention ✓
+ Unit Test: Scaled Dot-Product Attention...
+ Attention scores computed correctly (QK^T shape verified)
+ Scaling factor 1/√d_k applied
+ Softmax normalization verified (each row sums to 1.0)
+ Output shape matches expected (batch, seq, d_model)
+ Causal masking blocks future positions correctly
+ Progress: Scaled Dot-Product Attention ✓
 
-🔬 Unit Test: Multi-Head Attention...
-✅ 8 heads process 512 dimensions in parallel
-✅ Head splitting and concatenation correct
-✅ Q/K/V projection layers initialized properly
-✅ Output projection applied
-✅ Shape: (batch, seq, 512) → (batch, seq, 512) ✓
-📈 Progress: Multi-Head Attention ✓
+ Unit Test: Multi-Head Attention...
+ 8 heads process 512 dimensions in parallel
+ Head splitting and concatenation correct
+ Q/K/V projection layers initialized properly
+ Output projection applied
+ Shape: (batch, seq, 512) → (batch, seq, 512) ✓
+ Progress: Multi-Head Attention ✓
 
-📊 Analyzing Attention Complexity...
+ Analyzing Attention Complexity...
 Seq Len | Attention Matrix | Memory (KB) | Scaling
 --------------------------------------------------------
      16 |            256  |       1.00  |     1.0x
@@ -385,8 +385,8 @@ Seq Len | Attention Matrix | Memory (KB) | Scaling
     128 |         16,384  |      64.00  |     4.0x
     256 |         65,536  |     256.00  |     4.0x
 
-💡 Memory scales as O(n²) with sequence length
-🚀 For seq_len=2048 (GPT-3), attention matrix needs 16 MB per layer
+ Memory scales as O(n²) with sequence length
+ For seq_len=2048 (GPT-3), attention matrix needs 16 MB per layer
 ```
 
 ### Manual Testing Examples
@@ -550,21 +550,21 @@ Choose your preferred way to engage with this module:
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card} 🚀 Launch Binder
+```{grid-item-card}  Launch Binder
 :link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/12_attention/attention_dev.ipynb
 :class-header: bg-light
 
 Run this module interactively in your browser. No installation required!
 ```
 
-```{grid-item-card} ⚡ Open in Colab
+```{grid-item-card}  Open in Colab
 :link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/12_attention/attention_dev.ipynb
 :class-header: bg-light
 
 Use Google Colab for GPU access and cloud compute power.
 ```
 
-```{grid-item-card} 📖 View Source
+```{grid-item-card}  View Source
 :link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/12_attention/attention_dev.ipynb
 :class-header: bg-light
 
@@ -573,7 +573,7 @@ Browse the notebook source code and understand the implementation.
 
 ````
 
-```{admonition} 💾 Save Your Progress
+```{admonition}  Save Your Progress
 :class: tip
 **Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
 ```

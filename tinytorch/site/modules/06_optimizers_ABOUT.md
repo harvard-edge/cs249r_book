@@ -1,7 +1,7 @@
 ---
 title: "Optimizers"
 description: "Gradient-based parameter optimization algorithms - SGD, Adam, and AdamW"
-difficulty: "⭐⭐⭐⭐"
+difficulty: "$\bigstar$$\bigstar$$\bigstar$$\bigstar$"
 time_estimate: "6-8 hours"
 prerequisites: ["tensor", "autograd"]
 next_steps: ["training"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 06. Optimizers
 
-**FOUNDATION TIER** | Difficulty: ⭐⭐⭐⭐ (4/4) | Time: 6-8 hours
+**FOUNDATION TIER** | Difficulty: $\bigstar$$\bigstar$$\bigstar$$\bigstar$ (4/4) | Time: 6-8 hours
 
 ## Overview
 
@@ -351,36 +351,36 @@ The module includes comprehensive mathematical validation and convergence visual
 
 ```python
 # Example inline test output
-🔬 Unit Test: Base Optimizer...
-✅ Parameter validation working correctly
-✅ zero_grad clears all gradients properly
-✅ Error handling for non-gradient parameters
-📈 Progress: Base Optimizer ✓
+ Unit Test: Base Optimizer...
+ Parameter validation working correctly
+ zero_grad clears all gradients properly
+ Error handling for non-gradient parameters
+ Progress: Base Optimizer ✓
 
 # SGD with momentum validation
-🔬 Unit Test: SGD with momentum...
-✅ Parameter updates follow momentum equation v_t = βv_{t-1} + ∇L
-✅ Velocity accumulation working correctly
-✅ Weight decay applied properly
-✅ Momentum accelerates convergence vs vanilla SGD
-📈 Progress: SGD with Momentum ✓
+ Unit Test: SGD with momentum...
+ Parameter updates follow momentum equation v_t = βv_{t-1} + ∇L
+ Velocity accumulation working correctly
+ Weight decay applied properly
+ Momentum accelerates convergence vs vanilla SGD
+ Progress: SGD with Momentum ✓
 
 # Adam optimizer validation
-🔬 Unit Test: Adam optimizer...
-✅ First moment estimation (m_t) computed correctly
-✅ Second moment estimation (v_t) computed correctly
-✅ Bias correction applied properly (critical for early steps)
-✅ Adaptive learning rates working per parameter
-✅ Convergence faster than SGD on ill-conditioned problem
-📈 Progress: Adam Optimizer ✓
+ Unit Test: Adam optimizer...
+ First moment estimation (m_t) computed correctly
+ Second moment estimation (v_t) computed correctly
+ Bias correction applied properly (critical for early steps)
+ Adaptive learning rates working per parameter
+ Convergence faster than SGD on ill-conditioned problem
+ Progress: Adam Optimizer ✓
 
 # AdamW decoupled weight decay validation
-🔬 Unit Test: AdamW optimizer...
-✅ Weight decay decoupled from gradient updates
-✅ Results differ from Adam (proving proper implementation)
-✅ Regularization consistent across gradient scales
-✅ With zero weight decay, matches Adam behavior
-📈 Progress: AdamW Optimizer ✓
+ Unit Test: AdamW optimizer...
+ Weight decay decoupled from gradient updates
+ Results differ from Adam (proving proper implementation)
+ Regularization consistent across gradient scales
+ With zero weight decay, matches Adam behavior
+ Progress: AdamW Optimizer ✓
 ```
 
 ### Manual Testing Examples
@@ -518,21 +518,21 @@ Choose your preferred way to engage with this module:
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card} 🚀 Launch Binder
+```{grid-item-card}  Launch Binder
 :link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/06_optimizers/optimizers_dev.ipynb
 :class-header: bg-light
 
 Run this module interactively in your browser. No installation required!
 ```
 
-```{grid-item-card} ⚡ Open in Colab
+```{grid-item-card}  Open in Colab
 :link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/06_optimizers/optimizers_dev.ipynb
 :class-header: bg-light
 
 Use Google Colab for GPU access and cloud compute power.
 ```
 
-```{grid-item-card} 📖 View Source
+```{grid-item-card}  View Source
 :link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/06_optimizers/optimizers_dev.ipynb
 :class-header: bg-light
 
@@ -541,7 +541,7 @@ Browse the Jupyter notebook and understand the implementation.
 
 ````
 
-```{admonition} 💾 Save Your Progress
+```{admonition}  Save Your Progress
 :class: tip
 **Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
 

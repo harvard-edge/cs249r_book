@@ -1,7 +1,7 @@
 ---
 title: "Profiling - Performance Measurement for ML Systems"
 description: "Build profilers that measure parameters, FLOPs, memory, and latency to guide optimization decisions"
-difficulty: "⭐⭐⭐"
+difficulty: "$\bigstar$$\bigstar$$\bigstar$"
 time_estimate: "5-6 hours"
 prerequisites: ["Modules 01-13 - Complete ML implementation stack"]
 next_steps: ["Module 15 - Quantization"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 14. Profiling - Performance Measurement for ML Systems
 
-**OPTIMIZATION TIER** | Difficulty: ⭐⭐⭐ (3/4) | Time: 5-6 hours
+**OPTIMIZATION TIER** | Difficulty: $\bigstar$$\bigstar$$\bigstar$ (3/4) | Time: 5-6 hours
 
 ## Overview
 
@@ -391,29 +391,29 @@ def measure_latency_correctly(model, input_tensor):
 
 **Measurement Pitfalls and Solutions**:
 ```python
-# ❌ WRONG: Single measurement
+#  WRONG: Single measurement
 start = time.time()  # Low precision
 output = model(input)
 latency = time.time() - start  # Affected by system noise
 
-# ✅ CORRECT: Statistical measurement
+#  CORRECT: Statistical measurement
 profiler = Profiler()
 latency = profiler.measure_latency(model, input, warmup=10, iterations=100)
 # Returns median of 100 measurements after 10 warmup runs
 
-# ❌ WRONG: Measuring cold start
+#  WRONG: Measuring cold start
 latency = time_function_once(model.forward, input)  # Includes JIT compilation
 
-# ✅ CORRECT: Warmup runs
+#  CORRECT: Warmup runs
 for _ in range(10):
     model.forward(input)  # Discard these results
 latency = measure_with_statistics(model.forward, input)  # Now measure
 
-# ❌ WRONG: Using mean with outliers
+#  WRONG: Using mean with outliers
 times = [5.1, 5.2, 5.0, 5.3, 50.0]  # 50ms outlier from OS scheduling
 mean = np.mean(times)  # = 14.12 ms (misleading!)
 
-# ✅ CORRECT: Using median
+#  CORRECT: Using median
 median = np.median(times)  # = 5.2 ms (representative)
 ```
 
@@ -486,11 +486,11 @@ python -m pytest tests/ -k profiling -v
 
 ### Test Coverage Areas
 
-- ✅ **Parameter counting accuracy**: Verifies correct counts for Linear, Conv2d, models with/without parameters
-- ✅ **FLOP calculation correctness**: Validates formulas for different layer types (Linear, Conv2d, attention)
-- ✅ **Memory measurement reliability**: Checks tracemalloc integration, memory component tracking
-- ✅ **Latency measurement consistency**: Tests statistical timing with warmup runs and multiple iterations
-- ✅ **Advanced profiling completeness**: Validates forward/backward profiling returns all required metrics
+- ✓ **Parameter counting accuracy**: Verifies correct counts for Linear, Conv2d, models with/without parameters
+- ✓ **FLOP calculation correctness**: Validates formulas for different layer types (Linear, Conv2d, attention)
+- ✓ **Memory measurement reliability**: Checks tracemalloc integration, memory component tracking
+- ✓ **Latency measurement consistency**: Tests statistical timing with warmup runs and multiple iterations
+- ✓ **Advanced profiling completeness**: Validates forward/backward profiling returns all required metrics
 
 ### Inline Testing & Validation
 
@@ -498,32 +498,32 @@ The module includes comprehensive unit tests:
 
 ```python
 # Parameter counting validation
-🔬 Unit Test: Parameter Counting...
-✅ Simple model: 55 parameters (10×5 weight + 5 bias)
-✅ No parameter model: 0 parameters
-✅ Direct tensor: 0 parameters
-✅ Parameter counting works correctly!
+ Unit Test: Parameter Counting...
+ Simple model: 55 parameters (10×5 weight + 5 bias)
+ No parameter model: 0 parameters
+ Direct tensor: 0 parameters
+ Parameter counting works correctly!
 
 # FLOP counting validation
-🔬 Unit Test: FLOP Counting...
-✅ Tensor operation: 32 FLOPs
-✅ Linear layer: 16384 FLOPs (128 × 64 × 2)
-✅ Batch independence: 16384 FLOPs (same for batch 1 and 32)
-✅ FLOP counting works correctly!
+ Unit Test: FLOP Counting...
+ Tensor operation: 32 FLOPs
+ Linear layer: 16384 FLOPs (128 × 64 × 2)
+ Batch independence: 16384 FLOPs (same for batch 1 and 32)
+ FLOP counting works correctly!
 
 # Memory measurement validation
-🔬 Unit Test: Memory Measurement...
-✅ Basic measurement: 0.153 MB peak
-✅ Scaling: Small 0.002 MB → Large 0.020 MB
-✅ Efficiency: 0.524 (0-1 range)
-✅ Memory measurement works correctly!
+ Unit Test: Memory Measurement...
+ Basic measurement: 0.153 MB peak
+ Scaling: Small 0.002 MB → Large 0.020 MB
+ Efficiency: 0.524 (0-1 range)
+ Memory measurement works correctly!
 
 # Latency measurement validation
-🔬 Unit Test: Latency Measurement...
-✅ Basic latency: 0.008 ms
-✅ Consistency: 0.010 ± 0.002 ms
-✅ Scaling: Small 0.006 ms, Large 0.012 ms
-✅ Latency measurement works correctly!
+ Unit Test: Latency Measurement...
+ Basic latency: 0.008 ms
+ Consistency: 0.010 ± 0.002 ms
+ Scaling: Small 0.006 ms, Large 0.012 ms
+ Latency measurement works correctly!
 ```
 
 ### Manual Testing Examples
@@ -631,21 +631,21 @@ Choose your preferred way to engage with this module:
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card} 🚀 Launch Binder
+```{grid-item-card}  Launch Binder
 :link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/14_profiling/profiling_dev.ipynb
 :class-header: bg-light
 
 Run this module interactively in your browser. No installation required!
 ```
 
-```{grid-item-card} ⚡ Open in Colab
+```{grid-item-card}  Open in Colab
 :link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/14_profiling/profiling_dev.ipynb
 :class-header: bg-light
 
 Use Google Colab for cloud compute power and easy sharing.
 ```
 
-```{grid-item-card} 📖 View Source
+```{grid-item-card}  View Source
 :link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/14_profiling/profiling_dev.py
 :class-header: bg-light
 
@@ -654,7 +654,7 @@ Browse the Python source code and understand the implementation.
 
 ````
 
-```{admonition} 💾 Save Your Progress
+```{admonition}  Save Your Progress
 :class: tip
 **Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
 ```

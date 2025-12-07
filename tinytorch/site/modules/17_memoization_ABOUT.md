@@ -1,7 +1,7 @@
 ---
 title: "Memoization - Computational Reuse for Inference"
 description: "Transform O(n²) transformer generation into O(n) through KV caching, achieving 10-15x speedup"
-difficulty: "⭐⭐⭐ (3/4)"
+difficulty: "$\bigstar$$\bigstar$$\bigstar$ (3/4)"
 time_estimate: "4-5 hours"
 prerequisites: ["Transformers", "Profiling", "Quantization", "Compression"]
 next_steps: ["Acceleration"]
@@ -15,7 +15,7 @@ learning_objectives:
 
 # 17. Memoization - Computational Reuse for Inference
 
-**OPTIMIZATION TIER** | Difficulty: ⭐⭐⭐ (3/4) | Time: 4-5 hours
+**OPTIMIZATION TIER** | Difficulty: $\bigstar$$\bigstar$$\bigstar$ (3/4) | Time: 4-5 hours
 
 ## Overview
 
@@ -311,14 +311,14 @@ python -m pytest tests/ -k memoization -v
 
 ### Test Coverage Areas
 
-- ✅ **KVCache Initialization**: Validate cache creation, memory calculation, and initial state
-- ✅ **Cache Updates**: Test single-token append, multi-token sequences, and O(1) update performance
-- ✅ **Multi-Layer Synchronization**: Verify independent per-layer caches with correct indexing
-- ✅ **Cache Retrieval**: Test get() returns only valid cached portion (up to seq_pos)
-- ✅ **Non-Invasive Integration**: Validate enable_kv_cache() works without breaking model
-- ✅ **Correctness Validation**: Compare cached vs non-cached outputs (should be identical)
-- ✅ **Performance Measurement**: Measure speedup at different sequence lengths
-- ✅ **Memory Tracking**: Calculate cache size and validate memory usage
+- ✓ **KVCache Initialization**: Validate cache creation, memory calculation, and initial state
+- ✓ **Cache Updates**: Test single-token append, multi-token sequences, and O(1) update performance
+- ✓ **Multi-Layer Synchronization**: Verify independent per-layer caches with correct indexing
+- ✓ **Cache Retrieval**: Test get() returns only valid cached portion (up to seq_pos)
+- ✓ **Non-Invasive Integration**: Validate enable_kv_cache() works without breaking model
+- ✓ **Correctness Validation**: Compare cached vs non-cached outputs (should be identical)
+- ✓ **Performance Measurement**: Measure speedup at different sequence lengths
+- ✓ **Memory Tracking**: Calculate cache size and validate memory usage
 
 ### Inline Testing & Profiling
 
@@ -326,16 +326,16 @@ The module includes comprehensive validation with performance measurement:
 
 ```python
 # Unit Test: KVCache Implementation
-🔬 Unit Test: KVCache Implementation...
+ Unit Test: KVCache Implementation...
    Cache initialized: 0.59 MB
-✅ Cache initialization successful
-✅ Append and retrieval work correctly
-✅ Multi-layer caching validated
-✅ Reset functionality verified
-📈 Progress: KVCache ✓
+ Cache initialization successful
+ Append and retrieval work correctly
+ Multi-layer caching validated
+ Reset functionality verified
+ Progress: KVCache ✓
 
 # Integration Test: Performance Measurement
-🔬 Profiling Transformer Generation (Without Caching):
+ Profiling Transformer Generation (Without Caching):
    Seq Len  |  Latency (ms)  |  Growth
    ---------|----------------|----------
     10      |    2.34        |  baseline
@@ -344,13 +344,13 @@ The module includes comprehensive validation with performance measurement:
     80      |   21.45        |  2.12×
    160      |   45.67        |  2.13×
 
-💡 Key Observations:
+ Key Observations:
    • Latency grows QUADRATICALLY with sequence length
    • Each new token forces recomputation of ALL previous K,V pairs
    • For 160 tokens: ~4× time vs 80 tokens (2² growth)
 
-🎯 The Solution: CACHE the K,V values! (That's memoization)
-✅ Speedup: 10-15× for typical generation
+ The Solution: CACHE the K,V values! (That's memoization)
+ Speedup: 10-15× for typical generation
 ```
 
 ### Manual Testing Examples
@@ -640,21 +640,21 @@ Choose your preferred way to engage with this module:
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card} 🚀 Launch Binder
+```{grid-item-card}  Launch Binder
 :link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/17_memoization/memoization_dev.ipynb
 :class-header: bg-light
 
 Run this module interactively in your browser. No installation required!
 ```
 
-```{grid-item-card} ⚡ Open in Colab
+```{grid-item-card}  Open in Colab
 :link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/17_memoization/memoization_dev.ipynb
 :class-header: bg-light
 
 Use Google Colab for GPU access and cloud compute power.
 ```
 
-```{grid-item-card} 📖 View Source
+```{grid-item-card}  View Source
 :link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/17_memoization/memoization_dev.ipynb
 :class-header: bg-light
 
@@ -663,7 +663,7 @@ Browse the Jupyter notebook source and understand the implementation.
 
 ````
 
-```{admonition} 💾 Save Your Progress
+```{admonition}  Save Your Progress
 :class: tip
 **Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
 
