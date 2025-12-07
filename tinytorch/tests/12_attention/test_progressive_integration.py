@@ -28,12 +28,14 @@ class TestPriorStackStillWorking:
             from tinytorch.core.layers import Linear
             from tinytorch.core.optimizers import Adam
             from tinytorch.core.training import Trainer
+            from tinytorch.core.losses import MSELoss
             from tinytorch.core.compression import prune_weights
-            
+
             # All ML system components should be available
             model = Linear(10, 5)
             optimizer = Adam(model.parameters(), lr=0.001)
-            trainer = Trainer(model, optimizer)
+            loss_fn = MSELoss()
+            trainer = Trainer(model, optimizer, loss_fn)
             
             # Compression should still work
             if 'prune_weights' in locals():
@@ -55,11 +57,13 @@ class TestPriorStackStillWorking:
             from tinytorch.core.compression import quantize_weights
             from tinytorch.core.optimizers import SGD
             from tinytorch.core.layers import Linear
-            
+            from tinytorch.core.losses import MSELoss
+
             # Efficiency features should work
             model = Linear(8, 3)
             optimizer = SGD(model.parameters(), lr=0.01)
-            trainer = Trainer(model, optimizer)
+            loss_fn = MSELoss()
+            trainer = Trainer(model, optimizer, loss_fn)
             
             assert hasattr(trainer, 'train') or hasattr(trainer, 'fit'), "Training broken"
             
@@ -224,7 +228,9 @@ class TestProgressiveStackIntegration:
             # Accelerated training
             model = AcceleratedModel()
             optimizer = Adam(model.parameters(), lr=0.001)
-            trainer = Trainer(model, optimizer)
+            from tinytorch.core.losses import MSELoss
+            loss_fn = MSELoss()
+            trainer = Trainer(model, optimizer, loss_fn)
             
             dataset = PerformanceDataset()
             dataloader = DataLoader(dataset, batch_size=16)
@@ -544,7 +550,9 @@ class TestRegressionPrevention:
             # All components should work together
             model = Linear(8, 4)
             optimizer = Adam(model.parameters(), lr=0.001)
-            trainer = Trainer(model, optimizer)
+            from tinytorch.core.losses import MSELoss
+            loss_fn = MSELoss()
+            trainer = Trainer(model, optimizer, loss_fn)
             
             x = Tensor(np.random.randn(2, 8))
             output = model(x)
@@ -570,7 +578,9 @@ class TestRegressionPrevention:
             # Efficiency features should still work
             model = Linear(6, 3)
             optimizer = SGD(model.parameters(), lr=0.01)
-            trainer = Trainer(model, optimizer)
+            from tinytorch.core.losses import MSELoss
+            loss_fn = MSELoss()
+            trainer = Trainer(model, optimizer, loss_fn)
             
             assert hasattr(trainer, 'train') or hasattr(trainer, 'fit'), "Efficiency regression: Training broken"
             
@@ -598,16 +608,18 @@ class TestRegressionPrevention:
             from tinytorch.core.layers import Linear
             from tinytorch.core.optimizers import Adam
             from tinytorch.core.training import Trainer
-            
+            from tinytorch.core.losses import MSELoss
+
             # Complete system should work
             model = Linear(10, 5)
             optimizer = Adam(model.parameters(), lr=0.001)
-            trainer = Trainer(model, optimizer)
-            
+            loss_fn = MSELoss()
+            trainer = Trainer(model, optimizer, loss_fn)
+
             x = Tensor(np.random.randn(3, 10))
             output = model(x)
             assert output.shape == (3, 5), "ML system level broken"
-            
+
         except ImportError:
             pass  # Not implemented yet
         
