@@ -70,7 +70,7 @@ import warnings
 
 # Import dependencies from other modules
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.layers import Linear
+from tinytorch.core.layers import Linear, SimpleModel
 from tinytorch.core.activations import ReLU
 
 # Constants for INT8 quantization
@@ -1096,15 +1096,7 @@ def test_unit_quantize_model():
     layer2.weight = Tensor(np.random.randn(8, 3) * 0.5)
     layer2.bias = Tensor(np.random.randn(3) * 0.1)
     
-    # Create a simple model container for testing
-    class SimpleModel:
-        def __init__(self, *layers):
-            self.layers = list(layers)
-        def forward(self, x):
-            for layer in self.layers:
-                x = layer.forward(x)
-            return x
-    
+    # Use SimpleModel from tinytorch.core.layers
     model = SimpleModel(layer1, activation, layer2)
 
     # Test original model
@@ -1284,7 +1276,7 @@ def test_unit_compare_model_sizes():
     """🔬 Test model size comparison."""
     print("🔬 Unit Test: Model Size Comparison...")
 
-    # Create and quantize a model for testing (using SimpleModel pattern)
+    # Create and quantize a model for testing (using SimpleModel from tinytorch.core.layers)
     layer1_orig = Linear(100, 50)
     activation_orig = ReLU()
     layer2_orig = Linear(50, 10)
@@ -1594,15 +1586,7 @@ def demo_quantization_with_profiler():
     # Quantize the model (in-place modification)
     print("\n🗜️  Quantizing to INT8...")
     # quantize_model expects a model with .layers attribute, so wrap single layer in SimpleModel
-    class SimpleModel:
-        def __init__(self, layers):
-            self.layers = layers if isinstance(layers, list) else list(layers)
-        def forward(self, x):
-            for layer in self.layers:
-                x = layer.forward(x)
-            return x
-    
-    wrapped_model = SimpleModel([model])
+    wrapped_model = SimpleModel(model)
     quantize_model(wrapped_model)  # Modifies model in-place, returns None
     quantized_model = wrapped_model.layers[0] if wrapped_model.layers else model
     quantized_model.name = "quantized_model"
@@ -1673,7 +1657,7 @@ def test_module():
     # Test realistic usage scenario
     print("🔬 Integration Test: End-to-end quantization workflow...")
 
-    # Create a realistic model using explicit composition
+    # Create a realistic model using explicit composition (SimpleModel from tinytorch.core.layers)
     layer1 = Linear(784, 128)  # MNIST-like input
     activation1 = ReLU()
     layer2 = Linear(128, 64)
@@ -1787,56 +1771,50 @@ class Quantizer:
     Complete quantization system for milestone use.
     
     Provides INT8 quantization with calibration for 4× memory reduction.
+    
+    This class delegates to the standalone functions (quantize_int8, dequantize_int8)
+    that students implement, providing a clean OOP interface for milestones.
+    
+    Two APIs exist for different use cases:
+    - Standalone quantize_model(): Modifies model in-place (for learning/testing)
+    - Quantizer.quantize_model(): Returns stats dict (for milestones/benchmarking)
     """
     
     @staticmethod
     def quantize_tensor(tensor: Tensor) -> Tuple[Tensor, float, int]:
-        """Quantize FP32 tensor to INT8."""
-        data = tensor.data
-        min_val = float(np.min(data))
-        max_val = float(np.max(data))
-        
-        if abs(max_val - min_val) < EPSILON:
-            return Tensor(np.zeros_like(data, dtype=np.int8)), 1.0, 0
-        
-        scale = (max_val - min_val) / (INT8_RANGE - 1)
-        zero_point = int(np.round(INT8_MIN_VALUE - min_val / scale))
-        zero_point = int(np.clip(zero_point, INT8_MIN_VALUE, INT8_MAX_VALUE))
-        
-        quantized_data = np.round(data / scale + zero_point)
-        quantized_data = np.clip(quantized_data, INT8_MIN_VALUE, INT8_MAX_VALUE).astype(np.int8)
-        
-        return Tensor(quantized_data), scale, zero_point
+        """Quantize FP32 tensor to INT8. Delegates to quantize_int8()."""
+        return quantize_int8(tensor)
     
     @staticmethod
     def dequantize_tensor(q_tensor: Tensor, scale: float, zero_point: int) -> Tensor:
-        """Dequantize INT8 tensor back to FP32."""
-        dequantized_data = (q_tensor.data.astype(np.float32) - zero_point) * scale
-        return Tensor(dequantized_data)
+        """Dequantize INT8 tensor back to FP32. Delegates to dequantize_int8()."""
+        return dequantize_int8(q_tensor, scale, zero_point)
     
     @staticmethod
     def quantize_model(model, calibration_data: Optional[List[Tensor]] = None) -> Dict[str, any]:
         """
-        Quantize all Linear layers in a model.
+        Quantize all Linear layers in a model and return stats.
         
-        Returns dictionary with quantization info and memory savings.
+        Unlike the standalone quantize_model() which modifies in-place,
+        this returns a dictionary with quantization info for benchmarking.
+        
+        Returns:
+            Dict with quantized_layers, original_size_mb, quantized_size_mb, compression_ratio
         """
         quantized_layers = {}
         original_size = 0
-        quantized_size = 0
+        total_elements = 0
+        param_idx = 0
         
         # Iterate through model parameters
-        # SimpleModel has .layers, each layer has .parameters() method
-        param_idx = 0
-        total_elements = 0
         for layer in model.layers:
             for param in layer.parameters():
                 param_size = param.data.nbytes
                 original_size += param_size
                 total_elements += param.data.size
                 
-                # Quantize parameter
-                q_param, scale, zp = Quantizer.quantize_tensor(param)
+                # Quantize parameter using the standalone function
+                q_param, scale, zp = quantize_int8(param)
                 
                 quantized_layers[f'param_{param_idx}'] = {
                     'quantized': q_param,
@@ -1846,9 +1824,8 @@ class Quantizer:
                 }
                 param_idx += 1
         
-        # Calculate theoretical quantized size: 1 byte per element for INT8
-        # (Note: Tensor class converts to float32 internally, but INT8 storage would be 1 byte)
-        quantized_size = total_elements  # 1 byte per element
+        # INT8 uses 1 byte per element
+        quantized_size = total_elements
         
         return {
             'quantized_layers': quantized_layers,
@@ -1867,18 +1844,8 @@ class Quantizer:
             'memory_saved_mb': quantized_info['original_size_mb'] - quantized_info['quantized_size_mb']
         }
 
-# Convenience functions for backward compatibility
-def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
-    """Quantize FP32 tensor to INT8."""
-    return Quantizer.quantize_tensor(tensor)
-
-def dequantize_int8(q_tensor: Tensor, scale: float, zero_point: int) -> Tensor:
-    """Dequantize INT8 tensor back to FP32."""
-    return Quantizer.dequantize_tensor(q_tensor, scale, zero_point)
-
-def quantize_model(model, calibration_data: Optional[List[Tensor]] = None) -> Dict[str, any]:
-    """Quantize entire model to INT8."""
-    return Quantizer.quantize_model(model, calibration_data)
+# Note: quantize_int8, dequantize_int8, and quantize_model are defined earlier in this module.
+# The Quantizer class above delegates to those functions, providing an OOP interface for milestones.
 
 # %% [markdown]
 """

@@ -67,12 +67,14 @@ import time
 
 # Import from TinyTorch package (previous modules must be completed and exported)
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.layers import Linear
+from tinytorch.core.layers import Linear, SimpleModel
 from tinytorch.core.activations import ReLU
 
 # Constants for memory calculations
 BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
 MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
+
+# SimpleModel is now imported from tinytorch.core.layers
 
 # %% [markdown]
 """
@@ -1522,61 +1524,29 @@ class Compressor:
     Complete compression system for milestone use.
     
     Provides pruning, distillation, and low-rank approximation techniques.
+    
+    This class delegates to the standalone functions (measure_sparsity, magnitude_prune, etc.)
+    that students implement, providing a clean OOP interface for milestones.
+    
+    Note: Compressor methods return fractions (0-1) for consistency with benchmarking,
+    while standalone functions return percentages (0-100) for educational clarity.
     """
     
     @staticmethod
     def measure_sparsity(model) -> float:
-        """Measure the sparsity of a model (fraction of zero weights)."""
-        # SimpleModel has .layers, each layer has .parameters() method
-        total_params = 0
-        zero_params = 0
-        
-        for layer in model.layers:
-            for param in layer.parameters():
-                total_params += param.size
-                zero_params += np.sum(param.data == 0)
-        
-        return zero_params / total_params if total_params > 0 else 0.0
+        """Measure the sparsity of a model (returns fraction 0-1)."""
+        # Delegate to standalone function and convert percentage to fraction
+        return measure_sparsity(model) / 100.0
     
     @staticmethod
     def magnitude_prune(model, sparsity=0.5):
-        """
-        Prune model weights by magnitude (smallest weights set to zero).
-        
-        Args:
-            model: SimpleModel with .layers attribute
-            sparsity: Fraction of weights to prune (0-1)
-        """
-        # SimpleModel has .layers, each layer has .parameters() method
-        for layer in model.layers:
-            for param in layer.parameters():
-                threshold = np.percentile(np.abs(param.data), sparsity * 100)
-                param.data[np.abs(param.data) < threshold] = 0
-        
-        return model
+        """Prune model weights by magnitude. Delegates to standalone function."""
+        return magnitude_prune(model, sparsity)
     
     @staticmethod
     def structured_prune(model, prune_ratio=0.5):
-        """
-        Prune entire neurons/channels (structured pruning).
-        
-        Args:
-            model: SimpleModel with .layers attribute
-            prune_ratio: Fraction of structures to prune (0-1)
-        """
-        # SimpleModel has .layers, process Linear layers
-        for layer in model.layers:
-            if isinstance(layer, Linear):
-                # Linear layers have .weight attribute with .data
-                weight = layer.weight
-                if len(weight.shape) == 2:  # Linear layer
-                    # Prune output neurons
-                    neuron_norms = np.linalg.norm(weight.data, axis=0)
-                    threshold = np.percentile(neuron_norms, prune_ratio * 100)
-                    mask = neuron_norms >= threshold
-                    weight.data[:, ~mask] = 0
-        
-        return model
+        """Prune entire neurons/channels. Delegates to standalone function."""
+        return structured_prune(model, prune_ratio)
     
     @staticmethod
     def compress_model(model, compression_config: Dict[str, Any]):
@@ -1590,7 +1560,7 @@ class Compressor:
                 - 'structured_prune_ratio': float (0-1)
         
         Returns:
-            Compressed model with sparsity stats
+            Compressed model with sparsity stats (fractions 0-1)
         """
         stats = {
             'original_sparsity': Compressor.measure_sparsity(model)
@@ -1613,22 +1583,8 @@ class Compressor:
         
         return model, stats
 
-# Convenience functions for backward compatibility
-def measure_sparsity(model) -> float:
-    """Measure model sparsity."""
-    return Compressor.measure_sparsity(model)
-
-def magnitude_prune(model, sparsity=0.5):
-    """Apply magnitude-based pruning."""
-    return Compressor.magnitude_prune(model, sparsity)
-
-def structured_prune(model, prune_ratio=0.5):
-    """Apply structured pruning."""
-    return Compressor.structured_prune(model, prune_ratio)
-
-def compress_model(model, compression_config: Dict[str, Any]):
-    """Apply complete compression pipeline."""
-    return Compressor.compress_model(model, compression_config)
+# Note: measure_sparsity, magnitude_prune, structured_prune are defined earlier in this module.
+# The Compressor class above delegates to those functions, providing an OOP interface for milestones.
 
 # %% [markdown]
 """
