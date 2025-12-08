@@ -20,43 +20,246 @@ Build a complete machine learning (ML) framework from tensors to systems—under
 </p>
 
 ```{raw} html
-<!-- Hero GIF Carousel - Compact Design -->
-<div class="hero-carousel-compact">
-  <div class="carousel-track">
-    <div class="carousel-item active">
-      <div class="gif-preview">
-        <img src="_static/demos/01-clone-setup.gif" alt="Clone & Setup workflow" loading="lazy" />
-        <div class="preview-fallback">💻</div>
-      </div>
+<style>
+.demo-carousel {
+  max-width: 850px;
+  margin: 0 auto 1.5rem auto;
+}
+.demo-carousel .window {
+  background: linear-gradient(145deg, #1a1a2e 0%, #16213e 100%);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 25px 50px -12px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
+}
+.demo-carousel .window-bar {
+  background: linear-gradient(90deg, #2d2d44 0%, #1f1f35 100%);
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.demo-carousel .window-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+.demo-carousel .window-dot.red { background: #ff5f57; }
+.demo-carousel .window-dot.yellow { background: #febc2e; }
+.demo-carousel .window-dot.green { background: #28c840; }
+.demo-carousel .window-title {
+  flex: 1;
+  text-align: center;
+  color: #64748b;
+  font-size: 0.85rem;
+  font-family: -apple-system, system-ui, sans-serif;
+}
+.demo-carousel .slides-wrapper {
+  position: relative;
+  overflow: hidden;
+}
+.demo-carousel .slides-track {
+  display: flex;
+  transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.demo-carousel .slide {
+  min-width: 100%;
+  aspect-ratio: 16/9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+  position: relative;
+}
+.demo-carousel .slide-content {
+  text-align: center;
+  z-index: 1;
+}
+.demo-carousel .slide-icon {
+  font-size: 5rem;
+  margin-bottom: 1rem;
+  filter: drop-shadow(0 4px 12px rgba(0,0,0,0.3));
+}
+.demo-carousel .slide-title {
+  color: #f1f5f9;
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+}
+.demo-carousel .slide-desc {
+  color: #94a3b8;
+  font-size: 1rem;
+}
+.demo-carousel .slide::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 120%, rgba(59,130,246,0.1) 0%, transparent 60%);
+}
+.demo-carousel .nav-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255,255,255,0.1);
+  backdrop-filter: blur(8px);
+  color: white;
+  font-size: 1.25rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+.demo-carousel .nav-btn:hover {
+  background: rgba(255,255,255,0.2);
+  transform: translateY(-50%) scale(1.1);
+}
+.demo-carousel .nav-btn.prev { left: 16px; }
+.demo-carousel .nav-btn.next { right: 16px; }
+.demo-carousel .progress-bar {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 1rem;
+  background: linear-gradient(90deg, #1f1f35 0%, #2d2d44 50%, #1f1f35 100%);
+}
+.demo-carousel .step {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 2rem;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+.demo-carousel .step:hover {
+  color: #94a3b8;
+}
+.demo-carousel .step.active {
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  color: white;
+  box-shadow: 0 4px 12px rgba(59,130,246,0.4);
+}
+.demo-carousel .step-num {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+.demo-carousel .step.active .step-num {
+  background: rgba(255,255,255,0.2);
+}
+</style>
+
+<div class="demo-carousel">
+  <div class="window">
+    <!-- macOS-style window bar -->
+    <div class="window-bar">
+      <div class="window-dot red"></div>
+      <div class="window-dot yellow"></div>
+      <div class="window-dot green"></div>
+      <div class="window-title">TinyTorch Journey</div>
     </div>
 
-    <div class="carousel-item">
-      <div class="gif-preview">
-        <img src="_static/demos/02-build-jupyter.gif" alt="Build in Jupyter workflow" loading="lazy" />
-        <div class="preview-fallback">📓</div>
+    <!-- Slides -->
+    <div class="slides-wrapper">
+      <div class="slides-track" id="demo-track">
+        <div class="slide">
+          <!-- Replace placeholder with: <img src="_static/demos/01-setup.gif" style="width:100%;height:100%;object-fit:cover;" /> -->
+          <div class="slide-content">
+            <div class="slide-icon">💻</div>
+            <div class="slide-title">Setup</div>
+            <div class="slide-desc">Clone the repo & install in seconds</div>
+          </div>
+        </div>
+        <div class="slide">
+          <div class="slide-content">
+            <div class="slide-icon">🔨</div>
+            <div class="slide-title">Build</div>
+            <div class="slide-desc">Code your framework in Jupyter</div>
+          </div>
+        </div>
+        <div class="slide">
+          <div class="slide-content">
+            <div class="slide-icon">🏅</div>
+            <div class="slide-title">Milestone</div>
+            <div class="slide-desc">Unlock ML history achievements</div>
+          </div>
+        </div>
+        <div class="slide">
+          <div class="slide-content">
+            <div class="slide-icon">🏆</div>
+            <div class="slide-title">Compete</div>
+            <div class="slide-desc">Enter the Torch Olympics</div>
+          </div>
+        </div>
       </div>
+
+      <!-- Navigation arrows -->
+      <button class="nav-btn prev" onclick="demoSlide(-1)">‹</button>
+      <button class="nav-btn next" onclick="demoSlide(1)">›</button>
     </div>
 
-    <div class="carousel-item">
-      <div class="gif-preview">
-        <img src="_static/demos/03-export-tito.gif" alt="Export with TITO workflow" loading="lazy" />
-        <div class="preview-fallback">🛠️</div>
-      </div>
+    <!-- Progress steps -->
+    <div class="progress-bar">
+      <button class="step active" onclick="demoGo(0)">
+        <span class="step-num">1</span>
+        <span>Setup</span>
+      </button>
+      <button class="step" onclick="demoGo(1)">
+        <span class="step-num">2</span>
+        <span>Build</span>
+      </button>
+      <button class="step" onclick="demoGo(2)">
+        <span class="step-num">3</span>
+        <span>Milestone</span>
+      </button>
+      <button class="step" onclick="demoGo(3)">
+        <span class="step-num">4</span>
+        <span>Compete</span>
+      </button>
     </div>
-
-    <div class="carousel-item">
-      <div class="gif-preview">
-        <img src="_static/demos/04-validate-history.gif" alt="Validate with History workflow" loading="lazy" />
-        <div class="preview-fallback">🏆</div>
-      </div>
-    </div>
-  </div>
-
-  <div class="carousel-nav">
-    <button class="nav-arrow prev" onclick="moveCarousel(-1)">←</button>
-    <button class="nav-arrow next" onclick="moveCarousel(1)">→</button>
   </div>
 </div>
+
+<script>
+(function() {
+  let idx = 0;
+  const total = 4;
+
+  window.demoSlide = function(dir) {
+    idx = (idx + dir + total) % total;
+    update();
+  };
+
+  window.demoGo = function(i) {
+    idx = i;
+    update();
+  };
+
+  function update() {
+    const track = document.getElementById('demo-track');
+    if (track) track.style.transform = `translateX(-${idx * 100}%)`;
+    document.querySelectorAll('.demo-carousel .step').forEach((s, i) => {
+      s.classList.toggle('active', i === idx);
+    });
+  }
+})();
+</script>
 ```
 
 <div style="text-align: center; margin: 2rem 0;">
