@@ -2515,3 +2515,4 @@
 - `█░░░░` **Embedded Sys**: Updated content
 
 </details>
+* [Jon Sivak] - Added to changelog (2023-10-05)
