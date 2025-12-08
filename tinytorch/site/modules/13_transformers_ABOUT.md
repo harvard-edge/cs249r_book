@@ -13,7 +13,7 @@ learning_objectives:
   - "Apply transformer architecture to language modeling tasks using patterns from PyTorch and production systems"
 ---
 
-# 13. Transformers - Complete GPT Architecture
+# Transformers - Complete GPT Architecture
 
 **ARCHITECTURE TIER** | Difficulty: ●●●● (4/4) | Time: 6-8 hours
 

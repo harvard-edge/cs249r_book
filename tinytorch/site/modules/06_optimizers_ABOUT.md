@@ -13,7 +13,7 @@ learning_objectives:
   - "Connect optimizer design to PyTorch's torch.optim implementation patterns"
 ---
 
-# 06. Optimizers
+# Optimizers
 
 **FOUNDATION TIER** | Difficulty: ●●●● (4/4) | Time: 6-8 hours
 

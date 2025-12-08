@@ -13,7 +13,7 @@ learning_objectives:
   - "Analyze attention pattern trade-offs: computation cost, memory usage, and interpretability"
 ---
 
-# 12. Attention - The Mechanism That Powers Modern AI
+# Attention - The Mechanism That Powers Modern AI
 
 **ARCHITECTURE TIER** | Difficulty: ●●● (3/4) | Time: 5-6 hours
 

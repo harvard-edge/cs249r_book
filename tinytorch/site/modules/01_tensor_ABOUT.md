@@ -13,7 +13,7 @@ learning_objectives:
   - "Analyze computational complexity, memory usage, and view-vs-copy trade-offs in tensor operations"
 ---
 
-# 01. Tensor
+# Tensor
 
 **FOUNDATION TIER** | Difficulty: ● (1/4) | Time: 4-6 hours
 

@@ -13,7 +13,7 @@ learning_objectives:
   - "Analyze computational efficiency, numerical stability, and memory implications of different activations"
 ---
 
-# 02. Activations
+# Activations
 
 **FOUNDATION TIER** | Difficulty: ●● (2/4) | Time: 3-4 hours
 

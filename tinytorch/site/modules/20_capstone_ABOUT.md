@@ -13,7 +13,7 @@ learning_objectives:
   - "Build submission infrastructure that enables future ML competitions and community challenges"
 ---
 
-# 20. Capstone - Submission Infrastructure
+# Capstone - Submission Infrastructure
 
 **OPTIMIZATION TIER CAPSTONE** | Difficulty: ●●●● (4/4) | Time: 5-8 hours
 

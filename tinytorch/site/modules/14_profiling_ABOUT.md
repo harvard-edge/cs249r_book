@@ -13,7 +13,7 @@ learning_objectives:
   - "Apply profiling data to identify bottlenecks and prioritize optimizations"
 ---
 
-# 14. Profiling - Performance Measurement for ML Systems
+# Profiling - Performance Measurement for ML Systems
 
 **OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 5-6 hours
 

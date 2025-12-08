@@ -13,7 +13,7 @@ learning_objectives:
   - "Understand memory overhead, gradient accumulation, and train/eval mode switching"
 ---
 
-# 07. Training
+# Training
 
 **FOUNDATION TIER** | Difficulty: ●●●● (4/4) | Time: 6-8 hours
 

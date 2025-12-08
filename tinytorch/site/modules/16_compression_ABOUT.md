@@ -13,7 +13,7 @@ learning_objectives:
   - "Measure compression ratios and sparsity levels while understanding deployment constraints"
 ---
 
-# 16. Compression - Pruning and Model Compression
+# Compression - Pruning and Model Compression
 
 **OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 5-6 hours
 

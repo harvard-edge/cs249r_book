@@ -13,7 +13,7 @@ learning_objectives:
   - "Analyze receptive field growth, translation invariance, and spatial dimension management"
 ---
 
-# 09. Spatial Operations
+# Spatial Operations
 
 **ARCHITECTURE TIER** | Difficulty: ●●● (3/4) | Time: 6-8 hours
 

@@ -13,7 +13,7 @@ learning_objectives:
   - "Analyze tokenization throughput and compression ratios for production NLP systems"
 ---
 
-# 10. Tokenization - Text to Numerical Sequences
+# Tokenization - Text to Numerical Sequences
 
 **ARCHITECTURE TIER** | Difficulty: ●● (2/4) | Time: 4-5 hours
 

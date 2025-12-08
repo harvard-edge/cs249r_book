@@ -13,7 +13,7 @@ learning_objectives:
   - "Analyze trade-offs between batch size, memory usage, and throughput"
 ---
 
-# 08. DataLoader
+# DataLoader
 
 **ARCHITECTURE TIER** | Difficulty: ●●● (3/4) | Time: 4-5 hours
 

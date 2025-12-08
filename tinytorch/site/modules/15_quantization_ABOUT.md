@@ -13,7 +13,7 @@ learning_objectives:
   - "Recognize quantization as educational foundation vs production INT8 hardware acceleration"
 ---
 
-# 15. Quantization - Reduced Precision for Efficiency
+# Quantization - Reduced Precision for Efficiency
 
 **OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 5-6 hours
 

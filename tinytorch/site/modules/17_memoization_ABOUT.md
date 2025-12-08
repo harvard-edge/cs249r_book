@@ -13,7 +13,7 @@ learning_objectives:
   - "Analyze memory-speed trade-offs and understand when caching benefits justify costs"
 ---
 
-# 17. Memoization - Computational Reuse for Inference
+# Memoization - Computational Reuse for Inference
 
 **OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 4-5 hours
 

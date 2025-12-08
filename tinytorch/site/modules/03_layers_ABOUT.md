@@ -13,7 +13,7 @@ learning_objectives:
   - "Compose layers into multi-layer architectures"
 ---
 
-# 03. Layers
+# Layers
 
 **FOUNDATION TIER** | Difficulty: ●● (2/4) | Time: 4-5 hours
 

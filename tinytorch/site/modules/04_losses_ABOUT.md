@@ -13,7 +13,7 @@ learning_objectives:
   - "Analyze gradient flow and scaling trade-offs in loss computation"
 ---
 
-# 04. Loss Functions
+# Loss Functions
 
 **FOUNDATION TIER** | Difficulty: ●● (2/4) | Time: 3-4 hours
 

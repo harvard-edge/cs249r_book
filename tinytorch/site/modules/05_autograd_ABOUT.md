@@ -13,7 +13,7 @@ learning_objectives:
   - "Connect implementation to PyTorch's torch.autograd.Function architecture"
 ---
 
-# 05. Autograd
+# Autograd
 
 **FOUNDATION TIER** | Difficulty: ●●●● (4/4) | Time: 8-10 hours
 

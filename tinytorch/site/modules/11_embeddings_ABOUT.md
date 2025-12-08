@@ -13,7 +13,7 @@ learning_objectives:
   - "Apply dimensionality principles to semantic vector space design and trade-offs"
 ---
 
-# 11. Embeddings - Token to Vector Representations
+# Embeddings - Token to Vector Representations
 
 **ARCHITECTURE TIER** | Difficulty: ●● (2/4) | Time: 4-5 hours
 

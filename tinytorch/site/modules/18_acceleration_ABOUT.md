@@ -13,7 +13,7 @@ learning_objectives:
   - "Measure acceleration gains systematically using profiling integration"
 ---
 
-# 18. Acceleration - CPU Vectorization & Cache Optimization
+# Acceleration - CPU Vectorization & Cache Optimization
 
 **OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 6-8 hours
 

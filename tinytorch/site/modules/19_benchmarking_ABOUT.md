@@ -13,7 +13,7 @@ learning_objectives:
   - "Analyze measurement trade-offs including overhead costs, statistical power requirements, and reproducibility constraints"
 ---
 
-# 19. Benchmarking - Fair Performance Comparison
+# Benchmarking - Fair Performance Comparison
 
 **OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 5-6 hours
 
