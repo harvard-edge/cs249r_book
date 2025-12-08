@@ -1,7 +1,7 @@
 ---
 title: "Tokenization - Text to Numerical Sequences"
 description: "Build character-level and BPE tokenizers that convert text into token sequences for language models"
-difficulty: "⭐⭐"
+difficulty: "●●"
 time_estimate: "4-5 hours"
 prerequisites: ["Tensor"]
 next_steps: ["Embeddings"]
@@ -13,9 +13,9 @@ learning_objectives:
   - "Analyze tokenization throughput and compression ratios for production NLP systems"
 ---
 
-# 10. Tokenization - Text to Numerical Sequences
+# Tokenization - Text to Numerical Sequences
 
-**ARCHITECTURE TIER** | Difficulty: ⭐⭐ (2/4) | Time: 4-5 hours
+**ARCHITECTURE TIER** | Difficulty: ●● (2/4) | Time: 4-5 hours
 
 ## Overview
 
@@ -631,46 +631,46 @@ The module includes comprehensive inline tests with progress tracking:
 
 ```python
 # Example inline test output
-🔬 Unit Test: Base Tokenizer Interface...
-✅ encode() raises NotImplementedError correctly
-✅ decode() raises NotImplementedError correctly
-📈 Progress: Base Tokenizer Interface ✓
+ Unit Test: Base Tokenizer Interface...
+ encode() raises NotImplementedError correctly
+ decode() raises NotImplementedError correctly
+ Progress: Base Tokenizer Interface ✓
 
-🔬 Unit Test: Character Tokenizer...
-✅ Vocabulary built with 89 unique characters
-✅ Encode/decode round-trip: "hello" → [8,5,12,12,15] → "hello"
-✅ Unknown character maps to <UNK> token (ID 0)
-✅ Vocabulary building from corpus works correctly
-📈 Progress: Character Tokenizer ✓
+ Unit Test: Character Tokenizer...
+ Vocabulary built with 89 unique characters
+ Encode/decode round-trip: "hello" → [8,5,12,12,15] → "hello"
+ Unknown character maps to <UNK> token (ID 0)
+ Vocabulary building from corpus works correctly
+ Progress: Character Tokenizer ✓
 
-🔬 Unit Test: BPE Tokenizer...
-✅ Character-level initialization successful
-✅ Pair extraction: ['h','e','l','l','o</w>'] → {('h','e'), ('l','l'), ...}
-✅ Training learned 195 merge rules from corpus
-✅ Vocabulary size reached target (200 tokens)
-✅ Sequence length reduced 3.2x vs character-level
-✅ Unknown words decompose into subwords gracefully
-📈 Progress: BPE Tokenizer ✓
+ Unit Test: BPE Tokenizer...
+ Character-level initialization successful
+ Pair extraction: ['h','e','l','l','o</w>'] → {('h','e'), ('l','l'), ...}
+ Training learned 195 merge rules from corpus
+ Vocabulary size reached target (200 tokens)
+ Sequence length reduced 3.2x vs character-level
+ Unknown words decompose into subwords gracefully
+ Progress: BPE Tokenizer ✓
 
-🔬 Unit Test: Tokenization Utils...
-✅ Tokenizer factory creates correct instances
-✅ Dataset processing handles variable lengths
-✅ Analysis computes compression ratios correctly
-📈 Progress: Tokenization Utils ✓
+ Unit Test: Tokenization Utils...
+ Tokenizer factory creates correct instances
+ Dataset processing handles variable lengths
+ Analysis computes compression ratios correctly
+ Progress: Tokenization Utils ✓
 
-📊 Analyzing Tokenization Strategies...
+ Analyzing Tokenization Strategies...
 Strategy      Vocab    Avg Len  Compression   Coverage
 ------------------------------------------------------------
 Character     89       43.2     1.00          89
 BPE-100       100      28.5     1.52          87
 BPE-500       500      13.8     3.14          245
 
-💡 Key Insights:
+ Key Insights:
 - Character: Small vocab, long sequences, perfect coverage
 - BPE: Larger vocab, shorter sequences, better compression
 - Higher compression ratio = more characters per token = efficiency
 
-🎉 ALL TESTS PASSED! Module ready for export.
+ ALL TESTS PASSED! Module ready for export.
 ```
 
 ### Manual Testing Examples
@@ -827,21 +827,21 @@ Choose your preferred way to engage with this module:
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card} 🚀 Launch Binder
+```{grid-item-card}  Launch Binder
 :link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/10_tokenization/tokenization_dev.ipynb
 :class-header: bg-light
 
 Run this module interactively in your browser. No installation required!
 ```
 
-```{grid-item-card} ⚡ Open in Colab
+```{grid-item-card}  Open in Colab
 :link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/10_tokenization/tokenization_dev.ipynb
 :class-header: bg-light
 
 Use Google Colab for GPU access and cloud compute power.
 ```
 
-```{grid-item-card} 📖 View Source
+```{grid-item-card}  View Source
 :link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/10_tokenization/tokenization_dev.ipynb
 :class-header: bg-light
 
@@ -850,7 +850,7 @@ Browse the Jupyter notebook and understand the implementation.
 
 ````
 
-```{admonition} 💾 Save Your Progress
+```{admonition}  Save Your Progress
 :class: tip
 **Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
 

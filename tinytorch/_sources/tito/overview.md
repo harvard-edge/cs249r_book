@@ -33,14 +33,14 @@
 
 ---
 
-## 👥 Commands by User Role
+##  Commands by User Role
 
 TinyTorch serves three types of users. Choose your path:
 
 <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; margin: 2rem 0;">
 
 <div style="background: #e3f2fd; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #2196f3;">
-<h3 style="margin: 0 0 1rem 0; color: #1976d2;">🎓 Student / Learner</h3>
+<h3 style="margin: 0 0 1rem 0; color: #1976d2;"> Student / Learner</h3>
 <p style="margin: 0 0 1rem 0; font-size: 0.9rem; color: #37474f;">You're learning ML systems by building from scratch</p>
 
 **Your Workflow:**
@@ -66,7 +66,7 @@ tito status
 </div>
 
 <div style="background: #fff3e0; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #f57c00;">
-<h3 style="margin: 0 0 1rem 0; color: #e65100;">👨‍🏫 Instructor</h3>
+<h3 style="margin: 0 0 1rem 0; color: #e65100;"> Instructor</h3>
 <p style="margin: 0 0 1rem 0; font-size: 0.9rem; color: #37474f;">You're teaching ML systems engineering</p>
 
 **Your Workflow:**
@@ -93,7 +93,7 @@ tito nbgrader feedback 01
 </div>
 
 <div style="background: #f3e5f5; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #9c27b0;">
-<h3 style="margin: 0 0 1rem 0; color: #7b1fa2;">👩‍💻 Developer / Contributor</h3>
+<h3 style="margin: 0 0 1rem 0; color: #7b1fa2;">👩💻 Developer / Contributor</h3>
 <p style="margin: 0 0 1rem 0; font-size: 0.9rem; color: #37474f;">You're contributing to TinyTorch modules</p>
 
 **Your Workflow:**

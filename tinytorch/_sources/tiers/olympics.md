@@ -1,4 +1,4 @@
-# 🏅 Torch Olympics (Module 20)
+#  Torch Olympics (Module 20)
 
 **The ultimate test: Build a complete, competition-ready ML system.**
 
@@ -321,10 +321,10 @@ tito olympics init --track language --output ./my_language_project
 ## Prerequisites
 
 **Required**:
-- ✅ **All 19 modules completed** (Foundation + Architecture + Optimization)
-- ✅ Experience training models on real datasets
-- ✅ Understanding of profiling and benchmarking
-- ✅ Comfort with YOUR TinyTorch codebase
+- ✓ **All 19 modules completed** (Foundation + Architecture + Optimization)
+- ✓ Experience training models on real datasets
+- ✓ Understanding of profiling and benchmarking
+- ✓ Comfort with YOUR TinyTorch codebase
 
 **Highly recommended**:
 - Complete all 6 historical milestones (1957-2018)
@@ -376,9 +376,9 @@ tito olympics leaderboard
 
 **Or review prerequisites:**
 
-- **[🏗 Foundation Tier](foundation)** (Modules 01-07)
-- **[🏛️ Architecture Tier](architecture)** (Modules 08-13)
-- **[⏱️ Optimization Tier](optimization)** (Modules 14-19)
+- **[ Foundation Tier](foundation)** (Modules 01-07)
+- **[ Architecture Tier](architecture)** (Modules 08-13)
+- **[ Optimization Tier](optimization)** (Modules 14-19)
 
 ---
 

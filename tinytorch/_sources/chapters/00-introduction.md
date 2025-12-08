@@ -107,22 +107,22 @@ output = model(input)                    # YOU know exactly how this works
 
 ### Perfect For:
 
-**🎓 Computer Science Students**
+**Computer Science Students**
 - Want to understand ML systems beyond high-level APIs
 - Need to implement custom operations for research
 - Preparing for ML engineering roles that require systems knowledge
 
-**👩‍💻 Software Engineers → ML Engineers**
+**Software Engineers Transitioning to ML**
 - Transitioning into ML engineering roles
 - Need to debug and optimize production ML systems
 - Want to understand what happens "under the hood" of ML frameworks
 
-**🔬 ML Practitioners & Researchers**
+**ML Practitioners and Researchers**
 - Debug performance issues in production systems
 - Implement novel architectures and custom operations
 - Optimize training and inference for resource constraints
 
-**🧠 Anyone Curious About ML Systems**
+**Anyone Curious About ML Systems**
 - Understand how PyTorch, TensorFlow actually work
 - Build intuition for ML systems design and optimization
 - Appreciate the engineering behind modern AI breakthroughs
@@ -165,7 +165,7 @@ for batch in dataloader:  # Your data management
     optimizer.step()                            # Your parameter updates
 ```
 
-**🎯 Foundation Achievement**: 95%+ accuracy on MNIST using 100% your own mathematical implementations
+**Foundation Achievement**: 95%+ accuracy on MNIST using 100% your own mathematical implementations
 
 ### After Architecture Tier (Modules 08-13)
 - **Computer Vision Mastery**: CNNs achieving 75%+ accuracy on CIFAR-10 with YOUR convolution implementations
@@ -220,9 +220,9 @@ Module 1: Tensors → Module 2: Layers → Module 3: Training → ...
 
 ### TinyTorch Tier Approach:
 ```
-🏗️ Foundation Tier: Build mathematical infrastructure
-🏛️ Architecture Tier: Compose intelligent architectures
-⚡ Optimization Tier: Deploy at production scale
+Foundation Tier: Build mathematical infrastructure
+Architecture Tier: Compose intelligent architectures
+Optimization Tier: Deploy at production scale
 ```
 **Advantage**: Each tier builds complete, working systems with clear progression
 
@@ -240,17 +240,17 @@ Module 1: Tensors → Module 2: Layers → Module 3: Training → ...
 ### Career Impact by Tier
 After each tier, you become the team member who:
 
-**🏗️ Foundation Tier Graduate**:
+**Foundation Tier Graduate**:
 - Debugs gradient flow issues: "Your ReLU is causing dead neurons"
 - Implements custom optimizers: "I'll build a variant of Adam for this use case"
 - Understands memory patterns: "Batch size 64 hits your GPU memory limit here"
 
-**🏛️ Architecture Tier Graduate**:
+**Architecture Tier Graduate**:
 - Designs novel architectures: "We can adapt transformers for this computer vision task"
 - Optimizes attention patterns: "This attention bottleneck is why your model won't scale to longer sequences"
 - Bridges vision and language: "The same mathematical principles work for both domains"
 
-**⚡ Optimization Tier Graduate**:
+**Optimization Tier Graduate**:
 - Deploys production systems: "I can get us from 500ms to 50ms inference latency"
 - Leads performance optimization: "Here's our memory bottleneck and my 3-step plan to fix it"
 - Competes at industry scale: "Our optimizations achieve Torch Olympics benchmark performance"
@@ -296,14 +296,14 @@ After each tier, you become the team member who:
 :class: tip
 By completing all three tiers, you'll have built a complete ML framework that rivals production implementations:
 
-**🏗️ Foundation Tier Achievement**: 95%+ accuracy on MNIST with YOUR mathematical implementations
-**🏛️ Architecture Tier Achievement**: 75%+ accuracy on CIFAR-10 AND coherent text generation
-**⚡ Optimization Tier Achievement**: Production systems competitive in Torch Olympics benchmarks
+**Foundation Tier Achievement**: 95%+ accuracy on MNIST with YOUR mathematical implementations
+**Architecture Tier Achievement**: 75%+ accuracy on CIFAR-10 AND coherent text generation
+**Optimization Tier Achievement**: Production systems competitive in Torch Olympics benchmarks
 
 All using code you wrote yourself, from mathematical first principles to production optimization.
 ```
 
-**📖 Want to understand the pedagogical narrative behind this structure?** See [The Learning Journey](learning-journey.md) to understand WHY modules flow this way and HOW they build on each other through a six-act learning story.
+**Want to understand the pedagogical narrative behind this structure?** See [The Learning Journey](learning-journey.md) to understand WHY modules flow this way and HOW they build on each other through a six-act learning story.
 
 ---
 
@@ -332,7 +332,7 @@ All using code you wrote yourself, from mathematical first principles to product
 | **06** | **Optimizers** | Parameter updates | Adam, SGD optimizers |
 | **07** | **Training** | Complete training loops | Model.fit(), training scripts |
 
-**🎯 Tier Milestone**: Train neural networks achieving **95%+ accuracy on MNIST** using 100% your own implementations!
+**Tier Milestone**: Train neural networks achieving **95%+ accuracy on MNIST** using 100% your own implementations!
 
 **Skills Gained**:
 - Understand memory layout and computational graphs
@@ -366,7 +366,7 @@ All using code you wrote yourself, from mathematical first principles to product
 | **12** | **Attention** | Information routing | Multi-head attention, self-attention |
 | **13** | **Transformers** | Modern architectures | GPT, BERT, Vision Transformer |
 
-**🎯 Tier Milestone**: Achieve **75%+ accuracy on CIFAR-10** with CNNs AND generate coherent text with transformers!
+**Tier Milestone**: Achieve **75%+ accuracy on CIFAR-10** with CNNs AND generate coherent text with transformers!
 
 **Skills Gained**:
 - Understand why convolution works for spatial data
@@ -401,7 +401,7 @@ All using code you wrote yourself, from mathematical first principles to product
 | **19** | **Benchmarking** | Measurement systems | Torch Olympics, production monitoring |
 | **20** | **Capstone** | Full system integration | End-to-end ML pipeline |
 
-**🎯 Tier Milestone**: Build **production-ready systems** competitive in Torch Olympics benchmarks!
+**Tier Milestone**: Build **production-ready systems** competitive in Torch Olympics benchmarks!
 
 **Skills Gained**:
 - Profile memory usage and identify bottlenecks
@@ -418,19 +418,19 @@ All using code you wrote yourself, from mathematical first principles to product
 <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; margin: 2rem 0;">
 
 <div style="background: #fff7ed; border: 1px solid #fdba74; padding: 1.5rem; border-radius: 0.5rem;">
-<h4 style="margin: 0 0 1rem 0; color: #c2410c;">🚀 Complete Builder</h4>
+<h4 style="margin: 0 0 1rem 0; color: #c2410c;">Complete Builder</h4>
 <p style="margin: 0 0 1rem 0; font-size: 0.9rem;">Implement every component from scratch</p>
 <p style="margin: 0; font-size: 0.85rem; color: #6b7280;"><strong>Time:</strong> 14-18 weeks<br><strong>Ideal for:</strong> CS students, aspiring ML engineers</p>
 </div>
 
 <div style="background: #f0f9ff; border: 1px solid #7dd3fc; padding: 1.5rem; border-radius: 0.5rem;">
-<h4 style="margin: 0 0 1rem 0; color: #0284c7;">⚡ Focused Explorer</h4>
+<h4 style="margin: 0 0 1rem 0; color: #0284c7;">Focused Explorer</h4>
 <p style="margin: 0 0 1rem 0; font-size: 0.9rem;">Pick one tier based on your goals</p>
 <p style="margin: 0; font-size: 0.85rem; color: #6b7280;"><strong>Time:</strong> 4-8 weeks<br><strong>Ideal for:</strong> Working professionals, specific skill gaps</p>
 </div>
 
 <div style="background: #f0fdf4; border: 1px solid #86efac; padding: 1.5rem; border-radius: 0.5rem;">
-<h4 style="margin: 0 0 1rem 0; color: #166534;">📚 Guided Learner</h4>
+<h4 style="margin: 0 0 1rem 0; color: #166534;">Guided Learner</h4>
 <p style="margin: 0 0 1rem 0; font-size: 0.9rem;">Study implementations with hands-on exercises</p>
 <p style="margin: 0; font-size: 0.85rem; color: #6b7280;"><strong>Time:</strong> 8-12 weeks<br><strong>Ideal for:</strong> Self-directed learners, bootcamp graduates</p>
 </div>

@@ -1,7 +1,7 @@
 ---
 title: "Tensor"
 description: "Build the fundamental N-dimensional array data structure that powers all machine learning"
-difficulty: "⭐"
+difficulty: "●"
 time_estimate: "4-6 hours"
 prerequisites: []
 next_steps: ["02_activations"]
@@ -13,9 +13,9 @@ learning_objectives:
   - "Analyze computational complexity, memory usage, and view-vs-copy trade-offs in tensor operations"
 ---
 
-# 01. Tensor
+# Tensor
 
-**FOUNDATION TIER** | Difficulty: ⭐ (1/4) | Time: 4-6 hours
+**FOUNDATION TIER** | Difficulty: ● (1/4) | Time: 4-6 hours
 
 ## Overview
 
@@ -356,25 +356,25 @@ The development notebook includes comprehensive inline tests with immediate feed
 
 ```python
 # Example inline test output
-🧪 Unit Test: Tensor Creation...
-✅ Tensor created from list
-✅ Shape property correct: (2, 2)
-✅ Size property correct: 4
-✅ dtype is float32
-📈 Progress: Tensor initialization ✓
+ Unit Test: Tensor Creation...
+ Tensor created from list
+ Shape property correct: (2, 2)
+ Size property correct: 4
+ dtype is float32
+ Progress: Tensor initialization ✓
 
-🧪 Unit Test: Arithmetic Operations...
-✅ Addition: [[6, 8], [10, 12]]
-✅ Multiplication works element-wise
-✅ Broadcasting: scalar + tensor
-✅ Broadcasting: matrix + vector
-📈 Progress: Arithmetic operations ✓
+ Unit Test: Arithmetic Operations...
+ Addition: [[6, 8], [10, 12]]
+ Multiplication works element-wise
+ Broadcasting: scalar + tensor
+ Broadcasting: matrix + vector
+ Progress: Arithmetic operations ✓
 
-🧪 Unit Test: Matrix Multiplication...
-✅ 2×2 @ 2×2 = [[19, 22], [43, 50]]
-✅ Shape validation catches 2×2 @ 3×1 error
-✅ Error message shows: "2 ≠ 3"
-📈 Progress: Matrix operations ✓
+ Unit Test: Matrix Multiplication...
+ 2×2 @ 2×2 = [[19, 22], [43, 50]]
+ Shape validation catches 2×2 @ 3×1 error
+ Error message shows: "2 ≠ 3"
+ Progress: Matrix operations ✓
 ```
 
 ### Manual Testing Examples
@@ -425,12 +425,12 @@ Understanding what you're building vs. what production frameworks provide:
 | **Backend** | NumPy (CPU-only) | C++/CUDA (CPU/GPU/TPU) | C++/CUDA/XLA |
 | **Dtype Support** | float32 (primary) | float16/32/64, int8/16/32/64, bool, complex | Same + bfloat16 |
 | **Operations** | Arithmetic, matmul, reshape, transpose, reductions | 1000+ operations | 1000+ operations |
-| **Broadcasting** | ✅ Full NumPy rules | ✅ Same rules | ✅ Same rules |
-| **Autograd** | Dormant (activates Module 05) | ✅ Full computation graph | ✅ GradientTape |
-| **GPU Support** | ❌ CPU-only | ✅ CUDA, Metal, ROCm | ✅ CUDA, TPU |
-| **Memory Pooling** | ❌ Python GC | ✅ Caching allocator | ✅ Memory pools |
-| **JIT Compilation** | ❌ Interpreted | ✅ TorchScript, torch.compile | ✅ XLA, TF Graph |
-| **Distributed** | ❌ Single process | ✅ DDP, FSDP | ✅ tf.distribute |
+| **Broadcasting** | ✓ Full NumPy rules | ✓ Same rules | ✓ Same rules |
+| **Autograd** | Dormant (activates Module 05) | ✓ Full computation graph | ✓ GradientTape |
+| **GPU Support** | ✗ CPU-only | ✓ CUDA, Metal, ROCm | ✓ CUDA, TPU |
+| **Memory Pooling** | ✗ Python GC | ✓ Caching allocator | ✓ Memory pools |
+| **JIT Compilation** | ✗ Interpreted | ✓ TorchScript, torch.compile | ✓ XLA, TF Graph |
+| **Distributed** | ✗ Single process | ✓ DDP, FSDP | ✓ tf.distribute |
 
 **Educational focus**: Your implementation prioritizes clarity and understanding over performance. The core concepts (broadcasting, shape manipulation, reductions) are identical - you're learning the same patterns used in production, just with simpler infrastructure.
 
@@ -700,21 +700,21 @@ Choose your preferred way to engage with this module:
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card} 🚀 Launch Binder
+```{grid-item-card}  Launch Binder
 :link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/01_tensor/tensor_dev.ipynb
 :class-header: bg-light
 
 Run this module interactively in your browser. No installation required!
 ```
 
-```{grid-item-card} ⚡ Open in Colab
+```{grid-item-card}  Open in Colab
 :link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/01_tensor/tensor_dev.ipynb
 :class-header: bg-light
 
 Use Google Colab for GPU access and cloud compute power.
 ```
 
-```{grid-item-card} 📖 View Source
+```{grid-item-card}  View Source
 :link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/01_tensor/tensor_dev.ipynb
 :class-header: bg-light
 
@@ -723,7 +723,7 @@ Browse the Jupyter notebook and understand the implementation.
 
 ````
 
-```{admonition} 💾 Save Your Progress
+```{admonition}  Save Your Progress
 :class: tip
 **Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
 

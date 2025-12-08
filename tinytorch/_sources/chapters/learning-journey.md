@@ -321,14 +321,14 @@ As you progress through TinyTorch, you advance along **two dimensions simultaneo
 |--------------|-------------------|------------------|
 | **Act I: Foundation** | 🧠 1957 Perceptron | Your Linear layer recreates history |
 | **Act II: Learning** | ⚡ 1969 XOR + 🔢 1986 MLP | Your autograd enables training (95%+ MNIST) |
-| **Act III: Data & Scale** | 🖼️ 1998 CNN | Your Conv2d achieves 75%+ on CIFAR-10 |
+| **Act III: Data & Scale** | 🖼 1998 CNN | Your Conv2d achieves 75%+ on CIFAR-10 |
 | **Act IV: Language** | 🤖 2017 Transformers | Your attention generates coherent text |
 | **Act V: Production** | ⚡ 2024 Systems Age | Your optimizations compete in benchmarks |
 | **Act VI: Integration** | 🏆 TinyGPT Capstone | Your complete framework works end-to-end |
 
 **Understanding Both Dimensions**: The **Acts** explain WHY you're building each component (pedagogical progression). The **Milestones** prove WHAT you've built actually works (historical validation).
 
-**📖 See [Journey Through ML History](milestones.md)** for complete milestone details and how to run them.
+** See [Journey Through ML History](milestones.md)** for complete milestone details and how to run them.
 
 ---
 
@@ -543,7 +543,7 @@ Typical time estimates (varies by background):
 - Act V → Systems (2024)
 - Act VI → TinyGPT (complete)
 
-**📖 See [Milestones](milestones.md)** for details.
+** See [Milestones](milestones.md)** for details.
 
 ---
 
@@ -568,4 +568,4 @@ Typical time estimates (varies by background):
 
 **Remember**: You're not just learning ML algorithms. You're building ML systems - from mathematical foundations to production deployment. This journey transforms you from a framework user into a systems engineer who truly understands how modern AI works.
 
-**Welcome to the learning journey. Let's build something amazing together.** 🚀
+**Welcome to the learning journey. Let's build something amazing together.** 

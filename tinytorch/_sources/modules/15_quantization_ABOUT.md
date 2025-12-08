@@ -1,7 +1,7 @@
 ---
 title: "Quantization - Reduced Precision for Efficiency"
 description: "INT8 quantization fundamentals, calibration strategies, and accuracy-efficiency trade-offs"
-difficulty: "⭐⭐⭐"
+difficulty: "●●●"
 time_estimate: "5-6 hours"
 prerequisites: ["Profiling"]
 next_steps: ["Compression"]
@@ -13,9 +13,9 @@ learning_objectives:
   - "Recognize quantization as educational foundation vs production INT8 hardware acceleration"
 ---
 
-# 15. Quantization - Reduced Precision for Efficiency
+# Quantization - Reduced Precision for Efficiency
 
-**OPTIMIZATION TIER** | Difficulty: ⭐⭐⭐ (3/4) | Time: 5-6 hours
+**OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 5-6 hours
 
 ## Overview
 
@@ -306,12 +306,12 @@ python -m pytest tests/ -k quantization -v
 
 ### Test Coverage Areas
 
-- ✅ **Quantization Correctness**: FP32 → INT8 → FP32 roundtrip error bounds (< 0.5% mean error)
-- ✅ **Memory Reduction**: Verify 4× reduction in model size (weights + biases)
-- ✅ **Symmetric vs Asymmetric**: Both schemes produce valid INT8 in [-128, 127]
-- ✅ **Calibration Impact**: Percentile clipping reduces quantization error vs naive min/max
-- ✅ **QuantizedLinear Equivalence**: Output matches FP32 Linear within tolerance (< 1% difference)
-- ✅ **Model-Level Quantization**: Full network quantization preserves accuracy (< 2% degradation)
+- ✓ **Quantization Correctness**: FP32 → INT8 → FP32 roundtrip error bounds (< 0.5% mean error)
+- ✓ **Memory Reduction**: Verify 4× reduction in model size (weights + biases)
+- ✓ **Symmetric vs Asymmetric**: Both schemes produce valid INT8 in [-128, 127]
+- ✓ **Calibration Impact**: Percentile clipping reduces quantization error vs naive min/max
+- ✓ **QuantizedLinear Equivalence**: Output matches FP32 Linear within tolerance (< 1% difference)
+- ✓ **Model-Level Quantization**: Full network quantization preserves accuracy (< 2% degradation)
 
 ### Inline Testing & Quantization Analysis
 
@@ -319,16 +319,16 @@ The module includes comprehensive validation with real-time feedback:
 
 ```python
 # Example inline test output
-🔬 Unit Test: quantize_int8()...
-✅ Symmetric quantization: range [-128, 127] ✓
-✅ Scale calculation: max_val / 127 = 0.0234 ✓
-✅ Roundtrip error: 0.31% mean error ✓
-📈 Progress: quantize_int8() ✓
+ Unit Test: quantize_int8()...
+ Symmetric quantization: range [-128, 127] ✓
+ Scale calculation: max_val / 127 = 0.0234 ✓
+ Roundtrip error: 0.31% mean error ✓
+ Progress: quantize_int8() ✓
 
-🔬 Unit Test: QuantizedLinear...
-✅ Memory reduction: 145KB → 36KB (4.0×) ✓
-✅ Output equivalence: 0.43% max difference vs FP32 ✓
-📈 Progress: QuantizedLinear ✓
+ Unit Test: QuantizedLinear...
+ Memory reduction: 145KB → 36KB (4.0×) ✓
+ Output equivalence: 0.43% max difference vs FP32 ✓
+ Progress: QuantizedLinear ✓
 ```
 
 ### Manual Testing Examples
@@ -367,7 +367,7 @@ print(f"Reduction: {linear.weight.data.nbytes / q_linear.weights_int8.data.nbyte
 
 - **Edge AI Devices**: Google Edge TPU (Coral), NVIDIA Jetson, Intel Neural Compute Stick require INT8 models. Hardware is designed exclusively for quantized operations - FP32 isn't supported or is 10× slower.
 
-- **Cloud Inference Optimization**: AWS Inferentia, Azure Inferentia, Google Cloud TPU serve quantized models. INT8 reduces memory bandwidth (bottleneck for inference) and increases throughput by 2-4×. At scale (millions of requests/day), this saves millions in infrastructure costs.
+- **Cloud Inference Optimization**: AWS Inferentia, Azure Maia, Meta MTIA and Google Cloud TPU serve quantized models. INT8 reduces memory bandwidth (bottleneck for inference) and increases throughput by 2-4×. At scale (millions of requests/day), this saves millions in infrastructure costs.
 
 - **Large Language Models**: LLaMA-65B is 130GB in FP16, doesn't fit on single 80GB A100 GPU. INT8 quantization → 65GB, enables serving. GPTQ pushes to 4-bit (33GB) with < 1% perplexity increase. Quantization is how enthusiasts run 70B models on consumer GPUs.
 

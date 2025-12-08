@@ -1,4 +1,4 @@
-# 🏛️ Architecture Tier (Modules 08-13)
+#  Architecture Tier (Modules 08-13)
 
 **Build modern neural architectures—from computer vision to language models.**
 
@@ -148,7 +148,7 @@ After completing the Architecture tier, you'll be able to:
 ## Prerequisites
 
 **Required**:
-- **🏗 Foundation Tier** (Modules 01-07) completed
+- ** Foundation Tier** (Modules 01-07) completed
 - Understanding of tensors, autograd, and training loops
 - Basic understanding of images (height, width, channels)
 - Basic understanding of text/language concepts
@@ -237,9 +237,9 @@ tito module start 10_tokenization
 
 **Or explore other tiers:**
 
-- **[🏗 Foundation Tier](foundation)** (Modules 01-07): Mathematical foundations
-- **[⏱️ Optimization Tier](optimization)** (Modules 14-19): Production-ready performance
-- **[🏅 Torch Olympics](olympics)** (Module 20): Compete in ML systems challenges
+- **[ Foundation Tier](foundation)** (Modules 01-07): Mathematical foundations
+- **[ Optimization Tier](optimization)** (Modules 14-19): Production-ready performance
+- **[ Torch Olympics](olympics)** (Module 20): Compete in ML systems challenges
 
 ---
 

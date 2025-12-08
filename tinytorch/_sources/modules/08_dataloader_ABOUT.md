@@ -1,7 +1,7 @@
 ---
 title: "DataLoader - Data Pipeline Engineering"
 description: "Build production-grade data loading infrastructure for efficient ML training"
-difficulty: "⭐⭐⭐"
+difficulty: "●●●"
 time_estimate: "4-5 hours"
 prerequisites: ["Tensor", "Layers", "Training"]
 next_steps: ["Spatial (CNNs)"]
@@ -13,9 +13,9 @@ learning_objectives:
   - "Analyze trade-offs between batch size, memory usage, and throughput"
 ---
 
-# 08. DataLoader
+# DataLoader
 
-**ARCHITECTURE TIER** | Difficulty: ⭐⭐⭐ (3/4) | Time: 4-5 hours
+**ARCHITECTURE TIER** | Difficulty: ●●● (3/4) | Time: 4-5 hours
 
 ## Overview
 
@@ -244,11 +244,11 @@ python -m pytest tests/ -k dataloader -v
 
 ### Test Coverage Areas
 
-- ✅ **Dataset Interface**: Abstract base class enforcement, protocol implementation
-- ✅ **TensorDataset**: Tensor alignment validation, indexing correctness
-- ✅ **DataLoader Batching**: Batch shape consistency, handling uneven final batch
-- ✅ **Shuffling**: Randomization correctness, deterministic seeding
-- ✅ **Training Integration**: Complete workflow with train/validation splits
+- ✓ **Dataset Interface**: Abstract base class enforcement, protocol implementation
+- ✓ **TensorDataset**: Tensor alignment validation, indexing correctness
+- ✓ **DataLoader Batching**: Batch shape consistency, handling uneven final batch
+- ✓ **Shuffling**: Randomization correctness, deterministic seeding
+- ✓ **Training Integration**: Complete workflow with train/validation splits
 
 ### Inline Testing & Validation
 
@@ -259,21 +259,21 @@ The module includes comprehensive unit tests:
 python modules/08_dataloader/dataloader.py
 
 # Expected output:
-🔬 Unit Test: Dataset Abstract Base Class...
-✅ Dataset is properly abstract
-✅ Dataset interface works correctly!
+ Unit Test: Dataset Abstract Base Class...
+ Dataset is properly abstract
+ Dataset interface works correctly!
 
-🔬 Unit Test: TensorDataset...
-✅ TensorDataset works correctly!
+ Unit Test: TensorDataset...
+ TensorDataset works correctly!
 
-🔬 Unit Test: DataLoader...
-✅ DataLoader works correctly!
+ Unit Test: DataLoader...
+ DataLoader works correctly!
 
-🔬 Unit Test: DataLoader Deterministic Shuffling...
-✅ Deterministic shuffling works correctly!
+ Unit Test: DataLoader Deterministic Shuffling...
+ Deterministic shuffling works correctly!
 
-🔬 Integration Test: Training Workflow...
-✅ Training integration works correctly!
+ Integration Test: Training Workflow...
+ Training integration works correctly!
 ```
 
 ### Manual Testing Examples
@@ -332,21 +332,21 @@ Choose your preferred way to engage with this module:
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card} 🚀 Launch Binder
+```{grid-item-card}  Launch Binder
 :link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/08_dataloader/dataloader_dev.ipynb
 :class-header: bg-light
 
 Run this module interactively in your browser. No installation required!
 ```
 
-```{grid-item-card} ⚡ Open in Colab
+```{grid-item-card}  Open in Colab
 :link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/08_dataloader/dataloader_dev.ipynb
 :class-header: bg-light
 
 Use Google Colab for GPU access and cloud compute power.
 ```
 
-```{grid-item-card} 📖 View Source
+```{grid-item-card}  View Source
 :link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/08_dataloader/dataloader.py
 :class-header: bg-light
 
@@ -355,7 +355,7 @@ Browse the Python source code and understand the implementation.
 
 ````
 
-```{admonition} 💾 Save Your Progress
+```{admonition}  Save Your Progress
 :class: tip
 **Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
 
