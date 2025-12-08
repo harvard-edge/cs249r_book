@@ -4,7 +4,7 @@
 
 ---
 
-## 🚀 **One-Time Setup**
+##  **One-Time Setup**
 ```bash
 # 1. Setup environment
 python3 -m venv .venv && source .venv/bin/activate
@@ -96,9 +96,7 @@ ls modules/                          # Check available modules
 
 ---
 
-## 📚 **Course Planning**
-
-**17 TinyTorch Modules:**
+## 📚 **Course Planning17 TinyTorch Modules:**
 - **00-02**: Foundation (intro, setup, tensors)
 - **03-07**: Building Blocks (activations, layers, dense, spatial, attention)  
 - **08-11**: Training (dataloader, autograd, optimizers, training)
@@ -108,4 +106,4 @@ ls modules/                          # Check available modules
 
 ---
 
-**📖 For complete details: See [Instructor Guide](book/instructor-guide.md)**
+** For complete details: See [Instructor Guide](book/instructor-guide.md)**

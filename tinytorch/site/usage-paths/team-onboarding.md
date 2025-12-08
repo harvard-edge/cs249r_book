@@ -6,7 +6,7 @@ Complete guide for using TinyTorch in industry settings: new hire bootcamps, int
 
 TinyTorch's **Model 3: Team Onboarding** addresses industry use cases where ML teams want members to understand PyTorch internals. This guide covers deployment scenarios, training structures, and best practices for industry adoption.
 
-## 🚀 Use Cases
+##  Use Cases
 
 ### 1. New Hire Bootcamps (2-3 Week Intensive)
 
@@ -82,7 +82,7 @@ TinyTorch's **Model 3: Team Onboarding** addresses industry use cases where ML t
 - Performance optimization strategies
 - **Duration**: 2-3 days
 
-## 🏗️ Deployment Scenarios
+##  Deployment Scenarios
 
 ### Scenario 1: Cloud-Based Training (Recommended)
 
@@ -155,7 +155,7 @@ TinyTorch's **Model 3: Team Onboarding** addresses industry use cases where ML t
 - Week 3: Modules 18-19
 - Week 4: Capstone optimization project
 
-## 🎓 Learning Outcomes
+##  Learning Outcomes
 
 After completing TinyTorch onboarding, team members will:
 
@@ -213,7 +213,7 @@ After completing TinyTorch onboarding, team members will:
 - Improved code review quality
 - Better architecture decisions
 
-## 🛠️ Setup for Teams
+## 🛠 Setup for Teams
 
 ### Quick Start
 

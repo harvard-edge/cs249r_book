@@ -249,7 +249,7 @@ In 15 minutes, you've:
 
 **Notebook Platforms:**
 - **Online (Viewing)**: Jupyter/MyBinder, Google Colab, Marimo - great for exploring notebooks
-- **⚠️ Important**: Online notebooks are for **viewing only**. For full package experiments, milestone validation, and CLI tools, you need **local installation** (see [Student Workflow](student-workflow.md))
+- **⚠ Important**: Online notebooks are for **viewing only**. For full package experiments, milestone validation, and CLI tools, you need **local installation** (see [Student Workflow](student-workflow.md))
 
 </div>
 

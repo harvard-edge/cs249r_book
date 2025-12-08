@@ -155,9 +155,7 @@ You learn the *concepts* in TinyTorch, then understand how PyTorch optimizes the
 
 ### Does TinyTorch replace a traditional ML course?
 
-**No, it complements it.**
-
-**Traditional ML course teaches:**
+**No, it complements it.Traditional ML course teaches:**
 - Algorithms (gradient descent, backpropagation)
 - Theory (loss functions, regularization)
 - Applications (classification, generation)
@@ -212,13 +210,11 @@ Milestones are historical ML achievements you recreate with YOUR implementations
 
 Each milestone proves your framework works by running actual ML experiments.
 
-**📖 See [Journey Through ML History](chapters/milestones.md)** for details.
+** See [Journey Through ML History](chapters/milestones.md)** for details.
 
 ### Are the checkpoints required?
 
-**No, they're optional.**
-
-**The essential workflow:**
+**No, they're optional.The essential workflow:**
 ```
 1. Edit modules → 2. Export → 3. Validate with milestones
 ```
@@ -228,7 +224,7 @@ Each milestone proves your framework works by running actual ML experiments.
 - Helpful for self-assessment
 - Use `tito checkpoint status` to view progress
 
-**📖 See [Module Workflow](tito/modules.md)** for the core development cycle.
+** See [Module Workflow](tito/modules.md)** for the core development cycle.
 
 ---
 
@@ -255,7 +251,7 @@ cd modules/01_tensor
 jupyter lab tensor_dev.py
 ```
 
-**📖 See [Getting Started Guide](getting-started.md)** for detailed setup.
+** See [Getting Started Guide](getting-started.md)** for detailed setup.
 
 ### What's the typical workflow?
 
@@ -272,7 +268,7 @@ cd ../../milestones/01_1957_perceptron
 python rosenblatt_forward.py  # Uses YOUR implementation!
 ```
 
-**📖 See [Module Workflow](tito/modules.md)** for complete details.
+** See [Module Workflow](tito/modules.md)** for complete details.
 
 ### Can I use this in my classroom?
 
@@ -283,7 +279,7 @@ python rosenblatt_forward.py  # Uses YOUR implementation!
 - [NBGrader](https://nbgrader.readthedocs.io/) integration coming soon for automated grading
 - Instructor tooling under development
 
-**📖 See [Classroom Use Guide](usage-paths/classroom-use.md)** for details.
+** See [Classroom Use Guide](usage-paths/classroom-use.md)** for details.
 
 ### How do I get help?
 
@@ -310,9 +306,7 @@ When you import a library, you're limited by what it provides. When you build fr
 
 ### Isn't this reinventing the wheel?
 
-**Yes, intentionally!**
-
-**The best way to learn engineering:** Build it yourself.
+**Yes, intentionally!The best way to learn engineering:** Build it yourself.
 
 - Car mechanics learn by taking apart engines
 - Civil engineers build bridge models

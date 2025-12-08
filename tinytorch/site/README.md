@@ -1,8 +1,8 @@
-# Tiny🔥Torch Documentation Site
+# Tiny\raisebox{-0.1em}{\includegraphics[height=1em]{../_static/logos/fire-emoji.png}}Torch Documentation Site
 
 This directory contains the TinyTorch course website and documentation.
 
-## 🚀 Building the Site
+##  Building the Site
 
 All builds are managed through the Makefile:
 

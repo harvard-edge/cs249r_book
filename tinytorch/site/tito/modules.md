@@ -308,7 +308,7 @@ tito module reset 01
 
 **Use this when**: You want to start a module completely fresh
 
-⚠️ **Warning**: This removes your implementation. Use with caution!
+⚠ **Warning**: This removes your implementation. Use with caution!
 
 </div>
 

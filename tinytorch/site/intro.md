@@ -72,7 +72,7 @@ TinyTorch is organized into **four progressive tiers** that take you from mathem
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 2rem 0 2.5rem 0; max-width: 1100px;">
 
 <a href="tiers/foundation.html" class="tier-card" style="background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); padding: 1.5rem; border-radius: 0.5rem; border-left: 5px solid #1976d2; text-decoration: none; display: block; transition: transform 0.2s ease, box-shadow 0.2s ease;">
-<h3 style="margin: 0 0 0.75rem 0; color: #0d47a1; font-size: 1.15rem; font-weight: 600;">🏗 Foundation (Modules 01-07)</h3>
+<h3 style="margin: 0 0 0.75rem 0; color: #0d47a1; font-size: 1.15rem; font-weight: 600;"> Foundation (Modules 01-07)</h3>
 <p style="margin: 0 0 0.75rem 0; color: #1565c0; font-size: 0.95rem; line-height: 1.6;">Build the mathematical core that makes neural networks learn.</p>
 <p style="margin: 0.75rem 0 0 0; color: #0d47a1; font-size: 0.85rem; font-style: italic;">
 Unlocks: Perceptron (1957) • XOR Crisis (1969) • MLP (1986)
@@ -80,7 +80,7 @@ Unlocks: Perceptron (1957) • XOR Crisis (1969) • MLP (1986)
 </a>
 
 <a href="tiers/architecture.html" class="tier-card" style="background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%); padding: 1.5rem; border-radius: 0.5rem; border-left: 5px solid #7b1fa2; text-decoration: none; display: block; transition: transform 0.2s ease, box-shadow 0.2s ease;">
-<h3 style="margin: 0 0 0.75rem 0; color: #4a148c; font-size: 1.15rem; font-weight: 600;">🏛️ Architecture (Modules 08-13)</h3>
+<h3 style="margin: 0 0 0.75rem 0; color: #4a148c; font-size: 1.15rem; font-weight: 600;"> Architecture (Modules 08-13)</h3>
 <p style="margin: 0 0 0.75rem 0; color: #6a1b9a; font-size: 0.95rem; line-height: 1.6;">Build modern neural architectures—from computer vision to language models.</p>
 <p style="margin: 0.75rem 0 0 0; color: #4a148c; font-size: 0.85rem; font-style: italic;">
 Unlocks: CNN Revolution (1998) • Transformer Era (2017)
@@ -88,7 +88,7 @@ Unlocks: CNN Revolution (1998) • Transformer Era (2017)
 </a>
 
 <a href="tiers/optimization.html" class="tier-card" style="background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%); padding: 1.5rem; border-radius: 0.5rem; border-left: 5px solid #f57c00; text-decoration: none; display: block; transition: transform 0.2s ease, box-shadow 0.2s ease;">
-<h3 style="margin: 0 0 0.75rem 0; color: #e65100; font-size: 1.15rem; font-weight: 600;">⏱️ Optimization (Modules 14-19)</h3>
+<h3 style="margin: 0 0 0.75rem 0; color: #e65100; font-size: 1.15rem; font-weight: 600;"> Optimization (Modules 14-19)</h3>
 <p style="margin: 0 0 0.75rem 0; color: #ef6c00; font-size: 0.95rem; line-height: 1.6;">Transform research prototypes into production-ready systems.</p>
 <p style="margin: 0.75rem 0 0 0; color: #e65100; font-size: 0.85rem; font-style: italic;">
 Unlocks: MLPerf Torch Olympics (2018) • 8-16× compression • 12-40× speedup
@@ -96,7 +96,7 @@ Unlocks: MLPerf Torch Olympics (2018) • 8-16× compression • 12-40× speedup
 </a>
 
 <a href="tiers/olympics.html" class="tier-card" style="background: linear-gradient(135deg, #fce4ec 0%, #f8bbd0 100%); padding: 1.5rem; border-radius: 0.5rem; border-left: 5px solid #c2185b; text-decoration: none; display: block; transition: transform 0.2s ease, box-shadow 0.2s ease;">
-<h3 style="margin: 0 0 0.75rem 0; color: #880e4f; font-size: 1.15rem; font-weight: 600;">🏅 Torch Olympics (Module 20)</h3>
+<h3 style="margin: 0 0 0.75rem 0; color: #880e4f; font-size: 1.15rem; font-weight: 600;"> Torch Olympics (Module 20)</h3>
 <p style="margin: 0 0 0.75rem 0; color: #ad1457; font-size: 0.95rem; line-height: 1.6;">The ultimate test: Build a complete, competition-ready ML system.</p>
 <p style="margin: 0.75rem 0 0 0; color: #880e4f; font-size: 0.85rem; font-style: italic;">
 Capstone: Vision • Language • Speed • Compression tracks
@@ -246,7 +246,7 @@ Perfect if you want to **debug ML systems**, **implement custom operations**, or
 
 ---
 
-## 🌍 Join the Community
+##  Join the Community
 
 <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); padding: 2rem; border-radius: 1rem; margin: 2rem 0; text-align: center;">
   <p style="color: #f1f5f9; font-size: 1.25rem; margin: 0 0 0.5rem 0; font-weight: 600;">
@@ -269,7 +269,7 @@ Perfect if you want to **debug ML systems**, **implement custom operations**, or
               color: #f1f5f9; padding: 0.75rem 2rem; border-radius: 0.5rem; 
               text-decoration: none; font-weight: 600; font-size: 1rem;
               transition: all 0.2s ease;">
-      ✉️ Subscribe
+      ✉ Subscribe
     </a>
   </div>
 </div>
@@ -279,7 +279,7 @@ Perfect if you want to **debug ML systems**, **implement custom operations**, or
 **Next Steps**: **[Quick Start Guide](quickstart-guide)** (15 min) • **[Course Structure](chapters/00-introduction)** • **[FAQ](faq.md)**
 
 <div style="text-align: center; padding: 1.5rem 0; margin-top: 2rem; border-top: 1px solid #e2e8f0; color: #64748b; font-size: 0.9rem;">
-  <span style="color: #f97316;">🔥</span> <strong>TinyTorch</strong> 
+  <span style="color: #f97316;">\raisebox{-0.1em}{\includegraphics[height=1em]{../_static/logos/fire-emoji.png}}</span> <strong>TinyTorch</strong> 
   <span style="margin: 0 0.75rem;">•</span> 
   <a href="https://mlsysbook.ai" style="color: #64748b; text-decoration: none;">MLSysBook</a>
   <span style="margin: 0 0.75rem;">•</span>
