@@ -367,7 +367,7 @@ print(f"Reduction: {linear.weight.data.nbytes / q_linear.weights_int8.data.nbyte
 
 - **Edge AI Devices**: Google Edge TPU (Coral), NVIDIA Jetson, Intel Neural Compute Stick require INT8 models. Hardware is designed exclusively for quantized operations - FP32 isn't supported or is 10× slower.
 
-- **Cloud Inference Optimization**: AWS Inferentia, Google Cloud TPU serve quantized models. INT8 reduces memory bandwidth (bottleneck for inference) and increases throughput by 2-4×. At scale (millions of requests/day), this saves millions in infrastructure costs.
+- **Cloud Inference Optimization**: AWS Inferentia, Azure Maia, Meta MTIA and Google Cloud TPU serve quantized models. INT8 reduces memory bandwidth (bottleneck for inference) and increases throughput by 2-4×. At scale (millions of requests/day), this saves millions in infrastructure costs.
 
 - **Large Language Models**: LLaMA-65B is 130GB in FP16, doesn't fit on single 80GB A100 GPU. INT8 quantization → 65GB, enables serving. GPTQ pushes to 4-bit (33GB) with < 1% perplexity increase. Quantization is how enthusiasts run 70B models on consumer GPUs.
 
