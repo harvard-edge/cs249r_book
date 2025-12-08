@@ -21,243 +21,209 @@ Build a complete machine learning (ML) framework from tensors to systems—under
 
 ```{raw} html
 <style>
-.demo-carousel {
-  max-width: 850px;
+.demo-terminal {
+  max-width: 640px;
   margin: 0 auto 1.5rem auto;
 }
-.demo-carousel .window {
-  background: linear-gradient(145deg, #1a1a2e 0%, #16213e 100%);
-  border-radius: 12px;
+.demo-window {
+  background: #0d1117;
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
   overflow: hidden;
-  box-shadow: 0 25px 50px -12px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
 }
-.demo-carousel .window-bar {
-  background: linear-gradient(90deg, #2d2d44 0%, #1f1f35 100%);
-  padding: 12px 16px;
+.demo-titlebar {
+  background: linear-gradient(90deg, #21262d 0%, #161b22 100%);
+  padding: 10px 14px;
   display: flex;
   align-items: center;
   gap: 8px;
-  border-bottom: 1px solid rgba(255,255,255,0.05);
+  border-bottom: 1px solid #30363d;
 }
-.demo-carousel .window-dot {
+.demo-dots {
+  display: flex;
+  gap: 6px;
+}
+.demo-dot {
   width: 12px;
   height: 12px;
   border-radius: 50%;
 }
-.demo-carousel .window-dot.red { background: #ff5f57; }
-.demo-carousel .window-dot.yellow { background: #febc2e; }
-.demo-carousel .window-dot.green { background: #28c840; }
-.demo-carousel .window-title {
+.demo-dot.red { background: #ff5f57; }
+.demo-dot.yellow { background: #febc2e; }
+.demo-dot.green { background: #28c840; }
+.demo-titlebar-text {
   flex: 1;
   text-align: center;
-  color: #64748b;
+  color: #8b949e;
   font-size: 0.85rem;
-  font-family: -apple-system, system-ui, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
 }
-.demo-carousel .slides-wrapper {
-  position: relative;
-  overflow: hidden;
+.demo-body {
+  padding: 1.5rem 1.5rem;
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+  font-size: 0.9rem;
+  line-height: 1.8;
+  min-height: 280px;
 }
-.demo-carousel .slides-track {
-  display: flex;
-  transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+.demo-line {
+  color: #c9d1d9;
+  margin-bottom: 0.25rem;
+  opacity: 0;
+  transform: translateY(5px);
+  animation: fadeInLine 0.3s ease forwards;
 }
-.demo-carousel .slide {
-  min-width: 100%;
-  aspect-ratio: 16/9;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
-  position: relative;
+.demo-line.visible {
+  opacity: 1;
+  transform: translateY(0);
 }
-.demo-carousel .slide-content {
-  text-align: center;
-  z-index: 1;
+@keyframes fadeInLine {
+  to { opacity: 1; transform: translateY(0); }
 }
-.demo-carousel .slide-icon {
-  font-size: 5rem;
-  margin-bottom: 1rem;
-  filter: drop-shadow(0 4px 12px rgba(0,0,0,0.3));
+.demo-prompt {
+  color: #7ee787;
 }
-.demo-carousel .slide-title {
-  color: #f1f5f9;
-  font-size: 1.5rem;
-  font-weight: 700;
-  margin-bottom: 0.5rem;
+.demo-output {
+  color: #8b949e;
+  padding-left: 1rem;
 }
-.demo-carousel .slide-desc {
-  color: #94a3b8;
-  font-size: 1rem;
+.demo-success {
+  color: #7ee787;
 }
-.demo-carousel .slide::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(circle at 50% 120%, rgba(59,130,246,0.1) 0%, transparent 60%);
+.demo-faded {
+  color: #484f58;
+  font-style: italic;
+  margin-top: 1rem;
 }
-.demo-carousel .nav-btn {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  border: none;
-  background: rgba(255,255,255,0.1);
-  backdrop-filter: blur(8px);
-  color: white;
-  font-size: 1.25rem;
-  cursor: pointer;
-  transition: all 0.2s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 10;
-}
-.demo-carousel .nav-btn:hover {
-  background: rgba(255,255,255,0.2);
-  transform: translateY(-50%) scale(1.1);
-}
-.demo-carousel .nav-btn.prev { left: 16px; }
-.demo-carousel .nav-btn.next { right: 16px; }
-.demo-carousel .progress-bar {
+.demo-progress {
   display: flex;
   justify-content: center;
   gap: 0.5rem;
-  padding: 1rem;
-  background: linear-gradient(90deg, #1f1f35 0%, #2d2d44 50%, #1f1f35 100%);
+  margin-top: 1rem;
 }
-.demo-carousel .step {
+.demo-step {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  border-radius: 2rem;
-  border: none;
-  background: transparent;
+  gap: 0.35rem;
+  padding: 0.4rem 0.75rem;
+  background: #1e293b;
+  border-radius: 20px;
+  font-size: 0.8rem;
   color: #64748b;
-  font-size: 0.85rem;
-  cursor: pointer;
   transition: all 0.3s;
+  cursor: pointer;
+  border: none;
 }
-.demo-carousel .step:hover {
+.demo-step.active {
+  background: #1e3a8a;
+  color: #93c5fd;
+}
+.demo-step:hover {
+  background: #334155;
   color: #94a3b8;
 }
-.demo-carousel .step.active {
-  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-  color: white;
-  box-shadow: 0 4px 12px rgba(59,130,246,0.4);
-}
-.demo-carousel .step-num {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: rgba(255,255,255,0.1);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.7rem;
-  font-weight: 600;
-}
-.demo-carousel .step.active .step-num {
-  background: rgba(255,255,255,0.2);
+.demo-step.active:hover {
+  background: #1e40af;
 }
 </style>
 
-<div class="demo-carousel">
-  <div class="window">
-    <!-- macOS-style window bar -->
-    <div class="window-bar">
-      <div class="window-dot red"></div>
-      <div class="window-dot yellow"></div>
-      <div class="window-dot green"></div>
-      <div class="window-title">TinyTorch Journey</div>
-    </div>
-
-    <!-- Slides -->
-    <div class="slides-wrapper">
-      <div class="slides-track" id="demo-track">
-        <div class="slide">
-          <!-- Replace placeholder with: <img src="_static/demos/01-setup.gif" style="width:100%;height:100%;object-fit:cover;" /> -->
-          <div class="slide-content">
-            <div class="slide-icon">💻</div>
-            <div class="slide-title">Setup</div>
-            <div class="slide-desc">Clone the repo & install in seconds</div>
-          </div>
-        </div>
-        <div class="slide">
-          <div class="slide-content">
-            <div class="slide-icon">🔨</div>
-            <div class="slide-title">Build</div>
-            <div class="slide-desc">Code your framework in Jupyter</div>
-          </div>
-        </div>
-        <div class="slide">
-          <div class="slide-content">
-            <div class="slide-icon">🏅</div>
-            <div class="slide-title">Milestone</div>
-            <div class="slide-desc">Unlock ML history achievements</div>
-          </div>
-        </div>
-        <div class="slide">
-          <div class="slide-content">
-            <div class="slide-icon">🏆</div>
-            <div class="slide-title">Compete</div>
-            <div class="slide-desc">Enter the Torch Olympics</div>
-          </div>
-        </div>
+<div class="demo-terminal">
+  <div class="demo-window">
+    <div class="demo-titlebar">
+      <div class="demo-dots">
+        <span class="demo-dot red"></span>
+        <span class="demo-dot yellow"></span>
+        <span class="demo-dot green"></span>
       </div>
-
-      <!-- Navigation arrows -->
-      <button class="nav-btn prev" onclick="demoSlide(-1)">‹</button>
-      <button class="nav-btn next" onclick="demoSlide(1)">›</button>
+      <span class="demo-titlebar-text">TinyTorch Terminal</span>
     </div>
-
-    <!-- Progress steps -->
-    <div class="progress-bar">
-      <button class="step active" onclick="demoGo(0)">
-        <span class="step-num">1</span>
-        <span>Setup</span>
-      </button>
-      <button class="step" onclick="demoGo(1)">
-        <span class="step-num">2</span>
-        <span>Build</span>
-      </button>
-      <button class="step" onclick="demoGo(2)">
-        <span class="step-num">3</span>
-        <span>Milestone</span>
-      </button>
-      <button class="step" onclick="demoGo(3)">
-        <span class="step-num">4</span>
-        <span>Compete</span>
-      </button>
+    <div class="demo-body" id="demo-body">
+      <!-- Lines rendered by JS -->
     </div>
+  </div>
+  <div class="demo-progress">
+    <button class="demo-step active" data-step="0" onclick="goStep(0)">Setup</button>
+    <button class="demo-step" data-step="1" onclick="goStep(1)">Build</button>
+    <button class="demo-step" data-step="2" onclick="goStep(2)">Milestone</button>
+    <button class="demo-step" data-step="3" onclick="goStep(3)">Compete</button>
   </div>
 </div>
 
 <script>
 (function() {
-  let idx = 0;
-  const total = 4;
+  const scenes = [
+    { name: 'Setup', lines: [
+      { type: 'cmd', text: 'git clone https://github.com/mlsysbook/TinyTorch' },
+      { type: 'out', text: 'Cloning into \'TinyTorch\'...' },
+      { type: 'cmd', text: 'cd TinyTorch && ./setup.sh' },
+      { type: 'success', text: 'Environment ready!' },
+      { type: 'faded', text: 'Demos coming soon...' }
+    ]},
+    { name: 'Build', lines: [
+      { type: 'cmd', text: 'tito start tensor' },
+      { type: 'out', text: 'Opening Module 01: Tensor...' },
+      { type: 'cmd', text: 'tito test' },
+      { type: 'success', text: 'All tests passed!' },
+      { type: 'faded', text: 'Demos coming soon...' }
+    ]},
+    { name: 'Milestone', lines: [
+      { type: 'cmd', text: 'tito milestone' },
+      { type: 'success', text: 'Perceptron (1957) unlocked!' },
+      { type: 'success', text: 'XOR Crisis (1969) solved!' },
+      { type: 'success', text: 'MLP (1986) achieved!' },
+      { type: 'faded', text: 'Demos coming soon...' }
+    ]},
+    { name: 'Compete', lines: [
+      { type: 'cmd', text: 'tito olympics submit' },
+      { type: 'out', text: 'Benchmarking model...' },
+      { type: 'success', text: 'Score: 847/1000' },
+      { type: 'success', text: 'Rank #42 on leaderboard!' },
+      { type: 'faded', text: 'Demos coming soon...' }
+    ]}
+  ];
 
-  window.demoSlide = function(dir) {
-    idx = (idx + dir + total) % total;
-    update();
-  };
+  let current = 0;
+  let interval;
 
-  window.demoGo = function(i) {
-    idx = i;
-    update();
-  };
+  function renderScene(idx) {
+    const body = document.getElementById('demo-body');
+    const scene = scenes[idx];
+    body.innerHTML = '';
 
-  function update() {
-    const track = document.getElementById('demo-track');
-    if (track) track.style.transform = `translateX(-${idx * 100}%)`;
-    document.querySelectorAll('.demo-carousel .step').forEach((s, i) => {
-      s.classList.toggle('active', i === idx);
+    scene.lines.forEach((line, i) => {
+      const div = document.createElement('div');
+      div.className = 'demo-line';
+      if (line.type === 'cmd') {
+        div.innerHTML = '<span class="demo-prompt">$ </span>' + line.text;
+      } else if (line.type === 'success') {
+        div.innerHTML = '<span class="demo-success">' + line.text + '</span>';
+      } else if (line.type === 'faded') {
+        div.innerHTML = '<span class="demo-faded">' + line.text + '</span>';
+      } else {
+        div.innerHTML = '<span class="demo-output">' + line.text + '</span>';
+      }
+      body.appendChild(div);
+      setTimeout(() => div.classList.add('visible'), i * 400);
+    });
+
+    document.querySelectorAll('.demo-step').forEach((btn, i) => {
+      btn.classList.toggle('active', i === idx);
     });
   }
+
+  function nextScene() {
+    current = (current + 1) % scenes.length;
+    renderScene(current);
+  }
+
+  window.goStep = function(idx) {
+    current = idx;
+    renderScene(current);
+    clearInterval(interval);
+    interval = setInterval(nextScene, 4000);
+  };
+
+  renderScene(0);
+  interval = setInterval(nextScene, 4000);
 })();
 </script>
 ```
