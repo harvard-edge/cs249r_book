@@ -1,120 +1,112 @@
 # Preface
 
-## Why This Book Exists
+Everyone wants to be an astronaut. Very few want to be the rocket scientist.
 
-Machine learning has transformed from an academic curiosity into the infrastructure powering our digital world. Yet most ML education treats frameworks like PyTorch and TensorFlow as magic boxes—you import them, call their functions, and hope for the best. When things break, you're stuck. When performance matters, you're guessing.
+In machine learning, we see the same pattern. Everyone wants to train models, run inference, deploy AI. Very few want to understand how the frameworks actually work. Even fewer want to build one.
 
-This book takes a different approach: **build everything from scratch**.
+The world is full of users. We do not have enough builders.
 
-## The Systems Gap
+This is the gap TinyTorch exists to fill.
 
-There's a critical gap in ML education. Students learn the mathematics—backpropagation, optimization algorithms, attention mechanisms. They learn to use libraries—`nn.Linear()`, `optim.Adam()`, `nn.Transformer()`. But they rarely understand the systems engineering between math and library:
+## The Problem
 
-- How does a tensor actually store and compute with multidimensional data?
-- Why does Adam optimizer need 3× the memory of SGD?
-- What makes attention mechanisms scale quadratically?
-- When does data loading become the bottleneck?
+Most people can use PyTorch or TensorFlow. They can import libraries, call functions, train models. Very few understand how these frameworks work: how tensors manage memory, how autograd builds computation graphs, how optimizers update parameters. And almost no one has a guided, structured way to learn that from the ground up.
 
-These aren't academic questions—they're the daily reality of ML systems engineers debugging OOM errors, optimizing inference latency, and deploying models to production.
+Students cannot learn this from production code. PyTorch is too large, too complex, too optimized. Fifty thousand lines of C++ across hundreds of files. No one learns to build rockets by studying the Saturn V.
 
-## Who This Book Is For
+They also cannot learn it from toy scripts. A hundred-line neural network does not reveal the architecture of a framework. It hides it.
 
-This book is designed for four audiences:
+## The Solution
 
-**Students & Researchers** who want to understand ML systems deeply, not just use them superficially. If you've taken an ML course and wondered "how does that actually work?", this book is for you.
+TinyTorch occupies the space in the middle. Small enough to learn from: bite-sized code that runs even on a Raspberry Pi. Big enough to matter: showing the real architecture of how frameworks are built.
+
+If the [Machine Learning Systems](https://mlsysbook.ai) textbook teaches you the concepts of the rocket ship (propulsion, guidance, life support) then TinyTorch is where you actually build a small rocket with your own hands. Not a toy. A real framework with tensors, autograd, layers, optimizers, data loaders, and training loops. Twenty modules that take you from first principles to a working system.
+
+This is how people move from *doing* machine learning to *engineering* machine learning systems. This is how someone becomes an AI systems engineer rather than a notebook operator.
+
+## Who This Is For
+
+**Students and Researchers** who want to understand ML systems deeply, not just use them superficially. If you have taken an ML course and wondered "how does that actually work?", this guide is for you.
 
 **ML Engineers** who need to debug, optimize, and deploy models in production. Understanding the systems underneath makes you more effective at every stage of the ML lifecycle.
 
-**Systems Programmers** curious about ML. You understand systems thinking—memory hierarchies, computational complexity, performance optimization—and want to apply it to ML.
+**Systems Programmers** curious about ML. You understand systems thinking: memory hierarchies, computational complexity, performance optimization. You want to apply it to ML.
 
-**Educators** teaching ML systems. This book provides a complete pedagogical framework emphasizing systems thinking, with built-in assessment tools and clear learning outcomes.
+**Self-taught Engineers** who can use frameworks but want to know how they work. You might be preparing for ML infrastructure roles and need systems-level understanding.
 
-## How This Book Works
+What you need is not another API tutorial. You need to build.[^pin]
 
-Each module follows the same pattern:
+[^pin]: My own background was in compilers, specifically just-in-time compilation and dynamic binary instrumentation. But I did not become a systems engineer by reading papers alone. I became one by building [Pin](https://software.intel.com/content/www/us/en/develop/articles/pin-a-dynamic-binary-instrumentation-tool.html), a dynamic binary instrumentation engine. The lesson stayed with me: reading teaches concepts, but building deepens understanding.
 
-1. **Conceptual Understanding** - Why does this component exist? What problem does it solve?
-2. **Implementation** - Build it yourself in clean, readable Python
-3. **Profiling** - Measure memory usage, computational complexity, performance characteristics
-4. **Validation** - Comprehensive tests ensure your implementation works correctly
-5. **Historical Context** - Recreate breakthrough results using your implementations
+## What You Will Build
 
-You'll start with tensors and build up through 20 modules, each adding a new capability to your growing ML framework. By the end, you'll have implemented a complete system capable of training transformer models—and you'll understand every line of code.
+By the end of TinyTorch, you will have implemented:
+
+- A tensor library with broadcasting, reshaping, and matrix operations
+- Activation functions with numerical stability considerations
+- Neural network layers: linear, convolutional, normalization
+- An autograd engine that builds computation graphs and computes gradients
+- Optimizers that update parameters using those gradients
+- Data loaders that handle batching, shuffling, and preprocessing
+- A complete training loop that ties everything together
+- Tokenizers, embeddings, attention, and transformer architectures
+- Profiling, quantization, and optimization techniques
+
+This is not a simulation. This is the actual architecture of modern ML frameworks, implemented at human scale.
+
+## How to Use This Guide
+
+Each module follows a Build-Use-Reflect cycle:
+
+1. **Build**: Implement the component from scratch, understanding every line
+2. **Use**: Apply it to real problems: training networks, processing data
+3. **Reflect**: Connect what you built to production systems and understand the tradeoffs
+
+The guide follows a three-tier structure:
+
+**Foundation Tier (Modules 01-09)** builds the core infrastructure: tensors, activations, layers, losses, autograd, optimizers, training loops, data loading, and spatial operations.
+
+**Architecture Tier (Modules 10-13)** implements modern deep learning: tokenization, embeddings, attention mechanisms, and transformers.
+
+**Optimization Tier (Modules 14-19)** focuses on production: profiling, quantization, compression, memoization, acceleration, and benchmarking.
+
+**Module 20: Capstone** brings everything together. It is designed as a launchpad for community competitions we plan to run, fostering lifelong learning and connection among builders who share this path.
+
+Work through Foundation first. Then choose your path based on your interests.
 
 ## Learning Approach
 
-**Build → Profile → Optimize**
+**Type every line of code yourself.** Do not copy-paste. The learning happens in the struggle of implementation.
 
-This isn't just a coding exercise. You'll develop the mindset of an ML systems engineer:
+**Profile your code.** Use the built-in profiling tools to understand memory and performance characteristics. Measure first, optimize second.
 
-- Measure first, optimize second
-- Understand memory access patterns and cache behavior
-- Profile to find bottlenecks, don't guess
-- Make informed trade-offs between speed, memory, and accuracy
+**Run the tests.** Every module includes comprehensive tests. When they pass, you have built something real.
+
+**Compare with PyTorch.** Once your implementation works, compare it with PyTorch's equivalent to see what optimizations production frameworks add.
+
+Take your time. The goal is not to finish fast. The goal is to understand deeply.
 
 ## Prerequisites
 
 You should be comfortable with:
 
-- **Python programming** - Functions, classes, NumPy basics
-- **Linear algebra** - Matrix operations, vector spaces
-- **Calculus** - Derivatives, chain rule (for backpropagation)
-- **Basic ML concepts** - Neural networks, training, loss functions
+- **Python programming**: functions, classes, NumPy basics
+- **Linear algebra**: matrix operations, vector spaces
+- **Calculus**: derivatives, chain rule (for backpropagation)
+- **Basic ML concepts**: neural networks, training, loss functions
 
-If you've taken an introductory ML course and can write Python code, you're ready.
+If you have taken an introductory ML course and can write Python code, you are ready.
 
-## Course Structure
+## The Bigger Picture
 
-The book follows a three-tier structure that mirrors ML history:
+TinyTorch is part of a larger effort to educate a million learners at the edge of AI. The [Machine Learning Systems](https://mlsysbook.ai) textbook provides the conceptual foundation. TinyTorch provides the hands-on implementation experience. Together, they form a complete path into ML systems engineering.
 
-**Foundation Tier (Modules 01-07)** builds the mathematical infrastructure: tensors, activation functions, layers, loss functions, automatic differentiation, optimizers, and training loops. This tier covers 1950s-1990s breakthroughs.
+The next generation of engineers cannot rely on magic. They need to see how everything fits together, from tensors all the way to systems. They need to feel that the world of ML systems is not an unreachable tower but something they can open, shape, and build.
 
-**Architecture Tier (Modules 08-13)** implements modern AI: data loading, convolutional networks for vision, tokenization, embeddings, attention mechanisms, and transformers. This tier covers 1990s-2017 innovations.
-
-**Optimization Tier (Modules 14-20)** focuses on production deployment: profiling, memoization, quantization, compression, hardware acceleration, and benchmarking. This tier addresses modern systems challenges.
-
-## Historical Milestones
-
-As you complete modules, you'll unlock historical milestone demonstrations that prove your implementations work:
-
-- **1957: Perceptron** - First trainable network
-- **1969: XOR Solution** - Multi-layer networks with backpropagation
-- **1986: MNIST MLP** - Digit recognition with 95%+ accuracy
-- **1998: CIFAR-10 CNN** - Image classification with 75%+ accuracy
-- **2017: Transformers** - Language generation with attention
-- **2024: Systems Age** - Production optimization and deployment
-
-These aren't toy examples—you'll recreate genuine breakthroughs using only the code you've written.
-
-## Getting the Most from This Book
-
-**Type every line of code yourself.** Don't copy-paste. The learning happens in the struggle of implementation.
-
-**Profile your code.** Use the built-in profiling tools to understand memory and performance characteristics.
-
-**Run the tests.** Every module includes comprehensive tests. When they pass, you've built something real.
-
-**Compare with PyTorch.** Once your implementation works, compare it with PyTorch's equivalent to see what optimizations production frameworks add.
-
-**Join the community.** Share your progress, ask questions, help others. Learning is more effective together.
-
-## Acknowledgments
-
-This book emerged from years of teaching ML systems at Harvard University. I'm grateful to:
-
-- Students who challenged assumptions and pushed for deeper understanding
-- The PyTorch, TensorFlow, and JAX teams whose frameworks inspired this educational approach
-- The MLPerf community for benchmark standards that inform our performance discussions
-- Open source contributors who built the tools (Jupyter, NumPy, NBGrader) that make this course possible
-
-## Let's Begin
-
-The difference between using a library and understanding a system is the difference between being limited by tools and being empowered to create them.
-
-Let's build something real.
+That is what TinyTorch offers: the confidence that comes from building something real.
 
 ---
 
-**Prof. Vijay Janapa Reddi**
-Cambridge, Massachusetts
-January 2025
+*Prof. Vijay Janapa Reddi*
+*Harvard University*
+*2025*
