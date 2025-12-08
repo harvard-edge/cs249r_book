@@ -26,18 +26,19 @@ Build a complete machine learning (ML) framework from tensors to systems—under
   margin: 0 auto 1.5rem auto;
 }
 .demo-window {
-  background: #0d1117;
-  border-radius: 10px;
+  background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
+  border-radius: 12px;
   box-shadow: 0 8px 32px rgba(0,0,0,0.3);
   overflow: hidden;
+  border: 2px solid #f97316;
 }
 .demo-titlebar {
-  background: linear-gradient(90deg, #21262d 0%, #161b22 100%);
-  padding: 10px 14px;
+  background: linear-gradient(90deg, #1f2937 0%, #111827 100%);
+  padding: 12px 16px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  border-bottom: 1px solid #30363d;
+  gap: 10px;
+  border-bottom: 1px solid rgba(249, 115, 22, 0.3);
 }
 .demo-dots {
   display: flex;
@@ -48,14 +49,15 @@ Build a complete machine learning (ML) framework from tensors to systems—under
   height: 12px;
   border-radius: 50%;
 }
-.demo-dot.red { background: #ff5f57; }
-.demo-dot.yellow { background: #febc2e; }
-.demo-dot.green { background: #28c840; }
+.demo-dot.red { background: #E74C3C; }
+.demo-dot.yellow { background: #F39C12; }
+.demo-dot.green { background: #27ae60; }
 .demo-titlebar-text {
   flex: 1;
   text-align: center;
-  color: #8b949e;
+  color: #fbbf24;
   font-size: 0.85rem;
+  font-weight: 500;
   font-family: -apple-system, BlinkMacSystemFont, sans-serif;
 }
 .demo-body {
@@ -66,7 +68,7 @@ Build a complete machine learning (ML) framework from tensors to systems—under
   min-height: 280px;
 }
 .demo-line {
-  color: #c9d1d9;
+  color: #e5e7eb;
   margin-bottom: 0.25rem;
   opacity: 0;
   transform: translateY(5px);
@@ -80,17 +82,17 @@ Build a complete machine learning (ML) framework from tensors to systems—under
   to { opacity: 1; transform: translateY(0); }
 }
 .demo-prompt {
-  color: #7ee787;
+  color: #f97316;
 }
 .demo-output {
-  color: #8b949e;
+  color: #9ca3af;
   padding-left: 1rem;
 }
 .demo-success {
-  color: #7ee787;
+  color: #fbbf24;
 }
 .demo-faded {
-  color: #484f58;
+  color: #6b7280;
   font-style: italic;
   margin-top: 1rem;
 }
@@ -105,24 +107,26 @@ Build a complete machine learning (ML) framework from tensors to systems—under
   align-items: center;
   gap: 0.35rem;
   padding: 0.4rem 0.75rem;
-  background: #1e293b;
+  background: #1f2937;
   border-radius: 20px;
   font-size: 0.8rem;
-  color: #64748b;
+  color: #9ca3af;
   transition: all 0.3s;
   cursor: pointer;
-  border: none;
+  border: 1px solid transparent;
 }
 .demo-step.active {
-  background: #1e3a8a;
-  color: #93c5fd;
+  background: linear-gradient(135deg, #E74C3C 0%, #E67E22 100%);
+  color: white;
+  border-color: transparent;
 }
 .demo-step:hover {
-  background: #334155;
-  color: #94a3b8;
+  background: #374151;
+  color: #f3f4f6;
+  border-color: rgba(249, 115, 22, 0.3);
 }
 .demo-step.active:hover {
-  background: #1e40af;
+  background: linear-gradient(135deg, #c0392b 0%, #d35400 100%);
 }
 </style>
 
