@@ -66,10 +66,7 @@ def save_credentials(data: Dict[str, str]) -> None:
     except OSError:
         pass
 
-    # Print file update notification
-    console = get_console()
-    relative_path = p.relative_to(Path.home())
-    console.print(f"[dim]📝 Updated: ~/{relative_path}[/dim]")
+
 
 def load_credentials() -> Optional[Dict[str, str]]:
     p = _credentials_path()

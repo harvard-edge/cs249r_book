@@ -13,7 +13,6 @@ import sys
 import os
 import platform
 import datetime
-import webbrowser
 from pathlib import Path
 from argparse import ArgumentParser, Namespace
 from typing import Dict, Any, Optional
@@ -28,6 +27,7 @@ from .base import BaseCommand
 from .login import LoginCommand
 from ..core.console import get_console
 from ..core.auth import is_logged_in
+from ..core.browser import open_url
 
 def _print_file_update(console, file_path: Path) -> None:
     """Print a notification when a file is created or updated."""
@@ -368,7 +368,7 @@ class SetupCommand(BaseCommand):
         self.console.print()
         self.console.print(Panel.fit(
             "[bold cyan]🌍 Join the TinyTorch Community[/bold cyan]\n\n"
-            "Connect at [link=https://tinytorch.ai/community/?action=join]tinytorch.ai/community/?action=join[/link]\n\n"
+            "Connect at [link=https://mlsysbook.ai/tinytorch/community/?action=join]mlsysbook.ai/tinytorch/community/?action=join[/link]\n\n"
             "[dim]• See learners worldwide\n"
             "• Leaderboard submissions\n"
             "• Progress syncing[/dim]",
@@ -390,12 +390,25 @@ class SetupCommand(BaseCommand):
 
                 if login_result == 0:
                     self.console.print("[green]✅ Successfully connected to the TinyTorch community![/green]")
+
+                    # Post-login profile update prompt
+                    self.console.print()
+                    self.console.print(Panel(
+                        "[bold magenta]✨ Update Community Profile ✨[/bold magenta]\n\n"
+                        "Your CLI is now connected. Would you like to update your profile on the TinyTorch community website?",
+                        title="Community Profile Update",
+                        border_style="magenta",
+                        box=box.ROUNDED
+                    ))
+                    if Confirm.ask("[bold]Update your community profile?[/bold]", default=True):
+                        self.console.print("[dim]Opening profile editor...[/dim]")
+                        open_url("https://mlsysbook.ai/tinytorch/community/?action=profile", self.console, show_manual_fallback=True)
                 else:
                     self.console.print("[yellow]⚠️  Community connection failed or was cancelled. You can try again later with 'tito login'.[/yellow]")
             except Exception as e:
                  self.console.print(f"[yellow]⚠️  Error during login: {e}[/yellow]")
         else:
-            self.console.print("[dim]No problem! You can join anytime at tinytorch.ai/community[/dim]")
+            self.console.print("[dim]No problem! You can join anytime at mlsysbook.ai/tinytorch/community/[/dim]")
 
     def prompt_community_login(self) -> None:
         """Prompt user to log in to the TinyTorch community via CLI."""

@@ -4,7 +4,7 @@
     const NETLIFY_URL = "https://tinytorch.netlify.app"; 
 
     // URL Base Path Logic for Community Site Hosting
-    const isCommunitySite = window.location.hostname === 'tinytorch.ai' || (window.location.hostname === 'localhost' && window.location.port === '8000');
+    const isCommunitySite =  window.location.hostname === 'mlsysbook.ai' || window.location.hostname === 'tinytorch.ai' || (window.location.hostname === 'localhost' && window.location.port === '8000');
     const basePath = isCommunitySite ? '/community' : '';
 
     function forceLogin() {
@@ -662,7 +662,7 @@
             <a href="${basePath}/dashboard.html" class="nav-icon-btn" id="navDashboardBtn" style="display: ${displayExtras};" title="Dashboard">
                 ${footprintsIcon}
             </a>
-
+            
             <a href="${basePath}/community.html" class="nav-icon-btn" id="navCommunityBtn" style="display: ${displayExtras};" title="Community">
                 ${globeIcon}
             </a>
@@ -1037,15 +1037,18 @@
                     if (!refreshRes.ok) { forceLogin(); return; }
 
                     const refreshData = await refreshRes.json();
-                    if (refreshData.session) {
-                        token = refreshData.session.access_token;
+                    const session = refreshData.session || refreshData; // Handle nested 'session' or direct response
+
+                    if (session && session.access_token) {
+                        token = session.access_token;
                         localStorage.setItem("tinytorch_token", token);
-                        if (refreshData.session.refresh_token) {
-                            localStorage.setItem("tinytorch_refresh_token", refreshData.session.refresh_token);
+                        if (session.refresh_token) {
+                            localStorage.setItem("tinytorch_refresh_token", session.refresh_token);
                         }
                         retryCount++; 
                         continue; 
                     } else {
+                        console.warn("Refresh failed: No access token in response", refreshData);
                         forceLogin();
                         return;
                     }
@@ -1189,15 +1192,18 @@
                     if (!refreshRes.ok) { forceLogin(); return; }
 
                     const refreshData = await refreshRes.json();
-                    if (refreshData.session) {
-                        token = refreshData.session.access_token;
+                    const session = refreshData.session || refreshData; // Handle nested 'session' or direct response
+
+                    if (session && session.access_token) {
+                        token = session.access_token;
                         localStorage.setItem("tinytorch_token", token);
-                        if (refreshData.session.refresh_token) {
-                            localStorage.setItem("tinytorch_refresh_token", refreshData.session.refresh_token);
+                        if (session.refresh_token) {
+                            localStorage.setItem("tinytorch_refresh_token", session.refresh_token);
                         }
                         retryCount++;
                         continue;
                     } else {
+                        console.warn("Refresh failed: No access token in response", refreshData);
                         forceLogin();
                         return;
                     }
