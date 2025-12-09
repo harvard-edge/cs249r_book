@@ -663,7 +663,7 @@
                 ${footprintsIcon}
             </a>
             
-            <a href="${basePath}/community.html" class="nav-icon-btn" id="navCommunityBtn" style="display: ${displayExtras};" title="Community">
+            <a href="${basePath}/community.html" class="nav-icon-btn" id="navCommunityBtn" style="display: flex;" title="Community">
                 ${globeIcon}
             </a>
         </div>
@@ -672,12 +672,8 @@
             <a href="${basePath}/index.html" class="nav-item">Home</a>
             <a href="${basePath}/about.html" class="nav-item" id="aboutLink">About</a>
             <a href="${basePath}/events.html" class="nav-item">Events</a>
-            <a href="${basePath}/community.html" class="nav-item nav-item-restricted">
+            <a href="${basePath}/community.html" class="nav-item">
                 <span>Community</span>
-                <span class="lock-container">
-                    <svg class="lock-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M18 10h-1V7c0-2.76-2.24-5-5-5S7 4.24 7 7v3H6c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-8c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3-10H9V7c0-1.66 1.34-3 3-3s3 1.34 3 3v3z"/></svg>
-                    <span class="lock-tooltip">Account Required</span>
-                </span>
             </a>
             <a href="${basePath}/dashboard.html" class="nav-item nav-item-restricted">
                 <span>Dashboard</span>
