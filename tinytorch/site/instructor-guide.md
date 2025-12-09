@@ -1,4 +1,4 @@
-# 👩‍🏫 TinyTorch Instructor Guide
+# 👩 TinyTorch Instructor Guide
 
 Complete guide for teaching ML Systems Engineering with TinyTorch.
 
@@ -6,7 +6,7 @@ Complete guide for teaching ML Systems Engineering with TinyTorch.
 
 TinyTorch teaches ML systems engineering through building, not just using. Students construct a complete ML framework from tensors to transformers, understanding memory, performance, and scaling at each step.
 
-## 🛠️ Instructor Setup
+## 🛠 Instructor Setup
 
 ### **1. Initial Setup**
 ```bash
@@ -451,7 +451,7 @@ By course end, students should be able to:
 5. **Understand** framework design decisions
 6. **Apply** systems thinking to ML problems
 
-## 📈 Tracking Progress
+## ↗ Tracking Progress
 
 ### **Individual Progress**
 ```bash
@@ -500,9 +500,7 @@ print(f"Memory: {get_memory_usage():.2f} MB")
 
 ## 🔧 Troubleshooting
 
-### **Common Student Issues**
-
-**Environment Problems**
+### **Common Student IssuesEnvironment Problems**
 ```bash
 # Student fix:
 tito system health
@@ -521,9 +519,7 @@ tito export --all
 tito module test MODULE --verbose
 ```
 
-### **NBGrader Issues**
-
-**Database Locked**
+### **NBGrader IssuesDatabase Locked**
 ```bash
 # Clear NBGrader database
 rm gradebook.db
@@ -557,7 +553,7 @@ ls submitted/*/MODULE/
 | 15 | 14-19 Optimization | Profiling, Quantization, etc. |
 | 16 | 20 Capstone | Torch Olympics Competition |
 
-## 🎓 Assessment Strategy
+##  Assessment Strategy
 
 ### **Continuous Assessment (70%)**
 - Module completion: 4% each × 16 = 64%

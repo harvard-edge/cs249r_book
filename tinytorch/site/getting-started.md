@@ -9,19 +9,19 @@ Welcome to TinyTorch! This comprehensive guide will get you started whether you'
 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; max-width: 800px; margin: 0 auto;">
 
 <a href="#students" style="display: block; background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #1976d2; text-decoration: none; transition: transform 0.2s;">
-<div style="font-size: 2rem; margin-bottom: 0.5rem;">🎓</div>
+<div style="font-size: 2rem; margin-bottom: 0.5rem;"></div>
 <div style="color: #0d47a1; font-weight: 600; font-size: 1.1rem;">Students</div>
 <div style="color: #1565c0; font-size: 0.85rem; margin-top: 0.5rem;">Setup + Build Workflow</div>
 </a>
 
 <a href="#instructors" style="display: block; background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%); padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #7b1fa2; text-decoration: none; transition: transform 0.2s;">
-<div style="font-size: 2rem; margin-bottom: 0.5rem;">👨‍🏫</div>
+<div style="font-size: 2rem; margin-bottom: 0.5rem;"></div>
 <div style="color: #4a148c; font-weight: 600; font-size: 1.1rem;">Instructors</div>
 <div style="color: #6a1b9a; font-size: 0.85rem; margin-top: 0.5rem;">Course Setup + Grading</div>
 </a>
 
 <a href="#tas" style="display: block; background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%); padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #f57c00; text-decoration: none; transition: transform 0.2s;">
-<div style="font-size: 2rem; margin-bottom: 0.5rem;">👥</div>
+<div style="font-size: 2rem; margin-bottom: 0.5rem;"></div>
 <div style="color: #e65100; font-weight: 600; font-size: 1.1rem;">Teaching Assistants</div>
 <div style="color: #ef6c00; font-size: 0.85rem; margin-top: 0.5rem;">Student Support + Debugging</div>
 </a>
@@ -32,7 +32,7 @@ Welcome to TinyTorch! This comprehensive guide will get you started whether you'
 ---
 
 <a id="students"></a>
-## 🎓 For Students: Build Your ML Framework
+##  For Students: Build Your ML Framework
 
 ### Quick Setup (2 Minutes)
 
@@ -136,7 +136,7 @@ Each milestone has a README explaining:
 - Expected results
 - What you're learning
 
-**📖 See [Historical Milestones](chapters/milestones.md)** for the complete progression through ML history.
+** See [Historical Milestones](chapters/milestones.md)** for the complete progression through ML history.
 
 ### Your First Module (15 Minutes)
 
@@ -170,7 +170,7 @@ TinyTorch has 20 modules organized in progressive tiers:
 - **Optimization (14-19)**: Production optimization - profiling, quantization, benchmarking
 - **Capstone (20)**: Torch Olympics Competition
 
-**📖 See [Complete Course Structure](chapters/00-introduction.md)** for detailed module descriptions.
+** See [Complete Course Structure](chapters/00-introduction.md)** for detailed module descriptions.
 
 ### Essential Commands Reference
 
@@ -191,14 +191,14 @@ tito community join
 tito benchmark baseline
 ```
 
-**📖 See [TITO CLI Reference](tito/overview.md)** for complete command documentation.
+** See [TITO CLI Reference](tito/overview.md)** for complete command documentation.
 
 ### Notebook Platform Options
 
 **For Viewing & Exploration (Online):**
 - Jupyter/MyBinder: Click "Launch Binder" on any notebook page
 - Google Colab: Click "Launch Colab" for GPU access
-- Marimo: Click "🍃 Open in Marimo" for reactive notebooks
+- Marimo: Click "~ Open in Marimo" for reactive notebooks
 
 **For Full Development (Local - Required):**
 
@@ -222,14 +222,14 @@ The goal isn't just to write code - it's to **understand** how modern ML framewo
 ---
 
 <a id="instructors"></a>
-## 👨‍🏫 For Instructors: Turn-Key ML Systems Course
+##  For Instructors: Turn-Key ML Systems Course
 
 ### Course Overview
 
 TinyTorch provides a complete ML systems engineering course with NBGrader integration, automated grading, and production-ready teaching materials.
 
 <div style="background: #d4edda; border: 1px solid #28a745; padding: 1.5rem; border-radius: 0.5rem; margin: 1.5rem 0;">
-<h4 style="margin: 0 0 0.5rem 0; color: #155724;">✅ Complete NBGrader Integration Available</h4>
+<h4 style="margin: 0 0 0.5rem 0; color: #155724;">✓ Complete NBGrader Integration Available</h4>
 <p style="margin: 0; color: #155724;">TinyTorch includes automated grading workflows, rubrics, and sample solutions ready for classroom use.</p>
 </div>
 
@@ -242,7 +242,7 @@ TinyTorch provides a complete ML systems engineering course with NBGrader integr
 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem; margin: 2rem 0;">
 
 <div style="background: white; padding: 1.5rem; border-radius: 0.5rem; border: 1px solid #dee2e6;">
-<h4 style="color: #495057; margin: 0 0 0.5rem 0;">1️⃣ Clone & Setup (10 min)</h4>
+<h4 style="color: #495057; margin: 0 0 0.5rem 0;">1⃣ Clone & Setup (10 min)</h4>
 <div style="background: #f8f9fa; padding: 1rem; border-radius: 0.25rem; font-family: monospace; font-size: 0.85rem; margin: 0.5rem 0;">
 git clone TinyTorch<br>
 cd TinyTorch<br>
@@ -255,7 +255,7 @@ pip install nbgrader
 </div>
 
 <div style="background: white; padding: 1.5rem; border-radius: 0.5rem; border: 1px solid #dee2e6;">
-<h4 style="color: #495057; margin: 0 0 0.5rem 0;">2️⃣ Initialize Grading (10 min)</h4>
+<h4 style="color: #495057; margin: 0 0 0.5rem 0;">2⃣ Initialize Grading (10 min)</h4>
 <div style="background: #f8f9fa; padding: 1rem; border-radius: 0.25rem; font-family: monospace; font-size: 0.85rem; margin: 0.5rem 0;">
 tito grade setup<br>
 tito system health
@@ -264,7 +264,7 @@ tito system health
 </div>
 
 <div style="background: white; padding: 1.5rem; border-radius: 0.5rem; border: 1px solid #dee2e6;">
-<h4 style="color: #495057; margin: 0 0 0.5rem 0;">3️⃣ First Assignment (10 min)</h4>
+<h4 style="color: #495057; margin: 0 0 0.5rem 0;">3⃣ First Assignment (10 min)</h4>
 <div style="background: #f8f9fa; padding: 1rem; border-radius: 0.25rem; font-family: monospace; font-size: 0.85rem; margin: 0.5rem 0;">
 tito grade generate 01_tensor<br>
 tito grade release 01_tensor
@@ -416,12 +416,12 @@ tito grade export --module 01_tensor --output grades_module01.csv
 - **System health monitoring** (`tito module status --comprehensive`)
 - **Community support** via GitHub Issues
 
-**📖 See [Complete Course Structure](chapters/00-introduction.md)** for full curriculum overview.
+** See [Complete Course Structure](chapters/00-introduction.md)** for full curriculum overview.
 
 ---
 
 <a id="tas"></a>
-## 👥 For Teaching Assistants: Student Support Guide
+##  For Teaching Assistants: Student Support Guide
 
 ### TA Preparation
 
@@ -574,7 +574,7 @@ While NBGrader automates 70-80% of assessment, focus manual review on:
 </div>
 
 <div style="background: #f0fdf4; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #22c55e;">
-<h4 style="margin: 0 0 0.5rem 0; color: #166534;">🛠️ CLI & Tools</h4>
+<h4 style="margin: 0 0 0.5rem 0; color: #166534;">🛠 CLI & Tools</h4>
 <ul style="margin: 0.5rem 0; padding-left: 1.25rem; font-size: 0.9rem;">
 <li><a href="tito/overview.html">TITO CLI Overview</a></li>
 <li><a href="tito/modules.html">Module Workflow</a></li>

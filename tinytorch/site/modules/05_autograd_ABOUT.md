@@ -1,7 +1,7 @@
 ---
 title: "Autograd"
 description: "Build the automatic differentiation engine that powers neural network training"
-difficulty: "⭐⭐⭐⭐"
+difficulty: "●●●●"
 time_estimate: "8-10 hours"
 prerequisites: ["01_tensor", "02_activations", "03_layers", "04_losses"]
 next_steps: ["06_optimizers"]
@@ -13,9 +13,9 @@ learning_objectives:
   - "Connect implementation to PyTorch's torch.autograd.Function architecture"
 ---
 
-# 05. Autograd
+# Autograd
 
-**FOUNDATION TIER** | Difficulty: ⭐⭐⭐⭐ (4/4) | Time: 8-10 hours
+**FOUNDATION TIER** | Difficulty: ●●●● (4/4) | Time: 8-10 hours
 
 ## Overview
 
@@ -199,9 +199,9 @@ class MatmulBackward(Function):
 **✓ CHECKPOINT 1: Computational Graph Construction Complete**
 
 You've implemented the Function base class and gradient rules for core operations:
-- ✅ Function base class with apply() method
-- ✅ AddBackward, MulBackward, MatmulBackward, SumBackward
-- ✅ Understanding of chain rule for each operation
+- ✓ Function base class with apply() method
+- ✓ AddBackward, MulBackward, MatmulBackward, SumBackward
+- ✓ Understanding of chain rule for each operation
 
 **What you can do now**: Build computation graphs during forward pass that track operation dependencies.
 
@@ -296,10 +296,10 @@ print(f"W2.grad shape: {W2.grad.shape}")  # (2, 1)
 **✓ CHECKPOINT 2: Automatic Differentiation Working**
 
 You've completed the core autograd implementation:
-- ✅ Function classes with gradient computation rules
-- ✅ Enhanced Tensor with backward() method
-- ✅ Computational graph traversal in reverse order
-- ✅ Gradient accumulation and propagation
+- ✓ Function classes with gradient computation rules
+- ✓ Enhanced Tensor with backward() method
+- ✓ Computational graph traversal in reverse order
+- ✓ Gradient accumulation and propagation
 
 **What you can do now**: Train any neural network by calling loss.backward() to compute all parameter gradients automatically.
 
@@ -352,38 +352,38 @@ python -m pytest tests/05_autograd/test_batched_matmul_backward.py -v
 ```
 
 ### Test Coverage Areas
-- ✅ **Function Classes**: Verify AddBackward, MulBackward, MatmulBackward compute correct gradients according to mathematical definitions
-- ✅ **Backward Pass**: Test gradient flow through multi-layer computation graphs with multiple operation types
-- ✅ **Chain Rule Application**: Ensure composite functions (f(g(x))) correctly apply chain rule: df/dx = (df/dg) × (dg/dx)
-- ✅ **Gradient Accumulation**: Verify gradients accumulate correctly when multiple paths lead to same tensor
-- ✅ **Broadcasting Gradients**: Test gradient unbroadcasting when operations involve tensors of different shapes
-- ✅ **Neural Network Integration**: Validate seamless gradient computation through layers, activations, and loss functions
+- ✓ **Function Classes**: Verify AddBackward, MulBackward, MatmulBackward compute correct gradients according to mathematical definitions
+- ✓ **Backward Pass**: Test gradient flow through multi-layer computation graphs with multiple operation types
+- ✓ **Chain Rule Application**: Ensure composite functions (f(g(x))) correctly apply chain rule: df/dx = (df/dg) × (dg/dx)
+- ✓ **Gradient Accumulation**: Verify gradients accumulate correctly when multiple paths lead to same tensor
+- ✓ **Broadcasting Gradients**: Test gradient unbroadcasting when operations involve tensors of different shapes
+- ✓ **Neural Network Integration**: Validate seamless gradient computation through layers, activations, and loss functions
 
 ### Inline Testing & Mathematical Verification
 The module includes comprehensive mathematical validation:
 ```python
 # Example inline test output
-🔬 Unit Test: Function Classes...
-✅ AddBackward gradient computation correct
-✅ MulBackward gradient computation correct
-✅ MatmulBackward gradient computation correct
-✅ SumBackward gradient computation correct
-📈 Progress: Function Classes ✓
+ Unit Test: Function Classes...
+ AddBackward gradient computation correct
+ MulBackward gradient computation correct
+ MatmulBackward gradient computation correct
+ SumBackward gradient computation correct
+ Progress: Function Classes ✓
 
 # Mathematical verification with known derivatives
-🔬 Unit Test: Tensor Autograd Enhancement...
-✅ Simple gradient: d(3x+1)/dx = 3 ✓
-✅ Matrix multiplication gradients match analytical solution ✓
-✅ Multi-operation chain rule application correct ✓
-✅ Gradient accumulation works correctly ✓
-📈 Progress: Autograd Enhancement ✓
+ Unit Test: Tensor Autograd Enhancement...
+ Simple gradient: d(3x+1)/dx = 3 ✓
+ Matrix multiplication gradients match analytical solution ✓
+ Multi-operation chain rule application correct ✓
+ Gradient accumulation works correctly ✓
+ Progress: Autograd Enhancement ✓
 
 # Integration test
-🧪 Integration Test: Multi-layer Neural Network...
-✅ Forward pass builds computation graph correctly
-✅ Backward pass computes gradients for all parameters
-✅ Gradient shapes match parameter shapes
-✅ Complex operations (matmul + add + mul + sum) work correctly
+ Integration Test: Multi-layer Neural Network...
+ Forward pass builds computation graph correctly
+ Backward pass computes gradients for all parameters
+ Gradient shapes match parameter shapes
+ Complex operations (matmul + add + mul + sum) work correctly
 ```
 
 ### Manual Testing Examples
@@ -558,21 +558,21 @@ Choose your preferred way to engage with this module:
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card} 🚀 Launch Binder
+```{grid-item-card}  Launch Binder
 :link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/05_autograd/autograd.ipynb
 :class-header: bg-light
 
 Run this module interactively in your browser. No installation required!
 ```
 
-```{grid-item-card} ⚡ Open in Colab
+```{grid-item-card}  Open in Colab
 :link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/05_autograd/autograd.ipynb
 :class-header: bg-light
 
 Use Google Colab for GPU access and cloud compute power.
 ```
 
-```{grid-item-card} 📖 View Source
+```{grid-item-card}  View Source
 :link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/05_autograd/autograd.py
 :class-header: bg-light
 
@@ -581,7 +581,7 @@ Browse the Python source code and understand the implementation.
 
 ````
 
-```{admonition} 💾 Save Your Progress
+```{admonition}  Save Your Progress
 :class: tip
 **Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
 

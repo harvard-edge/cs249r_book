@@ -31,13 +31,42 @@ By the end of this module, you will be able to:
 - **Production Reality**: Distinguish between educational quantization (Python simulation) vs production INT8 (hardware acceleration, kernel fusion)
 - **When to Quantize**: Recognize deployment scenarios where quantization is mandatory (mobile/edge) vs optional (cloud serving)
 
-## Build → Use → Optimize
+## Build → Use → Reflect
 
-This module follows TinyTorch's **Build → Use → Optimize** framework:
+This module follows TinyTorch's **Build → Use → Reflect** framework:
 
 1. **Build**: Implement INT8 quantization/dequantization, calibration logic, QuantizedLinear layers
 2. **Use**: Quantize trained models, measure accuracy degradation vs memory savings on MNIST/CIFAR
-3. **Optimize**: Analyze the accuracy-efficiency frontier - when does quantization enable deployment vs hurt accuracy unacceptably?
+3. **Reflect**: Analyze the accuracy-efficiency frontier - when does quantization enable deployment vs hurt accuracy unacceptably?
+
+## Getting Started
+
+### Prerequisites
+
+Ensure you've completed profiling fundamentals:
+
+```bash
+# Activate TinyTorch environment
+source scripts/activate-tinytorch
+
+# Verify prerequisite modules
+tito test profiling
+```
+
+**Required Understanding:**
+- Memory profiling (Module 14): Measuring memory consumption
+- Tensor operations (Module 01): Understanding FP32 representation
+- Linear layers (Module 03): Matrix multiplication mechanics
+
+### Development Workflow
+
+1. **Open the development file**: `modules/15_quantization/quantization_dev.py`
+2. **Implement quantize_int8()**: FP32 → INT8 conversion with scale/zero-point calculation
+3. **Implement dequantize_int8()**: INT8 → FP32 restoration
+4. **Build QuantizedLinear**: Replace Linear layers with quantized versions
+5. **Add calibration logic**: Percentile-based scale selection
+6. **Implement quantize_model()**: Convert entire networks to quantized form
+7. **Export and verify**: `tito module complete 15 && tito test quantization`
 
 ## Implementation Guide
 
@@ -261,34 +290,86 @@ def quantize_model(model, calibration_data=None):
 4. Quantize weights with calibrated parameters
 5. Test accuracy on validation set
 
-## Getting Started
+## Common Pitfalls
 
-### Prerequisites
+### Quantizing Without Calibration
 
-Ensure you've completed profiling fundamentals:
+**Problem**: Using global min/max from weights leads to poor INT8 range utilization when outliers exist, wasting quantization precision
 
-```bash
-# Activate TinyTorch environment
-source scripts/activate-tinytorch
+**Solution**: Always use percentile-based calibration (99.9th percentile) on representative data to clip outliers and use INT8 range efficiently
 
-# Verify prerequisite modules
-tito test profiling
+```python
+# Wrong: Global min/max quantization
+scale = (tensor.max() - tensor.min()) / 255
+# Problem: Single outlier at 100 when data is [0, 5] wastes 95% of INT8 range
+
+# Correct: Percentile-based calibration
+max_val = np.percentile(np.abs(calibration_data), 99.9)
+scale = max_val / 127
+# Clips 0.1% outliers, uses full INT8 range for 99.9% of typical values
 ```
 
-**Required Understanding:**
-- Memory profiling (Module 14): Measuring memory consumption
-- Tensor operations (Module 01): Understanding FP32 representation
-- Linear layers (Module 03): Matrix multiplication mechanics
+### Forgetting Scale Factor During Dequantization
 
-### Development Workflow
+**Problem**: Dequantizing INT8 values without applying the scale factor produces incorrect FP32 values, causing massive accuracy loss
 
-1. **Open the development file**: `modules/15_quantization/quantization_dev.py`
-2. **Implement quantize_int8()**: FP32 → INT8 conversion with scale/zero-point calculation
-3. **Implement dequantize_int8()**: INT8 → FP32 restoration
-4. **Build QuantizedLinear**: Replace Linear layers with quantized versions
-5. **Add calibration logic**: Percentile-based scale selection
-6. **Implement quantize_model()**: Convert entire networks to quantized form
-7. **Export and verify**: `tito module complete 15 && tito test quantization`
+**Solution**: Always multiply by scale and subtract zero-point when converting INT8 back to FP32
+
+```python
+# Wrong: Forgetting scale/zero-point
+dequantized = quantized.astype(float32)  # Just converts [-128, 127] to floats
+
+# Correct: Apply scale and zero-point
+dequantized = (quantized.astype(float32) - zero_point) * scale  # Restores original range
+```
+
+### Computing in INT8 Without Hardware Support
+
+**Problem**: Expecting speedup from INT8 quantization in Python without actual hardware INT8 operations, leading to slower performance
+
+**Solution**: Understand your implementation provides 4× memory reduction but NOT speed improvement; production speedup requires specialized hardware (VNNI, NEON, Tensor Cores)
+
+```python
+# Educational implementation (YOUR code): Memory savings but no speedup
+weight_fp32 = dequantize_int8(weights_int8, scale, zp)  # Converts back to FP32
+output = x @ weight_fp32.T  # Computes in FP32 (not faster)
+
+# Production (TensorFlow Lite): Actual INT8 compute with hardware acceleration
+output_int8 = matmul_int8_hardware(x_int8, weight_int8)  # 4-10× faster
+```
+
+### Per-Tensor Quantization for Conv Layers
+
+**Problem**: Using single scale/zero-point for Conv layers with widely varying channel magnitudes causes significant accuracy degradation
+
+**Solution**: Use per-channel quantization for Conv/Linear layers where channel magnitudes vary significantly (0.5-1.5% accuracy improvement for 0.1-0.5% memory overhead)
+
+```python
+# Wrong: Per-tensor for Conv with 64 output channels
+scale = np.max(np.abs(conv_weights)) / 127  # Single scale for all channels
+# Problem: Channel 1 range [-0.1, 0.1], Channel 64 range [-5, 5] both use same scale
+
+# Correct: Per-channel quantization
+scales = np.max(np.abs(conv_weights), axis=(1,2,3)) / 127  # 64 separate scales
+# Each channel uses its natural range efficiently
+```
+
+### Mismatched Calibration and Deployment Data
+
+**Problem**: Calibrating on one distribution (ImageNet) but deploying on different distribution (medical images) causes catastrophic quantization failure
+
+**Solution**: Ensure calibration data matches deployment distribution; collect representative samples from actual target domain
+
+```python
+# Wrong: Calibrate on ImageNet, deploy on medical images
+calibration_data = load_imagenet_samples()  # Natural images [0, 255] range
+quantize_model(model, calibration_data)
+# Deploy on X-rays [-1024, 3072] HU range → massive quantization error
+
+# Correct: Calibrate on target domain
+calibration_data = load_medical_samples()  # Actual deployment distribution
+quantize_model(model, calibration_data)  # Scales match real data
+```
 
 ## Testing
 
@@ -358,6 +439,98 @@ print(f"\nOriginal weights: {linear.weight.data.nbytes} bytes")
 print(f"Quantized weights: {q_linear.weights_int8.data.nbytes} bytes")
 print(f"Reduction: {linear.weight.data.nbytes / q_linear.weights_int8.data.nbytes:.1f}×")
 ```
+
+## Production Context
+
+### Your Implementation vs. Production Frameworks
+
+Understanding what you're building vs. what production frameworks provide:
+
+| Feature | Your Quantization | PyTorch torch.quantization | TensorFlow Lite |
+|---------|-------------------|----------------------------|-----------------|
+| **Backend** | NumPy (CPU-only) | C++/CUDA (CPU/GPU) | C++/NNAPI/XLA (CPU/GPU/TPU/Mobile) |
+| **Algorithm** | Symmetric/Asymmetric INT8 | Same formula | Same formula |
+| **Computation** | Dequantize → FP32 compute | INT8 compute with hardware | INT8 compute on device |
+| **Calibration** | Manual percentile-based | Automatic observer API | Post-training quantization (PTQ) |
+| **Memory Savings** | 4× (same as production) | 4× (FP32→INT8) | 4× (FP32→INT8) |
+| **Speed Improvement** | ~0× (Python simulation) | 2-3× CPU, 4-10× specialized hardware | 3-10× on mobile devices |
+| **Per-Channel Support** | Educational demonstration | Default for Conv/Linear | Default for Conv/Linear |
+| **Quantization-Aware Training** | Not implemented | torch.quantization.QAT | TF Lite QAT API |
+
+**Educational Focus**: Your implementation provides the mathematical foundation and demonstrates 4× memory reduction. Production frameworks apply these same principles with hardware acceleration for actual speedup.
+
+### Side-by-Side Code Comparison
+
+**Your TinyTorch Quantization:**
+```python
+from tinytorch.quantization import quantize_int8, QuantizedLinear
+
+# Quantize a Linear layer
+linear = Linear(128, 64)
+q_linear = QuantizedLinear(linear)
+
+# Forward pass (dequantize → compute FP32 → quantize)
+x = Tensor(np.random.randn(10, 128))
+output = q_linear.forward(x)  # YOUR implementation, educational
+
+print(f"Memory reduction: {linear.weight.data.nbytes / q_linear.weights_int8.data.nbytes:.1f}×")
+# 4.0× reduction (same as production)
+```
+
+**Equivalent PyTorch (Production):**
+```python
+import torch
+import torch.quantization as tq
+
+# Quantize a Linear layer
+linear = torch.nn.Linear(128, 64)
+linear.qconfig = tq.get_default_qconfig('fbgemm')
+q_linear = tq.prepare(linear, inplace=False)
+q_linear = tq.convert(q_linear)  # Hardware-accelerated INT8
+
+# Forward pass (actual INT8 compute on CPU with VNNI instructions)
+x = torch.randn(10, 128)
+output = q_linear(x)  # Production INT8, 2-3× faster on CPU
+```
+
+**Key Differences:**
+1. **Hardware Acceleration**: PyTorch uses FBGEMM/QNNPACK for actual INT8 matrix multiplication (2-3× faster)
+2. **Automatic Calibration**: PyTorch observers automatically collect activation statistics during calibration
+3. **Kernel Fusion**: Production quantization fuses quantize/dequantize operations to reduce overhead
+4. **Deployment Ready**: PyTorch quantized models export to ONNX/TorchScript for production serving
+
+### Real-World Applications
+
+**Mobile Deployment (TensorFlow Lite)**: Google Photos uses quantized MobileNetV2 models (5MB instead of 20MB) for on-device image classification. INT8 quantization enables deployment within 100-200MB app size limits, reduces inference latency from 150ms to 40ms on mobile CPUs, and extends battery life by 3-4× compared to FP32.
+
+**Edge AI Devices (Google Coral)**: Edge TPU exclusively runs INT8 models—FP32 isn't supported. Quantizing EfficientDet-Lite enables real-time object detection (30 FPS) on 2W power budget. Without quantization, model doesn't run on hardware.
+
+**Cloud Inference at Scale (AWS Inferentia)**: AWS Inferentia accelerators deliver 70% cost reduction for BERT inference by running INT8 models. At 1 million requests/day, INT8 quantization saves $50,000/month in infrastructure costs through 2-4× throughput improvement.
+
+**Large Language Model Serving (LLaMA)**: LLaMA-65B is 130GB in FP16, doesn't fit on 80GB A100 GPU. INT8 quantization (GPTQ) reduces to 65GB, enabling single-GPU serving. Further 4-bit quantization (33GB) enables consumer GPU deployment with <1% perplexity degradation.
+
+### Performance Characteristics at Scale
+
+**Memory Scaling**: For ResNet-50 (25M parameters):
+- FP32: 25M × 4 bytes = 100MB model size
+- INT8: 25M × 1 byte = 25MB model size (4× reduction)
+- With per-channel scales: 25MB + 64KB (scales/zero-points) = 25.06MB (0.25% overhead)
+
+**Computational Reality**: Your Python implementation:
+- Memory: 4× reduction (REAL—same as production)
+- Speed: ~1× (no improvement, educational simulation)
+- Production with INT8 hardware: 4× memory + 2-10× speed (hardware acceleration)
+
+**Deployment Constraints**: Mobile app size limits:
+- iOS: 100MB over-the-air download limit
+- Android: 150MB APK size limit
+- Quantization often REQUIRED to meet platform constraints, not optional optimization
+
+**Accuracy-Efficiency Trade-offs**:
+- Per-tensor quantization: 4× memory, 1-2% accuracy loss
+- Per-channel quantization: 4× memory, 0.5-1% accuracy loss, 0.1-0.5% memory overhead
+- Quantization-Aware Training (QAT): 4× memory, <0.5% accuracy loss, requires retraining
+- Post-Training Quantization (PTQ): 4× memory, 1-2% accuracy loss, no retraining (fast)
 
 ## Systems Thinking Questions
 

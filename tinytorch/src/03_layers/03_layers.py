@@ -347,10 +347,6 @@ class Linear(Layer):
         return output
         ### END SOLUTION
 
-    def __call__(self, x):
-        """Allows the layer to be called like a function."""
-        return self.forward(x)
-
     def parameters(self):
         """
         Return list of trainable parameters.
@@ -563,8 +559,8 @@ class Dropout(Layer):
     """
     Dropout layer for regularization.
 
-    During training: randomly zeros elements with probability p
-    During inference: scales outputs by (1-p) to maintain expected value
+    During training: randomly zeros elements with probability p, scales survivors by 1/(1-p)
+    During inference: passes input through unchanged
 
     This prevents overfitting by forcing the network to not rely on specific neurons.
     """
@@ -591,8 +587,8 @@ class Dropout(Layer):
         """
         Forward pass through dropout layer.
 
-        During training: randomly zeros elements with probability p
-        During inference: scales outputs by (1-p) to maintain expected value
+        During training: randomly zeros elements with probability p, scales survivors by 1/(1-p)
+        During inference: passes input through unchanged
 
         This prevents overfitting by forcing the network to not rely on specific neurons.
 
@@ -648,6 +644,72 @@ class Dropout(Layer):
 
     def __repr__(self):
         return f"Dropout(p={self.p})"
+
+# %% [markdown]
+"""
+## Sequential - Layer Container for Composition
+
+`Sequential` chains layers together, calling forward() on each in order.
+
+**Progressive Disclosure**: After learning to compose layers explicitly 
+(h = relu(linear1(x)); out = linear2(h)), you can use Sequential for convenience:
+
+```python
+model = Sequential(Linear(784, 128), ReLU(), Linear(128, 10))
+out = model(x)  # Chains all layers automatically
+```
+
+This is TinyTorch's equivalent of PyTorch's nn.Sequential - simpler but same idea.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "sequential", "solution": false}
+#| export
+class Sequential:
+    """
+    Container that chains layers together sequentially.
+    
+    After you understand explicit layer composition, Sequential provides
+    a convenient way to bundle layers together.
+    
+    Example:
+        >>> model = Sequential(
+        ...     Linear(784, 128),
+        ...     ReLU(),
+        ...     Linear(128, 10)
+        ... )
+        >>> output = model(input_tensor)
+        >>> params = model.parameters()  # All parameters from all layers
+    """
+    
+    def __init__(self, *layers):
+        """Initialize with layers to chain together."""
+        # Accept both Sequential(layer1, layer2) and Sequential([layer1, layer2])
+        if len(layers) == 1 and isinstance(layers[0], (list, tuple)):
+            self.layers = list(layers[0])
+        else:
+            self.layers = list(layers)
+    
+    def forward(self, x):
+        """Forward pass through all layers sequentially."""
+        for layer in self.layers:
+            x = layer.forward(x)
+        return x
+    
+    def __call__(self, x):
+        """Allow model to be called like a function."""
+        return self.forward(x)
+    
+    def parameters(self):
+        """Collect all parameters from all layers."""
+        params = []
+        for layer in self.layers:
+            params.extend(layer.parameters())
+        return params
+    
+    def __repr__(self):
+        layer_reprs = ", ".join(repr(layer) for layer in self.layers)
+        return f"Sequential({layer_reprs})"
+
 
 # %% [markdown]
 """

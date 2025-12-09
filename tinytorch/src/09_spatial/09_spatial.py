@@ -1197,7 +1197,9 @@ class AvgPool2d:
                         # Store result
                         output[b, c, out_h, out_w] = avg_val
 
-        return Tensor(output)
+        # Return Tensor with gradient tracking (consistent with MaxPool2d)
+        result = Tensor(output, requires_grad=x.requires_grad)
+        return result
         ### END SOLUTION
 
     def parameters(self):

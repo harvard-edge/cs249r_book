@@ -1,7 +1,7 @@
 ---
 title: "Activations"
 description: "Neural network activation functions enabling non-linear learning"
-difficulty: "⭐⭐"
+difficulty: "●●"
 time_estimate: "3-4 hours"
 prerequisites: ["01_tensor"]
 next_steps: ["03_layers"]
@@ -13,9 +13,9 @@ learning_objectives:
   - "Analyze computational efficiency, numerical stability, and memory implications of different activations"
 ---
 
-# 02. Activations
+# Activations
 
-**FOUNDATION TIER** | Difficulty: ⭐⭐ (2/4) | Time: 3-4 hours
+**FOUNDATION TIER** | Difficulty: ●● (2/4) | Time: 3-4 hours
 
 ## Overview
 
@@ -262,11 +262,11 @@ python -m pytest tests/test_activations.py::test_relu -v
 
 ### Test Coverage Areas
 
-- ✅ **ReLU Correctness**: Verifies max(0, x) behavior, sparsity property (negative → 0, positive preserved), and proper handling of exactly zero inputs
-- ✅ **Sigmoid Numerical Stability**: Tests extreme values (±1000) don't cause overflow/underflow, validates (0,1) range constraints, confirms sigmoid(0) = 0.5 exactly
-- ✅ **Tanh Properties**: Validates (-1,1) range, symmetry property (tanh(-x) = -tanh(x)), zero-centered behavior (tanh(0) = 0), and extreme value convergence
-- ✅ **GELU Smoothness**: Confirms smooth differentiability (no sharp corners), validates approximation accuracy (GELU(0) ≈ 0, GELU(1) ≈ 0.84), and checks non-monotonic behavior
-- ✅ **Softmax Probability Distribution**: Verifies sum equals 1.0 exactly, all outputs in (0,1) range, largest input receives highest probability, numerical stability with large inputs, and correct dimension handling for multi-dimensional tensors
+- ✓ **ReLU Correctness**: Verifies max(0, x) behavior, sparsity property (negative → 0, positive preserved), and proper handling of exactly zero inputs
+- ✓ **Sigmoid Numerical Stability**: Tests extreme values (±1000) don't cause overflow/underflow, validates (0,1) range constraints, confirms sigmoid(0) = 0.5 exactly
+- ✓ **Tanh Properties**: Validates (-1,1) range, symmetry property (tanh(-x) = -tanh(x)), zero-centered behavior (tanh(0) = 0), and extreme value convergence
+- ✓ **GELU Smoothness**: Confirms smooth differentiability (no sharp corners), validates approximation accuracy (GELU(0) ≈ 0, GELU(1) ≈ 0.84), and checks non-monotonic behavior
+- ✓ **Softmax Probability Distribution**: Verifies sum equals 1.0 exactly, all outputs in (0,1) range, largest input receives highest probability, numerical stability with large inputs, and correct dimension handling for multi-dimensional tensors
 
 ### Inline Testing & Validation
 
@@ -274,24 +274,24 @@ The module includes comprehensive inline unit tests that run during development:
 
 ```python
 # Example inline test output
-🔬 Unit Test: ReLU...
-✅ ReLU zeros negative values correctly
-✅ ReLU preserves positive values
-✅ ReLU creates sparsity (3/4 values are zero)
-📈 Progress: ReLU ✓
+ Unit Test: ReLU...
+ ReLU zeros negative values correctly
+ ReLU preserves positive values
+ ReLU creates sparsity (3/4 values are zero)
+ Progress: ReLU ✓
 
-🔬 Unit Test: Sigmoid...
-✅ Sigmoid(0) = 0.5 exactly
-✅ All outputs in (0, 1) range
-✅ Numerically stable with extreme values (±1000)
-📈 Progress: Sigmoid ✓
+ Unit Test: Sigmoid...
+ Sigmoid(0) = 0.5 exactly
+ All outputs in (0, 1) range
+ Numerically stable with extreme values (±1000)
+ Progress: Sigmoid ✓
 
-🔬 Unit Test: Softmax...
-✅ Outputs sum to 1.0 exactly
-✅ All values positive and less than 1
-✅ Largest input gets highest probability
-✅ Handles large numbers without overflow
-📈 Progress: Softmax ✓
+ Unit Test: Softmax...
+ Outputs sum to 1.0 exactly
+ All values positive and less than 1
+ Largest input gets highest probability
+ Handles large numbers without overflow
+ Progress: Softmax ✓
 ```
 
 ### Manual Testing Examples
@@ -363,21 +363,21 @@ Choose your preferred way to engage with this module:
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card} 🚀 Launch Binder
+```{grid-item-card}  Launch Binder
 :link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/02_activations/activations_dev.ipynb
 :class-header: bg-light
 
 Run this module interactively in your browser. No installation required!
 ```
 
-```{grid-item-card} ⚡ Open in Colab
+```{grid-item-card}  Open in Colab
 :link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/02_activations/activations_dev.ipynb
 :class-header: bg-light
 
 Use Google Colab for GPU access and cloud compute power.
 ```
 
-```{grid-item-card} 📖 View Source
+```{grid-item-card}  View Source
 :link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/02_activations/activations_dev.py
 :class-header: bg-light
 
@@ -386,7 +386,7 @@ Browse the Python source code and understand the implementation.
 
 ````
 
-```{admonition} 💾 Save Your Progress
+```{admonition}  Save Your Progress
 :class: tip
 **Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
 

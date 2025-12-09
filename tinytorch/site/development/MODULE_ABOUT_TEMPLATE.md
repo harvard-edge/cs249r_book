@@ -98,9 +98,9 @@ The module includes comprehensive [validation type]:
 ```python
 # Example inline test output
 🔬 Unit Test: [Component]...
-✅ [Test result 1]
-✅ [Test result 2]
-📈 Progress: [Component] ✓
+✓ [Test result 1]
+✓ [Test result 2]
+↗ Progress: [Component] ✓
 ```
 
 ### Manual Testing Examples

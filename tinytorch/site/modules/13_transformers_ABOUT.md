@@ -1,7 +1,7 @@
 ---
 title: "Transformers - Complete GPT Architecture"
 description: "Build decoder-only transformer architecture for autoregressive text generation"
-difficulty: "⭐⭐⭐⭐"
+difficulty: "●●●●"
 time_estimate: "6-8 hours"
 prerequisites: ["Embeddings", "Attention"]
 next_steps: ["Profiling (Optimization Tier)"]
@@ -13,9 +13,9 @@ learning_objectives:
   - "Apply transformer architecture to language modeling tasks using patterns from PyTorch and production systems"
 ---
 
-# 13. Transformers - Complete GPT Architecture
+# Transformers - Complete GPT Architecture
 
-**ARCHITECTURE TIER** | Difficulty: ⭐⭐⭐⭐ (4/4) | Time: 6-8 hours
+**ARCHITECTURE TIER** | Difficulty: ●●●● (4/4) | Time: 6-8 hours
 
 ## Overview
 
@@ -402,11 +402,11 @@ python -m pytest tests/ -k transformers -v
 
 ### Test Coverage Areas
 
-- ✅ **LayerNorm**: Feature-wise normalization (mean≈0, std≈1), learnable gamma/beta parameters, numerical stability with epsilon
-- ✅ **MLP**: 4x expansion ratio (embed_dim → 4*embed_dim → embed_dim), GELU activation, shape preservation
-- ✅ **TransformerBlock**: Pre-norm architecture (LayerNorm before sub-layers), residual connections (x + sublayer), attention+MLP composition
-- ✅ **GPT Model**: Forward pass shape correctness (batch, seq, vocab_size), causal masking preventing future leakage, autoregressive generation
-- ✅ **Generation**: Temperature sampling (conservative vs creative), sequence extension, parameter counting validation
+- ✓ **LayerNorm**: Feature-wise normalization (mean≈0, std≈1), learnable gamma/beta parameters, numerical stability with epsilon
+- ✓ **MLP**: 4x expansion ratio (embed_dim → 4*embed_dim → embed_dim), GELU activation, shape preservation
+- ✓ **TransformerBlock**: Pre-norm architecture (LayerNorm before sub-layers), residual connections (x + sublayer), attention+MLP composition
+- ✓ **GPT Model**: Forward pass shape correctness (batch, seq, vocab_size), causal masking preventing future leakage, autoregressive generation
+- ✓ **Generation**: Temperature sampling (conservative vs creative), sequence extension, parameter counting validation
 
 ### Inline Testing & Architecture Validation
 
@@ -414,28 +414,28 @@ The module includes comprehensive architecture validation:
 
 ```python
 # Example inline test output
-🔬 Unit Test: LayerNorm...
-✅ Mean ≈ 0, std ≈ 1 after normalization
-✅ Learnable gamma/beta parameters work
-📈 Progress: LayerNorm ✓
+ Unit Test: LayerNorm...
+ Mean ≈ 0, std ≈ 1 after normalization
+ Learnable gamma/beta parameters work
+ Progress: LayerNorm ✓
 
-🔬 Unit Test: MLP...
-✅ 4x expansion ratio correct (embed_dim → 4*embed_dim)
-✅ Shape preserved (input: [2,10,64] → output: [2,10,64])
-✅ GELU activation applied
-📈 Progress: MLP ✓
+ Unit Test: MLP...
+ 4x expansion ratio correct (embed_dim → 4*embed_dim)
+ Shape preserved (input: [2,10,64] → output: [2,10,64])
+ GELU activation applied
+ Progress: MLP ✓
 
-🔬 Unit Test: TransformerBlock...
-✅ Pre-norm residual connections work
-✅ Attention + MLP sub-layers compose correctly
-✅ Causal mask prevents future information leak
-📈 Progress: TransformerBlock ✓
+ Unit Test: TransformerBlock...
+ Pre-norm residual connections work
+ Attention + MLP sub-layers compose correctly
+ Causal mask prevents future information leak
+ Progress: TransformerBlock ✓
 
-🔬 Unit Test: GPT Model...
-✅ Forward pass: [2,8] tokens → [2,8,100] logits
-✅ Generation: [1,5] prompt + 3 new → [1,8] sequence
-✅ Parameter counting validates all components
-📈 Progress: GPT Model ✓
+ Unit Test: GPT Model...
+ Forward pass: [2,8] tokens → [2,8,100] logits
+ Generation: [1,5] prompt + 3 new → [1,8] sequence
+ Parameter counting validates all components
+ Progress: GPT Model ✓
 ```
 
 ### Manual Testing Examples
@@ -583,21 +583,21 @@ Choose your preferred way to engage with this module:
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card} 🚀 Launch Binder
+```{grid-item-card}  Launch Binder
 :link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/13_transformers/transformers.ipynb
 :class-header: bg-light
 
 Run this module interactively in your browser. No installation required!
 ```
 
-```{grid-item-card} ⚡ Open in Colab
+```{grid-item-card}  Open in Colab
 :link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/13_transformers/transformers.ipynb
 :class-header: bg-light
 
 Use Google Colab for GPU access and cloud compute power.
 ```
 
-```{grid-item-card} 📖 View Source
+```{grid-item-card}  View Source
 :link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/13_transformers/transformers.py
 :class-header: bg-light
 
@@ -606,7 +606,7 @@ Browse the Python source code and understand the implementation.
 
 ````
 
-```{admonition} 💾 Save Your Progress
+```{admonition}  Save Your Progress
 :class: tip
 **Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
 

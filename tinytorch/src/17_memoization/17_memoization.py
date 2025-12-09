@@ -67,9 +67,9 @@ from typing import Tuple, Optional, Dict, List
 # Import TinyTorch components from previous modules
 from tinytorch.core.tensor import Tensor
 
-# Constants for memory calculations
-BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
-MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
+# Internal constants for memory calculations (not exported)
+_BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
+_MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 # %% [markdown]
 """
@@ -92,7 +92,6 @@ def profile_naive_generation():
     not when imported (avoiding side effects during imports).
     """
     from tinytorch.perf.profiling import Profiler
-    import matplotlib.pyplot as plt
 
     profiler = Profiler()
 
@@ -611,13 +610,12 @@ class KVCache:
         """
         # Calculate size of one cache tensor
         cache_size = self.batch_size * self.num_heads * self.max_seq_len * self.head_dim
-        bytes_per_float = 4  # float32
 
         # Each layer has key_cache + value_cache
         total_cache_tensors = self.num_layers * 2
         total_elements = cache_size * total_cache_tensors
-        total_bytes = total_elements * bytes_per_float
-        total_mb = total_bytes / (1024 * 1024)
+        total_bytes = total_elements * _BYTES_PER_FLOAT32
+        total_mb = total_bytes / _MB_TO_BYTES
 
         return {
             'total_mb': total_mb,
@@ -712,17 +710,17 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🎯 Part 4: Enabling KV Caching for Model Generation
+## 🎯 Part 3: Cache-Aware Generation
 
 ### Integration Strategy
 
 Now we need a clean way to enable KV caching in our existing transformer models without breaking the existing code. We'll create an `enable_kv_cache()` function that:
 
 1. Creates a KVCache instance sized for the model
-2. Returns a flag to indicate caching is enabled
-3. Can be called before generation starts
+2. Patches the model's attention layers to use caching
+3. Returns the cache for manual control if needed
 
-The actual integration with attention will happen in the milestone code where we:
+The actual integration with attention happens through monkey-patching where we:
 1. Check if cache is enabled
 2. Only compute K,V for new token (not all tokens)
 3. Update cache with new K,V
@@ -742,7 +740,7 @@ With Cache (New):
 cache = enable_kv_cache(model)
 for each new token:
     input_token = [just new token]          # Length always 1
-    logits = model.forward_cached(input_token, cache)  # Only new computation
+    logits = model.forward(input_token)     # Uses cache automatically!
     next_token = sample(logits[-1])
     append next_token
 ```
@@ -750,144 +748,45 @@ for each new token:
 **Key Difference**: Input changes from growing sequence to single token, with cache providing history.
 """
 
-# %%
-#| export
-def create_kv_cache(batch_size: int, max_seq_len: int, num_layers: int,
-                    num_heads: int, head_dim: int) -> KVCache:
-    """
-    Create and return a KVCache instance for model generation.
-
-    This function creates a properly sized cache for the model architecture.
-    Call this before starting generation, then pass the cache to your
-    generation loop.
-
-    Args:
-        batch_size: Number of sequences to generate simultaneously
-        max_seq_len: Maximum sequence length to support
-        num_layers: Number of transformer layers in model
-        num_heads: Number of attention heads per layer
-        head_dim: Dimension per attention head (usually embed_dim // num_heads)
-
-    Returns:
-        KVCache instance ready for use
-    
-    EXAMPLE:
-        ```python
-        # Enable caching for generation
-        cache = enable_kv_cache(
-            batch_size=1,
-            max_seq_len=100,
-            num_layers=4,
-            num_heads=4,
-            head_dim=32
-        )
-        
-        # Use in generation loop (pseudocode)
-        for step in range(max_new_tokens):
-            # Only process new token with cache
-            logits = model.forward_cached(new_token, cache)
-            next_token = sample(logits)
-        ```
-    """
-    cache = KVCache(batch_size, max_seq_len, num_layers, num_heads, head_dim)
-    
-    print(f"⚡ KV Cache enabled:")
-    print(f"   Batch size: {batch_size}")
-    print(f"   Max sequence: {max_seq_len}")
-    print(f"   Layers: {num_layers}")
-    print(f"   Heads: {num_heads}")
-    print(f"   Head dim: {head_dim}")
-    
-    mem_info = cache.get_memory_usage()
-    print(f"   Memory: {mem_info['total_mb']:.2f} MB")
-    print()
-    
-    return cache
-
 # %% [markdown]
 """
-### 🧪 Unit Test: Cache Enablement
+## 🎯 Part 4: Non-Invasive Integration with Existing Models
 
-Let's verify that we can create caches for realistic model configurations.
+### The Challenge
 
-**This is a unit test** - it tests the cache creation and memory calculation for different model sizes.
-"""
+We built KV caching in Module 17 (this module), but our transformer (Modules 12-13) doesn't know about it!
 
-# %% nbgrader={"grade": true, "grade_id": "test-cache-enablement", "locked": true, "points": 10}
-def test_unit_cache_enablement():
-    """🔬 Unit Test: Cache Enablement for Different Models"""
-    print("🔬 Unit Test: Cache Enablement for Different Models...")
+**❌ BAD Solution**: Go back and modify Module 12 (MultiHeadAttention)
+- Breaks "forward-only" learning (students shouldn't revisit old modules)
+- Makes Module 12 depend on Module 17 (wrong dependency direction!)
+- Violates clean module boundaries
 
-    # Test 1: Small model (fast generation)
-    print("   Test 1: Small Model (Tiny Transformer)")
-    cache_small = KVCache(
-        batch_size=1,
-        max_seq_len=64,
-        num_layers=2,
-        num_heads=4,
-        head_dim=32
-    )
-    mem_small = cache_small.get_memory_usage()
-    assert mem_small['total_mb'] < 1.0, "Small model should use < 1 MB"
-    print(f"   Small model cache: {mem_small['total_mb']:.3f} MB")
+**✅ GOOD Solution**: Module 17 ADDS caching to existing models without modification!
+- Use composition + monkey-patching (like `enable_autograd()`)
+- Module 17 wraps/enhances Module 12, not modifies it
+- Students learn systems engineering: "Add capabilities, don't break old code"
 
-    # Test 2: Medium model (balanced performance)
-    print("   Test 2: Medium Model (Standard Transformer)")
-    cache_medium = KVCache(
-        batch_size=1,
-        max_seq_len=128,
-        num_layers=4,
-        num_heads=8,
-        head_dim=64
-    )
-    mem_medium = cache_medium.get_memory_usage()
-    assert 1.0 < mem_medium['total_mb'] < 10.0, "Medium model should use 1-10 MB"
-    print(f"   Medium model cache: {mem_medium['total_mb']:.3f} MB")
-
-    # Test 3: Batch inference (multiple sequences)
-    print("   Test 3: Batch Inference (4 sequences)")
-    cache_batch = KVCache(
-        batch_size=4,  # Generate 4 sequences in parallel
-        max_seq_len=64,
-        num_layers=2,
-        num_heads=4,
-        head_dim=32
-    )
-    mem_batch = cache_batch.get_memory_usage()
-    assert mem_batch['total_mb'] > mem_small['total_mb'], "Batch cache should be larger"
-    print(f"   Batch cache: {mem_batch['total_mb']:.3f} MB (4x batch size)")
-
-    print("✅ Cache enablement works correctly!")
-
-# Run test immediately when developing this module
-if __name__ == "__main__":
-    test_unit_cache_enablement()
-
-# %% [markdown]
-"""
-## 🎯 Part 5: Using KV Cache in Practice
-
-### Practical Integration Checklist
+### Using KV Cache in Practice
 
 To use KV caching in your transformer generation:
 
 **Before Generation:**
-1. Create cache with `enable_kv_cache()`
-2. Set cache dimensions to match your model architecture
+1. Enable caching with `enable_kv_cache(model)`
+2. Cache is automatically sized for your model architecture
 3. Verify memory usage is acceptable
 
-**During Generation (Modified Forward Pass):**
+**During Generation:**
 1. For the first token (prompt), process normally and populate cache
 2. For subsequent tokens:
    - Only process the NEW token (not entire sequence)
-   - Update cache with new K,V pairs
-   - Retrieve full cached K,V for attention
-   - Use cached values in attention computation
-   - Advance cache position after all layers
+   - Cache is automatically updated with new K,V pairs
+   - Cached values are automatically used in attention
+   - Cache position advances after all layers
 
 **After Generation:**
-1. Reset cache if generating another sequence
-2. Monitor memory usage for production deployment
+1. Reset cache if generating another sequence: `model._kv_cache.reset()`
+2. Disable caching if needed: `disable_kv_cache(model)`
+3. Monitor memory usage for production deployment
 
 ### Performance Expectations
 
@@ -923,35 +822,6 @@ Why? Longer sequences = more redundant computation without cache.
 2. Tune `max_seq_len` to expected generation length (don't over-allocate)
 3. Consider batch inference to amortize model loading costs
 4. Monitor cache memory usage in production
-"""
-
-# %% [markdown]
-"""
-## 🎯 Part 5: Non-Invasive Integration with Existing Models
-
-### The Challenge
-
-We built KV caching in Module 17 (this module), but our transformer (Modules 12-13) doesn't know about it!
-
-**❌ BAD Solution**: Go back and modify Module 12 (MultiHeadAttention)
-- Breaks "forward-only" learning (students shouldn't revisit old modules)
-- Makes Module 12 depend on Module 17 (wrong dependency direction!)
-- Violates clean module boundaries
-
-**✅ GOOD Solution**: Module 17 ADDS caching to existing models without modification!
-- Use composition + monkey-patching (like `enable_autograd()`)
-- Module 17 wraps/enhances Module 12, not modifies it
-- Students learn systems engineering: "Add capabilities, don't break old code"
-
-### Implementation Strategy
-
-We'll create `enable_kv_cache(model)` that:
-1. Creates cache for the model's architecture
-2. Wraps each attention layer with caching logic
-3. Intercepts attention calls and manages cache automatically
-4. Returns the cache for manual control if needed
-
-This is **non-invasive enhancement** - a critical ML systems pattern!
 """
 
 # %% nbgrader={"grade": false, "grade_id": "enable-kv-cache", "solution": true}
@@ -1412,12 +1282,12 @@ def analyze_kvcache_memory():
     for embed_dim, num_layers, seq_len, name in configs:
         # Memory per layer: 2 tensors (K, V) × batch × seq_len × embed_dim × 4 bytes
         batch_size = 1
-        memory_per_layer = 2 * batch_size * seq_len * embed_dim * BYTES_PER_FLOAT32 / MB_TO_BYTES
+        memory_per_layer = 2 * batch_size * seq_len * embed_dim * _BYTES_PER_FLOAT32 / _MB_TO_BYTES
         total_memory = memory_per_layer * num_layers
 
         # Model parameter memory (approximate)
-        params_per_layer = embed_dim * embed_dim * BYTES_PER_FLOAT32  # QKV projections
-        model_memory = params_per_layer * num_layers * BYTES_PER_FLOAT32 / MB_TO_BYTES
+        params_per_layer = embed_dim * embed_dim * _BYTES_PER_FLOAT32  # QKV projections
+        model_memory = params_per_layer * num_layers * _BYTES_PER_FLOAT32 / _MB_TO_BYTES
 
         overhead_pct = (total_memory / model_memory) * 100 if model_memory > 0 else 0
 
@@ -1532,8 +1402,6 @@ def test_module():
     # Run all unit tests
     print("Running unit tests...")
     test_unit_kvcache()
-    print()
-    test_unit_cache_enablement()
     print()
     test_unit_noninvasive_integration()
     print()

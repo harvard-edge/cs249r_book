@@ -1,4 +1,4 @@
-# 🏗 Foundation Tier (Modules 01-07)
+#  Foundation Tier (Modules 01-07)
 
 **Build the mathematical core that makes neural networks learn.**
 
@@ -197,9 +197,9 @@ tito module start 01_tensor
 
 **Or explore other tiers:**
 
-- **[🏛️ Architecture Tier](architecture)** (Modules 08-13): CNNs, transformers, attention
-- **[⏱️ Optimization Tier](optimization)** (Modules 14-19): Production-ready performance
-- **[🏅 Torch Olympics](olympics)** (Module 20): Compete in ML systems challenges
+- **[ Architecture Tier](architecture)** (Modules 08-13): CNNs, transformers, attention
+- **[ Optimization Tier](optimization)** (Modules 14-19): Production-ready performance
+- **[ Torch Olympics](olympics)** (Module 20): Compete in ML systems challenges
 
 ---
 

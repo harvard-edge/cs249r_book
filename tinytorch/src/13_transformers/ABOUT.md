@@ -47,6 +47,36 @@ This module follows TinyTorch's **Build → Use → Reflect** framework:
 **Performance Note**: Transformer depth has O(n²d) attention cost per layer (n=sequence length, d=model dimension). For GPT-3 with 2048 tokens, each attention layer processes 4M token pairs. Memory scales linearly with layers but quadratically with sequence length. Production systems use KV caching (reuse key-value pairs during generation), FlashAttention (memory-efficient attention), and gradient checkpointing (trade compute for memory) to manage this. Understanding these trade-offs is critical for ML systems engineering.
 ```
 
+## Getting Started
+
+### Prerequisites
+
+Ensure you understand the foundations from previous modules:
+
+```bash
+# Activate TinyTorch environment
+source scripts/activate-tinytorch
+
+# Verify prerequisite modules
+tito test embeddings
+tito test attention
+```
+
+**Required Background:**
+- **Module 11 (Embeddings)**: Token and positional embeddings for input representation
+- **Module 12 (Attention)**: Multi-head attention mechanism for sequence modeling
+- **Module 05 (Autograd)**: Automatic differentiation for training deep networks
+- **Module 02 (Activations)**: GELU activation used in MLP layers
+
+### Development Workflow
+
+1. **Open the development file**: `modules/13_transformers/transformers.py`
+2. **Implement LayerNorm**: Normalize across feature dimension with learnable scale/shift parameters (gamma, beta)
+3. **Build MLP**: Two linear layers with 4x expansion ratio and GELU activation (position-wise transformation)
+4. **Create TransformerBlock**: Combine attention and MLP with pre-norm residual connections (LayerNorm before sub-layers)
+5. **Add GPT model**: Stack transformer blocks with token+positional embeddings, causal masking, and generation
+6. **Export and verify**: `tito module complete 13 && tito test transformers`
+
 ## Implementation Guide
 
 ### LayerNorm - Training Stability for Deep Networks
@@ -356,35 +386,186 @@ This module implements **decoder-only GPT architecture**. Here's why this choice
 3. **Versatility**: Handles both understanding and generation tasks
 4. **Efficiency**: Simpler to implement and optimize than encoder-decoder
 
-## Getting Started
+## Common Pitfalls
 
-### Prerequisites
+### Forgetting Residual Connections in Transformer Blocks
 
-Ensure you understand the foundations from previous modules:
+**Problem**: Implementing transformer blocks without residual connections causes gradient vanishing in deep networks (12+ layers)
 
-```bash
-# Activate TinyTorch environment
-source scripts/activate-tinytorch
+**Solution**: Always add residual connections around both attention and MLP sub-layers using `x = x + sublayer(x)` pattern
 
-# Verify prerequisite modules
-tito test embeddings
-tito test attention
+```python
+# Wrong: No residual connections
+def forward(self, x, mask=None):
+    x = self.ln1(x)
+    x = self.attention(x, mask)  # Gradient vanishes after 12+ layers
+    x = self.ln2(x)
+    x = self.mlp(x)
+    return x
+
+# Correct: Pre-norm with residual connections
+def forward(self, x, mask=None):
+    x = x + self.attention(self.ln1(x), mask)  # Residual around attention
+    x = x + self.mlp(self.ln2(x))              # Residual around MLP
+    return x
 ```
 
-**Required Background:**
-- **Module 11 (Embeddings)**: Token and positional embeddings for input representation
-- **Module 12 (Attention)**: Multi-head attention mechanism for sequence modeling
-- **Module 05 (Autograd)**: Automatic differentiation for training deep networks
-- **Module 02 (Activations)**: GELU activation used in MLP layers
+### Incorrect Pre-Norm vs Post-Norm Architecture
 
-### Development Workflow
+**Problem**: Applying LayerNorm after sub-layers (post-norm) instead of before (pre-norm) causes training instability in deep transformers
 
-1. **Open the development file**: `modules/13_transformers/transformers.py`
-2. **Implement LayerNorm**: Normalize across feature dimension with learnable scale/shift parameters (gamma, beta)
-3. **Build MLP**: Two linear layers with 4x expansion ratio and GELU activation (position-wise transformation)
-4. **Create TransformerBlock**: Combine attention and MLP with pre-norm residual connections (LayerNorm before sub-layers)
-5. **Add GPT model**: Stack transformer blocks with token+positional embeddings, causal masking, and generation
-6. **Export and verify**: `tito module complete 13 && tito test transformers`
+**Solution**: Use pre-norm architecture where LayerNorm is applied before attention and MLP, not after
+
+```python
+# Wrong: Post-norm (original Transformer paper, unstable for deep models)
+x = self.ln1(x + self.attention(x))  # LayerNorm after residual
+x = self.ln2(x + self.mlp(x))
+
+# Correct: Pre-norm (modern standard, stable for 100+ layers)
+x = x + self.attention(self.ln1(x))  # LayerNorm before sub-layer
+x = x + self.mlp(self.ln2(x))
+```
+
+### Missing Causal Mask in GPT Forward Pass
+
+**Problem**: Forgetting to create or apply causal mask allows future token leakage, breaking autoregressive generation property
+
+**Solution**: Always create upper triangular mask with -inf and pass to all transformer blocks during training and inference
+
+```python
+# Wrong: No causal mask
+logits = self.forward(tokens)  # Position i can see all positions (invalid for GPT)
+
+# Correct: Create and apply causal mask
+mask = np.triu(np.ones((seq_len, seq_len)) * -np.inf, k=1)
+for block in self.blocks:
+    x = block(x, mask=mask)  # Causal masking applied
+```
+
+### Incorrect Temperature Sampling Implementation
+
+**Problem**: Applying temperature after softmax or forgetting to apply it entirely results in incorrect generation behavior
+
+**Solution**: Divide logits by temperature before softmax to control randomness in sampling
+
+```python
+# Wrong: Temperature after softmax (no effect)
+probs = softmax(logits)
+probs = probs / temperature  # Doesn't change distribution shape
+
+# Correct: Temperature before softmax
+logits = logits / temperature  # temperature > 1 flattens, < 1 sharpens
+probs = softmax(logits)
+next_token = sample(probs)
+```
+
+### LayerNorm Numerical Instability Without Epsilon
+
+**Problem**: Computing variance without epsilon causes division by zero or NaN when all features are identical
+
+**Solution**: Always add small epsilon (1e-5) to variance before taking square root
+
+```python
+# Wrong: No epsilon protection
+normalized = (x - mean) / sqrt(variance)  # NaN if variance = 0
+
+# Correct: Epsilon for numerical stability
+normalized = (x - mean) / sqrt(variance + self.eps)  # Safe for variance = 0
+```
+
+## Production Context
+
+### Your Implementation vs Production Frameworks
+
+Understanding what you are building vs what production frameworks provide:
+
+| Feature | Your Transformers | PyTorch nn.Transformer | HuggingFace Transformers |
+|---------|-------------------|------------------------|--------------------------|
+| **Backend** | NumPy (CPU-only) | C++/CUDA (CPU/GPU/TPU) | PyTorch + optimizations |
+| **Algorithm** | Exact: Pre-norm GPT | Same architecture | Same + variants (BERT, T5) |
+| **Causal Masking** | Manual upper triangular | Built-in mask parameter | Auto-generated per model |
+| **Memory** | O(n²) attention per layer | Same + gradient checkpointing | Same + FlashAttention option |
+| **Generation** | Temperature sampling | Built-in generate() | Advanced (beam search, top-k, nucleus) |
+| **KV Caching** | Not implemented | Manual implementation | Automatic during generation |
+| **Model Sizes** | Educational scale | Any scale | Pre-trained (GPT-2 to 175B) |
+| **Optimizations** | None | CUDA kernels, mixed precision | All + model parallelism |
+
+**Educational Focus**: Your implementation prioritizes understanding the architecture fundamentals. The O(n²) attention cost and linear parameter scaling you experience are the SAME bottlenecks production systems face—they just optimize with specialized hardware and algorithms.
+
+### Side-by-Side Code Comparison
+
+**Your TinyTorch GPT:**
+```python
+from tinytorch.models.transformer import GPT
+
+# Create GPT model
+gpt = GPT(
+    vocab_size=50257,
+    embed_dim=768,
+    num_layers=12,
+    num_heads=12,
+    max_seq_len=1024
+)
+
+# Forward pass
+tokens = Tensor([[15496, 1917, 318]])  # "This is a"
+logits = gpt.forward(tokens)  # YOUR implementation
+
+# Generation
+generated = gpt.generate(
+    prompt_tokens=tokens,
+    max_new_tokens=50,
+    temperature=0.8
+)
+```
+
+**Equivalent HuggingFace (Production):**
+```python
+from transformers import GPT2LMHeadModel, GPT2Tokenizer
+
+# Load pre-trained GPT-2
+model = GPT2LMHeadModel.from_pretrained("gpt2")
+tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+
+# Forward pass (automatic GPU, KV caching, optimizations)
+tokens = tokenizer("This is a", return_tensors="pt")
+logits = model(**tokens).logits
+
+# Generation (beam search, top-k, nucleus sampling, KV cache)
+generated = model.generate(
+    **tokens,
+    max_new_tokens=50,
+    temperature=0.8,
+    do_sample=True
+)
+```
+
+**Key Differences:**
+1. **Pre-trained Weights**: HuggingFace loads GPT-2 trained on 40GB of text; your model starts from random initialization
+2. **GPU Acceleration**: HuggingFace moves model to GPU with `.to("cuda")` for 10-100× speedup
+3. **KV Caching**: HuggingFace caches key-value pairs during generation, reducing O(n²) to O(n) per token
+4. **Advanced Sampling**: HuggingFace supports beam search, top-k, nucleus (top-p), and other sampling strategies
+5. **Production Optimizations**: Mixed precision (FP16/BF16), model parallelism, gradient checkpointing
+
+### Real-World Applications
+
+**OpenAI GPT-4**: Uses 120-layer decoder with estimated 1.8 trillion parameters. Architecture identical to your implementation—pre-norm transformer blocks with causal attention. Training required 25,000 A100 GPUs for 3-4 months. Inference serves millions of users requiring KV caching, quantization (FP16/INT8), and distributed serving across thousands of GPUs.
+
+**Meta LLaMA 2**: 70B parameter open-source model uses your exact architecture with Grouped-Query Attention optimization. Replaces 80 independent KV heads with 10 shared heads, reducing KV cache from 640GB to 80GB (8× memory saving) with minimal quality loss. Released with pre-trained weights enabling fine-tuning for custom applications.
+
+**Anthropic Claude**: Uses decoder-only architecture with 100K+ token context window. Extended context requires sparse attention patterns and memory optimizations—full dense attention would need 38TB for attention weights across layers. Production systems use FlashAttention and custom CUDA kernels for feasibility.
+
+**Google Gemini**: Multimodal transformer processing text, images, audio, and video using unified decoder architecture. Same self-attention mechanism you implemented, but operates on mixed token types. Demonstrates versatility of transformer architecture beyond pure language modeling.
+
+### Performance Characteristics at Scale
+
+**Parameter Scaling**: Your GPT with embed_dim=768, num_layers=12, num_heads=12 has approximately 117M parameters (similar to GPT-2 Small). Scaling to GPT-3: embed_dim=12,288, num_layers=96, num_heads=96 yields 175B parameters. Storage: 175B × 2 bytes (FP16) = 350GB. Training requires 4× memory for gradients/optimizer states = 1.4TB per GPU.
+
+**Attention Memory Growth**: For GPT-3 with seq_len=2048, batch=4, heads=96: attention weights per layer = 4 × 96 × 2048² = 1.6B elements × 4 bytes = 6.4GB. Across 96 layers: 614GB (infeasible!). FlashAttention solves this by computing attention on-the-fly with O(n) memory = 12MB per layer.
+
+**Generation Efficiency**: Autoregressive generation without KV caching: 100 tokens = 5,050 attention computations (1+2+...+100). With KV cache: 100 tokens = 100 attention computations (10-15× speedup). All production LLMs use KV caching—ChatGPT would be economically infeasible without it.
+
+**Training Compute**: GPT-3 training required 3.14×10²³ FLOPs, consuming 1,300 MWh of electricity. At commercial GPU rates, training cost approximately 5-10 million USD. This explains why few organizations train models from scratch—most fine-tune existing models like LLaMA 2 or GPT-3.5.
 
 ## Testing
 

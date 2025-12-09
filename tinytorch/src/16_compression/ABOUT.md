@@ -43,6 +43,41 @@ This module follows TinyTorch's **Build → Use → Reflect** framework:
 2. **Use**: Apply compression techniques to realistic neural networks and measure sparsity, parameter reduction, and memory savings
 3. **Reflect**: Understand why 90% unstructured sparsity rarely accelerates inference, when structured pruning delivers real speedups, and how compression strategies must adapt to hardware constraints
 
+## Getting Started
+
+### Prerequisites
+
+Ensure you understand compression foundations:
+
+```bash
+# Activate TinyTorch environment
+source scripts/activate-tinytorch
+
+# Verify prerequisite modules
+tito test quantization
+```
+
+**Required knowledge**:
+- Neural network training and fine-tuning (pruned models need retraining)
+- Gradient-based optimization (fine-tuning after compression)
+- Quantization techniques (often combined with pruning for multiplicative gains)
+
+**From previous modules**:
+- **Tensor operations**: Weight manipulation and masking
+- **Optimizers**: Fine-tuning compressed models
+- **Quantization**: Combining compression techniques (10× pruning + 4× quantization = 40× total)
+
+### Development Workflow
+
+1. **Open the development file**: `modules/16_compression/compression_dev.ipynb`
+2. **Implement sparsity measurement**: Calculate percentage of zero weights across model
+3. **Build magnitude pruning**: Remove smallest weights using percentile thresholds
+4. **Create structured pruning**: Remove entire channels based on L2 norm importance
+5. **Implement knowledge distillation**: Build teacher-student training with temperature scaling
+6. **Add low-rank approximation**: Factor large matrices using truncated SVD
+7. **Build compression pipeline**: Combine techniques sequentially
+8. **Export and verify**: `tito module complete 16 && tito test compression`
+
 ## Implementation Guide
 
 ### Sparsity Measurement
@@ -249,40 +284,100 @@ print(f"Achieved {stats['final_sparsity']:.1f}% sparsity")
 
 **Multi-stage strategy**: Different techniques target different redundancy types. Magnitude pruning removes unimportant individual weights; structured pruning removes redundant channels; distillation creates fundamentally smaller architectures.
 
-## Getting Started
+## Common Pitfalls
 
-### Prerequisites
+### Measuring Sparsity Without Verifying Speedup
 
-Ensure you understand compression foundations:
+**Problem**: Achieving 90% unstructured sparsity looks impressive but rarely delivers proportional inference speedup without specialized hardware support.
 
-```bash
-# Activate TinyTorch environment
-source scripts/activate-tinytorch
+**Solution**: Always measure actual inference time, not just sparsity percentage. Use structured pruning for guaranteed speedup with standard hardware.
 
-# Verify prerequisite modules
-tito test quantization
+```python
+# ❌ Wrong: Assuming sparsity equals speedup
+magnitude_prune(model, sparsity=0.9)
+print(f"Achieved {measure_sparsity(model)}% sparsity!")  # 90% sparsity reported
+# Reality: Inference time unchanged without sparse kernels
+
+# ✅ Correct: Measure actual inference performance
+import time
+t0 = time.time()
+output = model.forward(x)
+inference_time = time.time() - t0
+print(f"Sparsity: {measure_sparsity(model):.1f}%, Time: {inference_time:.3f}s")
 ```
 
-**Required knowledge**:
-- Neural network training and fine-tuning (pruned models need retraining)
-- Gradient-based optimization (fine-tuning after compression)
-- Quantization techniques (often combined with pruning for multiplicative gains)
+### Pruning Without Fine-Tuning
 
-**From previous modules**:
-- **Tensor operations**: Weight manipulation and masking
-- **Optimizers**: Fine-tuning compressed models
-- **Quantization**: Combining compression techniques (10× pruning + 4× quantization = 40× total)
+**Problem**: Removing 50-90% of weights immediately degrades accuracy significantly. Models need retraining to recover performance after aggressive pruning.
 
-### Development Workflow
+**Solution**: Always fine-tune pruned models on training data to allow remaining weights to compensate for removed parameters.
 
-1. **Open the development file**: `modules/16_compression/compression_dev.ipynb`
-2. **Implement sparsity measurement**: Calculate percentage of zero weights across model
-3. **Build magnitude pruning**: Remove smallest weights using percentile thresholds
-4. **Create structured pruning**: Remove entire channels based on L2 norm importance
-5. **Implement knowledge distillation**: Build teacher-student training with temperature scaling
-6. **Add low-rank approximation**: Factor large matrices using truncated SVD
-7. **Build compression pipeline**: Combine techniques sequentially
-8. **Export and verify**: `tito module complete 16 && tito test compression`
+```python
+# ❌ Wrong: Prune and immediately evaluate
+magnitude_prune(model, sparsity=0.8)
+accuracy = evaluate(model, test_data)  # Accuracy drops 20-30%
+
+# ✅ Correct: Prune, fine-tune, then evaluate
+magnitude_prune(model, sparsity=0.8)
+fine_tune(model, train_data, epochs=5)  # Remaining weights adapt
+accuracy = evaluate(model, test_data)  # Accuracy recovers to 95-98% of original
+```
+
+### Ignoring Hardware Sparsity Constraints
+
+**Problem**: Creating arbitrary sparsity patterns (e.g., 73% sparse) that don't align with hardware acceleration requirements (e.g., NVIDIA's 2:4 structured sparsity).
+
+**Solution**: Match pruning patterns to target hardware capabilities. Use 50% (2:4), 75% (1:4), or channel-wise structured sparsity for actual deployment benefits.
+
+```python
+# ❌ Wrong: Arbitrary unstructured sparsity
+magnitude_prune(model, sparsity=0.73)  # No hardware can accelerate this pattern
+
+# ✅ Correct: Hardware-friendly structured patterns
+# NVIDIA Ampere 2:4 sparsity (50% with guaranteed 2× speedup)
+n_by_m_prune(model, n=2, m=4)  # Remove 2 out of every 4 weights
+# OR structured channel pruning
+structured_prune(model, prune_ratio=0.5)  # Remove entire channels
+```
+
+### Combining Compression Techniques in Wrong Order
+
+**Problem**: Applying quantization before pruning or pruning before distillation leads to suboptimal compression and accuracy trade-offs.
+
+**Solution**: Follow the optimal sequence: Distillation → Pruning → Fine-tuning → Quantization. This order maximizes compression while minimizing accuracy loss.
+
+```python
+# ❌ Wrong: Quantize then prune (destroys important weight relationships)
+quantize_model(model, bits=8)
+magnitude_prune(model, sparsity=0.9)  # Quantized weights don't prune well
+
+# ✅ Correct: Proper compression pipeline
+# 1. Distillation (architectural compression)
+student = distill_model(teacher, student_arch)
+# 2. Pruning (parameter compression)
+magnitude_prune(student, sparsity=0.8)
+# 3. Fine-tuning (accuracy recovery)
+fine_tune(student, train_data, epochs=5)
+# 4. Quantization (final compression)
+quantize_model(student, bits=8)
+```
+
+### Forgetting to Remove Pruned Weights Physically
+
+**Problem**: Zeroing weights creates sparsity but doesn't reduce model size or actual parameter count until weights are physically removed from the architecture.
+
+**Solution**: After structured pruning, create new smaller weight matrices that exclude pruned channels. Simply setting weights to zero doesn't save memory.
+
+```python
+# ❌ Wrong: Zeroed weights still occupy memory
+structured_prune(model, prune_ratio=0.5)  # Sets 50% of channels to zero
+print(f"Parameters: {count_params(model)}")  # Still shows original count!
+
+# ✅ Correct: Physically remove pruned channels
+pruned_indices = identify_pruned_channels(model)
+new_model = create_pruned_architecture(model, pruned_indices)
+print(f"Parameters: {count_params(new_model)}")  # Reduced by 50%
+```
 
 ## Testing
 
@@ -351,6 +446,89 @@ teacher = Sequential(Linear(100, 200), Linear(200, 50))
 student = Sequential(Linear(100, 50))  # 3× smaller
 kd = KnowledgeDistillation(teacher, student)
 ```
+
+## Production Context
+
+### Your Implementation vs. Production Frameworks
+
+Understanding what you're building vs. what production frameworks provide:
+
+| Feature | Your Compression | PyTorch Pruning | TensorFlow Model Optimization |
+|---------|------------------|-----------------|------------------------------|
+| **Backend** | NumPy (CPU-only) | C++/CUDA (CPU/GPU) | C++/XLA (CPU/GPU/TPU) |
+| **Algorithm** | Educational magnitude/structured pruning | torch.nn.utils.prune with custom strategies | TensorFlow Model Optimization Toolkit |
+| **Sparsity Patterns** | Unstructured & channel-wise | Unstructured, structured, n:m patterns | Weight clustering, pruning, quantization |
+| **Hardware Acceleration** | No specialized support | NVIDIA 2:4 sparsity on Ampere+ GPUs | TensorRT integration for deployment |
+| **Fine-Tuning** | Manual implementation | Integrated with training loop | Pruning-aware training built-in |
+| **Knowledge Distillation** | Temperature-scaled KL divergence | Manual implementation required | tf.keras distillation utilities |
+| **Production Deployment** | Educational only | torch.jit.script for mobile | TFLite converter for edge devices |
+
+**Educational Focus**: Your implementation prioritizes understanding compression trade-offs. Production systems optimize for deployment on specific hardware with specialized kernel support.
+
+### Side-by-Side Code Comparison
+
+**Your TinyTorch Compression:**
+```python
+from tinytorch.compression import magnitude_prune, measure_sparsity
+
+# Create and compress model
+model = Sequential(Linear(512, 256), ReLU(), Linear(256, 10))
+magnitude_prune(model, sparsity=0.8)
+print(f"Sparsity: {measure_sparsity(model):.1f}%")  # YOUR implementation
+```
+
+**Equivalent PyTorch (Production):**
+```python
+import torch
+import torch.nn as nn
+import torch.nn.utils.prune as prune
+
+# Create and compress model
+model = nn.Sequential(nn.Linear(512, 256), nn.ReLU(), nn.Linear(256, 10)).cuda()
+for module in model.modules():
+    if isinstance(module, nn.Linear):
+        prune.l1_unstructured(module, name='weight', amount=0.8)
+        prune.remove(module, 'weight')  # Make pruning permanent
+# Optimized CUDA kernels, sparse tensor support
+```
+
+**Key Differences:**
+1. **Sparse Tensor Support**: PyTorch uses sparse storage formats (COO, CSR) to reduce memory for sparse weights
+2. **Hardware Acceleration**: NVIDIA Ampere+ GPUs provide 2× speedup for 2:4 structured sparsity patterns
+3. **Pruning Strategies**: PyTorch offers L1, random, structured, and custom pruning methods
+4. **Deployment Integration**: PyTorch pruning integrates with torch.jit for mobile and TensorRT for production inference
+
+### Real-World Applications
+
+**DistilBERT (Hugging Face)**: Knowledge distillation compresses BERT from 110M to 66M parameters (40% reduction) while retaining 97% accuracy on GLUE benchmarks. Achieves 60% faster inference on CPU and GPU. Used in production by companies needing BERT-quality NLP on resource-constrained devices.
+
+**MobileNetV2 (Google)**: Combines depthwise separable convolutions with channel pruning to create models under 10MB that run real-time on smartphones. Powers Google Lens, Android camera features, and mobile vision applications processing 30+ FPS on phone CPUs.
+
+**NVIDIA TensorRT**: Automatic pruning and quantization pipeline for production inference. Combines 50-90% pruning with INT8 quantization for 10-20× speedup on NVIDIA GPUs. Used by autonomous vehicle companies for real-time perception (Tesla, Waymo).
+
+**OpenAI GPT Distillation**: DistilGPT-2 achieves 33% parameter reduction (82M → 54M parameters) with 95% of original performance. Enables GPT-quality text generation on consumer hardware without requiring cloud GPU access.
+
+### Performance Characteristics at Scale
+
+**Memory Scaling**: For BERT-Large with 340M parameters at FP32:
+- Original model: 1.36GB memory footprint
+- After 80% magnitude pruning: 1.36GB (sparsity doesn't reduce dense storage)
+- After structured pruning (50% channels): 680MB (architectural reduction)
+- After distillation to 160M params: 640MB (true compression)
+- Combined pruning + INT8 quantization: 170MB (8× total reduction)
+
+**Computational Bottlenecks**: In GPT-2 inference with 1024 context:
+- Dense model: 1.2 TFLOP per token (full 117M parameters)
+- 90% unstructured pruning: 1.1 TFLOP per token (sparse ops slower than dense!)
+- 50% structured pruning: 0.6 TFLOP per token (smaller dense matrices)
+- Knowledge distillation (50% params): 0.6 TFLOP per token (architectural speedup)
+
+**Inference Optimization**: Production compression pipeline for edge deployment:
+- Baseline ResNet-50: 138 ms/image on mobile CPU, 98MB model size
+- After pruning (60% sparsity): 127 ms/image (8% speedup), 98MB (no reduction in dense format)
+- After structured pruning (40% channels): 82 ms/image (40% speedup), 59MB
+- After quantization (INT8): 48 ms/image (65% speedup from baseline), 15MB
+- Combined: 2.9× speedup, 6.5× size reduction
 
 ## Systems Thinking Questions
 

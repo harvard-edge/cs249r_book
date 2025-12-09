@@ -39,6 +39,32 @@ This module follows TinyTorch's **Build → Use → Reflect** framework:
 2. **Use**: Apply your Tensor to real problems like matrix multiplication for neural network layers, data normalization with broadcasting, and statistical computations across various shapes and dimensions
 3. **Reflect**: Understand systems-level implications - why tensor operations dominate training time, how memory layout (row-major vs. column-major) affects cache performance, and how broadcasting eliminates redundant data copying
 
+## Getting Started
+
+### Prerequisites
+
+This is the first module - no prerequisites! Verify your environment is ready:
+
+```bash
+# Activate TinyTorch environment
+source scripts/activate-tinytorch
+
+# Check system health
+tito system health
+```
+
+All checks should pass (Python 3.8+, NumPy, pytest installed) before starting.
+
+### Development Workflow
+
+1. **Open the development notebook**: `modules/01_tensor/tensor_dev.ipynb` in Jupyter or your preferred editor
+2. **Implement Tensor.__init__**: Create constructor that converts data to NumPy array, stores shape/size/dtype, initializes gradient attributes
+3. **Build arithmetic operations**: Implement `__add__`, `__sub__`, `__mul__`, `__truediv__` with broadcasting support for both Tensor-Tensor and Tensor-scalar operations
+4. **Add matrix multiplication**: Implement `matmul()` with shape validation and clear error messages for dimension mismatches
+5. **Create shape manipulation**: Implement `reshape()` (with -1 support) and `transpose()` for dimension swapping
+6. **Implement reductions**: Build `sum()`, `mean()`, `max()` with axis parameter and keepdims support
+7. **Export and verify**: Run `tito export 01` to export to package, then `tito test 01` to validate all tests pass
+
 ## What You'll Build
 
 By completing this module, you'll create a production-ready Tensor class with:
@@ -130,24 +156,24 @@ Different operations have vastly different costs:
 ┌─────────────────────────────────────────┐
 │         Tensor Class                    │
 ├─────────────────────────────────────────┤
-│  Properties:                            │
-│  - data: np.ndarray (underlying storage)│
-│  - shape: tuple (dimensions)            │
-│  - size: int (total elements)           │
-│  - dtype: np.dtype (data type)          │
-│  - requires_grad: bool (autograd flag)  │
-│  - grad: Tensor (gradient - Module 05)  │
+│ Properties:                             │
+│ - data: np.ndarray (underlying storage) │
+│ - shape: tuple (dimensions)             │
+│ - size: int (total elements)            │
+│ - dtype: np.dtype (data type)           │
+│ - requires_grad: bool (autograd flag)   │
+│ - grad: Tensor (gradient - Module 05)   │
 ├─────────────────────────────────────────┤
-│  Operator Overloading:                  │
-│  - __add__, __sub__, __mul__, __truediv__│
-│  - __pow__ (exponentiation)             │
-│  - Returns new Tensor instances         │
+│ Operator Overloading:                   │
+│ - __add__, __sub__, __mul__, __truediv__│
+│ - __pow__ (exponentiation)              │
+│ - Returns new Tensor instances          │
 ├─────────────────────────────────────────┤
-│  Methods:                               │
-│  - matmul(other): Matrix multiplication │
-│  - reshape(*shape): Shape manipulation  │
-│  - transpose(): Dimension swap          │
-│  - sum/mean/max/min(axis): Reductions   │
+│ Methods:                                │
+│ - matmul(other): Matrix multiplication  │
+│  reshape(*shape): Shape manipulation    │
+│ - transpose(): Dimension swap           │
+│ - sum/mean/max/min(axis): Reductions    │
 └─────────────────────────────────────────┘
 ```
 
@@ -185,32 +211,6 @@ Module 06: Optimizers (updates Tensor parameters)
 ```
 
 Your Tensor is the universal foundation - every subsequent module builds on what you create here.
-
-## Prerequisites
-
-This is the first module - no prerequisites! Verify your environment is ready:
-
-```bash
-# Activate TinyTorch environment
-source scripts/activate-tinytorch
-
-# Check system health
-tito system health
-```
-
-All checks should pass (Python 3.8+, NumPy, pytest installed) before starting.
-
-## Getting Started
-
-### Development Workflow
-
-1. **Open the development notebook**: `modules/01_tensor/tensor_dev.ipynb` in Jupyter or your preferred editor
-2. **Implement Tensor.__init__**: Create constructor that converts data to NumPy array, stores shape/size/dtype, initializes gradient attributes
-3. **Build arithmetic operations**: Implement `__add__`, `__sub__`, `__mul__`, `__truediv__` with broadcasting support for both Tensor-Tensor and Tensor-scalar operations
-4. **Add matrix multiplication**: Implement `matmul()` with shape validation and clear error messages for dimension mismatches
-5. **Create shape manipulation**: Implement `reshape()` (with -1 support) and `transpose()` for dimension swapping
-6. **Implement reductions**: Build `sum()`, `mean()`, `max()` with axis parameter and keepdims support
-7. **Export and verify**: Run `tito export 01` to export to package, then `tito test 01` to validate all tests pass
 
 ## Implementation Guide
 

@@ -90,11 +90,11 @@ All users are assigned an **anonymous UUID** when joining the community. This UU
 ## Compliance
 
 **GDPR**: Our design aligns with GDPR principles:
-- ✅ Data minimization (only optional fields)
-- ✅ Purpose limitation (community map only)
-- ✅ User consent (explicit opt-in)
-- ✅ Right to deletion (`tito community leave`)
-- ✅ Data portability (JSON files)
+- ✓ Data minimization (only optional fields)
+- ✓ Purpose limitation (community map only)
+- ✓ User consent (explicit opt-in)
+- ✓ Right to deletion (`tito community leave`)
+- ✓ Data portability (JSON files)
 
 **FERPA**: For educational institutions:
 - No student names collected

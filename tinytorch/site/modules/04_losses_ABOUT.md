@@ -1,7 +1,7 @@
 ---
 title: "Loss Functions"
 description: "Build MSE and CrossEntropy loss functions with numerical stability for regression and classification"
-difficulty: "⭐⭐ (2/4)"
+difficulty: "●● (2/4)"
 time_estimate: "3-4 hours"
 prerequisites: ["01_tensor", "02_activations", "03_layers"]
 next_steps: ["05_autograd"]
@@ -13,9 +13,9 @@ learning_objectives:
   - "Analyze gradient flow and scaling trade-offs in loss computation"
 ---
 
-# 04. Loss Functions
+# Loss Functions
 
-**FOUNDATION TIER** | Difficulty: ⭐⭐ (2/4) | Time: 3-4 hours
+**FOUNDATION TIER** | Difficulty: ●● (2/4) | Time: 3-4 hours
 
 ## Overview
 
@@ -184,25 +184,25 @@ python -m pytest tests/ -k losses -v
 ```
 
 ### Test Coverage Areas
-- ✅ **MSE Correctness**: Validates known cases, perfect predictions (loss=0), non-negativity
-- ✅ **CrossEntropy Stability**: Tests large logits (1000+), verifies no overflow/underflow
-- ✅ **Gradient Properties**: Ensures CrossEntropy gradient equals softmax - target
-- ✅ **Binary Classification**: Validates BCE with boundary cases and probability constraints
-- ✅ **Log-Sum-Exp Trick**: Confirms numerical stability with extreme values
+- ✓ **MSE Correctness**: Validates known cases, perfect predictions (loss=0), non-negativity
+- ✓ **CrossEntropy Stability**: Tests large logits (1000+), verifies no overflow/underflow
+- ✓ **Gradient Properties**: Ensures CrossEntropy gradient equals softmax - target
+- ✓ **Binary Classification**: Validates BCE with boundary cases and probability constraints
+- ✓ **Log-Sum-Exp Trick**: Confirms numerical stability with extreme values
 
 ### Inline Testing & Validation
 The module includes comprehensive unit tests:
 ```python
-🔬 Unit Test: Log-Softmax...
-✅ log_softmax works correctly with numerical stability!
+ Unit Test: Log-Softmax...
+ log_softmax works correctly with numerical stability!
 
-🔬 Unit Test: MSE Loss...
-✅ MSELoss works correctly!
+ Unit Test: MSE Loss...
+ MSELoss works correctly!
 
-🔬 Unit Test: Cross-Entropy Loss...
-✅ CrossEntropyLoss works correctly!
+ Unit Test: Cross-Entropy Loss...
+ CrossEntropyLoss works correctly!
 
-📈 Progress: Loss Functions Module ✓
+ Progress: Loss Functions Module ✓
 ```
 
 ### Manual Testing Examples
@@ -254,21 +254,21 @@ Choose your preferred way to engage with this module:
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card} 🚀 Launch Binder
+```{grid-item-card}  Launch Binder
 :link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/04_losses/losses_dev.ipynb
 :class-header: bg-light
 
 Run this module interactively in your browser. No installation required!
 ```
 
-```{grid-item-card} ⚡ Open in Colab
+```{grid-item-card}  Open in Colab
 :link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/04_losses/losses_dev.ipynb
 :class-header: bg-light
 
 Use Google Colab for GPU access and cloud compute power.
 ```
 
-```{grid-item-card} 📖 View Source
+```{grid-item-card}  View Source
 :link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/04_losses/losses_dev.ipynb
 :class-header: bg-light
 
@@ -277,7 +277,7 @@ Browse the notebook source code and understand the implementation.
 
 ````
 
-```{admonition} 💾 Save Your Progress
+```{admonition}  Save Your Progress
 :class: tip
 **Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
 ```

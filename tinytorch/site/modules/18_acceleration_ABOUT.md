@@ -1,7 +1,7 @@
 ---
 title: "Acceleration - CPU Vectorization & Cache Optimization"
 description: "Master hardware-aware optimization through BLAS vectorization, cache-friendly algorithms, and roofline analysis"
-difficulty: "⭐⭐⭐"
+difficulty: "●●●"
 time_estimate: "6-8 hours"
 prerequisites: ["Profiling"]
 next_steps: ["Benchmarking"]
@@ -13,9 +13,9 @@ learning_objectives:
   - "Measure acceleration gains systematically using profiling integration"
 ---
 
-# 18. Acceleration - CPU Vectorization & Cache Optimization
+# Acceleration - CPU Vectorization & Cache Optimization
 
-**OPTIMIZATION TIER** | Difficulty: ⭐⭐⭐ (3/4) | Time: 6-8 hours
+**OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 6-8 hours
 
 ## Overview
 
@@ -421,14 +421,14 @@ The module includes comprehensive validation and measurement:
 python modules/18_acceleration/acceleration.py
 
 # Expected output:
-🔬 Unit Test: Vectorized Matrix Multiplication...
-✅ vectorized_matmul works correctly!
+ Unit Test: Vectorized Matrix Multiplication...
+ vectorized_matmul works correctly!
 
-🔬 Unit Test: Fused GELU...
-✅ fused_gelu works correctly!
+ Unit Test: Fused GELU...
+ fused_gelu works correctly!
 
-🔬 Unit Test: Kernel Fusion Performance Impact...
-📊 Kernel Fusion Performance Analysis:
+ Unit Test: Kernel Fusion Performance Impact...
+ Kernel Fusion Performance Analysis:
    Tensor size: 2000×2000 = 4,000,000 elements
    Unfused time: 45.23 ms
    Fused time:   18.12 ms
@@ -436,9 +436,9 @@ python modules/18_acceleration/acceleration.py
    Per-element: 11.3 ns → 4.5 ns
    Memory efficiency: 7→2 memory ops
    Effective bandwidth: 15.2→38.5 GB/s
-🚀 Excellent! Kernel fusion providing significant speedup
+ Excellent! Kernel fusion providing significant speedup
 
-📊 Analyzing vectorization scaling behavior...
+ Analyzing vectorization scaling behavior...
 ┌─────────┬─────────────┬─────────────┬─────────────┬─────────────┐
 │  Size   │ Time (ms)   │ GFLOPS      │ Bandwidth   │ Efficiency  │
 ├─────────┼─────────────┼─────────────┼─────────────┼─────────────┤
@@ -450,11 +450,11 @@ python modules/18_acceleration/acceleration.py
 │   2048  │    281.34   │     485.2   │      15.3   │     242.6   │
 └─────────┴─────────────┴─────────────┴─────────────┴─────────────┘
 
-🧪 RUNNING MODULE INTEGRATION TEST
+ RUNNING MODULE INTEGRATION TEST
 Running unit tests...
-✅ All tests passed!
+ All tests passed!
 
-🎉 ALL TESTS PASSED! Module ready for export.
+ ALL TESTS PASSED! Module ready for export.
 ```
 
 ### Manual Testing Examples
@@ -565,21 +565,21 @@ Choose your preferred way to engage with this module:
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card} 🚀 Launch Binder
+```{grid-item-card}  Launch Binder
 :link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/18_acceleration/acceleration_dev.ipynb
 :class-header: bg-light
 
 Run this module interactively in your browser. No installation required!
 ```
 
-```{grid-item-card} ⚡ Open in Colab
+```{grid-item-card}  Open in Colab
 :link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/18_acceleration/acceleration_dev.ipynb
 :class-header: bg-light
 
 Use Google Colab for GPU access and cloud compute power.
 ```
 
-```{grid-item-card} 📖 View Source
+```{grid-item-card}  View Source
 :link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/18_acceleration/acceleration.py
 :class-header: bg-light
 
@@ -588,7 +588,7 @@ Browse the Python source code and understand the implementation.
 
 ````
 
-```{admonition} 💾 Save Your Progress
+```{admonition}  Save Your Progress
 :class: tip
 **Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
 ```

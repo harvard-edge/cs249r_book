@@ -34,7 +34,7 @@ Unlike traditional CS courses, ML systems education requires students to:
 
 ---
 
-## 🏗️ Progressive Implementation Ladder Pattern
+##  Progressive Implementation Ladder Pattern
 
 ### Anti-Pattern: The Complexity Cliff
 ```python
@@ -256,7 +256,7 @@ By the end of this module, you will:
 
 ---
 
-## 🧪 Student-Friendly Testing Guidelines
+## ▶ Student-Friendly Testing Guidelines
 
 ### Test Hierarchy
 1. **Confidence Tests** (90%+ should pass)
@@ -340,7 +340,7 @@ def show_learning_progress():
 
 ---
 
-## ⚖️ Balancing Challenge and Support
+## ⚖ Balancing Challenge and Support
 
 ### The Goldilocks Principle
 - **Too Easy**: Students get bored and don't learn deeply
@@ -445,7 +445,7 @@ def guided_implementation():
 
 ---
 
-## 🚀 Implementation Checklist
+##  Implementation Checklist
 
 ### For Each New Module
 - [ ] **Learning objectives** clearly stated

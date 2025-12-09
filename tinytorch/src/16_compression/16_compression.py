@@ -67,12 +67,14 @@ import time
 
 # Import from TinyTorch package (previous modules must be completed and exported)
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.layers import Linear
+from tinytorch.core.layers import Linear, SimpleModel
 from tinytorch.core.activations import ReLU
 
 # Constants for memory calculations
 BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
 MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
+
+# SimpleModel is now imported from tinytorch.core.layers
 
 # %% [markdown]
 """
@@ -341,6 +343,7 @@ Why this matters: Sparsity directly relates to memory savings, but achieving spe
 """
 
 # %% nbgrader={"grade": false, "grade_id": "measure-sparsity", "solution": true, "schema_version": 3}
+#| export
 def measure_sparsity(model) -> float:
     """
     Calculate the percentage of zero weights in a model.
@@ -1522,61 +1525,29 @@ class Compressor:
     Complete compression system for milestone use.
     
     Provides pruning, distillation, and low-rank approximation techniques.
+    
+    This class delegates to the standalone functions (measure_sparsity, magnitude_prune, etc.)
+    that students implement, providing a clean OOP interface for milestones.
+    
+    Note: Compressor methods return fractions (0-1) for consistency with benchmarking,
+    while standalone functions return percentages (0-100) for educational clarity.
     """
     
     @staticmethod
     def measure_sparsity(model) -> float:
-        """Measure the sparsity of a model (fraction of zero weights)."""
-        # SimpleModel has .layers, each layer has .parameters() method
-        total_params = 0
-        zero_params = 0
-        
-        for layer in model.layers:
-            for param in layer.parameters():
-                total_params += param.size
-                zero_params += np.sum(param.data == 0)
-        
-        return zero_params / total_params if total_params > 0 else 0.0
+        """Measure the sparsity of a model (returns fraction 0-1)."""
+        # Delegate to standalone function and convert percentage to fraction
+        return measure_sparsity(model) / 100.0
     
     @staticmethod
     def magnitude_prune(model, sparsity=0.5):
-        """
-        Prune model weights by magnitude (smallest weights set to zero).
-        
-        Args:
-            model: SimpleModel with .layers attribute
-            sparsity: Fraction of weights to prune (0-1)
-        """
-        # SimpleModel has .layers, each layer has .parameters() method
-        for layer in model.layers:
-            for param in layer.parameters():
-                threshold = np.percentile(np.abs(param.data), sparsity * 100)
-                param.data[np.abs(param.data) < threshold] = 0
-        
-        return model
+        """Prune model weights by magnitude. Delegates to standalone function."""
+        return magnitude_prune(model, sparsity)
     
     @staticmethod
     def structured_prune(model, prune_ratio=0.5):
-        """
-        Prune entire neurons/channels (structured pruning).
-        
-        Args:
-            model: SimpleModel with .layers attribute
-            prune_ratio: Fraction of structures to prune (0-1)
-        """
-        # SimpleModel has .layers, process Linear layers
-        for layer in model.layers:
-            if isinstance(layer, Linear):
-                # Linear layers have .weight attribute with .data
-                weight = layer.weight
-                if len(weight.shape) == 2:  # Linear layer
-                    # Prune output neurons
-                    neuron_norms = np.linalg.norm(weight.data, axis=0)
-                    threshold = np.percentile(neuron_norms, prune_ratio * 100)
-                    mask = neuron_norms >= threshold
-                    weight.data[:, ~mask] = 0
-        
-        return model
+        """Prune entire neurons/channels. Delegates to standalone function."""
+        return structured_prune(model, prune_ratio)
     
     @staticmethod
     def compress_model(model, compression_config: Dict[str, Any]):
@@ -1590,7 +1561,7 @@ class Compressor:
                 - 'structured_prune_ratio': float (0-1)
         
         Returns:
-            Compressed model with sparsity stats
+            Compressed model with sparsity stats (fractions 0-1)
         """
         stats = {
             'original_sparsity': Compressor.measure_sparsity(model)
@@ -1613,22 +1584,8 @@ class Compressor:
         
         return model, stats
 
-# Convenience functions for backward compatibility
-def measure_sparsity(model) -> float:
-    """Measure model sparsity."""
-    return Compressor.measure_sparsity(model)
-
-def magnitude_prune(model, sparsity=0.5):
-    """Apply magnitude-based pruning."""
-    return Compressor.magnitude_prune(model, sparsity)
-
-def structured_prune(model, prune_ratio=0.5):
-    """Apply structured pruning."""
-    return Compressor.structured_prune(model, prune_ratio)
-
-def compress_model(model, compression_config: Dict[str, Any]):
-    """Apply complete compression pipeline."""
-    return Compressor.compress_model(model, compression_config)
+# Note: measure_sparsity, magnitude_prune, structured_prune are defined earlier in this module.
+# The Compressor class above delegates to those functions, providing an OOP interface for milestones.
 
 # %% [markdown]
 """
@@ -1665,6 +1622,72 @@ For deploying on a mobile device with 50MB model limit and 100ms latency require
 - Which pruning strategy optimizes for speed? [magnitude/structured/both]
 - What order should you apply compression techniques? _____________
 """
+
+# %% [markdown]
+"""
+## 8.5 Verification: Prove Pruning Works
+
+Before running the full integration test, let's create a verification function that
+proves pruning actually creates zeros using real zero counting.
+"""
+
+# %%
+#| export
+def verify_pruning_works(model, target_sparsity=0.8):
+    """
+    Verify pruning actually creates zeros using real zero counting.
+
+    This is NOT a theoretical calculation - we count actual zero values
+    in parameter arrays and honestly report memory footprint (unchanged with dense storage).
+
+    Args:
+        model: Model with pruned parameters (SimpleModel with .parameters())
+        target_sparsity: Expected sparsity ratio (default 0.8 = 80%)
+
+    Returns:
+        dict: Verification results with sparsity, zeros, total, verified
+
+    Example:
+        >>> model = SimpleModel(Linear(100, 50))
+        >>> magnitude_prune(model, sparsity=0.8)
+        >>> results = verify_pruning_works(model, target_sparsity=0.8)
+        >>> assert results['verified']  # Pruning actually works!
+    """
+    print("🔬 Verifying pruning sparsity with actual zero counting...")
+
+    # Count actual zeros in model parameters
+    zeros = sum(np.sum(p.data == 0) for p in model.parameters())
+    total = sum(p.data.size for p in model.parameters())
+    sparsity = zeros / total
+    memory_bytes = sum(p.data.nbytes for p in model.parameters())
+
+    # Display results
+    print(f"   Total parameters: {total:,}")
+    print(f"   Zero parameters: {zeros:,}")
+    print(f"   Active parameters: {total - zeros:,}")
+    print(f"   Sparsity achieved: {sparsity*100:.1f}%")
+    print(f"   Memory footprint: {memory_bytes / MB_TO_BYTES:.2f} MB (unchanged with dense storage)")
+
+    # Verify target met (allow 15% tolerance for structured pruning variations)
+    verified = abs(sparsity - target_sparsity) < 0.15
+    status = '✓' if verified else '✗'
+    print(f"   {status} Meets {target_sparsity*100:.0f}% sparsity target")
+
+    assert verified, f"Sparsity target not met: {sparsity:.2f} vs {target_sparsity:.2f}"
+
+    print(f"\n✅ VERIFIED: {sparsity*100:.1f}% sparsity achieved")
+    print(f"⚠️ Memory saved: 0 MB (dense numpy arrays)")
+    print(f"💡 LEARNING: Compute savings ~{sparsity*100:.1f}% (skip zero multiplications)")
+    print(f"   In production: Use sparse formats (scipy.sparse.csr_matrix) for memory savings")
+
+    return {
+        'sparsity': sparsity,
+        'zeros': zeros,
+        'total': total,
+        'active': total - zeros,
+        'memory_mb': memory_bytes / MB_TO_BYTES,
+        'verified': verified
+    }
 
 # %% [markdown]
 """

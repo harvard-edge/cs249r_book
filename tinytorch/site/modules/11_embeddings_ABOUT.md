@@ -1,7 +1,7 @@
 ---
 title: "Embeddings - Token to Vector Representations"
 description: "Build embedding layers that convert discrete tokens to dense, learnable vector representations powering modern NLP"
-difficulty: "⭐⭐"
+difficulty: "●●"
 time_estimate: "4-5 hours"
 prerequisites: ["Tensor", "Tokenization"]
 next_steps: ["Attention"]
@@ -13,9 +13,9 @@ learning_objectives:
   - "Apply dimensionality principles to semantic vector space design and trade-offs"
 ---
 
-# 11. Embeddings - Token to Vector Representations
+# Embeddings - Token to Vector Representations
 
-**ARCHITECTURE TIER** | Difficulty: ⭐⭐ (2/4) | Time: 4-5 hours
+**ARCHITECTURE TIER** | Difficulty: ●● (2/4) | Time: 4-5 hours
 
 ## Overview
 
@@ -334,11 +334,11 @@ python -m pytest tests/ -k embeddings -v
 
 ### Test Coverage Areas
 
-- ✅ **Embedding lookup correctness**: Verify token IDs map to correct vector rows in weight table
-- ✅ **Gradient flow verification**: Ensure sparse gradient updates accumulate properly during backpropagation
-- ✅ **Positional encoding math**: Validate sinusoidal formula implementation with correct frequencies
-- ✅ **Shape broadcasting**: Test token + position combination across batch dimensions
-- ✅ **Memory efficiency profiling**: Verify parameter count and lookup performance characteristics
+- ✓ **Embedding lookup correctness**: Verify token IDs map to correct vector rows in weight table
+- ✓ **Gradient flow verification**: Ensure sparse gradient updates accumulate properly during backpropagation
+- ✓ **Positional encoding math**: Validate sinusoidal formula implementation with correct frequencies
+- ✓ **Shape broadcasting**: Test token + position combination across batch dimensions
+- ✓ **Memory efficiency profiling**: Verify parameter count and lookup performance characteristics
 
 ### Inline Testing & Validation
 
@@ -346,32 +346,32 @@ The module includes comprehensive unit tests during development:
 
 ```python
 # Example inline test output
-🔬 Unit Test: Embedding layer...
-✅ Lookup table created: 10K vocab × 256 dims = 2.56M parameters
-✅ Forward pass shape correct: (32, 20, 256) for batch of 32 sequences
-✅ Backward pass sparse gradients accumulate correctly
-✅ Xavier initialization keeps variance stable
-📈 Progress: Embedding Layer ✓
+ Unit Test: Embedding layer...
+ Lookup table created: 10K vocab × 256 dims = 2.56M parameters
+ Forward pass shape correct: (32, 20, 256) for batch of 32 sequences
+ Backward pass sparse gradients accumulate correctly
+ Xavier initialization keeps variance stable
+ Progress: Embedding Layer ✓
 
-🔬 Unit Test: Sinusoidal positional encoding...
-✅ Encodings computed for 512 positions × 256 dimensions
-✅ Sine/cosine patterns verified (pos 0: [0, 1, 0, 1, ...])
-✅ Different positions have unique signatures
-✅ Frequency spectrum correct (high to low across dimensions)
-📈 Progress: Sinusoidal Positions ✓
+ Unit Test: Sinusoidal positional encoding...
+ Encodings computed for 512 positions × 256 dimensions
+ Sine/cosine patterns verified (pos 0: [0, 1, 0, 1, ...])
+ Different positions have unique signatures
+ Frequency spectrum correct (high to low across dimensions)
+ Progress: Sinusoidal Positions ✓
 
-🔬 Unit Test: Learned positional encoding...
-✅ Trainable position embeddings initialized
-✅ Addition with token embeddings preserves gradients
-✅ Batch broadcasting handled correctly
-📈 Progress: Learned Positions ✓
+ Unit Test: Learned positional encoding...
+ Trainable position embeddings initialized
+ Addition with token embeddings preserves gradients
+ Batch broadcasting handled correctly
+ Progress: Learned Positions ✓
 
-🔬 Unit Test: Complete embedding system...
-✅ Token + position combination works for all strategies
-✅ Embedding scaling (√d) applied correctly
-✅ Variable sequence lengths handled gracefully
-✅ Parameter counting correct for each configuration
-📈 Progress: Complete System ✓
+ Unit Test: Complete embedding system...
+ Token + position combination works for all strategies
+ Embedding scaling (√d) applied correctly
+ Variable sequence lengths handled gracefully
+ Parameter counting correct for each configuration
+ Progress: Complete System ✓
 ```
 
 ### Manual Testing Examples
@@ -453,21 +453,21 @@ Choose your preferred way to engage with this module:
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card} 🚀 Launch Binder
+```{grid-item-card}  Launch Binder
 :link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/11_embeddings/embeddings_dev.ipynb
 :class-header: bg-light
 
 Run this module interactively in your browser. No installation required!
 ```
 
-```{grid-item-card} ⚡ Open in Colab
+```{grid-item-card}  Open in Colab
 :link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/11_embeddings/embeddings_dev.ipynb
 :class-header: bg-light
 
 Use Google Colab for GPU access and cloud compute power.
 ```
 
-```{grid-item-card} 📖 View Source
+```{grid-item-card}  View Source
 :link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/11_embeddings/embeddings_dev.ipynb
 :class-header: bg-light
 
@@ -476,7 +476,7 @@ Browse the Jupyter notebook source and understand the implementation.
 
 ````
 
-```{admonition} 💾 Save Your Progress
+```{admonition}  Save Your Progress
 :class: tip
 **Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
 ```

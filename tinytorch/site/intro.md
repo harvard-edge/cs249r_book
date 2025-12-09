@@ -20,43 +20,216 @@ Build a complete machine learning (ML) framework from tensors to systems—under
 </p>
 
 ```{raw} html
-<!-- Hero GIF Carousel - Compact Design -->
-<div class="hero-carousel-compact">
-  <div class="carousel-track">
-    <div class="carousel-item active">
-      <div class="gif-preview">
-        <img src="_static/demos/01-clone-setup.gif" alt="Clone & Setup workflow" loading="lazy" />
-        <div class="preview-fallback">💻</div>
-      </div>
-    </div>
+<style>
+.demo-terminal {
+  max-width: 640px;
+  margin: 0 auto 1.5rem auto;
+}
+.demo-window {
+  background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  overflow: hidden;
+  border: 2px solid #f97316;
+}
+.demo-titlebar {
+  background: linear-gradient(90deg, #1f2937 0%, #111827 100%);
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid rgba(249, 115, 22, 0.3);
+}
+.demo-dots {
+  display: flex;
+  gap: 6px;
+}
+.demo-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+.demo-dot.red { background: #E74C3C; }
+.demo-dot.yellow { background: #F39C12; }
+.demo-dot.green { background: #27ae60; }
+.demo-titlebar-text {
+  flex: 1;
+  text-align: center;
+  color: #fbbf24;
+  font-size: 0.85rem;
+  font-weight: 500;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+.demo-body {
+  padding: 1.5rem 1.5rem;
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+  font-size: 0.9rem;
+  line-height: 1.8;
+  min-height: 280px;
+}
+.demo-line {
+  color: #e5e7eb;
+  margin-bottom: 0.25rem;
+  opacity: 0;
+  transform: translateY(5px);
+  animation: fadeInLine 0.3s ease forwards;
+}
+.demo-line.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+@keyframes fadeInLine {
+  to { opacity: 1; transform: translateY(0); }
+}
+.demo-prompt {
+  color: #f97316;
+}
+.demo-output {
+  color: #9ca3af;
+  padding-left: 1rem;
+}
+.demo-success {
+  color: #fbbf24;
+}
+.demo-faded {
+  color: #6b7280;
+  font-style: italic;
+  margin-top: 1rem;
+}
+.demo-progress {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+.demo-step {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.75rem;
+  background: #1f2937;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  color: #9ca3af;
+  transition: all 0.3s;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.demo-step.active {
+  background: linear-gradient(135deg, #E74C3C 0%, #E67E22 100%);
+  color: white;
+  border-color: transparent;
+}
+.demo-step:hover {
+  background: #374151;
+  color: #f3f4f6;
+  border-color: rgba(249, 115, 22, 0.3);
+}
+.demo-step.active:hover {
+  background: linear-gradient(135deg, #c0392b 0%, #d35400 100%);
+}
+</style>
 
-    <div class="carousel-item">
-      <div class="gif-preview">
-        <img src="_static/demos/02-build-jupyter.gif" alt="Build in Jupyter workflow" loading="lazy" />
-        <div class="preview-fallback">📓</div>
+<div class="demo-terminal">
+  <div class="demo-window">
+    <div class="demo-titlebar">
+      <div class="demo-dots">
+        <span class="demo-dot red"></span>
+        <span class="demo-dot yellow"></span>
+        <span class="demo-dot green"></span>
       </div>
+      <span class="demo-titlebar-text">TinyTorch Terminal</span>
     </div>
-
-    <div class="carousel-item">
-      <div class="gif-preview">
-        <img src="_static/demos/03-export-tito.gif" alt="Export with TITO workflow" loading="lazy" />
-        <div class="preview-fallback">🛠️</div>
-      </div>
-    </div>
-
-    <div class="carousel-item">
-      <div class="gif-preview">
-        <img src="_static/demos/04-validate-history.gif" alt="Validate with History workflow" loading="lazy" />
-        <div class="preview-fallback">🏆</div>
-      </div>
+    <div class="demo-body" id="demo-body">
+      <!-- Lines rendered by JS -->
     </div>
   </div>
-
-  <div class="carousel-nav">
-    <button class="nav-arrow prev" onclick="moveCarousel(-1)">←</button>
-    <button class="nav-arrow next" onclick="moveCarousel(1)">→</button>
+  <div class="demo-progress">
+    <button class="demo-step active" data-step="0" onclick="goStep(0)">Setup</button>
+    <button class="demo-step" data-step="1" onclick="goStep(1)">Build</button>
+    <button class="demo-step" data-step="2" onclick="goStep(2)">Milestone</button>
+    <button class="demo-step" data-step="3" onclick="goStep(3)">Compete</button>
   </div>
 </div>
+
+<script>
+(function() {
+  const scenes = [
+    { name: 'Setup', lines: [
+      { type: 'cmd', text: 'git clone https://github.com/mlsysbook/TinyTorch' },
+      { type: 'out', text: 'Cloning into \'TinyTorch\'...' },
+      { type: 'cmd', text: 'cd TinyTorch && ./setup.sh' },
+      { type: 'success', text: 'Environment ready!' },
+      { type: 'faded', text: 'Demos coming soon...' }
+    ]},
+    { name: 'Build', lines: [
+      { type: 'cmd', text: 'tito start tensor' },
+      { type: 'out', text: 'Opening Module 01: Tensor...' },
+      { type: 'cmd', text: 'tito test' },
+      { type: 'success', text: 'All tests passed!' },
+      { type: 'faded', text: 'Demos coming soon...' }
+    ]},
+    { name: 'Milestone', lines: [
+      { type: 'cmd', text: 'tito milestone' },
+      { type: 'success', text: 'Perceptron (1957) unlocked!' },
+      { type: 'success', text: 'XOR Crisis (1969) solved!' },
+      { type: 'success', text: 'MLP (1986) achieved!' },
+      { type: 'faded', text: 'Demos coming soon...' }
+    ]},
+    { name: 'Compete', lines: [
+      { type: 'cmd', text: 'tito olympics submit' },
+      { type: 'out', text: 'Benchmarking model...' },
+      { type: 'success', text: 'Score: 847/1000' },
+      { type: 'success', text: 'Rank #42 on leaderboard!' },
+      { type: 'faded', text: 'Demos coming soon...' }
+    ]}
+  ];
+
+  let current = 0;
+  let interval;
+
+  function renderScene(idx) {
+    const body = document.getElementById('demo-body');
+    const scene = scenes[idx];
+    body.innerHTML = '';
+
+    scene.lines.forEach((line, i) => {
+      const div = document.createElement('div');
+      div.className = 'demo-line';
+      if (line.type === 'cmd') {
+        div.innerHTML = '<span class="demo-prompt">$ </span>' + line.text;
+      } else if (line.type === 'success') {
+        div.innerHTML = '<span class="demo-success">' + line.text + '</span>';
+      } else if (line.type === 'faded') {
+        div.innerHTML = '<span class="demo-faded">' + line.text + '</span>';
+      } else {
+        div.innerHTML = '<span class="demo-output">' + line.text + '</span>';
+      }
+      body.appendChild(div);
+      setTimeout(() => div.classList.add('visible'), i * 400);
+    });
+
+    document.querySelectorAll('.demo-step').forEach((btn, i) => {
+      btn.classList.toggle('active', i === idx);
+    });
+  }
+
+  function nextScene() {
+    current = (current + 1) % scenes.length;
+    renderScene(current);
+  }
+
+  window.goStep = function(idx) {
+    current = idx;
+    renderScene(current);
+    clearInterval(interval);
+    interval = setInterval(nextScene, 4000);
+  };
+
+  renderScene(0);
+  interval = setInterval(nextScene, 4000);
+})();
+</script>
 ```
 
 <div style="text-align: center; margin: 2rem 0;">
@@ -72,7 +245,7 @@ TinyTorch is organized into **four progressive tiers** that take you from mathem
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 2rem 0 2.5rem 0; max-width: 1100px;">
 
 <a href="tiers/foundation.html" class="tier-card" style="background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); padding: 1.5rem; border-radius: 0.5rem; border-left: 5px solid #1976d2; text-decoration: none; display: block; transition: transform 0.2s ease, box-shadow 0.2s ease;">
-<h3 style="margin: 0 0 0.75rem 0; color: #0d47a1; font-size: 1.15rem; font-weight: 600;">🏗 Foundation (Modules 01-07)</h3>
+<h3 style="margin: 0 0 0.75rem 0; color: #0d47a1; font-size: 1.15rem; font-weight: 600;"> Foundation (Modules 01-07)</h3>
 <p style="margin: 0 0 0.75rem 0; color: #1565c0; font-size: 0.95rem; line-height: 1.6;">Build the mathematical core that makes neural networks learn.</p>
 <p style="margin: 0.75rem 0 0 0; color: #0d47a1; font-size: 0.85rem; font-style: italic;">
 Unlocks: Perceptron (1957) • XOR Crisis (1969) • MLP (1986)
@@ -80,7 +253,7 @@ Unlocks: Perceptron (1957) • XOR Crisis (1969) • MLP (1986)
 </a>
 
 <a href="tiers/architecture.html" class="tier-card" style="background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%); padding: 1.5rem; border-radius: 0.5rem; border-left: 5px solid #7b1fa2; text-decoration: none; display: block; transition: transform 0.2s ease, box-shadow 0.2s ease;">
-<h3 style="margin: 0 0 0.75rem 0; color: #4a148c; font-size: 1.15rem; font-weight: 600;">🏛️ Architecture (Modules 08-13)</h3>
+<h3 style="margin: 0 0 0.75rem 0; color: #4a148c; font-size: 1.15rem; font-weight: 600;"> Architecture (Modules 08-13)</h3>
 <p style="margin: 0 0 0.75rem 0; color: #6a1b9a; font-size: 0.95rem; line-height: 1.6;">Build modern neural architectures—from computer vision to language models.</p>
 <p style="margin: 0.75rem 0 0 0; color: #4a148c; font-size: 0.85rem; font-style: italic;">
 Unlocks: CNN Revolution (1998) • Transformer Era (2017)
@@ -88,7 +261,7 @@ Unlocks: CNN Revolution (1998) • Transformer Era (2017)
 </a>
 
 <a href="tiers/optimization.html" class="tier-card" style="background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%); padding: 1.5rem; border-radius: 0.5rem; border-left: 5px solid #f57c00; text-decoration: none; display: block; transition: transform 0.2s ease, box-shadow 0.2s ease;">
-<h3 style="margin: 0 0 0.75rem 0; color: #e65100; font-size: 1.15rem; font-weight: 600;">⏱️ Optimization (Modules 14-19)</h3>
+<h3 style="margin: 0 0 0.75rem 0; color: #e65100; font-size: 1.15rem; font-weight: 600;"> Optimization (Modules 14-19)</h3>
 <p style="margin: 0 0 0.75rem 0; color: #ef6c00; font-size: 0.95rem; line-height: 1.6;">Transform research prototypes into production-ready systems.</p>
 <p style="margin: 0.75rem 0 0 0; color: #e65100; font-size: 0.85rem; font-style: italic;">
 Unlocks: MLPerf Torch Olympics (2018) • 8-16× compression • 12-40× speedup
@@ -96,7 +269,7 @@ Unlocks: MLPerf Torch Olympics (2018) • 8-16× compression • 12-40× speedup
 </a>
 
 <a href="tiers/olympics.html" class="tier-card" style="background: linear-gradient(135deg, #fce4ec 0%, #f8bbd0 100%); padding: 1.5rem; border-radius: 0.5rem; border-left: 5px solid #c2185b; text-decoration: none; display: block; transition: transform 0.2s ease, box-shadow 0.2s ease;">
-<h3 style="margin: 0 0 0.75rem 0; color: #880e4f; font-size: 1.15rem; font-weight: 600;">🏅 Torch Olympics (Module 20)</h3>
+<h3 style="margin: 0 0 0.75rem 0; color: #880e4f; font-size: 1.15rem; font-weight: 600;"> Torch Olympics (Module 20)</h3>
 <p style="margin: 0 0 0.75rem 0; color: #ad1457; font-size: 0.95rem; line-height: 1.6;">The ultimate test: Build a complete, competition-ready ML system.</p>
 <p style="margin: 0.75rem 0 0 0; color: #880e4f; font-size: 0.85rem; font-style: italic;">
 Capstone: Vision • Language • Speed • Compression tracks
@@ -246,7 +419,7 @@ Perfect if you want to **debug ML systems**, **implement custom operations**, or
 
 ---
 
-## 🌍 Join the Community
+##  Join the Community
 
 <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); padding: 2rem; border-radius: 1rem; margin: 2rem 0; text-align: center;">
   <p style="color: #f1f5f9; font-size: 1.25rem; margin: 0 0 0.5rem 0; font-weight: 600;">
@@ -269,7 +442,7 @@ Perfect if you want to **debug ML systems**, **implement custom operations**, or
               color: #f1f5f9; padding: 0.75rem 2rem; border-radius: 0.5rem; 
               text-decoration: none; font-weight: 600; font-size: 1rem;
               transition: all 0.2s ease;">
-      ✉️ Subscribe
+      ✉ Subscribe
     </a>
   </div>
 </div>
@@ -279,7 +452,7 @@ Perfect if you want to **debug ML systems**, **implement custom operations**, or
 **Next Steps**: **[Quick Start Guide](quickstart-guide)** (15 min) • **[Course Structure](chapters/00-introduction)** • **[FAQ](faq.md)**
 
 <div style="text-align: center; padding: 1.5rem 0; margin-top: 2rem; border-top: 1px solid #e2e8f0; color: #64748b; font-size: 0.9rem;">
-  <span style="color: #f97316;">🔥</span> <strong>TinyTorch</strong> 
+  <span style="color: #f97316;">\raisebox{-0.1em}{\includegraphics[height=1em]{../_static/logos/fire-emoji.png}}</span> <strong>TinyTorch</strong> 
   <span style="margin: 0 0.75rem;">•</span> 
   <a href="https://mlsysbook.ai" style="color: #64748b; text-decoration: none;">MLSysBook</a>
   <span style="margin: 0 0.75rem;">•</span>

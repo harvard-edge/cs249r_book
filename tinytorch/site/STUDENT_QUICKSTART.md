@@ -1,10 +1,10 @@
-# 🎓 TinyTorch Student Quickstart Guide
+#  TinyTorch Student Quickstart Guide
 
 Welcome to TinyTorch! You're about to build an ML framework from scratch and understand ML systems engineering.
 
-## 🚀 Getting Started (2 minutes)
+##  Getting Started (2 minutes)
 
-### 1️⃣ **Setup Your Environment**
+### 1⃣ **Setup Your Environment**
 ```bash
 # Clone the repository
 git clone https://github.com/MLSysBook/TinyTorch.git
@@ -20,15 +20,13 @@ source activate.sh
 tito system doctor
 ```
 
-✅ **You should see all green checkmarks!**
-
-**What the setup script does:**
+✓ **You should see all green checkmarks!What the setup script does:**
 - Creates virtual environment (optimized for your system)
 - Installs all dependencies (NumPy, Jupyter, Rich, etc.)
 - Configures TinyTorch for development
 - Handles Apple Silicon architecture automatically
 
-### 2️⃣ **Start Your First Module**
+### 2⃣ **Start Your First Module**
 ```bash
 # View the first module
 tito module view 01_tensor
@@ -198,7 +196,7 @@ Your work is graded on:
 
 ---
 
-**Ready to build ML systems from scratch? Start with Module 01! 🚀**
+**Ready to build ML systems from scratch? Start with Module 01! **
 
 ```bash
 tito module view 01_setup

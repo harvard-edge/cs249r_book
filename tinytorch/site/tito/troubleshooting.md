@@ -22,11 +22,11 @@ tito system health
 ```
 
 This checks:
-- ✅ Virtual environment activated
-- ✅ Dependencies installed (NumPy, Jupyter, Rich)
-- ✅ TinyTorch in development mode
-- ✅ Data files intact
-- ✅ All systems ready
+- ✓ Virtual environment activated
+- ✓ Dependencies installed (NumPy, Jupyter, Rich)
+- ✓ TinyTorch in development mode
+- ✓ Data files intact
+- ✓ All systems ready
 
 **If doctor shows errors**: Follow the specific fixes below.
 

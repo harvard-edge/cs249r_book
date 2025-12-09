@@ -17,6 +17,14 @@ document.addEventListener('DOMContentLoaded', function() {
                     <span class="tinytorch-bar-badge">Under Construction</span>
                 </div>
                 <div class="tinytorch-bar-links">
+                    <a href="_static/downloads/TinyTorch-Guide.pdf" class="download-link" title="Download Course Guide (PDF)">
+                        <span class="link-icon">↓</span>
+                        <span class="link-text">Guide</span>
+                    </a>
+                    <a href="_static/downloads/TinyTorch-Paper.pdf" class="download-link" title="Download Research Paper (PDF)">
+                        <span class="link-icon">↓</span>
+                        <span class="link-text">Paper</span>
+                    </a>
                     <a href="https://mlsysbook.ai" target="_blank">
                         <span class="link-icon">📖</span>
                         <span class="link-text">MLSysBook</span>
@@ -25,11 +33,11 @@ document.addEventListener('DOMContentLoaded', function() {
                         <span class="link-icon">✉️</span>
                         <span class="link-text">Subscribe</span>
                     </a>
-                    <a href="https://github.com/mlsysbook/TinyTorch" target="_blank">
+                    <a href="https://github.com/harvard-edge/cs249r_book" target="_blank">
                         <span class="link-icon">⭐</span>
                         <span class="link-text">Star</span>
                     </a>
-                    <a href="https://tinytorch.ai/join" target="_blank">
+                    <a href="community/?action=join" target="_blank">
                         <span class="link-icon">🌍</span>
                         <span class="link-text">Community</span>
                     </a>

@@ -33,15 +33,15 @@ class TestPriorStackStillWorking:
     def test_spatial_operations_stable(self):
         """Verify Module 06 (Spatial) operations still work."""
         try:
-            from tinytorch.core.spatial import Conv2D, MaxPool2D
-            
+            from tinytorch.core.spatial import Conv2d, MaxPool2d
+
             # Basic spatial operations should work
-            conv = Conv2D(in_channels=3, out_channels=16, kernel_size=3)
-            pool = MaxPool2D(kernel_size=2)
-            
-            assert hasattr(conv, 'forward'), "Spatial broken: Conv2D interface"
-            assert hasattr(pool, 'forward'), "Spatial broken: MaxPool2D interface"
-            
+            conv = Conv2d(in_channels=3, out_channels=16, kernel_size=3)
+            pool = MaxPool2d(kernel_size=2)
+
+            assert hasattr(conv, 'forward'), "Spatial broken: Conv2d interface"
+            assert hasattr(pool, 'forward'), "Spatial broken: MaxPool2d interface"
+
         except ImportError:
             assert True, "Spatial operations not implemented yet"
 

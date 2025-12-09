@@ -187,6 +187,10 @@ class TestGradientChainNotBroken:
     
     def test_deep_network_gradient_chain(self):
         """Gradients must flow through 5 layers"""
+        # Use fixed seed for reproducibility - prevents flaky test due to
+        # random initialization that might kill all ReLUs
+        np.random.seed(42)
+        
         layers = [Linear(4, 4) for _ in range(5)]
         relu = ReLU()
         

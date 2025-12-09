@@ -31,9 +31,7 @@ Each module follows this pedagogical pattern:
 
 ## 📁 File Structure and Organization
 
-### 1. **File Naming Convention**
-
-**Developer Workflow (Source):**
+### 1. **File Naming ConventionDeveloper Workflow (Source):**
 ```
 src/NN_modulename/
 ├── NN_modulename.py           # SOURCE OF TRUTH (developers edit)
@@ -69,7 +67,7 @@ All source Python files in `src/` MUST use Jupytext percent format:
 3. Generates `modules/NN_name/NN_name.ipynb` (notebook)
 4. Exports to `tinytorch/` (package code)
 
-## 🏗️ Module Template Structure
+##  Module Template Structure
 
 **Follow this exact structure** (see `08_optimizers` for reference):
 
@@ -404,7 +402,7 @@ Your implementations are the foundation for:
 """
 ```
 
-## 🧪 Testing Standards
+## ▶ Testing Standards
 
 ### 1. **Test Function Naming**
 All test functions MUST follow this pattern:
@@ -533,7 +531,7 @@ next_modules:
   - "next_module"
 ```
 
-## ✅ Quality Checklist
+## ✓ Quality Checklist
 
 Before completing a module:
 

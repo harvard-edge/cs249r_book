@@ -179,7 +179,7 @@ Offer scaffolding modules when students reach unproductive frustration:
 2. **Asynchronous**: Discussion forums, email
 3. **Self-service**: Common errors documentation, FAQ
 
-## 🎓 Grading Support
+##  Grading Support
 
 ### Manual Review Focus Areas
 

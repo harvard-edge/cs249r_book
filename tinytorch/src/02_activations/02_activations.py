@@ -99,6 +99,9 @@ from tinytorch.core.tensor import Tensor
 # Constants for numerical comparisons
 TOLERANCE = 1e-10  # Small tolerance for floating-point comparisons in tests
 
+# Export only activation classes
+__all__ = ['Sigmoid', 'ReLU', 'Tanh', 'GELU', 'Softmax']
+
 # %% [markdown]
 """
 ## 1. Introduction - What Makes Neural Networks Intelligent?
@@ -206,7 +209,6 @@ Sigmoid Curve:
 
 # %% nbgrader={"grade": false, "grade_id": "sigmoid-impl", "solution": true}
 #| export
-from tinytorch.core.tensor import Tensor
 
 class Sigmoid:
     """

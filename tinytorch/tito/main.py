@@ -282,6 +282,19 @@ class TinyTorchCLI:
             
             if hasattr(parsed_args, 'no_color') and parsed_args.no_color:
                 self.config.no_color = True
+
+            # Guard against running outside a virtual environment unless explicitly allowed
+            if parsed_args.command not in ['setup', 'logo', None]:
+                in_venv = sys.prefix != sys.base_prefix
+                allow_system = os.environ.get("TITO_ALLOW_SYSTEM") == "1"
+                if not in_venv and not allow_system:
+                    print_error(
+                        "TinyTorch must run inside a virtual environment.\n"
+                        "Activate your project venv (for example, source .venv/bin/activate) "
+                        "or set TITO_ALLOW_SYSTEM=1 to proceed at your own risk.",
+                        "Virtual Environment Required"
+                    )
+                    return 1
             
             # Show banner for interactive commands (except logo which has its own display)
             # Skip banner for dev command with --json flag (CI/CD output)

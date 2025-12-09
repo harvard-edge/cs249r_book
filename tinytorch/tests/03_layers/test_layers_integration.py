@@ -177,7 +177,7 @@ class TestLayerParameterManagement:
         
         class ParameterizedLayer(Layer):
             def __init__(self, input_size, output_size):
-                self.weights = Tensor(np.random.randn(input_size, output_size))
+                self.weight = Tensor(np.random.randn(input_size, output_size))
                 self.bias = Tensor(np.zeros(output_size))
             
             def forward(self, x):
@@ -191,7 +191,7 @@ class TestLayerParameterManagement:
         assert output.shape == (3, 5)
         assert hasattr(layer, 'weight')
         assert hasattr(layer, 'bias')
-        assert isinstance(layer.weights, Tensor)
+        assert isinstance(layer.weight, Tensor)
         assert isinstance(layer.bias, Tensor)
     
     def test_layer_parameter_shapes(self):
@@ -203,7 +203,7 @@ class TestLayerParameterManagement:
             def __init__(self, in_features, out_features):
                 self.in_features = in_features
                 self.out_features = out_features
-                self.weights = Tensor(np.random.randn(in_features, out_features))
+                self.weight = Tensor(np.random.randn(in_features, out_features))
                 self.bias = Tensor(np.zeros(out_features))
             
             def forward(self, x):

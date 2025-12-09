@@ -64,7 +64,7 @@ tito milestone list
 Shows all 6 historical milestones with status:
 - 🔒 **LOCKED** - Need to complete required modules first
 - 🎯 **READY TO RUN** - All prerequisites met!
-- ✅ **COMPLETE** - You've already achieved this
+- ✓ **COMPLETE** - You've already achieved this
 
 **Simple View** (compact list):
 ```bash
@@ -176,7 +176,7 @@ tito milestone run 02
 
 ---
 
-### Milestone 03: MLP Revival (1986) 🎓
+### Milestone 03: MLP Revival (1986) 
 
 **What**: Backpropagation breakthrough - train deep networks on MNIST
 
@@ -194,7 +194,7 @@ tito milestone run 03
 
 ---
 
-### Milestone 04: CNN Revolution (1998) 👁️
+### Milestone 04: CNN Revolution (1998) 👁
 
 **What**: LeNet - Computer Vision Breakthrough
 

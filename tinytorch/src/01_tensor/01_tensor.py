@@ -288,7 +288,18 @@ class Tensor:
     def numpy(self):
         """Return the underlying NumPy array."""
         return self.data
-    
+
+    def memory_footprint(self):
+        """Calculate exact memory usage in bytes.
+
+        Systems Concept: Understanding memory footprint is fundamental to ML systems.
+        Before running any operation, engineers should know how much memory it requires.
+
+        Returns:
+            int: Memory usage in bytes (e.g., 1000x1000 float32 = 4MB)
+        """
+        return self.data.nbytes
+
     def __add__(self, other):
         """Add two tensors element-wise with broadcasting support."""
         ### BEGIN SOLUTION
