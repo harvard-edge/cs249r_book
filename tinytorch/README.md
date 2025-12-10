@@ -142,14 +142,63 @@ model.fit(X, y)  # Magic happens
 ## Repository Structure
 
 ```
-tinytorch/
-├── src/           # Source files (contributors edit here)
-├── modules/       # Generated notebooks (learners work here)
-├── tinytorch/     # Generated package (import from here)
-├── milestones/    # Historical ML achievements
-├── tests/         # Comprehensive test suite
-├── site/          # Documentation website
-└── tito/          # CLI tool
+TinyTorch/
+├── src/                        # 💻 Python source files (developers/contributors edit here)
+│   ├── 01_tensor/              # Module 01: Tensor operations from scratch
+│   │   ├── 01_tensor.py        # Python source (version controlled)
+│   │   └── ABOUT.md            # Conceptual overview & learning objectives
+│   ├── 02_activations/         # Module 02: ReLU, Softmax activations
+│   ├── 03_layers/              # Module 03: Linear layers, Module system
+│   ├── 04_losses/              # Module 04: MSE, CrossEntropy losses
+│   ├── 05_autograd/            # Module 05: Automatic differentiation
+│   ├── 06_optimizers/          # Module 06: SGD, Adam optimizers
+│   ├── 07_training/            # Module 07: Complete training loops
+│   ├── 08_dataloader/          # Module 08: Efficient data pipelines
+│   ├── 09_spatial/             # Module 09: Conv2d, MaxPool2d, CNNs
+│   ├── 10_tokenization/        # Module 10: Text processing
+│   ├── 11_embeddings/          # Module 11: Token & positional embeddings
+│   ├── 12_attention/           # Module 12: Multi-head attention
+│   ├── 13_transformers/        # Module 13: Complete transformer blocks
+│   ├── 14_profiling/           # Module 14: Performance analysis
+│   ├── 15_quantization/        # Module 15: Model compression (precision reduction)
+│   ├── 16_compression/         # Module 16: Pruning & distillation
+│   ├── 17_memoization/         # Module 17: KV-cache/memoization
+│   ├── 18_acceleration/        # Module 18: Hardware optimization
+│   ├── 19_benchmarking/        # Module 19: Performance measurement
+│   └── 20_capstone/            # Module 20: Complete ML systems
+│
+├── modules/                    # 📓 Generated notebooks (learners work here)
+│   ├── 01_tensor/              # Auto-generated from src/
+│   │   ├── 01_tensor.ipynb     # Jupyter notebook for learning
+│   │   ├── README.md           # Practical implementation guide
+│   │   └── tensor.py           # Your implementation
+│   └── ...                     # (20 module directories)
+│
+├── site/                       # 🌐 Course website & documentation (Jupyter Book)
+│   ├── intro.md                # Landing page
+│   ├── _toc.yml                # Site navigation (links to modules)
+│   ├── _config.yml             # HTML website configuration
+│   ├── chapters/               # Course content chapters
+│   └── modules/                # Module documentation
+│
+├── milestones/                 # 🏆 Historical ML evolution - prove what you built!
+│   ├── 01_1957_perceptron/     # Rosenblatt's first trainable network
+│   ├── 02_1969_xor/            # Minsky's challenge & multi-layer solution
+│   ├── 03_1986_mlp/            # Backpropagation & MNIST digits
+│   ├── 04_1998_cnn/            # LeCun's CNNs & CIFAR-10
+│   ├── 05_2017_transformer/    # Attention mechanisms & language
+│   └── 06_2018_mlperf/         # Modern optimization & profiling
+│
+├── tito/                       # 🎛️ CLI tool for streamlined workflows
+│   ├── main.py                 # Entry point
+│   ├── commands/               # 23 command modules
+│   └── core/                   # Core utilities
+│
+├── tinytorch/                  # 📦 Generated package (import from here)
+│   ├── core/                   # Core ML components
+│   └── ...                     # Your built framework!
+│
+└── tests/                      # ✅ Comprehensive test suite (600+ tests)
 ```
 
 **Key workflow**: `src/*.py` → `modules/*.ipynb` → `tinytorch/*.py`
