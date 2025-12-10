@@ -121,21 +121,23 @@ This project is part of a broader personal mission to **educate one million lear
 
 ## Support This Work
 
+We are tracking our way to **1 million learners by 2030**. Every star, share, and contribution helps us get there.
+
 ### Why GitHub Stars Matter
 
 <div align="center">
 
-*What gets measured gets done.* Every star represents a learner or believer in accessible AI education. We're tracking our way to 1 million learners by 2030. Sponsors match community support with funding that provides TinyML kits, workshops, and infrastructure for learners worldwide.
+*What gets measured gets done.* Every star represents a learner or believer in accessible AI education.
 
 [![Stars](https://img.shields.io/github/stars/harvard-edge/cs249r_book?style=for-the-badge&logo=github&color=gold)](https://github.com/harvard-edge/cs249r_book/stargazers)
 
 [![Star History Chart](https://api.star-history.com/svg?repos=harvard-edge/cs249r_book&type=Date)](https://star-history.com/#harvard-edge/cs249r_book&Date)
 
-1 ✓ → 10 ✓ → 100 ✓ → 1,000 ✓ → **10,000 ✓** → 100,000 by 2026
+1 ✓ → 10 ✓ → 100 ✓ → 1,000 ✓ → **10,000 ✓** → 100,000 by 2026 → ... → **1M by 2030**
 
 ### Fund the Mission
 
-Your contribution directly supports accessible AI education around the world.
+All contributions go to [Open Collective](https://opencollective.com/mlsysbook), a transparent fund that supports educational outreach: TinyML system kits, workshops, and infrastructure for learners worldwide.
 
 [![Open Collective](https://img.shields.io/badge/💝%20Support%20AI%20Education-Open%20Collective-blue.svg?style=for-the-badge)](https://opencollective.com/mlsysbook)
 
