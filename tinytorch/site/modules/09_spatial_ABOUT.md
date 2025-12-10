@@ -485,6 +485,6 @@ tito module complete 09  # Export to package
 ---
 
 <div class="prev-next-area">
-<a class="left-prev" href="../08_dataloader/ABOUT.html" title="previous page">← Module 08: DataLoader</a>
-<a class="right-next" href="../10_tokenization/ABOUT.html" title="next page">Module 10: Tokenization →</a>
+<a class="left-prev" href="08_dataloader_ABOUT.html" title="previous page">← Module 08: DataLoader</a>
+<a class="right-next" href="10_tokenization_ABOUT.html" title="next page">Module 10: Tokenization →</a>
 </div>

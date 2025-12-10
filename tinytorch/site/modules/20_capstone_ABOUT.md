@@ -688,5 +688,5 @@ This capstone involves benchmarking workflows that benefit from consistent hardw
 ---
 
 <div class="prev-next-area">
-<a class="left-prev" href="../19_benchmarking/ABOUT.html" title="previous page">← Module 19: Benchmarking</a>
+<a class="left-prev" href="19_benchmarking_ABOUT.html" title="previous page">← Module 19: Benchmarking</a>
 </div>

@@ -1,6 +1,6 @@
 # Community Ecosystem
 
-<iframe src="community/community.html" width="100%" height="600px" style="border: 1px solid #eee; border-radius: 8px; margin-bottom: 20px;"></iframe>
+<iframe src="extra/community/community.html" width="100%" height="600px" style="border: 1px solid #eee; border-radius: 8px; margin-bottom: 20px;"></iframe>
 
 **See yourself on the TinyTorch Globe!** Create an account and join the global community to track your progress and connect with other builders.
 
@@ -66,7 +66,7 @@ tito community stats
 - **Privacy-first** - All data stored locally in `.tinytorch/` directory
 - **Opt-in sharing** - You control what information to share
 
-**Privacy:** All fields are optional. We use anonymous UUIDs (no personal names). Data is stored locally in your project directory. See [Privacy Policy](../docs/PRIVACY_DATA_RETENTION.md) for details.
+**Privacy:** All fields are optional. We use anonymous UUIDs (no personal names). Data is stored locally in your project directory. See [Privacy Policy](PRIVACY_DATA_RETENTION.md) for details.
 
 ---
 
@@ -119,7 +119,7 @@ Teaching TinyTorch in your classroom?
 Built something impressive with TinyTorch?
 
 **Share it with the community:**
-- Post in [GitHub Discussions](https://github.com/harvard-edge/TinyTorch/discussions) under "Show and Tell"
+- Post in [GitHub Discussions](https://github.com/mlsysbook/TinyTorch/discussions) under "Show and Tell"
 - Tag us on social media with #TinyTorch
 - Submit your project for community showcase (coming soon)
 
@@ -132,9 +132,9 @@ Built something impressive with TinyTorch?
 
 ## Stay Updated
 
-**GitHub Watch**: [Enable notifications](https://github.com/harvard-edge/TinyTorch) for releases and updates
+**GitHub Watch**: [Enable notifications](https://github.com/mlsysbook/TinyTorch) for releases and updates
 
-**Follow Development**: Check [GitHub Issues](https://github.com/harvard-edge/TinyTorch/issues) for roadmap and upcoming features
+**Follow Development**: Check [GitHub Issues](https://github.com/mlsysbook/TinyTorch/issues) for roadmap and upcoming features
 
 ---
 

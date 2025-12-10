@@ -1,7 +1,7 @@
 ---
 title: "Memoization - Computational Reuse for Inference"
 description: "Transform O(n²) transformer generation into O(n) through KV caching, achieving 10-15x speedup"
-difficulty: "●●● (3/4)"
+difficulty: "●●●"
 time_estimate: "4-5 hours"
 prerequisites: ["Transformers", "Profiling", "Quantization", "Compression"]
 next_steps: ["Acceleration"]
@@ -672,6 +672,6 @@ Browse the Jupyter notebook source and understand the implementation.
 ---
 
 <div class="prev-next-area">
-<a class="left-prev" href="../16_compression/ABOUT.html" title="previous page">← Previous Module</a>
-<a class="right-next" href="../18_acceleration/ABOUT.html" title="next page">Next Module →</a>
+<a class="left-prev" href="16_compression_ABOUT.html" title="previous page">← Module 16: Compression</a>
+<a class="right-next" href="18_acceleration_ABOUT.html" title="next page">Module 18: Acceleration →</a>
 </div>

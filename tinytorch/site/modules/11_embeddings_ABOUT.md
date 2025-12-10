@@ -484,6 +484,6 @@ Browse the Jupyter notebook source and understand the implementation.
 ---
 
 <div class="prev-next-area">
-<a class="left-prev" href="../modules/10_tokenization_ABOUT.html" title="previous page">← Previous Module</a>
-<a class="right-next" href="../modules/12_attention_ABOUT.html" title="next page">Next Module →</a>
+<a class="left-prev" href="10_tokenization_ABOUT.html" title="previous page">← Module 10: Tokenization</a>
+<a class="right-next" href="12_attention_ABOUT.html" title="next page">Module 12: Attention →</a>
 </div>
