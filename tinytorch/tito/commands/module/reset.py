@@ -24,6 +24,7 @@ from rich.table import Table
 from rich.text import Text
 
 from ..base import BaseCommand
+from ...core.modules import get_module_mapping, normalize_module_number
 
 
 class ModuleResetCommand(BaseCommand):
@@ -77,36 +78,7 @@ class ModuleResetCommand(BaseCommand):
             "--force", action="store_true", help="Skip confirmation prompts"
         )
 
-    def get_module_mapping(self) -> Dict[str, str]:
-        """Get mapping from numbers to module names."""
-        return {
-            "01": "01_tensor",
-            "02": "02_activations",
-            "03": "03_layers",
-            "04": "04_losses",
-            "05": "05_autograd",
-            "06": "06_optimizers",
-            "07": "07_training",
-            "08": "08_dataloader",
-            "09": "09_spatial",
-            "10": "10_tokenization",
-            "11": "11_embeddings",
-            "12": "12_attention",
-            "13": "13_transformers",
-            "14": "14_profiling",
-            "15": "15_quantization",
-            "16": "16_acceleration",
-            "17": "17_compression",
-            "18": "18_memoization",
-            "19": "19_benchmarking",
-            "20": "20_capstone",
-        }
-
-    def normalize_module_number(self, module_input: str) -> str:
-        """Normalize module input to 2-digit format."""
-        if module_input.isdigit():
-            return f"{int(module_input):02d}"
-        return module_input
+    # Module mapping and normalization now imported from core.modules
 
     def get_backup_dir(self) -> Path:
         """Get the backup directory, creating it if needed."""
@@ -500,7 +472,7 @@ class ModuleResetCommand(BaseCommand):
         """Reset all modules to pristine state."""
         console = self.console
         
-        module_mapping = self.get_module_mapping()
+        module_mapping = get_module_mapping()
         
         # BIG WARNING
         console.print()
@@ -705,8 +677,8 @@ class ModuleResetCommand(BaseCommand):
                 )
                 return 1
 
-            module_mapping = self.get_module_mapping()
-            normalized = self.normalize_module_number(args.module_number)
+            module_mapping = get_module_mapping()
+            normalized = normalize_module_number(args.module_number)
 
             if normalized not in module_mapping:
                 console.print(f"[red]Invalid module number: {args.module_number}[/red]")
@@ -732,8 +704,8 @@ class ModuleResetCommand(BaseCommand):
             return 1
 
         # Normalize and validate module number
-        module_mapping = self.get_module_mapping()
-        normalized = self.normalize_module_number(args.module_number)
+        module_mapping = get_module_mapping()
+        normalized = normalize_module_number(args.module_number)
 
         if normalized not in module_mapping:
             console.print(f"[red]Invalid module number: {args.module_number}[/red]")

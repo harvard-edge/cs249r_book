@@ -25,6 +25,15 @@ from .test import ModuleTestCommand
 from ...core.exceptions import ModuleNotFoundError
 from ...core import auth
 from ...core.submission import SubmissionHandler
+from ...core.modules import (
+    get_module_mapping,
+    get_module_name,
+    get_module_display_name,
+    get_next_module,
+    normalize_module_number,
+    get_total_modules,
+    module_exists,
+)
 
 class ModuleWorkflowCommand(BaseCommand):
     """Enhanced module command with natural workflow."""
@@ -185,49 +194,20 @@ class ModuleWorkflowCommand(BaseCommand):
             help='List all available modules'
         )
     
-    def get_module_mapping(self) -> Dict[str, str]:
-        """Get mapping from numbers to module names."""
-        return {
-            "01": "01_tensor",
-            "02": "02_activations",
-            "03": "03_layers",
-            "04": "04_losses",
-            "05": "05_autograd",
-            "06": "06_optimizers",
-            "07": "07_training",
-            "08": "08_spatial",
-            "09": "09_dataloader",
-            "10": "10_tokenization",
-            "11": "11_embeddings",
-            "12": "12_attention",
-            "13": "13_transformers",
-            "14": "14_profiling",
-            "15": "15_acceleration",
-            "16": "16_quantization",
-            "17": "17_compression",
-            "18": "18_caching",
-            "19": "19_benchmarking",
-            "20": "20_capstone",
-            "21": "21_mlops"
-        }
-    
-    def normalize_module_number(self, module_input: str) -> str:
-        """Normalize module input to 2-digit format."""
-        if module_input.isdigit():
-            return f"{int(module_input):02d}"
-        return module_input
+    # Module mapping and normalization now imported from core.modules
     
     def start_module(self, module_number: str) -> int:
         """Start working on a module with prerequisite checking and visual feedback."""
         from rich import box
         from rich.table import Table
 
-        module_mapping = self.get_module_mapping()
-        normalized = self.normalize_module_number(module_number)
+        module_mapping = get_module_mapping()
+        normalized = normalize_module_number(module_number)
 
         if normalized not in module_mapping:
             self.console.print(f"[red]❌ Module {normalized} not found[/red]")
-            self.console.print("💡 Available modules: 01-21")
+            max_module = max(module_mapping.keys()) if module_mapping else "??"
+            self.console.print(f"💡 Available modules: 01-{max_module}")
             return 1
 
         module_name = module_mapping[normalized]
@@ -356,7 +336,7 @@ class ModuleWorkflowCommand(BaseCommand):
     
     def resume_module(self, module_number: Optional[str] = None) -> int:
         """Resume working on a module (continue previous work)."""
-        module_mapping = self.get_module_mapping()
+        module_mapping = get_module_mapping()
         
         # If no module specified, resume last worked
         if not module_number:
@@ -367,11 +347,12 @@ class ModuleWorkflowCommand(BaseCommand):
                 return 1
             module_number = last_worked
         
-        normalized = self.normalize_module_number(module_number)
+        normalized = normalize_module_number(module_number)
         
         if normalized not in module_mapping:
             self.console.print(f"[red]❌ Module {normalized} not found[/red]")
-            self.console.print("💡 Available modules: 01-21")
+            max_module = max(module_mapping.keys()) if module_mapping else "??"
+            self.console.print(f"💡 Available modules: 01-{max_module}")
             return 1
         
         module_name = module_mapping[normalized]
@@ -426,7 +407,7 @@ class ModuleWorkflowCommand(BaseCommand):
         from rich import box
         from rich.table import Table
 
-        module_mapping = self.get_module_mapping()
+        module_mapping = get_module_mapping()
 
         # If no module specified, complete current/last worked
         if not module_number:
@@ -437,7 +418,7 @@ class ModuleWorkflowCommand(BaseCommand):
                 return 1
             module_number = last_worked
 
-        normalized = self.normalize_module_number(module_number)
+        normalized = normalize_module_number(module_number)
 
         if normalized not in module_mapping:
             self.console.print(f"[red]❌ Module {normalized} not found[/red]")
@@ -574,7 +555,7 @@ class ModuleWorkflowCommand(BaseCommand):
             )
             if should_submit:
                 handler = SubmissionHandler(self.config, self.console)
-                total_modules = len(self.get_module_mapping())
+                total_modules = len(get_module_mapping())
                 handler.sync_progress(total_modules=total_modules)
         else:
             self.console.print("[dim]💡 Run 'tito login' to enable automatic progress syncing![/dim]")
@@ -960,7 +941,7 @@ class ModuleWorkflowCommand(BaseCommand):
     
     def show_next_steps(self, completed_module: str) -> None:
         """Show next steps after completing a module."""
-        module_mapping = self.get_module_mapping()
+        module_mapping = get_module_mapping()
         completed_num = int(completed_module)
         next_num = f"{completed_num + 1:02d}"
         
@@ -984,34 +965,12 @@ class ModuleWorkflowCommand(BaseCommand):
             ))
     
     def list_modules(self) -> int:
-        """List all available modules with descriptions."""
+        """List all available modules with descriptions (auto-discovered)."""
         from rich.table import Table
         from rich import box
         
-        # Module descriptions for educational context
-        module_info = {
-            "01": ("Tensor", "Fundamental data structure for all deep learning"),
-            "02": ("Activations", "Non-linear functions that enable learning"),
-            "03": ("Layers", "Building blocks for neural networks"),
-            "04": ("Losses", "Objective functions to minimize"),
-            "05": ("Autograd", "Automatic differentiation for backprop"),
-            "06": ("Optimizers", "SGD, Adam - how models learn"),
-            "07": ("Training", "Complete training loop"),
-            "08": ("Spatial", "Convolutions for computer vision"),
-            "09": ("DataLoader", "Efficient data loading and batching"),
-            "10": ("Tokenization", "Text → numbers conversion"),
-            "11": ("Embeddings", "Learned vector representations"),
-            "12": ("Attention", "Focus mechanism for transformers"),
-            "13": ("Transformers", "Modern architecture for NLP"),
-            "14": ("Profiling", "Performance measurement tools"),
-            "15": ("Acceleration", "Speed optimizations"),
-            "16": ("Quantization", "Model compression with integers"),
-            "17": ("Compression", "Pruning and sparsification"),
-            "18": ("Caching", "KV cache for fast inference"),
-            "19": ("Benchmarking", "TinyMLPerf performance suite"),
-            "20": ("Capstone", "Full system integration"),
-            "21": ("MLOps", "Production deployment")
-        }
+        # Auto-discover modules from filesystem
+        module_mapping = get_module_mapping()
         
         # Build table
         table = Table(
@@ -1022,10 +981,11 @@ class ModuleWorkflowCommand(BaseCommand):
         )
         table.add_column("#", style="cyan", width=3)
         table.add_column("Module", style="bold")
-        table.add_column("Description")
+        table.add_column("Folder")
         
-        for num, (name, desc) in module_info.items():
-            table.add_row(num, name, desc)
+        for num, folder_name in sorted(module_mapping.items()):
+            display_name = get_module_display_name(num)
+            table.add_row(num, display_name, folder_name)
         
         self.console.print()
         self.console.print(table)
@@ -1043,7 +1003,7 @@ class ModuleWorkflowCommand(BaseCommand):
         from rich.text import Text
         from datetime import datetime, timedelta
 
-        module_mapping = self.get_module_mapping()
+        module_mapping = get_module_mapping()
         progress = self.get_progress_data()
 
         started = progress.get('started_modules', [])
