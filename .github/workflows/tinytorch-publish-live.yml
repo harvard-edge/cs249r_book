@@ -1,6 +1,7 @@
 name: 🔥 TinyTorch Publish (Live)
 
 # Builds and deploys TinyTorch site to mlsysbook.ai/tinytorch/
+# Downloads latest PDF artifacts and injects them into the site
 
 on:
   push:
@@ -10,18 +11,34 @@ on:
       - 'tinytorch/src/**'
       - '.github/workflows/tinytorch-publish-live.yml'
   workflow_dispatch:
+    inputs:
+      build_pdfs:
+        description: 'Build fresh PDFs (otherwise use latest artifacts)'
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: tinytorch-live-deploy
   cancel-in-progress: true
 
 jobs:
+  # Optionally build fresh PDFs
+  build-pdfs:
+    name: '📚 Build PDFs'
+    if: inputs.build_pdfs == true
+    uses: ./.github/workflows/tinytorch-build-pdfs.yml
+
   build-and-deploy:
+    name: '🔥 Build & Deploy'
     runs-on: ubuntu-latest
-    
+    needs: [build-pdfs]
+    if: always() && (needs.build-pdfs.result == 'success' || needs.build-pdfs.result == 'skipped')
+
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v4
@@ -45,6 +62,86 @@ jobs:
         run: |
           jupyter-book build . --all
           touch _build/html/.nojekyll
+
+      - name: 📥 Download PDF Guide (from this run)
+        if: needs.build-pdfs.result == 'success'
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: TinyTorch-Guide
+          path: ./pdf-artifacts/guide
+
+      - name: 📥 Download PDF Paper (from this run)
+        if: needs.build-pdfs.result == 'success'
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: TinyTorch-Paper
+          path: ./pdf-artifacts/paper
+
+      - name: 📥 Find latest PDF artifacts (if not built fresh)
+        if: needs.build-pdfs.result == 'skipped'
+        id: find-pdfs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🔎 Searching for latest PDF build artifacts..."
+
+          # Find latest successful PDF build run
+          RUN_ID=$(gh api repos/${{ github.repository }}/actions/workflows/tinytorch-build-pdfs.yml/runs \
+            --jq '.workflow_runs[] | select(.status == "completed" and .conclusion == "success") | .id' \
+            | head -n 1)
+
+          if [ -n "$RUN_ID" ]; then
+            echo "Found PDF build run: $RUN_ID"
+            echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ No successful PDF build found"
+            echo "run_id=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 📥 Download PDF Guide (from previous run)
+        if: needs.build-pdfs.result == 'skipped' && steps.find-pdfs.outputs.run_id != ''
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: TinyTorch-Guide
+          path: ./pdf-artifacts/guide
+          run-id: ${{ steps.find-pdfs.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📥 Download PDF Paper (from previous run)
+        if: needs.build-pdfs.result == 'skipped' && steps.find-pdfs.outputs.run_id != ''
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: TinyTorch-Paper
+          path: ./pdf-artifacts/paper
+          run-id: ${{ steps.find-pdfs.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📁 Inject PDFs into site
+        run: |
+          echo "📁 Injecting PDFs into built site..."
+          mkdir -p tinytorch/site/_build/html/_static/downloads
+
+          if [ -f ./pdf-artifacts/guide/tinytorch-course.pdf ]; then
+            cp ./pdf-artifacts/guide/tinytorch-course.pdf tinytorch/site/_build/html/_static/downloads/TinyTorch-Guide.pdf
+            echo "✅ Injected TinyTorch-Guide.pdf"
+          else
+            echo "⚠️ Guide PDF not found"
+          fi
+
+          if [ -f ./pdf-artifacts/paper/paper.pdf ]; then
+            cp ./pdf-artifacts/paper/paper.pdf tinytorch/site/_build/html/_static/downloads/TinyTorch-Paper.pdf
+            echo "✅ Injected TinyTorch-Paper.pdf"
+          else
+            echo "⚠️ Paper PDF not found"
+          fi
+
+          echo ""
+          echo "📦 Downloads folder contents:"
+          ls -la tinytorch/site/_build/html/_static/downloads/ || echo "No downloads folder"
 
       - name: 🚀 Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3

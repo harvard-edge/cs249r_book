@@ -1,7 +1,7 @@
 name: 🔥 TinyTorch Publish (Dev)
 
 # Builds and deploys TinyTorch site to dev preview repo
-# Uses repository variables: DEV_REPO_URL, DEV_TINYTORCH_PATH
+# Downloads latest PDF artifacts and injects them into the site
 # Result: harvard-edge.github.io/cs249r_book_dev/tinytorch/
 
 on:
@@ -12,6 +12,12 @@ on:
       - 'tinytorch/src/**'
       - '.github/workflows/tinytorch-publish-dev.yml'
   workflow_dispatch:
+    inputs:
+      build_pdfs:
+        description: 'Build fresh PDFs (otherwise use latest artifacts)'
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -22,10 +28,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Optionally build fresh PDFs
+  build-pdfs:
+    name: '📚 Build PDFs'
+    if: inputs.build_pdfs == true
+    uses: ./.github/workflows/tinytorch-build-pdfs.yml
+
   build-and-deploy:
     name: '🔥 Build & Deploy TinyTorch Dev'
     runs-on: ubuntu-latest
-    
+    needs: [build-pdfs]
+    if: always() && (needs.build-pdfs.result == 'success' || needs.build-pdfs.result == 'skipped')
+
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v4
@@ -51,9 +65,86 @@ jobs:
           jupyter-book build . --all
           touch _build/html/.nojekyll
           echo "✅ Build complete"
+
+      - name: 📥 Download PDF Guide (from this run)
+        if: needs.build-pdfs.result == 'success'
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: TinyTorch-Guide
+          path: ./pdf-artifacts/guide
+
+      - name: 📥 Download PDF Paper (from this run)
+        if: needs.build-pdfs.result == 'success'
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: TinyTorch-Paper
+          path: ./pdf-artifacts/paper
+
+      - name: 📥 Find latest PDF artifacts (if not built fresh)
+        if: needs.build-pdfs.result == 'skipped'
+        id: find-pdfs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🔎 Searching for latest PDF build artifacts..."
+
+          # Find latest successful PDF build run
+          RUN_ID=$(gh api repos/${{ github.repository }}/actions/workflows/tinytorch-build-pdfs.yml/runs \
+            --jq '.workflow_runs[] | select(.status == "completed" and .conclusion == "success") | .id' \
+            | head -n 1)
+
+          if [ -n "$RUN_ID" ]; then
+            echo "Found PDF build run: $RUN_ID"
+            echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ No successful PDF build found"
+            echo "run_id=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 📥 Download PDF Guide (from previous run)
+        if: needs.build-pdfs.result == 'skipped' && steps.find-pdfs.outputs.run_id != ''
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: TinyTorch-Guide
+          path: ./pdf-artifacts/guide
+          run-id: ${{ steps.find-pdfs.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📥 Download PDF Paper (from previous run)
+        if: needs.build-pdfs.result == 'skipped' && steps.find-pdfs.outputs.run_id != ''
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: TinyTorch-Paper
+          path: ./pdf-artifacts/paper
+          run-id: ${{ steps.find-pdfs.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📁 Inject PDFs into site
+        run: |
+          echo "📁 Injecting PDFs into built site..."
+          mkdir -p tinytorch/site/_build/html/_static/downloads
+
+          if [ -f ./pdf-artifacts/guide/tinytorch-course.pdf ]; then
+            cp ./pdf-artifacts/guide/tinytorch-course.pdf tinytorch/site/_build/html/_static/downloads/TinyTorch-Guide.pdf
+            echo "✅ Injected TinyTorch-Guide.pdf"
+          else
+            echo "⚠️ Guide PDF not found"
+          fi
+
+          if [ -f ./pdf-artifacts/paper/paper.pdf ]; then
+            cp ./pdf-artifacts/paper/paper.pdf tinytorch/site/_build/html/_static/downloads/TinyTorch-Paper.pdf
+            echo "✅ Injected TinyTorch-Paper.pdf"
+          else
+            echo "⚠️ Paper PDF not found"
+          fi
+
           echo ""
-          echo "📦 Build output:"
-          ls -la _build/html/ | head -20
+          echo "📦 Downloads folder contents:"
+          ls -la tinytorch/site/_build/html/_static/downloads/ || echo "No downloads folder"
 
       - name: 🚀 Deploy to Dev Site via SSH
         env:
@@ -62,7 +153,7 @@ jobs:
           echo "🔐 Starting ssh-agent..."
           eval "$(ssh-agent -s)"
           echo "$SSH_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
-          
+
           # Add github.com to known hosts
           mkdir -p ~/.ssh
           ssh-keyscan github.com >> ~/.ssh/known_hosts
@@ -73,29 +164,28 @@ jobs:
 
           echo "🔄 Cloning dev preview repository (${{ vars.DEV_REPO }})..."
           git clone --depth=1 ${{ vars.DEV_REPO_URL }} target-repo
-          
+
           cd target-repo
-          
+
           echo "🧹 Cleaning ${{ vars.DEV_TINYTORCH_PATH }} directory..."
-          # Only remove tinytorch subdirectory, preserve everything else (book content, landing page)
           rm -rf ${{ vars.DEV_TINYTORCH_PATH }}
           mkdir -p ${{ vars.DEV_TINYTORCH_PATH }}
-          
+
           echo "🚚 Copying TinyTorch site content..."
           cp -r "${{ github.workspace }}/tinytorch/site/_build/html/." ${{ vars.DEV_TINYTORCH_PATH }}/
-          
+
           echo "🔍 Validating deployment content..."
           if [ ! -f "${{ vars.DEV_TINYTORCH_PATH }}/index.html" ]; then
             echo "❌ CRITICAL: ${{ vars.DEV_TINYTORCH_PATH }}/index.html is missing. Aborting deployment."
             exit 1
           fi
-          
+
           echo "📦 Contents of ${{ vars.DEV_TINYTORCH_PATH }}/:"
           ls -la ${{ vars.DEV_TINYTORCH_PATH }}/ | head -10
-          
+
           echo "📦 Committing and pushing changes..."
           git add .
           git commit -m "🔥 Deploy TinyTorch dev to /${{ vars.DEV_TINYTORCH_PATH }}/ from ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
           git push origin main
-          
+
           echo "✅ TinyTorch deployed to: https://harvard-edge.github.io/${{ vars.DEV_REPO }}/${{ vars.DEV_TINYTORCH_PATH }}/"
