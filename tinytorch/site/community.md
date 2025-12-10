@@ -1,73 +1,53 @@
 # Community Ecosystem
 
+<iframe src="community/community.html" width="100%" height="600px" style="border: 1px solid #eee; border-radius: 8px; margin-bottom: 20px;"></iframe>
+
+**See yourself on the TinyTorch Globe!** Create an account and join the global community to track your progress and connect with other builders.
+
+```{image} _static/images/diagram_tiny-commununity.png
+:alt: TinyTorch Community Ecosystem
+:width: 100%
+:align: center
+```
+
 **Learn together, build together, grow together.**
 
 TinyTorch is more than a course—it's a growing community of students, educators, and ML engineers learning systems engineering from first principles.
-
----
-
-## Connect Now
-
-### GitHub Discussions (Available Now ✓)
-
-Join conversations with other TinyTorch builders:
-
-**[Visit GitHub Discussions](https://github.com/harvard-edge/TinyTorch/discussions)**
-
-- **Ask questions** about implementations and debugging
-- **Share your projects** and milestone achievements
-- **Help others** with systems thinking questions
-- **Discuss ML systems** engineering and production practices
-
-**Active discussion categories:**
-- Module implementations and debugging
-- Systems performance optimization
-- Career advice for ML engineers
-- Show and tell: Your TinyTorch projects
-
-**Why community matters for TinyTorch:** Unlike watching lectures, building ML systems requires debugging, experimentation, and iteration. The community helps you debug faster, learn trade-offs, stay motivated, and build systems intuition through discussion.
-
-### GitHub Repository (Available Now ✓)
-
-Star, fork, and contribute to TinyTorch:
-
-**[Visit GitHub Repository](https://github.com/harvard-edge/TinyTorch)**
-
-- **Report issues** and bugs
-- **Contribute fixes** and improvements
-- **Improve documentation** and examples
-- **Watch releases** for new features
-
-### Share Your Progress (Available Now ✓)
-
-Help others discover TinyTorch:
-
-- **Twitter/X**: Share your learning journey with #TinyTorch
-- **LinkedIn**: Post about building ML systems from scratch
-- **Reddit**: Share in r/MachineLearning, r/learnmachinelearning
-- **Blog**: Write about your implementations and insights
-
----
-
-## Coming Soon
-
-We're building additional community features to enhance your learning experience:
-
-### Discord Server (In Development)
-
-Real-time chat and study groups:
-- Live Q&A channels for debugging
-- Tier-based study groups
-- Office hours with educators
-- Project showcase channels
 
 ### Community Dashboard (Available Now ✓)
 
 Join the global TinyTorch community and see your progress:
 
+```{image} _static/images/tinytorch-community.png
+:alt: TinyTorch User Journey
+:width: 100%
+:align: center
+```
+
+## How to Join the TinyTorch Community:
+
+There are two primary ways to join and engage with the TinyTorch community:
+
+### Option 1: Explore the Live Dashboard
+
+You can explore the interactive TinyTorch Community Dashboard directly in your browser:
+
+<p align="center">
+    <a href="/community.html" target="_blank" class="btn btn-primary btn-lg" style="background-color: #ff6600; color: white; padding: 15px 30px; text-align: center; text-decoration: none; display: inline-block; font-size: 20px; margin: 10px 2px; cursor: pointer; border-radius: 8px; border: none;">
+        Explore Dashboard <span class="badge badge-light">🌎</span>
+    </a>
+</p>
+
+### Option 2: Join via TinyTorch CLI
+
+Download the TinyTorch CLI to set up your environment, manage your profile, and contribute to community statistics directly from your terminal.
+
 ```bash
-# Join the community
-tito community join
+# Join the community (first-time setup)
+tito setup
+
+# Or, if already set up, log in
+tito community login
 
 # View your profile
 tito community profile
@@ -88,8 +68,9 @@ tito community stats
 
 **Privacy:** All fields are optional. We use anonymous UUIDs (no personal names). Data is stored locally in your project directory. See [Privacy Policy](../docs/PRIVACY_DATA_RETENTION.md) for details.
 
-### Benchmark & Performance Tracking (Available Now ✓)
+---
 
+## Connect Now
 Validate your setup and track performance improvements:
 
 ```bash

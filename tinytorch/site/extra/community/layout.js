@@ -682,7 +682,7 @@
                     <span class="lock-tooltip">Account Required</span>
                 </span>
             </a>
-            <a href="${basePath}/contact.html" class="nav-item">Contact</a>
+            <a href="${basePath}/contact.html" class="nav-item hidden">Contact</a>
         </nav>
 
         <!-- Auth Modal -->
