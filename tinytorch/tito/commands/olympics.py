@@ -74,7 +74,10 @@ class OlympicsCommand(BaseCommand):
         logo = Text.from_markup("\n".join(logo_lines) + "\n\n")
 
         message = Text()
-        message.append("🎯 What's Coming:\n\n", style="bold cyan")
+        message.append("🚧 COMING SOON 🚧\n\n", style="bold yellow")
+        message.append("The TinyTorch Olympics is currently under development.\n\n", style="white")
+
+        message.append("🎯 What to Expect:\n\n", style="bold cyan")
         message.append("  • ", style="cyan")
         message.append("🏃 Speed Challenges", style="bold white")
         message.append(" - Optimize inference latency\n", style="dim")
@@ -91,20 +94,11 @@ class OlympicsCommand(BaseCommand):
         message.append("👥 Team Events", style="bold white")
         message.append(" - Collaborate and compete together\n\n", style="dim")
 
-        message.append("🏆 Why Olympics?\n\n", style="bold yellow")
-        message.append("The TinyTorch Olympics will be a global competition where students\n", style="white")
-        message.append("can showcase their ML engineering skills, learn from each other,\n", style="white")
-        message.append("and earn recognition in the TinyML community.\n\n", style="white")
-
-        message.append("📅 Stay Tuned!\n\n", style="bold green")
-        message.append("Follow TinyTorch updates for the competition launch announcement.\n", style="dim")
-        message.append("In the meantime, keep building and perfecting your TinyTorch skills!\n\n", style="dim")
-
-        message.append("💡 Continue Your Journey:\n", style="bold cyan")
+        message.append("💡 In the Meantime:\n", style="bold cyan")
         message.append("  • Complete modules: ", style="white")
         message.append("tito module status\n", style="cyan")
         message.append("  • Track milestones: ", style="white")
-        message.append("tito milestone status\n", style="cyan")
+        message.append("tito milestones status\n", style="cyan")
         message.append("  • Join community:   ", style="white")
         message.append("tito community login\n", style="cyan")
 
