@@ -507,8 +507,7 @@ class BenchmarkCommand(BaseCommand):
         
         console.print(Panel(
             f"[bold green]🏆 Capstone Benchmark Complete![/bold green]\n\n"
-            f"📊 Overall Score: [bold]{results.get('overall_score', 0)}/100[/bold]\n\n"
-            f"🌍 Submit to leaderboard: [cyan]tito community submit --benchmark[/cyan]",
+            f"📊 Overall Score: [bold]{results.get('overall_score', 0)}/100[/bold]",
             title="Success",
             border_style="green"
         ))
@@ -575,7 +574,7 @@ class BenchmarkCommand(BaseCommand):
             
             config = self._get_config()
             if not config.get("website", {}).get("enabled", False):
-                console.print("[cyan]💡 To submit: Create a PR with this file or run 'tito community submit'[/cyan]")
+                console.print("[cyan]💡 Submission saved locally. Community leaderboard coming soon![/cyan]")
     
     def _get_community_data(self) -> Optional[Dict[str, Any]]:
         """Get user's community profile from ~/.tinytorch (flat structure)."""
