@@ -14,19 +14,28 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 # Mapping from generated package paths back to source files
+# Keys are (subpackage, module) tuples matching default_exp directives
 SOURCE_MAPPINGS = {
     ("core", "tensor"): "src/01_tensor/01_tensor.py",
     ("core", "activations"): "src/02_activations/02_activations.py",
     ("core", "layers"): "src/03_layers/03_layers.py",
-    ("core", "dense"): "src/04_losses/04_losses.py",
-    ("core", "spatial"): "src/09_spatial/09_spatial.py",
-    ("core", "attention"): "src/12_attention/12_attention.py",
-    ("core", "dataloader"): "src/08_dataloader/08_dataloader.py",
+    ("core", "losses"): "src/04_losses/04_losses.py",
     ("core", "autograd"): "src/05_autograd/05_autograd.py",
     ("core", "optimizers"): "src/06_optimizers/06_optimizers.py",
     ("core", "training"): "src/07_training/07_training.py",
-    ("core", "compression"): "src/16_compression/16_compression.py",
-    ("core", "benchmarking"): "src/19_benchmarking/19_benchmarking.py",
+    ("core", "dataloader"): "src/08_dataloader/08_dataloader.py",
+    ("core", "spatial"): "src/09_spatial/09_spatial.py",
+    ("core", "tokenization"): "src/10_tokenization/10_tokenization.py",
+    ("core", "embeddings"): "src/11_embeddings/11_embeddings.py",
+    ("core", "attention"): "src/12_attention/12_attention.py",
+    ("core", "transformer"): "src/13_transformers/13_transformers.py",
+    ("perf", "profiling"): "src/14_profiling/14_profiling.py",
+    ("perf", "quantization"): "src/15_quantization/15_quantization.py",
+    ("perf", "compression"): "src/16_compression/16_compression.py",
+    ("perf", "memoization"): "src/17_memoization/17_memoization.py",
+    ("perf", "acceleration"): "src/18_acceleration/18_acceleration.py",
+    ("bench",): "src/19_benchmarking/19_benchmarking.py",
+    ("capstone",): "src/20_capstone/20_capstone.py",
 }
 
 
