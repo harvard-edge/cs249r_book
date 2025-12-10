@@ -102,7 +102,7 @@ class TinyTorchCLI:
             ],
             'community': [
                 ('[cyan]tito community login[/cyan]', 'Log in to TinyTorch'),
-                ('[cyan]tito community leaderboard[/cyan]', 'View global leaderboard'),
+                ('[cyan]tito community logout[/cyan]', 'Log out of TinyTorch'),
             ],
             'help_docs': [
                 ('[magenta]tito system doctor[/magenta]', 'Check environment health'),
