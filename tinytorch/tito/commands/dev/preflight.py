@@ -275,10 +275,14 @@ class PreflightCommand(BaseCommand):
         required_dirs = [
             ("modules/", "Module notebooks directory"),
             ("src/", "Source files directory"),
-            ("tinytorch/", "Package directory"),
             ("milestones/", "Milestone scripts"),
             ("tests/", "Test directory"),
             ("tito/", "CLI directory"),
+        ]
+
+        # Optional directories (generated, not in git)
+        optional_dirs = [
+            ("tinytorch/", "Package directory (run 'tito export' to generate)"),
         ]
 
         for dir_path, desc in required_dirs:
@@ -295,6 +299,24 @@ class PreflightCommand(BaseCommand):
                     name=f"{dir_path} exists",
                     status=CheckStatus.FAIL,
                     message=f"Missing: {desc}",
+                    duration_ms=int((time.time() - start) * 1000)
+                ))
+
+        # Optional directories (generated, warn if missing)
+        for dir_path, desc in optional_dirs:
+            start = time.time()
+            path = project_root / dir_path
+            if path.exists() and path.is_dir():
+                category.checks.append(CheckResult(
+                    name=f"{dir_path} exists",
+                    status=CheckStatus.PASS,
+                    duration_ms=int((time.time() - start) * 1000)
+                ))
+            else:
+                category.checks.append(CheckResult(
+                    name=f"{dir_path} exists",
+                    status=CheckStatus.WARN,
+                    message=desc,
                     duration_ms=int((time.time() - start) * 1000)
                 ))
 
