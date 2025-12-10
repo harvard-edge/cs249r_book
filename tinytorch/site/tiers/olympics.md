@@ -1,5 +1,11 @@
 #  Torch Olympics (Module 20)
 
+```{image} ../_static/images/tito_olympics.png
+:alt: TinyTorch Olympics
+:align: center
+:width: 600px
+```
+
 **The ultimate test: Build a complete, competition-ready ML system.**
 
 ---
