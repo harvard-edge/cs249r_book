@@ -1,15 +1,10 @@
 name: 🔥 TinyTorch Publish (Live)
 
 # Builds and deploys TinyTorch site to mlsysbook.ai/tinytorch/
-# Optionally builds fresh PDFs, otherwise uses latest artifacts
+# First syncs dev → main, then builds and deploys from main
+# This ensures live site always reflects tested dev state
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'tinytorch/site/**'
-      - 'tinytorch/src/**'
-      - '.github/workflows/tinytorch-publish-live.yml'
   workflow_dispatch:
     inputs:
       build_guide:
@@ -30,14 +25,43 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  sync-from-dev:
+    name: '🔄 Sync dev → main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔄 Merge dev into main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          echo "📥 Fetching dev branch..."
+          git fetch origin dev
+
+          echo "🔄 Merging dev into main..."
+          git merge origin/dev --no-edit -m "🔄 Sync dev → main for live publish"
+
+          echo "🚀 Pushing updated main..."
+          git push origin main
+
   build-guide:
     name: '📚 Build Course Guide'
     runs-on: ubuntu-latest
+    needs: [sync-from-dev]
     if: inputs.build_guide != false
 
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v4
+        with:
+          ref: main  # Use freshly synced main
 
       - name: 🐍 Setup Python
         uses: actions/setup-python@v5
@@ -78,11 +102,14 @@ jobs:
   build-paper:
     name: '📑 Build Research Paper'
     runs-on: ubuntu-latest
+    needs: [sync-from-dev]
     if: inputs.build_paper != false
 
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v4
+        with:
+          ref: main  # Use freshly synced main
 
       - name: 📑 Compile Paper with LuaLaTeX
         uses: xu-cheng/latex-action@v3
@@ -101,12 +128,14 @@ jobs:
   build-and-deploy:
     name: '🔥 Build & Deploy'
     runs-on: ubuntu-latest
-    needs: [build-guide, build-paper]
-    if: always()
+    needs: [sync-from-dev, build-guide, build-paper]
+    if: always() && needs.sync-from-dev.result == 'success'
 
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v4
+        with:
+          ref: main  # Use freshly synced main
 
       - name: 🐍 Setup Python
         uses: actions/setup-python@v5

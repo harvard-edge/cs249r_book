@@ -1,11 +1,22 @@
-# TinyTorch
+<div align="center">
 
-**Build ML Systems From First Principles**
+# 🔥 TinyTorch
+
+### Build Your Own ML Framework From Scratch
 
 [![CI](https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/tinytorch-ci.yml?branch=dev&label=CI&logo=githubactions)](https://github.com/harvard-edge/cs249r_book/actions/workflows/tinytorch-ci.yml)
-[![Docs](https://img.shields.io/badge/Docs-mlsysbook.ai%2Ftinytorch-blue)](https://mlsysbook.ai/tinytorch)
-![Python](https://img.shields.io/badge/python-3.8+-blue.svg)
-![License](https://img.shields.io/badge/license-MIT-green.svg)
+[![Docs](https://img.shields.io/badge/docs-mlsysbook.ai-blue?logo=readthedocs)](https://mlsysbook.ai/tinytorch)
+[![Python](https://img.shields.io/badge/python-3.8+-3776ab?logo=python&logoColor=white)](https://python.org)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Harvard](https://img.shields.io/badge/Harvard-CS249r-A51C30?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyTDIgN2wxMCA1IDEwLTV6TTIgMTdsMTAgNSAxMC01TTIgMTJsMTAgNSAxMC01Ii8+PC9zdmc+)](https://mlsysbook.ai)
+
+**Most ML courses teach you to *use* frameworks. TinyTorch teaches you to *build* them.**
+
+[Get Started](#-quick-start) · [20 Modules](#-20-progressive-modules) · [Documentation](https://mlsysbook.ai/tinytorch) · [Contributing](CONTRIBUTING.md)
+
+</div>
+
+---
 
 > 🧪 **Early Access** - TinyTorch is available for early adopters! All 20 modules are implemented with complete solutions and the `tito` CLI for streamlined workflows.
 >
