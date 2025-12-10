@@ -58,6 +58,10 @@
                 <label for="modal-organization">Organization <span class="optional-label">(optional)</span></label>
                 <input type="text" id="modal-organization" name="metadata__organization" placeholder="University or company">
               </div>
+              <div class="form-group">
+                <label for="modal-motivation">What brings you here? <span class="optional-label">(optional)</span></label>
+                <textarea id="modal-motivation" name="metadata__motivation" rows="2" placeholder="e.g., teaching a course, learning ML systems, building edge devices..."></textarea>
+              </div>
               <input type="hidden" name="tag" value="tinytorch-website">
               <button type="submit" class="btn btn-primary subscribe-btn">Subscribe</button>
               <p class="form-note">No spam, ever. Unsubscribe anytime.</p>
@@ -241,7 +245,8 @@
       }
 
       .form-group input[type="text"],
-      .form-group input[type="email"] {
+      .form-group input[type="email"],
+      .form-group textarea {
         padding: 0.875rem 1rem;
         border: 1px solid #cbd5e1;
         border-radius: 8px;
@@ -251,15 +256,22 @@
         font-family: inherit;
       }
 
+      .form-group textarea {
+        resize: vertical;
+        min-height: 60px;
+      }
+
       .form-group input[type="text"]:focus,
-      .form-group input[type="email"]:focus {
+      .form-group input[type="email"]:focus,
+      .form-group textarea:focus {
         outline: none;
         border-color: #3b82f6;
         background: white;
         box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
       }
 
-      .form-group input::placeholder {
+      .form-group input::placeholder,
+      .form-group textarea::placeholder {
         color: #94a3b8;
       }
 
@@ -418,7 +430,8 @@
       }
 
       html[data-theme="dark"] .form-group input[type="text"],
-      html[data-theme="dark"] .form-group input[type="email"] {
+      html[data-theme="dark"] .form-group input[type="email"],
+      html[data-theme="dark"] .form-group textarea {
         background: #0f172a;
         border-color: #334155;
         color: #f1f5f9;
