@@ -12,6 +12,8 @@ This is the gap TinyTorch exists to fill.
 
 Most people can use PyTorch or TensorFlow. They can import libraries, call functions, train models. Very few understand how these frameworks work: how tensors manage memory, how autograd builds computation graphs, how optimizers update parameters. And almost no one has a guided, structured way to learn that from the ground up.
 
+Why does this matter? Because users hit walls that builders do not. When your model runs out of memory, you need to understand tensor allocation. When gradients explode, you need to understand the computation graph. When training is slow, you need to understand where the bottlenecks are. When you need to deploy on a microcontroller, you need to understand what can be stripped away and what cannot. The framework becomes a black box that you cannot debug, optimize, or adapt. You are stuck waiting for someone else to solve your problem.
+
 Students cannot learn this from production code. PyTorch is too large, too complex, too optimized. Fifty thousand lines of C++ across hundreds of files. No one learns to build rockets by studying the Saturn V.
 
 They also cannot learn it from toy scripts. A hundred-line neural network does not reveal the architecture of a framework. It hides it.
