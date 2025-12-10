@@ -24,6 +24,7 @@ from .export_utils import (
     get_export_target,
     validate_notebook_integrity,
 )
+from ..core.modules import get_next_module, get_total_modules
 
 class SrcCommand(BaseCommand):
 
@@ -90,44 +91,21 @@ class SrcCommand(BaseCommand):
         """Show next steps after successful module completion."""
         console = self.console
         
-        # Get module number for next module suggestion
-        if completed_module.startswith(tuple(f"{i:02d}_" for i in range(100))):
-            try:
-                module_num = int(completed_module[:2])
-                next_num = module_num + 1
-                
-                # Suggest next module (updated for reordered progression)
-                next_modules = {
-                    1: ("02_tensor", "Tensor operations - the foundation of ML"),
-                    2: ("03_activations", "Activation functions - adding intelligence"),
-                    3: ("04_layers", "Neural layers - building blocks"),
-                    4: ("05_losses", "Loss functions - measuring performance"),
-                    5: ("06_optimizers", "Optimization algorithms - systematic weight updates"),
-                    6: ("07_autograd", "Automatic differentiation - gradient computation"),
-                    7: ("08_training", "Training loops - end-to-end learning"),
-                    8: ("09_spatial", "Spatial processing - convolutional operations"),
-                    9: ("10_dataloader", "Data loading - efficient training pipelines"),
-                    10: ("11_tokenization", "Text preprocessing - sequence understanding"),
-                    11: ("12_embeddings", "Vector representations - semantic learning"),
-                    12: ("13_attention", "Attention mechanisms - selective focus"),
-                    13: ("14_transformers", "Transformer architectures - sequence modeling"),
-                    14: ("15_acceleration", "Performance optimization - efficient computation"),
-                    19: ("20_capstone", "Capstone project - complete ML systems"),
-                }
-                
-                if next_num in next_modules:
-                    next_module, next_desc = next_modules[next_num]
-                    console.print(f"\n[bold cyan]🎯 Continue Your Journey[/bold cyan]")
-                    console.print(f"[bold]Next Module:[/bold] {next_module}")
-                    console.print(f"[dim]{next_desc}[/dim]")
-                    console.print(f"\n[green]Ready to continue? Run:[/green]")
-                    console.print(f"[dim]  tito module start {next_module}[/dim]")
-                elif next_num > 16:
-                    console.print(f"\n[bold green]🏆 Congratulations![/bold green]")
-                    console.print(f"[green]You've completed all TinyTorch modules![/green]")
-                    console.print(f"[dim]Run 'tito checkpoint status' to see your full progress[/dim]")
-            except (ValueError, IndexError):
-                pass
+        # Get next module suggestion (auto-discovered from filesystem)
+        next_info = get_next_module(completed_module)
+        
+        if next_info:
+            next_num, next_folder, next_display = next_info
+            console.print(f"\n[bold cyan]🎯 Continue Your Journey[/bold cyan]")
+            console.print(f"[bold]Next Module:[/bold] {next_folder}")
+            console.print(f"[dim]{next_display}[/dim]")
+            console.print(f"\n[green]Ready to continue? Run:[/green]")
+            console.print(f"[dim]  tito module start {next_num}[/dim]")
+        else:
+            # No next module - they've completed all!
+            console.print(f"\n[bold green]🏆 Congratulations![/bold green]")
+            console.print(f"[green]You've completed all TinyTorch modules![/green]")
+            console.print(f"[dim]Run 'tito checkpoint status' to see your full progress[/dim]")
         
         # General next steps
         console.print(f"\n[bold]Continue your ML systems journey:[/bold]")

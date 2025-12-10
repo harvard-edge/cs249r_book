@@ -264,7 +264,7 @@ Unlocks: CNN Revolution (1998) • Transformer Era (2017)
 <h3 style="margin: 0 0 0.75rem 0; color: #e65100; font-size: 1.15rem; font-weight: 600;"> Optimization (Modules 14-19)</h3>
 <p style="margin: 0 0 0.75rem 0; color: #ef6c00; font-size: 0.95rem; line-height: 1.6;">Transform research prototypes into production-ready systems.</p>
 <p style="margin: 0.75rem 0 0 0; color: #e65100; font-size: 0.85rem; font-style: italic;">
-Unlocks: MLPerf Torch Olympics (2018) • 8-16× compression • 12-40× speedup
+Unlocks: MLPerf Benchmarks (2018–Present) • 8-16× compression • 12-40× speedup
 </p>
 </a>
 
@@ -341,8 +341,8 @@ Walk through ML history by rebuilding its greatest breakthroughs with YOUR TinyT
     <div class="ml-timeline-item right olympics">
         <div class="ml-timeline-dot"></div>
         <div class="ml-timeline-content">
-            <div class="ml-timeline-year">2018</div>
-            <div class="ml-timeline-title">MLPerf Benchmarks </div>
+            <div class="ml-timeline-year">2018–Present</div>
+            <div class="ml-timeline-title">MLPerf Benchmarks</div>
             <div class="ml-timeline-desc">Production optimization (8-16× smaller, 12-40× faster)</div>
             <div class="ml-timeline-tech">Profile → Compress → Accelerate</div>
         </div>

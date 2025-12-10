@@ -31,25 +31,54 @@
 
 ---
 
-## About This Book
+## About This Project
 
-The **open source textbook** for learning how to engineer AI systems. It began in Harvard's CS249r course by [Prof. Vijay Janapa Reddi](https://vijay.seas.harvard.edu). Today, it supports classrooms, study groups, and independent learners around the world.
+This repository contains an **open source textbook** and **hands-on framework** for learning how to engineer AI systems. It began in Harvard's CS249r course by [Prof. Vijay Janapa Reddi](https://vijay.seas.harvard.edu). Today, it supports classrooms, study groups, and independent learners around the world.
 
-> **Mission:** Accessible AI systems education for anyone, anywhere. One chapter at a time.
+> **Mission:** Accessible AI systems education for anyone, anywhere.
+
+### What's Here
+
+**Read → Experiment → Build**
+
+| Component | Description | Getting Started |
+|-----------|-------------|-----------------|
+| **[📖 Book](book/)** | The ML Systems textbook with chapters on system design, deployment, edge AI, and responsible AI | [book/README.md](book/README.md) |
+| **[🔮 Lens](lens/)** | Interactive Colabs to simulate and explore ML Systems | *Coming 2026* |
+| **[🔥 TinyTorch](tinytorch/)** | Build your own ML framework from scratch, from tensors to systems | [tinytorch/README.md](tinytorch/README.md) |
 
 ---
 
-### Why This Book Exists
+## What You Will Learn
 
-*Students learn how to train ML models, but few are taught how to engineer the systems that make those models useful in practice. As AI capabilities grow, progress will depend less on developing new algorithms—since AI itself will increasingly be able to optimize them—and more on developing the engineers who can design scalable, efficient, and responsible systems that bring those algorithms to life.*
+This textbook teaches you to think at the intersection of machine learning and systems engineering. Each chapter bridges algorithmic concepts with the infrastructure that makes them work in practice.
 
-This book is part of a broader personal mission to **educate one million learners worldwide** in the foundations of AI systems engineering. The long term impact of AI will be shaped by a generation of engineers and builders who know how to turn ideas into working systems.
+### The ML ↔ Systems Bridge
 
-**— Vijay Janapa Reddi**
+| ML Concept | Systems Concept | What You Learn |
+|------------|-----------------|----------------|
+| Model parameters | Memory constraints | How to fit large models on resource-limited devices |
+| Inference latency | Hardware acceleration | How GPUs, TPUs, and accelerators execute neural networks |
+| Training convergence | Compute efficiency | How mixed-precision and optimization techniques reduce cost |
+| Model accuracy | Quantization and pruning | How to compress models while preserving performance |
+| Data requirements | Pipeline infrastructure | How to build efficient data loading and preprocessing |
+| Model deployment | MLOps practices | How to monitor, version, and update models in production |
+| Privacy constraints | On-device learning | How to train and adapt models without sending data to the cloud |
+
+### Book Structure
+
+| Part | Focus | Chapters |
+|------|-------|----------|
+| **I. Foundations** | Core concepts | Introduction, ML Systems, DL Primer, Architectures |
+| **II. Design** | Building blocks | Workflow, Data Engineering, Frameworks, Training |
+| **III. Performance** | Making it fast | Efficient AI, Optimizations, HW Acceleration, Benchmarking |
+| **IV. Deployment** | Making it work | MLOps, On-device Learning, Privacy, Robustness |
+| **V. Trust** | Making it right | Responsible AI, Sustainable AI, AI for Good |
+| **VI. Frontiers** | What's next | Emerging trends and future directions |
 
 ---
 
-### What Makes This Book Different
+## What Makes This Book Different
 
 This project is a living textbook. I keep it updated as the field grows, with community input along the way.
 
@@ -59,48 +88,56 @@ Think of it like LEGO. New sets arrive all the time, but the bricks themselves s
 
 Whether you are reading a chapter, running a lab, or sharing feedback, you are helping make these ideas more accessible to the next learner.
 
-Thank you for being a part of the story 🙏
+Thank you for being a part of the story.
 
 ---
 
-### Start Here
+## Why This Project Exists
 
-1. Read [Chapter 1](https://www.mlsysbook.ai/contents/core/introduction/introduction.html) and the overview.
-2. Skim the [Benchmarking chapter](https://mlsysbook.ai/contents/core/benchmarking/benchmarking.html) to know what to measure.
-3. Pick a [TinyML kit](https://www.mlsysbook.ai/contents/labs/kits.html) and run a lab.
-4. Say hello in [Introduce Yourself](https://github.com/harvard-edge/cs249r_book/discussions). I will do my best to reply.
+*Students learn how to train ML models, but few are taught how to engineer the systems that make those models useful in practice. As AI capabilities grow, progress will depend less on developing new algorithms and more on developing the engineers who can design scalable, efficient, and responsible systems that bring those algorithms to life.*
 
-## 📚 What You Will Learn
+This project is part of a broader personal mission to **educate one million learners worldwide** in the foundations of AI systems engineering. The long term impact of AI will be shaped by a generation of engineers and builders who know how to turn ideas into working systems.
 
-This textbook gives you a **systems level understanding of machine learning**, bridging the gap between algorithms and the real world infrastructure that makes them work. You will learn how to **design, build, and reason about** the components that make modern AI possible.
-
-| Topic                              | What You Will Learn                                                                            |
-| ---------------------------------- | ---------------------------------------------------------------------------------------------- |
-| **System Design**                  | How to design and structure end-to-end ML systems that are scalable, modular, and maintainable |
-| **Data Engineering**               | How to build reliable pipelines for collection, labeling, and processing                       |
-| **Model Deployment**               | How to turn trained models into robust, production-ready services                              |
-| **MLOps and Monitoring**           | How to operate, monitor, and sustain AI systems over time                                      |
-| **Edge and Embedded AI**           | How to deploy ML on mobile, embedded, and resource-constrained devices                         |
-| **Responsible and Sustainable AI** | How to design systems with privacy, security, and environmental impact in mind                 |
+**— Vijay Janapa Reddi**
 
 ---
+
+## Start Here
+
+**For Readers:**
+1. Read [Chapter 1](https://www.mlsysbook.ai/contents/core/introduction/introduction.html) and the overview
+2. Skim the [Benchmarking chapter](https://mlsysbook.ai/contents/core/benchmarking/benchmarking.html) to know what to measure
+3. Pick a [TinyML kit](https://www.mlsysbook.ai/contents/labs/kits.html) and run a lab
+
+**For Builders:**
+1. Clone this repo and explore [TinyTorch](tinytorch/)
+2. Start with Module 01 (Tensors) and build your way up
+3. Train a CNN on CIFAR-10 with code you wrote from scratch
+
+**For Everyone:**
+- Say hello in [Introduce Yourself](https://github.com/harvard-edge/cs249r_book/discussions). I will do my best to reply.
+
+---
+
 ## Support This Work
 
-### ⭐ Why GitHub Stars Matter
+We are tracking our way to **1 million learners by 2030**. Every star, share, and contribution helps us get there.
+
+### Why GitHub Stars Matter
 
 <div align="center">
 
-*What gets measured gets done.* Every star represents a learner or believer in accessible AI education. We're tracking our way to 1 million learners by 2030. Sponsors match community support with funding that provides TinyML kits, workshops, and infrastructure for learners worldwide.
+*What gets measured gets done.* Every star represents a learner or believer in accessible AI education.
 
 [![Stars](https://img.shields.io/github/stars/harvard-edge/cs249r_book?style=for-the-badge&logo=github&color=gold)](https://github.com/harvard-edge/cs249r_book/stargazers)
 
 [![Star History Chart](https://api.star-history.com/svg?repos=harvard-edge/cs249r_book&type=Date)](https://star-history.com/#harvard-edge/cs249r_book&Date)
 
-1 ✓ → 10 ✓ → 100 ✓ → 1,000 ✓ → **10,000 ✓** → 100,000 by 2026
+1 ✓ → 10 ✓ → 100 ✓ → 1,000 ✓ → **10,000 ✓** → 100,000 by 2026 → ... → **1M by 2030**
 
 ### Fund the Mission
 
-Your contribution directly supports accessible AI education around the world.
+All contributions go to [Open Collective](https://opencollective.com/mlsysbook), a transparent fund that supports educational outreach: TinyML system kits, workshops, and infrastructure for learners worldwide.
 
 [![Open Collective](https://img.shields.io/badge/💝%20Support%20AI%20Education-Open%20Collective-blue.svg?style=for-the-badge)](https://opencollective.com/mlsysbook)
 
@@ -108,28 +145,31 @@ Your contribution directly supports accessible AI education around the world.
 
 ---
 
-## 🌐 Community and Resources
+## Community and Resources
 
 | Resource | Description |
 |---|---|
-| [📚 **Textbook**](https://mlsysbook.ai) | Interactive online textbook |
-| [🔥 **TinyTorch**](https://tinytorch.ai) | Educational ML framework (🚧 Work in progress) |
+| [📖 **Textbook**](https://mlsysbook.ai) | Interactive online textbook |
+| [🔥 **TinyTorch**](https://tinytorch.ai) | Educational ML framework (Early Access) |
 | [🌐 **Ecosystem**](https://mlsysbook.org) | Resources, workshops, and community |
 | [💬 **Discussions**](https://github.com/harvard-edge/cs249r_book/discussions) | Questions and ideas |
 
 ---
 
-## 🛠️ Contributing
+## Contributing
 
-Want to improve this resource? We welcome contributions!
+We welcome contributions to both the book and TinyTorch!
 
-- [Contribution guide](docs/contribute.md)
-- [Development setup](#development)
-- Community discussions (see Community Resources above)
+| I want to... | Go here |
+|--------------|---------|
+| Fix a typo or improve a chapter | [book/docs/CONTRIBUTING.md](book/docs/CONTRIBUTING.md) |
+| Add a TinyTorch module or fix a bug | [tinytorch/CONTRIBUTING.md](tinytorch/CONTRIBUTING.md) |
+| Report an issue | [GitHub Issues](https://github.com/harvard-edge/cs249r_book/issues) |
+| Ask a question | [GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions) |
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### For Readers
 ```bash
@@ -143,32 +183,37 @@ curl -O https://mlsysbook.ai/pdf
 curl -O https://mlsysbook.ai/epub
 ```
 
-### For Contributors
+### For Book Contributors
 ```bash
-git clone https://github.com/harvard-edge/cs249r_book.git
-cd cs249r_book
+cd book
 
 # First time setup
 ./binder setup
 ./binder doctor
 
-# Daily workflow (most used)
-./binder clean              # Clean build artifacts
-./binder build              # Build HTML book
-./binder preview intro      # Preview chapter with live reload
-
-# Build all formats
-./binder pdf                # Build PDF
-./binder epub               # Build EPUB
-
-# Utilities
-./binder help               # Show all commands
-./binder list               # List chapters
+# Daily workflow
+./binder clean
+./binder build
+./binder preview intro
 ```
+
+### For TinyTorch Learners
+```bash
+cd tinytorch
+
+# One-command setup
+tito setup
+source .venv/bin/activate
+
+# Start building
+tito module start 01
+```
+
+See [book/README.md](book/README.md) and [tinytorch/README.md](tinytorch/README.md) for detailed instructions.
 
 ---
 
-## 📋 Citation & License
+## Citation & License
 
 ### Citation
 ```bibtex
@@ -184,11 +229,12 @@ cd cs249r_book
 ```
 
 ### License
-This work is licensed under **Creative Commons Attribution–NonCommercial–ShareAlike 4.0 International** (CC BY-NC-SA 4.0). You may share and adapt the material for non-commercial purposes with appropriate credit.
+- **Book content**: Creative Commons Attribution–NonCommercial–ShareAlike 4.0 International (CC BY-NC-SA 4.0)
+- **TinyTorch code**: MIT License
 
 ---
 
-## 🙏 Contributors
+## Contributors
 
 Thanks goes to these wonderful people who have contributed to making this resource better for everyone:
 

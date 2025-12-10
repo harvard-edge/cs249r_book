@@ -34,6 +34,7 @@ from rich.console import Console, Group
 from rich.rule import Rule
 
 from ..base import BaseCommand
+from ...core.modules import get_module_mapping, normalize_module_number
 
 
 class ModuleTestCommand(BaseCommand):
@@ -85,36 +86,7 @@ class ModuleTestCommand(BaseCommand):
             help="Skip integration tests",
         )
 
-    def get_module_mapping(self) -> Dict[str, str]:
-        """Get mapping from numbers to module names."""
-        return {
-            "01": "01_tensor",
-            "02": "02_activations",
-            "03": "03_layers",
-            "04": "04_losses",
-            "05": "05_autograd",
-            "06": "06_optimizers",
-            "07": "07_training",
-            "08": "08_dataloader",
-            "09": "09_spatial",
-            "10": "10_tokenization",
-            "11": "11_embeddings",
-            "12": "12_attention",
-            "13": "13_transformers",
-            "14": "14_profiling",
-            "15": "15_quantization",
-            "16": "16_compression",
-            "17": "17_memoization",
-            "18": "18_acceleration",
-            "19": "19_benchmarking",
-            "20": "20_capstone",
-        }
-
-    def normalize_module_number(self, module_input: str) -> str:
-        """Normalize module input to 2-digit format."""
-        if module_input.isdigit():
-            return f"{int(module_input):02d}"
-        return module_input
+    # Module mapping and normalization now imported from core.modules
 
     def run_inline_tests(
         self, module_name: str, module_number: str, verbose: bool = False
@@ -405,7 +377,7 @@ class ModuleTestCommand(BaseCommand):
     ) -> int:
         """Test all modules sequentially."""
         console = self.console
-        module_mapping = self.get_module_mapping()
+        module_mapping = get_module_mapping()
 
         console.print()
         console.print(
@@ -554,8 +526,8 @@ class ModuleTestCommand(BaseCommand):
             return 1
 
         # Normalize and validate module number
-        module_mapping = self.get_module_mapping()
-        normalized = self.normalize_module_number(args.module_number)
+        module_mapping = get_module_mapping()
+        normalized = normalize_module_number(args.module_number)
 
         if normalized not in module_mapping:
             console.print(f"[red]Invalid module number: {args.module_number}[/red]")
