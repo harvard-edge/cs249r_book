@@ -40,6 +40,7 @@ from .commands.benchmark import BenchmarkCommand
 from .commands.community import CommunityCommand
 from .commands.dev import DevCommand
 from .commands.olympics import OlympicsCommand
+from .commands.update import UpdateCommand
 
 # Configure logging
 logging.basicConfig(
@@ -78,6 +79,8 @@ class TinyTorchCLI:
             'community': CommunityCommand,
             'benchmark': BenchmarkCommand,
             'olympics': OlympicsCommand,
+            # Utilities
+            'update': UpdateCommand,
             # Shortcuts
             'export': ExportCommand,
             'test': TestCommand,
