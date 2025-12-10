@@ -369,6 +369,6 @@ These milestones include download utilities and preprocessing for production dat
 ---
 
 <div class="prev-next-area">
-<a class="left-prev" href="../chapters/07_training.html" title="previous page">← Previous Module: Training</a>
-<a class="right-next" href="../chapters/09_spatial.html" title="next page">Next Module: Spatial (CNNs) →</a>
+<a class="left-prev" href="07_training_ABOUT.html" title="previous page">← Module 07: Training</a>
+<a class="right-next" href="09_spatial_ABOUT.html" title="next page">Module 09: Spatial →</a>
 </div>

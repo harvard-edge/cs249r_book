@@ -859,6 +859,6 @@ Browse the Jupyter notebook and understand the implementation.
 ---
 
 <div class="prev-next-area">
-<a class="left-prev" href="../chapters/09_spatial.html" title="previous page">← Previous Module</a>
-<a class="right-next" href="../chapters/11_embeddings.html" title="next page">Next Module →</a>
+<a class="left-prev" href="09_spatial_ABOUT.html" title="previous page">← Module 09: Spatial</a>
+<a class="right-next" href="11_embeddings_ABOUT.html" title="next page">Module 11: Embeddings →</a>
 </div>

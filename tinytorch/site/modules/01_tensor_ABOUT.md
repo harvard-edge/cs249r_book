@@ -732,5 +732,5 @@ Browse the Jupyter notebook and understand the implementation.
 ---
 
 <div class="prev-next-area">
-<a class="right-next" href="../02_activations/ABOUT.html" title="next page">Next Module →</a>
+<a class="right-next" href="02_activations_ABOUT.html" title="next page">Module 02: Activations →</a>
 </div>

@@ -101,7 +101,7 @@ class HealthCommand(BaseCommand):
             ('tinytorch/', 'Package directory'),
             ('tinytorch/core/', 'Core module directory'),
             ('modules/', 'Module directory'),
-            ('bin/tito', 'CLI script'),
+            ('src/', 'Source modules directory'),
             ('requirements.txt', 'Dependencies file')
         ]
         

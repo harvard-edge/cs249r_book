@@ -550,6 +550,6 @@ Browse the Jupyter notebook and understand the implementation.
 ---
 
 <div class="prev-next-area">
-<a class="left-prev" href="../modules/05_autograd_ABOUT.html" title="previous page">← Previous Module</a>
-<a class="right-next" href="../modules/07_training_ABOUT.html" title="next page">Next Module →</a>
+<a class="left-prev" href="05_autograd_ABOUT.html" title="previous page">← Module 05: Autograd</a>
+<a class="right-next" href="07_training_ABOUT.html" title="next page">Module 07: Training →</a>
 </div>

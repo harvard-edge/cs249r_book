@@ -434,6 +434,6 @@ Binder sessions are temporary. Download your completed notebook when done, or sw
 ---
 
 <div class="prev-next-area">
-<a class="left-prev" href="../modules/14_profiling/ABOUT.html" title="previous page">← Module 14: Profiling</a>
-<a class="right-next" href="../modules/16_compression/ABOUT.html" title="next page">Module 16: Compression →</a>
+<a class="left-prev" href="14_profiling_ABOUT.html" title="previous page">← Module 14: Profiling</a>
+<a class="right-next" href="16_compression_ABOUT.html" title="next page">Module 16: Compression →</a>
 </div>

@@ -668,6 +668,6 @@ python profiling_dev.py  # Inline tests as you build
 ---
 
 <div class="prev-next-area">
-<a class="left-prev" href="../13_transformers/ABOUT.html" title="previous page">← Module 13: Transformers</a>
-<a class="right-next" href="../15_quantization/ABOUT.html" title="next page">Module 15: Quantization →</a>
+<a class="left-prev" href="13_transformers_ABOUT.html" title="previous page">← Module 13: Transformers</a>
+<a class="right-next" href="15_quantization_ABOUT.html" title="next page">Module 15: Quantization →</a>
 </div>

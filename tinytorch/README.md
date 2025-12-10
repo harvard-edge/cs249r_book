@@ -27,8 +27,8 @@ A Harvard University course that transforms you from framework user to systems e
 
 A **complete ML framework** capable of:
 
-🎯 **North Star Achievement**: Train CNNs on CIFAR-10 to **75%+ accuracy**
-- Real computer vision with 50,000 training images
+🎯 **North Star Achievement**: Train CNNs for image classification
+- Real computer vision on standard benchmark datasets
 - Built entirely from scratch using only NumPy
 - Competitive performance with modern frameworks
 
@@ -69,7 +69,7 @@ Build your framework through four progressive parts:
 | Part | Modules | What You Build |
 |------|---------|----------------|
 | **I. Foundations** | 01-07 | Tensors, activations, layers, losses, autograd, optimizers, training |
-| **II. Vision** | 08-09 | DataLoaders, Conv2d, CNNs → CIFAR-10 @ 75%+ |
+| **II. Vision** | 08-09 | DataLoaders, Conv2d, CNNs for image classification |
 | **III. Language** | 10-13 | Tokenization, embeddings, attention, transformers |
 | **IV. Optimization** | 14-20 | Profiling, quantization, compression, acceleration, benchmarking, capstone |
 
@@ -87,8 +87,8 @@ As you progress, unlock recreations of landmark ML achievements:
 |------|-----------|------------------|
 | 1957 | Perceptron | Binary classification with gradient descent |
 | 1969 | XOR Crisis | Multi-layer networks solve non-linear problems |
-| 1986 | Backpropagation | MNIST digit recognition at 95%+ |
-| 1998 | CNN Revolution | **CIFAR-10 @ 75%+ accuracy** |
+| 1986 | Backpropagation | Multi-layer network training |
+| 1998 | CNN Revolution | **Image classification with convolutions** |
 | 2017 | Transformer Era | Language generation with self-attention |
 | 2018+ | MLPerf | Production-ready optimization |
 

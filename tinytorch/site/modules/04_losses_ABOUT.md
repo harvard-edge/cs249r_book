@@ -1,7 +1,7 @@
 ---
 title: "Loss Functions"
 description: "Build MSE and CrossEntropy loss functions with numerical stability for regression and classification"
-difficulty: "●● (2/4)"
+difficulty: "●●"
 time_estimate: "3-4 hours"
 prerequisites: ["01_tensor", "02_activations", "03_layers"]
 next_steps: ["05_autograd"]
@@ -298,6 +298,6 @@ tito test losses
 ---
 
 <div class="prev-next-area">
-<a class="left-prev" href="../03_layers/ABOUT.html" title="previous page">← Module 03: Layers</a>
-<a class="right-next" href="../05_autograd/ABOUT.html" title="next page">Module 05: Autograd →</a>
+<a class="left-prev" href="03_layers_ABOUT.html" title="previous page">← Module 03: Layers</a>
+<a class="right-next" href="05_autograd_ABOUT.html" title="next page">Module 05: Autograd →</a>
 </div>

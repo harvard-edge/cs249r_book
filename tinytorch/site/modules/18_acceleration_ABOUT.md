@@ -596,6 +596,6 @@ Browse the Python source code and understand the implementation.
 ---
 
 <div class="prev-next-area">
-<a class="left-prev" href="../chapters/17_memoization_ABOUT.html" title="previous page">← Module 17: Memoization</a>
-<a class="right-next" href="../chapters/19_benchmarking_ABOUT.html" title="next page">Module 19: Benchmarking →</a>
+<a class="left-prev" href="17_memoization_ABOUT.html" title="previous page">← Module 17: Memoization</a>
+<a class="right-next" href="19_benchmarking_ABOUT.html" title="next page">Module 19: Benchmarking →</a>
 </div>

@@ -536,6 +536,6 @@ Browse the Python source code and understand the implementation.
 ---
 
 <div class="prev-next-area">
-<a class="left-prev" href="../modules/06_optimizers_ABOUT.html" title="previous page">← Previous Module</a>
-<a class="right-next" href="../modules/08_dataloader_ABOUT.html" title="next page">Next Module →</a>
+<a class="left-prev" href="06_optimizers_ABOUT.html" title="previous page">← Module 06: Optimizers</a>
+<a class="right-next" href="08_dataloader_ABOUT.html" title="next page">Module 08: DataLoader →</a>
 </div>
