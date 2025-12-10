@@ -41,11 +41,11 @@ This repository contains an **open source textbook** and **hands-on framework** 
 
 **Read → Experiment → Build**
 
-| Component | Description | Getting Started |
-|-----------|-------------|-----------------|
-| **[📖 Book](book/)** | The ML Systems textbook with chapters on system design, deployment, edge AI, and responsible AI | [book/README.md](book/README.md) |
-| **[🔮 Lens](lens/)** | Interactive Colabs to simulate and explore ML Systems | *Coming 2026* |
-| **[🔥 TinyTorch](tinytorch/)** | Build your own ML framework from scratch, from tensors to systems | [tinytorch/README.md](tinytorch/README.md) |
+| Component                      | Description                                                                                                                                               | Getting Started                            |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| **[📖 Book](book/)**           | The Machine Learning Systems textbook that walks through design, optimization, deployment, edge computing, and responsible AI in a clear, end-to-end way  | [book/README.md](book/README.md)           |
+| **[🔥 TinyTorch](tinytorch/)** | A from-scratch ML framework that lets you build the full stack yourself, piece by piece, and learn how real systems work under the hood                   | [tinytorch/README.md](tinytorch/README.md) |
+| **[🔮 Lens](lens/)**           | Hands-on Colab simulations that let you experiment with ML systems, explore tradeoffs, and see how design decisions ripple through a working microchamber | *Coming in Summer 2026*                              |
 
 ---
 
