@@ -24,6 +24,8 @@ set -e  # Exit on any error
 # Configuration
 # ============================================================================
 REPO_URL="https://github.com/harvard-edge/cs249r_book.git"
+REPO_SHORT="harvard-edge/cs249r_book"
+BRANCH="main"
 INSTALL_DIR="tinytorch"
 SPARSE_PATH="tinytorch"
 MIN_PYTHON_VERSION="3.8"
@@ -128,6 +130,25 @@ check_write_permission() {
     rm -f ".tinytorch_write_test"
 }
 
+check_not_in_venv() {
+    # Warn if already in a virtual environment
+    if [ -n "$VIRTUAL_ENV" ]; then
+        print_warning "You're inside a virtual environment: $VIRTUAL_ENV"
+        echo "  Consider deactivating first: deactivate"
+        echo ""
+    fi
+}
+
+check_internet() {
+    # Quick connectivity check
+    if ! git ls-remote --exit-code "$REPO_URL" >/dev/null 2>&1; then
+        print_error "Cannot reach GitHub"
+        echo "  Check your internet connection and try again."
+        exit 1
+    fi
+    print_success "GitHub reachable"
+}
+
 check_prerequisites() {
     local errors=0
 
@@ -197,6 +218,8 @@ show_plan_and_confirm() {
     echo "  • Python virtual environment"
     echo "  • tito CLI tool"
     echo ""
+    echo -e "${DIM}Source: ${REPO_SHORT} (${BRANCH} branch)${NC}"
+    echo ""
 }
 
 do_install() {
@@ -208,7 +231,7 @@ do_install() {
     TEMP_DIR=$(mktemp -d)
 
     # Clone in background with spinner
-    git clone --depth 1 --filter=blob:none --sparse --branch main \
+    git clone --depth 1 --filter=blob:none --sparse --branch "$BRANCH" \
         "$REPO_URL" "$TEMP_DIR/repo" >/dev/null 2>&1 &
     local clone_pid=$!
     spin $clone_pid "Cloning repository..."
@@ -224,13 +247,52 @@ do_install() {
     local original_dir="$PWD"
     cd "$TEMP_DIR/repo"
     git sparse-checkout set "$SPARSE_PATH" 2>/dev/null
+
+    # Capture commit hash for provenance
+    COMMIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
     cd "$original_dir"
 
     # Move to final location
     mv "$TEMP_DIR/repo/$SPARSE_PATH" "$INSTALL_DIR"
     rm -rf "$TEMP_DIR"
     TEMP_DIR=""
-    print_success "Downloaded TinyTorch"
+
+    # Remove dev-only files that students don't need
+    rm -rf "$INSTALL_DIR/paper" \
+           "$INSTALL_DIR/instructor" \
+           "$INSTALL_DIR/site" \
+           "$INSTALL_DIR/scripts" \
+           "$INSTALL_DIR/tools" \
+           "$INSTALL_DIR/binder" \
+           "$INSTALL_DIR/etc" \
+           "$INSTALL_DIR/assignments" \
+           "$INSTALL_DIR/milestones" \
+           "$INSTALL_DIR/benchmark_results" \
+           "$INSTALL_DIR/.git-hooks" \
+           "$INSTALL_DIR/.claude" \
+           "$INSTALL_DIR/.cursor" \
+           "$INSTALL_DIR/.vscode" \
+           "$INSTALL_DIR/Makefile" \
+           "$INSTALL_DIR/activate.sh" \
+           "$INSTALL_DIR/setup-dev.sh" \
+           "$INSTALL_DIR/setup-environment.sh" \
+           "$INSTALL_DIR/CONTRIBUTING.md" \
+           "$INSTALL_DIR/INSTRUCTOR.md" \
+           "$INSTALL_DIR/settings.ini" \
+           "$INSTALL_DIR/MANIFEST.in" \
+           "$INSTALL_DIR/.pre-commit-config.yaml" \
+           "$INSTALL_DIR/.shared-ai-rules.md" \
+           "$INSTALL_DIR/.tinyrc" \
+           "$INSTALL_DIR/.editorconfig" \
+           "$INSTALL_DIR/.gitattributes" \
+           2>/dev/null || true
+
+    # Clear modules/ folder - students populate via CLI exports from src/
+    if [ -d "$INSTALL_DIR/modules" ]; then
+        find "$INSTALL_DIR/modules" -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + 2>/dev/null || true
+    fi
+
+    print_success "Downloaded TinyTorch ${DIM}(${COMMIT_HASH})${NC}"
 
     # Step 2: Create virtual environment
     echo -e "${BLUE}[2/4]${NC} Creating Python environment..."
@@ -308,9 +370,11 @@ main() {
     # Phase 1: Pre-flight checks
     check_write_permission
     check_existing_directory
+    check_not_in_venv
 
     echo "Checking prerequisites..."
     check_prerequisites
+    check_internet
 
     # Phase 2: Show plan and confirm
     show_plan_and_confirm
