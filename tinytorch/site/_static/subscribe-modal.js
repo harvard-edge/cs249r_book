@@ -542,17 +542,29 @@
     setTimeout(() => {
       // Look for subscribe links in navbar, top bar, etc.
       const subscribeSelectors = [
+        '#navbar-subscribe-btn',
         'a[href*="buttondown.email/tinytorch"]',
+        'a[href*="#subscribe"]',
         'a[href*="subscribe"]',
         '.tinytorch-bar-links a:has(.link-text:contains("Subscribe"))',
         'a.subscribe-link'
       ];
-      
+
       subscribeSelectors.forEach(selector => {
         try {
           const links = document.querySelectorAll(selector);
           links.forEach(link => {
-            if (link.href && (link.href.includes('buttondown') || link.href.includes('subscribe'))) {
+            // Check if it's a subscribe-related link
+            const href = link.href || link.getAttribute('href') || '';
+            const isSubscribeLink =
+              link.id === 'navbar-subscribe-btn' ||
+              link.classList.contains('subscribe-link') ||
+              href.includes('buttondown') ||
+              href.includes('subscribe') ||
+              href === '#subscribe' ||
+              href.endsWith('#subscribe');
+
+            if (isSubscribeLink) {
               link.addEventListener('click', function(e) {
                 e.preventDefault();
                 openSubscribeModal();
