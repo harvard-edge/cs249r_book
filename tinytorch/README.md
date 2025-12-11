@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🔥 TinyTorch
+# Tiny🔥Torch
 
 ### Build Your Own ML Framework From Scratch
 
