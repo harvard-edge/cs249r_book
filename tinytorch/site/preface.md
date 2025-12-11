@@ -1,5 +1,9 @@
 # Welcome
 
+<div style="text-align: center; margin: 1rem 0 2rem 0;">
+<img src="_static/images/tito.png" alt="Tito the TinyTorch mascot" style="width: 300px;">
+</div>
+
 Everyone wants to be an astronaut 🧑‍🚀. Very few want to be the rocket scientist 🚀.
 
 In machine learning, we see the same pattern. Everyone wants to train models, run inference, deploy AI. Very few want to understand how the frameworks actually work. Even fewer want to build one.
@@ -146,14 +150,7 @@ Take your time. The goal is not to finish fast. The goal is to understand deeply
 
 ## Prerequisites
 
-You should be comfortable with:
-
-- **Python programming**: functions, classes, NumPy basics
-- **Linear algebra**: matrix operations, vector spaces
-- **Calculus**: derivatives, chain rule (for backpropagation)
-- **Basic ML concepts**: neural networks, training, loss functions
-
-If you have taken an introductory ML course and can write Python code, you are ready.
+Familiarity with Python and basic linear algebra is helpful but not required. We explain concepts as we build.
 
 ## The Bigger Picture
 
