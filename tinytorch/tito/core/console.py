@@ -12,6 +12,8 @@ from rich.align import Align
 from typing import Optional
 import sys
 
+from .theme import Theme
+
 # Global console instance
 _console: Optional[Console] = None
 
@@ -30,22 +32,22 @@ def print_banner(compact: bool = False):
     else:
         # Create banner text that matches the clean block text theme
         banner_text = Text()
-        banner_text.append("Tiny", style="dim cyan")
-        banner_text.append("🔥", style="red")
-        banner_text.append("TORCH", style="bold orange1")
-        banner_text.append(": Don't import it. Build it.", style="dim")
-        console.print(Panel(banner_text, style="bright_blue", padding=(1, 2)))
+        banner_text.append("Tiny", style=Theme.BRAND_ACCENT)
+        banner_text.append("🔥", style=Theme.BRAND_FLAME)
+        banner_text.append("TORCH", style=Theme.BRAND_PRIMARY)
+        banner_text.append(": Don't import it. Build it.", style=Theme.DIM)
+        console.print(Panel(banner_text, style=Theme.BORDER_DEFAULT, padding=(1, 2)))
 
 def print_compact_banner():
     """Print a compact TinyTorch banner with 'Tiny' above TORCH."""
     console = get_console()
     # Create compact banner text
     banner_text = Text()
-    banner_text.append("Tiny", style="dim cyan")
-    banner_text.append("\n🔥", style="red")
-    banner_text.append("TORCH", style="bold orange1")
-    banner_text.append(": Don't import it. Build it.", style="dim")
-    console.print(Panel(banner_text, style="bright_blue", padding=(1, 2)))
+    banner_text.append("Tiny", style=Theme.BRAND_ACCENT)
+    banner_text.append("\n🔥", style=Theme.BRAND_FLAME)
+    banner_text.append("TORCH", style=Theme.BRAND_PRIMARY)
+    banner_text.append(": Don't import it. Build it.", style=Theme.DIM)
+    console.print(Panel(banner_text, style=Theme.BORDER_DEFAULT, padding=(1, 2)))
 
 def print_ascii_logo(compact: bool = False):
     """Print the clean, minimal ASCII art TinyTorch logo."""
@@ -76,16 +78,12 @@ def print_ascii_logo(compact: bool = False):
     ]
     
     # ============================================
-    # COLOR CONFIGURATION - EDIT COLORS HERE!
+    # COLOR CONFIGURATION - Uses Theme constants
     # ============================================
-    # Available colors: black, red, green, yellow, blue, magenta, cyan, white
-    # Prefix with 'bright_' for brighter versions (e.g., 'bright_red')
-    # Add 'bold' for bold text (e.g., 'bold red' or 'bold bright_black')
-    
-    FLAME_COLOR = "yellow"              # Color for 🔥 emoji
-    TINY_COLOR = "bold orange1"         # Color for "tiny" text (flame effect!)
-    TORCH_COLOR = "bold white"          # Color for "TORCH" text (better contrast)
-    TAGLINE_COLOR = "bold orange1"      # Color for tagline (matches flame glow)
+    FLAME_COLOR = Theme.BRAND_FLAME     # Color for 🔥 emoji
+    TINY_COLOR = Theme.BRAND_ACCENT     # Color for "tiny" text
+    TORCH_COLOR = Theme.BRAND_PRIMARY   # Color for "TORCH" text
+    TAGLINE_COLOR = Theme.BRAND_ACCENT  # Color for tagline
     
     # Process and apply colors to each line
     for i, line in enumerate(logo_lines):
@@ -114,7 +112,7 @@ def print_ascii_logo(compact: bool = False):
     console.print()
     console.print(Panel(
         Align.center(full_content),
-        border_style="bright_blue",
+        border_style=Theme.BORDER_DEFAULT,
         padding=(1, 2)
     ))
     console.print()
@@ -127,19 +125,19 @@ def print_compact_ascii_logo():
 def print_error(message: str, title: str = "Error"):
     """Print an error message with consistent formatting."""
     console = get_console()
-    console.print(Panel(f"[red]❌ {message}[/red]", title=title, border_style="red"))
+    console.print(Panel(f"[{Theme.ERROR}]❌ {message}[/{Theme.ERROR}]", title=title, border_style=Theme.BORDER_ERROR))
 
 def print_success(message: str, title: str = "Success"):
     """Print a success message with consistent formatting."""
     console = get_console()
-    console.print(Panel(f"[green]✅ {message}[/green]", title=title, border_style="green"))
+    console.print(Panel(f"[{Theme.SUCCESS}]✅ {message}[/{Theme.SUCCESS}]", title=title, border_style=Theme.BORDER_SUCCESS))
 
 def print_warning(message: str, title: str = "Warning"):
     """Print a warning message with consistent formatting."""
     console = get_console()
-    console.print(Panel(f"[yellow]⚠️ {message}[/yellow]", title=title, border_style="yellow"))
+    console.print(Panel(f"[{Theme.WARNING}]⚠️ {message}[/{Theme.WARNING}]", title=title, border_style=Theme.BORDER_WARNING))
 
 def print_info(message: str, title: str = "Info"):
     """Print an info message with consistent formatting."""
     console = get_console()
-    console.print(Panel(f"[cyan]ℹ️ {message}[/cyan]", title=title, border_style="cyan")) 
+    console.print(Panel(f"[{Theme.INFO}]ℹ️ {message}[/{Theme.INFO}]", title=title, border_style=Theme.BORDER_INFO)) 
