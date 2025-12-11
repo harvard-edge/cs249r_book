@@ -64,6 +64,16 @@ class ModuleWorkflowCommand(BaseCommand):
             help='Module number to start (01, 02, 03, etc.)'
         )
         
+        # VIEW command - just open the notebook
+        view_parser = subparsers.add_parser(
+            'view',
+            help='Open module notebook in Jupyter (no status updates)'
+        )
+        view_parser.add_argument(
+            'module_number',
+            help='Module number to view (01, 02, 03, etc.)'
+        )
+
         # RESUME command - continue working on a module
         resume_parser = subparsers.add_parser(
             'resume',
@@ -270,7 +280,23 @@ class ModuleWorkflowCommand(BaseCommand):
 
                 return 1
 
-        # Prerequisites met! Show success and what they're unlocking
+        # Prerequisites met! Check if module needs to be created from src/
+        module_dir = self.config.modules_dir / module_name
+        if not module_dir.exists():
+            # Create module from src/ using export
+            src_dir = self.config.project_root / "src" / module_name
+            if not src_dir.exists():
+                self.console.print(f"[red]❌ Source not found: src/{module_name}[/red]")
+                return 1
+
+            self.console.print(f"[cyan]📝 Creating module from source...[/cyan]")
+            if not self._create_module_from_src(module_name):
+                self.console.print(f"[red]❌ Failed to create module {module_name}[/red]")
+                return 1
+            self.console.print(f"[green]✅ Module {normalized} ready![/green]")
+            self.console.print()
+
+        # Show success panel
         self.console.print(Panel(
             f"[green]Starting Module {normalized}: {module_name}[/green]\n\n"
             f"Build your ML framework one component at a time.",
@@ -316,6 +342,40 @@ class ModuleWorkflowCommand(BaseCommand):
         self.console.print()
 
         return self._open_jupyter(module_name)
+
+    def view_module(self, module_number: str) -> int:
+        """Open a module notebook in Jupyter without any status ceremony."""
+        module_mapping = get_module_mapping()
+        normalized = normalize_module_number(module_number)
+
+        if normalized not in module_mapping:
+            self.console.print(f"[red]❌ Module {normalized} not found[/red]")
+            return 1
+
+        module_name = module_mapping[normalized]
+        module_dir = self.config.modules_dir / module_name
+
+        if not module_dir.exists():
+            self.console.print(f"[yellow]⚠️  Module {normalized} not started yet[/yellow]")
+            self.console.print(f"💡 Run: [bold cyan]tito module start {normalized}[/bold cyan]")
+            return 1
+
+        return self._open_jupyter(module_name)
+
+    def _create_module_from_src(self, module_name: str) -> bool:
+        """Create a module in modules/ by converting from src/.
+
+        Uses the same conversion logic as 'tito src export' but only creates
+        the student-facing notebook, without exporting to the tinytorch package.
+        """
+        from ..export_utils import convert_py_to_notebook
+
+        src_path = self.config.project_root / "src" / module_name
+        if not src_path.exists():
+            return False
+
+        # Convert src/*.py to modules/*.ipynb using jupytext
+        return convert_py_to_notebook(src_path, self.venv_path, self.console)
 
     def _get_milestone_for_module(self, module_num: int) -> Optional[tuple]:
         """Get the milestone this module contributes to."""
@@ -1157,6 +1217,8 @@ class ModuleWorkflowCommand(BaseCommand):
         if hasattr(args, 'module_command') and args.module_command:
             if args.module_command == 'start':
                 return self.start_module(args.module_number)
+            elif args.module_command == 'view':
+                return self.view_module(args.module_number)
             elif args.module_command == 'resume':
                 return self.resume_module(getattr(args, 'module_number', None))
             elif args.module_command == 'complete':
@@ -1183,6 +1245,7 @@ class ModuleWorkflowCommand(BaseCommand):
             "[bold cyan]Module Lifecycle Commands[/bold cyan]\n\n"
             "[bold]Core Workflow:[/bold]\n"
             "  [bold green]tito module start 01[/bold green]     - Start working on Module 01 (first time)\n"
+            "  [bold green]tito module view 01[/bold green]      - Open Module 01 notebook\n"
             "  [bold green]tito module resume 01[/bold green]    - Resume working on Module 01 (continue)\n"
             "  [bold green]tito module complete 01[/bold green]  - Complete Module 01 (test + export)\n"
             "  [bold yellow]tito module reset 01[/bold yellow]    - Reset Module 01 to clean state (with backup)\n\n"
@@ -1195,7 +1258,7 @@ class ModuleWorkflowCommand(BaseCommand):
             "  2. [dim]Work in Jupyter, save[/dim]    → Ctrl+S to save progress\n"
             "  3. [dim]tito module complete 01[/dim]  → Test, export, track progress\n"
             "  4. [dim]tito module start 02[/dim]     → Begin activations\n"
-            "  5. [dim]tito module resume 02[/dim]    → Continue activations later\n\n"
+            "  5. [dim]tito module view 02[/dim]      → Just open the notebook\n\n"
             "[bold]Module States:[/bold]\n"
             "  ⏳ Not started  🚀 In progress  ✅ Completed\n\n"
             "[bold]Reset Options:[/bold]\n"
