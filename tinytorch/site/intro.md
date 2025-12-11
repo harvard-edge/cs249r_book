@@ -554,11 +554,11 @@ Perfect if you want to **debug ML systems**, **implement custom operations**, or
 **Next Steps**: **[Quick Start Guide](quickstart-guide)** (15 min) • **[Course Structure](chapters/00-introduction)** • **[FAQ](faq.md)**
 
 <div style="text-align: center; padding: 1.5rem 0; margin-top: 2rem; border-top: 1px solid #e2e8f0; color: #64748b; font-size: 0.9rem;">
-  <span style="color: #f97316;">\raisebox{-0.1em}{\includegraphics[height=1em]{../_static/logos/fire-emoji.png}}</span> <strong>TinyTorch</strong> 
-  <span style="margin: 0 0.75rem;">•</span> 
+  <strong>Tiny🔥Torch</strong>
+  <span style="margin: 0 0.75rem;">•</span>
   <a href="https://mlsysbook.ai" style="color: #64748b; text-decoration: none;">MLSysBook</a>
   <span style="margin: 0 0.75rem;">•</span>
-  <a href="https://github.com/mlsysbook/TinyTorch" style="color: #64748b; text-decoration: none;">GitHub</a>
+  <a href="https://github.com/harvard-edge/cs249r_book" style="color: #64748b; text-decoration: none;">GitHub</a>
   <span style="margin: 0 0.75rem;">•</span>
-  <a href="https://tinytorch.ai/leaderboard" style="color: #64748b; text-decoration: none;">Leaderboard</a>
+  <a href="leaderboard" style="color: #64748b; text-decoration: none;">Leaderboard</a>
 </div>
