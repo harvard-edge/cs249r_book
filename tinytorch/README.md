@@ -26,9 +26,18 @@
 
 ## Why TinyTorch?
 
-**"Most ML education teaches you to _use_ frameworks. TinyTorch teaches you to _build_ them."**
+Everyone wants to be an astronaut 🧑‍🚀. Very few want to be the rocket scientist 🚀.
 
-The difference between ML users and ML engineers determines who drives innovation versus who merely consumes it. TinyTorch bridges this gap by teaching you to build every component of modern AI systems from scratch.
+In machine learning, we see the same pattern. Everyone wants to train models, run inference, deploy AI. Very few want to understand how the frameworks actually work. Even fewer want to build one.
+
+**The world is full of users. We do not have enough builders.**
+
+### The Solution: AI Bricks 🧱
+
+TinyTorch teaches you the **AI bricks**—the stable engineering foundations you can use to build any AI system.
+
+- **Small enough to learn from**: bite-sized code that runs even on a Raspberry Pi
+- **Big enough to matter**: showing the real architecture of how frameworks are built
 
 A Harvard University course that transforms you from framework user to systems engineer, giving you the deep understanding needed to optimize, debug, and innovate at the foundation of AI.
 
