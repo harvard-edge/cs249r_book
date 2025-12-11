@@ -11,7 +11,7 @@ from pathlib import Path
 
 def main():
     """Install binder CLI in development mode"""
-    project_root = Path(__file__).parent
+    project_root = Path(__file__).parent.parent  # Go up from book/ to repo root
     
     print("🔧 Setting up binder CLI in virtual environment...")
     

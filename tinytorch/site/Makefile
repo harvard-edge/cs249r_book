@@ -42,6 +42,7 @@ pdf:
 	@python3 scripts/latex_postprocessor.py
 	@cp _static/logos/fire-emoji.png _build/latex/
 	@cp _static/logos/logo-mlsysbook.png _build/latex/
+	@cp _static/images/tito.png _build/latex/
 	@echo ""
 	@# Compile PDF with XeLaTeX
 	@echo "🔥 Compiling PDF with XeLaTeX..."

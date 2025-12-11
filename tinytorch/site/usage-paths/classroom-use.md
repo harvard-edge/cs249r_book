@@ -106,7 +106,7 @@
 
 The TinyTorch course consists of 20 progressive modules organized into learning stages.
 
-** See [Complete Course Structure](../chapters/00-introduction.md)** for detailed module descriptions, learning objectives, and prerequisites for each module.
+**See [Complete Course Structure](../chapters/00-introduction.md)** for detailed module descriptions, learning objectives, and prerequisites for each module.
 
 ---
 
