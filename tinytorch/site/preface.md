@@ -1,7 +1,7 @@
 # Welcome
 
 <div style="text-align: center; margin: 1rem 0 2rem 0;">
-<img src="_static/images/tito.png" alt="Tito the TinyTorch mascot" style="width: 300px;">
+<img src="_static/images/tito.png" alt="TinyTorch" style="width: 300px;">
 </div>
 
 Everyone wants to be an astronaut 🧑‍🚀. Very few want to be the rocket scientist 🚀.
