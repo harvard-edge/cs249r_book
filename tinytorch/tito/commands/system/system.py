@@ -34,21 +34,13 @@ class SystemCommand(BaseCommand):
         info_cmd = InfoCommand(self.config)
         info_cmd.add_arguments(info_parser)
 
-        # Health subcommand (quick check)
+        # Health subcommand
         health_parser = subparsers.add_parser(
             'health',
-            help='Quick environment health check'
+            help='Environment health check and validation'
         )
         health_cmd = HealthCommand(self.config)
         health_cmd.add_arguments(health_parser)
-
-        # Doctor subcommand (alias for health - comprehensive validation)
-        doctor_parser = subparsers.add_parser(
-            'doctor',
-            help='Comprehensive environment validation and diagnosis'
-        )
-        doctor_cmd = HealthCommand(self.config)
-        doctor_cmd.add_arguments(doctor_parser)
 
         # Jupyter subcommand
         jupyter_parser = subparsers.add_parser(
@@ -66,10 +58,9 @@ class SystemCommand(BaseCommand):
                 "[bold cyan]System Commands[/bold cyan]\n\n"
                 "Available subcommands:\n"
                 "  • [bold]info[/bold]    - Show system/environment information\n"
-                "  • [bold]health[/bold]  - Quick environment health check\n"
-                "  • [bold]doctor[/bold]  - Comprehensive environment validation\n"
+                "  • [bold]health[/bold]  - Environment health check and validation\n"
                 "  • [bold]jupyter[/bold] - Start Jupyter notebook server\n\n"
-                "[dim]Example: tito system doctor[/dim]",
+                "[dim]Example: tito system health[/dim]",
                 title="System Command Group",
                 border_style="bright_cyan"
             ))
@@ -79,7 +70,7 @@ class SystemCommand(BaseCommand):
         if args.system_command == 'info':
             cmd = InfoCommand(self.config)
             return cmd.execute(args)
-        elif args.system_command in ('health', 'doctor'):
+        elif args.system_command == 'health':
             cmd = HealthCommand(self.config)
             return cmd.execute(args)
         elif args.system_command == 'jupyter':

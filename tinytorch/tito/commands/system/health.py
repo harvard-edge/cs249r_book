@@ -1,7 +1,5 @@
 """
-Health command for TinyTorch CLI: quick environment health check.
-
-For comprehensive validation (60+ tests), use `tito system check` instead.
+Health command for TinyTorch CLI: environment health check and validation.
 """
 
 import sys

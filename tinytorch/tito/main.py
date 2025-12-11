@@ -109,7 +109,7 @@ class TinyTorchCLI:
                 (f'[{Theme.CAT_COMMUNITY}]tito community logout[/{Theme.CAT_COMMUNITY}]', 'Log out of TinyTorch'),
             ],
             'help_docs': [
-                (f'[{Theme.CAT_HELP}]tito system doctor[/{Theme.CAT_HELP}]', 'Check environment health'),
+                (f'[{Theme.CAT_HELP}]tito system health[/{Theme.CAT_HELP}]', 'Check environment health'),
                 (f'[{Theme.CAT_HELP}]tito --help[/{Theme.CAT_HELP}]', 'See all commands'),
             ]
         }
@@ -226,7 +226,7 @@ class TinyTorchCLI:
                 "Environment validation failed:\n" + "\n".join(f"  • {issue}" for issue in issues),
                 "Environment Issues"
             )
-            self.console.print("\n[dim]Run 'tito system doctor' for detailed diagnosis[/dim]")
+            self.console.print("\n[dim]Run 'tito system health' for detailed diagnosis[/dim]")
             # Return True to allow command execution despite validation issues
             # This is temporary for development
             return True
@@ -309,12 +309,12 @@ class TinyTorchCLI:
             if parsed_args.command and not self.config.no_color and not skip_banner:
                 print_banner()
             
-            # Validate environment for most commands (skip for doctor)
+            # Validate environment for most commands (skip for health)
             skip_validation = (
                 parsed_args.command in [None, 'version', 'help'] or
-                (parsed_args.command == 'system' and 
-                 hasattr(parsed_args, 'system_command') and 
-                 parsed_args.system_command == 'doctor')
+                (parsed_args.command == 'system' and
+                 hasattr(parsed_args, 'system_command') and
+                 parsed_args.system_command == 'health')
             )
             if not skip_validation:
                 if not self.validate_environment():

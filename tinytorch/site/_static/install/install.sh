@@ -290,7 +290,7 @@ print_success_message() {
     echo -e "${BOLD}Useful commands:${NC}"
     echo ""
     echo -e "  ${CYAN}tito module status${NC}         # View your progress"
-    echo -e "  ${CYAN}tito system doctor${NC}         # Check environment health"
+    echo -e "  ${CYAN}tito system health${NC}         # Check environment health"
     echo -e "  ${CYAN}tito update${NC}                # Check for updates"
     echo ""
     echo -e "${DIM}Documentation: https://tinytorch.ai${NC}"
