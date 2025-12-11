@@ -540,13 +540,28 @@
 
     // Intercept navbar subscribe link
     setTimeout(() => {
-      const navSubscribeLink = document.querySelector('a[href*="buttondown.email/mlsysbook"]');
-      if (navSubscribeLink) {
-        navSubscribeLink.addEventListener('click', function(e) {
-          e.preventDefault();
-          openModal();
-        });
-      }
+      // Look for subscribe links in navbar
+      const subscribeSelectors = [
+        'a[href*="buttondown.email/mlsysbook"]',
+        'a[href="#subscribe"]',
+        'a[href*="subscribe"]',
+        '#navbar-subscribe-btn',
+        '.subscribe-link'
+      ];
+
+      subscribeSelectors.forEach(selector => {
+        try {
+          const links = document.querySelectorAll(selector);
+          links.forEach(link => {
+            link.addEventListener('click', function(e) {
+              e.preventDefault();
+              openModal();
+            });
+          });
+        } catch (err) {
+          // Selector not supported, continue
+        }
+      });
     }, 1000);
   }
 
