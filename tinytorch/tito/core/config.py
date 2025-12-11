@@ -84,8 +84,9 @@ class CLIConfig:
         if not self.assignments_dir.exists():
             issues.append(f"Assignments directory not found: {self.assignments_dir}")
         
-        if not self.tinytorch_dir.exists():
-            issues.append(f"TinyTorch package not found: {self.tinytorch_dir}")
+        # tinytorch_dir check removed - the project root IS tinytorch
+        # if not self.tinytorch_dir.exists():
+        #     issues.append(f"TinyTorch package not found: {self.tinytorch_dir}")
         
         # Check required packages
         for package in self.required_packages:
