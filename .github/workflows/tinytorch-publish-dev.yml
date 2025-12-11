@@ -1,7 +1,7 @@
 name: 🔥 TinyTorch Publish (Dev)
 
 # Builds and deploys TinyTorch site to dev preview
-# Optionally builds fresh PDFs, otherwise uses latest artifacts
+# Calls centralized PDF workflow, then builds and deploys site
 
 on:
   push:
@@ -9,17 +9,10 @@ on:
     paths:
       - 'tinytorch/site/**'
       - 'tinytorch/src/**'
+      - 'tinytorch/paper/**'
       - '.github/workflows/tinytorch-publish-dev.yml'
+      - '.github/workflows/tinytorch-build-pdfs.yml'
   workflow_dispatch:
-    inputs:
-      build_guide:
-        description: 'Build Course Guide PDF'
-        type: boolean
-        default: true
-      build_paper:
-        description: 'Build Research Paper PDF'
-        type: boolean
-        default: true
 
 permissions:
   contents: read
@@ -30,78 +23,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-guide:
-    name: '📚 Build Course Guide'
-    runs-on: ubuntu-latest
-    if: inputs.build_guide != false
-
-    steps:
-      - name: 📥 Checkout
-        uses: actions/checkout@v4
-
-      - name: 🐍 Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-          cache-dependency-path: 'tinytorch/site/requirements.txt'
-
-      - name: 📦 Install dependencies
-        working-directory: tinytorch
-        run: |
-          pip install --upgrade pip
-          pip install -r site/requirements.txt
-          pip install -e .
-
-      - name: 📚 Generate LaTeX
-        working-directory: tinytorch/site
-        run: |
-          jupyter-book build . --builder latex --config _config_pdf.yml
-          python3 scripts/latex_postprocessor.py
-          cp _static/logos/fire-emoji.png _build/latex/
-          cp _static/logos/logo-mlsysbook.png _build/latex/
-
-      - name: 📚 Compile PDF with XeLaTeX
-        uses: xu-cheng/latex-action@v3
-        with:
-          root_file: tinytorch-course.tex
-          working_directory: tinytorch/site/_build/latex
-          latexmk_use_xelatex: true
-
-      - name: 📤 Upload PDF Guide
-        uses: actions/upload-artifact@v4
-        with:
-          name: TinyTorch-Guide
-          path: tinytorch/site/_build/latex/tinytorch-course.pdf
-          retention-days: 90
-
-  build-paper:
-    name: '📑 Build Research Paper'
-    runs-on: ubuntu-latest
-    if: inputs.build_paper != false
-
-    steps:
-      - name: 📥 Checkout
-        uses: actions/checkout@v4
-
-      - name: 📑 Compile Paper with LuaLaTeX
-        uses: xu-cheng/latex-action@v3
-        with:
-          root_file: paper.tex
-          working_directory: tinytorch/paper
-          latexmk_use_lualatex: true
-
-      - name: 📤 Upload PDF Paper
-        uses: actions/upload-artifact@v4
-        with:
-          name: TinyTorch-Paper
-          path: tinytorch/paper/paper.pdf
-          retention-days: 90
+  build-pdfs:
+    name: '📚 Build PDFs'
+    uses: ./.github/workflows/tinytorch-build-pdfs.yml
 
   build-and-deploy:
     name: '🔥 Build & Deploy TinyTorch Dev'
     runs-on: ubuntu-latest
-    needs: [build-guide, build-paper]
+    needs: [build-pdfs]
     if: always()
 
     steps:
@@ -130,73 +59,19 @@ jobs:
           touch _build/html/.nojekyll
           echo "✅ Build complete"
 
-      - name: 📥 Download PDF Guide (from this run)
-        if: needs.build-guide.result == 'success'
+      - name: 📥 Download PDF Guide
         uses: actions/download-artifact@v4
         continue-on-error: true
         with:
           name: TinyTorch-Guide
           path: ./pdf-artifacts/guide
 
-      - name: 📥 Download PDF Paper (from this run)
-        if: needs.build-paper.result == 'success'
+      - name: 📥 Download PDF Paper
         uses: actions/download-artifact@v4
         continue-on-error: true
         with:
           name: TinyTorch-Paper
           path: ./pdf-artifacts/paper
-
-      - name: 📥 Find latest PDF artifacts (for PDFs not built fresh)
-        id: find-pdfs
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "🔎 Searching for latest PDF artifacts..."
-
-          # Search multiple workflows for PDF artifacts (in priority order)
-          WORKFLOWS="tinytorch-publish-live.yml tinytorch-publish-dev.yml tinytorch-build-pdfs.yml"
-
-          for WORKFLOW in $WORKFLOWS; do
-            echo "Checking $WORKFLOW..."
-            RUN_ID=$(gh api repos/${{ github.repository }}/actions/workflows/$WORKFLOW/runs \
-              --jq '.workflow_runs[] | select(.status == "completed" and .conclusion == "success") | .id' \
-              2>/dev/null | head -n 1)
-
-            if [ -n "$RUN_ID" ]; then
-              # Verify this run has PDF artifacts
-              HAS_GUIDE=$(gh api repos/${{ github.repository }}/actions/runs/$RUN_ID/artifacts \
-                --jq '.artifacts[] | select(.name == "TinyTorch-Guide") | .id' 2>/dev/null | head -n 1)
-
-              if [ -n "$HAS_GUIDE" ]; then
-                echo "✅ Found PDF artifacts in $WORKFLOW (run $RUN_ID)"
-                echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
-                exit 0
-              fi
-            fi
-          done
-
-          echo "⚠️ No PDF artifacts found in any workflow"
-          echo "run_id=" >> $GITHUB_OUTPUT
-
-      - name: 📥 Download PDF Guide (from previous run)
-        if: needs.build-guide.result != 'success' && steps.find-pdfs.outputs.run_id != ''
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: TinyTorch-Guide
-          path: ./pdf-artifacts/guide
-          run-id: ${{ steps.find-pdfs.outputs.run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: 📥 Download PDF Paper (from previous run)
-        if: needs.build-paper.result != 'success' && steps.find-pdfs.outputs.run_id != ''
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: TinyTorch-Paper
-          path: ./pdf-artifacts/paper
-          run-id: ${{ steps.find-pdfs.outputs.run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 📁 Inject PDFs into site
         run: |

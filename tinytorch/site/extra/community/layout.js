@@ -4,8 +4,14 @@
     const NETLIFY_URL = "https://tinytorch.netlify.app"; 
 
     // URL Base Path Logic for Community Site Hosting
-    const isCommunitySite =  window.location.hostname === 'mlsysbook.ai' || window.location.hostname === 'tinytorch.ai' || (window.location.hostname === 'localhost' && window.location.port === '8000');
-    const basePath = isCommunitySite ? '/community' : '';
+    let basePath = '';
+    const hostname = window.location.hostname;
+    
+    if (hostname === 'mlsysbook.ai' || hostname === 'tinytorch.ai' || (hostname === 'localhost' && window.location.port === '8000')) {
+        basePath = '/community';
+    } else if (hostname === 'harvard-edge.github.io') {
+        basePath = '/cs249r_book_dev/tinytorch/community';
+    }
 
     function forceLogin() {
         console.warn("Session expired or invalid. Redirecting to login...");
