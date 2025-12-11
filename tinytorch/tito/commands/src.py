@@ -194,10 +194,25 @@ class SrcCommand(BaseCommand):
     def _handle_export(self, args: Namespace, console) -> int:
         """Handle the export subcommand."""
         logger.info("Handling export subcommand")
-        
+
         # Print starting directory for debugging
         console.print(f"running this from {Path.cwd()}")
-        
+
+        # Guard: Ensure we're in the correct directory (tinytorch repo root, not parent)
+        # The package should export to tinytorch/tinytorch/, not tinytorch/
+        if not (Path.cwd() / "tinytorch" / "__init__.py").exists():
+            console.print(Panel(
+                "[red]❌ Must run from TinyTorch repo root, not parent directory[/red]\n\n"
+                "[dim]Expected structure:[/dim]\n"
+                "[dim]  tinytorch/          ← run from here[/dim]\n"
+                "[dim]  ├── src/[/dim]\n"
+                "[dim]  ├── tinytorch/      ← package exports here[/dim]\n"
+                "[dim]  │   └── __init__.py[/dim]\n"
+                "[dim]  └── settings.ini[/dim]",
+                title="Wrong Directory", border_style="red"
+            ))
+            return 1
+
         # Determine what to export
         if hasattr(args, 'modules') and args.modules:
             logger.info(f"Exporting specific modules: {args.modules}")
