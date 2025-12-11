@@ -137,7 +137,7 @@ Each milestone has a README explaining:
 - Expected results
 - What you're learning
 
-** See [Historical Milestones](chapters/milestones.md)** for the complete progression through ML history.
+**See [Historical Milestones](chapters/milestones.md)** for the complete progression through ML history.
 
 ### Your First Module (15 Minutes)
 
@@ -171,7 +171,7 @@ TinyTorch has 20 modules organized in progressive tiers:
 - **Optimization (14-19)**: Production optimization - profiling, quantization, benchmarking
 - **Capstone (20)**: Torch Olympics Competition
 
-** See [Complete Course Structure](chapters/00-introduction.md)** for detailed module descriptions.
+**See [Complete Course Structure](chapters/00-introduction.md)** for detailed module descriptions.
 
 ### Essential Commands Reference
 
@@ -192,7 +192,7 @@ tito community join
 tito benchmark baseline
 ```
 
-** See [TITO CLI Reference](tito/overview.md)** for complete command documentation.
+**See [TITO CLI Reference](tito/overview.md)** for complete command documentation.
 
 ### Notebook Platform Options
 
@@ -415,7 +415,7 @@ tito grade export --module 01_tensor --output grades_module01.csv
 - **System health monitoring** (`tito module status --comprehensive`)
 - **Community support** via GitHub Issues
 
-** See [Complete Course Structure](chapters/00-introduction.md)** for full curriculum overview.
+**See [Complete Course Structure](chapters/00-introduction.md)** for full curriculum overview.
 
 ---
 

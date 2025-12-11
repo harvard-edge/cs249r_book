@@ -1,6 +1,6 @@
 # Welcome
 
-Everyone wants to be an astronaut. Very few want to be the rocket scientist.
+Everyone wants to be an astronaut 🧑‍🚀. Very few want to be the rocket scientist 🚀.
 
 In machine learning, we see the same pattern. Everyone wants to train models, run inference, deploy AI. Very few want to understand how the frameworks actually work. Even fewer want to build one.
 
