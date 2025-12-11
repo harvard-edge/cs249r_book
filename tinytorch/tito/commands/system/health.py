@@ -52,9 +52,9 @@ class HealthCommand(BaseCommand):
         )
 
         if venv_exists and in_venv:
-            venv_status = "[green]✅ Active[/green]"
+            venv_status = "[green]✅ OK[/green]"
         elif venv_exists:
-            venv_status = "[yellow]⚠️  Not Active[/yellow]"
+            venv_status = "[yellow]⚠️  Not Activated[/yellow]"
         else:
             venv_status = "[red]❌ Missing[/red]"
         env_table.add_row("Virtual Environment", venv_status)
