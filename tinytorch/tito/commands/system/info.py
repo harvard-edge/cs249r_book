@@ -65,10 +65,10 @@ class InfoCommand(BaseCommand):
         )
 
         if venv_exists and in_venv:
-            venv_status = "✅ Active"
+            venv_status = "✅ OK"
             venv_path = os.environ.get('VIRTUAL_ENV', str(self.venv_path))
         elif venv_exists:
-            venv_status = "⚠️  Exists (Not Active)"
+            venv_status = "⚠️  Not Activated"
             venv_path = str(self.venv_path)
         else:
             venv_status = "❌ Not Found"

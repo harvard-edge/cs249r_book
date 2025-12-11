@@ -344,7 +344,7 @@ except Exception as e:
         env_table.add_row("Python", "✅", f"{env['python_version']}")
         
         # Virtual environment
-        venv_status = "✅ Active" if env['virtual_env_active'] else "❌ Not Active"
+        venv_status = "✅ OK" if env['virtual_env_active'] else "❌ Not Activated"
         env_table.add_row("Virtual Env", venv_status, "Required for development")
         
         # Dependencies
