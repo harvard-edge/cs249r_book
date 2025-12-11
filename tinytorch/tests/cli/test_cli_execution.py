@@ -95,7 +95,7 @@ class TestCommandExecution:
 
     @pytest.mark.parametrize("command,subcommand", [
         ('system', 'info'),
-        ('system', 'doctor'),
+        ('system', 'health'),
         ('module', 'status'),
         ('module', 'list'),
         ('community', 'join'),

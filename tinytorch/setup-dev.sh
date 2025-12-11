@@ -40,7 +40,7 @@ echo "💡 To activate the environment in the future, run:"
 echo "   source .venv/bin/activate"
 echo ""
 echo "💡 Quick commands:"
-echo "   tito system doctor    - Diagnose environment"
+echo "   tito system health    - Check environment health"
 echo "   tito module test      - Run tests"
 echo "   tito --help           - See all commands"
 

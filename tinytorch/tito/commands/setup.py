@@ -319,9 +319,9 @@ class SetupCommand(BaseCommand):
             return False
 
     def check_tinytorch_package(self) -> bool:
-        """Check if Tiny🔥Torch package is installed."""
+        """Check if Tiny🔥Torch package is installed (tito CLI)."""
         try:
-            import tinytorch
+            import tito
             return True
         except ImportError:
             return False

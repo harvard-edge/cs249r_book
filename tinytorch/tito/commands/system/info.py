@@ -117,9 +117,7 @@ class InfoCommand(BaseCommand):
         # Helpful tips pointing to other commands
         console.print(Panel(
             "[dim]💡 For more information:[/dim]\n"
-            "• Run [cyan]tito system health[/cyan] for quick environment check\n"
-            "• Run [cyan]tito system version[/cyan] to see all package versions\n"
-            "• Run [cyan]tito system check[/cyan] for comprehensive validation (60+ tests)",
+            "• Run [cyan]tito system health[/cyan] for environment health check and validation",
             border_style="blue"
         ))
 

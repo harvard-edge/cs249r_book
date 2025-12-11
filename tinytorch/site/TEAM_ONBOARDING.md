@@ -231,7 +231,7 @@ pip install -r requirements.txt
 pip install -e .
 
 # 4. Verify setup
-tito system doctor
+tito system health
 
 # 5. Start with Module 01
 tito view 01_tensor

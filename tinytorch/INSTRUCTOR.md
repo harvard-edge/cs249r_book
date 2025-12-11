@@ -28,7 +28,7 @@ tito grade setup
 
 ### **2. Verify Installation**
 ```bash
-tito system doctor
+tito system health
 # Should show all green checkmarks
 
 tito grade
@@ -505,7 +505,7 @@ print(f"Memory: {get_memory_usage():.2f} MB")
 **Environment Problems**
 ```bash
 # Student fix:
-tito system doctor
+tito system health
 tito system reset
 ```
 

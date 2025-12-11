@@ -23,6 +23,7 @@ from .core.config import CLIConfig
 from .core.virtual_env_manager import get_venv_path
 from .core.console import get_console, print_banner, print_error, print_ascii_logo
 from .core.exceptions import TinyTorchCLIError
+from .core.theme import Theme
 from rich.panel import Panel
 from .commands.base import BaseCommand
 from .commands.test import TestCommand
@@ -95,21 +96,21 @@ class TinyTorchCLI:
         # Welcome screen sections (used for both tito and tito --help)
         self.welcome_sections = {
             'quick_start': [
-                ('[green]tito setup[/green]', 'First-time setup (includes verification)'),
-                ('[green]tito module start 01[/green]', 'Start Module 01 (tensors)'),
-                ('[green]tito module complete 01[/green]', 'Test, export, and track progress'),
+                (f'[{Theme.CAT_QUICKSTART}]tito setup[/{Theme.CAT_QUICKSTART}]', 'First-time setup (includes verification)'),
+                (f'[{Theme.CAT_QUICKSTART}]tito module start 01[/{Theme.CAT_QUICKSTART}]', 'Start Module 01 (tensors)'),
+                (f'[{Theme.CAT_QUICKSTART}]tito module complete 01[/{Theme.CAT_QUICKSTART}]', 'Test, export, and track progress'),
             ],
             'track_progress': [
-                ('[yellow]tito module status[/yellow]', 'View module progress'),
-                ('[yellow]tito milestones status[/yellow]', 'View unlocked capabilities'),
+                (f'[{Theme.CAT_PROGRESS}]tito module status[/{Theme.CAT_PROGRESS}]', 'View module progress'),
+                (f'[{Theme.CAT_PROGRESS}]tito milestones status[/{Theme.CAT_PROGRESS}]', 'View unlocked capabilities'),
             ],
             'community': [
-                ('[cyan]tito community login[/cyan]', 'Log in to TinyTorch'),
-                ('[cyan]tito community logout[/cyan]', 'Log out of TinyTorch'),
+                (f'[{Theme.CAT_COMMUNITY}]tito community login[/{Theme.CAT_COMMUNITY}]', 'Log in to TinyTorch'),
+                (f'[{Theme.CAT_COMMUNITY}]tito community logout[/{Theme.CAT_COMMUNITY}]', 'Log out of TinyTorch'),
             ],
             'help_docs': [
-                ('[magenta]tito system doctor[/magenta]', 'Check environment health'),
-                ('[magenta]tito --help[/magenta]', 'See all commands'),
+                (f'[{Theme.CAT_HELP}]tito system health[/{Theme.CAT_HELP}]', 'Check environment health'),
+                (f'[{Theme.CAT_HELP}]tito --help[/{Theme.CAT_HELP}]', 'See all commands'),
             ]
         }
     
@@ -118,22 +119,22 @@ class TinyTorchCLI:
         lines = []
 
         # Quick Start
-        lines.append("[bold cyan]Quick Start:[/bold cyan]")
+        lines.append(f"[{Theme.SECTION}]Quick Start:[/{Theme.SECTION}]")
         for cmd, desc in self.welcome_sections['quick_start']:
             lines.append(f"  {cmd:<38} {desc}")
 
         # Track Progress
-        lines.append("\n[bold cyan]Track Progress:[/bold cyan]")
+        lines.append(f"\n[{Theme.SECTION}]Track Progress:[/{Theme.SECTION}]")
         for cmd, desc in self.welcome_sections['track_progress']:
             lines.append(f"  {cmd:<38} {desc}")
 
         # Community
-        lines.append("\n[bold cyan]Community:[/bold cyan]")
+        lines.append(f"\n[{Theme.SECTION}]Community:[/{Theme.SECTION}]")
         for cmd, desc in self.welcome_sections['community']:
             lines.append(f"  {cmd:<38} {desc}")
 
         # Help & Docs
-        lines.append("\n[bold cyan]Help & Docs:[/bold cyan]")
+        lines.append(f"\n[{Theme.SECTION}]Help & Docs:[/{Theme.SECTION}]")
         for cmd, desc in self.welcome_sections['help_docs']:
             lines.append(f"  {cmd:<38} {desc}")
 
@@ -225,7 +226,7 @@ class TinyTorchCLI:
                 "Environment validation failed:\n" + "\n".join(f"  • {issue}" for issue in issues),
                 "Environment Issues"
             )
-            self.console.print("\n[dim]Run 'tito doctor' for detailed diagnosis[/dim]")
+            self.console.print("\n[dim]Run 'tito system health' for detailed diagnosis[/dim]")
             # Return True to allow command execution despite validation issues
             # This is temporary for development
             return True
@@ -240,9 +241,9 @@ class TinyTorchCLI:
         print_ascii_logo()
 
         # Create commands table
-        table = Table(show_header=True, header_style="bold cyan", box=None, padding=(0, 2))
-        table.add_column("Command", style="green", width=15)
-        table.add_column("Description", style="dim")
+        table = Table(show_header=True, header_style=Theme.SECTION, box=None, padding=(0, 2))
+        table.add_column("Command", style=Theme.COMMAND, width=15)
+        table.add_column("Description", style=Theme.DIM)
 
         # Add all commands dynamically
         for cmd_name, cmd_class in self.commands.items():
@@ -250,20 +251,20 @@ class TinyTorchCLI:
             table.add_row(cmd_name, cmd.description)
 
         self.console.print()
-        self.console.print("[bold cyan]Tiny🔥Torch CLI[/bold cyan] - Build ML systems from scratch")
+        self.console.print(f"[{Theme.SECTION}]Tiny🔥Torch CLI[/{Theme.SECTION}] - Build ML systems from scratch")
         self.console.print()
-        self.console.print("[bold]Usage:[/bold] [cyan]tito[/cyan] [yellow]COMMAND[/yellow] [dim][OPTIONS][/dim]")
+        self.console.print(f"[{Theme.EMPHASIS}]Usage:[/{Theme.EMPHASIS}] [{Theme.INFO}]tito[/{Theme.INFO}] [{Theme.OPTION}]COMMAND[/{Theme.OPTION}] [{Theme.DIM}][OPTIONS][/{Theme.DIM}]")
         self.console.print()
-        self.console.print("[bold cyan]Available Commands:[/bold cyan]")
+        self.console.print(f"[{Theme.SECTION}]Available Commands:[/{Theme.SECTION}]")
         self.console.print(table)
         self.console.print()
         self.console.print(self._generate_welcome_text())
         self.console.print()
-        self.console.print("[bold cyan]Global Options:[/bold cyan]")
-        self.console.print("  [yellow]--help, -h[/yellow]      Show this help message")
-        self.console.print("  [yellow]--version[/yellow]       Show version number")
-        self.console.print("  [yellow]--verbose, -v[/yellow]   Enable verbose output")
-        self.console.print("  [yellow]--no-color[/yellow]      Disable colored output")
+        self.console.print(f"[{Theme.SECTION}]Global Options:[/{Theme.SECTION}]")
+        self.console.print(f"  [{Theme.OPTION}]--help, -h[/{Theme.OPTION}]      Show this help message")
+        self.console.print(f"  [{Theme.OPTION}]--version[/{Theme.OPTION}]       Show version number")
+        self.console.print(f"  [{Theme.OPTION}]--verbose, -v[/{Theme.OPTION}]   Enable verbose output")
+        self.console.print(f"  [{Theme.OPTION}]--no-color[/{Theme.OPTION}]      Disable colored output")
         self.console.print()
 
         return 0
@@ -308,12 +309,12 @@ class TinyTorchCLI:
             if parsed_args.command and not self.config.no_color and not skip_banner:
                 print_banner()
             
-            # Validate environment for most commands (skip for doctor)
+            # Validate environment for most commands (skip for health)
             skip_validation = (
                 parsed_args.command in [None, 'version', 'help'] or
-                (parsed_args.command == 'system' and 
-                 hasattr(parsed_args, 'system_command') and 
-                 parsed_args.system_command == 'doctor')
+                (parsed_args.command == 'system' and
+                 hasattr(parsed_args, 'system_command') and
+                 parsed_args.system_command == 'health')
             )
             if not skip_validation:
                 if not self.validate_environment():
@@ -328,7 +329,7 @@ class TinyTorchCLI:
                 self.console.print(Panel(
                     self._generate_welcome_text(),
                     title="Welcome to Tiny🔥Torch!",
-                    border_style="bright_green"
+                    border_style=Theme.BORDER_WELCOME
                 ))
                 return 0
             
@@ -342,7 +343,7 @@ class TinyTorchCLI:
                 return 1
                 
         except KeyboardInterrupt:
-            self.console.print("\n[yellow]Operation cancelled by user[/yellow]")
+            self.console.print(f"\n[{Theme.WARNING}]Operation cancelled by user[/{Theme.WARNING}]")
             return 130
         except TinyTorchCLIError as e:
             logger.error(f"CLI error: {e}")

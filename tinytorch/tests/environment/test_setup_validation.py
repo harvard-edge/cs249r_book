@@ -9,7 +9,7 @@ Usage:
     pytest tests/environment/test_setup_validation.py -v
 
     Or via TITO:
-    tito system doctor --verify
+    tito system health --verify
 """
 
 import sys
@@ -402,7 +402,7 @@ def run_all_validation_tests():
     """
     Run all validation tests and provide a summary.
 
-    This is called by `tito system doctor --verify` to ensure
+    This is called by `tito system health --verify` to ensure
     the environment is correctly configured.
     """
     import pytest
@@ -426,7 +426,7 @@ def run_all_validation_tests():
     else:
         print("\n" + "="*70)
         print("❌ Some validation tests failed")
-        print("🔧 Please fix the issues above and run: tito system doctor --verify")
+        print("🔧 Please fix the issues above and run: tito system health --verify")
         print("="*70)
 
     return exit_code

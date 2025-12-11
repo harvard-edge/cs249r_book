@@ -8,7 +8,7 @@
   [![Book](https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&label=Book&logo=githubactions&cacheSeconds=300)](https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml)
   [![TinyTorch](https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/tinytorch-ci.yml?branch=dev&label=TinyTorch&logo=python&cacheSeconds=300)](https://github.com/harvard-edge/cs249r_book/actions/workflows/tinytorch-ci.yml)
   ![Updated](https://img.shields.io/github/last-commit/harvard-edge/cs249r_book/dev?label=Updated&logo=git&cacheSeconds=300)
-  [![License](https://img.shields.io/badge/License-CC--BY--NC--SA%204.0-blue.svg)](https://github.com/harvard-edge/cs249r_book/blob/dev/LICENSE.md)
+  [![License](https://img.shields.io/badge/License-CC--BY--NC--ND%204.0-blue.svg)](https://github.com/harvard-edge/cs249r_book/blob/dev/LICENSE.md)
   [![Cite](https://img.shields.io/badge/Cite-IEEE%202024-blue?logo=ieee)](#-citation--license)
   [![Fund Us](https://img.shields.io/badge/Fund%20Us-Open%20Collective-blue.svg?logo=open-collective)](https://opencollective.com/mlsysbook)
 
@@ -229,8 +229,15 @@ See [book/README.md](book/README.md) and [tinytorch/README.md](tinytorch/README.
 ```
 
 ### License
-- **Book content**: Creative Commons Attribution–NonCommercial–ShareAlike 4.0 International (CC BY-NC-SA 4.0)
-- **TinyTorch code**: MIT License
+
+This project uses a dual-license structure:
+
+| Component | License | What It Means |
+|-----------|---------|---------------|
+| **Book content** | [CC BY-NC-ND 4.0](LICENSE.md) | Share freely with attribution; no commercial use; no derivatives |
+| **TinyTorch code** | [Apache 2.0](tinytorch/LICENSE) | Use, modify, and distribute freely; includes patent protection |
+
+The textbook content (chapters, figures, explanations) is educational material that should circulate with attribution and without commercial exploitation. The software framework is a tool designed to be easy for anyone to use, modify, or integrate into their own projects.
 
 ---
 

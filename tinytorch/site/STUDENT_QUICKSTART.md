@@ -17,7 +17,7 @@ cd TinyTorch
 source activate.sh
 
 # Verify setup
-tito system doctor
+tito system health
 ```
 
 ✓ **You should see all green checkmarks!What the setup script does:**
@@ -153,7 +153,7 @@ tito module test 02_tensor --verbose
 ### **Environment Issues**
 ```bash
 # Full system check
-tito system doctor
+tito system health
 
 # Reset if needed
 tito system reset
