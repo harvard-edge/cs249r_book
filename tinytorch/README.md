@@ -55,21 +55,19 @@ A **complete ML framework** capable of:
 ## Quick Start
 
 ```bash
-# Clone the repository
-git clone https://github.com/harvard-edge/cs249r_book.git
-cd cs249r_book/tinytorch
+# One-line install
+curl -sSL tinytorch.ai/install | bash
 
-# Install in editable mode
-pip install -e .
-
-# Verify installation
-tito doctor
+# Activate and get started
+cd tinytorch
+source .venv/bin/activate
+tito setup
 
 # Start building!
 tito module start 01
 ```
 
-> **Note**: TinyTorch is part of the [ML Systems Book](https://mlsysbook.ai) project. Installing from the book repository keeps everything together and lets you easily update with `git pull`.
+> **Tip**: Run the installer from a project folder (e.g., `~/projects`). It will create a `tinytorch/` directory with everything you need. Update anytime with `tito update`.
 
 ---
 
