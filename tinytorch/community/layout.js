@@ -4,8 +4,14 @@
     const NETLIFY_URL = "https://tinytorch.netlify.app"; 
 
     // URL Base Path Logic for Community Site Hosting
-    const isCommunitySite =  window.location.hostname === 'mlsysbook.ai' || window.location.hostname === 'tinytorch.ai' || (window.location.hostname === 'localhost' && window.location.port === '8000');
-    const basePath = isCommunitySite ? '/community' : '';
+    let basePath = '';
+    const hostname = window.location.hostname;
+    
+    if (hostname === 'mlsysbook.ai' || hostname === 'tinytorch.ai' || (hostname === 'localhost' && window.location.port === '8000')) {
+        basePath = '/community';
+    } else if (hostname === 'harvard-edge.github.io') {
+        basePath = '/cs249r_book_dev/tinytorch/community';
+    }
 
     function forceLogin() {
         console.warn("Session expired or invalid. Redirecting to login...");
@@ -1296,7 +1302,11 @@
                 body = { email };
             } else {
                 endpoint = currentMode === 'login' ? '/api/auth/login' : '/api/auth/signup';
-                body = { email, password };
+                body = { 
+                    email, 
+                    password, 
+                    redirect_to: window.location.origin + basePath + '/dashboard.html' 
+                };
             }
             
             const url = `${NETLIFY_URL}${endpoint}`;
@@ -1306,7 +1316,8 @@
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify(body)
+                body: JSON.stringify(body),
+                credentials: 'include'
             });
 
             const data = await response.json();
@@ -1325,30 +1336,21 @@
                     throw new Error(data.error || (currentMode === 'login' ? 'Login failed' : 'Signup failed'));
                 }
 
-                if (currentMode === 'login') {
-                    // Login Success
-                    if (data.access_token) {
-                        localStorage.setItem("tinytorch_token", data.access_token);
-                        if (data.refresh_token) localStorage.setItem("tinytorch_refresh_token", data.refresh_token);
-                        localStorage.setItem("tinytorch_user", JSON.stringify(data.user));
-                        updateNavState(); // Update button state
-                        
-                        const params = new URLSearchParams(window.location.search);
-                        const redirectAction = params.get('action') === 'profile' ? '?action=profile' : '';
-                        const next = params.get('next');
-                        if (next) {
-                            window.location.href = basePath + '/' + next + redirectAction;
-                        } else {
-                            window.location.href = basePath + '/dashboard.html' + redirectAction;
-                        }
-                    }
-                } else {
-                    // Signup Success
-                    alert('Account created successfully! Please check your email to confirm before logging in.');
-                    setMode('login'); // Switch to login
-                    updateNavState(); // Update button state
-                }
-            }
+                            if (currentMode === 'login') {
+                                // Login Success
+                                if (data.access_token) {
+                                    localStorage.setItem("tinytorch_token", data.access_token);
+                                    if (data.refresh_token) localStorage.setItem("tinytorch_refresh_token", data.refresh_token);
+                                    localStorage.setItem("tinytorch_user", JSON.stringify(data.user));
+                                    updateNavState(); // Update button state
+                                    
+                                    window.location.href = basePath + '/dashboard.html';
+                                }
+                            } else {
+                                // Signup Success
+                                alert('Account created successfully! Please check your email to confirm before logging in.');
+                                window.location.href = basePath + '/dashboard.html';
+                            }            }
 
         } catch (error) {
             console.error("Auth error:", error);

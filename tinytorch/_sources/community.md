@@ -33,7 +33,7 @@ There are two primary ways to join and engage with the TinyTorch community:
 You can explore the interactive TinyTorch Community Dashboard directly in your browser:
 
 <p align="center">
-    <a href="/community.html" target="_blank" class="btn btn-primary btn-lg" style="background-color: #ff6600; color: white; padding: 15px 30px; text-align: center; text-decoration: none; display: inline-block; font-size: 20px; margin: 10px 2px; cursor: pointer; border-radius: 8px; border: none;">
+    <a href="community/community.html" target="_blank" class="btn btn-primary btn-lg" style="background-color: #ff6600; color: white; padding: 15px 30px; text-align: center; text-decoration: none; display: inline-block; font-size: 20px; margin: 10px 2px; cursor: pointer; border-radius: 8px; border: none;">
         Explore Dashboard <span class="badge badge-light">🌎</span>
     </a>
 </p>
@@ -66,7 +66,7 @@ tito community stats
 - **Privacy-first** - All data stored locally in `.tinytorch/` directory
 - **Opt-in sharing** - You control what information to share
 
-**Privacy:** All fields are optional. We use anonymous UUIDs (no personal names). Data is stored locally in your project directory. See [Privacy Policy](../docs/PRIVACY_DATA_RETENTION.md) for details.
+**Privacy:** All fields are optional. We use anonymous UUIDs (no personal names). Data is stored locally in your project directory. See [Privacy Policy](PRIVACY_DATA_RETENTION.md) for details.
 
 ---
 
@@ -119,7 +119,7 @@ Teaching TinyTorch in your classroom?
 Built something impressive with TinyTorch?
 
 **Share it with the community:**
-- Post in [GitHub Discussions](https://github.com/harvard-edge/TinyTorch/discussions) under "Show and Tell"
+- Post in [GitHub Discussions](https://github.com/mlsysbook/TinyTorch/discussions) under "Show and Tell"
 - Tag us on social media with #TinyTorch
 - Submit your project for community showcase (coming soon)
 
@@ -132,9 +132,9 @@ Built something impressive with TinyTorch?
 
 ## Stay Updated
 
-**GitHub Watch**: [Enable notifications](https://github.com/harvard-edge/TinyTorch) for releases and updates
+**GitHub Watch**: [Enable notifications](https://github.com/mlsysbook/TinyTorch) for releases and updates
 
-**Follow Development**: Check [GitHub Issues](https://github.com/harvard-edge/TinyTorch/issues) for roadmap and upcoming features
+**Follow Development**: Check [GitHub Issues](https://github.com/mlsysbook/TinyTorch/issues) for roadmap and upcoming features
 
 ---
 

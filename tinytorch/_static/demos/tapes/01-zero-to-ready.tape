@@ -36,7 +36,7 @@ Sleep 500ms
 # STEP 2: CLONE REPOSITORY - Get TinyTorch from GitHub
 # ==============================================================================
 
-Type "git clone https://github.com/mlsysbook/TinyTorch.git"
+Type "git clone https://github.com/harvard-edge/cs249r_book.git"
 Sleep 400ms
 Enter
 Wait+Line@120s /profvjreddi/  # Wait for clone to complete (up to 120s)
@@ -46,34 +46,24 @@ Sleep 500ms
 # STEP 3: ENTER PROJECT - Navigate into TinyTorch
 # ==============================================================================
 
-Type "cd TinyTorch"
+Type "cd cs249r_book/tinytorch"
 Sleep 300ms
 Enter
 Wait+Line@10ms /profvjreddi/
 Sleep 500ms
 
 # ==============================================================================
-# STEP 4: SETUP ENVIRONMENT - Automatic detection (conda/venv)
+# STEP 4: INSTALL - Editable install with pip
 # ==============================================================================
 
-Type "./setup-environment.sh"
+Type "pip install -e ."
 Sleep 400ms
 Enter
-Wait+Line@120s /profvjreddi/  # Setup creates virtual environment (up to 120s)
+Wait+Line@120s /profvjreddi/  # Install dependencies (up to 120s)
 Sleep 1s
 
 # ==============================================================================
-# STEP 5: ACTIVATE - Get access to tito commands
-# ==============================================================================
-
-Type "source activate.sh"
-Sleep 300ms
-Enter
-Wait+Line@10ms /profvjreddi/
-Sleep 1s
-
-# ==============================================================================
-# STEP 6: CHECK STATUS - See all 20 modules ready to build
+# STEP 5: CHECK STATUS - See all 20 modules ready to build
 # ==============================================================================
 
 Type "tito module status"
@@ -83,7 +73,7 @@ Wait+Line@10ms /profvjreddi/
 Sleep 2s
 
 # ==============================================================================
-# STEP 7: READ THE STORY - Understand the TinyTorch philosophy
+# STEP 6: READ THE STORY - Understand the TinyTorch philosophy
 # ==============================================================================
 
 Type "tito logo"

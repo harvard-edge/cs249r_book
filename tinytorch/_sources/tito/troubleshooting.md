@@ -28,9 +28,9 @@ This checks:
 - ✓ Data files intact
 - ✓ All systems ready
 
-**If doctor shows errors**: Follow the specific fixes below.
+**If health shows errors**: Follow the specific fixes below.
 
-**If doctor shows all green**: Your environment is fine - issue is elsewhere.
+**If health shows all green**: Your environment is fine - issue is elsewhere.
 
 </div>
 

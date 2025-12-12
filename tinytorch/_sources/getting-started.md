@@ -39,25 +39,26 @@ Welcome to TinyTorch! This comprehensive guide will get you started whether you'
 Get your development environment ready to build ML systems from scratch:
 
 ```bash
-# Clone repository
-git clone https://github.com/mlsysbook/TinyTorch.git
-cd TinyTorch
+# One-line install (run from a project folder like ~/projects)
+curl -sSL tinytorch.ai/install | bash
 
-# Automated setup (handles everything!)
-./setup-environment.sh
-
-# Activate environment
-source activate.sh
-
-# Verify setup
-tito system health
+# Activate and verify
+cd tinytorch
+source .venv/bin/activate
+tito setup
 ```
 
 **What this does:**
-- Creates optimized virtual environment
-- Installs all dependencies (NumPy, Jupyter, Rich, PyTorch for validation)
-- Configures TinyTorch in development mode
-- Verifies installation with system diagnostics
+- Checks your system (Python 3.8+, git)
+- Downloads TinyTorch to a `tinytorch/` folder
+- Creates an isolated virtual environment
+- Installs all dependencies
+- Verifies installation
+
+**Keeping up to date:**
+```bash
+tito update    # Check for and install updates (your work is preserved)
+```
 
 ### Join the Community (Optional)
 
@@ -136,7 +137,7 @@ Each milestone has a README explaining:
 - Expected results
 - What you're learning
 
-** See [Historical Milestones](chapters/milestones.md)** for the complete progression through ML history.
+**See [Historical Milestones](chapters/milestones.md)** for the complete progression through ML history.
 
 ### Your First Module (15 Minutes)
 
@@ -170,7 +171,7 @@ TinyTorch has 20 modules organized in progressive tiers:
 - **Optimization (14-19)**: Production optimization - profiling, quantization, benchmarking
 - **Capstone (20)**: Torch Olympics Competition
 
-** See [Complete Course Structure](chapters/00-introduction.md)** for detailed module descriptions.
+**See [Complete Course Structure](chapters/00-introduction.md)** for detailed module descriptions.
 
 ### Essential Commands Reference
 
@@ -191,7 +192,7 @@ tito community join
 tito benchmark baseline
 ```
 
-** See [TITO CLI Reference](tito/overview.md)** for complete command documentation.
+**See [TITO CLI Reference](tito/overview.md)** for complete command documentation.
 
 ### Notebook Platform Options
 
@@ -242,13 +243,11 @@ TinyTorch provides a complete ML systems engineering course with NBGrader integr
 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem; margin: 2rem 0;">
 
 <div style="background: white; padding: 1.5rem; border-radius: 0.5rem; border: 1px solid #dee2e6;">
-<h4 style="color: #495057; margin: 0 0 0.5rem 0;">1⃣ Clone & Setup (10 min)</h4>
+<h4 style="color: #495057; margin: 0 0 0.5rem 0;">1⃣ Install & Setup (10 min)</h4>
 <div style="background: #f8f9fa; padding: 1rem; border-radius: 0.25rem; font-family: monospace; font-size: 0.85rem; margin: 0.5rem 0;">
-git clone TinyTorch<br>
-cd TinyTorch<br>
-python -m venv .venv<br>
+curl -sSL tinytorch.ai/install | bash<br>
+cd tinytorch<br>
 source .venv/bin/activate<br>
-pip install -r requirements.txt<br>
 pip install nbgrader
 </div>
 <p style="font-size: 0.9rem; margin: 0; color: #6c757d;">One-time environment setup</p>
@@ -416,7 +415,7 @@ tito grade export --module 01_tensor --output grades_module01.csv
 - **System health monitoring** (`tito module status --comprehensive`)
 - **Community support** via GitHub Issues
 
-** See [Complete Course Structure](chapters/00-introduction.md)** for full curriculum overview.
+**See [Complete Course Structure](chapters/00-introduction.md)** for full curriculum overview.
 
 ---
 

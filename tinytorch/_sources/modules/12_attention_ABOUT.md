@@ -581,6 +581,6 @@ Browse the notebook source code and understand the implementation.
 ---
 
 <div class="prev-next-area">
-<a class="left-prev" href="../chapters/11_embeddings.html" title="previous page">← Module 11: Embeddings</a>
-<a class="right-next" href="../chapters/13_transformers.html" title="next page">Module 13: Transformers →</a>
+<a class="left-prev" href="11_embeddings_ABOUT.html" title="previous page">← Module 11: Embeddings</a>
+<a class="right-next" href="13_transformers_ABOUT.html" title="next page">Module 13: Transformers →</a>
 </div>

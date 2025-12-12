@@ -21,6 +21,106 @@ Build a complete machine learning (ML) framework from tensors to systems—under
 
 ```{raw} html
 <style>
+/* Install command box */
+.install-box {
+  max-width: 680px;
+  margin: 0 auto 2.5rem auto;
+}
+.install-command {
+  background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid rgba(249, 115, 22, 0.3);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+.install-command code {
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+  font-size: 0.95rem;
+  color: #e5e7eb;
+  background: none;
+  padding: 0;
+}
+.install-command .prompt {
+  color: #f97316;
+}
+.install-command .cmd {
+  color: #fbbf24;
+}
+.install-command .url {
+  color: #60a5fa;
+}
+.copy-btn {
+  background: rgba(249, 115, 22, 0.15);
+  border: 1px solid rgba(249, 115, 22, 0.3);
+  color: #f97316;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.copy-btn:hover {
+  background: rgba(249, 115, 22, 0.25);
+  border-color: #f97316;
+}
+.copy-btn.copied {
+  background: rgba(34, 197, 94, 0.2);
+  border-color: rgba(34, 197, 94, 0.4);
+  color: #22c55e;
+}
+.install-note {
+  text-align: center;
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  color: #6b7280;
+}
+.install-note a {
+  color: #f97316;
+  text-decoration: none;
+}
+.install-note a:hover {
+  text-decoration: underline;
+}
+</style>
+
+<div class="install-box">
+  <div class="install-command">
+    <code><span class="prompt">$</span> <span class="cmd">curl</span> -sSL <span class="url">tinytorch.ai/install</span> | <span class="cmd">bash</span></code>
+    <button class="copy-btn" onclick="copyInstall(this)">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+      </svg>
+      Copy
+    </button>
+  </div>
+  <p class="install-note">Requires Python 3.8+ and git. <a href="quickstart-guide.html">See full guide →</a></p>
+</div>
+
+<script>
+function copyInstall(btn) {
+  const cmd = 'curl -sSL tinytorch.ai/install | bash';
+  navigator.clipboard.writeText(cmd).then(() => {
+    btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg> Copied!';
+    btn.classList.add('copied');
+    setTimeout(() => {
+      btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg> Copy';
+      btn.classList.remove('copied');
+    }, 2000);
+  });
+}
+</script>
+```
+
+```{raw} html
+<style>
 .demo-terminal {
   max-width: 640px;
   margin: 0 auto 1.5rem auto;
@@ -156,32 +256,34 @@ Build a complete machine learning (ML) framework from tensors to systems—under
 (function() {
   const scenes = [
     { name: 'Setup', lines: [
-      { type: 'cmd', text: 'git clone https://github.com/mlsysbook/TinyTorch' },
-      { type: 'out', text: 'Cloning into \'TinyTorch\'...' },
-      { type: 'cmd', text: 'cd TinyTorch && ./setup.sh' },
-      { type: 'success', text: 'Environment ready!' },
-      { type: 'faded', text: 'Demos coming soon...' }
+      { type: 'success', text: '🔥 TinyTorch Installer' },
+      { type: 'out', text: '✓ Python 3.11 found' },
+      { type: 'out', text: '✓ Downloading TinyTorch...' },
+      { type: 'out', text: '✓ Creating virtual environment...' },
+      { type: 'success', text: '🎉 TinyTorch installed!' },
+      { type: 'cmd', text: 'cd tinytorch && source .venv/bin/activate' },
+      { type: 'cmd', text: 'tito' }
     ]},
     { name: 'Build', lines: [
-      { type: 'cmd', text: 'tito start tensor' },
+      { type: 'cmd', text: 'tito module start 01' },
       { type: 'out', text: 'Opening Module 01: Tensor...' },
-      { type: 'cmd', text: 'tito test' },
-      { type: 'success', text: 'All tests passed!' },
-      { type: 'faded', text: 'Demos coming soon...' }
+      { type: 'cmd', text: 'tito module complete 01' },
+      { type: 'success', text: '✓ All tests passed!' },
+      { type: 'success', text: '✓ Module 01 completed!' }
     ]},
     { name: 'Milestone', lines: [
-      { type: 'cmd', text: 'tito milestone' },
-      { type: 'success', text: 'Perceptron (1957) unlocked!' },
-      { type: 'success', text: 'XOR Crisis (1969) solved!' },
-      { type: 'success', text: 'MLP (1986) achieved!' },
-      { type: 'faded', text: 'Demos coming soon...' }
+      { type: 'cmd', text: 'tito milestones status' },
+      { type: 'success', text: '🏆 Perceptron (1957) unlocked!' },
+      { type: 'success', text: '🏆 XOR Crisis (1969) solved!' },
+      { type: 'success', text: '🏆 MLP (1986) achieved!' },
+      { type: 'out', text: '⏳ CNN Revolution (1998) - 2 modules remaining' }
     ]},
     { name: 'Compete', lines: [
-      { type: 'cmd', text: 'tito olympics submit' },
-      { type: 'out', text: 'Benchmarking model...' },
-      { type: 'success', text: 'Score: 847/1000' },
-      { type: 'success', text: 'Rank #42 on leaderboard!' },
-      { type: 'faded', text: 'Demos coming soon...' }
+      { type: 'cmd', text: 'tito benchmark run' },
+      { type: 'out', text: 'Running benchmark suite...' },
+      { type: 'success', text: '✓ Accuracy: 97.2%' },
+      { type: 'success', text: '✓ Inference: 1.2ms' },
+      { type: 'success', text: '✓ Model size: 245 KB' }
     ]}
   ];
 
@@ -302,9 +404,9 @@ Walk through ML history by rebuilding its greatest breakthroughs with YOUR TinyT
         <div class="ml-timeline-dot"></div>
         <div class="ml-timeline-content">
             <div class="ml-timeline-year">1969</div>
-            <div class="ml-timeline-title">XOR Crisis Solved</div>
-            <div class="ml-timeline-desc">Hidden layers unlock non-linear learning</div>
-            <div class="ml-timeline-tech">Input → Linear → ReLU → Linear → Output</div>
+            <div class="ml-timeline-title">XOR Crisis</div>
+            <div class="ml-timeline-desc">Minsky & Papert expose limits of single-layer networks</div>
+            <div class="ml-timeline-tech">Input → Linear → Sigmoid → FAIL!</div>
         </div>
     </div>
 
@@ -452,11 +554,11 @@ Perfect if you want to **debug ML systems**, **implement custom operations**, or
 **Next Steps**: **[Quick Start Guide](quickstart-guide)** (15 min) • **[Course Structure](chapters/00-introduction)** • **[FAQ](faq.md)**
 
 <div style="text-align: center; padding: 1.5rem 0; margin-top: 2rem; border-top: 1px solid #e2e8f0; color: #64748b; font-size: 0.9rem;">
-  <span style="color: #f97316;">\raisebox{-0.1em}{\includegraphics[height=1em]{../_static/logos/fire-emoji.png}}</span> <strong>TinyTorch</strong> 
-  <span style="margin: 0 0.75rem;">•</span> 
+  <strong>Tiny🔥Torch</strong>
+  <span style="margin: 0 0.75rem;">•</span>
   <a href="https://mlsysbook.ai" style="color: #64748b; text-decoration: none;">MLSysBook</a>
   <span style="margin: 0 0.75rem;">•</span>
-  <a href="https://github.com/mlsysbook/TinyTorch" style="color: #64748b; text-decoration: none;">GitHub</a>
+  <a href="https://github.com/harvard-edge/cs249r_book" style="color: #64748b; text-decoration: none;">GitHub</a>
   <span style="margin: 0 0.75rem;">•</span>
-  <a href="https://tinytorch.ai/leaderboard" style="color: #64748b; text-decoration: none;">Leaderboard</a>
+  <a href="leaderboard" style="color: #64748b; text-decoration: none;">Leaderboard</a>
 </div>
