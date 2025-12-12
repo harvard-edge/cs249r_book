@@ -75,7 +75,7 @@ class TinyTorchCLI:
             'package': PackageCommand,
             'nbgrader': NBGraderCommand,
             # Progress tracking
-            'milestones': MilestoneCommand,
+            'milestone': MilestoneCommand,
             # Community
             'community': CommunityCommand,
             'benchmark': BenchmarkCommand,
@@ -90,7 +90,7 @@ class TinyTorchCLI:
         }
 
         # Command categorization for help display
-        self.student_commands = ['module', 'milestones', 'community', 'benchmark', 'olympics']
+        self.student_commands = ['module', 'milestone', 'community', 'benchmark', 'olympics']
         self.developer_commands = ['dev', 'system', 'src', 'package', 'nbgrader']
 
         # Welcome screen sections (used for both tito and tito --help)
@@ -102,7 +102,7 @@ class TinyTorchCLI:
             ],
             'track_progress': [
                 (f'[{Theme.CAT_PROGRESS}]tito module status[/{Theme.CAT_PROGRESS}]', 'View module progress'),
-                (f'[{Theme.CAT_PROGRESS}]tito milestones status[/{Theme.CAT_PROGRESS}]', 'View unlocked capabilities'),
+                (f'[{Theme.CAT_PROGRESS}]tito milestone status[/{Theme.CAT_PROGRESS}]', 'View unlocked capabilities'),
             ],
             'community': [
                 (f'[{Theme.CAT_COMMUNITY}]tito community login[/{Theme.CAT_COMMUNITY}]', 'Log in to TinyTorch'),

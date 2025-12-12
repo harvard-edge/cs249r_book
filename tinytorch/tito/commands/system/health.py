@@ -96,10 +96,9 @@ class HealthCommand(BaseCommand):
         struct_table.add_column("Type", style="dim", width=25)
         
         required_paths = [
-            ('tinytorch/', 'Package directory'),
-            ('tinytorch/core/', 'Core module directory'),
-            ('modules/', 'Module directory'),
-            ('src/', 'Source modules directory'),
+            ('src/', 'Source modules directory (student workspace)'),
+            ('tests/', 'Test suite directory'),
+            ('tito/', 'CLI infrastructure'),
             ('requirements.txt', 'Dependencies file')
         ]
         

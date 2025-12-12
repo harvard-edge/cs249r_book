@@ -36,9 +36,9 @@ MILESTONE_SCRIPTS = {
         "name": "Perceptron (1957)",
         "year": 1957,
         "title": "Frank Rosenblatt's First Neural Network",
-        "script": "milestones/01_1957_perceptron/02_rosenblatt_trained.py",
-        "required_modules": [1],
-        "description": "Build the first trainable neural network",
+        "script": "milestones/01_1957_perceptron/01_rosenblatt_forward.py",
+        "required_modules": [1, 2, 3],  # Tensor, Activations, Layers (forward pass only)
+        "description": "Build the first neural network (forward pass)",
         "historical_context": "Rosenblatt's perceptron proved machines could learn",
         "emoji": "🧠"
     },
@@ -48,7 +48,7 @@ MILESTONE_SCRIPTS = {
         "year": 1969,
         "title": "Solving the Problem That Stalled AI",
         "script": "milestones/02_1969_xor/02_xor_solved.py",
-        "required_modules": [1, 2],
+        "required_modules": [1, 2, 3, 4, 5, 6],  # Tensor, Activations, Layers, Losses, Autograd, Optimizers
         "description": "Solve XOR with multi-layer networks",
         "historical_context": "Minsky & Papert showed single-layer limits",
         "emoji": "🔀"
@@ -59,7 +59,7 @@ MILESTONE_SCRIPTS = {
         "year": 1986,
         "title": "Backpropagation Breakthrough",
         "script": "milestones/03_1986_mlp/01_rumelhart_tinydigits.py",
-        "required_modules": [1, 2, 3, 4, 5, 6, 7],
+        "required_modules": [1, 2, 3, 4, 5, 6, 8],  # + DataLoader (08)
         "description": "Train deep networks on TinyDigits",
         "historical_context": "Rumelhart, Hinton & Williams (Nature, 1986)",
         "emoji": "🎓"
@@ -70,7 +70,7 @@ MILESTONE_SCRIPTS = {
         "year": 1998,
         "title": "LeNet - Computer Vision Breakthrough",
         "script": "milestones/04_1998_cnn/01_lecun_tinydigits.py",
-        "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 9],
+        "required_modules": [1, 2, 3, 4, 5, 6, 8, 9],  # + Spatial (09)
         "description": "Build LeNet for digit recognition",
         "historical_context": "Yann LeCun's convolutional networks",
         "emoji": "👁️"
@@ -81,7 +81,7 @@ MILESTONE_SCRIPTS = {
         "year": 2017,
         "title": "Attention is All You Need",
         "script": "milestones/05_2017_transformer/00_vaswani_attention_proof.py",
-        "required_modules": list(range(1, 14)),
+        "required_modules": [1, 2, 3, 4, 5, 6, 11, 12, 13],  # + Embeddings, Attention, Transformers
         "description": "Prove attention works with sequence reversal",
         "historical_context": "Vaswani et al. revolutionized NLP",
         "emoji": "🤖"
@@ -858,14 +858,26 @@ class MilestoneCommand(BaseCommand):
         ))
 
         # Check module completion status
-        progress_file = Path(".tito") / "progress.json"
-        completed_modules = []
+        # Module workflow saves to progress.json in project root
+        progress_file = Path("progress.json")
+        completed_modules_raw = []
         if progress_file.exists():
             try:
                 with open(progress_file, 'r') as f:
                     progress_data = json.load(f)
-                    completed_modules = progress_data.get("completed_modules", [])
+                    completed_modules_raw = progress_data.get("completed_modules", [])
             except (json.JSONDecodeError, IOError):
+                pass
+
+        # Convert completed modules to integers for comparison
+        # Handles both "01" and "01_tensor" formats
+        completed_module_nums = set()
+        for mod in completed_modules_raw:
+            try:
+                # Extract number from formats like "01" or "01_tensor"
+                num_str = mod.split("_")[0] if "_" in mod else mod
+                completed_module_nums.add(int(num_str))
+            except (ValueError, IndexError):
                 pass
 
         # Check milestone completion
@@ -875,8 +887,8 @@ class MilestoneCommand(BaseCommand):
         for milestone_id in sorted(MILESTONE_SCRIPTS.keys()):
             milestone = MILESTONE_SCRIPTS[milestone_id]
 
-            # Check if prerequisites met
-            prereqs_met = all(mod in completed_modules for mod in milestone["required_modules"])
+            # Check if prerequisites met (required_modules contains integers)
+            prereqs_met = all(mod in completed_module_nums for mod in milestone["required_modules"])
             is_complete = milestone_id in completed_milestones
 
             # Status indicator
@@ -907,7 +919,7 @@ class MilestoneCommand(BaseCommand):
                 if prereqs_met and not is_complete:
                     milestone_display += f"[bold yellow]▶ Run now:[/bold yellow] [cyan]tito milestone run {milestone_id}[/cyan]\n"
                 elif not prereqs_met:
-                    missing = [str(m) for m in milestone["required_modules"] if m not in completed_modules]
+                    missing = [f"{m:02d}" for m in milestone["required_modules"] if m not in completed_module_nums]
                     milestone_display += f"[dim]Required: Complete modules {', '.join(missing)}[/dim]\n"
 
                 console.print(Panel(

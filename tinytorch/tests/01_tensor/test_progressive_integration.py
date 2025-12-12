@@ -21,10 +21,11 @@ class TestModule01Prerequisites:
         """Verify setup module functionality is still working."""
         # Python version detection
         assert sys.version_info >= (3, 8), "Python 3.8+ required"
-        
-        # Project structure
+
+        # Project structure - check directories that exist in student install
         project_root = Path(__file__).parent.parent.parent
-        required_dirs = ['modules', 'tests', 'tito', 'tinytorch']
+        # 'src' is the student working directory, 'tests' and 'tito' are CLI infrastructure
+        required_dirs = ['src', 'tests', 'tito']
         for dir_name in required_dirs:
             dir_path = project_root / dir_name
             assert dir_path.exists(), f"Setup failed: {dir_name} directory missing"
@@ -84,13 +85,13 @@ class TestProgressiveStack:
     def test_setup_enables_tensor(self):
         """Test that proper setup enables tensor functionality."""
         # Verify setup created the foundation for tensors
-        
+
         # 1. Environment should support numpy (from setup)
         import numpy as np
         assert np.__version__ is not None, "Numpy not properly set up"
-        
-        # 2. Project structure should support tensor module
-        tensor_module_path = Path(__file__).parent.parent.parent / "modules" / "01_tensor"
+
+        # 2. Project structure should support tensor module (in src/ for students)
+        tensor_module_path = Path(__file__).parent.parent.parent / "src" / "01_tensor"
         assert tensor_module_path.exists(), "Setup didn't create proper module structure"
     
     def test_end_to_end_capability(self):

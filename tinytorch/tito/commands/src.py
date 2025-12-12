@@ -244,9 +244,11 @@ class SrcCommand(BaseCommand):
                     return 1
                 
                 # Always convert Python file to notebook (Python file is source of truth)
-                # Notebook will be created in modules/ directory
-                notebook_file = Path("modules") / module_name / f"{module_name}.ipynb"
-                
+                # Notebook will be created in modules/ directory with SHORT name (e.g., tensor.ipynb)
+                # Note: convert_py_to_notebook uses short_name = module_name.split("_", 1)[1]
+                short_name = module_name.split("_", 1)[1] if "_" in module_name else module_name
+                notebook_file = Path("modules") / module_name / f"{short_name}.ipynb"
+
                 console.print(f"📝 Converting {module_name} Python file to notebook...")
                 if not self._convert_py_to_notebook(module_path):
                     logger.error(f"Failed to convert .py file to notebook for {module_name}")

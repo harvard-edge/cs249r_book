@@ -434,6 +434,8 @@ class ModuleWorkflowCommand(BaseCommand):
     
     def _open_jupyter(self, module_name: str) -> int:
         """Open Jupyter Lab for a module."""
+        import time
+
         try:
             module_dir = self.config.modules_dir / module_name
             if not module_dir.exists():
@@ -442,16 +444,24 @@ class ModuleWorkflowCommand(BaseCommand):
 
             self.console.print(f"\n[cyan]🚀 Opening Jupyter Lab for module {module_name}...[/cyan]")
 
-            # Launch Jupyter Lab in the module directory
-            subprocess.Popen(
-                ["jupyter", "lab", "--no-browser"],
+            # Launch Jupyter Lab - capture output to get URL
+            process = subprocess.Popen(
+                ["jupyter", "lab"],
                 cwd=str(module_dir),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
             )
+
+            # Give Jupyter a moment to start and capture the URL
+            time.sleep(2)
 
             self.console.print("[green]✅ Jupyter Lab started![/green]")
             self.console.print(f"[dim]Working directory: {module_dir}[/dim]")
+            self.console.print()
+            self.console.print("[bold]If Jupyter doesn't open automatically:[/bold]")
+            self.console.print("  Open [cyan]http://localhost:8888[/cyan] in your browser")
+            self.console.print("  [dim]Or check the terminal for the full URL with token[/dim]")
             return 0
 
         except FileNotFoundError:
