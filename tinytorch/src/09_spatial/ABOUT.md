@@ -1,7 +1,7 @@
 ---
 title: "Spatial Operations"
 description: "Build CNNs from scratch - implement Conv2d, pooling, and spatial processing for computer vision"
-difficulty: "⭐⭐⭐"
+difficulty: "●●●"
 time_estimate: "6-8 hours"
 prerequisites: ["Tensor", "Activations", "Layers", "DataLoader"]
 next_steps: ["Tokenization"]
@@ -13,9 +13,9 @@ learning_objectives:
   - "Analyze receptive field growth, translation invariance, and spatial dimension management"
 ---
 
-# 09. Spatial Operations
+# Spatial Operations
 
-**ARCHITECTURE TIER** | Difficulty: ⭐⭐⭐ (3/4) | Time: 6-8 hours
+**ARCHITECTURE TIER** | Difficulty: ●●● (3/4) | Time: 6-8 hours
 
 ## Overview
 
@@ -38,44 +38,6 @@ This module follows TinyTorch's **Build → Use → Reflect** framework:
 1. **Build**: Implement Conv2d with explicit sliding window loops to expose computational complexity, create MaxPool2d and AvgPool2d for spatial downsampling, and build Flatten operations connecting spatial and dense layers for complete CNN architectures
 2. **Use**: Train CNNs on CIFAR-10 (60K 32×32 color images) to achieve >75% accuracy, visualize learned feature maps showing edges in early layers and complex patterns in deep layers, and compare CNN vs MLP parameter efficiency on spatial data
 3. **Reflect**: Analyze why weight sharing reduces parameters by 35-1000× while improving spatial reasoning, how stacked 3×3 convolutions build global context from local receptive fields, and what memory-computation trade-offs exist between large kernels vs deep stacking
-
-## Getting Started
-
-### Prerequisites
-
-Ensure you understand the foundations from previous modules:
-
-```bash
-# Activate TinyTorch environment
-source scripts/activate-tinytorch
-
-# Verify prerequisite modules are complete
-tito test tensor      # Module 01: Tensor operations
-tito test activations # Module 02: ReLU activation
-tito test layers      # Module 03: Linear layers
-tito test dataloader  # Module 08: Batch loading
-```
-
-**Why These Prerequisites**:
-- **Tensor**: Conv2d requires tensor indexing, reshaping, and broadcasting for sliding windows
-- **Activations**: CNNs use ReLU after each convolution for non-linear feature learning
-- **Layers**: Dense classification layers connect to CNN feature extraction
-- **DataLoader**: CIFAR-10 training requires batch loading and data augmentation
-
-### Development Workflow
-
-1. **Open the development file**: `modules/09_spatial/spatial_dev.py`
-2. **Implement Conv2d forward pass**: Build sliding window convolution with explicit loops showing computational complexity
-3. **Create MaxPool2d and AvgPool2d**: Implement spatial downsampling with different aggregation strategies
-4. **Build Flatten operation**: Connect spatial feature maps to dense layers
-5. **Design SimpleCNN architecture**: Compose spatial and dense layers into complete CNN
-6. **Export and verify**: `tito module complete 09 && tito test spatial`
-
-**Development Tips**:
-- Start with small inputs (8×8 images) to debug convolution logic before scaling to 32×32
-- Print intermediate shapes at each layer to verify dimension calculations
-- Visualize feature maps after Conv layers to understand learned filters
-- Compare parameter counts: Conv2d(3→32, k=3) = 896 params vs Dense(3072→32) = 98,304 params
 
 ## Implementation Guide
 
@@ -263,114 +225,43 @@ class SimpleCNN:
 
 **Architecture Design Principles**: This follows the standard CNN pattern—alternating Conv+ReLU (feature extraction) with Pooling (dimension reduction). Each Conv layer learns hierarchical features (Layer 1: edges → Layer 2: shapes), while pooling provides computational efficiency and translation invariance.
 
-## Common Pitfalls
+## Getting Started
 
-### Incorrect Output Dimension Calculation
+### Prerequisites
 
-**Problem**: Forgetting to account for padding, kernel size, and stride when calculating Conv2d output dimensions causes shape mismatches in subsequent layers.
+Ensure you understand the foundations from previous modules:
 
-**Solution**: Use the formula `output_size = (input_size + 2*padding - kernel_size) // stride + 1`:
+```bash
+# Activate TinyTorch environment
+source scripts/activate-tinytorch
 
-```python
-# ❌ Wrong - assuming output size equals input size
-conv = Conv2d(3, 32, kernel_size=3, padding=0)  # No padding
-x = Tensor(np.random.randn(1, 3, 32, 32))
-out = conv(x)  # Shape: (1, 32, 30, 30) - NOT 32×32!
-next_layer = MaxPool2d(kernel_size=2)
-# Dimensions shrink: 32→30→15, breaks expected 32→16→8 pattern
-
-# ✅ Correct - use padding=1 for same-size output with kernel=3
-conv = Conv2d(3, 32, kernel_size=3, padding=1)  # padding=1
-x = Tensor(np.random.randn(1, 3, 32, 32))
-out = conv(x)  # Shape: (1, 32, 32, 32) - preserves spatial size!
-# Rule: padding = (kernel_size - 1) // 2 for same-size output
+# Verify prerequisite modules are complete
+tito test tensor      # Module 01: Tensor operations
+tito test activations # Module 02: ReLU activation
+tito test layers      # Module 03: Linear layers
+tito test dataloader  # Module 08: Batch loading
 ```
 
-### Mismatched Flatten Dimensions for Dense Layer
+**Why These Prerequisites**:
+- **Tensor**: Conv2d requires tensor indexing, reshaping, and broadcasting for sliding windows
+- **Activations**: CNNs use ReLU after each convolution for non-linear feature learning
+- **Layers**: Dense classification layers connect to CNN feature extraction
+- **DataLoader**: CIFAR-10 training requires batch loading and data augmentation
 
-**Problem**: Calculating wrong input dimension for dense layer after spatial operations causes shape errors. The input to the first dense layer must match the flattened spatial feature map size.
+### Development Workflow
 
-**Solution**: Track spatial dimensions through each layer and calculate flatten size correctly:
+1. **Open the development file**: `modules/09_spatial/spatial_dev.py`
+2. **Implement Conv2d forward pass**: Build sliding window convolution with explicit loops showing computational complexity
+3. **Create MaxPool2d and AvgPool2d**: Implement spatial downsampling with different aggregation strategies
+4. **Build Flatten operation**: Connect spatial feature maps to dense layers
+5. **Design SimpleCNN architecture**: Compose spatial and dense layers into complete CNN
+6. **Export and verify**: `tito module complete 09 && tito test spatial`
 
-```python
-# ❌ Wrong - incorrect flatten dimension calculation
-# Input: (B, 3, 32, 32)
-# Conv1: (B, 32, 32, 32), Pool1: (B, 32, 16, 16)
-# Conv2: (B, 64, 16, 16), Pool2: (B, 64, 8, 8)
-# Flatten: (B, 64*8*8) = (B, 4096)
-fc = Linear(2048, 10)  # Wrong input dim! Should be 4096
-# Shape error when connecting CNN to classifier
-
-# ✅ Correct - calculate flatten dimension properly
-flatten_dim = 64 * 8 * 8  # channels × height × width after final pool
-fc = Linear(flatten_dim, 10)  # 4096 → 10 (correct!)
-```
-
-### Forgetting Batch Dimension in Shape Calculations
-
-**Problem**: Implementing Conv2d forward pass without accounting for batch dimension causes incorrect tensor indexing and shape errors.
-
-**Solution**: Always include batch dimension in all spatial operations:
-
-```python
-# ❌ Wrong - ignoring batch dimension
-def forward(self, x):
-    # Assumes x.shape = (C, H, W) - missing batch!
-    out = np.zeros((self.out_channels, out_h, out_w))
-    for c_out in range(self.out_channels):
-        # Processes single image, fails on batches
-
-# ✅ Correct - handle batch dimension
-def forward(self, x):
-    # x.shape = (B, C, H, W) - includes batch
-    batch_size = x.shape[0]
-    out = np.zeros((batch_size, self.out_channels, out_h, out_w))
-    for b in range(batch_size):  # Loop over batch
-        for c_out in range(self.out_channels):
-            # Processes each image in batch
-```
-
-### Using Wrong Pooling Stride
-
-**Problem**: Not setting stride correctly in pooling layers causes unexpected spatial dimension changes or computation waste.
-
-**Solution**: For standard downsampling, set `stride = kernel_size`:
-
-```python
-# ❌ Wrong - stride=1 with kernel=2 creates overlapping pools
-pool = MaxPool2d(kernel_size=2, stride=1)
-x = Tensor(np.random.randn(1, 64, 32, 32))
-out = pool(x)  # Shape: (1, 64, 31, 31) - only reduces by 1!
-# Wastes computation and doesn't achieve desired 2× downsampling
-
-# ✅ Correct - stride=kernel_size for non-overlapping pools
-pool = MaxPool2d(kernel_size=2, stride=2)  # Or omit stride (defaults to kernel_size)
-x = Tensor(np.random.randn(1, 64, 32, 32))
-out = pool(x)  # Shape: (1, 64, 16, 16) - proper 2× downsampling
-```
-
-### Inefficient Large Kernel Sizes
-
-**Problem**: Using large kernels (5×5, 7×7) in deep CNNs wastes parameters and computation compared to stacking smaller kernels.
-
-**Solution**: Prefer stacked 3×3 convolutions over single large kernels for depth and efficiency:
-
-```python
-# ❌ Wrong - single 7×7 convolution
-conv = Conv2d(64, 64, kernel_size=7, padding=3)
-# Parameters: 64 × 64 × 7 × 7 = 200,704
-# Receptive field: 7×7
-# Nonlinearities: 1 ReLU after conv
-
-# ✅ Correct - three 3×3 convolutions
-conv1 = Conv2d(64, 64, kernel_size=3, padding=1)
-conv2 = Conv2d(64, 64, kernel_size=3, padding=1)
-conv3 = Conv2d(64, 64, kernel_size=3, padding=1)
-# Parameters: 3 × (64 × 64 × 3 × 3) = 110,592 (45% fewer!)
-# Receptive field: 7×7 (same as single 7×7)
-# Nonlinearities: 3 ReLUs (more expressiveness)
-# This is why VGG and ResNet use 3×3 kernels exclusively
-```
+**Development Tips**:
+- Start with small inputs (8×8 images) to debug convolution logic before scaling to 32×32
+- Print intermediate shapes at each layer to verify dimension calculations
+- Visualize feature maps after Conv layers to understand learned filters
+- Compare parameter counts: Conv2d(3→32, k=3) = 896 params vs Dense(3072→32) = 98,304 params
 
 ## Testing
 
@@ -388,11 +279,11 @@ python -m pytest tests/ -k spatial -v
 
 ### Test Coverage Areas
 
-- ✅ **Conv2d Shape Propagation**: Verifies output dimensions match formula (H+2P-K)//S+1 for various kernel sizes, strides, and padding
-- ✅ **Weight Sharing Validation**: Confirms same filter applies at all spatial positions, achieving parameter reduction vs dense layers
-- ✅ **Pooling Correctness**: Tests MaxPool extracts maximum values and AvgPool computes correct averages across windows
-- ✅ **Translation Invariance**: Verifies CNNs detect features regardless of spatial position through weight sharing
-- ✅ **Complete CNN Pipeline**: End-to-end test processing CIFAR-10 images through Conv → Pool → Flatten → Dense architecture
+- ✓ **Conv2d Shape Propagation**: Verifies output dimensions match formula (H+2P-K)//S+1 for various kernel sizes, strides, and padding
+- ✓ **Weight Sharing Validation**: Confirms same filter applies at all spatial positions, achieving parameter reduction vs dense layers
+- ✓ **Pooling Correctness**: Tests MaxPool extracts maximum values and AvgPool computes correct averages across windows
+- ✓ **Translation Invariance**: Verifies CNNs detect features regardless of spatial position through weight sharing
+- ✓ **Complete CNN Pipeline**: End-to-end test processing CIFAR-10 images through Conv → Pool → Flatten → Dense architecture
 
 ### Inline Testing & Validation
 
@@ -404,25 +295,25 @@ cd /Users/VJ/GitHub/TinyTorch/modules/09_spatial
 python spatial_dev.py
 
 # Expected output:
-🔬 Unit Test: Conv2d...
-✅ Sliding window convolution works correctly
-✅ Weight sharing applied at all positions
-✅ Output shape matches calculated dimensions
-✅ Parameter count: 896 (vs 32,000 for dense layer)
-📈 Progress: Conv2d forward pass implemented
+ Unit Test: Conv2d...
+ Sliding window convolution works correctly
+ Weight sharing applied at all positions
+ Output shape matches calculated dimensions
+ Parameter count: 896 (vs 32,000 for dense layer)
+ Progress: Conv2d forward pass implemented
 
-🔬 Unit Test: Pooling Operations...
-✅ MaxPool2d extracts maximum values correctly
-✅ AvgPool2d computes averages correctly
-✅ Spatial dimensions reduced by factor of kernel_size
-✅ Translation invariance property verified
-📈 Progress: Pooling layers implemented
+ Unit Test: Pooling Operations...
+ MaxPool2d extracts maximum values correctly
+ AvgPool2d computes averages correctly
+ Spatial dimensions reduced by factor of kernel_size
+ Translation invariance property verified
+ Progress: Pooling layers implemented
 
-🔬 Unit Test: SimpleCNN Integration...
-✅ Forward pass through all layers successful
-✅ Output shape: (32, 10) for 10 CIFAR-10 classes
-✅ Total parameters: ~500K (efficient!)
-📈 Progress: CNN architecture complete
+ Unit Test: SimpleCNN Integration...
+ Forward pass through all layers successful
+ Output shape: (32, 10) for 10 CIFAR-10 classes
+ Total parameters: ~500K (efficient!)
+ Progress: CNN architecture complete
 ```
 
 ### Manual Testing Examples
@@ -455,149 +346,6 @@ params = cnn.parameters()
 total = sum(np.prod(p.shape) for p in params)
 print(f"Total parameters: {total:,}")  # ~500,000
 ```
-
-## Production Context
-
-### Your Implementation vs. Production Frameworks
-
-Understanding what you're building vs. what production frameworks provide:
-
-| Feature | Your Spatial (Module 09) | PyTorch nn.Conv2d | TensorFlow tf.keras.Conv2D |
-|---------|-------------------------|------------------|---------------------------|
-| **Backend** | NumPy (CPU-only) | C++/CUDA (CPU/GPU) | C++/CUDA/XLA |
-| **Conv2d** | Explicit nested loops | ✅ im2col + GEMM | ✅ Winograd/FFT |
-| **MaxPool2d** | Loop-based max extraction | ✅ CUDA kernels | ✅ Optimized pooling |
-| **Padding** | Manual np.pad | ✅ `padding` parameter | ✅ `padding` parameter |
-| **Stride** | Manual step control | ✅ `stride` parameter | ✅ `strides` parameter |
-| **Dilation** | ❌ Not implemented | ✅ `dilation` parameter | ✅ `dilation_rate` |
-| **Groups** | ❌ Not implemented | ✅ `groups` (depthwise conv) | ✅ Depthwise layers |
-| **Batch Norm** | ❌ Not implemented | ✅ nn.BatchNorm2d | ✅ BatchNormalization |
-| **GPU Acceleration** | ❌ CPU-only | ✅ cuDNN integration | ✅ cuDNN/XLA |
-
-**Educational Focus**: Your implementation uses explicit loops to expose computational cost O(B×C_out×H×W×K²×C_in). Production frameworks optimize with im2col transformation, Winograd algorithms, and cuDNN kernels achieving 10-1000× speedup.
-
-### Side-by-Side Code Comparison
-
-**Your implementation:**
-```python
-from tinytorch.core.spatial import Conv2d, MaxPool2d, Flatten
-from tinytorch.core.layers import Linear
-from tinytorch.core.tensor import Tensor
-
-# Build SimpleCNN for CIFAR-10
-class SimpleCNN:
-    def __init__(self):
-        # Feature extraction
-        self.conv1 = Conv2d(3, 32, kernel_size=3, padding=1)
-        self.pool1 = MaxPool2d(kernel_size=2)
-        self.conv2 = Conv2d(32, 64, kernel_size=3, padding=1)
-        self.pool2 = MaxPool2d(kernel_size=2)
-
-        # Classification head
-        self.flatten = Flatten()
-        self.fc = Linear(64 * 8 * 8, 10)
-
-    def forward(self, x):
-        x = relu(self.conv1(x))  # Manual activation
-        x = self.pool1(x)
-        x = relu(self.conv2(x))
-        x = self.pool2(x)
-        x = self.flatten(x)
-        return self.fc(x)
-
-# Create and use model
-model = SimpleCNN()
-img = Tensor(np.random.randn(32, 3, 32, 32))
-logits = model.forward(img)
-```
-
-**Equivalent PyTorch:**
-```python
-import torch
-import torch.nn as nn
-
-# Build SimpleCNN for CIFAR-10 (same architecture)
-class SimpleCNN(nn.Module):
-    def __init__(self):
-        super().__init__()
-        # Feature extraction
-        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, padding=1)
-        self.pool1 = nn.MaxPool2d(kernel_size=2)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
-        self.pool2 = nn.MaxPool2d(kernel_size=2)
-
-        # Classification head
-        self.flatten = nn.Flatten()
-        self.fc = nn.Linear(64 * 8 * 8, 10)
-
-    def forward(self, x):
-        x = torch.relu(self.conv1(x))  # Same pattern
-        x = self.pool1(x)
-        x = torch.relu(self.conv2(x))
-        x = self.pool2(x)
-        x = self.flatten(x)
-        return self.fc(x)
-
-# Create and use model (same API!)
-model = SimpleCNN()
-img = torch.randn(32, 3, 32, 32)
-logits = model(img)
-```
-
-**Key Differences:**
-1. **Convolution Algorithm**: Your loops are O(B×C×H×W×K²×C_in). PyTorch uses im2col to convert convolution into matrix multiplication (GEMM), leveraging optimized BLAS libraries. For large images, Winograd or FFT-based convolution provides additional speedup.
-2. **GPU Execution**: PyTorch automatically uses cuDNN (NVIDIA's optimized library) for Conv2d on CUDA tensors. Single line `.cuda()` moves computation to GPU with 10-100× speedup.
-3. **Memory Layout**: PyTorch uses channels-first (NCHW) format optimized for GPU memory access patterns. Your implementation follows the same layout for compatibility.
-4. **Activation Fusion**: Production frameworks fuse Conv+ReLU into single kernel to reduce memory bandwidth. Your implementation computes them separately.
-
-### Real-World Production Usage
-
-**Meta ResNet ImageNet**: ResNet-50 uses Conv2d extensively (49 convolutional layers). Training on 8× V100 GPUs with batch_size=256 processes ~2000 images/second using cuDNN-optimized convolutions. Mixed precision training (FP16 conv, FP32 accumulation) doubles throughput. Key optimization: Conv2d constitutes 95% of training FLOPs, so cuDNN optimization is critical.
-
-**Google Vision Transformer**: While transformers dominate NLP, ViT starts with Conv2d patch embedding (converts 224×224 image into 16×16 patches). Single Conv2d(3→768, kernel_size=16, stride=16) replaces traditional CNN backbone. This "convolutional stem" is 10× faster than unfolding patches in Python, demonstrating Conv2d's efficiency even in transformer architectures.
-
-**Tesla Autopilot (HydraNet)**: Processes 8 camera streams (1280×960 each) at 36 FPS using custom CNN backbones. Depthwise separable convolutions (groups parameter) reduce FLOPs by 8-10× compared to standard Conv2d while maintaining accuracy. Runs on Tesla FSD computer (144 TOPS) with aggressive quantization (INT8 conv operations) for real-time performance.
-
-**Medical Imaging (U-Net for Segmentation)**: PathAI's cancer detection uses U-Net architecture with Conv2d for feature extraction and transposed Conv2d for upsampling. Processes 1024×1024 pathology patches in batches of 16 on A100 GPUs. Padding strategy critical to avoid border artifacts—uses reflection padding instead of zero padding for medical images.
-
-**Hugging Face CLIP**: Vision encoder uses Conv2d for image processing while text encoder uses transformers. Conv2d patch embedding (kernel_size=32, stride=32) converts 224×224 images into 7×7 patch grids. This hybrid approach demonstrates Conv2d's continued relevance: transformers excel at sequence modeling, Conv2d excels at local spatial feature extraction.
-
-### Performance Characteristics at Scale
-
-**Convolution Computational Cost**: For batch_size=32, input=224×224×3, kernel=3×3, output_channels=64:
-- **FLOPs**: 32 × 224 × 224 × 64 × (3 × 3 × 3) = 8.7 billion operations
-- **Your implementation**: ~45 seconds on modern CPU (nested Python loops)
-- **PyTorch CPU (im2col + MKL)**: ~2 seconds (22× speedup via GEMM optimization)
-- **PyTorch GPU (cuDNN)**: ~15ms (3000× speedup via parallelization)
-- **Bottleneck**: Memory bandwidth, not compute (modern GPUs are compute-abundant, memory-bound)
-
-**Parameter Efficiency Comparison**: For 32×32 RGB input, 32 output channels:
-- **Dense layer**: (3 × 32 × 32) → 32 → 98,304 parameters
-- **Conv2d(3→32, k=3, p=1)**: 3 × 32 × 3 × 3 = 896 parameters (110× reduction!)
-- **Trade-off**: Conv2d assumes local spatial structure. For tasks where pixels far apart are strongly related (e.g., detecting relationships between distant objects), dense layers may be necessary (motivates attention mechanisms).
-
-**Receptive Field Growth with Depth**: How many 3×3 Conv2d layers needed to see entire 224×224 image?
-- **Formula**: Receptive field = 1 + N×(kernel_size - 1) = 1 + N×2 = 1 + 2N
-- **Coverage**: For RF ≥ 224, need N ≥ 111.5 → 112 Conv2d layers!
-- **Production solution**: Pooling layers provide 2× downsampling, reducing required depth. With 5 pooling layers (224→112→56→28→14→7), need far fewer conv layers.
-- **ResNet-50 approach**: 49 conv layers + 4 pooling stages achieves global receptive field
-
-**Memory Consumption Analysis**: For batch_size=32, ResNet-50 on 224×224 images:
-- **Input**: 32 × 3 × 224 × 224 = 6MB
-- **Conv1 output**: 32 × 64 × 112 × 112 = 26MB
-- **Layer1 output**: 32 × 256 × 56 × 56 = 26MB
-- **Layer2 output**: 32 × 512 × 28 × 28 = 13MB
-- **Layer3 output**: 32 × 1024 × 14 × 14 = 6.5MB
-- **Layer4 output**: 32 × 2048 × 7 × 7 = 3.2MB
-- **Total activations**: ~80MB (dominates 25MB parameters during training)
-- **With gradients**: ~160MB (activation gradients match activation memory)
-
-**Optimization Techniques in Production**:
-1. **im2col transformation**: Converts Conv2d into GEMM (matrix multiplication), leveraging optimized BLAS
-2. **Winograd algorithm**: Reduces multiplications by 2.25× for 3×3 kernels (trades additions for multiplications)
-3. **FFT convolution**: Efficient for large kernels (7×7+), uses frequency domain multiplication
-4. **Depthwise separable**: Splits Conv2d into depthwise + pointwise, reducing FLOPs by ~9× (used in MobileNet)
-5. **Quantization**: INT8 convolution on Tensor Cores provides 4× throughput vs FP32 with minimal accuracy loss
 
 ## Systems Thinking Questions
 
@@ -699,21 +447,21 @@ Choose your preferred way to engage with this module:
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card} 🚀 Launch Binder
+```{grid-item-card}  Launch Binder
 :link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/09_spatial/spatial_dev.ipynb
 :class-header: bg-light
 
 Run this module interactively in your browser. No installation required!
 ```
 
-```{grid-item-card} ⚡ Open in Colab
+```{grid-item-card}  Open in Colab
 :link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/09_spatial/spatial_dev.ipynb
 :class-header: bg-light
 
 Use Google Colab for GPU access and cloud compute power.
 ```
 
-```{grid-item-card} 📖 View Source
+```{grid-item-card}  View Source
 :link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/09_spatial/spatial_dev.ipynb
 :class-header: bg-light
 
@@ -722,7 +470,7 @@ Browse the Jupyter notebook source and understand the implementation.
 
 ````
 
-```{admonition} 💾 Save Your Progress
+```{admonition}  Save Your Progress
 :class: tip
 **Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
 ```
@@ -737,6 +485,6 @@ tito module complete 09  # Export to package
 ---
 
 <div class="prev-next-area">
-<a class="left-prev" href="../08_dataloader/ABOUT.html" title="previous page">← Module 08: DataLoader</a>
-<a class="right-next" href="../10_tokenization/ABOUT.html" title="next page">Module 10: Tokenization →</a>
+<a class="left-prev" href="08_dataloader_ABOUT.html" title="previous page">← Module 08: DataLoader</a>
+<a class="right-next" href="10_tokenization_ABOUT.html" title="next page">Module 10: Tokenization →</a>
 </div>

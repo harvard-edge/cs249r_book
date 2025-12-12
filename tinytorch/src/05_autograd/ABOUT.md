@@ -1,7 +1,7 @@
 ---
 title: "Autograd"
 description: "Build the automatic differentiation engine that powers neural network training"
-difficulty: "⭐⭐⭐⭐"
+difficulty: "●●●●"
 time_estimate: "8-10 hours"
 prerequisites: ["01_tensor", "02_activations", "03_layers", "04_losses"]
 next_steps: ["06_optimizers"]
@@ -13,9 +13,9 @@ learning_objectives:
   - "Connect implementation to PyTorch's torch.autograd.Function architecture"
 ---
 
-# 05. Autograd
+# Autograd
 
-**FOUNDATION TIER** | Difficulty: ⭐⭐⭐⭐ (4/4) | Time: 8-10 hours
+**FOUNDATION TIER** | Difficulty: ●●●● (4/4) | Time: 8-10 hours
 
 ## Overview
 
@@ -65,31 +65,6 @@ This module follows TinyTorch's **Build → Use → Reflect** framework:
 1. **Build**: Implement Function base class and operation-specific gradient functions (AddBackward, MulBackward, MatmulBackward, SumBackward), enhance Tensor class with backward() method, create enable_autograd() that activates gradient tracking
 2. **Use**: Apply automatic differentiation to mathematical expressions, compute gradients for neural network parameters (weights and biases), verify gradient correctness against manual chain rule calculations
 3. **Reflect**: How does computation graph memory scale with network depth? Why does backward pass take 2-3x forward pass time despite similar operations? When does gradient accumulation help vs. hurt training?
-
-## Getting Started
-
-### Prerequisites
-Ensure you understand the mathematical building blocks:
-
-```bash
-# Activate TinyTorch environment
-source scripts/activate-tinytorch
-
-# Verify prerequisite modules
-tito test tensor
-tito test activations
-tito test layers
-tito test losses
-```
-
-### Development Workflow
-1. **Open the development file**: `modules/05_autograd/autograd.py`
-2. **Implement Function base class**: Create gradient computation foundation with saved_tensors and apply() method
-3. **Build operation Functions**: Implement AddBackward, MulBackward, SubBackward, DivBackward, MatmulBackward gradient rules
-4. **Add backward() to Tensor**: Implement reverse-mode differentiation with gradient accumulation and graph traversal
-5. **Create enable_autograd()**: Monkey-patch Tensor operations to track gradients and build computation graphs
-6. **Extend to activations and losses**: Add ReLUBackward, SigmoidBackward, MSEBackward, CrossEntropyBackward gradient functions
-7. **Export and verify**: `tito module complete 05 && tito test autograd`
 
 ## Implementation Guide
 
@@ -224,9 +199,9 @@ class MatmulBackward(Function):
 **✓ CHECKPOINT 1: Computational Graph Construction Complete**
 
 You've implemented the Function base class and gradient rules for core operations:
-- ✅ Function base class with apply() method
-- ✅ AddBackward, MulBackward, MatmulBackward, SumBackward
-- ✅ Understanding of chain rule for each operation
+- ✓ Function base class with apply() method
+- ✓ AddBackward, MulBackward, MatmulBackward, SumBackward
+- ✓ Understanding of chain rule for each operation
 
 **What you can do now**: Build computation graphs during forward pass that track operation dependencies.
 
@@ -321,10 +296,10 @@ print(f"W2.grad shape: {W2.grad.shape}")  # (2, 1)
 **✓ CHECKPOINT 2: Automatic Differentiation Working**
 
 You've completed the core autograd implementation:
-- ✅ Function classes with gradient computation rules
-- ✅ Enhanced Tensor with backward() method
-- ✅ Computational graph traversal in reverse order
-- ✅ Gradient accumulation and propagation
+- ✓ Function classes with gradient computation rules
+- ✓ Enhanced Tensor with backward() method
+- ✓ Computational graph traversal in reverse order
+- ✓ Gradient accumulation and propagation
 
 **What you can do now**: Train any neural network by calling loss.backward() to compute all parameter gradients automatically.
 
@@ -334,114 +309,30 @@ You've completed the core autograd implementation:
 
 ---
 
-## Common Pitfalls
+## Getting Started
 
-### Forgetting to Set requires_grad
+### Prerequisites
+Ensure you understand the mathematical building blocks:
 
-**Problem**: Tensors don't track gradients unless explicitly marked with `requires_grad=True`, causing `grad` to remain None after backward().
+```bash
+# Activate TinyTorch environment
+source scripts/activate-tinytorch
 
-**Solution**: Always set `requires_grad=True` for parameters you want to optimize:
-
-```python
-# ❌ Wrong - gradient won't be computed
-x = Tensor([1.0, 2.0, 3.0])
-y = x * 2
-loss = y.sum()
-loss.backward()
-print(x.grad)  # None - no gradient tracked!
-
-# ✅ Correct - explicitly enable gradient tracking
-x = Tensor([1.0, 2.0, 3.0], requires_grad=True)
-y = x * 2
-loss = y.sum()
-loss.backward()
-print(x.grad)  # [2.0, 2.0, 2.0] - gradients computed!
+# Verify prerequisite modules
+tito test tensor
+tito test activations
+tito test layers
+tito test losses
 ```
 
-### Calling backward() Multiple Times Without zero_grad()
-
-**Problem**: Gradients accumulate by default. Calling backward() twice without clearing gradients causes incorrect accumulated values.
-
-**Solution**: Always call `zero_grad()` before computing new gradients:
-
-```python
-# ❌ Wrong - gradients accumulate across iterations
-x = Tensor([1.0], requires_grad=True)
-for i in range(3):
-    loss = (x ** 2).sum()
-    loss.backward()  # grad accumulates: 2, 4, 6
-print(x.grad)  # [6.0] - accumulated from 3 iterations!
-
-# ✅ Correct - clear gradients each iteration
-x = Tensor([1.0], requires_grad=True)
-for i in range(3):
-    if x.grad is not None:
-        x.grad = None  # Or implement zero_grad() method
-    loss = (x ** 2).sum()
-    loss.backward()
-print(x.grad)  # [2.0] - only from last iteration
-```
-
-### Incorrect Matrix Multiplication Gradient Shapes
-
-**Problem**: Matmul gradients involve transpose operations. Shape mismatches cause crashes or incorrect gradients.
-
-**Solution**: Remember the gradient formulas for `Z = A @ B`:
-- `grad_A = grad_Z @ B.T` (transpose second input)
-- `grad_B = A.T @ grad_Z` (transpose first input)
-
-```python
-# Example: Verify gradient shapes
-A = Tensor([[1, 2], [3, 4]], requires_grad=True)  # (2, 2)
-B = Tensor([[5, 6], [7, 8]], requires_grad=True)  # (2, 2)
-Z = A.matmul(B)  # (2, 2)
-loss = Z.sum()
-loss.backward()
-
-# Check shapes match
-assert A.grad.shape == A.shape  # (2, 2) ✓
-assert B.grad.shape == B.shape  # (2, 2) ✓
-```
-
-### In-Place Operations Breaking Gradient Tracking
-
-**Problem**: Modifying tensor data in-place (`x.data += 1`) corrupts the computation graph by overwriting values needed for backward pass.
-
-**Solution**: Avoid in-place modifications during forward pass. Create new tensors instead:
-
-```python
-# ❌ Wrong - in-place operation breaks gradient
-x = Tensor([1.0, 2.0], requires_grad=True)
-x.data += 1.0  # Modifies x in-place - breaks graph!
-y = x * 2
-y.backward()  # Incorrect gradients!
-
-# ✅ Correct - create new tensor
-x = Tensor([1.0, 2.0], requires_grad=True)
-x_modified = x + 1.0  # New tensor preserves graph
-y = x_modified * 2
-y.backward()  # Correct gradients
-```
-
-### Backward on Non-Scalar Without Gradient Argument
-
-**Problem**: `backward()` on non-scalar tensors requires explicitly passing gradient, otherwise raises error.
-
-**Solution**: For non-scalar outputs, provide gradient matching output shape:
-
-```python
-# ❌ Wrong - backward() on non-scalar without gradient
-x = Tensor([[1.0, 2.0], [3.0, 4.0]], requires_grad=True)
-y = x * 2  # Shape (2, 2) - non-scalar
-y.backward()  # Error: backward() requires gradient for non-scalars!
-
-# ✅ Correct - provide gradient for non-scalar
-x = Tensor([[1.0, 2.0], [3.0, 4.0]], requires_grad=True)
-y = x * 2
-gradient = np.ones_like(y.data)  # Match output shape
-y.backward(gradient)
-print(x.grad)  # Correct gradients
-```
+### Development Workflow
+1. **Open the development file**: `modules/05_autograd/autograd.py`
+2. **Implement Function base class**: Create gradient computation foundation with saved_tensors and apply() method
+3. **Build operation Functions**: Implement AddBackward, MulBackward, SubBackward, DivBackward, MatmulBackward gradient rules
+4. **Add backward() to Tensor**: Implement reverse-mode differentiation with gradient accumulation and graph traversal
+5. **Create enable_autograd()**: Monkey-patch Tensor operations to track gradients and build computation graphs
+6. **Extend to activations and losses**: Add ReLUBackward, SigmoidBackward, MSEBackward, CrossEntropyBackward gradient functions
+7. **Export and verify**: `tito module complete 05 && tito test autograd`
 
 ## Testing
 
@@ -461,38 +352,38 @@ python -m pytest tests/05_autograd/test_batched_matmul_backward.py -v
 ```
 
 ### Test Coverage Areas
-- ✅ **Function Classes**: Verify AddBackward, MulBackward, MatmulBackward compute correct gradients according to mathematical definitions
-- ✅ **Backward Pass**: Test gradient flow through multi-layer computation graphs with multiple operation types
-- ✅ **Chain Rule Application**: Ensure composite functions (f(g(x))) correctly apply chain rule: df/dx = (df/dg) × (dg/dx)
-- ✅ **Gradient Accumulation**: Verify gradients accumulate correctly when multiple paths lead to same tensor
-- ✅ **Broadcasting Gradients**: Test gradient unbroadcasting when operations involve tensors of different shapes
-- ✅ **Neural Network Integration**: Validate seamless gradient computation through layers, activations, and loss functions
+- ✓ **Function Classes**: Verify AddBackward, MulBackward, MatmulBackward compute correct gradients according to mathematical definitions
+- ✓ **Backward Pass**: Test gradient flow through multi-layer computation graphs with multiple operation types
+- ✓ **Chain Rule Application**: Ensure composite functions (f(g(x))) correctly apply chain rule: df/dx = (df/dg) × (dg/dx)
+- ✓ **Gradient Accumulation**: Verify gradients accumulate correctly when multiple paths lead to same tensor
+- ✓ **Broadcasting Gradients**: Test gradient unbroadcasting when operations involve tensors of different shapes
+- ✓ **Neural Network Integration**: Validate seamless gradient computation through layers, activations, and loss functions
 
 ### Inline Testing & Mathematical Verification
 The module includes comprehensive mathematical validation:
 ```python
 # Example inline test output
-🔬 Unit Test: Function Classes...
-✅ AddBackward gradient computation correct
-✅ MulBackward gradient computation correct
-✅ MatmulBackward gradient computation correct
-✅ SumBackward gradient computation correct
-📈 Progress: Function Classes ✓
+ Unit Test: Function Classes...
+ AddBackward gradient computation correct
+ MulBackward gradient computation correct
+ MatmulBackward gradient computation correct
+ SumBackward gradient computation correct
+ Progress: Function Classes ✓
 
 # Mathematical verification with known derivatives
-🔬 Unit Test: Tensor Autograd Enhancement...
-✅ Simple gradient: d(3x+1)/dx = 3 ✓
-✅ Matrix multiplication gradients match analytical solution ✓
-✅ Multi-operation chain rule application correct ✓
-✅ Gradient accumulation works correctly ✓
-📈 Progress: Autograd Enhancement ✓
+ Unit Test: Tensor Autograd Enhancement...
+ Simple gradient: d(3x+1)/dx = 3 ✓
+ Matrix multiplication gradients match analytical solution ✓
+ Multi-operation chain rule application correct ✓
+ Gradient accumulation works correctly ✓
+ Progress: Autograd Enhancement ✓
 
 # Integration test
-🧪 Integration Test: Multi-layer Neural Network...
-✅ Forward pass builds computation graph correctly
-✅ Backward pass computes gradients for all parameters
-✅ Gradient shapes match parameter shapes
-✅ Complex operations (matmul + add + mul + sum) work correctly
+ Integration Test: Multi-layer Neural Network...
+ Forward pass builds computation graph correctly
+ Backward pass computes gradients for all parameters
+ Gradient shapes match parameter shapes
+ Complex operations (matmul + add + mul + sum) work correctly
 ```
 
 ### Manual Testing Examples
@@ -532,101 +423,6 @@ z = y1 + y2 # z = (x+x) + (3x) = 5x, dz/dx = 5
 z.backward()
 print(f"dz/dx with multiple paths: {x.grad}")  # Should be 5.0 ✓
 ```
-
-## Production Context
-
-### Your Implementation vs. Production Frameworks
-
-Understanding what you're building vs. what production frameworks provide:
-
-| Feature | Your Autograd (Module 05) | PyTorch torch.autograd | TensorFlow tf.GradientTape |
-|---------|--------------------------|----------------------|---------------------------|
-| **Backend** | NumPy (CPU-only) | C++/CUDA (CPU/GPU) | C++/CUDA/XLA |
-| **Computational Graph** | Dynamic (define-by-run) | ✅ Dynamic | ✅ Eager mode (TF 2.x) |
-| **Gradient Tracking** | Manual `requires_grad=True` | ✅ Same API | ✅ `tf.GradientTape()` context |
-| **Function Classes** | AddBackward, MulBackward, etc. | ✅ Same architecture | ✅ GradientTape ops |
-| **backward() Method** | Single scalar loss | ✅ Scalar or vector with gradient | ✅ `tape.gradient()` |
-| **Gradient Accumulation** | Manual `.grad +=` | ✅ Automatic accumulation | ✅ Accumulate via tape |
-| **Higher-Order Gradients** | ❌ Not implemented | ✅ `create_graph=True` | ✅ Nested tapes |
-| **In-Place Detection** | ❌ No safety | ✅ Runtime version tracking | ✅ Variable watch |
-| **Memory Optimization** | ❌ No checkpointing | ✅ `checkpoint()` utility | ✅ `tf.recompute_grad` |
-| **JIT Compilation** | ❌ Interpreted Python | ✅ `torch.compile()` (2.0+) | ✅ `@tf.function` |
-
-**Educational Focus**: Your implementation prioritizes clarity and understanding of the chain rule. Production frameworks add sophisticated optimizations (graph fusion, memory pooling, compiled gradients) while maintaining the same core algorithmic approach.
-
-### Side-by-Side Code Comparison
-
-**Your implementation:**
-```python
-from tinytorch.core.autograd import enable_autograd
-from tinytorch.core.tensor import Tensor
-
-enable_autograd()  # Activate gradient tracking
-
-# Create tensors with gradient tracking
-x = Tensor([[1.0, 2.0]], requires_grad=True)
-w = Tensor([[0.5], [0.7]], requires_grad=True)
-b = Tensor([0.1], requires_grad=True)
-
-# Forward pass builds computation graph
-y = x.matmul(w) + b  # Creates MatmulBackward, AddBackward
-loss = y.mean()      # Creates MeanBackward
-
-# Backward pass traverses graph
-loss.backward()  # Your implementation
-
-# Access gradients
-print(x.grad, w.grad, b.grad)
-```
-
-**Equivalent PyTorch:**
-```python
-import torch
-
-# Create tensors with gradient tracking
-x = torch.tensor([[1.0, 2.0]], requires_grad=True)
-w = torch.tensor([[0.5], [0.7]], requires_grad=True)
-b = torch.tensor([0.1], requires_grad=True)
-
-# Forward pass builds computation graph (same concept)
-y = x @ w + b        # Creates MmBackward, AddBackward
-loss = y.mean()      # Creates MeanBackward
-
-# Backward pass traverses graph
-loss.backward()      # PyTorch autograd engine
-
-# Access gradients (same API)
-print(x.grad, w.grad, b.grad)
-```
-
-**Key Differences:**
-1. **Graph Construction**: Both build dynamic computational graphs during forward pass. PyTorch uses optimized C++ graph nodes while you use Python Function objects.
-2. **Memory Pooling**: PyTorch reuses graph node memory across iterations via object pools. Your implementation allocates new Function objects each forward pass.
-3. **Gradient Computation**: Both traverse graphs in reverse topological order applying chain rule. PyTorch uses hand-optimized CUDA kernels for gradient ops.
-4. **Safety Features**: PyTorch detects in-place operations that would corrupt gradients via tensor version counters. Your implementation trusts users to avoid dangerous operations.
-
-### Real-World Production Usage
-
-**OpenAI GPT-3 Training**: 175B parameters require computing gradients across 96 transformer layers. Autodiff computes all 175B parameter gradients in a single `loss.backward()` call. Gradient checkpointing trades 30% extra compute for 10× memory reduction, enabling training on available GPU memory.
-
-**Google BERT Pre-training**: Distributed training across thousands of TPUs uses autodiff on each device. Gradient synchronization happens after backward pass—each device computes local gradients via autodiff, then all-reduce averages gradients across devices for consistent weight updates.
-
-**Meta ResNet**: Image classification training uses mixed precision autodiff (FP16 forward/backward, FP32 parameter updates). Automatic mixed precision (AMP) wraps autograd to prevent FP16 underflow/overflow while maintaining speed.
-
-**Tesla Autopilot**: Real-time training on edge devices uses simplified autodiff with reduced graph memory. Gradient checkpointing aggressively recomputes activations to fit models in limited memory, accepting 2-3× training slowdown for on-device learning.
-
-### Performance Characteristics at Scale
-
-**Computation Graph Memory**: For ResNet-50 with batch size 64, the computation graph stores ~100MB of intermediate activations during forward pass. This is 4× the parameter memory (25M params × 4 bytes = 100MB), dominating training memory usage.
-
-**Backward Pass Time**: Backward pass takes 2-3× forward pass time despite similar FLOPs because:
-1. Matmul gradients require two matmuls (one for each input)
-2. Memory bandwidth dominates (loading saved activations from forward pass)
-3. Less opportunity for kernel fusion (forward pass fuses matmul+bias+activation, backward must separate)
-
-**Gradient Accumulation Savings**: Processing batch_size=256 as 4×64 mini-batches reduces peak memory from ~400MB to ~100MB graph memory + accumulated gradients. Enables training larger models on fixed GPU memory.
-
-**Higher-Order Gradients Cost**: Computing Hessian (gradient of gradients) for N parameters requires O(N²) memory for full Hessian matrix. Second-order optimizers (Newton's method) are impractical for billion-parameter models.
 
 ## Systems Thinking Questions
 
@@ -762,21 +558,21 @@ Choose your preferred way to engage with this module:
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card} 🚀 Launch Binder
+```{grid-item-card}  Launch Binder
 :link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/05_autograd/autograd.ipynb
 :class-header: bg-light
 
 Run this module interactively in your browser. No installation required!
 ```
 
-```{grid-item-card} ⚡ Open in Colab
+```{grid-item-card}  Open in Colab
 :link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/05_autograd/autograd.ipynb
 :class-header: bg-light
 
 Use Google Colab for GPU access and cloud compute power.
 ```
 
-```{grid-item-card} 📖 View Source
+```{grid-item-card}  View Source
 :link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/05_autograd/autograd.py
 :class-header: bg-light
 
@@ -785,7 +581,7 @@ Browse the Python source code and understand the implementation.
 
 ````
 
-```{admonition} 💾 Save Your Progress
+```{admonition}  Save Your Progress
 :class: tip
 **Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
 
@@ -794,6 +590,6 @@ Browse the Python source code and understand the implementation.
 ---
 
 <div class="prev-next-area">
-<a class="left-prev" href="../modules/04_losses/ABOUT.html" title="previous page">← Previous Module</a>
-<a class="right-next" href="../modules/06_optimizers/ABOUT.html" title="next page">Next Module →</a>
+<a class="left-prev" href="04_losses_ABOUT.html" title="previous page">← Module 04: Losses</a>
+<a class="right-next" href="06_optimizers_ABOUT.html" title="next page">Module 06: Optimizers →</a>
 </div>

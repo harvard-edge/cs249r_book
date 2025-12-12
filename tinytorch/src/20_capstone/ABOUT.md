@@ -1,7 +1,7 @@
 ---
 title: "Capstone - Submission Infrastructure"
 description: "Build professional benchmarking workflows that generate standardized submissions for ML competitions"
-difficulty: "⭐⭐⭐⭐"
+difficulty: "●●●●"
 time_estimate: "5-8 hours"
 prerequisites: ["Module 19 - Benchmarking", "Modules 14-18 - Optimization Techniques"]
 next_steps: ["Milestone 05 - TinyGPT", "Wake Vision Competition"]
@@ -13,9 +13,9 @@ learning_objectives:
   - "Build submission infrastructure that enables future ML competitions and community challenges"
 ---
 
-# 20. Capstone - Submission Infrastructure
+# Capstone - Submission Infrastructure
 
-**OPTIMIZATION TIER CAPSTONE** | Difficulty: ⭐⭐⭐⭐ (4/4) | Time: 5-8 hours
+**OPTIMIZATION TIER CAPSTONE** | Difficulty: ●●●● (4/4) | Time: 5-8 hours
 
 ## Overview
 
@@ -42,66 +42,6 @@ This capstone follows TinyTorch's **Build → Use → Reflect** framework:
 1. **Build**: Implement `BenchmarkReport` class, `generate_submission()` function, and standardized JSON schema with system metadata
 2. **Use**: Benchmark baseline and optimized models using TinyTorch's optimization APIs; generate submissions comparing before/after performance
 3. **Reflect**: How do optimization techniques combine in practice? What makes submissions reproducible? How does standardized infrastructure enable fair competition?
-
-## Getting Started
-
-### Prerequisites
-
-Ensure you understand benchmarking and optimization techniques:
-
-```bash
-# Activate TinyTorch environment
-source scripts/activate-tinytorch
-
-# Required: Benchmarking methodology (Module 19)
-tito test benchmarking
-
-# Helpful: Optimization techniques (Modules 14-18)
-tito test profiling        # Module 14: Find bottlenecks
-tito test quantization     # Module 15: Reduce precision
-tito test compression      # Module 16: Prune parameters
-tito test memoization      # Module 17: Cache computations
-tito test acceleration     # Module 18: Operator fusion
-```
-
-**Why Module 19 is Essential**: This capstone uses Module 19's `BenchmarkReport` class as the foundation. Understanding statistical measurement methodology from Module 19 is critical for generating valid submissions.
-
-### Development Workflow
-
-1. **Open the development file**: `modules/20_capstone/20_capstone.py`
-2. **Implement SimpleMLP**: Simple demonstration model for benchmarking
-3. **Build BenchmarkReport**: Class to collect and store metrics
-4. **Create generate_submission()**: Function to create standardized JSON
-5. **Add save_submission()**: JSON serialization with proper formatting
-6. **Implement workflow examples**: Basic and optimization workflow demonstrations
-7. **Export and verify**: `tito module complete 20 && tito test capstone`
-
-**Development Tips**:
-```python
-# Test BenchmarkReport with toy model
-model = SimpleMLP(input_size=10, hidden_size=20, output_size=3)
-report = BenchmarkReport(model_name="test_model")
-metrics = report.benchmark_model(model, X_test, y_test, num_runs=10)
-
-# Verify all required metrics are present
-required = ['parameter_count', 'model_size_mb', 'accuracy',
-            'latency_ms_mean', 'latency_ms_std', 'throughput_samples_per_sec']
-assert all(metric in metrics for metric in required)
-
-# Test submission generation
-submission = generate_submission(report, student_name="Test")
-assert 'baseline' in submission
-assert 'system_info' in submission
-assert submission['submission_type'] == 'capstone_benchmark'
-
-# Test with optimization comparison
-optimized_report = BenchmarkReport(model_name="optimized")
-# ... benchmark optimized model ...
-submission_with_opt = generate_submission(report, optimized_report,
-                                         techniques_applied=["pruning"])
-assert 'improvements' in submission_with_opt
-assert 'speedup' in submission_with_opt['improvements']
-```
 
 ## Implementation Guide
 
@@ -253,7 +193,7 @@ def generate_submission(
 def save_submission(submission: Dict[str, Any], filepath: str):
     """Save submission to JSON file with proper formatting."""
     Path(filepath).write_text(json.dumps(submission, indent=2))
-    print(f"✅ Submission saved to: {filepath}")
+    print(f" Submission saved to: {filepath}")
     return filepath
 ```
 
@@ -372,7 +312,7 @@ def run_optimization_workflow_example():
     # Display improvements
     if 'improvements' in submission:
         imp = submission['improvements']
-        print(f"\n  📈 Results:")
+        print(f"\n   Results:")
         print(f"     Speedup: {imp['speedup']:.2f}x")
         print(f"     Compression: {imp['compression_ratio']:.2f}x")
         print(f"     Accuracy Δ: {imp['accuracy_delta']*100:+.1f}%")
@@ -380,7 +320,7 @@ def run_optimization_workflow_example():
     # Step 6: Save submission
     save_submission(submission, "optimization_submission.json")
 
-    print("\n✅ Complete optimization workflow demonstrated!")
+    print("\n Complete optimization workflow demonstrated!")
     return submission
 ```
 
@@ -443,211 +383,65 @@ The submission infrastructure you build enables future TinyTorch challenges:
 - Constraint validation (checking competition requirements)
 - Leaderboard integration (automated ranking systems)
 
-## Common Pitfalls
+## Getting Started
 
-### Inconsistent Benchmark Runs
+### Prerequisites
 
-**Problem**: Running benchmark with too few iterations causes high variance in latency measurements, making speedup claims unreliable
+Ensure you understand benchmarking and optimization techniques:
 
-**Solution**: Always use sufficient runs (minimum 50-100) to achieve statistical confidence in measurements
+```bash
+# Activate TinyTorch environment
+source scripts/activate-tinytorch
 
-```python
-# ❌ Wrong: Too few runs produces unreliable measurements
-report.benchmark_model(model, X_test, y_test, num_runs=5)
-# Result: latency std may exceed mean improvement
+# Required: Benchmarking methodology (Module 19)
+tito test benchmarking
 
-# ✅ Correct: Sufficient runs for statistical confidence
-report.benchmark_model(model, X_test, y_test, num_runs=100)
-# Result: std << mean, reliable improvement claims
+# Helpful: Optimization techniques (Modules 14-18)
+tito test profiling        # Module 14: Find bottlenecks
+tito test quantization     # Module 15: Reduce precision
+tito test compression      # Module 16: Prune parameters
+tito test memoization      # Module 17: Cache computations
+tito test acceleration     # Module 18: Operator fusion
 ```
 
-### Missing System Information
+**Why Module 19 is Essential**: This capstone uses Module 19's `BenchmarkReport` class as the foundation. Understanding statistical measurement methodology from Module 19 is critical for generating valid submissions.
 
-**Problem**: Omitting system info (platform, Python version, NumPy version) makes results non-reproducible and invalidates cross-environment comparisons
+### Development Workflow
 
-**Solution**: Always collect and include complete system information in benchmark reports
+1. **Open the development file**: `modules/20_capstone/20_capstone.py`
+2. **Implement SimpleMLP**: Simple demonstration model for benchmarking
+3. **Build BenchmarkReport**: Class to collect and store metrics
+4. **Create generate_submission()**: Function to create standardized JSON
+5. **Add save_submission()**: JSON serialization with proper formatting
+6. **Implement workflow examples**: Basic and optimization workflow demonstrations
+7. **Export and verify**: `tito module complete 20 && tito test capstone`
 
+**Development Tips**:
 ```python
-# ❌ Wrong: Benchmark without system context
-metrics = {'accuracy': 0.95, 'latency_ms': 10.0}
-# Cannot reproduce or compare across systems
+# Test BenchmarkReport with toy model
+model = SimpleMLP(input_size=10, hidden_size=20, output_size=3)
+report = BenchmarkReport(model_name="test_model")
+metrics = report.benchmark_model(model, X_test, y_test, num_runs=10)
 
-# ✅ Correct: Full system info captured
-report = BenchmarkReport(model_name="baseline")
-report.benchmark_model(model, X_test, y_test)
-# Includes platform, Python version, NumPy version automatically
-```
+# Verify all required metrics are present
+required = ['parameter_count', 'model_size_mb', 'accuracy',
+            'latency_ms_mean', 'latency_ms_std', 'throughput_samples_per_sec']
+assert all(metric in metrics for metric in required)
 
-### Incorrect Improvement Calculations
+# Test submission generation
+submission = generate_submission(report, student_name="Test")
+assert 'baseline' in submission
+assert 'system_info' in submission
+assert submission['submission_type'] == 'capstone_benchmark'
 
-**Problem**: Computing speedup as (optimized / baseline) instead of (baseline / optimized) inverts the metric, showing 0.5x instead of 2x
-
-**Solution**: Speedup ratio should always be baseline divided by optimized (larger is better)
-
-```python
-# ❌ Wrong: Inverted speedup calculation
-speedup = optimized_latency / baseline_latency  # 5ms / 10ms = 0.5x (wrong!)
-
-# ✅ Correct: Speedup as baseline over optimized
-speedup = baseline_latency / optimized_latency  # 10ms / 5ms = 2.0x (correct!)
-# Interpretation: Optimized model is 2x faster
-```
-
-### Comparing Unmatched Datasets
-
-**Problem**: Benchmarking baseline and optimized models on different test datasets produces incomparable accuracy metrics
-
-**Solution**: Use identical test data for both baseline and optimized model benchmarks
-
-```python
-# ❌ Wrong: Different test sets invalidate comparison
-baseline_report.benchmark_model(baseline_model, X_test_v1, y_test_v1)
-optimized_report.benchmark_model(optimized_model, X_test_v2, y_test_v2)
-# Accuracy delta meaningless
-
-# ✅ Correct: Same test set for fair comparison
-baseline_report.benchmark_model(baseline_model, X_test, y_test)
-optimized_report.benchmark_model(optimized_model, X_test, y_test)
-# Accuracy delta reflects true model difference
-```
-
-### Ignoring Statistical Significance
-
-**Problem**: Claiming "optimization improved latency 5%" when standard deviation is 8% makes the improvement statistically meaningless
-
-**Solution**: Ensure improvement magnitude exceeds measurement noise (rule of thumb: improvement > 2x std deviation)
-
-```python
-# Problem: Improvement within noise margin
-baseline_lat = 10.0  # ms, std=0.8
-optimized_lat = 9.5   # ms, std=0.8
-improvement = 5%  # But std is 8% of baseline!
-
-# ✅ Solution: Report confidence and check significance
-if improvement_percent > 2 * std_percent:
-    print(f"Statistically significant: {improvement_percent:.1f}% ± {std_percent:.1f}%")
-else:
-    print(f"Within measurement noise: {improvement_percent:.1f}% ± {std_percent:.1f}%")
-```
-
-## Production Context
-
-### Your Implementation vs. Production Frameworks
-
-Understanding what you're building vs. what production benchmarking systems provide:
-
-| Feature | Your Submission Infrastructure | MLPerf Inference | Hugging Face Benchmarks |
-|---------|-------------------------------|------------------|------------------------|
-| **Metrics** | Latency, accuracy, model size | 20+ metrics (latency, throughput, power, cost) | Inference speed, memory, accuracy |
-| **System Info** | Basic (platform, Python, NumPy) | Comprehensive (CPU, GPU, memory, OS, drivers) | Hardware specs, library versions |
-| **Statistical Rigor** | Mean ± std over 100 runs | 99th percentile latency, confidence intervals | Multiple run aggregation |
-| **Submission Format** | Custom JSON schema | Standardized MLPerf format | JSON/CSV with metadata |
-| **Scale** | Single model, toy datasets | Production models, full datasets | Model families, diverse tasks |
-| **Validation** | Manual verification | Automated compliance checking | Community validation |
-
-**Educational Focus**: Your implementation prioritizes understanding the workflow over handling production-scale complexity. The submission format you build follows the SAME principles as MLPerf (reproducibility, system info, normalized metrics).
-
-### Side-by-Side Code Comparison
-
-**Your TinyTorch Submission:**
-```python
-from tinytorch.capstone import BenchmarkReport, generate_submission
-
-# Benchmark baseline model
-baseline_report = BenchmarkReport(model_name="baseline")
-baseline_report.benchmark_model(baseline_model, X_test, y_test, num_runs=100)
-
-# Benchmark optimized model
+# Test with optimization comparison
 optimized_report = BenchmarkReport(model_name="optimized")
-optimized_report.benchmark_model(optimized_model, X_test, y_test, num_runs=100)
-
-# Generate submission with improvements
-submission = generate_submission(
-    baseline_report=baseline_report,
-    optimized_report=optimized_report,
-    student_name="Optimizer",
-    techniques_applied=["pruning", "quantization"]
-)
-
-save_submission(submission, "results.json")
+# ... benchmark optimized model ...
+submission_with_opt = generate_submission(report, optimized_report,
+                                         techniques_applied=["pruning"])
+assert 'improvements' in submission_with_opt
+assert 'speedup' in submission_with_opt['improvements']
 ```
-
-**Equivalent MLPerf Workflow (Production):**
-```python
-import mlperf_loadgen as lg
-
-# Configure benchmark scenario
-settings = lg.TestSettings()
-settings.scenario = lg.TestScenario.SingleStream
-settings.mode = lg.TestMode.PerformanceOnly
-
-# Run benchmark with LoadGen
-lg.StartTest(sut, qsl, settings)  # Automated measurement
-
-# Generate MLPerf-compliant submission
-lg.GenerateSubmissionFiles(
-    results_dir="mlperf_results",
-    system_desc="system_desc.json",
-    compliance_dir="compliance"
-)
-# Output: Standardized JSON with 20+ metrics, compliance verification
-```
-
-**Key Differences:**
-1. **Metric Breadth**: MLPerf measures 99th percentile latency, power consumption, total cost of ownership; your implementation focuses on core metrics
-2. **Automation**: MLPerf uses LoadGen for automated measurement; you implement manual benchmarking loops
-3. **Compliance**: MLPerf enforces strict submission rules; your format is educational and flexible
-4. **Scale**: MLPerf runs full ImageNet/COCO datasets; you use toy datasets for learning
-
-### Real-World Applications
-
-**OpenAI GPT-4 Optimization**: When optimizing GPT-4 for production deployment, OpenAI benchmarks baseline and optimized versions using comprehensive metrics:
-- Baseline: 96-layer transformer, FP32 weights, 1.76 trillion parameters
-- Optimized: Mixed precision (FP16/INT8), KV cache optimization, FlashAttention
-- Metrics tracked: Tokens/second, memory bandwidth, power consumption, cost per 1M tokens
-- Submission format includes: Model architecture, optimization techniques, hardware specs, benchmark results
-
-**Meta LLaMA 2 Inference**: Meta publishes benchmarking infrastructure similar to your submission system:
-- Baseline: Standard multi-head attention, FP32 inference
-- Optimized: Grouped-query attention (8x KV cache reduction), INT8 quantization
-- Results published: Latency (ms/token), throughput (tokens/s), memory (GB), compression ratio
-- Community submissions enabled: Reproducible format allowing third-party optimization comparisons
-
-**Google TPU Benchmarks**: Google's TPU performance reports follow the same workflow pattern:
-- Profile baseline model on TPU v4
-- Apply optimization techniques (XLA compilation, operator fusion, mixed precision)
-- Benchmark with statistical rigor (1000+ runs, percentile analysis)
-- Generate submission with system info (TPU generation, topology, software stack)
-- Normalized metrics: FLOP/s efficiency, memory bandwidth utilization, speedup over baseline
-
-**Hugging Face Model Benchmarks**: Community benchmarking infrastructure at scale:
-- Submission format: Model card with hardware, latency, throughput, memory metrics
-- Enables fair comparison: Normalized speedup accounts for hardware differences
-- Your infrastructure teaches the SAME principles: reproducibility, system context, improvement metrics
-
-### Performance Characteristics at Scale
-
-**Benchmark Duration Scaling**: For production models:
-- Your SimpleMLP: 100 runs × 0.04ms = 4ms total benchmark time
-- ResNet-50 (ImageNet): 100 runs × 50ms = 5 seconds
-- GPT-3 (2048 tokens): 100 runs × 2000ms = 3.3 minutes
-- LLaMA-70B (4K context): 100 runs × 30000ms = 50 minutes
-- Production insight: Statistical rigor requires 1000+ runs for large models, taking hours
-
-**Memory Overhead**: Submission storage requirements:
-- Your toy submission: ~2KB JSON (baseline + optimized + metrics)
-- ResNet-50 submission: ~10KB (adds layer-wise profiling data)
-- Transformer submission: ~100KB (attention patterns, layer metrics)
-- MLPerf submission: ~10MB (comprehensive system logs, compliance data)
-- Production systems: Compress and archive submissions, store aggregated results
-
-**Metric Computation Cost**: For 100-run benchmark:
-- Parameter counting: O(1) per model
-- Accuracy measurement: O(n) inference passes on test set
-- Latency measurement: 100 × single-sample inference (dominant cost)
-- System info collection: O(1) metadata queries
-- Improvement calculations: O(1) arithmetic
-- Production optimization: Parallelize runs across GPUs, cache model loads
 
 ## Testing
 
@@ -663,74 +457,74 @@ tito test capstone
 python -m pytest tests/ -k capstone -v
 
 # Expected output:
-# ✅ test_simple_mlp - Model creation and forward pass
-# ✅ test_benchmark_report - Metrics collection and storage
-# ✅ test_submission_generation - JSON creation
-# ✅ test_submission_schema - Schema validation
-# ✅ test_submission_with_optimization - Before/after comparison
-# ✅ test_improvements_calculation - Speedup/compression/accuracy
-# ✅ test_json_serialization - File saving and loading
+#  test_simple_mlp - Model creation and forward pass
+#  test_benchmark_report - Metrics collection and storage
+#  test_submission_generation - JSON creation
+#  test_submission_schema - Schema validation
+#  test_submission_with_optimization - Before/after comparison
+#  test_improvements_calculation - Speedup/compression/accuracy
+#  test_json_serialization - File saving and loading
 ```
 
 ### Test Coverage Areas
 
-- ✅ **SimpleMLP Model**: Forward pass, parameter counting, output shape validation
-- ✅ **BenchmarkReport**: Metric collection, system info capture, statistical measurement
-- ✅ **Submission Generation**: Schema structure, field presence, type validation
-- ✅ **Schema Validation**: Required fields, value ranges, type correctness
-- ✅ **Optimization Comparison**: Improvements calculation, technique tracking
-- ✅ **JSON Serialization**: File writing, round-trip preservation, formatting
+- ✓ **SimpleMLP Model**: Forward pass, parameter counting, output shape validation
+- ✓ **BenchmarkReport**: Metric collection, system info capture, statistical measurement
+- ✓ **Submission Generation**: Schema structure, field presence, type validation
+- ✓ **Schema Validation**: Required fields, value ranges, type correctness
+- ✓ **Optimization Comparison**: Improvements calculation, technique tracking
+- ✓ **JSON Serialization**: File writing, round-trip preservation, formatting
 
 ### Inline Testing & Validation
 
 The module includes comprehensive unit tests:
 
 ```python
-🔬 Unit Test: SimpleMLP...
-✅ Model creation with custom parameters
-✅ Parameter count: 263 (10×20 + 20 + 20×3 + 3)
-✅ Forward pass output shape: (5, 3)
-✅ No NaN values in output
-📈 Progress: SimpleMLP ✓
+ Unit Test: SimpleMLP...
+ Model creation with custom parameters
+ Parameter count: 263 (10×20 + 20 + 20×3 + 3)
+ Forward pass output shape: (5, 3)
+ No NaN values in output
+ Progress: SimpleMLP ✓
 
-🔬 Unit Test: BenchmarkReport...
-✅ Model name and timestamp set correctly
-✅ System info collected (platform, python_version, numpy_version)
-✅ Metrics: parameter_count, model_size_mb, accuracy, latency, throughput
-✅ Metric types and ranges validated
-📈 Progress: BenchmarkReport ✓
+ Unit Test: BenchmarkReport...
+ Model name and timestamp set correctly
+ System info collected (platform, python_version, numpy_version)
+ Metrics: parameter_count, model_size_mb, accuracy, latency, throughput
+ Metric types and ranges validated
+ Progress: BenchmarkReport ✓
 
-🔬 Unit Test: Submission Generation...
-✅ Baseline submission structure complete
-✅ Version, type, timestamp, system_info, baseline present
-✅ Student name included when provided
-📈 Progress: generate_submission() ✓
+ Unit Test: Submission Generation...
+ Baseline submission structure complete
+ Version, type, timestamp, system_info, baseline present
+ Student name included when provided
+ Progress: generate_submission() ✓
 
-🔬 Unit Test: Submission Schema...
-✅ Required fields present
-✅ Field types correct (str, dict, float, int)
-✅ Baseline and metrics structure validated
-✅ System info contains platform and python_version
-📈 Progress: Schema validation ✓
+ Unit Test: Submission Schema...
+ Required fields present
+ Field types correct (str, dict, float, int)
+ Baseline and metrics structure validated
+ System info contains platform and python_version
+ Progress: Schema validation ✓
 
-🔬 Unit Test: Submission with Optimization...
-✅ Optimized section present with techniques
-✅ Improvements section with speedup, compression, accuracy_delta
-✅ Techniques list matches input
-📈 Progress: Optimization comparison ✓
+ Unit Test: Submission with Optimization...
+ Optimized section present with techniques
+ Improvements section with speedup, compression, accuracy_delta
+ Techniques list matches input
+ Progress: Optimization comparison ✓
 
-🔬 Unit Test: Improvements Calculation...
-✅ Speedup: 2.0x (baseline 10.0ms / optimized 5.0ms)
-✅ Compression: 2.0x (baseline 4.0MB / optimized 2.0MB)
-✅ Accuracy delta: -0.05 (0.75 - 0.80)
-📈 Progress: Improvements math ✓
+ Unit Test: Improvements Calculation...
+ Speedup: 2.0x (baseline 10.0ms / optimized 5.0ms)
+ Compression: 2.0x (baseline 4.0MB / optimized 2.0MB)
+ Accuracy delta: -0.05 (0.75 - 0.80)
+ Progress: Improvements math ✓
 
-🔬 Unit Test: JSON Serialization...
-✅ File created and exists
-✅ JSON valid and loadable
-✅ Structure preserved (version, student_name, metrics)
-✅ Round-trip serialization successful
-📈 Progress: File I/O ✓
+ Unit Test: JSON Serialization...
+ File created and exists
+ JSON valid and loadable
+ Structure preserved (version, student_name, metrics)
+ Round-trip serialization successful
+ Progress: File I/O ✓
 ```
 
 ### Manual Testing Examples
@@ -861,21 +655,21 @@ Choose your preferred way to engage with this capstone:
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card} 🚀 Launch Binder
+```{grid-item-card}  Launch Binder
 :link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/20_capstone/20_capstone.py
 :class-header: bg-light
 
 Run this capstone interactively in your browser. No installation required!
 ```
 
-```{grid-item-card} ⚡ Open in Colab
+```{grid-item-card}  Open in Colab
 :link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/20_capstone/20_capstone.ipynb
 :class-header: bg-light
 
 Use Google Colab for cloud compute power and easy sharing.
 ```
 
-```{grid-item-card} 📖 View Source
+```{grid-item-card}  View Source
 :link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/20_capstone/20_capstone.py
 :class-header: bg-light
 
@@ -884,7 +678,7 @@ Browse the Python source code and understand the implementation.
 
 ````
 
-```{admonition} 💡 Local Development Recommended
+```{admonition}  Local Development Recommended
 :class: tip
 This capstone involves benchmarking workflows that benefit from consistent hardware and persistent results. Local setup provides better control over measurement conditions and faster iteration cycles.
 
@@ -894,5 +688,5 @@ This capstone involves benchmarking workflows that benefit from consistent hardw
 ---
 
 <div class="prev-next-area">
-<a class="left-prev" href="../19_benchmarking/ABOUT.html" title="previous page">← Module 19: Benchmarking</a>
+<a class="left-prev" href="19_benchmarking_ABOUT.html" title="previous page">← Module 19: Benchmarking</a>
 </div>

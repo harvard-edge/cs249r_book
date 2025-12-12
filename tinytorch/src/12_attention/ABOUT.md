@@ -1,7 +1,7 @@
 ---
 title: "Attention - The Mechanism That Powers Modern AI"
 description: "Build scaled dot-product and multi-head attention mechanisms from scratch"
-difficulty: "⭐⭐⭐"
+difficulty: "●●●"
 time_estimate: "5-6 hours"
 prerequisites: ["01_tensor", "02_activations", "03_layers", "11_embeddings"]
 next_steps: ["13_transformers"]
@@ -13,9 +13,9 @@ learning_objectives:
   - "Analyze attention pattern trade-offs: computation cost, memory usage, and interpretability"
 ---
 
-# 12. Attention - The Mechanism That Powers Modern AI
+# Attention - The Mechanism That Powers Modern AI
 
-**ARCHITECTURE TIER** | Difficulty: ⭐⭐⭐ (3/4) | Time: 5-6 hours
+**ARCHITECTURE TIER** | Difficulty: ●●● (3/4) | Time: 5-6 hours
 
 ## Overview
 
@@ -40,40 +40,6 @@ This module follows TinyTorch's **Build → Use → Reflect** framework:
 1. **Build**: Implement scaled dot-product attention with explicit O(n²) loops (educational), create MultiHeadAttention class with Q/K/V projections and head splitting, and build masking utilities
 2. **Use**: Apply attention to realistic sequences with causal masking for language modeling, visualize attention patterns showing what the model "sees," and test with different head configurations
 3. **Reflect**: Why does attention scale O(n²)? How do different heads specialize without supervision? What memory bottlenecks emerge at GPT-4 scale (128 heads, 8K+ context)?
-
-
-## Getting Started
-
-### Prerequisites
-
-Ensure you understand these foundations:
-
-```bash
-# Activate TinyTorch environment
-source scripts/activate-tinytorch
-
-# Verify prerequisite modules
-tito test tensor      # Matrix operations (matmul, transpose)
-tito test activations  # Softmax for attention normalization
-tito test layers      # Linear layers for Q/K/V projections
-tito test embeddings  # Token/position embeddings attention operates on
-```
-
-**Core Concepts You'll Need:**
-- **Matrix Multiplication**: Understanding QK^T computation and broadcasting
-- **Softmax Numerical Stability**: Subtracting max before exp prevents overflow
-- **Layer Composition**: How Q/K/V projections combine with attention
-- **Shape Manipulation**: Reshape and transpose operations for head splitting
-
-### Development Workflow
-
-1. **Open the development file**: `modules/12_attention/attention_dev.ipynb` (notebook) or `attention_dev.py` (script)
-2. **Implement scaled_dot_product_attention**: Build core attention formula with explicit loops showing O(n²) complexity
-3. **Create MultiHeadAttention class**: Add Q/K/V projections, head splitting, parallel attention, and output projection
-4. **Build masking utilities**: Create causal mask for GPT-style attention and padding mask for batching
-5. **Test and analyze**: Run comprehensive tests, visualize attention patterns, and profile computational scaling
-6. **Export and verify**: `tito module complete 12 && tito test attention`
-
 
 ## Implementation Guide
 
@@ -329,83 +295,37 @@ Your implementation vs `torch.nn.MultiheadAttention`:
 - Knowledge of masking strategies and their architectural implications
 - Foundation for understanding advanced attention variants (sparse, linear)
 
-## Common Pitfalls
+## Getting Started
 
-### Shape Mismatch in Attention Scores
+### Prerequisites
 
-**Problem**: QK^T computation fails with incompatible dimensions when batch or sequence dimensions don't align
+Ensure you understand these foundations:
 
-**Solution**: Ensure Q and K have matching dimensions for matrix multiplication: `(batch, seq_q, d_k) @ (batch, d_k, seq_k)^T` requires transposing K correctly
+```bash
+# Activate TinyTorch environment
+source scripts/activate-tinytorch
 
-```python
-# ❌ Wrong: Forgetting to transpose K
-scores = Q @ K  # Shape error: (batch, seq, d_k) @ (batch, seq, d_k)
-
-# ✅ Correct: Transpose K for attention scores
-scores = Q @ K.transpose(-2, -1)  # (batch, seq_q, d_k) @ (batch, d_k, seq_k) → (batch, seq_q, seq_k)
+# Verify prerequisite modules
+tito test tensor      # Matrix operations (matmul, transpose)
+tito test activations  # Softmax for attention normalization
+tito test layers      # Linear layers for Q/K/V projections
+tito test embeddings  # Token/position embeddings attention operates on
 ```
 
-### Forgetting Scaling Factor in Attention
+**Core Concepts You'll Need:**
+- **Matrix Multiplication**: Understanding QK^T computation and broadcasting
+- **Softmax Numerical Stability**: Subtracting max before exp prevents overflow
+- **Layer Composition**: How Q/K/V projections combine with attention
+- **Shape Manipulation**: Reshape and transpose operations for head splitting
 
-**Problem**: Attention scores grow large with increasing d_k, causing softmax saturation and vanishing gradients
+### Development Workflow
 
-**Solution**: Always divide attention scores by √d_k before softmax to maintain stable gradient magnitudes
-
-```python
-# ❌ Wrong: No scaling leads to softmax saturation
-attention_weights = softmax(Q @ K^T)  # Scores too large → softmax outputs near [0,0,...,1,0]
-
-# ✅ Correct: Scale by 1/√d_k for numerical stability
-scale = np.sqrt(d_k)
-attention_weights = softmax((Q @ K^T) / scale)  # Properly normalized scores
-```
-
-### Mask Application Timing Error
-
-**Problem**: Applying mask after softmax zeroes out attention weights but doesn't prevent them from affecting normalization
-
-**Solution**: Apply mask BEFORE softmax by setting masked positions to -inf (they become ~0 after softmax)
-
-```python
-# ❌ Wrong: Mask after softmax doesn't prevent normalization issues
-attention_weights = softmax(scores)
-attention_weights = attention_weights * mask  # Destroys probability distribution
-
-# ✅ Correct: Mask before softmax with -inf
-scores = scores.masked_fill(mask == 0, float('-inf'))
-attention_weights = softmax(scores)  # Masked positions → 0 weight after softmax
-```
-
-### Multi-Head Dimension Calculation Error
-
-**Problem**: head_dim doesn't divide evenly into embed_dim, causing shape mismatches during head splitting
-
-**Solution**: Validate that embed_dim is divisible by num_heads during initialization
-
-```python
-# ❌ Wrong: No validation leads to silent shape errors
-head_dim = embed_dim // num_heads  # Integer division may lose precision
-
-# ✅ Correct: Validate divisibility explicitly
-if embed_dim % num_heads != 0:
-    raise ValueError(f"embed_dim ({embed_dim}) must be divisible by num_heads ({num_heads})")
-head_dim = embed_dim // num_heads
-```
-
-### Attention Weight Memory Explosion
-
-**Problem**: Storing full attention matrices for long sequences causes OOM errors (seq_len² memory growth)
-
-**Solution**: For sequences > 2048, use gradient checkpointing or FlashAttention-style computation (recompute during backward instead of storing)
-
-```python
-# Problem: 4096 seq × 96 heads × batch 32 = 51GB attention weights at FP32
-# For production: Use checkpointing or fused kernels
-# Educational implementation: Document the O(n²) memory limitation explicitly
-attention_weights = softmax(QK^T / √d_k)  # Stores (batch, heads, seq, seq) tensor
-output = attention_weights @ V  # Memory bottleneck for long sequences
-```
-
+1. **Open the development file**: `modules/12_attention/attention_dev.ipynb` (notebook) or `attention_dev.py` (script)
+2. **Implement scaled_dot_product_attention**: Build core attention formula with explicit loops showing O(n²) complexity
+3. **Create MultiHeadAttention class**: Add Q/K/V projections, head splitting, parallel attention, and output projection
+4. **Build masking utilities**: Create causal mask for GPT-style attention and padding mask for batching
+5. **Test and analyze**: Run comprehensive tests, visualize attention patterns, and profile computational scaling
+6. **Export and verify**: `tito module complete 12 && tito test attention`
 
 ## Testing
 
@@ -426,37 +346,37 @@ python modules/12_attention/attention_dev.py
 
 ### Test Coverage Areas
 
-- ✅ **Attention Scores Computation**: Verifies QK^T produces correct shapes and values
-- ✅ **Numerical Stability**: Confirms 1/√d_k scaling prevents softmax saturation
-- ✅ **Probability Normalization**: Validates attention weights sum to 1.0 per query
-- ✅ **Causal Masking**: Tests that future positions get zero attention weight
-- ✅ **Multi-Head Configuration**: Checks head splitting, parallel processing, and concatenation
-- ✅ **Shape Preservation**: Ensures input shape equals output shape
-- ✅ **Gradient Flow**: Verifies differentiability through attention computation graph
-- ✅ **Computational Complexity**: Profiles O(n²) scaling with increasing sequence length
+- ✓ **Attention Scores Computation**: Verifies QK^T produces correct shapes and values
+- ✓ **Numerical Stability**: Confirms 1/√d_k scaling prevents softmax saturation
+- ✓ **Probability Normalization**: Validates attention weights sum to 1.0 per query
+- ✓ **Causal Masking**: Tests that future positions get zero attention weight
+- ✓ **Multi-Head Configuration**: Checks head splitting, parallel processing, and concatenation
+- ✓ **Shape Preservation**: Ensures input shape equals output shape
+- ✓ **Gradient Flow**: Verifies differentiability through attention computation graph
+- ✓ **Computational Complexity**: Profiles O(n²) scaling with increasing sequence length
 
 ### Inline Testing & Complexity Analysis
 
 The module includes comprehensive validation and performance analysis:
 
 ```python
-🔬 Unit Test: Scaled Dot-Product Attention...
-✅ Attention scores computed correctly (QK^T shape verified)
-✅ Scaling factor 1/√d_k applied
-✅ Softmax normalization verified (each row sums to 1.0)
-✅ Output shape matches expected (batch, seq, d_model)
-✅ Causal masking blocks future positions correctly
-📈 Progress: Scaled Dot-Product Attention ✓
+ Unit Test: Scaled Dot-Product Attention...
+ Attention scores computed correctly (QK^T shape verified)
+ Scaling factor 1/√d_k applied
+ Softmax normalization verified (each row sums to 1.0)
+ Output shape matches expected (batch, seq, d_model)
+ Causal masking blocks future positions correctly
+ Progress: Scaled Dot-Product Attention ✓
 
-🔬 Unit Test: Multi-Head Attention...
-✅ 8 heads process 512 dimensions in parallel
-✅ Head splitting and concatenation correct
-✅ Q/K/V projection layers initialized properly
-✅ Output projection applied
-✅ Shape: (batch, seq, 512) → (batch, seq, 512) ✓
-📈 Progress: Multi-Head Attention ✓
+ Unit Test: Multi-Head Attention...
+ 8 heads process 512 dimensions in parallel
+ Head splitting and concatenation correct
+ Q/K/V projection layers initialized properly
+ Output projection applied
+ Shape: (batch, seq, 512) → (batch, seq, 512) ✓
+ Progress: Multi-Head Attention ✓
 
-📊 Analyzing Attention Complexity...
+ Analyzing Attention Complexity...
 Seq Len | Attention Matrix | Memory (KB) | Scaling
 --------------------------------------------------------
      16 |            256  |       1.00  |     1.0x
@@ -465,8 +385,8 @@ Seq Len | Attention Matrix | Memory (KB) | Scaling
     128 |         16,384  |      64.00  |     4.0x
     256 |         65,536  |     256.00  |     4.0x
 
-💡 Memory scales as O(n²) with sequence length
-🚀 For seq_len=2048 (GPT-3), attention matrix needs 16 MB per layer
+ Memory scales as O(n²) with sequence length
+ For seq_len=2048 (GPT-3), attention matrix needs 16 MB per layer
 ```
 
 ### Manual Testing Examples
@@ -503,86 +423,6 @@ print("Future attention blocked:", np.allclose(causal_weights.data[0, 3, 4:], 0)
 print("\nAttention pattern (position → position):")
 print(weights.data[0, :5, :5].round(3))  # First 5x5 submatrix
 ```
-
-## Production Context
-
-### Your Implementation vs. Production Frameworks
-
-Understanding what you're building vs. what production frameworks provide:
-
-| Feature | Your Attention | PyTorch nn.MultiheadAttention | TensorFlow tf.keras.layers.MultiHeadAttention |
-|---------|----------------|-------------------------------|-----------------------------------------------|
-| **Backend** | NumPy (CPU-only) | C++/CUDA (CPU/GPU/TPU) | C++/CUDA/XLA (CPU/GPU/TPU) |
-| **Algorithm** | Exact: softmax(QK^T/√d_k)V | Same formula | Same formula |
-| **Explicit Loops** | Educational O(n²) demonstration | Fused GPU kernels | XLA-optimized kernels |
-| **Memory** | Stores full attention matrix O(n²) | FlashAttention O(n) optional | Memory-efficient attention |
-| **Masking** | Manual application | Built-in mask parameter | Built-in attention_mask |
-| **Batching** | Standard NumPy operations | Highly optimized batched GEMM | Batched matrix operations |
-| **Multi-Query Attention** | Not implemented | Supported (GQA variants) | Supported |
-| **Numerical Stability** | 1/√d_k scaling | Same + additional safeguards | Same + mixed precision |
-
-**Educational Focus**: Your implementation prioritizes understanding over speed. The O(n²) complexity you implement is the SAME complexity production systems face—they just optimize it with specialized hardware and algorithms.
-
-### Side-by-Side Code Comparison
-
-**Your TinyTorch Attention:**
-```python
-from tinytorch.core.attention import MultiHeadAttention
-
-# Create multi-head attention
-mha = MultiHeadAttention(embed_dim=512, num_heads=8)
-
-# Forward pass
-x = Tensor(np.random.randn(2, 10, 512))  # (batch, seq, embed)
-output = mha.forward(x)  # YOUR implementation, explicit O(n²)
-```
-
-**Equivalent PyTorch (Production):**
-```python
-import torch
-import torch.nn as nn
-
-# Create multi-head attention
-mha = nn.MultiheadAttention(embed_dim=512, num_heads=8, batch_first=True).cuda()
-
-# Forward pass (automatic GPU acceleration)
-x = torch.randn(2, 10, 512).cuda()
-output, attn_weights = mha(x, x, x)  # Optimized CUDA kernels, FlashAttention
-```
-
-**Key Differences:**
-1. **GPU Support**: PyTorch moves attention to GPU with `.cuda()` for 10-100× speedup via parallel matrix operations
-2. **Memory Optimization**: FlashAttention (PyTorch 2.0+) uses O(n) memory instead of O(n²) through kernel fusion
-3. **Batched Operations**: PyTorch batches QKV projections and attention computation for efficiency
-4. **Mixed Precision**: PyTorch supports FP16/BF16 for 2-4× memory reduction and speedup on modern GPUs
-
-### Real-World Applications
-
-**OpenAI GPT-4**: Uses ~120-layer transformer with 128 attention heads per layer. Each forward pass computes 15,360 attention operations (120 layers × 128 heads). Attention accounts for 60-70% of total compute. Without FlashAttention optimization, 32K context would require 400GB+ just for attention matrices.
-
-**Meta LLaMA 2**: 70B parameter model uses Grouped-Query Attention (GQA) to reduce KV cache memory by 8×. Instead of 80 KV heads, uses only 10—saving 576GB of KV cache memory at inference time while maintaining 97% of quality.
-
-**Google PaLM**: 540B parameter model processes 8192-token contexts with multi-query attention (MQA). Single shared K,V across all heads reduces memory bandwidth requirements by 96× compared to standard multi-head attention.
-
-**Anthropic Claude**: Uses long-context attention (100K tokens) made feasible through sparse attention patterns and optimized kernel implementations. Without memory optimizations, 100K tokens would require 38TB of attention weight storage across layers.
-
-### Performance Characteristics at Scale
-
-**Memory Scaling**: For GPT-3 with 96 layers, 96 heads, 2048 sequence length, and batch size 4:
-- Attention weights per layer: 4 × 96 × 2048 × 2048 = 1.6B elements × 4 bytes = 6.4GB
-- Total across 96 layers: 614GB (clearly infeasible!)
-- FlashAttention solution: Recompute on-the-fly, use only O(n) memory = 12MB per layer
-
-**Computational Bottlenecks**: In GPT-3 forward pass with 2048 tokens:
-- Attention: 96 layers × 2 × 2048² × 12288 = 1.04×10¹⁵ FLOPs (62% of total)
-- MLP: 96 layers × 2 × 2048 × 12288 × 4×12288 = 6.34×10¹⁴ FLOPs (38% of total)
-- Attention dominates compute time, making it the primary optimization target
-
-**Inference Optimization**: KV caching (Module 17) transforms O(n²) generation into O(n):
-- Without cache: Generate 100 tokens = 5,050 attention computations (1+2+3+...+100)
-- With cache: Generate 100 tokens = 100 attention computations (10-15× speedup)
-- Production LLMs ALL use KV caching—ChatGPT would be economically infeasible without it
-
 
 ## Systems Thinking Questions
 
@@ -710,21 +550,21 @@ Choose your preferred way to engage with this module:
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card} 🚀 Launch Binder
+```{grid-item-card}  Launch Binder
 :link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/12_attention/attention_dev.ipynb
 :class-header: bg-light
 
 Run this module interactively in your browser. No installation required!
 ```
 
-```{grid-item-card} ⚡ Open in Colab
+```{grid-item-card}  Open in Colab
 :link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/12_attention/attention_dev.ipynb
 :class-header: bg-light
 
 Use Google Colab for GPU access and cloud compute power.
 ```
 
-```{grid-item-card} 📖 View Source
+```{grid-item-card}  View Source
 :link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/12_attention/attention_dev.ipynb
 :class-header: bg-light
 
@@ -733,7 +573,7 @@ Browse the notebook source code and understand the implementation.
 
 ````
 
-```{admonition} 💾 Save Your Progress
+```{admonition}  Save Your Progress
 :class: tip
 **Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
 ```
@@ -741,6 +581,6 @@ Browse the notebook source code and understand the implementation.
 ---
 
 <div class="prev-next-area">
-<a class="left-prev" href="../chapters/11_embeddings.html" title="previous page">← Module 11: Embeddings</a>
-<a class="right-next" href="../chapters/13_transformers.html" title="next page">Module 13: Transformers →</a>
+<a class="left-prev" href="11_embeddings_ABOUT.html" title="previous page">← Module 11: Embeddings</a>
+<a class="right-next" href="13_transformers_ABOUT.html" title="next page">Module 13: Transformers →</a>
 </div>
