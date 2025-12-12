@@ -1,3 +1,16 @@
+```{raw} html
+<div style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border: 2px solid #f59e0b; border-radius: 0.75rem; padding: 1.25rem 1.5rem; margin: 0 0 2rem 0; text-align: center;">
+  <div style="display: flex; align-items: center; justify-content: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+    <span style="font-size: 1.25rem;">🚧</span>
+    <span style="font-weight: 700; color: #92400e; font-size: 1.1rem;">Preview Release</span>
+  </div>
+  <p style="margin: 0; color: #78350f; font-size: 0.95rem; line-height: 1.5;">
+    TinyTorch is functional but evolving. We're sharing early to shape the direction with community input.<br>
+    <strong>Classroom ready: Summer/Fall 2026</strong> · <a href="https://github.com/harvard-edge/cs249r_book/discussions/1076" style="color: #b45309; font-weight: 600;">Share your feedback →</a>
+  </p>
+</div>
+```
+
 <!-- Main heading -->
 <h1 style="text-align: center; font-size: 3rem; margin: 0rem 0 0.5rem 0; font-weight: 700;">
 Build Your Own ML Framework
@@ -21,322 +34,78 @@ Build a complete machine learning (ML) framework from tensors to systems—under
 
 ```{raw} html
 <style>
-/* Install command box */
-.install-box {
-  max-width: 680px;
+.vision-box {
+  max-width: 720px;
   margin: 0 auto 2.5rem auto;
-}
-.install-command {
-  background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
-  border-radius: 8px;
-  padding: 1rem 1.25rem;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border: 1px solid rgba(249, 115, 22, 0.3);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-}
-.install-command code {
-  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
-  font-size: 0.95rem;
-  color: #e5e7eb;
-  background: none;
-  padding: 0;
-}
-.install-command .prompt {
-  color: #f97316;
-}
-.install-command .cmd {
-  color: #fbbf24;
-}
-.install-command .url {
-  color: #60a5fa;
-}
-.copy-btn {
-  background: rgba(249, 115, 22, 0.15);
-  border: 1px solid rgba(249, 115, 22, 0.3);
-  color: #f97316;
-  padding: 0.5rem 0.75rem;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.85rem;
-  font-weight: 500;
-  transition: all 0.2s ease;
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-.copy-btn:hover {
-  background: rgba(249, 115, 22, 0.25);
-  border-color: #f97316;
-}
-.copy-btn.copied {
-  background: rgba(34, 197, 94, 0.2);
-  border-color: rgba(34, 197, 94, 0.4);
-  color: #22c55e;
-}
-.install-note {
-  text-align: center;
-  margin-top: 0.75rem;
-  font-size: 0.85rem;
-  color: #6b7280;
-}
-.install-note a {
-  color: #f97316;
-  text-decoration: none;
-}
-.install-note a:hover {
-  text-decoration: underline;
-}
-</style>
-
-<div class="install-box">
-  <div class="install-command">
-    <code><span class="prompt">$</span> <span class="cmd">curl</span> -sSL <span class="url">tinytorch.ai/install</span> | <span class="cmd">bash</span></code>
-    <button class="copy-btn" onclick="copyInstall(this)">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-      </svg>
-      Copy
-    </button>
-  </div>
-  <p class="install-note">Requires Python 3.8+ and git. <a href="quickstart-guide.html">See full guide →</a></p>
-</div>
-
-<script>
-function copyInstall(btn) {
-  const cmd = 'curl -sSL tinytorch.ai/install | bash';
-  navigator.clipboard.writeText(cmd).then(() => {
-    btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg> Copied!';
-    btn.classList.add('copied');
-    setTimeout(() => {
-      btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg> Copy';
-      btn.classList.remove('copied');
-    }, 2000);
-  });
-}
-</script>
-```
-
-```{raw} html
-<style>
-.demo-terminal {
-  max-width: 640px;
-  margin: 0 auto 1.5rem auto;
-}
-.demo-window {
-  background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
   border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-  overflow: hidden;
-  border: 2px solid #f97316;
+  padding: 2rem;
+  border: 1px solid rgba(249, 115, 22, 0.3);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.2);
 }
-.demo-titlebar {
-  background: linear-gradient(90deg, #1f2937 0%, #111827 100%);
-  padding: 12px 16px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border-bottom: 1px solid rgba(249, 115, 22, 0.3);
-}
-.demo-dots {
-  display: flex;
-  gap: 6px;
-}
-.demo-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-}
-.demo-dot.red { background: #E74C3C; }
-.demo-dot.yellow { background: #F39C12; }
-.demo-dot.green { background: #27ae60; }
-.demo-titlebar-text {
-  flex: 1;
-  text-align: center;
-  color: #fbbf24;
-  font-size: 0.85rem;
-  font-weight: 500;
-  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-}
-.demo-body {
-  padding: 1.5rem 1.5rem;
-  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
-  font-size: 0.9rem;
-  line-height: 1.8;
-  min-height: 280px;
-}
-.demo-line {
-  color: #e5e7eb;
-  margin-bottom: 0.25rem;
-  opacity: 0;
-  transform: translateY(5px);
-  animation: fadeInLine 0.3s ease forwards;
-}
-.demo-line.visible {
-  opacity: 1;
-  transform: translateY(0);
-}
-@keyframes fadeInLine {
-  to { opacity: 1; transform: translateY(0); }
-}
-.demo-prompt {
+.vision-title {
   color: #f97316;
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0 0 1rem 0;
+  text-align: center;
 }
-.demo-output {
-  color: #9ca3af;
-  padding-left: 1rem;
+.vision-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
 }
-.demo-success {
+.vision-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+.vision-icon {
+  font-size: 1.25rem;
+  flex-shrink: 0;
+}
+.vision-text {
+  color: #e2e8f0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.vision-text strong {
   color: #fbbf24;
 }
-.demo-faded {
-  color: #6b7280;
-  font-style: italic;
-  margin-top: 1rem;
-}
-.demo-progress {
-  display: flex;
-  justify-content: center;
-  gap: 0.5rem;
-  margin-top: 1rem;
-}
-.demo-step {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.4rem 0.75rem;
-  background: #1f2937;
-  border-radius: 20px;
-  font-size: 0.8rem;
-  color: #9ca3af;
-  transition: all 0.3s;
-  cursor: pointer;
-  border: 1px solid transparent;
-}
-.demo-step.active {
-  background: linear-gradient(135deg, #E74C3C 0%, #E67E22 100%);
-  color: white;
-  border-color: transparent;
-}
-.demo-step:hover {
-  background: #374151;
-  color: #f3f4f6;
-  border-color: rgba(249, 115, 22, 0.3);
-}
-.demo-step.active:hover {
-  background: linear-gradient(135deg, #c0392b 0%, #d35400 100%);
+@media (max-width: 600px) {
+  .vision-grid { grid-template-columns: 1fr; }
 }
 </style>
 
-<div class="demo-terminal">
-  <div class="demo-window">
-    <div class="demo-titlebar">
-      <div class="demo-dots">
-        <span class="demo-dot red"></span>
-        <span class="demo-dot yellow"></span>
-        <span class="demo-dot green"></span>
-      </div>
-      <span class="demo-titlebar-text">TinyTorch Terminal</span>
+<div class="vision-box">
+  <p class="vision-title">The "AI Bricks" Approach</p>
+  <div class="vision-grid">
+    <div class="vision-item">
+      <span class="vision-icon">🧱</span>
+      <span class="vision-text"><strong>Build each piece</strong> — Tensors, autograd, optimizers, attention. No magic imports.</span>
     </div>
-    <div class="demo-body" id="demo-body">
-      <!-- Lines rendered by JS -->
+    <div class="vision-item">
+      <span class="vision-icon">🏛️</span>
+      <span class="vision-text"><strong>Recreate ML history</strong> — From Perceptron (1957) to Transformers (2017).</span>
     </div>
-  </div>
-  <div class="demo-progress">
-    <button class="demo-step active" data-step="0" onclick="goStep(0)">Setup</button>
-    <button class="demo-step" data-step="1" onclick="goStep(1)">Build</button>
-    <button class="demo-step" data-step="2" onclick="goStep(2)">Milestone</button>
-    <button class="demo-step" data-step="3" onclick="goStep(3)">Compete</button>
+    <div class="vision-item">
+      <span class="vision-icon">⚡</span>
+      <span class="vision-text"><strong>Understand systems</strong> — Memory, compute, optimization trade-offs.</span>
+    </div>
+    <div class="vision-item">
+      <span class="vision-icon">🎯</span>
+      <span class="vision-text"><strong>End goal</strong> — A complete framework that trains real models.</span>
+    </div>
   </div>
 </div>
-
-<script>
-(function() {
-  const scenes = [
-    { name: 'Setup', lines: [
-      { type: 'success', text: '🔥 TinyTorch Installer' },
-      { type: 'out', text: '✓ Python 3.11 found' },
-      { type: 'out', text: '✓ Downloading TinyTorch...' },
-      { type: 'out', text: '✓ Creating virtual environment...' },
-      { type: 'success', text: '🎉 TinyTorch installed!' },
-      { type: 'cmd', text: 'cd tinytorch && source .venv/bin/activate' },
-      { type: 'cmd', text: 'tito' }
-    ]},
-    { name: 'Build', lines: [
-      { type: 'cmd', text: 'tito module start 01' },
-      { type: 'out', text: 'Opening Module 01: Tensor...' },
-      { type: 'cmd', text: 'tito module complete 01' },
-      { type: 'success', text: '✓ All tests passed!' },
-      { type: 'success', text: '✓ Module 01 completed!' }
-    ]},
-    { name: 'Milestone', lines: [
-      { type: 'cmd', text: 'tito milestones status' },
-      { type: 'success', text: '🏆 Perceptron (1957) unlocked!' },
-      { type: 'success', text: '🏆 XOR Crisis (1969) solved!' },
-      { type: 'success', text: '🏆 MLP (1986) achieved!' },
-      { type: 'out', text: '⏳ CNN Revolution (1998) - 2 modules remaining' }
-    ]},
-    { name: 'Compete', lines: [
-      { type: 'cmd', text: 'tito benchmark run' },
-      { type: 'out', text: 'Running benchmark suite...' },
-      { type: 'success', text: '✓ Accuracy: 97.2%' },
-      { type: 'success', text: '✓ Inference: 1.2ms' },
-      { type: 'success', text: '✓ Model size: 245 KB' }
-    ]}
-  ];
-
-  let current = 0;
-  let interval;
-
-  function renderScene(idx) {
-    const body = document.getElementById('demo-body');
-    const scene = scenes[idx];
-    body.innerHTML = '';
-
-    scene.lines.forEach((line, i) => {
-      const div = document.createElement('div');
-      div.className = 'demo-line';
-      if (line.type === 'cmd') {
-        div.innerHTML = '<span class="demo-prompt">$ </span>' + line.text;
-      } else if (line.type === 'success') {
-        div.innerHTML = '<span class="demo-success">' + line.text + '</span>';
-      } else if (line.type === 'faded') {
-        div.innerHTML = '<span class="demo-faded">' + line.text + '</span>';
-      } else {
-        div.innerHTML = '<span class="demo-output">' + line.text + '</span>';
-      }
-      body.appendChild(div);
-      setTimeout(() => div.classList.add('visible'), i * 400);
-    });
-
-    document.querySelectorAll('.demo-step').forEach((btn, i) => {
-      btn.classList.toggle('active', i === idx);
-    });
-  }
-
-  function nextScene() {
-    current = (current + 1) % scenes.length;
-    renderScene(current);
-  }
-
-  window.goStep = function(idx) {
-    current = idx;
-    renderScene(current);
-    clearInterval(interval);
-    interval = setInterval(nextScene, 4000);
-  };
-
-  renderScene(0);
-  interval = setInterval(nextScene, 4000);
-})();
-</script>
 ```
 
 <div style="text-align: center; margin: 2rem 0;">
-  <a href="quickstart-guide.html" style="display: inline-block; background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); color: white; padding: 0.875rem 2rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600; font-size: 1rem; margin: 0.5rem; box-shadow: 0 4px 6px rgba(0,0,0,0.15);">
-    Start Building in 15 Minutes →
+  <a href="https://github.com/harvard-edge/cs249r_book/discussions/1076" style="display: inline-block; background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); color: white; padding: 0.875rem 2rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600; font-size: 1rem; margin: 0.5rem; box-shadow: 0 4px 6px rgba(0,0,0,0.15);">
+    Share Your Feedback →
+  </a>
+  <a href="getting-started.html" style="display: inline-block; background: transparent; border: 2px solid #3b82f6; color: #3b82f6; padding: 0.75rem 1.5rem; border-radius: 0.5rem; text-decoration: none; font-weight: 600; font-size: 0.9rem; margin: 0.5rem;">
+    Early Adopter Setup
   </a>
 </div>
 
