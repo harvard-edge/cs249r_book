@@ -103,7 +103,7 @@ MILESTONE_SCRIPTS = {
                 "description": "KV Caching for 10× faster Transformer"
             }
         ],
-        "required_modules": list(range(1, 18)),  # Needs up to Module 17 (Memoization)
+        "required_modules": [1, 2, 3, 4, 5, 6, 11, 12, 14, 15, 16, 17, 18, 19],  # Core + Transformer + Optimization
         "description": "Compress and accelerate your neural network",
         "historical_context": "MLPerf standardized ML benchmarks",
         "emoji": "🏆"
