@@ -150,46 +150,23 @@ class ModuleWorkflowCommand(BaseCommand):
         # RESET command - reset module to clean state
         reset_parser = subparsers.add_parser(
             'reset',
-            help='Reset module to clean state (backup + unexport + restore)'
+            help='Reset module to clean state'
         )
         reset_parser.add_argument(
             'module_number',
-            help='Module number to reset (01, 02, 03, etc.)'
+            nargs='?',
+            default=None,
+            help='Module number to reset (01, 02, etc.)'
         )
         reset_parser.add_argument(
-            '--soft',
+            '--all',
             action='store_true',
-            help='Soft reset: backup + restore (keep exports)'
-        )
-        reset_parser.add_argument(
-            '--hard',
-            action='store_true',
-            help='Hard reset: backup + unexport + restore [DEFAULT]'
-        )
-        reset_parser.add_argument(
-            '--from-git',
-            action='store_true',
-            help='Restore from git HEAD [DEFAULT]'
-        )
-        reset_parser.add_argument(
-            '--restore-backup',
-            metavar='TIMESTAMP',
-            help='Restore from specific backup'
-        )
-        reset_parser.add_argument(
-            '--list-backups',
-            action='store_true',
-            help='List available backups'
-        )
-        reset_parser.add_argument(
-            '--no-backup',
-            action='store_true',
-            help='Skip backup (dangerous)'
+            help='Reset ALL modules to pristine state'
         )
         reset_parser.add_argument(
             '--force',
             action='store_true',
-            help='Skip confirmation'
+            help='Skip confirmation prompts'
         )
 
         # STATUS command - show progress
@@ -1272,9 +1249,9 @@ class ModuleWorkflowCommand(BaseCommand):
             "[bold]Module States:[/bold]\n"
             "  ⏳ Not started  🚀 In progress  ✅ Completed\n\n"
             "[bold]Reset Options:[/bold]\n"
-            "  [dim]tito module reset 01 --list-backups[/dim]   - View available backups\n"
-            "  [dim]tito module reset 01 --soft[/dim]           - Keep package exports\n"
-            "  [dim]tito module reset 01 --restore-backup[/dim] - Restore from backup",
+            "  [dim]tito module reset[/dim]         - Prompt for module to reset\n"
+            "  [dim]tito module reset 01[/dim]      - Reset module 01\n"
+            "  [dim]tito module reset --all[/dim]   - Reset all modules (fresh install)",
             title="Module Development Workflow",
             border_style="bright_cyan"
         ))
