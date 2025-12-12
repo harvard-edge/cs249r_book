@@ -1182,21 +1182,39 @@ class ModuleWorkflowCommand(BaseCommand):
 
     def _check_milestone_readiness(self, completed_modules: list) -> list:
         """Check which milestones are unlocked or ready."""
+        import json
+
         milestones = [
-            ("01", "Perceptron (1957)", [1]),
-            ("02", "XOR Crisis (1969)", [1, 2]),
-            ("03", "MLP Revival (1986)", [1, 2, 3, 4, 5, 6, 7]),
-            ("04", "CNN Revolution (1998)", [1, 2, 3, 4, 5, 6, 7, 8, 9]),
-            ("05", "Transformer Era (2017)", [1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13]),  # Skip spatial/dataloader for attention
-            ("06", "MLPerf (2018)", list(range(1, 20))),
+            ("01", "Perceptron (1957)", [1, 2, 3]),
+            ("02", "XOR Crisis (1969)", [1, 2, 3]),
+            ("03", "MLP Revival (1986)", [1, 2, 3, 4, 5, 6]),
+            ("04", "CNN Revolution (1998)", [1, 2, 3, 4, 5, 6, 8, 9]),
+            ("05", "Transformer Era (2017)", [1, 2, 3, 4, 5, 6, 11, 12, 13]),
+            ("06", "MLPerf (2018)", [1, 2, 3, 4, 5, 6, 14, 15, 16, 17, 18, 19]),
         ]
+
+        # Check which milestones have been completed (run successfully)
+        milestones_file = self.config.project_root / ".tito" / "milestones.json"
+        completed_milestones = []
+        if milestones_file.exists():
+            try:
+                with open(milestones_file, 'r') as f:
+                    data = json.load(f)
+                    completed_milestones = data.get("unlocked_milestones", [])
+            except Exception:
+                pass
 
         result = []
         for mid, name, required in milestones:
-            all_completed = all(m in completed_modules for m in required)
-            if all_completed:
+            # Convert required module numbers to strings like "01", "02"
+            required_strs = [f"{m:02d}" for m in required]
+            all_modules_done = all(m in completed_modules for m in required_strs)
+
+            if mid in completed_milestones:
+                # Milestone has been run and completed
                 result.append((mid, name, "unlocked"))
-            elif len([m for m in required if m in completed_modules]) >= len(required) - 2:
+            elif all_modules_done:
+                # All required modules done but milestone not yet run
                 result.append((mid, name, "ready"))
 
         return result
