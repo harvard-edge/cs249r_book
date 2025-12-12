@@ -47,14 +47,14 @@ CIFAR-10 contains 60,000 32×32 color images in 10 classes:
     Sample Images:                    Feature Hierarchy YOUR CNN Learns:
 
     ┌──────────┐                     Layer 1 (Conv 3→32):
-    │ ✈️ Plane │                     • Edge detectors
+    │   Plane  │                     • Edge detectors
     │[Sky blue │                     • Color gradients
     │[White    │                     • Simple textures
     │[Wings    │
     └──────────┘                     Layer 2 (Conv 32→64):
-                                      • Object parts
+                                     • Object parts
     ┌──────────┐                     • Complex patterns
-    │ 🚗 Car    │                     • Spatial relationships
+    │    Car   │                     • Spatial relationships
     │[Red body]│
     │[Wheels]  │                     Output Layer:
     │[Windows] │                     • Complete objects
