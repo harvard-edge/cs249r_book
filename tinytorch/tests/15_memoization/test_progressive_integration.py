@@ -26,7 +26,7 @@ class TestEntireTinyTorchSystemStable:
         try:
             from tinytorch.core.tensor import Tensor
             from tinytorch.core.layers import Linear
-            from tinytorch.core.spatial import Conv2D
+            from tinytorch.core.spatial import Conv2d as Conv2D
             from tinytorch.core.attention import MultiHeadAttention
             from tinytorch.core.optimizers import Adam
             from tinytorch.core.training import Trainer
@@ -222,7 +222,7 @@ class TestCompleteSystemIntegration:
             from tinytorch.core.transformers import TinyGPT
             from tinytorch.core.optimizers import Adam
             from tinytorch.core.training import Trainer, CrossEntropyLoss
-            from tinytorch.core.data import Dataset, DataLoader
+            from tinytorch.core.dataloader import Dataset, DataLoader
             from tinytorch.core.tensor import Tensor
             
             # Language modeling dataset
@@ -346,7 +346,7 @@ class TestCompleteSystemIntegration:
         """Test multi-modal AI capabilities (vision + language)."""
         try:
             from tinytorch.core.transformers import TinyGPT
-            from tinytorch.core.spatial import Conv2D, MaxPool2D
+            from tinytorch.core.spatial import Conv2d as Conv2D, MaxPool2d
             from tinytorch.core.layers import Linear
             from tinytorch.core.attention import MultiHeadAttention
             from tinytorch.core.tensor import Tensor
@@ -356,7 +356,7 @@ class TestCompleteSystemIntegration:
                 def __init__(self):
                     # Vision encoder (CNN)
                     self.conv1 = Conv2D(3, 16, kernel_size=3)
-                    self.pool = MaxPool2D(kernel_size=2)
+                    self.pool = MaxPool2d(kernel_size=2)
                     self.conv2 = Conv2D(16, 32, kernel_size=3)
                     
                     # Vision to language bridge
@@ -423,9 +423,9 @@ class TestCapstoneSystemValidation:
             from tinytorch.core.tensor import Tensor
             from tinytorch.core.layers import Linear
             from tinytorch.core.activations import ReLU, Softmax
-            from tinytorch.core.spatial import Conv2D
+            from tinytorch.core.spatial import Conv2d as Conv2D
             from tinytorch.core.attention import MultiHeadAttention
-            from tinytorch.core.data import Dataset, DataLoader
+            from tinytorch.core.dataloader import Dataset, DataLoader
             from tinytorch.core.optimizers import Adam
             from tinytorch.core.training import Trainer
             from tinytorch.core.transformers import TinyGPT
@@ -705,22 +705,25 @@ class TestRegressionPrevention:
         
         # Complete system should still work perfectly
         try:
+            import numpy as np
             from tinytorch.core.tensor import Tensor
             from tinytorch.core.layers import Linear
             from tinytorch.core.optimizers import Adam
             from tinytorch.core.training import Trainer
-            
+            from tinytorch.core.losses import MSELoss
+
             # Complete system integration
             model = Linear(16, 8)
             optimizer = Adam(model.parameters(), lr=0.001)
-            trainer = Trainer(model, optimizer)
-            
+            loss_fn = MSELoss()
+            trainer = Trainer(model, optimizer, loss_fn)
+
             x = Tensor(np.random.randn(4, 16))
             output = model(x)
             assert output.shape == (4, 8), "System-wide regression: Core functionality broken"
             
             # Advanced features should work
-            from tinytorch.core.spatial import Conv2D
+            from tinytorch.core.spatial import Conv2d as Conv2D
             from tinytorch.core.attention import MultiHeadAttention
             
             conv = Conv2D(in_channels=3, out_channels=8, kernel_size=3)
@@ -747,21 +750,29 @@ class TestRegressionPrevention:
             from tinytorch.core.layers import Linear
             from tinytorch.core.optimizers import Adam
             from tinytorch.core.training import Trainer
-            from tinytorch.core.compression import prune_weights
-            from tinytorch.core.kernels import optimized_matmul
-            
+            from tinytorch.core.losses import MSELoss
+            try:
+                from tinytorch.core.compression import prune_weights
+            except ImportError:
+                prune_weights = None  # Optional module
+            try:
+                from tinytorch.core.kernels import optimized_matmul
+            except ImportError:
+                optimized_matmul = None  # Optional module
+
             # Complete production system should work
             model = Linear(20, 10)
             optimizer = Adam(model.parameters(), lr=0.001)
-            trainer = Trainer(model, optimizer)
+            loss_fn = MSELoss()
+            trainer = Trainer(model, optimizer, loss_fn)
             
             x = Tensor(np.random.randn(5, 20))
             output = model(x)
             assert output.shape == (5, 10), "Complete system level broken"
             
             # All advanced features should work
-            if 'prune_weights' in locals():
-                pruned = prune_weights(model.weights, sparsity=0.3)
+            if prune_weights is not None:
+                pruned = prune_weights(model.weight, sparsity=0.3)
                 assert pruned.shape == model.weight.shape, "Advanced features broken"
                 
         except ImportError:

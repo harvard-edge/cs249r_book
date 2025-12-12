@@ -188,7 +188,7 @@ class TestProgressiveStackIntegration:
             from tinytorch.core.optimizers import Adam
             from tinytorch.core.training import Trainer
             from tinytorch.core.kernels import enable_optimizations
-            from tinytorch.core.data import Dataset, DataLoader
+            from tinytorch.core.dataloader import Dataset, DataLoader
             
             # Enable kernel optimizations
             if 'enable_optimizations' in locals():

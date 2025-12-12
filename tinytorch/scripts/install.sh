@@ -258,6 +258,8 @@ do_install() {
     TEMP_DIR=""
 
     # Remove dev-only files that students don't need
+    # NOTE: Keep settings.ini - required for nbdev_export to work!
+    # NOTE: Keep milestones/ - required for tito milestone run!
     rm -rf "$INSTALL_DIR/paper" \
            "$INSTALL_DIR/instructor" \
            "$INSTALL_DIR/site" \
@@ -266,7 +268,6 @@ do_install() {
            "$INSTALL_DIR/binder" \
            "$INSTALL_DIR/etc" \
            "$INSTALL_DIR/assignments" \
-           "$INSTALL_DIR/milestones" \
            "$INSTALL_DIR/benchmark_results" \
            "$INSTALL_DIR/.git-hooks" \
            "$INSTALL_DIR/.claude" \
@@ -278,7 +279,6 @@ do_install() {
            "$INSTALL_DIR/setup-environment.sh" \
            "$INSTALL_DIR/CONTRIBUTING.md" \
            "$INSTALL_DIR/INSTRUCTOR.md" \
-           "$INSTALL_DIR/settings.ini" \
            "$INSTALL_DIR/MANIFEST.in" \
            "$INSTALL_DIR/.pre-commit-config.yaml" \
            "$INSTALL_DIR/.shared-ai-rules.md" \
@@ -291,6 +291,16 @@ do_install() {
     if [ -d "$INSTALL_DIR/modules" ]; then
         find "$INSTALL_DIR/modules" -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + 2>/dev/null || true
     fi
+
+    # Clear tinytorch/core/ contents - students build this through module exports
+    # Keep the directory and __init__.py files, but remove implementation files
+    if [ -d "$INSTALL_DIR/tinytorch/core" ]; then
+        find "$INSTALL_DIR/tinytorch/core" -name "*.py" ! -name "__init__.py" -type f -delete 2>/dev/null || true
+    fi
+
+    # Reset progress tracking - students start fresh
+    rm -f "$INSTALL_DIR/progress.json" 2>/dev/null || true
+    rm -rf "$INSTALL_DIR/.tito" 2>/dev/null || true
 
     print_success "Downloaded TinyTorch ${DIM}(${COMMIT_HASH})${NC}"
 

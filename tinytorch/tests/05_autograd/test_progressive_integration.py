@@ -39,7 +39,7 @@ class TestPriorStackStillWorking:
     def test_advanced_stack_stable(self):
         """Verify advanced modules (06→07) still work."""
         try:
-            from tinytorch.core.spatial import Conv2D
+            from tinytorch.core.spatial import Conv2d as Conv2D
             from tinytorch.core.attention import MultiHeadAttention
             
             # Spatial and attention should work
@@ -59,7 +59,7 @@ class TestModule08DataLoaderCore:
     def test_dataset_creation(self):
         """Test basic dataset creation works."""
         try:
-            from tinytorch.core.data import Dataset
+            from tinytorch.core.dataloader import Dataset
             
             # Create simple dataset
             class SimpleDataset(Dataset):
@@ -88,7 +88,7 @@ class TestModule08DataLoaderCore:
     def test_dataloader_creation(self):
         """Test DataLoader creation and batching."""
         try:
-            from tinytorch.core.data import DataLoader, Dataset
+            from tinytorch.core.dataloader import DataLoader, Dataset
             from tinytorch.core.tensor import Tensor
             
             # Simple dataset for testing
@@ -96,20 +96,21 @@ class TestModule08DataLoaderCore:
                 def __init__(self):
                     self.data = np.random.randn(20, 5)
                     self.targets = np.random.randint(0, 2, 20)
-                
+
                 def __len__(self):
                     return 20
-                
+
                 def __getitem__(self, idx):
-                    return Tensor(self.data[idx]), self.targets[idx]
-            
+                    # Return Tensors for both data and targets
+                    return Tensor(self.data[idx]), Tensor(np.array([self.targets[idx]]))
+
             dataset = TestDataset()
             dataloader = DataLoader(dataset, batch_size=4, shuffle=True)
-            
+
             # Test batching
             for batch_x, batch_y in dataloader:
                 assert batch_x.shape == (4, 5), "DataLoader batch shape broken"
-                assert len(batch_y) == 4, "DataLoader target batch broken"
+                assert batch_y.shape[0] == 4, "DataLoader target batch broken"
                 break  # Just test first batch
                 
         except ImportError:
@@ -118,7 +119,7 @@ class TestModule08DataLoaderCore:
     def test_real_dataset_support(self):
         """Test support for real datasets like CIFAR-10."""
         try:
-            from tinytorch.core.data import CIFAR10Dataset
+            from tinytorch.core.dataloader import CIFAR10Dataset
             
             # Note: This might download data, so we'll just test instantiation
             # In real usage, students would download CIFAR-10
@@ -143,7 +144,7 @@ class TestProgressiveStackIntegration:
     def test_complete_training_pipeline(self):
         """Test complete ML pipeline: data → model → training."""
         try:
-            from tinytorch.core.data import DataLoader, Dataset
+            from tinytorch.core.dataloader import DataLoader, Dataset
             from tinytorch.core.tensor import Tensor
             from tinytorch.core.layers import Linear
             from tinytorch.core.activations import ReLU, Softmax
@@ -188,8 +189,8 @@ class TestProgressiveStackIntegration:
     def test_cnn_data_pipeline(self):
         """Test CNN pipeline with spatial data."""
         try:
-            from tinytorch.core.data import DataLoader, Dataset  
-            from tinytorch.core.spatial import Conv2D, MaxPool2D
+            from tinytorch.core.dataloader import DataLoader, Dataset  
+            from tinytorch.core.spatial import Conv2d as Conv2D, MaxPool2d
             from tinytorch.core.layers import Linear
             from tinytorch.core.tensor import Tensor
             
@@ -211,7 +212,7 @@ class TestProgressiveStackIntegration:
             
             # CNN components
             conv1 = Conv2D(in_channels=3, out_channels=16, kernel_size=3)
-            pool = MaxPool2D(kernel_size=2)
+            pool = MaxPool2d(kernel_size=2)
             fc = Linear(16 * 15 * 15, 5)  # Approximate after conv/pool
             
             # Test CNN pipeline
@@ -236,7 +237,7 @@ class TestRealWorldDataCapability:
     def test_data_preprocessing_pipeline(self):
         """Test data preprocessing and augmentation."""
         try:
-            from tinytorch.core.data import transforms
+            from tinytorch.core.dataloader import transforms
             from tinytorch.core.tensor import Tensor
             
             # Basic transforms
@@ -263,20 +264,22 @@ class TestRealWorldDataCapability:
     def test_memory_efficient_loading(self):
         """Test memory efficient data loading."""
         try:
-            from tinytorch.core.data import DataLoader, Dataset
+            from tinytorch.core.dataloader import DataLoader, Dataset
             
+            from tinytorch.core.tensor import Tensor
+
             # Large dataset simulation
             class LargeDataset(Dataset):
                 def __init__(self, size=1000):
                     self.size = size
                     # Don't load all data at once - simulate lazy loading
-                
+
                 def __len__(self):
                     return self.size
-                
+
                 def __getitem__(self, idx):
-                    # Simulate loading data on-demand
-                    return np.random.randn(100), idx % 10
+                    # Simulate loading data on-demand - return Tensors
+                    return Tensor(np.random.randn(100)), Tensor(np.array([idx % 10]))
             
             dataset = LargeDataset(1000)
             dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
@@ -296,18 +299,19 @@ class TestRealWorldDataCapability:
     def test_parallel_data_loading(self):
         """Test parallel/multi-threaded data loading."""
         try:
-            from tinytorch.core.data import DataLoader, Dataset
-            
+            from tinytorch.core.dataloader import DataLoader, Dataset
+            from tinytorch.core.tensor import Tensor
+
             class ParallelDataset(Dataset):
                 def __init__(self):
                     self.data = np.random.randn(100, 50)
-                
+
                 def __len__(self):
                     return 100
-                
+
                 def __getitem__(self, idx):
-                    # Simulate some processing time
-                    return self.data[idx], idx % 5
+                    # Simulate some processing time - return Tensors
+                    return Tensor(self.data[idx]), Tensor(np.array([idx % 5]))
             
             dataset = ParallelDataset()
             
@@ -347,7 +351,7 @@ class TestRegressionPrevention:
     def test_no_advanced_regression(self):
         """Verify advanced modules (06→07) unchanged."""
         try:
-            from tinytorch.core.spatial import Conv2D
+            from tinytorch.core.spatial import Conv2d as Conv2D
             from tinytorch.core.attention import MultiHeadAttention
             
             # Advanced operations should still work
@@ -386,7 +390,7 @@ class TestRegressionPrevention:
         
         # Data level (if available)
         try:
-            from tinytorch.core.data import Dataset
+            from tinytorch.core.dataloader import Dataset
             
             class TestDataset(Dataset):
                 def __len__(self):

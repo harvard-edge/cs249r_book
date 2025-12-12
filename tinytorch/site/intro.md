@@ -404,9 +404,9 @@ Walk through ML history by rebuilding its greatest breakthroughs with YOUR TinyT
         <div class="ml-timeline-dot"></div>
         <div class="ml-timeline-content">
             <div class="ml-timeline-year">1969</div>
-            <div class="ml-timeline-title">XOR Crisis Solved</div>
-            <div class="ml-timeline-desc">Hidden layers unlock non-linear learning</div>
-            <div class="ml-timeline-tech">Input → Linear → ReLU → Linear → Output</div>
+            <div class="ml-timeline-title">XOR Crisis</div>
+            <div class="ml-timeline-desc">Minsky & Papert expose limits of single-layer networks</div>
+            <div class="ml-timeline-tech">Input → Linear → Sigmoid → FAIL!</div>
         </div>
     </div>
 

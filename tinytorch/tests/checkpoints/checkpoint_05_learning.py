@@ -19,7 +19,7 @@ def test_checkpoint_05_learning():
     
     try:
         from tinytorch.core.tensor import Tensor
-        from tinytorch.core.spatial import Conv2D, MaxPool2D
+        from tinytorch.core.spatial import Conv2d as Conv2D, MaxPool2d
         from tinytorch.core.activations import ReLU
     except ImportError as e:
         pytest.fail(f"❌ Cannot import required classes - complete Modules 2-6 first: {e}")
@@ -39,7 +39,7 @@ def test_checkpoint_05_learning():
     
     # Test 2: Pooling operation
     print("📉 Testing pooling operation...")
-    pool = MaxPool2D(kernel_size=2)
+    pool = MaxPool2d(kernel_size=2)
     
     # Create larger feature map for pooling
     feature_map = Tensor(np.random.randn(1, 3, 4, 4))
@@ -79,7 +79,7 @@ def test_checkpoint_05_learning():
     print("🏔️ Testing spatial hierarchy...")
     conv1 = Conv2D(in_channels=1, out_channels=8, kernel_size=3)
     conv2 = Conv2D(in_channels=8, out_channels=16, kernel_size=3)
-    pool = MaxPool2D(kernel_size=2)
+    pool = MaxPool2d(kernel_size=2)
     
     # Build spatial hierarchy
     x = Tensor(np.random.randn(1, 1, 16, 16))

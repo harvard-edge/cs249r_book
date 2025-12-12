@@ -36,9 +36,9 @@ MILESTONE_SCRIPTS = {
         "name": "Perceptron (1957)",
         "year": 1957,
         "title": "Frank Rosenblatt's First Neural Network",
-        "script": "milestones/01_1957_perceptron/02_rosenblatt_trained.py",
-        "required_modules": [1],
-        "description": "Build the first trainable neural network",
+        "script": "milestones/01_1957_perceptron/01_rosenblatt_forward.py",
+        "required_modules": [1, 2, 3],  # Tensor, Activations, Layers (forward pass only)
+        "description": "Build the first neural network (forward pass)",
         "historical_context": "Rosenblatt's perceptron proved machines could learn",
         "emoji": "🧠"
     },
@@ -46,11 +46,11 @@ MILESTONE_SCRIPTS = {
         "id": "02",
         "name": "XOR Crisis (1969)",
         "year": 1969,
-        "title": "Solving the Problem That Stalled AI",
-        "script": "milestones/02_1969_xor/02_xor_solved.py",
-        "required_modules": [1, 2],
-        "description": "Solve XOR with multi-layer networks",
-        "historical_context": "Minsky & Papert showed single-layer limits",
+        "title": "The Problem That Stalled AI",
+        "script": "milestones/02_1969_xor/01_xor_crisis.py",
+        "required_modules": [1, 2, 3],  # Just forward pass: Tensor, Activations, Layers
+        "description": "Single-layer perceptron CANNOT solve XOR (75% max)",
+        "historical_context": "Minsky & Papert proved limits of single-layer networks",
         "emoji": "🔀"
     },
     "03": {
@@ -58,10 +58,23 @@ MILESTONE_SCRIPTS = {
         "name": "MLP Revival (1986)",
         "year": 1986,
         "title": "Backpropagation Breakthrough",
-        "script": "milestones/03_1986_mlp/01_rumelhart_tinydigits.py",
-        "required_modules": [1, 2, 3, 4, 5, 6, 7],
-        "description": "Train deep networks on TinyDigits",
-        "historical_context": "Rumelhart, Hinton & Williams (Nature, 1986)",
+        "scripts": [
+            {
+                "name": "XOR Solved",
+                "script": "milestones/02_1969_xor/02_xor_solved.py",
+                "description": "Hidden layers + backprop SOLVE the impossible XOR problem!",
+                "required_modules": [1, 2, 3, 4, 5, 6]  # Core training modules
+            },
+            {
+                "name": "TinyDigits",
+                "script": "milestones/03_1986_mlp/01_rumelhart_tinydigits.py",
+                "description": "Scale up to real data - handwritten digit recognition",
+                "required_modules": [1, 2, 3, 4, 5, 6, 8]  # + DataLoader (08)
+            }
+        ],
+        "required_modules": [1, 2, 3, 4, 5, 6],  # Minimum for Part 1 (XOR Solved)
+        "description": "Solve XOR with hidden layers, then train on real data",
+        "historical_context": "Rumelhart, Hinton & Williams (Nature, 1986) ended the AI Winter",
         "emoji": "🎓"
     },
     "04": {
@@ -70,7 +83,7 @@ MILESTONE_SCRIPTS = {
         "year": 1998,
         "title": "LeNet - Computer Vision Breakthrough",
         "script": "milestones/04_1998_cnn/01_lecun_tinydigits.py",
-        "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 9],
+        "required_modules": [1, 2, 3, 4, 5, 6, 8, 9],  # + Spatial (09)
         "description": "Build LeNet for digit recognition",
         "historical_context": "Yann LeCun's convolutional networks",
         "emoji": "👁️"
@@ -80,8 +93,8 @@ MILESTONE_SCRIPTS = {
         "name": "Transformer Era (2017)",
         "year": 2017,
         "title": "Attention is All You Need",
-        "script": "milestones/05_2017_transformer/00_vaswani_attention_proof.py",
-        "required_modules": list(range(1, 14)),
+        "script": "milestones/05_2017_transformer/01_vaswani_attention.py",
+        "required_modules": [1, 2, 3, 4, 5, 6, 11, 12, 13],  # + Embeddings, Attention, Transformers
         "description": "Prove attention works with sequence reversal",
         "historical_context": "Vaswani et al. revolutionized NLP",
         "emoji": "🤖"
@@ -95,15 +108,17 @@ MILESTONE_SCRIPTS = {
             {
                 "name": "Model Compression",
                 "script": "milestones/06_2018_mlperf/01_optimization_olympics.py",
-                "description": "Profiling + Quantization + Pruning on MLP"
+                "description": "Profiling + Quantization + Pruning on MLP",
+                "required_modules": [1, 2, 3, 4, 5, 6, 14, 15, 16, 17, 18, 19]  # Core + Optimization (no Transformer)
             },
             {
                 "name": "Generation Speedup",
                 "script": "milestones/06_2018_mlperf/02_generation_speedup.py",
-                "description": "KV Caching for 10× faster Transformer"
+                "description": "KV Caching for 10× faster Transformer",
+                "required_modules": [1, 2, 3, 11, 12, 14, 17]  # Core + Embeddings + Attention + Profiler + KVCache
             }
         ],
-        "required_modules": list(range(1, 18)),  # Needs up to Module 17 (Memoization)
+        "required_modules": [1, 2, 3, 4, 5, 6, 14, 15, 16, 17, 18, 19],  # Minimum for Part 1
         "description": "Compress and accelerate your neural network",
         "historical_context": "MLPerf standardized ML benchmarks",
         "emoji": "🏆"
@@ -162,9 +177,8 @@ class MilestoneSystem:
                     self.console.print(f"[yellow]Warning: Could not load era config {era_path}: {e}[/yellow]")
         
         # If no milestones loaded, use MILESTONE_SCRIPTS as fallback
-        # (MILESTONE_SCRIPTS is the simple dict-based config that doesn't need YAML)
         if not milestones:
-            return {}  # Let calling code handle using MILESTONE_SCRIPTS
+            return MILESTONE_SCRIPTS
 
         return milestones
     
@@ -193,17 +207,22 @@ class MilestoneSystem:
             # Check if milestone is unlocked
             is_unlocked = milestone_id in milestone_data.get("unlocked_milestones", [])
 
-            # Check if trigger module is completed
-            trigger_complete = self._is_module_completed(milestone.get("trigger_module", ""))
-            
+            # Check if trigger module is completed (if trigger_module exists)
+            trigger_module = milestone.get("trigger_module", "")
+            if trigger_module:
+                trigger_complete = self._is_module_completed(trigger_module)
+            else:
+                # No trigger module - consider complete if all required modules done
+                trigger_complete = required_complete
+
             milestone_status = {
                 "id": milestone_id,
                 "name": milestone["name"],
                 "title": milestone["title"],
                 "emoji": milestone.get("emoji", "🎯"),
-                "trigger_module": milestone.get("trigger_module", ""),
+                "trigger_module": trigger_module,
                 "required_modules": milestone.get("required_modules", []),
-                "victory_condition": milestone.get("victory_condition", ""),
+                "victory_condition": milestone.get("victory_condition", milestone.get("description", "")),
                 "capability": milestone.get("capability", ""),
                 "real_world_impact": milestone.get("real_world_impact", ""),
                 "required_complete": required_complete,
@@ -390,6 +409,11 @@ class MilestoneCommand(BaseCommand):
             help='Milestone ID to run (01-06)'
         )
         run_parser.add_argument(
+            '--part',
+            type=int,
+            help='Run only a specific part (for multi-part milestones)'
+        )
+        run_parser.add_argument(
             '--skip-checks',
             action='store_true',
             help='Skip prerequisite checks (not recommended)'
@@ -465,7 +489,9 @@ class MilestoneCommand(BaseCommand):
                 "  • [bold]demo[/bold]       - Run capability demonstration\n\n"
                 "[dim]Examples:[/dim]\n"
                 "[dim]  tito milestone list[/dim]\n"
-                "[dim]  tito milestone run 03[/dim]\n"
+                "[dim]  tito milestone run 02           # Run all parts[/dim]\n"
+                "[dim]  tito milestone run 02 --part 1  # Run Part 1 only[/dim]\n"
+                "[dim]  tito milestone run 02 --part 2  # Run Part 2 only[/dim]\n"
                 "[dim]  tito milestone info 03[/dim]\n"
                 "[dim]  tito milestone status --detailed[/dim]",
                 title="🏆 Milestone System",
@@ -858,14 +884,26 @@ class MilestoneCommand(BaseCommand):
         ))
 
         # Check module completion status
-        progress_file = Path(".tito") / "progress.json"
-        completed_modules = []
+        # Module workflow saves to progress.json in project root
+        progress_file = Path("progress.json")
+        completed_modules_raw = []
         if progress_file.exists():
             try:
                 with open(progress_file, 'r') as f:
                     progress_data = json.load(f)
-                    completed_modules = progress_data.get("completed_modules", [])
+                    completed_modules_raw = progress_data.get("completed_modules", [])
             except (json.JSONDecodeError, IOError):
+                pass
+
+        # Convert completed modules to integers for comparison
+        # Handles both "01" and "01_tensor" formats
+        completed_module_nums = set()
+        for mod in completed_modules_raw:
+            try:
+                # Extract number from formats like "01" or "01_tensor"
+                num_str = mod.split("_")[0] if "_" in mod else mod
+                completed_module_nums.add(int(num_str))
+            except (ValueError, IndexError):
                 pass
 
         # Check milestone completion
@@ -875,8 +913,8 @@ class MilestoneCommand(BaseCommand):
         for milestone_id in sorted(MILESTONE_SCRIPTS.keys()):
             milestone = MILESTONE_SCRIPTS[milestone_id]
 
-            # Check if prerequisites met
-            prereqs_met = all(mod in completed_modules for mod in milestone["required_modules"])
+            # Check if prerequisites met (required_modules contains integers)
+            prereqs_met = all(mod in completed_module_nums for mod in milestone["required_modules"])
             is_complete = milestone_id in completed_milestones
 
             # Status indicator
@@ -907,7 +945,7 @@ class MilestoneCommand(BaseCommand):
                 if prereqs_met and not is_complete:
                     milestone_display += f"[bold yellow]▶ Run now:[/bold yellow] [cyan]tito milestone run {milestone_id}[/cyan]\n"
                 elif not prereqs_met:
-                    missing = [str(m) for m in milestone["required_modules"] if m not in completed_modules]
+                    missing = [f"{m:02d}" for m in milestone["required_modules"] if m not in completed_module_nums]
                     milestone_display += f"[dim]Required: Complete modules {', '.join(missing)}[/dim]\n"
 
                 console.print(Panel(
@@ -936,10 +974,38 @@ class MilestoneCommand(BaseCommand):
         milestone = MILESTONE_SCRIPTS[milestone_id]
 
         # Handle both single script and multiple scripts
+        # Also track which script configs we're running (for per-part requirements)
+        scripts_to_run = []
+        script_configs = []  # Store full config for each script (includes required_modules)
+
         if "scripts" in milestone:
-            scripts_to_run = [(s["name"], s["script"], s.get("description", "")) for s in milestone["scripts"]]
+            all_script_configs = milestone["scripts"]
+            all_scripts = [(s["name"], s["script"], s.get("description", "")) for s in all_script_configs]
+
+            # Handle --part flag for multi-part milestones
+            if args.part is not None:
+                if args.part < 1 or args.part > len(all_scripts):
+                    console.print(Panel(
+                        f"[red]Invalid part number: {args.part}[/red]\n\n"
+                        f"Milestone {milestone_id} has {len(all_scripts)} parts.\n"
+                        f"Valid parts: 1-{len(all_scripts)}\n\n"
+                        f"[dim]Available parts:[/dim]\n" +
+                        "\n".join(f"  Part {i+1}: {s[0]} - {s[2]}" for i, s in enumerate(all_scripts)),
+                        title="Invalid Part",
+                        border_style="red"
+                    ))
+                    return 1
+                scripts_to_run = [all_scripts[args.part - 1]]
+                script_configs = [all_script_configs[args.part - 1]]
+                console.print(f"[dim]Running Part {args.part} of {len(all_scripts)}[/dim]\n")
+            else:
+                scripts_to_run = all_scripts
+                script_configs = all_script_configs
         else:
+            if args.part is not None:
+                console.print(f"[yellow]⚠️ Milestone {milestone_id} has only one part, ignoring --part flag[/yellow]\n")
             scripts_to_run = [("Main", milestone["script"], milestone.get("description", ""))]
+            script_configs = [milestone]  # Single script uses milestone-level config
         
         # Check if all scripts exist
         for script_name, script_file, _ in scripts_to_run:
@@ -969,18 +1035,28 @@ class MilestoneCommand(BaseCommand):
             source_cmd = SrcCommand(self.config)
             test_cmd = TestCommand(self.config)
             
-            # Check if modules are completed using progress data
-            required_modules = milestone.get('required_modules', [])
+            # Determine required modules based on what we're running
+            # If running specific part(s), use per-part requirements if available
+            # Otherwise use milestone-level requirements
+            required_modules = set()
+            for config in script_configs:
+                part_reqs = config.get('required_modules', milestone.get('required_modules', []))
+                required_modules.update(part_reqs)
+            required_modules = sorted(required_modules)
+
             completed_modules = progress_data.get('completed_modules', [])
-            
+
             # Convert completed to set of integers
             completed_set = {int(m) if isinstance(m, str) else m for m in completed_modules}
             missing_modules = [m for m in required_modules if m not in completed_set]
-            
+
             if missing_modules:
+                part_info = ""
+                if args.part is not None and len(script_configs) == 1:
+                    part_info = f" (Part {args.part})"
                 console.print(Panel(
                     f"[bold yellow]❌ Missing Required Modules[/bold yellow]\n\n"
-                    f"[yellow]Milestone {milestone_id} requires modules: {', '.join(f'{m:02d}' for m in required_modules)}[/yellow]\n"
+                    f"[yellow]Milestone {milestone_id}{part_info} requires modules: {', '.join(f'{m:02d}' for m in required_modules)}[/yellow]\n"
                     f"[red]Missing: {', '.join(f'{m:02d}' for m in missing_modules)}[/red]\n\n"
                     f"[cyan]Complete the missing modules first:[/cyan]\n" +
                     "\n".join(f"[dim]  tito module complete {m:02d}[/dim]" for m in missing_modules[:3]),
@@ -1189,7 +1265,7 @@ class MilestoneCommand(BaseCommand):
             except:
                 pass
 
-        prereqs_met = all(m in completed_modules for m in milestone["required_modules"])
+        prereqs_met = all(f"{m:02d}" in completed_modules for m in milestone["required_modules"])
 
         # Display detailed info
         info_text = (
@@ -1203,10 +1279,11 @@ class MilestoneCommand(BaseCommand):
         )
 
         for mod in milestone["required_modules"]:
-            if mod in completed_modules:
-                info_text += f"  [green]✓[/green] Module {mod:02d}\n"
+            mod_str = f"{mod:02d}"
+            if mod_str in completed_modules:
+                info_text += f"  [green]✓[/green] Module {mod_str}\n"
             else:
-                info_text += f"  [red]✗[/red] Module {mod:02d}\n"
+                info_text += f"  [red]✗[/red] Module {mod_str}\n"
 
         # Show scripts
         if "scripts" in milestone:
@@ -1235,12 +1312,22 @@ class MilestoneCommand(BaseCommand):
         """Mark a milestone as complete in progress tracking."""
         progress = self._get_milestone_progress_data()
 
+        # Add to completed_milestones
         if milestone_id not in progress.get("completed_milestones", []):
             if "completed_milestones" not in progress:
                 progress["completed_milestones"] = []
             progress["completed_milestones"].append(milestone_id)
             progress["completion_dates"] = progress.get("completion_dates", {})
             progress["completion_dates"][milestone_id] = datetime.now().isoformat()
+
+        # Also add to unlocked_milestones (for status display)
+        if milestone_id not in progress.get("unlocked_milestones", []):
+            if "unlocked_milestones" not in progress:
+                progress["unlocked_milestones"] = []
+            progress["unlocked_milestones"].append(milestone_id)
+            progress["unlock_dates"] = progress.get("unlock_dates", {})
+            progress["unlock_dates"][milestone_id] = datetime.now().isoformat()
+            progress["total_unlocked"] = len(progress["unlocked_milestones"])
 
         self._save_milestone_progress_data(progress)
 

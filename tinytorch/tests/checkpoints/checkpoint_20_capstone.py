@@ -23,7 +23,7 @@ def test_checkpoint_20_capstone():
         from tinytorch.core.layers import Linear, Embedding
         from tinytorch.core.activations import ReLU, Sigmoid, Softmax, GELU
         from tinytorch.core.networks import Sequential
-        from tinytorch.core.spatial import Conv2D, MaxPool2D
+        from tinytorch.core.spatial import Conv2d as Conv2D, MaxPool2d
         from tinytorch.core.attention import MultiHeadAttention, CausalMask
         from tinytorch.core.dataloader import DataLoader, TokenizedDataset
         from tinytorch.core.autograd import Variable

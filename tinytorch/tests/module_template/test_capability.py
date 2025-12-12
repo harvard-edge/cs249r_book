@@ -17,7 +17,7 @@ class TestModuleCapabilities:
     def test_solves_intended_problem(self):
         """Test the module can solve its primary use case."""
         # Example for Conv2D:
-        # from tinytorch.core.spatial import Conv2D
+        # from tinytorch.core.spatial import Conv2d as Conv2D
         # 
         # conv = Conv2D(3, 32, kernel_size=3)
         # image = Tensor(np.random.randn(1, 28, 28, 3))

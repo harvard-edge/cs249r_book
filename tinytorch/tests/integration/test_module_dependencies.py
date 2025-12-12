@@ -129,7 +129,7 @@ def test_dense_with_tensor():
     assert layer.weight.shape == (10, 5), "Weight shape should match layer dims"
     # Bias may or may not exist depending on implementation
     if hasattr(layer, 'bias') and layer.bias is not None:
-    assert isinstance(layer.bias, Tensor), "Bias should be Tensor"
+        assert isinstance(layer.bias, Tensor), "Bias should be Tensor"
 
 
 def test_dense_with_activations():
