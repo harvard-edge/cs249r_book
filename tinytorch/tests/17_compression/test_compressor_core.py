@@ -58,10 +58,9 @@ class TestCompressionBasics:
                     [0, 0, 1, 1],
                     [0, 0, 1, 1]
                 ], dtype=np.float32)
-            
-            @property
-            def layers(self):
-                return [self.layer]
+
+            def parameters(self):
+                return self.layer.parameters()
         
         model = SimpleModel()
         sparsity = Compressor.measure_sparsity(model)
@@ -89,10 +88,9 @@ class TestCompressionBasics:
         class SimpleModel:
             def __init__(self):
                 self.layer = Linear(10, 10, bias=False)
-            
-            @property
-            def layers(self):
-                return [self.layer]
+
+            def parameters(self):
+                return self.layer.parameters()
         
         model = SimpleModel()
         initial_sparsity = Compressor.measure_sparsity(model)

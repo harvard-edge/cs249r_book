@@ -46,21 +46,25 @@ class TestPriorStackStillWorking:
     
     def test_advanced_features_stable(self):
         """Verify advanced modules (07→11) still work."""
+        import numpy as np  # Import at function scope
+
         try:
+            from tinytorch.core.tensor import Tensor
             from tinytorch.core.attention import MultiHeadAttention
             from tinytorch.core.spatial import Conv2d as Conv2D
             from tinytorch.core.dataloader import DataLoader
             from tinytorch.core.optimizers import Adam
-            
+
             # Advanced features should work
             attention = MultiHeadAttention(embed_dim=64, num_heads=8)
             conv = Conv2D(in_channels=3, out_channels=16, kernel_size=3)
-            optimizer = Adam([np.array([1.0])], lr=0.001)
-            
+            # Use Tensor with requires_grad instead of numpy array
+            optimizer = Adam([Tensor(np.array([1.0]), requires_grad=True)], lr=0.001)
+
             assert hasattr(attention, 'forward'), "Advanced features broken: Attention"
             assert hasattr(conv, 'forward'), "Advanced features broken: Spatial"
             assert hasattr(optimizer, 'step'), "Advanced features broken: Optimizers"
-            
+
         except ImportError:
             assert True, "Advanced features not implemented yet"
 
@@ -506,28 +510,32 @@ class TestRegressionPrevention:
     
     def test_no_advanced_features_regression(self):
         """Verify advanced features (07→11) unchanged."""
+        import numpy as np  # Import at function scope
+
         try:
+            from tinytorch.core.tensor import Tensor
             from tinytorch.core.attention import MultiHeadAttention
             from tinytorch.core.spatial import Conv2d as Conv2D
             from tinytorch.core.optimizers import Adam
             from tinytorch.core.dataloader import Dataset
-            
+
             # Advanced features should still work
             attention = MultiHeadAttention(embed_dim=32, num_heads=4)
             conv = Conv2D(in_channels=1, out_channels=8, kernel_size=3)
-            optimizer = Adam([np.array([1.0])], lr=0.001)
-            
+            # Use Tensor with requires_grad instead of numpy array
+            optimizer = Adam([Tensor(np.array([1.0]), requires_grad=True)], lr=0.001)
+
             assert hasattr(attention, 'forward'), "Advanced regression: Attention broken"
             assert hasattr(conv, 'forward'), "Advanced regression: Spatial broken"
             assert hasattr(optimizer, 'step'), "Advanced regression: Optimization broken"
-            
+
             # Data loading should still work
             class TestDataset(Dataset):
                 def __len__(self):
                     return 3
                 def __getitem__(self, idx):
                     return idx, idx * 2
-            
+
             dataset = TestDataset()
             assert len(dataset) == 3, "Advanced regression: Data loading broken"
             
