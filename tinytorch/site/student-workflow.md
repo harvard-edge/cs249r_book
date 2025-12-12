@@ -95,7 +95,7 @@ When you run `tito module test`, it executes three phases:
 **Phase 2: Module Tests** (Blue)
 - Runs pytest with educational output (`--tinytorch`)
 - Shows **WHAT** each test checks
-- Explains **WHY** it matters  
+- Explains **WHY** it matters
 - Provides **learning tips** when tests fail
 - Groups tests by module for clarity
 
@@ -185,25 +185,25 @@ The most important commands you'll use:
 # Export module to package
 tito module complete MODULE_NUMBER
 
-# Check module status (optional capability tracking)
-tito checkpoint status
+# Check module status
+tito module status
 
 # System information
 tito system info
 
-# Join community and benchmark
-tito community join
+# Community and benchmark
+tito community login
 tito benchmark baseline
 ```
 
 For complete command documentation, see [TITO CLI Reference](tito/overview.md).
 
-## Checkpoint System (Optional)
+## Progress Tracking (Optional)
 
-TinyTorch includes an optional checkpoint system for tracking progress:
+TinyTorch includes progress tracking for modules:
 
 ```bash
-tito checkpoint status  # View completion tracking
+tito module status  # View module completion status
 ```
 
 This is helpful for self-assessment but **not required** for the core workflow. The essential cycle remains: edit → export → validate.
@@ -253,14 +253,14 @@ pip install -e .  # Install TinyTorch package
 After completing setup, join the global TinyTorch community:
 
 ```bash
-# Join with optional information
-tito community join
+# Log in to join the community
+tito community login
 
 # View your profile and progress
 tito community profile
 
-# Update your information
-tito community update
+# Check your community status
+tito community status
 ```
 
 **Privacy:** All information is optional. Data is stored locally in `.tinytorch/` directory. See [Community Guide](community.md) for details.

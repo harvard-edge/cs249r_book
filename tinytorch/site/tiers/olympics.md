@@ -186,35 +186,31 @@ pruned_model = prune(quantized_model, sparsity=0.5)  # YOUR pruning
 
 ### 3. Benchmark Rigorously
 
-Use Module 19's benchmarking tools:
+Use TinyTorch's benchmarking tools:
 
 ```bash
-# Accuracy
-tito benchmark accuracy --model your_model.pt --dataset cifar10
+# Quick validation (ensures setup works)
+tito benchmark baseline
 
-# Speed (tokens/sec)
-tito benchmark speed --model your_transformer.pt --input-length 512
-
-# Size (MB)
-tito benchmark size --model your_model.pt
-
-# Memory (peak usage)
-tito benchmark memory --model your_model.pt
+# Full performance evaluation (Module 20 capstone)
+tito benchmark capstone
 ```
+
+**Note**: Advanced benchmarking commands for accuracy, speed, size, and memory measurement are planned for future releases.
 
 ### 4. Submit to Leaderboard
 
-```bash
-# Package your submission
-tito olympics submit \
-  --track vision \
-  --model your_model.pt \
-  --code your_training.py \
-  --report your_analysis.md
+**Coming Soon!** The submission and leaderboard system is under development.
 
-# View leaderboard
-tito olympics leaderboard --track vision
+```bash
+# Check your current Olympics status
+tito olympics status
+
+# View the Olympics logo
+tito olympics logo
 ```
+
+*Submission commands will be available in a future release.*
 
 ---
 
@@ -299,15 +295,9 @@ Instructors can use the Torch Olympics as a capstone project:
 
 ### Reference Implementations
 
-Starter code is provided for each track:
+Starter code will be provided for each track.
 
-```bash
-# Vision track starter
-tito olympics init --track vision --output ./my_vision_project
-
-# Language track starter
-tito olympics init --track language --output ./my_language_project
-```
+**Coming Soon**: The olympics init command for initializing competition projects is under development.
 
 ### Community
 
@@ -370,15 +360,14 @@ By completing the Torch Olympics, you'll have:
 **Ready to compete?**
 
 ```bash
-# Initialize your Torch Olympics project
-tito olympics init --track vision
+# Check your Olympics status
+tito olympics status
 
-# Review the rules
-tito olympics rules
-
-# View current leaderboard
-tito olympics leaderboard
+# View the Olympics logo
+tito olympics logo
 ```
+
+*Full competition commands (`init`, `submit`, `leaderboard`) are coming soon!*
 
 **Or review prerequisites:**
 

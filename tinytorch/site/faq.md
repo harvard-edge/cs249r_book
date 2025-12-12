@@ -219,10 +219,10 @@ Each milestone proves your framework works by running actual ML experiments.
 1. Edit modules → 2. Export → 3. Validate with milestones
 ```
 
-**Optional checkpoint system:**
-- Tracks 21 capability checkpoints
+**Optional milestone system:**
+- Tracks historical milestone achievements
 - Helpful for self-assessment
-- Use `tito checkpoint status` to view progress
+- Use `tito milestone status` to view progress
 
 ** See [Module Workflow](tito/modules.md)** for the core development cycle.
 

@@ -288,7 +288,7 @@ Browse the notebook source code and understand the implementation.
 tito module start 04
 
 # Work in Jupyter
-tito jupyter 04
+tito system jupyter
 
 # When complete
 tito module complete 04

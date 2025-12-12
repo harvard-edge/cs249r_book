@@ -56,8 +56,8 @@ See [Module Workflow](tito/modules.md) for detailed commands and [Troubleshootin
 After setup, join the global TinyTorch community and validate your setup:
 
 ```bash
-# Join the community (optional)
-tito community join
+# Log in to join the community (optional)
+tito community login
 
 # Run baseline benchmark to validate setup
 tito benchmark baseline
@@ -179,7 +179,7 @@ After completing your first modules:
 **Check your new capabilities:** Use the optional checkpoint system to track your progress:
 
 ```bash
-tito checkpoint status  # View your completion tracking
+tito module status  # View your module completion status
 ```
 
 This is helpful for self-assessment but not required for the core workflow.
@@ -194,11 +194,11 @@ After exporting your modules, **prove what you've built** by running milestone s
 
 <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 2rem; border-radius: 0.5rem; margin: 1.5rem 0; color: white;">
 
-**After Module 07**: Build **Rosenblatt's 1957 Perceptron** - the first trainable neural network  
-**After Module 07**: Solve the **1969 XOR Crisis** with multi-layer networks  
-**After Module 08**: Achieve **95%+ accuracy on MNIST** with 1986 backpropagation  
-**After Module 09**: Hit **75%+ on CIFAR-10** with 1998 CNNs  
-**After Module 13**: Generate text with **2017 Transformers**  
+**After Module 07**: Build **Rosenblatt's 1957 Perceptron** - the first trainable neural network
+**After Module 07**: Solve the **1969 XOR Crisis** with multi-layer networks
+**After Module 08**: Achieve **95%+ accuracy on MNIST** with 1986 backpropagation
+**After Module 09**: Hit **75%+ on CIFAR-10** with 1998 CNNs
+**After Module 13**: Generate text with **2017 Transformers**
 **After Module 18**: Optimize for production with **2018 Torch Olympics**
 
 See [Journey Through ML History](chapters/milestones.md) for complete timeline, requirements, and expected results.

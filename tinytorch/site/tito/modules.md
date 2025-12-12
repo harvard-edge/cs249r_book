@@ -389,7 +389,7 @@ tinytorch/
 ```
 
 **IMPORTANT**: Understanding the flow
-- **Developers**: Edit `src/XX_name/XX_name.py` → Run `tito source export` → Generates notebooks & package
+- **Developers**: Edit `src/XX_name/XX_name.py` → Run `tito src export` → Generates notebooks & package
 - **Students**: Work in generated `modules/XX_name/XX_name.ipynb` notebooks
 - **Never edit** `tinytorch/` directly - it's auto-generated
 - Changes in `tinytorch/` will be lost on re-export

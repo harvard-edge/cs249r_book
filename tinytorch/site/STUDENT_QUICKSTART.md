@@ -84,13 +84,13 @@ YOUR RESPONSE HERE
 ### **Check Your Capabilities**
 ```bash
 # See overall progress
-tito checkpoint status
+tito module status
 
-# Visual timeline
-tito checkpoint timeline
+# Visual milestone timeline
+tito milestone timeline
 
-# Test specific capability
-tito checkpoint test 01
+# Test specific module
+tito module test 01
 ```
 
 ### **Complete Modules**
@@ -155,8 +155,8 @@ tito module test 02_tensor --verbose
 # Full system check
 tito system health
 
-# Reset if needed
-tito system reset
+# Reset specific module if needed
+tito module reset XX
 ```
 
 ### **Community**

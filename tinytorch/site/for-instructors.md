@@ -72,7 +72,7 @@ tito grade release MODULE_NAME
   - Create assignment repository from TinyTorch template
   - Students clone and work in their repos
   - Automatic submission via GitHub
-  
+
 - **Option B: Direct Distribution**
   - Share `release/` directory contents
   - Students download and submit via LMS
@@ -225,17 +225,17 @@ tito grade export --module MODULE_NAME --output grades.csv
 
 ```bash
 # Check specific student
-tito checkpoint status --student student_id
+tito module status --student student_id
 
 # Export class progress
-tito checkpoint export --output class_progress.csv
+tito module status --export class_progress.csv
 
 # View module completion rates
-tito module status --comprehensive
+tito module status
 ```
 
 **Identify Struggling Students:**
-- Missing checkpoint achievements
+- Missing module completions
 - Low scores on systems thinking questions
 - Incomplete module submissions
 - Late milestone completions
@@ -377,7 +377,7 @@ While auto-grading handles 70%, focus manual review on:
 ```bash
 # Student fix:
 tito system health
-tito system reset
+tito module reset XX  # Reset specific module if needed
 ```
 
 ### Module Import Errors
@@ -440,4 +440,3 @@ ls submitted/*/MODULE/
 With NBGrader integration, automated grading, and comprehensive teaching materials, you have everything needed to run a successful ML systems course.
 </p>
 </div>
-

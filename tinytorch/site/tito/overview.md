@@ -48,20 +48,20 @@ TinyTorch serves three types of users. Choose your path:
 # Start learning
 tito module start 01
 
-# Complete modules  
+# Complete modules
 tito module complete 01
 
 # Validate with history
 tito milestone run 03
 
 # Track progress
-tito status
+tito module status
 ```
 
 **Key Commands:**
 - `tito module` - Build components
 - `tito milestone` - Validate
-- `tito status` - Track progress
+- `tito module status` - Track progress
 
 </div>
 
@@ -131,14 +131,9 @@ tito milestone run 03
 
 | Command | Description | Guide |
 |---------|-------------|-------|
-| `tito system health` | Quick environment health check (status only) | [Module Workflow](modules.md) |
-| `tito system check` | Comprehensive validation with 60+ tests | [Module Workflow](modules.md) |
+| `tito system health` | Environment health check and validation | [Module Workflow](modules.md) |
 | `tito system info` | System resources (paths, disk, memory) | [Module Workflow](modules.md) |
-| `tito system version` | Show all package versions | [Module Workflow](modules.md) |
-| `tito system clean` | Clean workspace caches and temp files | [Module Workflow](modules.md) |
-| `tito system report` | Generate JSON diagnostic report | [Module Workflow](modules.md) |
 | `tito system jupyter` | Start Jupyter Lab server | [Module Workflow](modules.md) |
-| `tito system protect` | Student protection system | [Module Workflow](modules.md) |
 
 ### Module Commands
 
@@ -174,10 +169,9 @@ tito milestone run 03
 
 | Command | Description | Guide |
 |---------|-------------|-------|
-| `tito status` | View all progress (modules + milestones) | [Progress & Data](data.md) |
-| `tito reset all` | Reset all progress and start fresh | [Progress & Data](data.md) |
-| `tito reset progress` | Reset module completion only | [Progress & Data](data.md) |
-| `tito reset milestones` | Reset milestone achievements only | [Progress & Data](data.md) |
+| `tito module status` | View module completion progress | [Progress & Data](data.md) |
+| `tito milestone status` | View milestone achievements | [Progress & Data](data.md) |
+| `tito module reset XX` | Reset a specific module | [Progress & Data](data.md) |
 
 **See**: [Progress & Data Management](data.md) for complete details
 
@@ -187,11 +181,11 @@ tito milestone run 03
 
 | Command | Description | Guide |
 |---------|-------------|-------|
-| `tito community join` | Join the community (optional info) | [Community Guide](../community.md) |
-| `tito community update` | Update your community profile | [Community Guide](../community.md) |
-| `tito community profile` | View your community profile | [Community Guide](../community.md) |
-| `tito community stats` | View community statistics | [Community Guide](../community.md) |
-| `tito community leave` | Remove your community profile | [Community Guide](../community.md) |
+| `tito community login` | Log in to the community via web browser | [Community Guide](../community.md) |
+| `tito community logout` | Log out of the community | [Community Guide](../community.md) |
+| `tito community profile` | View/edit your community profile | [Community Guide](../community.md) |
+| `tito community status` | Show login status and user info | [Community Guide](../community.md) |
+| `tito community map` | Open global community map | [Community Guide](../community.md) |
 
 **See**: [Community Guide](../community.md) for complete details
 
@@ -216,7 +210,7 @@ tito milestone run 03
 | `tito src export --all` | Export all modules | After major refactoring |
 | `tito src test <module>` | Run tests on source files | During development |
 
-**Note**: These commands work with `src/XX_name/XX_name.py` files and are for TinyTorch contributors/developers.  
+**Note**: These commands work with `src/XX_name/XX_name.py` files and are for TinyTorch contributors/developers.
 **Students** use `tito module` commands to work with generated notebooks.
 
 **Directory Structure:**
@@ -293,10 +287,8 @@ tito milestone status
 
 ```bash
 # View all progress
-tito status
-
-# Reset if needed
-tito reset all --backup
+tito module status
+tito milestone status
 ```
 
 ---
@@ -333,7 +325,8 @@ tito milestone run 03      # Run with YOUR code
 
 **5. Track Progress**
 ```bash
-tito status                # See everything
+tito module status         # See module progress
+tito milestone status      # See milestone achievements
 ```
 
 </div>

@@ -571,10 +571,11 @@ tito module reset 05
 # Clears completion for Module 05 only
 ```
 
-**Option 2: Reset all progress**:
+**Option 2: Delete progress file**:
 ```bash
-tito reset progress
-# Clears all module completion
+# Remove progress tracking (will be recreated)
+rm .tito/progress.json
+tito system health  # Recreates the file
 ```
 
 **Option 3: Manually edit `.tito/progress.json`**:

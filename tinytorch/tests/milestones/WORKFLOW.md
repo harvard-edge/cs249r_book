@@ -39,14 +39,14 @@ After export, the system automatically:
 ║ 🎉 You can now verify that gradient descent actually works!      ║
 ║                                                                  ║
 ║ Run the verification test:                                       ║
-║ tito milestones run perceptron                                   ║
+║ tito milestone run perceptron                                    ║
 ╚══════════════════════════════════════════════════════════════════╝
 ```
 
 ### 4. Student Runs Milestone Test
 
 ```bash
-tito milestones run perceptron
+tito milestone run perceptron
 ```
 
 The system:
@@ -87,7 +87,7 @@ tito module complete 02
 # 🔓 MILESTONE UNLOCKED! 1957 - The Perceptron
 
 # === PHASE 2: Verify Learning ===
-tito milestones run perceptron
+tito milestone run perceptron
 
 # 🧪 Running 1957 - The Perceptron
 # ... test runs, shows learning metrics ...
@@ -105,7 +105,7 @@ tito module complete 03
 
 # 🔓 MILESTONE UNLOCKED! 1986 - Backpropagation (XOR)
 
-tito milestones run xor
+tito milestone run xor
 # ... and so on ...
 ```
 
@@ -113,7 +113,7 @@ tito milestones run xor
 
 ### Check Progress
 ```bash
-tito milestones progress
+tito milestone status
 ```
 
 Shows:
@@ -123,14 +123,14 @@ Shows:
 
 ### List Unlocked Tests
 ```bash
-tito milestones list
+tito milestone list
 ```
 
 Shows all milestone tests you can currently run.
 
 ### Run a Milestone Test
 ```bash
-tito milestones run <milestone_id>
+tito milestone run <milestone_id>
 ```
 
 IDs: `perceptron`, `xor`, `mlp_digits`, `cnn`, `transformer`
@@ -177,7 +177,7 @@ Every milestone test checks:
 5. **Shows unlock notifications**
 6. Suggests next steps
 
-### Milestone Run (`tito milestones run perceptron`)
+### Milestone Run (`tito milestone run perceptron`)
 
 1. Verifies all required modules are complete
 2. Runs pytest test from `tests/milestones/`
@@ -215,7 +215,7 @@ Success messages make students feel accomplished—they've built something real!
 ### "Milestone still locked"
 Check which modules you need:
 ```bash
-tito milestones progress
+tito milestone status
 ```
 
 ### "Test failed"
@@ -246,4 +246,3 @@ This system creates a **gamified learning experience**:
 5. **Historical Journey**: Connect to 60+ years of ML history
 
 Students aren't just completing assignments—they're **unlocking the history of AI**! 🚀
-

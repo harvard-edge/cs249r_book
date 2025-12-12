@@ -176,7 +176,7 @@ tito milestone run 02
 
 ---
 
-### Milestone 03: MLP Revival (1986) 
+### Milestone 03: MLP Revival (1986)
 
 **What**: Backpropagation breakthrough - train deep networks on MNIST
 
@@ -341,10 +341,10 @@ TinyTorch tracks progress in three ways (all are related but distinct):
 - Tracked in `.tito/milestones.json`
 - Unlocked by completing modules + running milestones
 
-**3. Capability Checkpoints** (`tito checkpoint status`) - OPTIONAL
-- Gamified capability tracking
-- Tracked in `.tito/checkpoints.json`
-- Purely motivational; can be disabled
+**3. Overall Status**
+- Check `tito module status` and `tito milestone status`
+- Quick view of all progress
+- Purely informational
 
 </div>
 

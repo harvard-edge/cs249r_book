@@ -39,16 +39,16 @@ python script.py
 tito module complete 01
 
 # Check module status
-tito checkpoint status
+tito module status
 
-# System reset (if needed)
-tito system reset
+# Check system health
+tito system health
 ```
 
 ### Community & Benchmarking
 ```bash
-# Join community (optional)
-tito community join
+# Log in to community (optional)
+tito community login
 
 # Run baseline benchmark
 tito benchmark baseline
@@ -110,8 +110,8 @@ tito system health
 # View detailed error logs
 tito module complete N --verbose
 
-# Reset if corrupted
-tito system reset
+# Reset module if needed
+tito module reset N
 
 # Reimport in Python
 python
@@ -214,4 +214,3 @@ from tinytorch.training import Trainer             # M07
 ---
 
 **💡 Pro Tip**: Bookmark this page for quick command reference while building!
-

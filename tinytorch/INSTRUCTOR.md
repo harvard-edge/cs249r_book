@@ -148,7 +148,7 @@ def memory_footprint(self):
     """Calculate tensor memory in bytes."""
     return self.data.nbytes
 ```
-**Why Excellent**: 
+**Why Excellent**:
 - Concise and correct
 - Uses NumPy's built-in `nbytes` property
 - Clear docstring
@@ -160,7 +160,7 @@ def memory_footprint(self):
     """Calculate memory usage."""
     return np.prod(self.data.shape) * self.data.dtype.itemsize
 ```
-**Why Good**: 
+**Why Good**:
 - Correct implementation
 - Manually calculates (shows understanding)
 - Works but less efficient than using `nbytes`
@@ -174,7 +174,7 @@ def memory_footprint(self):
         size *= dim
     return size * 4  # Assumes float32
 ```
-**Why Acceptable**: 
+**Why Acceptable**:
 - Correct logic but hardcoded dtype size
 - Works for float32 but fails for other dtypes
 - Shows understanding of memory calculation
@@ -188,13 +188,13 @@ def backward(self, gradient=None):
     """Backward pass through computational graph."""
     if gradient is None:
         gradient = np.ones_like(self.data)
-    
+
     self.grad = gradient
-    
+
     if self.grad_fn is not None:
         # Compute gradients for inputs
         input_grads = self.grad_fn.backward(gradient)
-        
+
         # Propagate to input tensors
         if isinstance(input_grads, tuple):
             for input_tensor, input_grad in zip(self.grad_fn.inputs, input_grads):
@@ -249,14 +249,14 @@ def forward(self, x):
     batch_size, in_channels, height, width = x.shape
     out_height = (height - self.kernel_size + 2 * self.padding) // self.stride + 1
     out_width = (width - self.kernel_size + 2 * self.padding) // self.stride + 1
-    
+
     output = np.zeros((batch_size, self.out_channels, out_height, out_width))
-    
+
     # Apply padding
     if self.padding > 0:
-        x = np.pad(x, ((0, 0), (0, 0), (self.padding, self.padding), 
+        x = np.pad(x, ((0, 0), (0, 0), (self.padding, self.padding),
                       (self.padding, self.padding)), mode='constant')
-    
+
     # Explicit convolution loops
     for b in range(batch_size):
         for oc in range(self.out_channels):
@@ -266,12 +266,12 @@ def forward(self, x):
                     w_start = ow * self.stride
                     h_end = h_start + self.kernel_size
                     w_end = w_start + self.kernel_size
-                    
+
                     window = x[b, :, h_start:h_end, w_start:w_end]
                     output[b, oc, oh, ow] = np.sum(
                         window * self.weight[oc] + self.bias[oc]
                     )
-    
+
     return Tensor(output, requires_grad=x.requires_grad)
 ```
 **Why Excellent**:
@@ -288,7 +288,7 @@ def forward(self, x):
     out_h = (H - self.kernel_size) // self.stride + 1
     out_w = (W - self.kernel_size) // self.stride + 1
     out = np.zeros((B, self.out_channels, out_h, out_w))
-    
+
     for b in range(B):
         for oc in range(self.out_channels):
             for i in range(out_h):
@@ -296,7 +296,7 @@ def forward(self, x):
                     h = i * self.stride
                     w = j * self.stride
                     out[b, oc, i, j] = np.sum(
-                        x[b, :, h:h+self.kernel_size, w:w+self.kernel_size] 
+                        x[b, :, h:h+self.kernel_size, w:w+self.kernel_size]
                         * self.weight[oc]
                     ) + self.bias[oc]
     return Tensor(out)
@@ -332,18 +332,18 @@ def forward(self, query, key, value, mask=None):
     """Scaled dot-product attention with numerical stability."""
     # Compute attention scores
     scores = np.dot(query, key.T) / np.sqrt(self.d_k)
-    
+
     # Apply mask if provided
     if mask is not None:
         scores = np.where(mask, scores, -1e9)
-    
+
     # Softmax with numerical stability
     exp_scores = np.exp(scores - np.max(scores, axis=-1, keepdims=True))
     attention_weights = exp_scores / np.sum(exp_scores, axis=-1, keepdims=True)
-    
+
     # Apply attention to values
     output = np.dot(attention_weights, value)
-    
+
     return output, attention_weights
 ```
 **Why Excellent**:
@@ -387,7 +387,7 @@ def forward(self, q, k, v):
    - If no: Maximum 6 points (even if well-written)
    - If yes: Proceed to quality evaluation
 
-2. **Code Quality**: 
+2. **Code Quality**:
    - **Excellent (9-10)**: Production-ready, handles edge cases, well-documented
    - **Good (7-8)**: Correct and functional, minor improvements possible
    - **Acceptable (5-6)**: Works but incomplete or has issues
@@ -456,18 +456,18 @@ By course end, students should be able to:
 ### **Individual Progress**
 ```bash
 # Check specific student progress
-tito checkpoint status --student student_id
+tito module status --student student_id
 ```
 
 ### **Class Overview**
 ```bash
-# Export all checkpoint achievements
-tito checkpoint export --output class_progress.csv
+# Export all module progress
+tito module status --export class_progress.csv
 ```
 
 ### **Identify Struggling Students**
 Look for:
-- Missing checkpoint achievements
+- Missing module completions
 - Low scores on ML Systems questions
 - Incomplete module submissions
 
@@ -488,7 +488,7 @@ Look for:
 # Use profilers liberally
 with TimeProfiler("operation"):
     result = expensive_operation()
-    
+
 # Show memory usage
 print(f"Memory: {get_memory_usage():.2f} MB")
 ```
@@ -506,7 +506,7 @@ print(f"Memory: {get_memory_usage():.2f} MB")
 ```bash
 # Student fix:
 tito system health
-tito system reset
+tito module reset XX  # Reset specific module if needed
 ```
 
 **Module Import Errors**

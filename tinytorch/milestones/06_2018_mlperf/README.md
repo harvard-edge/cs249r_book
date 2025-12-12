@@ -77,7 +77,7 @@ python milestones/06_2018_mlperf/02_generation_speedup.py
 
 Or via tito:
 ```bash
-tito milestones run 06
+tito milestone run 06
 ```
 
 ## Key Learning

@@ -1,8 +1,8 @@
 # TinyTorch Module Development Rules
 
-**Version**: 2.0  
-**Date**: January 2025  
-**Status**: Complete Reference Guide  
+**Version**: 2.0
+**Date**: January 2025
+**Status**: Complete Reference Guide
 **Reference Implementation**: `src/08_optimizers/08_optimizers.py`
 
 This document defines the complete set of rules, patterns, and conventions for developing TinyTorch modules. Instead of maintaining separate documentation, **use `08_optimizers` as your reference implementation** - it follows all current patterns perfectly.
@@ -26,7 +26,7 @@ This document defines the complete set of rules, patterns, and conventions for d
 ### "Build → Use → [Understand/Reflect/Analyze/Optimize]" Framework
 Each module follows this pedagogical pattern:
 - **Build**: Implement the component from scratch
-- **Use**: Apply it to real data and problems  
+- **Use**: Apply it to real data and problems
 - **Third Stage**: Varies by module (Understand/Reflect/Analyze/Optimize)
 
 ## 📁 File Structure and Organization
@@ -63,7 +63,7 @@ All source Python files in `src/` MUST use Jupytext percent format:
 
 **Build Process:**
 1. Developer edits `src/NN_name/NN_name.py`
-2. Run `tito source export NN_name`
+2. Run `tito src export NN_name`
 3. Generates `modules/NN_name/NN_name.ipynb` (notebook)
 4. Exports to `tinytorch/` (package code)
 
@@ -79,7 +79,7 @@ All source Python files in `src/` MUST use Jupytext percent format:
 
 ## Learning Goals
 - Goal 1: Specific outcome
-- Goal 2: Another objective  
+- Goal 2: Another objective
 - Goal 3: Connection to ML concepts
 
 ## Build → Use → [Understand/Reflect/Analyze/Optimize]
@@ -111,7 +111,7 @@ print("Ready to [action]!")
 """
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/NN_modulename/modulename_dev.py`  
+**Learning Side:** You work in `modules/NN_modulename/modulename_dev.py`
 **Building Side:** Code exports to `tinytorch.core.modulename`
 
 ```python
@@ -285,14 +285,14 @@ Step-by-step approach to building the component.
 class ComponentName:
     """
     Brief description of the component.
-    
+
     TODO: Student implementation guidance
-    
+
     APPROACH:
     1. [First step with specific guidance]
     2. [Second step with specific guidance]
     3. [Third step with specific guidance]
-    
+
     EXAMPLE:
     Input: [concrete example]
     Expected: [concrete expected output]
@@ -319,7 +319,7 @@ class ComponentName:
 def test_component_function():
     """Test the component functionality."""
     print("🔬 Unit Test: Component Function...")
-    
+
     # Test implementation
     try:
         # Test logic
@@ -346,7 +346,7 @@ Congratulations! You've successfully implemented [module description]:
 
 ### ✅ What You've Built
 - **Component 1**: Description of accomplishment
-- **Component 2**: Description of accomplishment  
+- **Component 2**: Description of accomplishment
 - **Integration**: How components work together
 - **Complete System**: End-to-end functionality
 
@@ -416,13 +416,13 @@ def test_component_name():
 def test_component_function():
     """Test description."""
     print("🔬 Unit Test: Component Function...")
-    
+
     ### 🧪 Unit Test: Component Function
-    
+
     **Description**: Brief explanation of what is tested
-    
+
     **This is a unit test** - it tests [specific functionality] in isolation.
-    
+
     try:
         # Test logic
         print("✅ [check] works")
@@ -466,7 +466,7 @@ def function_to_export():
 def student_function():
     """
     Student implementation function.
-    
+
     TODO: Implementation guidance for students.
     """
     ### BEGIN SOLUTION
