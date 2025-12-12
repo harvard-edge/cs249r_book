@@ -39,7 +39,7 @@ class TestPriorStackStillWorking:
     def test_advanced_stack_stable(self):
         """Verify advanced modules (06→07) still work."""
         try:
-            from tinytorch.core.spatial import Conv2D
+            from tinytorch.core.spatial import Conv2d as Conv2D
             from tinytorch.core.attention import MultiHeadAttention
             
             # Spatial and attention should work
@@ -59,7 +59,7 @@ class TestModule08DataLoaderCore:
     def test_dataset_creation(self):
         """Test basic dataset creation works."""
         try:
-            from tinytorch.core.data import Dataset
+            from tinytorch.core.dataloader import Dataset
             
             # Create simple dataset
             class SimpleDataset(Dataset):
@@ -88,7 +88,7 @@ class TestModule08DataLoaderCore:
     def test_dataloader_creation(self):
         """Test DataLoader creation and batching."""
         try:
-            from tinytorch.core.data import DataLoader, Dataset
+            from tinytorch.core.dataloader import DataLoader, Dataset
             from tinytorch.core.tensor import Tensor
             
             # Simple dataset for testing
@@ -118,7 +118,7 @@ class TestModule08DataLoaderCore:
     def test_real_dataset_support(self):
         """Test support for real datasets like CIFAR-10."""
         try:
-            from tinytorch.core.data import CIFAR10Dataset
+            from tinytorch.core.dataloader import CIFAR10Dataset
             
             # Note: This might download data, so we'll just test instantiation
             # In real usage, students would download CIFAR-10
@@ -143,7 +143,7 @@ class TestProgressiveStackIntegration:
     def test_complete_training_pipeline(self):
         """Test complete ML pipeline: data → model → training."""
         try:
-            from tinytorch.core.data import DataLoader, Dataset
+            from tinytorch.core.dataloader import DataLoader, Dataset
             from tinytorch.core.tensor import Tensor
             from tinytorch.core.layers import Linear
             from tinytorch.core.activations import ReLU, Softmax
@@ -188,8 +188,8 @@ class TestProgressiveStackIntegration:
     def test_cnn_data_pipeline(self):
         """Test CNN pipeline with spatial data."""
         try:
-            from tinytorch.core.data import DataLoader, Dataset  
-            from tinytorch.core.spatial import Conv2D, MaxPool2D
+            from tinytorch.core.dataloader import DataLoader, Dataset  
+            from tinytorch.core.spatial import Conv2d as Conv2D, MaxPool2d
             from tinytorch.core.layers import Linear
             from tinytorch.core.tensor import Tensor
             
@@ -211,7 +211,7 @@ class TestProgressiveStackIntegration:
             
             # CNN components
             conv1 = Conv2D(in_channels=3, out_channels=16, kernel_size=3)
-            pool = MaxPool2D(kernel_size=2)
+            pool = MaxPool2d(kernel_size=2)
             fc = Linear(16 * 15 * 15, 5)  # Approximate after conv/pool
             
             # Test CNN pipeline
@@ -236,7 +236,7 @@ class TestRealWorldDataCapability:
     def test_data_preprocessing_pipeline(self):
         """Test data preprocessing and augmentation."""
         try:
-            from tinytorch.core.data import transforms
+            from tinytorch.core.dataloader import transforms
             from tinytorch.core.tensor import Tensor
             
             # Basic transforms
@@ -263,7 +263,7 @@ class TestRealWorldDataCapability:
     def test_memory_efficient_loading(self):
         """Test memory efficient data loading."""
         try:
-            from tinytorch.core.data import DataLoader, Dataset
+            from tinytorch.core.dataloader import DataLoader, Dataset
             
             # Large dataset simulation
             class LargeDataset(Dataset):
@@ -296,7 +296,7 @@ class TestRealWorldDataCapability:
     def test_parallel_data_loading(self):
         """Test parallel/multi-threaded data loading."""
         try:
-            from tinytorch.core.data import DataLoader, Dataset
+            from tinytorch.core.dataloader import DataLoader, Dataset
             
             class ParallelDataset(Dataset):
                 def __init__(self):
@@ -347,7 +347,7 @@ class TestRegressionPrevention:
     def test_no_advanced_regression(self):
         """Verify advanced modules (06→07) unchanged."""
         try:
-            from tinytorch.core.spatial import Conv2D
+            from tinytorch.core.spatial import Conv2d as Conv2D
             from tinytorch.core.attention import MultiHeadAttention
             
             # Advanced operations should still work
@@ -386,7 +386,7 @@ class TestRegressionPrevention:
         
         # Data level (if available)
         try:
-            from tinytorch.core.data import Dataset
+            from tinytorch.core.dataloader import Dataset
             
             class TestDataset(Dataset):
                 def __len__(self):

@@ -3,61 +3,57 @@
 The XOR Crisis (1969) - Minsky & Papert
 ========================================
 
-📚 HISTORICAL CONTEXT:
-In 1969, Marvin Minsky and Seymour Papert published "Perceptrons," mathematically 
-proving that single-layer perceptrons CANNOT solve the XOR problem. This revelation 
+HISTORICAL CONTEXT:
+In 1969, Marvin Minsky and Seymour Papert published "Perceptrons," mathematically
+proving that single-layer perceptrons CANNOT solve the XOR problem. This revelation
 killed neural network research funding for over a decade - the "AI Winter."
 
-🎯 MILESTONE 2 PART 1: THE CRISIS (After Modules 01-04)
+MILESTONE 2 PART 1: THE CRISIS (After Modules 01-03)
 
-This demonstrates WHY the crisis happened. Watch a perceptron fail to learn XOR,
-no matter how much we train it. This is what convinced the world that neural 
-networks were a dead end.
+This demonstrates WHY the crisis happened. We'll show that NO MATTER what weights
+you choose, a single-layer perceptron cannot correctly classify all XOR patterns.
+This is a mathematical impossibility - not a training failure.
 
-✅ REQUIRED MODULES (Run after Module 04):
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+REQUIRED MODULES:
   Module 01 (Tensor)        : YOUR data structure
-  Module 02 (Activations)   : YOUR sigmoid activation  
-  Module 03 (Layers)        : YOUR Linear layer (single layer only!)
-  Module 04 (Losses)        : YOUR loss function
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Module 02 (Activations)   : YOUR sigmoid activation
+  Module 03 (Layers)        : YOUR Linear layer
 
-🔍 THE XOR PROBLEM - Why It's Impossible for Single Layers:
+THE XOR PROBLEM - Why It's Impossible for Single Layers:
 
 XOR (Exclusive OR) outputs 1 when inputs DIFFER, 0 when they're the SAME:
 
     Visual Representation:        Truth Table:
-    
-    1 │ ○ (0,1)    ● (1,1)        │ x₁ │ x₂ │ XOR │
-      │   [1]       [0]           ├────┼────┼─────┤
-      │                           │ 0  │ 0  │  0  │ ← same
-    0 │ ● (0,0)    ○ (1,0)        │ 0  │ 1  │  1  │ ← different  
-      │   [0]       [1]           │ 1  │ 0  │  1  │ ← different
-      └─────────────────          │ 1  │ 1  │  0  │ ← same
-        0          1              └────┴────┴─────┘
 
-🚫 THE FUNDAMENTAL PROBLEM:
+    1 | O (0,1)    * (1,1)        | x1 | x2 | XOR |
+      |   [1]       [0]           |----|----| --- |
+      |                           | 0  | 0  |  0  | same
+    0 | * (0,0)    O (1,0)        | 0  | 1  |  1  | different
+      |   [0]       [1]           | 1  | 0  |  1  | different
+      +-----------                | 1  | 1  |  0  | same
+        0          1
+
+THE FUNDAMENTAL PROBLEM:
 
 No single straight line can separate the points!
 
-    Try drawing a line:           Any line fails:
-    
-    1 │ 1 ╱ ╱ ╱ 0                1 │ 1 ╲ ╲ ╲ 0
-      │ ╱ ╱ ╱ ╱ ╱                  │ ╲ ╲ ╲ ╲ ╲
-    0 │ 0 ╱ ╱ ╱ 1                0 │ 0 ╲ ╲ ╲ 1
-      └────────────                └────────────
-        Line can't separate!        Still wrong!
+A single-layer perceptron computes: y = sigmoid(w1*x1 + w2*x2 + b)
+The decision boundary is: w1*x1 + w2*x2 + b = 0 (a straight line!)
 
-This is called "non-linear separability" - the problem that ended the first 
+No matter how you draw this line, you CANNOT separate:
+  - (0,0) and (1,1) on one side (both should be 0)
+  - (0,1) and (1,0) on the other side (both should be 1)
+
+This is called "non-linear separability" - the problem that ended the first
 neural network era.
 
-⚠️ WHAT TO EXPECT:
-- Training will complete (no errors)
-- Loss will NOT decrease (stuck around 0.69)
-- Accuracy will NOT improve (stuck at 50% - random guessing)
-- The model CANNOT learn XOR - Minsky was right!
+WHAT TO EXPECT:
+- We'll try MANY different weight configurations
+- NONE of them will achieve 100% accuracy
+- Best possible: 75% (3 out of 4 correct)
+- This proves Minsky was right!
 
-This failure launched the AI Winter. Part 2 (xor_solved.py) shows the solution!
+Part 2 (02_xor_solved.py) shows how hidden layers solve this!
 """
 
 import sys
@@ -66,254 +62,264 @@ import numpy as np
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
+from rich import box
 
 # Add project root to path
 sys.path.insert(0, os.getcwd())
 
 # Import TinyTorch components YOU BUILT!
-from tinytorch import Tensor, Linear, Sigmoid, BinaryCrossEntropyLoss, SGD
+# Only needs Modules 01-03 (no training required)
+from tinytorch import Tensor, Linear, Sigmoid
 
 console = Console()
 
 
 # ============================================================================
-# 🎲 DATA GENERATION
+# XOR DATA
 # ============================================================================
 
-def generate_xor_data(n_samples=100):
-    """
-    Generate XOR dataset with slight noise.
-    
-    Returns clean XOR data to clearly demonstrate the failure.
-    """
-    console.print("\n[bold]Step 1:[/bold] Generating XOR dataset...")
-    
-    # Generate each XOR case with repetition
-    samples_per_case = n_samples // 4
-    
-    # Case 1: (0,0) → 0
-    x1 = np.random.randn(samples_per_case, 2) * 0.1 + np.array([0.0, 0.0])
-    y1 = np.zeros((samples_per_case, 1))
-    
-    # Case 2: (0,1) → 1  
-    x2 = np.random.randn(samples_per_case, 2) * 0.1 + np.array([0.0, 1.0])
-    y2 = np.ones((samples_per_case, 1))
-    
-    # Case 3: (1,0) → 1
-    x3 = np.random.randn(samples_per_case, 2) * 0.1 + np.array([1.0, 0.0])
-    y3 = np.ones((samples_per_case, 1))
-    
-    # Case 4: (1,1) → 0
-    x4 = np.random.randn(samples_per_case, 2) * 0.1 + np.array([1.0, 1.0])
-    y4 = np.zeros((samples_per_case, 1))
-    
-    # Combine and shuffle
-    X = np.vstack([x1, x2, x3, x4])
-    y = np.vstack([y1, y2, y3, y4])
-    
-    indices = np.random.permutation(n_samples)
-    X = X[indices]
-    y = y[indices]
-    
-    console.print(f"  ✓ Created [bold]{n_samples}[/bold] XOR samples")
-    console.print(f"  ✓ Problem: [bold red]NOT linearly separable![/bold red]")
-    
-    return Tensor(X), Tensor(y)
+XOR_INPUTS = np.array([
+    [0.0, 0.0],
+    [0.0, 1.0],
+    [1.0, 0.0],
+    [1.0, 1.0]
+])
+
+XOR_TARGETS = np.array([
+    [0.0],  # 0 XOR 0 = 0
+    [1.0],  # 0 XOR 1 = 1
+    [1.0],  # 1 XOR 0 = 1
+    [0.0],  # 1 XOR 1 = 0
+])
 
 
 # ============================================================================
-# 🏗️ SINGLE-LAYER PERCEPTRON (The Architecture That FAILS)
+# SINGLE-LAYER PERCEPTRON
 # ============================================================================
 
 class SingleLayerPerceptron:
     """
     Single-layer perceptron - the architecture that CANNOT solve XOR.
-    
+
     This is the exact architecture Minsky proved insufficient in 1969.
+    Decision boundary: w1*x1 + w2*x2 + b = 0 (always a straight line)
     """
-    
+
     def __init__(self):
         self.linear = Linear(2, 1)
         self.sigmoid = Sigmoid()
-    
+
+    def set_weights(self, w1, w2, b):
+        """Manually set weights to test different configurations."""
+        # Weight shape is (in_features, out_features) = (2, 1)
+        self.linear.weight.data = np.array([[w1], [w2]])
+        self.linear.bias.data = np.array([b])
+
     def __call__(self, x):
-        """Forward pass: Input → Linear → Sigmoid → Output"""
-        logits = self.linear(x)
-        output = self.sigmoid(logits)
-        return output
-    
-    def parameters(self):
-        """Return trainable parameters."""
-        return self.linear.parameters()
+        """Forward pass: Input -> Linear -> Sigmoid -> Output"""
+        return self.sigmoid(self.linear(x))
+
+    def get_weights(self):
+        """Return current weights."""
+        # Weight shape is (2, 1), flatten to get [w1, w2]
+        w = self.linear.weight.data.flatten()
+        b = float(self.linear.bias.data.item() if hasattr(self.linear.bias.data, 'item') else self.linear.bias.data[0])
+        return w[0], w[1], b
 
 
-# ============================================================================
-# 🔥 TRAINING FUNCTION (That Will FAIL on XOR)
-# ============================================================================
-
-def train_perceptron(model, X, y, epochs=100, lr=0.1):
-    """
-    Train single-layer perceptron on XOR.
-    
-    This will fail - the model CANNOT learn XOR.
-    """
-    loss_fn = BinaryCrossEntropyLoss()
-    optimizer = SGD(model.parameters(), lr=lr)
-    
-    console.print("\n[bold cyan]🔥 Attempting to Train on XOR...[/bold cyan]")
-    console.print("[dim](This will fail - Minsky proved it mathematically!)[/dim]\n")
-    
-    history = {"loss": [], "accuracy": []}
-    
-    for epoch in range(epochs):
-        # Forward pass
-        predictions = model(X)
-        loss = loss_fn(predictions, y)
-        
-        # Backward pass
-        loss.backward()
-        
-        # Update weights
-        optimizer.step()
-        optimizer.zero_grad()
-        
-        # Calculate accuracy
-        pred_classes = (predictions.data > 0.5).astype(int)
-        accuracy = (pred_classes == y.data).mean()
-        
-        history["loss"].append(loss.data.item())
-        history["accuracy"].append(accuracy)
-        
-        # Print progress every 20 epochs
-        if (epoch + 1) % 20 == 0:
-            console.print(f"Epoch {epoch+1:3d}/{epochs}  Loss: {loss.data:.4f}  Accuracy: {accuracy:.1%}")
-    
-    console.print("\n[bold yellow]⚠️  Training Complete (But Failed to Learn!)[/bold yellow]\n")
-    
-    return history
-
-
-# ============================================================================
-# 📊 EVALUATION & VISUALIZATION
-# ============================================================================
-
-def evaluate_and_explain(model, X, y, history):
-    """Evaluate the failed model and explain WHY it failed."""
-    
+def evaluate_on_xor(model):
+    """Evaluate model on XOR and return accuracy + predictions."""
+    X = Tensor(XOR_INPUTS)
     predictions = model(X)
     pred_classes = (predictions.data > 0.5).astype(int)
-    final_accuracy = (pred_classes == y.data).mean()
-    
-    # Get final metrics
-    initial_loss = history["loss"][0]
-    final_loss = history["loss"][-1]
-    initial_acc = history["accuracy"][0]
-    final_acc = history["accuracy"][-1]
-    
-    # Show results table
-    table = Table(title="\n🎯 The XOR Crisis - Results", show_header=True)
-    table.add_column("Metric", style="cyan")
-    table.add_column("Initial", style="white")
-    table.add_column("Final", style="white")
-    table.add_column("Change", style="bold")
-    
-    loss_change = "No improvement" if abs(final_loss - initial_loss) < 0.1 else f"{initial_loss - final_loss:+.4f}"
-    acc_change = "No improvement" if abs(final_acc - initial_acc) < 0.05 else f"{final_acc - initial_acc:+.1%}"
-    
-    table.add_row("Loss", f"{initial_loss:.4f}", f"{final_loss:.4f}", loss_change)
-    table.add_row("Accuracy", f"{initial_acc:.1%}", f"{final_acc:.1%}", acc_change)
-    
+    accuracy = (pred_classes == XOR_TARGETS).mean()
+    return accuracy, predictions.data.flatten()
+
+
+def describe_decision_boundary(w1, w2, b):
+    """Describe what the decision boundary looks like."""
+    if abs(w2) < 0.001:
+        if abs(w1) < 0.001:
+            return "Horizontal line (degenerate)"
+        return f"Vertical line at x1 = {-b/w1:.2f}"
+
+    slope = -w1/w2
+    intercept = -b/w2
+    return f"Line: x2 = {slope:.2f}*x1 + {intercept:.2f}"
+
+
+# ============================================================================
+# DEMONSTRATION
+# ============================================================================
+
+def demonstrate_crisis():
+    """Show that NO weight configuration can solve XOR."""
+
+    console.print(Panel.fit(
+        "[bold red]The XOR Crisis (1969)[/bold red]\n\n"
+        "[dim]Minsky & Papert proved single-layer perceptrons cannot solve XOR.[/dim]\n"
+        "[dim]Let's verify this by trying MANY different weight configurations.[/dim]",
+        border_style="red"
+    ))
+
+    # Show the XOR problem
+    console.print("\n[bold]The XOR Truth Table:[/bold]")
+    table = Table(show_header=True, box=box.ROUNDED)
+    table.add_column("x1", style="cyan", justify="center")
+    table.add_column("x2", style="cyan", justify="center")
+    table.add_column("XOR", style="green", justify="center")
+    table.add_column("Visual", style="yellow", justify="center")
+
+    table.add_row("0", "0", "0", "Bottom-left")
+    table.add_row("0", "1", "1", "Top-left")
+    table.add_row("1", "0", "1", "Bottom-right")
+    table.add_row("1", "1", "0", "Top-right")
     console.print(table)
-    
-    # Show the failure
-    if final_accuracy < 0.6:
+
+    console.print("\n[bold yellow]The Challenge:[/bold yellow]")
+    console.print("  Separate (0,0) and (1,1) from (0,1) and (1,0)")
+    console.print("  Using only a SINGLE STRAIGHT LINE")
+    console.print("  [red]Spoiler: It's impossible![/red]\n")
+
+    # Try various weight configurations
+    console.print("[bold cyan]Testing Different Weight Configurations...[/bold cyan]\n")
+
+    model = SingleLayerPerceptron()
+
+    # Different weight configurations to try
+    configurations = [
+        (1.0, 1.0, -0.5, "Diagonal line (positive slope)"),
+        (1.0, 1.0, -1.5, "Diagonal line (shifted)"),
+        (-1.0, 1.0, 0.0, "Diagonal line (negative slope)"),
+        (1.0, -1.0, 0.0, "Diagonal line (other direction)"),
+        (2.0, 2.0, -1.0, "Steep diagonal"),
+        (0.0, 1.0, -0.5, "Horizontal split"),
+        (1.0, 0.0, -0.5, "Vertical split"),
+        (1.0, 1.0, 0.0, "Through origin"),
+        (5.0, 5.0, -2.5, "Sharp sigmoid"),
+        (-1.0, -1.0, 1.5, "Inverted diagonal"),
+    ]
+
+    results_table = Table(title="Weight Configuration Results", box=box.ROUNDED)
+    results_table.add_column("Config", style="dim")
+    results_table.add_column("w1", justify="right")
+    results_table.add_column("w2", justify="right")
+    results_table.add_column("b", justify="right")
+    results_table.add_column("Accuracy", justify="center")
+    results_table.add_column("Predictions", style="dim")
+
+    best_accuracy = 0
+    best_config = None
+
+    for i, (w1, w2, b, description) in enumerate(configurations):
+        model.set_weights(w1, w2, b)
+        accuracy, preds = evaluate_on_xor(model)
+
+        # Format predictions
+        pred_str = " ".join([f"{int(p)}" for p in (preds > 0.5).astype(int)])
+
+        # Color accuracy based on value
+        if accuracy == 1.0:
+            acc_style = "[bold green]100%[/bold green]"
+        elif accuracy >= 0.75:
+            acc_style = "[yellow]75%[/yellow]"
+        else:
+            acc_style = "[red]{:.0%}[/red]".format(accuracy)
+
+        results_table.add_row(
+            f"#{i+1}",
+            f"{w1:.1f}",
+            f"{w2:.1f}",
+            f"{b:.1f}",
+            acc_style.format(accuracy) if "{" in acc_style else acc_style,
+            pred_str
+        )
+
+        if accuracy > best_accuracy:
+            best_accuracy = accuracy
+            best_config = (w1, w2, b, description)
+
+    console.print(results_table)
+
+    # Also try random configurations
+    console.print("\n[bold cyan]Trying 100 Random Configurations...[/bold cyan]")
+
+    random_best = 0
+    for _ in range(100):
+        w1 = np.random.randn() * 5
+        w2 = np.random.randn() * 5
+        b = np.random.randn() * 3
+        model.set_weights(w1, w2, b)
+        accuracy, _ = evaluate_on_xor(model)
+        if accuracy > random_best:
+            random_best = accuracy
+            if accuracy > best_accuracy:
+                best_accuracy = accuracy
+                best_config = (w1, w2, b, "Random")
+
+    console.print(f"  Best from random search: [yellow]{random_best:.0%}[/yellow]")
+
+    # Show the conclusion
+    console.print("\n")
+    if best_accuracy < 1.0:
         console.print(Panel(
-            "[bold red]❌ FAILURE: Cannot Learn XOR[/bold red]\n\n"
-            f"Final accuracy: {final_accuracy:.1%} (essentially random guessing)\n"
-            f"Loss stuck at: {final_loss:.4f} (not decreasing)\n\n"
-            "[bold]This is the XOR Crisis![/bold]\n"
-            "Single-layer perceptrons cannot solve non-linearly separable problems.",
-            title="⚠️  The 1969 AI Winter Begins",
+            f"[bold red]CONFIRMED: XOR is UNSOLVABLE![/bold red]\n\n"
+            f"Best accuracy achieved: [yellow]{best_accuracy:.0%}[/yellow] (need 100%)\n"
+            f"We tried {len(configurations) + 100} different configurations.\n\n"
+            "[bold]Why does this happen?[/bold]\n"
+            "A single-layer perceptron can only draw ONE straight line.\n"
+            "XOR requires separating diagonal corners - impossible with one line!\n\n"
+            "[dim]This mathematical impossibility ended neural network research for 17 years.[/dim]",
+            title="The 1969 AI Winter Begins",
             border_style="red"
         ))
     else:
         console.print(Panel(
-            "[yellow]⚠️  PARTIAL SUCCESS (Unexpected!)[/yellow]\n\n"
-            f"Accuracy: {final_accuracy:.1%}\n"
-            "This shouldn't happen with clean XOR data.\n"
-            "The problem is fundamentally non-linearly separable.",
+            "[yellow]Unexpected: Found a solution![/yellow]\n"
+            "This shouldn't happen with standard XOR.",
             border_style="yellow"
         ))
-    
-    # Show XOR truth table vs predictions
-    console.print("\n[bold]XOR Truth Table vs Model Predictions:[/bold]")
-    test_inputs = np.array([[0.0, 0.0], [0.0, 1.0], [1.0, 0.0], [1.0, 1.0]])
-    test_preds = model(Tensor(test_inputs))
-    
-    truth_table = Table(show_header=True)
-    truth_table.add_column("x₁", style="cyan")
-    truth_table.add_column("x₂", style="cyan")
-    truth_table.add_column("XOR (True)", style="green")
-    truth_table.add_column("Predicted", style="yellow")
-    truth_table.add_column("Correct?", style="white")
-    
-    for i, (x1, x2) in enumerate(test_inputs):
-        true_xor = int(x1 != x2)
-        pred = int(test_preds.data[i, 0] > 0.5)
-        correct = "✓" if pred == true_xor else "✗"
-        truth_table.add_row(
-            f"{int(x1)}", 
-            f"{int(x2)}", 
-            f"{true_xor}", 
-            f"{pred}",
-            correct
-        )
-    
-    console.print(truth_table)
 
+    # Visual explanation
+    console.print("\n[bold]Why No Line Works:[/bold]")
+    console.print("""
+    The XOR pattern:          Any line fails:
 
-# ============================================================================
-# 🎯 MAIN EXECUTION
-# ============================================================================
+      1 | O       *             1 | O   /   *
+        | (1)     (0)             |   /
+        |                         | /
+      0 | *       O             0 |*      O
+        | (0)     (1)             |
+        +----------               +----------
+          0       1                 0       1
 
-def main():
-    """Demonstrate the XOR crisis - single-layer perceptron failure."""
-    
-    console.print(Panel.fit(
-        "[bold]The XOR Crisis (1969) - Minsky & Papert[/bold]\n\n"
-        "[dim]Watch a single-layer perceptron FAIL to learn XOR.[/dim]\n"
-        "[dim]This failure convinced the world neural networks were useless.[/dim]",
-        border_style="red"
-    ))
-    
-    # Generate data
-    X, y = generate_xor_data(n_samples=100)
-    
-    # Create single-layer perceptron
-    console.print("\n[bold]Step 2:[/bold] Creating single-layer perceptron...")
-    model = SingleLayerPerceptron()
-    console.print("  ✓ Architecture: Input(2) → Linear(2→1) → Sigmoid → Output")
-    console.print("  ⚠️  [bold red]No hidden layer - this is the problem![/bold red]")
-    
-    # Attempt to train (will fail)
-    console.print("\n[bold]Step 3:[/bold] Training on XOR...")
-    history = train_perceptron(model, X, y, epochs=100, lr=0.5)
-    
-    # Evaluate and explain the failure
-    evaluate_and_explain(model, X, y, history)
-    
+    O = should output 1          The line separates (0,0) from the rest,
+    * = should output 0          but (1,1) is on the WRONG side!
+
+    No matter how you draw a single line, at least one point is wrong.
+    """)
+
     # Historical context
     console.print(Panel(
-        "[bold]💡 Historical Significance[/bold]\n\n"
-        "[bold cyan]1969:[/bold cyan] Minsky & Papert prove single-layer networks can't solve XOR\n"
-        "[bold red]1970s:[/bold red] AI Winter begins - funding disappears\n"
-        "[bold yellow]1986:[/bold yellow] Multi-layer networks + backprop solve it (see xor_solved.py!)\n"
-        "[bold green]Today:[/bold green] Deep learning powers GPT, AlphaGo, etc.\n\n"
-        "[dim]The solution? Hidden layers! See [bold]xor_solved.py[/bold] to witness the revival.[/dim]",
-        title="🌨️  The AI Winter",
+        "[bold]Historical Significance[/bold]\n\n"
+        "[bold cyan]1969:[/bold cyan] Minsky & Papert publish 'Perceptrons'\n"
+        "       Mathematically prove XOR is unsolvable\n\n"
+        "[bold red]1970s:[/bold red] AI Winter begins\n"
+        "       Neural network research funding disappears\n\n"
+        "[bold yellow]1986:[/bold yellow] Rumelhart, Hinton & Williams\n"
+        "       Multi-layer networks + backprop SOLVE XOR!\n\n"
+        "[dim]Run Part 2 to see how hidden layers break through this barrier![/dim]",
+        title="The Path Forward",
         border_style="blue"
     ))
 
+    return 0
+
+
+def main():
+    """Demonstrate the XOR crisis."""
+    return demonstrate_crisis()
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -26,7 +26,7 @@ class TestPriorStackStillWorking:
         try:
             from tinytorch.core.tensor import Tensor
             from tinytorch.core.layers import Linear
-            from tinytorch.core.data import Dataset, DataLoader
+            from tinytorch.core.dataloader import Dataset, DataLoader
             from tinytorch.core.optimizers import SGD
             
             # All components should be available
@@ -68,7 +68,7 @@ class TestModule11TrainingCore:
             from tinytorch.core.training import Trainer
             from tinytorch.core.layers import Linear
             from tinytorch.core.optimizers import SGD
-            from tinytorch.core.data import Dataset, DataLoader
+            from tinytorch.core.dataloader import Dataset, DataLoader
             
             # Create model and optimizer
             model = Linear(10, 3)
@@ -159,7 +159,7 @@ class TestProgressiveStackIntegration:
             from tinytorch.core.activations import ReLU, Softmax
             from tinytorch.core.optimizers import SGD
             from tinytorch.core.training import Trainer, CrossEntropyLoss
-            from tinytorch.core.data import Dataset, DataLoader
+            from tinytorch.core.dataloader import Dataset, DataLoader
             
             # Create complete model
             class SimpleModel:
@@ -227,18 +227,18 @@ class TestProgressiveStackIntegration:
     def test_cnn_training_pipeline(self):
         """Test CNN training with spatial operations."""
         try:
-            from tinytorch.core.spatial import Conv2D, MaxPool2D
+            from tinytorch.core.spatial import Conv2d as Conv2D, MaxPool2d
             from tinytorch.core.layers import Linear
             from tinytorch.core.activations import ReLU
             from tinytorch.core.optimizers import Adam
-            from tinytorch.core.data import Dataset, DataLoader
+            from tinytorch.core.dataloader import Dataset, DataLoader
             from tinytorch.core.tensor import Tensor
             
             # CNN model
             class SimpleCNN:
                 def __init__(self):
                     self.conv1 = Conv2D(in_channels=3, out_channels=16, kernel_size=3)
-                    self.pool = MaxPool2D(kernel_size=2)
+                    self.pool = MaxPool2d(kernel_size=2)
                     self.relu = ReLU()
                     self.fc = Linear(16 * 15 * 15, 5)  # Approximate size
                 
@@ -299,7 +299,7 @@ class TestAdvancedTrainingFeatures:
             from tinytorch.core.training import Trainer
             from tinytorch.core.layers import Linear
             from tinytorch.core.optimizers import SGD
-            from tinytorch.core.data import Dataset, DataLoader
+            from tinytorch.core.dataloader import Dataset, DataLoader
             
             # Model and optimizer
             model = Linear(5, 2)
@@ -464,7 +464,7 @@ class TestRegressionPrevention:
             from tinytorch.core.tensor import Tensor
             from tinytorch.core.layers import Linear
             from tinytorch.core.optimizers import SGD
-            from tinytorch.core.data import Dataset
+            from tinytorch.core.dataloader import Dataset
             
             # All pipeline components should work
             layer = Linear(3, 2)
@@ -482,7 +482,7 @@ class TestRegressionPrevention:
         """Verify optimization (10) and data loading (08) unchanged."""
         try:
             from tinytorch.core.optimizers import SGD, Adam
-            from tinytorch.core.data import Dataset, DataLoader
+            from tinytorch.core.dataloader import Dataset, DataLoader
             
             # Optimizers should still work
             class DummyModule:

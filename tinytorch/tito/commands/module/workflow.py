@@ -150,46 +150,23 @@ class ModuleWorkflowCommand(BaseCommand):
         # RESET command - reset module to clean state
         reset_parser = subparsers.add_parser(
             'reset',
-            help='Reset module to clean state (backup + unexport + restore)'
+            help='Reset module to clean state'
         )
         reset_parser.add_argument(
             'module_number',
-            help='Module number to reset (01, 02, 03, etc.)'
+            nargs='?',
+            default=None,
+            help='Module number to reset (01, 02, etc.)'
         )
         reset_parser.add_argument(
-            '--soft',
+            '--all',
             action='store_true',
-            help='Soft reset: backup + restore (keep exports)'
-        )
-        reset_parser.add_argument(
-            '--hard',
-            action='store_true',
-            help='Hard reset: backup + unexport + restore [DEFAULT]'
-        )
-        reset_parser.add_argument(
-            '--from-git',
-            action='store_true',
-            help='Restore from git HEAD [DEFAULT]'
-        )
-        reset_parser.add_argument(
-            '--restore-backup',
-            metavar='TIMESTAMP',
-            help='Restore from specific backup'
-        )
-        reset_parser.add_argument(
-            '--list-backups',
-            action='store_true',
-            help='List available backups'
-        )
-        reset_parser.add_argument(
-            '--no-backup',
-            action='store_true',
-            help='Skip backup (dangerous)'
+            help='Reset ALL modules to pristine state'
         )
         reset_parser.add_argument(
             '--force',
             action='store_true',
-            help='Skip confirmation'
+            help='Skip confirmation prompts'
         )
 
         # STATUS command - show progress
@@ -922,9 +899,10 @@ class ModuleWorkflowCommand(BaseCommand):
             return 1
     
     def get_progress_data(self) -> dict:
-        """Get current progress data."""
-        progress_file = self.config.project_root / "progress.json"
-        
+        """Get current progress data from .tito/progress.json."""
+        tito_dir = self.config.project_root / ".tito"
+        progress_file = tito_dir / "progress.json"
+
         try:
             import json
             if progress_file.exists():
@@ -932,7 +910,7 @@ class ModuleWorkflowCommand(BaseCommand):
                     return json.load(f)
         except Exception:
             pass
-        
+
         return {
             'started_modules': [],
             'completed_modules': [],
@@ -940,16 +918,18 @@ class ModuleWorkflowCommand(BaseCommand):
             'last_completed': None,
             'last_updated': None
         }
-    
+
     def save_progress_data(self, progress: dict) -> None:
-        """Save progress data."""
-        progress_file = self.config.project_root / "progress.json"
-        
+        """Save progress data to .tito/progress.json."""
+        tito_dir = self.config.project_root / ".tito"
+        tito_dir.mkdir(parents=True, exist_ok=True)
+        progress_file = tito_dir / "progress.json"
+
         try:
             import json
             from datetime import datetime
             progress['last_updated'] = datetime.now().isoformat()
-            
+
             with open(progress_file, 'w') as f:
                 json.dump(progress, f, indent=2)
         except Exception as e:
@@ -1202,21 +1182,39 @@ class ModuleWorkflowCommand(BaseCommand):
 
     def _check_milestone_readiness(self, completed_modules: list) -> list:
         """Check which milestones are unlocked or ready."""
+        import json
+
         milestones = [
-            ("01", "Perceptron (1957)", [1]),
-            ("02", "XOR Crisis (1969)", [1, 2]),
-            ("03", "MLP Revival (1986)", [1, 2, 3, 4, 5, 6, 7]),
-            ("04", "CNN Revolution (1998)", [1, 2, 3, 4, 5, 6, 7, 8, 9]),
-            ("05", "Transformer Era (2017)", [1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13]),  # Skip spatial/dataloader for attention
-            ("06", "MLPerf (2018)", list(range(1, 20))),
+            ("01", "Perceptron (1957)", [1, 2, 3]),
+            ("02", "XOR Crisis (1969)", [1, 2, 3]),
+            ("03", "MLP Revival (1986)", [1, 2, 3, 4, 5, 6]),
+            ("04", "CNN Revolution (1998)", [1, 2, 3, 4, 5, 6, 8, 9]),
+            ("05", "Transformer Era (2017)", [1, 2, 3, 4, 5, 6, 11, 12, 13]),
+            ("06", "MLPerf (2018)", [1, 2, 3, 4, 5, 6, 14, 15, 16, 17, 18, 19]),
         ]
+
+        # Check which milestones have been completed (run successfully)
+        milestones_file = self.config.project_root / ".tito" / "milestones.json"
+        completed_milestones = []
+        if milestones_file.exists():
+            try:
+                with open(milestones_file, 'r') as f:
+                    data = json.load(f)
+                    completed_milestones = data.get("unlocked_milestones", [])
+            except Exception:
+                pass
 
         result = []
         for mid, name, required in milestones:
-            all_completed = all(m in completed_modules for m in required)
-            if all_completed:
+            # Convert required module numbers to strings like "01", "02"
+            required_strs = [f"{m:02d}" for m in required]
+            all_modules_done = all(m in completed_modules for m in required_strs)
+
+            if mid in completed_milestones:
+                # Milestone has been run and completed
                 result.append((mid, name, "unlocked"))
-            elif len([m for m in required if m in completed_modules]) >= len(required) - 2:
+            elif all_modules_done:
+                # All required modules done but milestone not yet run
                 result.append((mid, name, "ready"))
 
         return result
@@ -1272,9 +1270,9 @@ class ModuleWorkflowCommand(BaseCommand):
             "[bold]Module States:[/bold]\n"
             "  ⏳ Not started  🚀 In progress  ✅ Completed\n\n"
             "[bold]Reset Options:[/bold]\n"
-            "  [dim]tito module reset 01 --list-backups[/dim]   - View available backups\n"
-            "  [dim]tito module reset 01 --soft[/dim]           - Keep package exports\n"
-            "  [dim]tito module reset 01 --restore-backup[/dim] - Restore from backup",
+            "  [dim]tito module reset[/dim]         - Prompt for module to reset\n"
+            "  [dim]tito module reset 01[/dim]      - Reset module 01\n"
+            "  [dim]tito module reset --all[/dim]   - Reset all modules (fresh install)",
             title="Module Development Workflow",
             border_style="bright_cyan"
         ))

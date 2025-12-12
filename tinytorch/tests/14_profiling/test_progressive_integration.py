@@ -55,13 +55,13 @@ class TestCompleteTinyTorchSystemStillWorks:
         try:
             # Test that complete TinyTorch system still works
             from tinytorch.core.tensor import Tensor
-            from tinytorch.core.spatial import Conv2D, MaxPool2D
+            from tinytorch.core.spatial import Conv2d as Conv2D, MaxPool2d
             from tinytorch.core.attention import MultiHeadAttention
             from tinytorch.core.layers import Linear
             from tinytorch.core.activations import ReLU, Softmax
             from tinytorch.core.optimizers import Adam
             from tinytorch.core.training import Trainer
-            from tinytorch.core.data import Dataset, DataLoader
+            from tinytorch.core.dataloader import Dataset, DataLoader
             from tinytorch.core.compression import prune_weights
             from tinytorch.core.benchmarking import benchmark_model
             
@@ -70,7 +70,7 @@ class TestCompleteTinyTorchSystemStillWorks:
                 def __init__(self):
                     # Vision pathway
                     self.vision_conv = Conv2D(3, 64, kernel_size=3, padding=1)
-                    self.vision_pool = MaxPool2D(kernel_size=2)
+                    self.vision_pool = MaxPool2d(kernel_size=2)
                     self.vision_proj = Linear(64 * 16 * 16, 256)
                     
                     # Language pathway
@@ -222,7 +222,7 @@ class TestCompleteTinyTorchSystemStillWorks:
         try:
             from tinytorch.core.benchmarking import benchmark_model
             from tinytorch.core.layers import Linear
-            from tinytorch.core.spatial import Conv2D
+            from tinytorch.core.spatial import Conv2d as Conv2D
             from tinytorch.core.tensor import Tensor
             
             # Test that benchmarking still works
@@ -842,7 +842,7 @@ class TestMLOpsIntegration:
             from tinytorch.core.layers import Linear
             from tinytorch.core.optimizers import Adam
             from tinytorch.core.training import Trainer, MSELoss
-            from tinytorch.core.data import Dataset, DataLoader
+            from tinytorch.core.dataloader import Dataset, DataLoader
             from tinytorch.core.benchmarking import benchmark_model
             from tinytorch.core.mlops import ModelMonitor, ModelServer
             

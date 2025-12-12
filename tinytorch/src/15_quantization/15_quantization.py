@@ -70,7 +70,7 @@ import warnings
 
 # Import dependencies from other modules
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.layers import Linear, SimpleModel
+from tinytorch.core.layers import Linear, Sequential
 from tinytorch.core.activations import ReLU
 
 # Constants for INT8 quantization
@@ -1030,7 +1030,7 @@ def quantize_model(model, calibration_data: Optional[List[Tensor]] = None) -> No
     1. Find all Linear layers in the model
     2. Replace each with QuantizedLinear version
     3. If calibration data provided, calibrate input quantization
-    4. Handle models with .layers attribute (SimpleModel pattern)
+    4. Handle models with .layers attribute (Sequential pattern)
 
     Args:
         model: Model to quantize (with .layers or similar structure)
@@ -1043,16 +1043,16 @@ def quantize_model(model, calibration_data: Optional[List[Tensor]] = None) -> No
     >>> layer1 = Linear(10, 5)
     >>> activation = ReLU()
     >>> layer2 = Linear(5, 2)
-    >>> model = SimpleModel(layer1, activation, layer2)
+    >>> model = Sequential(layer1, activation, layer2)
     >>> quantize_model(model)
     >>> # Now model uses quantized layers
 
     HINT:
-    - Handle models with .layers attribute (SimpleModel pattern)
+    - Handle models with .layers attribute (Sequential pattern)
     - Use isinstance(layer, Linear) to identify layers to quantize
     """
     ### BEGIN SOLUTION
-    # Handle SimpleModel pattern (has .layers attribute)
+    # Handle Sequential pattern (has .layers attribute)
     if hasattr(model, 'layers'):
         for i, layer in enumerate(model.layers):
             if isinstance(layer, Linear):
@@ -1067,7 +1067,7 @@ def quantize_model(model, calibration_data: Optional[List[Tensor]] = None) -> No
                         # Forward through layers up to this point
                         x = data
                         for j in range(i):
-                            # All layers in SimpleModel have .forward() method
+                            # All layers in Sequential have .forward() method
                             x = model.layers[j].forward(x)
                         sample_inputs.append(x)
 
@@ -1099,8 +1099,8 @@ def test_unit_quantize_model():
     layer2.weight = Tensor(np.random.randn(8, 3) * 0.5)
     layer2.bias = Tensor(np.random.randn(3) * 0.1)
     
-    # Use SimpleModel from tinytorch.core.layers
-    model = SimpleModel(layer1, activation, layer2)
+    # Use Sequential from tinytorch.core.layers
+    model = Sequential(layer1, activation, layer2)
 
     # Test original model
     x = Tensor(np.random.randn(2, 4))
@@ -1219,7 +1219,7 @@ def compare_model_sizes(original_model, quantized_model) -> Dict[str, float]:
     EXAMPLE:
     >>> layer1 = Linear(100, 50)
     >>> layer2 = Linear(50, 10)
-    >>> model = SimpleModel(layer1, layer2)
+    >>> model = Sequential(layer1, layer2)
     >>> quantize_model(model)
     >>> stats = compare_model_sizes(model, model)  # Same model after in-place quantization
     >>> print(f"Reduced to {stats['reduction_ratio']:.1f}x smaller")
@@ -1232,7 +1232,7 @@ def compare_model_sizes(original_model, quantized_model) -> Dict[str, float]:
     """
     ### BEGIN SOLUTION
     # Count original model parameters
-    # SimpleModel has .layers attribute, layers may have .parameters() method
+    # Sequential has .layers attribute, layers may have .parameters() method
     original_params = 0
     original_bytes = 0
     for layer in original_model.layers:
@@ -1279,7 +1279,7 @@ def test_unit_compare_model_sizes():
     """🔬 Test model size comparison."""
     print("🔬 Unit Test: Model Size Comparison...")
 
-    # Create and quantize a model for testing (using SimpleModel from tinytorch.core.layers)
+    # Create and quantize a model for testing (using Sequential from tinytorch.core.layers)
     layer1_orig = Linear(100, 50)
     activation_orig = ReLU()
     layer2_orig = Linear(50, 10)
@@ -1287,7 +1287,7 @@ def test_unit_compare_model_sizes():
     layer1_orig.bias = Tensor(np.random.randn(50))
     layer2_orig.weight = Tensor(np.random.randn(50, 10))
     layer2_orig.bias = Tensor(np.random.randn(10))
-    original_model = SimpleModel(layer1_orig, activation_orig, layer2_orig)
+    original_model = Sequential(layer1_orig, activation_orig, layer2_orig)
 
     # Create quantized copy
     layer1_quant = Linear(100, 50)
@@ -1297,7 +1297,7 @@ def test_unit_compare_model_sizes():
     layer1_quant.bias = Tensor(np.random.randn(50))
     layer2_quant.weight = Tensor(np.random.randn(50, 10))
     layer2_quant.bias = Tensor(np.random.randn(10))
-    quantized_model = SimpleModel(layer1_quant, activation_quant, layer2_quant)
+    quantized_model = Sequential(layer1_quant, activation_quant, layer2_quant)
 
     quantize_model(quantized_model)
 
@@ -1588,8 +1588,8 @@ def demo_quantization_with_profiler():
     
     # Quantize the model (in-place modification)
     print("\n🗜️  Quantizing to INT8...")
-    # quantize_model expects a model with .layers attribute, so wrap single layer in SimpleModel
-    wrapped_model = SimpleModel(model)
+    # quantize_model expects a model with .layers attribute, so wrap single layer in Sequential
+    wrapped_model = Sequential(model)
     quantize_model(wrapped_model)  # Modifies model in-place, returns None
     quantized_model = wrapped_model.layers[0] if wrapped_model.layers else model
     quantized_model.name = "quantized_model"
@@ -1643,15 +1643,15 @@ def verify_quantization_works(original_model, quantized_model):
     by numpy arrays to prove the optimization is real.
 
     Args:
-        original_model: Model with FP32 parameters (SimpleModel with .parameters())
-        quantized_model: Model with INT8 quantized parameters (SimpleModel with QuantizedLinear layers)
+        original_model: Model with FP32 parameters (Sequential with .parameters())
+        quantized_model: Model with INT8 quantized parameters (Sequential with QuantizedLinear layers)
 
     Returns:
         dict: Verification results with actual_reduction, original_mb, quantized_mb
 
     Example:
-        >>> original = SimpleModel(Linear(100, 50))
-        >>> quantized = SimpleModel(Linear(100, 50))
+        >>> original = Sequential(Linear(100, 50))
+        >>> quantized = Sequential(Linear(100, 50))
         >>> quantize_model(quantized)
         >>> results = verify_quantization_works(original, quantized)
         >>> assert results['actual_reduction'] >= 3.5  # Real 4× reduction
@@ -1727,13 +1727,13 @@ def test_module():
     # Test realistic usage scenario
     print("🔬 Integration Test: End-to-end quantization workflow...")
 
-    # Create a realistic model using explicit composition (SimpleModel from tinytorch.core.layers)
+    # Create a realistic model using explicit composition (Sequential from tinytorch.core.layers)
     layer1 = Linear(784, 128)  # MNIST-like input
     activation1 = ReLU()
     layer2 = Linear(128, 64)
     activation2 = ReLU()
     layer3 = Linear(64, 10)     # 10-class output
-    model = SimpleModel(layer1, activation1, layer2, activation2, layer3)
+    model = Sequential(layer1, activation1, layer2, activation2, layer3)
 
     # Initialize with realistic weights
     for layer in [layer1, layer2, layer3]:
@@ -1772,7 +1772,7 @@ def test_module():
     orig_layer2 = Linear(128, 64)
     orig_act2 = ReLU()
     orig_layer3 = Linear(64, 10)
-    original_model = SimpleModel(orig_layer1, orig_act1, orig_layer2, orig_act2, orig_layer3)
+    original_model = Sequential(orig_layer1, orig_act1, orig_layer2, orig_act2, orig_layer3)
 
     for i, layer in enumerate(model.layers):
         if isinstance(layer, QuantizedLinear):

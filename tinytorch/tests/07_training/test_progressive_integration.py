@@ -26,7 +26,7 @@ class TestPriorStackStillWorking:
         try:
             from tinytorch.core.tensor import Tensor
             from tinytorch.core.layers import Linear
-            from tinytorch.core.data import Dataset
+            from tinytorch.core.dataloader import Dataset
             
             # Complete ML pipeline components should work
             layer = Linear(10, 5)
@@ -74,7 +74,7 @@ class TestModule10OptimizersCore:
             
             # Should have learning rate and parameter groups
             assert hasattr(optimizer, 'lr'), "SGD broken: No learning rate"
-            assert hasattr(optimizer, 'param_groups') or hasattr(optimizer, 'parameters'), "SGD broken: No parameters"
+            assert hasattr(optimizer, 'param_groups') or hasattr(optimizer, 'parameters') or hasattr(optimizer, 'params'), "SGD broken: No parameters"
             
             # Test zero_grad
             if hasattr(optimizer, 'zero_grad'):
@@ -127,7 +127,7 @@ class TestModule10OptimizersCore:
             initial_weights = layer.weight.data.copy()
             
             # Create dummy gradients
-            if hasattr(layer.weights, 'grad'):
+            if hasattr(layer.weight, 'grad'):
                 layer.weight.grad = Tensor(np.random.randn(*layer.weight.shape))
             elif hasattr(layer, 'zero_grad'):
                 # Simulate backward pass
@@ -140,7 +140,7 @@ class TestModule10OptimizersCore:
             optimizer.step()
             
             # Weights should have changed (if gradients exist)
-            if hasattr(layer.weights, 'grad') and layer.weight.grad is not None:
+            if hasattr(layer.weight, 'grad') and layer.weight.grad is not None:
                 updated_weights = layer.weight.data
                 # Check if weights actually updated
                 weight_changed = not np.array_equal(initial_weights, updated_weights)
@@ -160,7 +160,7 @@ class TestProgressiveStackIntegration:
             from tinytorch.core.layers import Linear
             from tinytorch.core.activations import ReLU
             from tinytorch.core.optimizers import SGD
-            from tinytorch.core.data import Dataset, DataLoader
+            from tinytorch.core.dataloader import Dataset, DataLoader
             from tinytorch.core.autograd import Variable
             
             # Create dataset
@@ -221,14 +221,14 @@ class TestProgressiveStackIntegration:
     def test_cnn_optimization(self):
         """Test optimization with convolutional networks."""
         try:
-            from tinytorch.core.spatial import Conv2D, MaxPool2D
+            from tinytorch.core.spatial import Conv2d as Conv2D, MaxPool2d
             from tinytorch.core.layers import Linear
             from tinytorch.core.optimizers import Adam
             from tinytorch.core.tensor import Tensor
             
             # CNN architecture
             conv1 = Conv2D(in_channels=3, out_channels=16, kernel_size=3)
-            pool = MaxPool2D(kernel_size=2)
+            pool = MaxPool2d(kernel_size=2)
             fc = Linear(16 * 15 * 15, 10)  # Approximate size
             
             # Collect CNN parameters
@@ -237,7 +237,7 @@ class TestProgressiveStackIntegration:
                 if hasattr(module, 'parameters'):
                     params.extend(module.parameters())
                 elif hasattr(module, 'weight'):
-                    params.append(module.weights)
+                    params.append(module.weight)
                     if hasattr(module, 'bias') and module.bias is not None:
                         params.append(module.bias)
             
@@ -368,7 +368,7 @@ class TestProductionOptimization:
             optimizer = SGD(layer.parameters(), lr=0.1)
             
             # Simulate large gradients
-            if hasattr(layer.weights, 'grad'):
+            if hasattr(layer.weight, 'grad'):
                 layer.weight.grad = Tensor(np.random.randn(*layer.weight.shape) * 100)  # Large gradients
             
             # Test gradient clipping if available
@@ -388,12 +388,13 @@ class TestProductionOptimization:
         try:
             from tinytorch.core.optimizers import Adam
             from tinytorch.core.layers import Linear
-            
+            from tinytorch.core.tensor import Tensor
+
             layer = Linear(5, 1)
             optimizer = Adam(layer.parameters(), lr=0.001)
-            
+
             # Take some steps to build state
-            if hasattr(layer.weights, 'grad'):
+            if hasattr(layer.weight, 'grad'):
                 layer.weight.grad = Tensor(np.random.randn(*layer.weight.shape))
                 
                 for _ in range(3):
@@ -431,13 +432,13 @@ class TestRegressionPrevention:
             assert output.shape == (2, 3), "Foundation regression: Neural network broken"
             
         except ImportError:
-            import numpy as np
+            # Still verify numpy works at minimum
             assert np.random is not None, "Foundation regression: Numpy broken"
     
     def test_no_data_and_autograd_regression(self):
         """Verify data loading (08) and autograd (09) unchanged."""
         try:
-            from tinytorch.core.data import Dataset
+            from tinytorch.core.dataloader import Dataset
             from tinytorch.core.autograd import Variable
             
             # Data loading should still work
@@ -457,22 +458,20 @@ class TestRegressionPrevention:
                 
         except ImportError:
             # Basic functionality should work
-            import numpy as np
             assert np is not None, "Data/Autograd regression: Basic functionality broken"
     
     def test_progressive_stability(self):
         """Test the progressive stack is stable through optimization."""
         # Stack should be stable through: Setup → ... → Autograd → Optimizers
-        
-        # Setup level
-        import numpy as np
+
+        # Setup level - np already imported globally
         assert np is not None, "Setup level broken"
         
         # ML pipeline level (if available)
         try:
             from tinytorch.core.tensor import Tensor
             from tinytorch.core.layers import Linear
-            from tinytorch.core.data import Dataset
+            from tinytorch.core.dataloader import Dataset
             
             # Complete ML components should work together
             layer = Linear(3, 2)
@@ -486,14 +485,12 @@ class TestRegressionPrevention:
         # Optimization level (if available)
         try:
             from tinytorch.core.optimizers import SGD
-            
-            class DummyModule:
-                def parameters(self):
-                    return [np.array([1.0, 2.0])]
-            
-            module = DummyModule()
-            optimizer = SGD(module.parameters(), lr=0.01)
+            from tinytorch.core.tensor import Tensor
+
+            # Create a proper Tensor with requires_grad for SGD
+            param = Tensor(np.array([1.0, 2.0]), requires_grad=True)
+            optimizer = SGD([param], lr=0.01)
             assert hasattr(optimizer, 'lr'), "Optimization level broken"
-            
+
         except ImportError:
             pass  # Not implemented yet

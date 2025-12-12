@@ -292,7 +292,7 @@ class TestRegressionPrevention:
     def test_no_spatial_regression(self):
         """Verify spatial operations (Module 06) unchanged."""
         try:
-            from tinytorch.core.spatial import Conv2D
+            from tinytorch.core.spatial import Conv2d as Conv2D
             
             # Spatial operations should still work
             conv = Conv2D(in_channels=1, out_channels=8, kernel_size=3)

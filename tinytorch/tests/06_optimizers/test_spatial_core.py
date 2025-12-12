@@ -17,7 +17,7 @@ class TestConv2DLayer:
     def test_conv2d_creation(self):
         """Test Conv2D layer creation."""
         try:
-            from tinytorch.core.spatial import Conv2D
+            from tinytorch.core.spatial import Conv2d as Conv2D
             
             conv = Conv2D(in_channels=3, out_channels=16, kernel_size=3)
             
@@ -31,7 +31,7 @@ class TestConv2DLayer:
     def test_conv2d_weight_shape(self):
         """Test Conv2D weight tensor has correct shape."""
         try:
-            from tinytorch.core.spatial import Conv2D
+            from tinytorch.core.spatial import Conv2d as Conv2D
             
             conv = Conv2D(in_channels=3, out_channels=16, kernel_size=5)
             
@@ -48,7 +48,7 @@ class TestConv2DLayer:
     def test_conv2d_forward_shape(self):
         """Test Conv2D forward pass output shape."""
         try:
-            from tinytorch.core.spatial import Conv2D
+            from tinytorch.core.spatial import Conv2d as Conv2D
             from tinytorch.core.tensor import Tensor
             
             conv = Conv2D(in_channels=3, out_channels=16, kernel_size=3)
@@ -68,7 +68,7 @@ class TestConv2DLayer:
     def test_conv2d_simple_convolution(self):
         """Test simple convolution operation."""
         try:
-            from tinytorch.core.spatial import Conv2D
+            from tinytorch.core.spatial import Conv2d as Conv2D
             from tinytorch.core.tensor import Tensor
             
             # Simple 1-channel convolution
@@ -97,24 +97,24 @@ class TestPoolingLayers:
     """Test pooling layers."""
     
     def test_maxpool2d_creation(self):
-        """Test MaxPool2D layer creation."""
+        """Test MaxPool2d layer creation."""
         try:
-            from tinytorch.core.spatial import MaxPool2D
+            from tinytorch.core.spatial import MaxPool2d
             
-            pool = MaxPool2D(pool_size=2)
+            pool = MaxPool2d(pool_size=2)
             
             assert pool.pool_size == 2
             
         except ImportError:
-            assert True, "MaxPool2D not implemented yet"
+            assert True, "MaxPool2d not implemented yet"
     
     def test_maxpool2d_forward_shape(self):
-        """Test MaxPool2D forward pass output shape."""
+        """Test MaxPool2d forward pass output shape."""
         try:
-            from tinytorch.core.spatial import MaxPool2D
+            from tinytorch.core.spatial import MaxPool2d
             from tinytorch.core.tensor import Tensor
             
-            pool = MaxPool2D(pool_size=2)
+            pool = MaxPool2d(pool_size=2)
             
             # Input: (batch_size, height, width, channels)
             x = Tensor(np.random.randn(4, 28, 28, 32))
@@ -125,15 +125,15 @@ class TestPoolingLayers:
             assert output.shape == expected_shape
             
         except ImportError:
-            assert True, "MaxPool2D forward pass not implemented yet"
+            assert True, "MaxPool2d forward pass not implemented yet"
     
     def test_maxpool2d_operation(self):
-        """Test MaxPool2D actually finds maximum values."""
+        """Test MaxPool2d actually finds maximum values."""
         try:
-            from tinytorch.core.spatial import MaxPool2D
+            from tinytorch.core.spatial import MaxPool2d
             from tinytorch.core.tensor import Tensor
             
-            pool = MaxPool2D(pool_size=2)
+            pool = MaxPool2d(pool_size=2)
             
             # Create input with known pattern
             # 4x4 input with values [1,2,3,4] in each 2x2 block
@@ -151,7 +151,7 @@ class TestPoolingLayers:
                 assert output.data[0, 0, 0, 1] == 8  # Max of [5,6,7,8]
             
         except ImportError:
-            assert True, "MaxPool2D operation not implemented yet"
+            assert True, "MaxPool2d operation not implemented yet"
     
     def test_avgpool2d_operation(self):
         """Test average pooling."""
@@ -262,14 +262,14 @@ class TestCNNArchitecture:
     def test_conv_relu_pool_chain(self):
         """Test Conv -> ReLU -> Pool chain."""
         try:
-            from tinytorch.core.spatial import Conv2D, MaxPool2D
+            from tinytorch.core.spatial import Conv2d as Conv2D, MaxPool2d
             from tinytorch.core.activations import ReLU
             from tinytorch.core.tensor import Tensor
             
             # Build simple CNN block
             conv = Conv2D(3, 16, kernel_size=3)
             relu = ReLU()
-            pool = MaxPool2D(pool_size=2)
+            pool = MaxPool2d(pool_size=2)
             
             # Input image
             x = Tensor(np.random.randn(1, 32, 32, 3))
@@ -288,14 +288,14 @@ class TestCNNArchitecture:
     def test_feature_map_progression(self):
         """Test feature map size progression through CNN."""
         try:
-            from tinytorch.core.spatial import Conv2D, MaxPool2D
+            from tinytorch.core.spatial import Conv2d as Conv2D, MaxPool2d
             from tinytorch.core.tensor import Tensor
             
             # Typical CNN progression: increase channels, decrease spatial size
             conv1 = Conv2D(3, 32, kernel_size=3)    # 3 -> 32 channels
-            pool1 = MaxPool2D(pool_size=2)          # /2 spatial size
+            pool1 = MaxPool2d(pool_size=2)          # /2 spatial size
             conv2 = Conv2D(32, 64, kernel_size=3)   # 32 -> 64 channels
-            pool2 = MaxPool2D(pool_size=2)          # /2 spatial size
+            pool2 = MaxPool2d(pool_size=2)          # /2 spatial size
             
             x = Tensor(np.random.randn(1, 32, 32, 3))  # Start: 32x32x3
             
