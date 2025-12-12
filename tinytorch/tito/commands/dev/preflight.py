@@ -368,7 +368,7 @@ class PreflightCommand(BaseCommand):
     def _check_cli(self, project_root: Path, verbose: bool = False) -> CheckCategory:
         """Check CLI commands work."""
         category = CheckCategory(name="CLI Commands", emoji="🖥️")
-        
+
         if verbose:
             self.console.print(f"\n[bold]🖥️ CLI Commands[/bold]")
 
@@ -377,14 +377,17 @@ class PreflightCommand(BaseCommand):
             (["--help"], "tito --help"),
             (["module", "status"], "tito module status"),
             (["system", "info"], "tito system info"),
-            (["milestones", "list", "--simple"], "tito milestones list"),
+            (["milestone", "list", "--simple"], "tito milestone list"),
         ]
+
+        # Use bin/tito wrapper (no pip install required)
+        tito_bin = project_root / "bin" / "tito"
 
         for args, name in cli_checks:
             start = time.time()
-            cmd = [sys.executable, "-m", "tito.main"] + args
-            cmd_str = f"python -m tito.main {' '.join(args)}"
-            
+            cmd = [sys.executable, str(tito_bin)] + args
+            cmd_str = f"./bin/tito {' '.join(args)}"
+
             code, stdout, stderr = self._run_command(cmd, project_root, timeout=30, verbose=verbose)
 
             duration = int((time.time() - start) * 1000)
