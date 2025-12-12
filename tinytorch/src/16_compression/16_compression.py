@@ -67,14 +67,14 @@ import time
 
 # Import from TinyTorch package (previous modules must be completed and exported)
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.layers import Linear, SimpleModel
+from tinytorch.core.layers import Linear, Sequential
 from tinytorch.core.activations import ReLU
 
 # Constants for memory calculations
 BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
 MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
-# SimpleModel is now imported from tinytorch.core.layers
+# Sequential provides model container with .layers and .parameters()
 
 # %% [markdown]
 """
@@ -366,7 +366,7 @@ def measure_sparsity(model) -> float:
     >>> # Create test model with explicit composition
     >>> layer1 = Linear(10, 5)
     >>> layer2 = Linear(5, 2)
-    >>> model = SimpleModel(layer1, layer2)
+    >>> model = Sequential(layer1, layer2)
     >>> sparsity = measure_sparsity(model)
     >>> print(f"Model sparsity: {sparsity:.1f}%")
     Model sparsity: 0.0%  # Before pruning
@@ -398,7 +398,7 @@ def test_unit_measure_sparsity():
     # Test with dense model - explicit composition shows structure
     layer1 = Linear(4, 3)
     layer2 = Linear(3, 2)
-    model = SimpleModel(layer1, layer2)  # Test helper for parameter collection
+    model = Sequential(layer1, layer2)  # Test helper for parameter collection
 
     initial_sparsity = measure_sparsity(model)
     assert initial_sparsity < 1.0, f"Expected <1% sparsity (dense model), got {initial_sparsity}%"
@@ -494,7 +494,7 @@ def magnitude_prune(model, sparsity=0.9):
     >>> # Create model with explicit layer composition
     >>> layer1 = Linear(100, 50)
     >>> layer2 = Linear(50, 10)
-    >>> model = SimpleModel(layer1, layer2)
+    >>> model = Sequential(layer1, layer2)
     >>> original_params = sum(p.size for p in model.parameters())
     >>> magnitude_prune(model, sparsity=0.8)
     >>> final_sparsity = measure_sparsity(model)
@@ -540,7 +540,7 @@ def test_unit_magnitude_prune():
     # Create test model with explicit composition - students see structure
     layer1 = Linear(4, 3)
     layer2 = Linear(3, 2)
-    model = SimpleModel(layer1, layer2)
+    model = Sequential(layer1, layer2)
 
     # Set specific weight values for predictable testing
     # Students can see exactly which weights we're testing
@@ -661,7 +661,7 @@ def structured_prune(model, prune_ratio=0.5):
     >>> # Create model with explicit layers
     >>> layer1 = Linear(100, 50)
     >>> layer2 = Linear(50, 10)
-    >>> model = SimpleModel(layer1, layer2)
+    >>> model = Sequential(layer1, layer2)
     >>> original_shape = layer1.weight.shape
     >>> structured_prune(model, prune_ratio=0.3)
     >>> # 30% of channels are now completely zero
@@ -709,7 +709,7 @@ def test_unit_structured_prune():
     # Create test model with explicit layers - students see the architecture
     layer1 = Linear(4, 6)
     layer2 = Linear(6, 2)
-    model = SimpleModel(layer1, layer2)
+    model = Sequential(layer1, layer2)
 
     # Set predictable weights for testing
     # Students can see channel importance: col 0,2,4 = large, col 1,3,5 = small
@@ -1013,10 +1013,10 @@ class KnowledgeDistillation:
         >>> # Create teacher with more capacity (explicit layers)
         >>> teacher_l1 = Linear(100, 200)
         >>> teacher_l2 = Linear(200, 50)
-        >>> teacher = SimpleModel(teacher_l1, teacher_l2)
+        >>> teacher = Sequential(teacher_l1, teacher_l2)
         >>>
         >>> # Create smaller student (explicit layer)
-        >>> student = SimpleModel(Linear(100, 50))
+        >>> student = Sequential(Linear(100, 50))
         >>>
         >>> kd = KnowledgeDistillation(teacher, student, temperature=4.0, alpha=0.8)
         >>> print(f"Temperature: {kd.temperature}, Alpha: {kd.alpha}")
@@ -1113,11 +1113,11 @@ def test_unit_knowledge_distillation():
     # Create teacher model with more capacity - explicit composition
     teacher_l1 = Linear(10, 20)
     teacher_l2 = Linear(20, 5)
-    teacher = SimpleModel(teacher_l1, teacher_l2)
+    teacher = Sequential(teacher_l1, teacher_l2)
 
     # Create smaller student model - explicit composition shows size difference
     student_l1 = Linear(10, 5)
-    student = SimpleModel(student_l1)  # Direct connection, no hidden layer
+    student = Sequential(student_l1)  # Direct connection, no hidden layer
 
     # Initialize knowledge distillation with temperature scaling
     kd = KnowledgeDistillation(teacher, student, temperature=3.0, alpha=0.7)
@@ -1282,7 +1282,7 @@ def test_unit_compress_model():
     layer1 = Linear(20, 15)
     layer2 = Linear(15, 10)
     layer3 = Linear(10, 5)
-    model = SimpleModel(layer1, layer2, layer3)
+    model = Sequential(layer1, layer2, layer3)
 
     # Define compression configuration
     # Students understand what each technique does
@@ -1426,7 +1426,7 @@ def analyze_compression_techniques():
 
     for model_name, layers in model_configs:
         # Create model with explicit composition
-        model = SimpleModel(*layers)
+        model = Sequential(*layers)
         baseline_params = sum(p.size for p in model.parameters())
 
         # Test magnitude pruning on copy of model
@@ -1436,7 +1436,7 @@ def analyze_compression_techniques():
             layer.weight = layers[i].weight
             # Linear layers always have bias (may be None)
             layer.bias = layers[i].bias
-        mag_model = SimpleModel(*mag_layers)
+        mag_model = Sequential(*mag_layers)
         magnitude_prune(mag_model, sparsity=0.8)
         mag_sparsity = measure_sparsity(mag_model)
         mag_ratio = 1.0 / (1.0 - mag_sparsity / 100) if mag_sparsity < 100 else float('inf')
@@ -1450,7 +1450,7 @@ def analyze_compression_techniques():
             layer.weight = layers[i].weight
             # Linear layers always have bias (may be None)
             layer.bias = layers[i].bias
-        struct_model = SimpleModel(*struct_layers)
+        struct_model = Sequential(*struct_layers)
         structured_prune(struct_model, prune_ratio=0.5)
         struct_sparsity = measure_sparsity(struct_model)
         struct_ratio = 1.0 / (1.0 - struct_sparsity / 100) if struct_sparsity < 100 else float('inf')
@@ -1641,14 +1641,14 @@ def verify_pruning_works(model, target_sparsity=0.8):
     in parameter arrays and honestly report memory footprint (unchanged with dense storage).
 
     Args:
-        model: Model with pruned parameters (SimpleModel with .parameters())
+        model: Model with pruned parameters (Sequential with .parameters())
         target_sparsity: Expected sparsity ratio (default 0.8 = 80%)
 
     Returns:
         dict: Verification results with sparsity, zeros, total, verified
 
     Example:
-        >>> model = SimpleModel(Linear(100, 50))
+        >>> model = Sequential(Linear(100, 50))
         >>> magnitude_prune(model, sparsity=0.8)
         >>> results = verify_pruning_works(model, target_sparsity=0.8)
         >>> assert results['verified']  # Pruning actually works!
@@ -1729,7 +1729,7 @@ def test_module():
     hidden1 = Linear(512, 256)         # Hidden layer 1
     hidden2 = Linear(256, 128)         # Hidden layer 2
     output_layer = Linear(128, 10)     # Output layer
-    model = SimpleModel(input_layer, hidden1, hidden2, output_layer)
+    model = Sequential(input_layer, hidden1, hidden2, output_layer)
 
     original_params = sum(p.size for p in model.parameters())
     print(f"Original model: {original_params:,} parameters")
@@ -1756,11 +1756,11 @@ def test_module():
     # Create teacher with more capacity - explicit layers show architecture
     teacher_l1 = Linear(100, 200)
     teacher_l2 = Linear(200, 50)
-    teacher = SimpleModel(teacher_l1, teacher_l2)
+    teacher = Sequential(teacher_l1, teacher_l2)
 
     # Create smaller student - explicit shows size difference
     student_l1 = Linear(100, 50)
-    student = SimpleModel(student_l1)  # 3x fewer parameters
+    student = Sequential(student_l1)  # 3x fewer parameters
 
     kd = KnowledgeDistillation(teacher, student, temperature=4.0, alpha=0.8)
 
