@@ -26,7 +26,7 @@ class TestEntireTinyTorchSystemStable:
         try:
             from tinytorch.core.tensor import Tensor
             from tinytorch.core.layers import Linear
-            from tinytorch.core.spatial import Conv2D
+            from tinytorch.core.spatial import Conv2d as Conv2D
             from tinytorch.core.attention import MultiHeadAttention
             from tinytorch.core.optimizers import Adam
             from tinytorch.core.training import Trainer
@@ -222,7 +222,7 @@ class TestCompleteSystemIntegration:
             from tinytorch.core.transformers import TinyGPT
             from tinytorch.core.optimizers import Adam
             from tinytorch.core.training import Trainer, CrossEntropyLoss
-            from tinytorch.core.data import Dataset, DataLoader
+            from tinytorch.core.dataloader import Dataset, DataLoader
             from tinytorch.core.tensor import Tensor
             
             # Language modeling dataset
@@ -346,7 +346,7 @@ class TestCompleteSystemIntegration:
         """Test multi-modal AI capabilities (vision + language)."""
         try:
             from tinytorch.core.transformers import TinyGPT
-            from tinytorch.core.spatial import Conv2D, MaxPool2D
+            from tinytorch.core.spatial import Conv2d as Conv2D, MaxPool2d
             from tinytorch.core.layers import Linear
             from tinytorch.core.attention import MultiHeadAttention
             from tinytorch.core.tensor import Tensor
@@ -356,7 +356,7 @@ class TestCompleteSystemIntegration:
                 def __init__(self):
                     # Vision encoder (CNN)
                     self.conv1 = Conv2D(3, 16, kernel_size=3)
-                    self.pool = MaxPool2D(kernel_size=2)
+                    self.pool = MaxPool2d(kernel_size=2)
                     self.conv2 = Conv2D(16, 32, kernel_size=3)
                     
                     # Vision to language bridge
@@ -423,9 +423,9 @@ class TestCapstoneSystemValidation:
             from tinytorch.core.tensor import Tensor
             from tinytorch.core.layers import Linear
             from tinytorch.core.activations import ReLU, Softmax
-            from tinytorch.core.spatial import Conv2D
+            from tinytorch.core.spatial import Conv2d as Conv2D
             from tinytorch.core.attention import MultiHeadAttention
-            from tinytorch.core.data import Dataset, DataLoader
+            from tinytorch.core.dataloader import Dataset, DataLoader
             from tinytorch.core.optimizers import Adam
             from tinytorch.core.training import Trainer
             from tinytorch.core.transformers import TinyGPT
@@ -720,7 +720,7 @@ class TestRegressionPrevention:
             assert output.shape == (4, 8), "System-wide regression: Core functionality broken"
             
             # Advanced features should work
-            from tinytorch.core.spatial import Conv2D
+            from tinytorch.core.spatial import Conv2d as Conv2D
             from tinytorch.core.attention import MultiHeadAttention
             
             conv = Conv2D(in_channels=3, out_channels=8, kernel_size=3)

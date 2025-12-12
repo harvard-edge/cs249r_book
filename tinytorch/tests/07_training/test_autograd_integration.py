@@ -190,8 +190,8 @@ class TestAutogradOptimizationIntegration:
             layer = Linear(1, 1)
             
             # Convert layer parameters to Variables if needed
-            if not isinstance(layer.weights, Variable):
-                layer.weights = Variable(layer.weight.data, requires_grad=True)
+            if not isinstance(layer.weight, Variable):
+                layer.weight = Variable(layer.weight.data, requires_grad=True)
             
             # Simple forward pass
             x = Variable(np.array([[1.0]]), requires_grad=True)

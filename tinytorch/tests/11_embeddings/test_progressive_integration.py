@@ -48,8 +48,8 @@ class TestPriorStackStillWorking:
         """Verify advanced modules (07→11) still work."""
         try:
             from tinytorch.core.attention import MultiHeadAttention
-            from tinytorch.core.spatial import Conv2D
-            from tinytorch.core.data import DataLoader
+            from tinytorch.core.spatial import Conv2d as Conv2D
+            from tinytorch.core.dataloader import DataLoader
             from tinytorch.core.optimizers import Adam
             
             # Advanced features should work
@@ -191,7 +191,7 @@ class TestProgressiveStackIntegration:
             from tinytorch.core.optimizers import SGD
             from tinytorch.core.training import Trainer
             from tinytorch.core.compression import prune_weights, quantize_weights
-            from tinytorch.core.data import Dataset, DataLoader
+            from tinytorch.core.dataloader import Dataset, DataLoader
             
             # Create model
             model = Linear(20, 5)
@@ -223,7 +223,7 @@ class TestProgressiveStackIntegration:
     def test_cnn_compression_pipeline(self):
         """Test compression with CNN models."""
         try:
-            from tinytorch.core.spatial import Conv2D
+            from tinytorch.core.spatial import Conv2d as Conv2D
             from tinytorch.core.layers import Linear
             from tinytorch.core.compression import prune_weights, quantize_weights
             from tinytorch.core.tensor import Tensor
@@ -508,9 +508,9 @@ class TestRegressionPrevention:
         """Verify advanced features (07→11) unchanged."""
         try:
             from tinytorch.core.attention import MultiHeadAttention
-            from tinytorch.core.spatial import Conv2D
+            from tinytorch.core.spatial import Conv2d as Conv2D
             from tinytorch.core.optimizers import Adam
-            from tinytorch.core.data import Dataset
+            from tinytorch.core.dataloader import Dataset
             
             # Advanced features should still work
             attention = MultiHeadAttention(embed_dim=32, num_heads=4)

@@ -56,10 +56,10 @@ class TestCompleteMLPipelineStillWorks:
         try:
             # Test complete pipeline still works
             from tinytorch.core.tensor import Tensor
-            from tinytorch.core.spatial import Conv2D, MaxPool2D
+            from tinytorch.core.spatial import Conv2d as Conv2D, MaxPool2d
             from tinytorch.core.layers import Linear
             from tinytorch.core.activations import ReLU, Softmax
-            from tinytorch.core.data import Dataset, DataLoader
+            from tinytorch.core.dataloader import Dataset, DataLoader
             
             # Create simple dataset
             class TestDataset(Dataset):
@@ -75,7 +75,7 @@ class TestCompleteMLPipelineStillWorks:
             
             # Create model components
             conv = Conv2D(3, 16, kernel_size=3, padding=1)
-            pool = MaxPool2D(kernel_size=2)
+            pool = MaxPool2d(kernel_size=2)
             dense = Linear(16 * 16 * 16, 10)  # 4096 -> 10
             relu = ReLU()
             softmax = Softmax()
@@ -169,7 +169,7 @@ class TestCompleteMLPipelineStillWorks:
         """
         try:
             from tinytorch.core.tensor import Tensor
-            from tinytorch.core.spatial import Conv2D
+            from tinytorch.core.spatial import Conv2d as Conv2D
             from tinytorch.core.attention import MultiHeadAttention
             from tinytorch.core.layers import Linear
             from tinytorch.core.activations import ReLU
@@ -647,14 +647,14 @@ class TestAutogradIntegration:
         try:
             from tinytorch.core.autograd import Variable
             from tinytorch.core.tensor import Tensor
-            from tinytorch.core.spatial import Conv2D, MaxPool2D
+            from tinytorch.core.spatial import Conv2d as Conv2D, MaxPool2d
             
             # Test spatial operations with Variables
             x = Variable(Tensor(np.random.randn(1, 3, 8, 8)), requires_grad=True)
             
             # Create spatial layers
             conv = Conv2D(3, 16, kernel_size=3)
-            pool = MaxPool2D(kernel_size=2)
+            pool = MaxPool2d(kernel_size=2)
             
             # Test forward pass
             if hasattr(conv, '__call__'):
@@ -1173,7 +1173,7 @@ class TestModule09Completion:
             autograd_capabilities["Layer integration ready"] = True
             
             # Test 7: Spatial operations (basic structure)
-            from tinytorch.core.spatial import Conv2D
+            from tinytorch.core.spatial import Conv2d as Conv2D
             conv = Conv2D(3, 16, kernel_size=3)
             # Spatial ops exist, gradients will be implemented
             autograd_capabilities["Spatial operation gradients"] = True

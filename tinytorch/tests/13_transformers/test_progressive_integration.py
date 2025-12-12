@@ -56,18 +56,18 @@ class TestCompleteMLSystemStillWorks:
         try:
             # Test complete ML system still works
             from tinytorch.core.tensor import Tensor
-            from tinytorch.core.spatial import Conv2D, MaxPool2D
+            from tinytorch.core.spatial import Conv2d as Conv2D, MaxPool2d
             from tinytorch.core.layers import Linear
             from tinytorch.core.activations import ReLU, Softmax
             from tinytorch.core.optimizers import Adam
             from tinytorch.core.training import Trainer
-            from tinytorch.core.data import Dataset, DataLoader
+            from tinytorch.core.dataloader import Dataset, DataLoader
             
             # Create complete ML pipeline
             class TestModel:
                 def __init__(self):
                     self.conv1 = Conv2D(3, 16, kernel_size=3, padding=1)
-                    self.pool = MaxPool2D(kernel_size=2)
+                    self.pool = MaxPool2d(kernel_size=2)
                     self.conv2 = Conv2D(16, 32, kernel_size=3, padding=1)
                     self.fc = Linear(32 * 8 * 8, 10)
                     self.relu = ReLU()
@@ -685,7 +685,7 @@ class TestBenchmarkingIntegration:
             from tinytorch.core.layers import Linear
             from tinytorch.core.optimizers import SGD
             from tinytorch.core.training import Trainer, MSELoss
-            from tinytorch.core.data import Dataset, DataLoader
+            from tinytorch.core.dataloader import Dataset, DataLoader
             
             # Create training setup
             model = Linear(50, 10)
@@ -823,7 +823,7 @@ class TestBenchmarkingIntegration:
         try:
             from tinytorch.core.benchmarking import benchmark_inference
             from tinytorch.core.tensor import Tensor
-            from tinytorch.core.spatial import Conv2D, MaxPool2D
+            from tinytorch.core.spatial import Conv2d as Conv2D, MaxPool2d
             from tinytorch.core.layers import Linear
             from tinytorch.core.activations import ReLU
             
@@ -831,7 +831,7 @@ class TestBenchmarkingIntegration:
             class InferenceModel:
                 def __init__(self):
                     self.conv1 = Conv2D(3, 32, kernel_size=3, padding=1)
-                    self.pool = MaxPool2D(kernel_size=2)
+                    self.pool = MaxPool2d(kernel_size=2)
                     self.conv2 = Conv2D(32, 64, kernel_size=3, padding=1)
                     self.fc = Linear(64 * 8 * 8, 1000)  # ImageNet-like
                     self.relu = ReLU()
@@ -969,7 +969,7 @@ class TestBenchmarkingIntegration:
             from tinytorch.core.benchmarking import analyze_hardware_performance
             from tinytorch.core.tensor import Tensor
             from tinytorch.core.layers import Linear
-            from tinytorch.core.spatial import Conv2D
+            from tinytorch.core.spatial import Conv2d as Conv2D
             
             # Test hardware analysis
             models_for_analysis = [
@@ -1185,7 +1185,7 @@ class TestModule14Completion:
             benchmarking_capabilities["Hardware analysis"] = True
             
             # Test 7: ML pipeline integration
-            from tinytorch.core.spatial import Conv2D
+            from tinytorch.core.spatial import Conv2d as Conv2D
             from tinytorch.core.activations import ReLU
             
             # Benchmark complex model
