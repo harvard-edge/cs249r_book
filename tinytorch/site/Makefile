@@ -1,25 +1,30 @@
 # TinyTorch Book Build Makefile
 # Convenient shortcuts for building HTML and PDF versions
 
-.PHONY: help html pdf paper downloads clean install test restore-emoji
+.PHONY: help html serve pdf paper downloads clean install test restore-emoji
 
 help:
 	@echo "Tiny🔥Torch Build Commands"
 	@echo "=========================="
 	@echo ""
 	@echo "  make html          - Build HTML version (website)"
+	@echo "  make serve         - Build and serve locally at http://localhost:8000"
 	@echo "  make pdf           - Build PDF course guide via XeLaTeX"
 	@echo "  make paper         - Build research paper via LuaLaTeX"
-	@echo "  make downloads     - Build both PDFs and copy to assets/downloads/"
 	@echo "  make clean         - Remove all build artifacts"
-	@echo "  make restore-emoji - Restore original markdown files (if build interrupted)"
-	@echo "  make install       - Install Python dependencies"
 	@echo "  make test          - Test build configuration"
 	@echo ""
 
 html:
 	@echo "🌐 Building HTML version..."
 	@jupyter-book build .
+
+serve: clean html
+	@echo ""
+	@echo "🚀 Starting local server at http://localhost:8000"
+	@echo "   Press Ctrl+C to stop"
+	@echo ""
+	@cd _build/html && python3 -m http.server 8000
 
 pdf:
 	@echo "🔥 Building Tiny🔥Torch PDF via XeLaTeX..."
@@ -118,4 +123,3 @@ downloads: pdf paper
 
 # Default target
 .DEFAULT_GOAL := help
-

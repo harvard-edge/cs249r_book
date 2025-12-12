@@ -1,7 +1,7 @@
 ---
 title: "Tensor"
 description: "Build the fundamental N-dimensional array data structure that powers all machine learning"
-difficulty: "⭐"
+difficulty: "●"
 time_estimate: "4-6 hours"
 prerequisites: []
 next_steps: ["02_activations"]
@@ -13,9 +13,9 @@ learning_objectives:
   - "Analyze computational complexity, memory usage, and view-vs-copy trade-offs in tensor operations"
 ---
 
-# 01. Tensor
+# Tensor
 
-**FOUNDATION TIER** | Difficulty: ⭐ (1/4) | Time: 4-6 hours
+**FOUNDATION TIER** | Difficulty: ● (1/4) | Time: 4-6 hours
 
 ## Overview
 
@@ -38,32 +38,6 @@ This module follows TinyTorch's **Build → Use → Reflect** framework:
 1. **Build**: Implement the Tensor class from scratch using NumPy as the underlying array library - creating `__init__`, operator overloading (`__add__`, `__mul__`, etc.), shape manipulation methods, and reduction operations
 2. **Use**: Apply your Tensor to real problems like matrix multiplication for neural network layers, data normalization with broadcasting, and statistical computations across various shapes and dimensions
 3. **Reflect**: Understand systems-level implications - why tensor operations dominate training time, how memory layout (row-major vs. column-major) affects cache performance, and how broadcasting eliminates redundant data copying
-
-## Getting Started
-
-### Prerequisites
-
-This is the first module - no prerequisites! Verify your environment is ready:
-
-```bash
-# Activate TinyTorch environment
-source scripts/activate-tinytorch
-
-# Check system health
-tito system health
-```
-
-All checks should pass (Python 3.8+, NumPy, pytest installed) before starting.
-
-### Development Workflow
-
-1. **Open the development notebook**: `modules/01_tensor/tensor_dev.ipynb` in Jupyter or your preferred editor
-2. **Implement Tensor.__init__**: Create constructor that converts data to NumPy array, stores shape/size/dtype, initializes gradient attributes
-3. **Build arithmetic operations**: Implement `__add__`, `__sub__`, `__mul__`, `__truediv__` with broadcasting support for both Tensor-Tensor and Tensor-scalar operations
-4. **Add matrix multiplication**: Implement `matmul()` with shape validation and clear error messages for dimension mismatches
-5. **Create shape manipulation**: Implement `reshape()` (with -1 support) and `transpose()` for dimension swapping
-6. **Implement reductions**: Build `sum()`, `mean()`, `max()` with axis parameter and keepdims support
-7. **Export and verify**: Run `tito export 01` to export to package, then `tito test 01` to validate all tests pass
 
 ## What You'll Build
 
@@ -156,24 +130,24 @@ Different operations have vastly different costs:
 ┌─────────────────────────────────────────┐
 │         Tensor Class                    │
 ├─────────────────────────────────────────┤
-│ Properties:                             │
-│ - data: np.ndarray (underlying storage) │
-│ - shape: tuple (dimensions)             │
-│ - size: int (total elements)            │
-│ - dtype: np.dtype (data type)           │
-│ - requires_grad: bool (autograd flag)   │
-│ - grad: Tensor (gradient - Module 05)   │
+│  Properties:                            │
+│  - data: np.ndarray (underlying storage)│
+│  - shape: tuple (dimensions)            │
+│  - size: int (total elements)           │
+│  - dtype: np.dtype (data type)          │
+│  - requires_grad: bool (autograd flag)  │
+│  - grad: Tensor (gradient - Module 05)  │
 ├─────────────────────────────────────────┤
-│ Operator Overloading:                   │
-│ - __add__, __sub__, __mul__, __truediv__│
-│ - __pow__ (exponentiation)              │
-│ - Returns new Tensor instances          │
+│  Operator Overloading:                  │
+│  - __add__, __sub__, __mul__, __truediv__│
+│  - __pow__ (exponentiation)             │
+│  - Returns new Tensor instances         │
 ├─────────────────────────────────────────┤
-│ Methods:                                │
-│ - matmul(other): Matrix multiplication  │
-│  reshape(*shape): Shape manipulation    │
-│ - transpose(): Dimension swap           │
-│ - sum/mean/max/min(axis): Reductions    │
+│  Methods:                               │
+│  - matmul(other): Matrix multiplication │
+│  - reshape(*shape): Shape manipulation  │
+│  - transpose(): Dimension swap          │
+│  - sum/mean/max/min(axis): Reductions   │
 └─────────────────────────────────────────┘
 ```
 
@@ -211,6 +185,32 @@ Module 06: Optimizers (updates Tensor parameters)
 ```
 
 Your Tensor is the universal foundation - every subsequent module builds on what you create here.
+
+## Prerequisites
+
+This is the first module - no prerequisites! Verify your environment is ready:
+
+```bash
+# Activate TinyTorch environment
+source scripts/activate-tinytorch
+
+# Check system health
+tito system health
+```
+
+All checks should pass (Python 3.8+, NumPy, pytest installed) before starting.
+
+## Getting Started
+
+### Development Workflow
+
+1. **Open the development notebook**: `modules/01_tensor/tensor_dev.ipynb` in Jupyter or your preferred editor
+2. **Implement Tensor.__init__**: Create constructor that converts data to NumPy array, stores shape/size/dtype, initializes gradient attributes
+3. **Build arithmetic operations**: Implement `__add__`, `__sub__`, `__mul__`, `__truediv__` with broadcasting support for both Tensor-Tensor and Tensor-scalar operations
+4. **Add matrix multiplication**: Implement `matmul()` with shape validation and clear error messages for dimension mismatches
+5. **Create shape manipulation**: Implement `reshape()` (with -1 support) and `transpose()` for dimension swapping
+6. **Implement reductions**: Build `sum()`, `mean()`, `max()` with axis parameter and keepdims support
+7. **Export and verify**: Run `tito export 01` to export to package, then `tito test 01` to validate all tests pass
 
 ## Implementation Guide
 
@@ -356,25 +356,25 @@ The development notebook includes comprehensive inline tests with immediate feed
 
 ```python
 # Example inline test output
-🧪 Unit Test: Tensor Creation...
-✅ Tensor created from list
-✅ Shape property correct: (2, 2)
-✅ Size property correct: 4
-✅ dtype is float32
-📈 Progress: Tensor initialization ✓
+ Unit Test: Tensor Creation...
+ Tensor created from list
+ Shape property correct: (2, 2)
+ Size property correct: 4
+ dtype is float32
+ Progress: Tensor initialization ✓
 
-🧪 Unit Test: Arithmetic Operations...
-✅ Addition: [[6, 8], [10, 12]]
-✅ Multiplication works element-wise
-✅ Broadcasting: scalar + tensor
-✅ Broadcasting: matrix + vector
-📈 Progress: Arithmetic operations ✓
+ Unit Test: Arithmetic Operations...
+ Addition: [[6, 8], [10, 12]]
+ Multiplication works element-wise
+ Broadcasting: scalar + tensor
+ Broadcasting: matrix + vector
+ Progress: Arithmetic operations ✓
 
-🧪 Unit Test: Matrix Multiplication...
-✅ 2×2 @ 2×2 = [[19, 22], [43, 50]]
-✅ Shape validation catches 2×2 @ 3×1 error
-✅ Error message shows: "2 ≠ 3"
-📈 Progress: Matrix operations ✓
+ Unit Test: Matrix Multiplication...
+ 2×2 @ 2×2 = [[19, 22], [43, 50]]
+ Shape validation catches 2×2 @ 3×1 error
+ Error message shows: "2 ≠ 3"
+ Progress: Matrix operations ✓
 ```
 
 ### Manual Testing Examples
@@ -425,12 +425,12 @@ Understanding what you're building vs. what production frameworks provide:
 | **Backend** | NumPy (CPU-only) | C++/CUDA (CPU/GPU/TPU) | C++/CUDA/XLA |
 | **Dtype Support** | float32 (primary) | float16/32/64, int8/16/32/64, bool, complex | Same + bfloat16 |
 | **Operations** | Arithmetic, matmul, reshape, transpose, reductions | 1000+ operations | 1000+ operations |
-| **Broadcasting** | ✅ Full NumPy rules | ✅ Same rules | ✅ Same rules |
-| **Autograd** | Dormant (activates Module 05) | ✅ Full computation graph | ✅ GradientTape |
-| **GPU Support** | ❌ CPU-only | ✅ CUDA, Metal, ROCm | ✅ CUDA, TPU |
-| **Memory Pooling** | ❌ Python GC | ✅ Caching allocator | ✅ Memory pools |
-| **JIT Compilation** | ❌ Interpreted | ✅ TorchScript, torch.compile | ✅ XLA, TF Graph |
-| **Distributed** | ❌ Single process | ✅ DDP, FSDP | ✅ tf.distribute |
+| **Broadcasting** | ✓ Full NumPy rules | ✓ Same rules | ✓ Same rules |
+| **Autograd** | Dormant (activates Module 05) | ✓ Full computation graph | ✓ GradientTape |
+| **GPU Support** | ✗ CPU-only | ✓ CUDA, Metal, ROCm | ✓ CUDA, TPU |
+| **Memory Pooling** | ✗ Python GC | ✓ Caching allocator | ✓ Memory pools |
+| **JIT Compilation** | ✗ Interpreted | ✓ TorchScript, torch.compile | ✓ XLA, TF Graph |
+| **Distributed** | ✗ Single process | ✓ DDP, FSDP | ✓ tf.distribute |
 
 **Educational focus**: Your implementation prioritizes clarity and understanding over performance. The core concepts (broadcasting, shape manipulation, reductions) are identical - you're learning the same patterns used in production, just with simpler infrastructure.
 
@@ -700,21 +700,21 @@ Choose your preferred way to engage with this module:
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card} 🚀 Launch Binder
+```{grid-item-card}  Launch Binder
 :link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/01_tensor/tensor_dev.ipynb
 :class-header: bg-light
 
 Run this module interactively in your browser. No installation required!
 ```
 
-```{grid-item-card} ⚡ Open in Colab
+```{grid-item-card}  Open in Colab
 :link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/01_tensor/tensor_dev.ipynb
 :class-header: bg-light
 
 Use Google Colab for GPU access and cloud compute power.
 ```
 
-```{grid-item-card} 📖 View Source
+```{grid-item-card}  View Source
 :link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/01_tensor/tensor_dev.ipynb
 :class-header: bg-light
 
@@ -723,7 +723,7 @@ Browse the Jupyter notebook and understand the implementation.
 
 ````
 
-```{admonition} 💾 Save Your Progress
+```{admonition}  Save Your Progress
 :class: tip
 **Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
 
@@ -732,5 +732,5 @@ Browse the Jupyter notebook and understand the implementation.
 ---
 
 <div class="prev-next-area">
-<a class="right-next" href="../02_activations/ABOUT.html" title="next page">Next Module →</a>
+<a class="right-next" href="02_activations_ABOUT.html" title="next page">Module 02: Activations →</a>
 </div>
