@@ -1,5 +1,6 @@
 import { NETLIFY_URL, getBasePath } from './config.js';
 import { updateNavState } from './ui.js';
+import { openProfileModal, closeProfileModal, handleProfileUpdate } from './profile.js';
 
 let currentMode = 'signup'; 
 
@@ -29,6 +30,16 @@ export function setMode(mode) {
 
     if (mode === 'login') {
         authTitle.textContent = 'Login';
+        
+        // Check for confirmed_email param
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('confirmed_email') === 'true') {
+             authTitle.textContent = 'Thank you for confirming your email. Please login.';
+             // Clean up URL
+             const newUrl = window.location.pathname + '?action=login';
+             window.history.replaceState({}, '', newUrl);
+        }
+
         authSubmit.textContent = 'Login';
         authToggle.textContent = 'Need an account? Create Account';
         passwordInput.classList.remove('hidden');
@@ -86,7 +97,7 @@ export async function handleAuth(e) {
             body = { 
                 email, 
                 password, 
-                redirect_to: window.location.origin + basePath + '/dashboard.html' 
+                redirect_to: window.location.origin + basePath + '/index.html?action=login&confirmed_email=true'
             };
         }
         
@@ -148,7 +159,8 @@ export function handleLogout() {
         localStorage.removeItem("tinytorch_token");
         localStorage.removeItem("tinytorch_user");
         updateNavState();
-        window.location.href = basePath + '/';
+        closeProfileModal();
+        window.location.href = basePath + '/index.html';
     }
 }
 
