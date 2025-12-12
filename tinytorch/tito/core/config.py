@@ -18,7 +18,7 @@ class CLIConfig:
     assignments_dir: Path
     tinytorch_dir: Path
     bin_dir: Path
-    modules_dir: Path  # Alias for assignments_dir
+    modules_dir: Path  # Student working directory (src/)
     
     # Environment settings
     python_min_version: tuple = (3, 8)
@@ -80,9 +80,9 @@ class CLIConfig:
         if not in_venv:
             issues.append(f"Virtual environment not activated. Run: source {venv_path}/bin/activate")
         
-        # Check required directories
-        if not self.assignments_dir.exists():
-            issues.append(f"Assignments directory not found: {self.assignments_dir}")
+        # Check required directories (modules_dir is 'src/' where students work)
+        if not self.modules_dir.exists():
+            issues.append(f"Modules directory not found: {self.modules_dir}")
         
         # tinytorch_dir check removed - the project root IS tinytorch
         # if not self.tinytorch_dir.exists():
