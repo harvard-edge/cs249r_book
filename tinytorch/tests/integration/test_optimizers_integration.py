@@ -112,16 +112,16 @@ def test_optimizer_with_mse_loss():
     optimizer = SGD(layer.parameters(), lr=0.01)
     loss_fn = MSELoss()
 
-            # Forward pass
+    # Forward pass
     x = Tensor(np.random.randn(4, 3), requires_grad=True)
     target = Tensor(np.random.randn(4, 1))
     output = layer(x)
     loss = loss_fn(output, target)
 
     # Backward and update
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
 
     print("✅ Optimizer integrates with MSE loss!")
 

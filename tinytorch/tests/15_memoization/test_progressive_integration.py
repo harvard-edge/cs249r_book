@@ -705,16 +705,19 @@ class TestRegressionPrevention:
         
         # Complete system should still work perfectly
         try:
+            import numpy as np
             from tinytorch.core.tensor import Tensor
             from tinytorch.core.layers import Linear
             from tinytorch.core.optimizers import Adam
             from tinytorch.core.training import Trainer
-            
+            from tinytorch.core.losses import MSELoss
+
             # Complete system integration
             model = Linear(16, 8)
             optimizer = Adam(model.parameters(), lr=0.001)
-            trainer = Trainer(model, optimizer)
-            
+            loss_fn = MSELoss()
+            trainer = Trainer(model, optimizer, loss_fn)
+
             x = Tensor(np.random.randn(4, 16))
             output = model(x)
             assert output.shape == (4, 8), "System-wide regression: Core functionality broken"
@@ -747,21 +750,29 @@ class TestRegressionPrevention:
             from tinytorch.core.layers import Linear
             from tinytorch.core.optimizers import Adam
             from tinytorch.core.training import Trainer
-            from tinytorch.core.compression import prune_weights
-            from tinytorch.core.kernels import optimized_matmul
-            
+            from tinytorch.core.losses import MSELoss
+            try:
+                from tinytorch.core.compression import prune_weights
+            except ImportError:
+                prune_weights = None  # Optional module
+            try:
+                from tinytorch.core.kernels import optimized_matmul
+            except ImportError:
+                optimized_matmul = None  # Optional module
+
             # Complete production system should work
             model = Linear(20, 10)
             optimizer = Adam(model.parameters(), lr=0.001)
-            trainer = Trainer(model, optimizer)
+            loss_fn = MSELoss()
+            trainer = Trainer(model, optimizer, loss_fn)
             
             x = Tensor(np.random.randn(5, 20))
             output = model(x)
             assert output.shape == (5, 10), "Complete system level broken"
             
             # All advanced features should work
-            if 'prune_weights' in locals():
-                pruned = prune_weights(model.weights, sparsity=0.3)
+            if prune_weights is not None:
+                pruned = prune_weights(model.weight, sparsity=0.3)
                 assert pruned.shape == model.weight.shape, "Advanced features broken"
                 
         except ImportError:

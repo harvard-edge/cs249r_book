@@ -58,10 +58,10 @@ class TestModule07AttentionCore:
             # Create attention mechanism
             attention = MultiHeadAttention(embed_dim=64, num_heads=8)
             
-            # Should have proper components
-            assert hasattr(attention, 'query_proj'), "Attention broken: No query projection"
-            assert hasattr(attention, 'key_proj'), "Attention broken: No key projection"
-            assert hasattr(attention, 'value_proj'), "Attention broken: No value projection"
+            # Should have proper components (q_proj, k_proj, v_proj naming)
+            assert hasattr(attention, 'q_proj') or hasattr(attention, 'query_proj'), "Attention broken: No query projection"
+            assert hasattr(attention, 'k_proj') or hasattr(attention, 'key_proj'), "Attention broken: No key projection"
+            assert hasattr(attention, 'v_proj') or hasattr(attention, 'value_proj'), "Attention broken: No value projection"
             
             # Test with sequence input
             seq_len, batch_size, embed_dim = 10, 4, 64
