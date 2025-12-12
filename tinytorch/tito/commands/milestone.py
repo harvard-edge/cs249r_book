@@ -1312,12 +1312,22 @@ class MilestoneCommand(BaseCommand):
         """Mark a milestone as complete in progress tracking."""
         progress = self._get_milestone_progress_data()
 
+        # Add to completed_milestones
         if milestone_id not in progress.get("completed_milestones", []):
             if "completed_milestones" not in progress:
                 progress["completed_milestones"] = []
             progress["completed_milestones"].append(milestone_id)
             progress["completion_dates"] = progress.get("completion_dates", {})
             progress["completion_dates"][milestone_id] = datetime.now().isoformat()
+
+        # Also add to unlocked_milestones (for status display)
+        if milestone_id not in progress.get("unlocked_milestones", []):
+            if "unlocked_milestones" not in progress:
+                progress["unlocked_milestones"] = []
+            progress["unlocked_milestones"].append(milestone_id)
+            progress["unlock_dates"] = progress.get("unlock_dates", {})
+            progress["unlock_dates"][milestone_id] = datetime.now().isoformat()
+            progress["total_unlocked"] = len(progress["unlocked_milestones"])
 
         self._save_milestone_progress_data(progress)
 
