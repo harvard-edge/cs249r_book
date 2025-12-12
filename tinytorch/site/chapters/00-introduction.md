@@ -284,7 +284,7 @@ After each tier, you become the team member who:
 <h3 style="margin: 0 0 1rem 0; color: #495057;">Begin Building ML Systems</h3>
 <p style="margin: 0 0 1.5rem 0; color: #6c757d;">Choose your starting point based on your goals and time commitment</p>
 <a href="../quickstart-guide.html" style="display: inline-block; background: #007bff; color: white; padding: 0.75rem 1.5rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500; margin-right: 1rem;">15-Minute Start →</a>
-<a href="01-setup.html" style="display: inline-block; background: #28a745; color: white; padding: 0.75rem 1.5rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500;">Foundation Tier →</a>
+<a href="../tiers/foundation.html" style="display: inline-block; background: #28a745; color: white; padding: 0.75rem 1.5rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500;">Foundation Tier →</a>
 </div>
 
 **Next Steps**:
