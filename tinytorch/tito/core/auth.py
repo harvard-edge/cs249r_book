@@ -192,7 +192,7 @@ class CallbackHandler(http.server.BaseHTTPRequestHandler):
 
         if parsed_path.path == "/logout":
             self.send_response(302)
-            self.send_header('Location', f"{API_BASE_URL}/logout")
+            self.send_header('Location', f"{API_BASE_URL}/cli/logged-out")
             self.end_headers()
             return
 
@@ -209,14 +209,13 @@ class CallbackHandler(http.server.BaseHTTPRequestHandler):
                 'user_email': query_params.get('email', [''])[0]
             }
 
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html')
+            # Redirect to the branded "Logged In" page
+            user_email = self.server.auth_data['user_email']
+            redirect_url = f"{API_BASE_URL}/cli/logged-in?email={user_email}"
+
+            self.send_response(302)
+            self.send_header('Location', redirect_url)
             self.end_headers()
-
-            html_content = "<html><body><h1>🔥 Tinytorch <h1> <h2>Login Successful</h2><p>You can close this window and return to the CLI.</p><p><a href='https://tinytorch.netlify.app/dashboard'>Go to TinyTorch Dashboard</a></p><script>window.close()</script></body></html>"
-
-            self.wfile.write(html_content.encode('utf-8'))
-            self.wfile.flush()
 
             # Persist immediately
             try:
