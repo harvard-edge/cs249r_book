@@ -86,7 +86,7 @@ Build a complete machine learning (ML) framework from tensors to systems—under
     </div>
     <div class="vision-item">
       <span class="vision-icon">🏛️</span>
-      <span class="vision-text"><strong>Recreate ML history</strong> — From Perceptron (1957) to Transformers (2017).</span>
+      <span class="vision-text"><strong>Recreate history</strong> — Perceptron (1957) to Transformers (2017) to MLPerf (Present).</span>
     </div>
     <div class="vision-item">
       <span class="vision-icon">⚡</span>
@@ -94,7 +94,7 @@ Build a complete machine learning (ML) framework from tensors to systems—under
     </div>
     <div class="vision-item">
       <span class="vision-icon">🎯</span>
-      <span class="vision-text"><strong>End goal</strong> — A complete framework that trains real models.</span>
+      <span class="vision-text"><strong>End goal</strong> — A complete ML systems framework that trains and optimizes models.</span>
     </div>
   </div>
 </div>
