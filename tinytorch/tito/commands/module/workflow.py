@@ -899,9 +899,10 @@ class ModuleWorkflowCommand(BaseCommand):
             return 1
     
     def get_progress_data(self) -> dict:
-        """Get current progress data."""
-        progress_file = self.config.project_root / "progress.json"
-        
+        """Get current progress data from .tito/progress.json."""
+        tito_dir = self.config.project_root / ".tito"
+        progress_file = tito_dir / "progress.json"
+
         try:
             import json
             if progress_file.exists():
@@ -909,7 +910,7 @@ class ModuleWorkflowCommand(BaseCommand):
                     return json.load(f)
         except Exception:
             pass
-        
+
         return {
             'started_modules': [],
             'completed_modules': [],
@@ -917,16 +918,18 @@ class ModuleWorkflowCommand(BaseCommand):
             'last_completed': None,
             'last_updated': None
         }
-    
+
     def save_progress_data(self, progress: dict) -> None:
-        """Save progress data."""
-        progress_file = self.config.project_root / "progress.json"
-        
+        """Save progress data to .tito/progress.json."""
+        tito_dir = self.config.project_root / ".tito"
+        tito_dir.mkdir(parents=True, exist_ok=True)
+        progress_file = tito_dir / "progress.json"
+
         try:
             import json
             from datetime import datetime
             progress['last_updated'] = datetime.now().isoformat()
-            
+
             with open(progress_file, 'w') as f:
                 json.dump(progress, f, indent=2)
         except Exception as e:

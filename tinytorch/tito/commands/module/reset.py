@@ -211,11 +211,13 @@ class ModuleResetCommand(BaseCommand):
             return 0
 
     def _update_progress_tracking(self, module_number: str, module_name: str) -> None:
-        """Remove module from completed progress."""
+        """Remove module from completed progress in .tito/progress.json."""
         console = self.console
 
-        # Update progress.json
-        progress_file = self.config.project_root / "progress.json"
+        tito_dir = self.config.project_root / ".tito"
+        tito_dir.mkdir(parents=True, exist_ok=True)
+        progress_file = tito_dir / "progress.json"
+
         if progress_file.exists():
             try:
                 with open(progress_file, "r") as f:
@@ -238,26 +240,18 @@ class ModuleResetCommand(BaseCommand):
                 console.print(f"[dim]Could not update progress: {e}[/dim]")
 
     def _clear_all_progress(self) -> None:
-        """Clear all progress tracking."""
-        # Reset progress.json
-        progress_file = self.config.project_root / "progress.json"
+        """Clear all progress tracking in .tito/ directory."""
+        tito_dir = self.config.project_root / ".tito"
+        tito_dir.mkdir(parents=True, exist_ok=True)
+
+        # Reset .tito/progress.json
+        progress_file = tito_dir / "progress.json"
         progress_file.write_text(json.dumps({
             "version": "1.0",
             "started_modules": [],
             "completed_modules": [],
             "last_worked": None,
             "last_updated": datetime.now().isoformat()
-        }, indent=2))
-
-        # Reset .tito/progress.json
-        tito_dir = self.config.project_root / ".tito"
-        tito_dir.mkdir(parents=True, exist_ok=True)
-
-        tito_progress = tito_dir / "progress.json"
-        tito_progress.write_text(json.dumps({
-            "version": "1.0",
-            "completed_modules": [],
-            "completion_dates": {}
         }, indent=2))
 
         # Reset milestones

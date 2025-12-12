@@ -177,9 +177,8 @@ class MilestoneSystem:
                     self.console.print(f"[yellow]Warning: Could not load era config {era_path}: {e}[/yellow]")
         
         # If no milestones loaded, use MILESTONE_SCRIPTS as fallback
-        # (MILESTONE_SCRIPTS is the simple dict-based config that doesn't need YAML)
         if not milestones:
-            return {}  # Let calling code handle using MILESTONE_SCRIPTS
+            return MILESTONE_SCRIPTS
 
         return milestones
     
@@ -208,17 +207,22 @@ class MilestoneSystem:
             # Check if milestone is unlocked
             is_unlocked = milestone_id in milestone_data.get("unlocked_milestones", [])
 
-            # Check if trigger module is completed
-            trigger_complete = self._is_module_completed(milestone.get("trigger_module", ""))
-            
+            # Check if trigger module is completed (if trigger_module exists)
+            trigger_module = milestone.get("trigger_module", "")
+            if trigger_module:
+                trigger_complete = self._is_module_completed(trigger_module)
+            else:
+                # No trigger module - consider complete if all required modules done
+                trigger_complete = required_complete
+
             milestone_status = {
                 "id": milestone_id,
                 "name": milestone["name"],
                 "title": milestone["title"],
                 "emoji": milestone.get("emoji", "🎯"),
-                "trigger_module": milestone.get("trigger_module", ""),
+                "trigger_module": trigger_module,
                 "required_modules": milestone.get("required_modules", []),
-                "victory_condition": milestone.get("victory_condition", ""),
+                "victory_condition": milestone.get("victory_condition", milestone.get("description", "")),
                 "capability": milestone.get("capability", ""),
                 "real_world_impact": milestone.get("real_world_impact", ""),
                 "required_complete": required_complete,
