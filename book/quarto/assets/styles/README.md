@@ -99,7 +99,7 @@ The textbook navigation is configured with sophisticated organization:
 
 ### Main Academic Sections (Always Expanded)
 - Systems Foundations
-- Design Principles  
+- Design Principles
 - Performance Engineering
 - Robust Deployment
 - Trustworthy Systems
@@ -120,7 +120,7 @@ This organization allows students to focus on academic content while providing e
 ### Academic Hierarchy
 ```scss
 h1: 2.75rem  // Chapter titles - command attention
-h2: 2.25rem  // Major sections - clear organization  
+h2: 2.25rem  // Major sections - clear organization
 h3: 1.75rem  // Subsections - readable hierarchy
 h4: 1.5rem   // Minor headings - subtle emphasis
 h5: 1.25rem  // Small headings - minimal prominence
@@ -158,7 +158,7 @@ xxxl: 4rem    // Chapter spacing
 
 ### Modern Standards
 - **Chrome/Edge**: 88+ (full support)
-- **Firefox**: 85+ (full support)  
+- **Firefox**: 85+ (full support)
 - **Safari**: 14+ (full support)
 - **Mobile**: iOS 14+, Android 10+ (optimized)
 
@@ -200,12 +200,12 @@ xxxl: 4rem    // Chapter spacing
 
 This styling system meets Harvard University's expectations for:
 
-✅ **Academic Excellence**: Sophisticated, scholarly presentation  
-✅ **Brand Consistency**: Appropriate use of Harvard identity  
-✅ **Professional Quality**: Publication-ready design standards  
-✅ **Accessibility**: Universal design principles  
-✅ **Responsive Design**: Modern multi-device support  
-✅ **Print Quality**: Academic publication standards  
+✅ **Academic Excellence**: Sophisticated, scholarly presentation
+✅ **Brand Consistency**: Appropriate use of Harvard identity
+✅ **Professional Quality**: Publication-ready design standards
+✅ **Accessibility**: Universal design principles
+✅ **Responsive Design**: Modern multi-device support
+✅ **Print Quality**: Academic publication standards
 
 ## Integration & Build
 

@@ -115,4 +115,3 @@ When updating dependencies:
 - [Binder Documentation](https://mybinder.readthedocs.io/)
 - [Jupyter Book Launch Buttons](https://jupyterbook.org/en/stable/interactive/launchbuttons.html)
 - [Google Colab GitHub Integration](https://colab.research.google.com/github/)
-

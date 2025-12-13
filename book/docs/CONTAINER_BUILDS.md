@@ -15,7 +15,7 @@ This document describes the containerized build system for MLSysBook that signif
 ```
 Current Linux Build (45 minutes):
 ├── Install system packages (5-10 min)
-├── Install TeX Live (15-20 min) 
+├── Install TeX Live (15-20 min)
 ├── Install R packages (5-10 min)
 ├── Install Python packages (2-5 min)
 ├── Install Quarto (1-2 min)
@@ -23,7 +23,7 @@ Current Linux Build (45 minutes):
 
 Containerized Linux Build (5-10 minutes):
 ├── Pull container (30 seconds)
-├── Checkout code (30 seconds)  
+├── Checkout code (30 seconds)
 └── Build content (5-10 min)
 ```
 
@@ -167,7 +167,7 @@ If issues arise:
 ### Access Control
 - Container registry access via GitHub Actions
 - No external dependencies
-- All builds run in isolated containers 
+- All builds run in isolated containers
 
 ### Building the Containers
 
@@ -179,4 +179,4 @@ docker build -f docker/linux/Dockerfile -t mlsysbook-linux .
 
 # For Windows
 docker build -f docker/windows/Dockerfile -t mlsysbook-windows .
-``` 
+```

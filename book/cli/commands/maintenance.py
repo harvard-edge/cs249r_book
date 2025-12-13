@@ -15,23 +15,23 @@ console = Console()
 
 class MaintenanceCommand:
     """Handles maintenance operations for the MLSysBook."""
-    
+
     def __init__(self, config_manager, chapter_discovery):
         """Initialize maintenance command.
-        
+
         Args:
             config_manager: ConfigManager instance
             chapter_discovery: ChapterDiscovery instance
         """
         self.config_manager = config_manager
         self.chapter_discovery = chapter_discovery
-        
+
     def switch_format(self, format_type: str) -> bool:
         """Switch active configuration format.
-        
+
         Args:
             format_type: Format to switch to ('html', 'pdf', 'epub')
-            
+
         Returns:
             True if switch succeeded, False otherwise
         """
@@ -39,24 +39,24 @@ class MaintenanceCommand:
             console.print("[red]❌ Format must be 'html', 'pdf', or 'epub'[/red]")
             console.print("[yellow]💡 Available formats: html, pdf, epub[/yellow]")
             return False
-            
+
         console.print(f"[blue]🔄 Switching to {format_type.upper()} configuration...[/blue]")
-        
+
         try:
             # Set up the symlink
             config_name = self.config_manager.setup_symlink(format_type)
             console.print(f"[green]✅ Switched to {format_type.upper()} configuration[/green]")
             console.print(f"[dim]🔗 Active config: {config_name}[/dim]")
-            
+
             # Show current status
             self.config_manager.show_symlink_status()
-            
+
             return True
-            
+
         except Exception as e:
             console.print(f"[red]❌ Error switching format: {e}[/red]")
             return False
-    
+
     def show_hello(self) -> bool:
         """Show welcome message and quick start guide."""
         # Banner
@@ -69,21 +69,21 @@ class MaintenanceCommand:
             padding=(1, 2)
         )
         console.print(banner)
-        
+
         # Quick start table
         quick_table = Table(show_header=True, header_style="bold green", box=None)
         quick_table.add_column("Action", style="green", width=25)
         quick_table.add_column("Command", style="cyan", width=30)
         quick_table.add_column("Description", style="dim", width=35)
-        
+
         quick_table.add_row("🚀 Get started", "./binder help", "Show all available commands")
         quick_table.add_row("📋 List chapters", "./binder list", "See all available chapters")
         quick_table.add_row("🏗️ Build a chapter", "./binder build intro", "Build introduction chapter")
         quick_table.add_row("🌐 Preview live", "./binder preview intro", "Start live development server")
         quick_table.add_row("🏥 Health check", "./binder doctor", "Run comprehensive diagnostics")
-        
+
         console.print(Panel(quick_table, title="🚀 Quick Start", border_style="green"))
-        
+
         # Tips
         tips = Panel(
             "[bold magenta]💡 Pro Tips:[/bold magenta]\n"
@@ -95,9 +95,9 @@ class MaintenanceCommand:
             border_style="magenta"
         )
         console.print(tips)
-        
+
         return True
-    
+
     def show_about(self) -> bool:
         """Show information about the MLSysBook project."""
         # Project info
@@ -114,21 +114,21 @@ class MaintenanceCommand:
             padding=(1, 2)
         )
         console.print(about_panel)
-        
+
         # Statistics
         chapters = self.chapter_discovery.get_all_chapters()
         stats_table = Table(show_header=True, header_style="bold blue", box=None)
         stats_table.add_column("Metric", style="blue", width=20)
         stats_table.add_column("Value", style="green", width=15)
         stats_table.add_column("Description", style="dim", width=35)
-        
+
         stats_table.add_row("📄 Chapters", str(len(chapters)), "Total number of chapters")
         stats_table.add_row("🏗️ Formats", "3", "HTML, PDF, EPUB supported")
         stats_table.add_row("🔧 Commands", "10+", "Build, preview, maintenance")
         stats_table.add_row("🏥 Health Checks", "18", "Comprehensive diagnostics")
-        
+
         console.print(Panel(stats_table, title="📊 Project Statistics", border_style="cyan"))
-        
+
         # Architecture info
         arch_panel = Panel(
             "[bold magenta]🏗️ Modular CLI Architecture:[/bold magenta]\n\n"
@@ -143,29 +143,29 @@ class MaintenanceCommand:
             border_style="magenta"
         )
         console.print(arch_panel)
-        
+
         return True
-    
+
     def setup_environment(self) -> bool:
         """Setup development environment (simplified version)."""
         console.print("[bold blue]🔧 MLSysBook Environment Setup[/bold blue]")
         console.print("[dim]Setting up your development environment...[/dim]\n")
-        
+
         # Run doctor command for comprehensive check
         console.print("[blue]🏥 Running health check first...[/blue]")
-        
+
         # Import and run doctor (avoiding circular imports)
         from .doctor import DoctorCommand
         doctor = DoctorCommand(self.config_manager, self.chapter_discovery)
         health_ok = doctor.run_health_check()
-        
+
         if health_ok:
             console.print("\n[green]✅ Environment setup complete![/green]")
             console.print("[dim]💡 Your system is healthy and ready for development[/dim]")
         else:
             console.print("\n[yellow]⚠️ Environment setup completed with issues[/yellow]")
             console.print("[dim]💡 Please review the health check results above[/dim]")
-            
+
         # Show next steps
         next_steps = Panel(
             "[bold green]🚀 Next Steps:[/bold green]\n\n"
@@ -177,7 +177,5 @@ class MaintenanceCommand:
             border_style="green"
         )
         console.print(next_steps)
-        
-        return health_ok
-    
 
+        return health_ok

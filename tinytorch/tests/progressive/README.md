@@ -12,7 +12,7 @@ TinyTorch uses **progressive testing** - when you complete Module N, we verify:
 ```
 Module 01: Tensor        ← Foundation: if this breaks, everything breaks
 Module 02: Activations   ← Builds on Tensor
-Module 03: Layers        ← Uses Tensor + Activations  
+Module 03: Layers        ← Uses Tensor + Activations
 Module 04: Losses        ← Uses Tensor + Layers
 Module 05: Autograd      ← Core: patches Tensor with gradient tracking
 ...and so on
@@ -35,20 +35,20 @@ Each module has three test categories:
 class TestLinearCapability:
     """
     🎯 LEARNING OBJECTIVE: Linear layer performs y = xW + b
-    
+
     A Linear layer is the fundamental building block of neural networks.
     It applies a linear transformation to input data.
     """
-    
+
     def test_linear_forward_computes_affine_transformation(self):
         """
         ✅ WHAT WE'RE TESTING: y = xW + b computation
-        
+
         Your Linear layer should:
         1. Store weight matrix W of shape (in_features, out_features)
         2. Store bias vector b of shape (out_features,)
         3. Compute output = input @ W + b
-        
+
         🔍 IF THIS FAILS: Check your forward() method
         """
 ```
@@ -61,14 +61,14 @@ class TestLinearCapability:
 class TestModule05DoesNotBreakFoundation:
     """
     🛡️ REGRESSION CHECK: Ensure Autograd doesn't break earlier modules
-    
+
     Autograd patches Tensor operations. This can accidentally break
     basic tensor functionality if not done carefully.
     """
-    
+
     def test_tensor_creation_still_works(self):
         """After enabling autograd, basic tensor creation must still work"""
-        
+
     def test_tensor_arithmetic_still_works(self):
         """After enabling autograd, tensor +, -, *, / must still work"""
 ```
@@ -81,13 +81,13 @@ class TestModule05DoesNotBreakFoundation:
 class TestLayerAutogradIntegration:
     """
     🔗 INTEGRATION CHECK: Layers + Autograd work together
-    
+
     Neural network training requires:
     - Layers compute forward pass
     - Loss measures error
     - Autograd computes gradients
     - Optimizer updates weights
-    
+
     This tests the Layer ↔ Autograd connection.
     """
 ```
@@ -114,7 +114,7 @@ Tests should be self-documenting:
 ```python
 # ❌ BAD: Unclear what's being tested
 def test_forward(self):
-    
+
 # ✅ GOOD: Clear learning objective
 def test_forward_pass_produces_correct_output_shape(self):
 
@@ -142,10 +142,3 @@ assert output.shape == expected, (
     f"   y should have shape (batch, out_features)"
 )
 ```
-
-
-
-
-
-
-

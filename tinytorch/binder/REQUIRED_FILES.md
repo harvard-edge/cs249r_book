@@ -73,4 +73,3 @@ These files exist but are NOT explicitly mentioned in the paper:
 ## Note on MAINTENANCE.md
 
 The paper mentions `MAINTENANCE.md` but the user doesn't want it. The maintenance commitment information (support through 2027, etc.) is described in the paper text but doesn't need to be in a separate file if the user prefers not to have it.
-

@@ -148,4 +148,3 @@ To fix these issues:
 - `clean_bibliographies.py` - Remove unused entries from `.bib` files
 - `fix_bibliography.py` - Update citation key formats
 - `.pre-commit-config.yaml` - Pre-commit hook configuration
-

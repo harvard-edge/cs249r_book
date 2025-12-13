@@ -1,7 +1,7 @@
 # Learning Objectives and Assessment Alignment Framework
 
-**Version:** 1.0  
-**Created:** 2025-11-01  
+**Version:** 1.0
+**Created:** 2025-11-01
 **Purpose:** Establish systematic framework for aligning chapter learning objectives with quiz assessments across all 21 chapters
 
 ---
@@ -432,7 +432,7 @@ python sync_objectives.py --chapter introduction --apply
 
 ### A. Exemplary Alignment
 
-**Chapter:** On-Device Learning  
+**Chapter:** On-Device Learning
 **Objective:** "Analyze how training amplifies resource constraints compared to inference, quantifying memory (3-5×), computational (2-3×), and energy overhead impacts"
 
 **Mapped Questions:**
@@ -447,7 +447,7 @@ python sync_objectives.py --chapter introduction --apply
 
 ### B. Poor Alignment (Anti-Pattern)
 
-**Chapter:** Introduction (Original)  
+**Chapter:** Introduction (Original)
 **Objective:** "Define machine learning systems as integrated computing systems comprising data, algorithms, and infrastructure"
 
 **Original Quiz Objective:** "Understand the fundamental difference between traditional and ML systems."
@@ -496,14 +496,10 @@ python sync_objectives.py --chapter introduction --apply
 
 ## Contact and Contributions
 
-**Questions:** Open issue on GitHub with tag `learning-objectives`  
-**Improvements:** Submit PR to `/docs/LEARNING_OBJECTIVES_FRAMEWORK.md`  
+**Questions:** Open issue on GitHub with tag `learning-objectives`
+**Improvements:** Submit PR to `/docs/LEARNING_OBJECTIVES_FRAMEWORK.md`
 **Review Cycle:** Quarterly updates aligned with book releases
 
 ---
 
 *This framework establishes MLSysBook as the gold standard for pedagogically rigorous technical textbooks with evidence-based learning design.*
-
-
-
-

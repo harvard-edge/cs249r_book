@@ -112,7 +112,7 @@ output = layer2.forward(x)
 """
 ## 🔬 Motivation: Why Compression Matters
 
-Before we learn compression, let's profile a model to analyze its weight 
+Before we learn compression, let's profile a model to analyze its weight
 distribution. We'll discover that many weights are tiny and might not matter much!
 """
 
@@ -1345,40 +1345,40 @@ def demo_compression_with_profiler():
     # Create a simple model (Linear already imported above)
     model = Linear(512, 256)
     model.name = "baseline_model"
-    
+
     print("\n🏋️  BEFORE: Dense Model")
     print("-" * 70)
-    
+
     # Measure baseline
     param_count_before = profiler.count_parameters(model)
     sparsity_before = measure_sparsity(model)
     input_shape = (32, 512)
     memory_before = profiler.measure_memory(model, input_shape)
-    
+
     print(f"   Parameters: {param_count_before:,}")
     print(f"   Sparsity: {sparsity_before*100:.1f}% (zeros)")
     print(f"   Memory: {memory_before['parameter_memory_mb']:.2f} MB")
     print(f"   Active parameters: {int(param_count_before * (1 - sparsity_before)):,}")
-    
+
     # Apply magnitude pruning
     target_sparsity = 0.7  # Remove 70% of parameters
     print(f"\n✂️  Applying {target_sparsity*100:.0f}% Magnitude Pruning...")
     pruned_model = magnitude_prune(model, sparsity=target_sparsity)
     pruned_model.name = "pruned_model"
-    
+
     print("\n🪶 AFTER: Pruned Model")
     print("-" * 70)
-    
+
     # Measure after pruning
     param_count_after = profiler.count_parameters(pruned_model)
     sparsity_after = measure_sparsity(pruned_model)
     memory_after = profiler.measure_memory(pruned_model, input_shape)
-    
+
     print(f"   Parameters: {param_count_after:,} (same, but many are zero)")
     print(f"   Sparsity: {sparsity_after*100:.1f}% (zeros)")
     print(f"   Memory: {memory_after['parameter_memory_mb']:.2f} MB (same storage)")
     print(f"   Active parameters: {int(param_count_after * (1 - sparsity_after)):,}")
-    
+
     print("\n📈 COMPRESSION RESULTS")
     print("=" * 70)
     sparsity_gain = (sparsity_after - sparsity_before) * 100
@@ -1386,12 +1386,12 @@ def demo_compression_with_profiler():
     active_after = int(param_count_after * (1 - sparsity_after))
     reduction_ratio = active_before / active_after if active_after > 0 else 1
     params_removed = active_before - active_after
-    
+
     print(f"   Sparsity increased: {sparsity_before*100:.1f}% → {sparsity_after*100:.1f}%")
     print(f"   Active params reduced: {active_before:,} → {active_after:,}")
     print(f"   Parameters removed: {params_removed:,} ({sparsity_gain:.1f}% of total)")
     print(f"   Compression ratio: {reduction_ratio:.1f}x fewer active parameters")
-    
+
     print("\n💡 Key Insight:")
     print(f"   Magnitude pruning removes {sparsity_gain:.0f}% of parameters")
     print(f"   With sparse storage formats, this means {reduction_ratio:.1f}x less memory!")
@@ -1523,65 +1523,65 @@ for export to the tinytorch package. This allows milestones to use the complete 
 class Compressor:
     """
     Complete compression system for milestone use.
-    
+
     Provides pruning, distillation, and low-rank approximation techniques.
-    
+
     This class delegates to the standalone functions (measure_sparsity, magnitude_prune, etc.)
     that students implement, providing a clean OOP interface for milestones.
-    
+
     Note: Compressor methods return fractions (0-1) for consistency with benchmarking,
     while standalone functions return percentages (0-100) for educational clarity.
     """
-    
+
     @staticmethod
     def measure_sparsity(model) -> float:
         """Measure the sparsity of a model (returns fraction 0-1)."""
         # Delegate to standalone function and convert percentage to fraction
         return measure_sparsity(model) / 100.0
-    
+
     @staticmethod
     def magnitude_prune(model, sparsity=0.5):
         """Prune model weights by magnitude. Delegates to standalone function."""
         return magnitude_prune(model, sparsity)
-    
+
     @staticmethod
     def structured_prune(model, prune_ratio=0.5):
         """Prune entire neurons/channels. Delegates to standalone function."""
         return structured_prune(model, prune_ratio)
-    
+
     @staticmethod
     def compress_model(model, compression_config: Dict[str, Any]):
         """
         Apply complete compression pipeline to a model.
-        
+
         Args:
             model: Model to compress
             compression_config: Dictionary with compression settings
                 - 'magnitude_sparsity': float (0-1)
                 - 'structured_prune_ratio': float (0-1)
-        
+
         Returns:
             Compressed model with sparsity stats (fractions 0-1)
         """
         stats = {
             'original_sparsity': Compressor.measure_sparsity(model)
         }
-        
+
         # Apply magnitude pruning
         if 'magnitude_sparsity' in compression_config:
             model = Compressor.magnitude_prune(
                 model, compression_config['magnitude_sparsity']
             )
-        
+
         # Apply structured pruning
         if 'structured_prune_ratio' in compression_config:
             model = Compressor.structured_prune(
                 model, compression_config['structured_prune_ratio']
             )
-        
+
         stats['final_sparsity'] = Compressor.measure_sparsity(model)
         stats['compression_ratio'] = 1.0 / (1.0 - stats['final_sparsity']) if stats['final_sparsity'] < 1.0 else float('inf')
-        
+
         return model, stats
 
 # Note: measure_sparsity, magnitude_prune, structured_prune are defined earlier in this module.
@@ -1821,24 +1821,24 @@ def demo_compression():
     """🎯 See pruning create sparsity."""
     print("🎯 AHA MOMENT: Pruning Removes Weights")
     print("=" * 45)
-    
+
     # Create a model
     layer = Linear(128, 64)
-    
+
     original_nonzero = np.count_nonzero(layer.weight.data)
     original_total = layer.weight.data.size
-    
+
     # Apply 50% pruning
     Compressor.magnitude_prune(layer, sparsity=0.5)
-    
+
     pruned_nonzero = np.count_nonzero(layer.weight.data)
     sparsity = 1 - (pruned_nonzero / original_total)
-    
+
     print(f"Original: {original_nonzero:,} non-zero weights")
     print(f"After 50% pruning: {pruned_nonzero:,} non-zero weights")
     print(f"\nActual sparsity: {sparsity:.1%}")
     print(f"Half the weights are now zero!")
-    
+
     print("\n✨ Smaller weights removed—model still works!")
 
 # %%

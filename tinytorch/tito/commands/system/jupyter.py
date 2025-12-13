@@ -24,10 +24,10 @@ class JupyterCommand(BaseCommand):
 
     def run(self, args: Namespace) -> int:
         console = self.console
-        
-        console.print(Panel("📓 Jupyter Notebook Server", 
+
+        console.print(Panel("📓 Jupyter Notebook Server",
                            title="Interactive Development", border_style="bright_green"))
-        
+
         # Determine which Jupyter to start
         if args.lab:
             cmd = ["jupyter", "lab", "--port", str(args.port)]
@@ -35,18 +35,18 @@ class JupyterCommand(BaseCommand):
         else:
             cmd = ["jupyter", "notebook", "--port", str(args.port)]
             console.print(f"🚀 Starting Jupyter Notebook on port {args.port}...")
-        
+
         console.print("💡 Open your browser to the URL shown above")
         console.print("📁 Navigate to your module's notebook directory")
         console.print("🔄 Press Ctrl+C to stop the server")
-        
+
         try:
             subprocess.run(cmd)
         except KeyboardInterrupt:
             console.print("\n🛑 Jupyter server stopped")
         except FileNotFoundError:
-            console.print(Panel("[red]❌ Jupyter not found. Install with: pip install jupyter[/red]", 
+            console.print(Panel("[red]❌ Jupyter not found. Install with: pip install jupyter[/red]",
                               title="Error", border_style="red"))
             return 1
-        
-        return 0 
+
+        return 0

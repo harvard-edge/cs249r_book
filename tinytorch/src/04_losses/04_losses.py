@@ -1639,26 +1639,26 @@ def demo_losses():
     """🎯 See how loss responds to prediction quality."""
     print("🎯 AHA MOMENT: Loss Guides Learning")
     print("=" * 45)
-    
+
     loss_fn = MSELoss()
     target = Tensor(np.array([1.0, 0.0, 0.0]))
-    
+
     # Perfect prediction
     perfect = Tensor(np.array([1.0, 0.0, 0.0]))
     loss_perfect = loss_fn(perfect, target)
-    
+
     # Close prediction
     close = Tensor(np.array([0.9, 0.1, 0.1]))
     loss_close = loss_fn(close, target)
-    
+
     # Wrong prediction
     wrong = Tensor(np.array([0.0, 1.0, 1.0]))
     loss_wrong = loss_fn(wrong, target)
-    
+
     print(f"Perfect prediction → Loss: {float(loss_perfect.data):.4f}")
     print(f"Close prediction   → Loss: {float(loss_close.data):.4f}")
     print(f"Wrong prediction   → Loss: {float(loss_wrong.data):.4f}")
-    
+
     print("\n✨ Lower loss = better predictions! Training minimizes this.")
 
 # %%

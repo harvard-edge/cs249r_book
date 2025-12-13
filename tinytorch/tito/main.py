@@ -57,7 +57,7 @@ logger = logging.getLogger(__name__)
 
 class TinyTorchCLI:
     """Main CLI application class."""
-    
+
     def __init__(self):
         """Initialize the CLI application."""
         self.config = CLIConfig.from_project_root()
@@ -113,7 +113,7 @@ class TinyTorchCLI:
                 (f'[{Theme.CAT_HELP}]tito --help[/{Theme.CAT_HELP}]', 'See all commands'),
             ]
         }
-    
+
     def _generate_welcome_text(self) -> str:
         """Generate dynamic welcome text for interactive mode."""
         lines = []
@@ -180,7 +180,7 @@ class TinyTorchCLI:
             formatter_class=argparse.RawDescriptionHelpFormatter,
             epilog=self._generate_epilog()
         )
-        
+
         # Global options
         parser.add_argument(
             '--version',
@@ -197,14 +197,14 @@ class TinyTorchCLI:
             action='store_true',
             help='Disable colored output'
         )
-        
+
         # Subcommands
         subparsers = parser.add_subparsers(
             dest='command',
             help='Available commands',
             metavar='COMMAND'
         )
-        
+
         # Add command parsers
         for command_name, command_class in self.commands.items():
             # Create temporary instance to get metadata
@@ -214,13 +214,13 @@ class TinyTorchCLI:
                 help=temp_command.description
             )
             temp_command.add_arguments(cmd_parser)
-        
+
         return parser
-    
+
     def validate_environment(self) -> bool:
         """Validate the environment and show issues if any."""
         issues = self.config.validate(get_venv_path())
-        
+
         if issues:
             print_error(
                 "Environment validation failed:\n" + "\n".join(f"  • {issue}" for issue in issues),
@@ -230,9 +230,9 @@ class TinyTorchCLI:
             # Return True to allow command execution despite validation issues
             # This is temporary for development
             return True
-        
+
         return True
-    
+
     def _show_help(self) -> int:
         """Show custom Rich-formatted help."""
         from rich.table import Table
@@ -278,12 +278,12 @@ class TinyTorchCLI:
 
             parser = self.create_parser()
             parsed_args = parser.parse_args(args)
-            
+
             # Update config with global options
             if hasattr(parsed_args, 'verbose') and parsed_args.verbose:
                 self.config.verbose = True
                 logging.getLogger().setLevel(logging.DEBUG)
-            
+
             if hasattr(parsed_args, 'no_color') and parsed_args.no_color:
                 self.config.no_color = True
 
@@ -299,7 +299,7 @@ class TinyTorchCLI:
                         "Virtual Environment Required"
                     )
                     return 1
-            
+
             # Show banner for interactive commands (except logo which has its own display)
             # Skip banner for dev command with --json flag (CI/CD output)
             skip_banner = (
@@ -308,7 +308,7 @@ class TinyTorchCLI:
             )
             if parsed_args.command and not self.config.no_color and not skip_banner:
                 print_banner()
-            
+
             # Validate environment for most commands (skip for health)
             skip_validation = (
                 parsed_args.command in [None, 'version', 'help'] or
@@ -319,7 +319,7 @@ class TinyTorchCLI:
             if not skip_validation:
                 if not self.validate_environment():
                     return 1
-            
+
             # Handle no command
             if not parsed_args.command:
                 # Show ASCII logo first
@@ -332,7 +332,7 @@ class TinyTorchCLI:
                     border_style=Theme.BORDER_WELCOME
                 ))
                 return 0
-            
+
             # Execute command
             if parsed_args.command in self.commands:
                 command_class = self.commands[parsed_args.command]
@@ -341,7 +341,7 @@ class TinyTorchCLI:
             else:
                 print_error(f"Unknown command: {parsed_args.command}")
                 return 1
-                
+
         except KeyboardInterrupt:
             self.console.print(f"\n[{Theme.WARNING}]Operation cancelled by user[/{Theme.WARNING}]")
             return 130
@@ -360,4 +360,4 @@ def main() -> int:
     return cli.run(sys.argv[1:])
 
 if __name__ == "__main__":
-    sys.exit(main()) 
+    sys.exit(main())

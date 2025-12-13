@@ -22,7 +22,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ]]--
 -- pre-pre-release
--- 
+--
 -- partial rewrite, complete later
 
 -- nice rename function learned from shafayetShafee :-)
@@ -39,7 +39,7 @@ local fmt=""
 if ishtml or isepub then fmt="html" elseif ispdf then fmt = "pdf" end
 
 -- TODO encapsulate stylez into a doc thing or so
--- maybe later allow various versions concurrently. 
+-- maybe later allow various versions concurrently.
 -- this could probably be problematic because of option clashes in rendered header?
 
 local stylename="foldbox"
@@ -55,16 +55,16 @@ fbx={ -- global table, holds information for processing fboxes
 
 
 -- utility functions ---
-local function DeInline(tbl)  
+local function DeInline(tbl)
     local result ={}
     for i, v in pairs(tbl) do
-        pdtype = pandoc.utils.type(v)   
+        pdtype = pandoc.utils.type(v)
         if pdtype == "Inlines" or pdtype =="boolean"
-        then 
+        then
             result[i] = str(v)
         elseif pdtype == "List" then result[i] = DeInline(v)
         end
-    end  
+    end
     return(result)
 end
 
@@ -75,19 +75,19 @@ local function tablecontains(tbl, val)
     end
   end
   return false
-end  
+end
 
 local function ifelse(condition, iftrue, iffalse)
   if condition then return iftrue else return iffalse end
-end  
+end
 
 local function replaceifnil(existvalue, replacevalue)
   if existvalue ~= nil then return existvalue else return replacevalue end
-end  
+end
 
 local function replaceifempty(existvalue, replacevalue)
   if existvalue == nil or existvalue=="" then return replacevalue else return existvalue end
-end  
+end
 
 
 local function updateTable (oldtbl, newtbl, ignorekeys)
@@ -102,11 +102,11 @@ local function updateTable (oldtbl, newtbl, ignorekeys)
          end
         end
       -- special: set reflabel to label if not given in attribs
---        if newattribs["reflabel"] == nil then result.reflabel = result.label end 
+--        if newattribs["reflabel"] == nil then result.reflabel = result.label end
       -- TODO: do this elsewhere
-      end  
+      end
     end
-  end  
+  end
   return(result)
 end
 
@@ -117,8 +117,8 @@ end
 
 -- find chapter number and file name
 -- returns a table with keyed entries
---   processedfile: string, 
---   ishtmlbook: boolean, 
+--   processedfile: string,
+--   ishtmlbook: boolean,
 --   chapno: string (at least if ishtmlbook),
 --   unnumbered: boolean - initial state of section / chapter
 -- if the user has given a chapno yaml entry, then unnumbered = false
@@ -126,10 +126,10 @@ end
 -- !!! for pdf, the workflow is very different! ---
 -- also find out if lastfile of a book
 
--- find first and last file of a book, and chapter number of that file 
+-- find first and last file of a book, and chapter number of that file
 local function chapterinfo(book, fname)
-  local first = "" 
-  local last = "" 
+  local first = ""
+  local last = ""
   local chapno = nil
   local info = {}
   --if book.render then
@@ -152,36 +152,36 @@ local function Meta_findChapterNumber(meta)
   fbx.isbook = meta.book ~= nil
   fbx.ishtmlbook = meta.book ~= nil and not quarto.doc.is_format("pdf")
   fbx.processedfile = processedfile
- 
+
   fbx.output_file = PANDOC_STATE.output_file
  -- pout(" now in "..processedfile.." later becomes ".. str(fbx.output_file))
-  
+
   fbx.isfirstfile = not fbx.ishtmlbook
   fbx.islastfile = not fbx.ishtmlbook
-  if fbx.isbook then 
+  if fbx.isbook then
     local chinfo = chapterinfo(meta.book, processedfile)
     if fbx.ishtmlbook then
       fbx.xreffile= "._htmlbook_xref.json"
-    else 
+    else
       fbx.xreffile= "._pdfbook_xref.json"
       -- fbx.xreffile= "._"..chinfo.lastchapter.."_xref.json"
-    end  
-    fbx.isfirstfile = chinfo.isfirst 
-    fbx.islastfile  = chinfo.islast 
-    
+    end
+    fbx.isfirstfile = chinfo.isfirst
+    fbx.islastfile  = chinfo.islast
+
     fbx.unnumbered = false
     -- user set chapter number overrides information from meta
-    if meta.chapno then  
+    if meta.chapno then
       fbx.chapno = str(meta.chapno)
     else
       if chinfo.chapno ~= nil then
         fbx.chapno = str(chinfo.chapno)
-      else  
+      else
         fbx.chapno = ""
         fbx.unnumbered = true
       end
     end
-  else -- not a book. 
+  else -- not a book.
     fbx.xreffile ="._"..processedfile.."_xref.json"
     fbx.chapno = ""
     fbx.unnumbered = true
@@ -193,11 +193,11 @@ local function makeKnownClassDetector(knownclasses)
     for _, cls in pairs(div.classes) do
       if tablecontains(knownclasses, cls) then return str(cls) end
     end
-    return nil  
+    return nil
   end
-end  
+end
 
-local function Meta_initClassDefaults (meta) 
+local function Meta_initClassDefaults (meta)
   -- do we want to prefix fbx numbers with section numbers?
   -- Configuration is now only under filter-metadata
   local cunumbl = nil
@@ -209,22 +209,22 @@ local function Meta_initClassDefaults (meta)
   --[[ TODO later
   if meta.fbx_number_within_sections then
     fbx.number_within_sections = meta.fbx_number_within_sections
-  else   
+  else
     fbx.number_within_sections = false
-  end 
-  --]] 
+  end
+  --]]
   -- prepare information for numbering fboxes by class
   -- fbx.knownClasses ={}
   fbx.classDefaults ={}
   local groupDefaults = {default = stylez.defaultOptions} -- not needed later
-  fbx.counter = {unnumbered = 0} -- counter for unnumbered divs 
+  fbx.counter = {unnumbered = 0} -- counter for unnumbered divs
   -- ! unnumbered not for classes that have unnumbered as default !
   -- fbx.counterx = {}
   if cunumbl.classes == nil then
         print("== @%!& == Warning == &!%@ ==\n wrong format for fboxes yaml: classes needed")
-        return     
+        return
   end
-  
+
 -- simplified copy of yaml data: inlines to string
   if cunumbl.groups then
     for key, val in pairs(cunumbl.groups) do
@@ -241,8 +241,8 @@ local function Meta_initClassDefaults (meta)
       --fbx.
       groupDefaults[key] = ginfo
    --   pout("-----group---"); pout(ginfo)
-    end 
-  end  
+    end
+  end
   for key, val in pairs(cunumbl.classes) do
     local clinfo = DeInline(val)
   --  pout("==== before after =======");  pout(clinfo)
@@ -252,12 +252,12 @@ local function Meta_initClassDefaults (meta)
     clinfo = updateTable(groupDefaults[theGroup], clinfo)
     clinfo.label = replaceifnil(clinfo.label, str(key))
     clinfo.reflabel = replaceifnil(clinfo.reflabel, clinfo.label)
-    -- assign counter --  
+    -- assign counter --
     clinfo.cntname = replaceifnil(clinfo.group, str(key))
     fbx.counter[clinfo.cntname] = 0 -- sets the counter up if non existing
     fbx.classDefaults[key] = clinfo
  -- pout("---class----");  pout(clinfo)
-  end 
+  end
   fbx.is_cunumblo = makeKnownClassDetector(fbx.knownclasses)
 -- gather lists-of and make filenames by going through all classes
   for _, val in pairs(fbx.classDefaults) do
@@ -276,28 +276,28 @@ local function Meta_initClassDefaults (meta)
   end
  -- pout(fbx.lists)
   --]]
--- document can give the chapter number for books in yaml header 
+-- document can give the chapter number for books in yaml header
 -- this becomes the counter Prefix
 end
- 
+
 local initMeta = function(m)
   -- Skip this extension entirely for ePub builds
   -- ePub will use Quarto's native callout rendering with custom CSS
   if quarto.doc.is_format("epub") then
     return(m)
   end
-  
+
   -- Configuration is now only under filter-metadata
   local config = nil
   if m["filter-metadata"] and m["filter-metadata"]["mlsysbook-ext/custom-numbered-blocks"] then
     config = m["filter-metadata"]["mlsysbook-ext/custom-numbered-blocks"]
   end
-  
+
   if config then
     Meta_findChapterNumber(m)
     Meta_initClassDefaults(m)
   else
-    print("== @%!& == Warning == &!%@ ==\n missing cunumblo key in filter-metadata yaml")  
+    print("== @%!& == Warning == &!%@ ==\n missing cunumblo key in filter-metadata yaml")
   end
   return(m)
 end
@@ -321,43 +321,43 @@ local function fboxDiv_setAttributes(el, cls, prefix)
   local counter = {}
   local cnts = 0
   local idnumber = "0.0"
-   
+
   --  set prefix
   ela._prefix = prefix
 
-  id = replaceifnil(id ,"") 
-  tag = replaceifnil(tag ,"") 
-  
+  id = replaceifnil(id ,"")
+  tag = replaceifnil(tag ,"")
+
   --- determine if numbered and / or tagged ------
-  
+
   if tagged then numbered = false end
   if el.classes:includes("unnumbered") then numbered = false end
 
-  if ela.numtag then 
+  if ela.numtag then
     tag = ela.numtag
   --  print("!!! also hier mal ein numtag.\n")
     numbered = true
     tagged = true
   end
 
--- make counts ---  
-  
+-- make counts ---
+
   if not numbered then cntkey = "unnumbered" end
-    
+
   cnts = fbx.counter[cntkey] +1
   fbx.counter[cntkey] = cnts
- 
+
   idnumber = ifelse(prefix ~= "", prefix .. '.' .. cnts, str(cnts))
   --[[
   if prefix ~="" then  idnumber = prefix .. '.' .. cnts
     else idnumber = str(cnts)
-  end    
+  end
 
-  if numbered then 
+  if numbered then
     if  not tagged then tag = idnumber
-    else tag = idnumber.."("..tag..")" 
-    end  
-  end  
+    else tag = idnumber.."("..tag..")"
+    end
+  end
 ]]--
   if numbered then tag = idnumber..ifelse(tagged, "("..tag..")", "" ) end
 
@@ -366,15 +366,15 @@ local function fboxDiv_setAttributes(el, cls, prefix)
       autoid = ela._fbxclass..'-'..tag
     else
       autoid = ela._fbxclass..'*-'..idnumber
-    end  
+    end
     -- changed my mind here: always give autoid
     else autoid = ela._fbxclass..'-id-'..id
-  end  
-  
+  end
+
   -- do not change identifier el.identifier = id
-  
-  ela._autoid = autoid 
-   
+
+  ela._autoid = autoid
+
   ela._tag = tag
 
   ela._file = fbx.processedfile -- necessary to reference between chapters. At least with  quarto 1.3
@@ -394,16 +394,16 @@ local function fboxDiv_mark_for_processing(div)
     if not div.classes:includes("callout") then
       div.classes:insert(1, "callout")
     end
-    
+
     diva._process_me = "true"
     diva._fbxclass = str(cls)
     diva._prefix = ""
     diva._tag = ""
-    diva._collapse = str(replaceifnil(diva.collapse, ClassDef.collapse)) 
-    diva._boxstyle = str(replaceifnil(diva.boxstyle, ClassDef.boxstyle)) 
-    diva._label = str(replaceifnil(diva.label, ClassDef.label)) 
-    diva._reflabel = str(replaceifnil(diva.reflabel, ClassDef.reflabel)) 
-  end  
+    diva._collapse = str(replaceifnil(diva.collapse, ClassDef.collapse))
+    diva._boxstyle = str(replaceifnil(diva.boxstyle, ClassDef.boxstyle))
+    diva._label = str(replaceifnil(diva.label, ClassDef.label))
+    diva._reflabel = str(replaceifnil(diva.reflabel, ClassDef.reflabel))
+  end
   return(div)
 end
 
@@ -414,33 +414,33 @@ local function Pandoc_prefix_count(doc)
   local secno = 0
   local prefix = "0"
   if fbx.ishtmlbook then prefix = fbx.chapno end
- 
+
 -- pout("this is a book?"..str(fbx.ishtmlbook))
 
  --- make numbering and prep div blocks ---
 --[[------- comment -----------
- quarto (1.2) books allow level 1 headings within a chapter. 
+ quarto (1.2) books allow level 1 headings within a chapter.
   This would give a mess for crossreference numbers: e.g. multiple examples 3.1,
   from chapter 1 (with 2 l1 headers ) and chapter 3.
  Therefore I decided to ignore level 1 headings in chapters.
  This can easily be changed, then the crossref is for the last occurence only.
  Maybe one day when there is more fine tuning concerning individual numbering depth.
  If this happens before quarto 1.4
-   
---]]---------- end comment ------------  
+
+--]]---------- end comment ------------
   for i, blk in ipairs(doc.blocks) do
 --    print(prefix.."-"..i.." "..blk.t.."\n")
-  
-    if blk.t=="Header" and not fbx.ishtmlbook then 
+
+    if blk.t=="Header" and not fbx.ishtmlbook then
       if (blk.level == 1) then -- increase prefix
-         if  blk.classes:includes("unnumbered") 
-         then 
-           prefix = "" 
+         if  blk.classes:includes("unnumbered")
+         then
+           prefix = ""
          else
-            if blk.attr.attributes.secno then 
-  
+            if blk.attr.attributes.secno then
+
                prefix = str(blk.attr.attributes.secno)
-            else 
+            else
                secno = secno + 1
                prefix = str(secno)
            end
@@ -450,16 +450,16 @@ local function Pandoc_prefix_count(doc)
          -- of numbering depth
          -- then: add a numdepth variable to fbx with a list of keys
          for k in pairs(fbx.counter) do fbx.counter[k]=0 end
-      end  
+      end
 
       -- problem: only the outer divs are captured
-    elseif blk.t=="Div" then 
+    elseif blk.t=="Div" then
         local known = fbx.is_cunumblo(blk)
-        if  known then 
+        if  known then
            blk = fboxDiv_setAttributes(blk, known, prefix)
-        end  
+        end
     end
-  end  
+  end
   return(doc)
 end
 
@@ -468,28 +468,28 @@ local function Divs_getid(el)
   -- local known = getKnownEnv(el.attr.classes)
    local ela = el.attributes
    local id = el.identifier
-   
+
    if not ela._process_me then return(el) end
    -- pout("--- processing item with id ".. replaceifempty(id, "LEER"))
-   
-   if id == nil or id =="" then  
+
+   if id == nil or id =="" then
     -- try in next header
     el1 = el.content[1]
-    if el1.t=="Header" then 
+    if el1.t=="Header" then
     --    pout("--- looking at header with id "..el1.identifier)
     --    pout("--- still processing item with id ".. replaceifempty(id, "LEER"))
      -- pout("replacing id")
       id = el1.identifier
       el.identifier = id
     end
-  end 
-  if id == nil or id =="" 
-    then  
+  end
+  if id == nil or id ==""
+    then
       -- pout("immer noch leer")
       if ela._autoid ~= nil then
       id = ela._autoid
       el.identifier = id
-    end 
+    end
     --else pout("nix autoid in ");pout(ela._autoid)
   end
   -- pout("resulting el:"); pout(el.attr)
@@ -502,18 +502,18 @@ local function str_sanimath(theInline, fmt)
   local newstring = theInline:walk{
     Math = function(ma)
       local mathtxt = str(ma.text)
-      if fmt == "html" then 
+      if fmt == "html" then
         return {'<span class="math inline">\\(' .. mathtxt .. '\\)</span>'}
-      elseif fmt == "pdf" then 
+      elseif fmt == "pdf" then
         return {'\\(' .. mathtxt .. '\\)'}
-      elseif fmt == "md" then 
+      elseif fmt == "md" then
         return  {'$' .. mathtxt .. '$'}
       else return {mathtxt}
-      end  
-  end  
+      end
+  end
   }
   return str(newstring)
-end  
+end
 
 
 ----------- title of divs ----------------
@@ -524,30 +524,30 @@ local function Divs_maketitle(el)
    local mdtitl = replaceifnil(ela.title, "")
    local ClassDef = {}
    -- local id = el.identifier
-   
+
    if not ela._process_me then return(el) end
   -- pout("--- processing item with id ".. replaceifempty(el.identifier, "LEER"))
-   
+
    ClassDef = fbx.classDefaults[ela._fbxclass]
- 
-   if titl == nil then  
+
+   if titl == nil then
       el1 = el.content[1]
-      if el1.t=="Header" then 
+      if el1.t=="Header" then
         -- sanitize math inline. depends on format
         ela.title = str(el1.content)  -- readable version without math
         mdtitl = str_sanimath(el1.content, "md")
         if ishtml then titl = str_sanimath(el1.content, "html")
           elseif ispdf then titl = str_sanimath(el1.content, "pdf")
           else titl = mdtitl
-        end 
+        end
     --    pout("--- looking at header with id "..el1.identifier)
     --    pout("--- still processing item with id ".. replaceifempty(id, "LEER"))
-    --[[    
+    --[[
     if id =="" or id == nil then
             pout("replacing id")
             id = el1.identifier
             el.identifier = id
-        end  
+        end
         ]]--
         table.remove(el.content, 1)
       else titl = ""
@@ -562,7 +562,7 @@ local function Divs_maketitle(el)
   -- pout("resulting el:"); pout(el)
    return(el)
  end
- 
+
 ---------------- initialize xref ----------
 -- xrefinit = require ("fbx3")
 
@@ -577,18 +577,18 @@ local function Pandoc_preparexref(doc)
   local exists = false
   if fbx.xref == nil then fbx.xref ={} end
   xref = fbx.xref
-  cnt = #xref  
+  cnt = #xref
   if cnt > 0 then
     for i, xinf in ipairs(xref) do
       file_autoid[xinf.file..xinf.autoid] = i
-    end  
-  -- pout(autoids)  
-  end  
+    end
+  -- pout(autoids)
+  end
     for _, blk in ipairs(doc.blocks) do
       if blk.attributes then
         bla = blk.attributes
-        if bla._process_me then 
-          --pout("fbox "..blk.attributes._tag) 
+        if bla._process_me then
+          --pout("fbox "..blk.attributes._tag)
           ------------- an fbox :) ------------
           if blk.identifier == nil then id = ""
             else id = blk.identifier end
@@ -599,20 +599,20 @@ local function Pandoc_preparexref(doc)
             label    = bla._label,
             reflabel = bla._reflabel,
             reftag   = bla._tag,
-            refnum   = replaceifempty(bla._tag, "??"), 
+            refnum   = replaceifempty(bla._tag, "??"),
             file     = pandoc.path.split_extension(fbx.output_file)
           }
           -- if not xinfo.reftag then xinfo.reftag ="" end
           -- if xinfo.refnum == ""  then xinfo.refnum ="??" end
           --[[
-          if bla._tag 
-              then 
+          if bla._tag
+              then
                 if bla._tag ~="" then xinfo.refnum = bla._tag else xinfo.reftag="??" end
-              end 
-           ]]--   
-          --- check if autoid already exist in database. otherwise update 
+              end
+           ]]--
+          --- check if autoid already exist in database. otherwise update
           oldxrefno = file_autoid[xinfo.file..xinfo.autoid]
-          if oldxrefno == nil then         
+          if oldxrefno == nil then
             cnt = cnt+1
             bla._xrefno = cnt
             table.insert (xref, cnt, xinfo)
@@ -620,13 +620,13 @@ local function Pandoc_preparexref(doc)
             bla._xrefno = oldxrefno
             xref[oldxrefno] = xinfo
           end
-        end 
-      end   
+        end
+      end
     end
     return(doc)
-  end  
-  
-  
+  end
+
+
 local function Pandoc_finalizexref(doc)
   xref = fbx.xref -- shortcut
   local bla = {}
@@ -635,51 +635,51 @@ local function Pandoc_finalizexref(doc)
       bla = blk.attributes
       --pout(bla)
       if bla then
-        if bla._process_me == "true" then 
+        if bla._process_me == "true" then
           ------------- an fbox :) ------------
           xindex = tonumber(bla._xrefno)
           if xindex then
             xref[xindex].neu = true -- mark as new entry
             if bla._title then xref[xindex].title = bla._title end
           end
-         
+
         --  else pout("ochje.")
-        end  
-      end   
+        end
+      end
     end
  -- pout(xref)
   --- write to disc --
   --- check if this was the last file to process ---
   return(doc)
-end  
+end
 
 
 local function Meta_writexref(meta)
   local xref = fbx.xref
   local xrjson = quarto.json.encode(fbx.xref)
   local file = io.open(fbx.xreffile,"w")
-  if file ~= nil then 
-    file:write(xrjson) 
+  if file ~= nil then
+    file:write(xrjson)
     file:close()
   end
-  if fbx.islastfile then 
-  --  pout(fbx.processedfile.." -- nu aufräum! aber zack ---") 
+  if fbx.islastfile then
+  --  pout(fbx.processedfile.." -- nu aufräum! aber zack ---")
     for i, v in ipairs(xref) do
-      if not v.neu then 
+      if not v.neu then
   --      pout("killed")
   --      pout(v)
         xref[i] = nil
-      end   
+      end
     end
   --  pout("-------- überlebende")
   --  pout(xref)
-  end  
+  end
 end
 
-  
+
 local function Meta_readxref(meta)
   local file = io.open(fbx.xreffile,"r")
-  if file then 
+  if file then
      local xrfjson = file:read "*a"
     file:close()
     --[[
@@ -694,7 +694,7 @@ local function Meta_readxref(meta)
     --  pout("eingelesen")
     --pout(fbx.xref)
   else fbx.xref ={}
-  end  
+  end
   return(meta)
 end
 -------------- render -------------------
@@ -703,18 +703,18 @@ end
 local tt_from_attributes_id = function(A, id)
   --local tyti =""
   --local tt = {}
-  --if A._tag == "" then tyti = A._label 
-  --else tyti = A._label..' '..A._tag end 
+  --if A._tag == "" then tyti = A._label
+  --else tyti = A._label..' '..A._tag end
 --    print("TYTI: === "..tyti)
 local thelink = "#"..id
       if fbx.ishtmlbook and A._file~=nil then thelink = A._file..".qmd"..thelink end
 return {id = id,
-      type = A._fbxclass, 
+      type = A._fbxclass,
       tag = A._tag,
-      title = A._title, 
+      title = A._title,
       typlabel = A._label,
       typlabelTag = A._label .. ifelse(A._tag == "",""," "..A._tag),
-      mdtitle = A._mdtitle, 
+      mdtitle = A._mdtitle,
       collapse = A._collapse,
       boxstyle = A._boxstyle,
       link = thelink
@@ -730,30 +730,30 @@ insertStylesPandoc = function(doc)
   return(doc)
 end;
 
-renderDiv = function(thediv)    
+renderDiv = function(thediv)
   local A = thediv.attributes
   local tt = {}
   if A._fbxclass ~= nil then
-    
+
     collapsstr = str(A._collapse)
     tt = tt_from_attributes_id(A, thediv.identifier)
-    
+
     local fmt='html'
     if quarto.doc.is_format("pdf") then fmt = "tex" end;
-    if #thediv.content > 0 and thediv.content[1].t == "Para" and 
+    if #thediv.content > 0 and thediv.content[1].t == "Para" and
       thediv.content[#thediv.content].t == "Para" then
-        table.insert(thediv.content[1].content, 1, 
+        table.insert(thediv.content[1].content, 1,
           pandoc.RawInline(fmt, stylez.blockStart(tt, fmt)))
         table.insert(thediv.content,
           pandoc.RawInline(fmt, stylez.blockEnd(tt, fmt)))
       else
-        table.insert(thediv.content, 1, 
+        table.insert(thediv.content, 1,
           pandoc.RawBlock(fmt, stylez.blockStart(tt, fmt)))
-        table.insert(thediv.content,  
+        table.insert(thediv.content,
           pandoc.RawBlock(fmt, stylez.blockEnd(tt, fmt)))
-    end  
+    end
     --]]
-  end  
+  end
   return(thediv)
 end -- function renderDiv
 
@@ -762,15 +762,15 @@ end -- function renderDiv
 -- learned from nameref extension by shafayeedShafee
 -- TODO: make everything with walk. Looks so nice
 local function resolveref(data)
-  return { 
+  return {
    RawInline = function(el)
       local refid = el.text:match("\\ref{(.*)}")
-      if refid then 
+      if refid then
         if data[refid] then
           local href = '#'..refid
-          if fbx.ishtmlbook then 
-            href = data[refid].file .. '.html' .. href 
-          end  
+          if fbx.ishtmlbook then
+            href = data[refid].file .. '.html' .. href
+          end
           return pandoc.Link(data[refid].refnum, href)
       end  end
     end
@@ -789,10 +789,10 @@ function Pandoc_resolvexref(doc)
 end
 -- pout(xrefdata)
   return doc:walk(resolveref(xrefdata))
-end  
+end
 -----------
 
---- remove all attributes that start with underscore. 
+--- remove all attributes that start with underscore.
 -- could theoretically give clashes with filters that need persistent such attributes
 function Div_cleanupAttribs (el)
   if el.attributes._process_me then
@@ -827,17 +827,17 @@ local function Pandoc_makeListof(doc)
   for i, blk in ipairs(doc.blocks) do
     --[[ -- this may require manual deletion of headers in the list-of.qmd
     -- and does in this form not help with html books anyway --
-    if blk.t=="Header" then 
-      if blk.level==1 then 
+    if blk.t=="Header" then
+      if blk.level==1 then
         zeile = "\n\n## "..str(blk.content).."\n"
       --- add to all lists
         for _, lst in pairs (fbx.lists) do
           lst.contents = lst.contents..zeile
         end
       end
-      elseif blk.t=="Div" then 
-     ]]-- 
-     if blk.t=="Div" then 
+      elseif blk.t=="Div" then
+     ]]--
+     if blk.t=="Div" then
       if blk.attributes._process_me then
         thelists = fbx.classDefaults[blk.attributes._fbxclass].listin
         if thelists ~= nil and thelists ~="" then
@@ -848,26 +848,26 @@ local function Pandoc_makeListof(doc)
         -- TODO: should be like [**R-tip 1.1**](intro.qmd#Rtip-install)
           --zeile = ("\n[**"..tt.titeltyp.." \\ref{"..blk.identifier.."}**]" ..
             --       ifelse(tt.mdtitle=="","",": "..tt.mdtitle) ..
-              --     " \\Pageref{"..blk.identifier.."}\n") 
+              --     " \\Pageref{"..blk.identifier.."}\n")
             zeile = ("\n [**"..tt.typlabelTag.."**](" .. tt.link ..")" ..
-                     ifelse(tt.mdtitle=="","",": "..tt.mdtitle) .. "\\Pageref{".. tt.id .."}\n")                               
+                     ifelse(tt.mdtitle=="","",": "..tt.mdtitle) .. "\\Pageref{".. tt.id .."}\n")
           for _, lst in ipairs (thelists) do
             fbx.lists[lst].contents = fbx.lists[lst].contents..zeile
-          end 
+          end
         end
-      end 
+      end
     end
   end
   --- write to file ---
   for nam, lst in pairs(fbx.lists) do
-    if lst.file ~= nil then 
+    if lst.file ~= nil then
       local file = io.open(lst.file, lstfilemode)
-      if file then 
-        file:write(lst.contents) 
+      if file then
+        file:write(lst.contents)
         file:close()
-      else pout("cannot write to file "..lst.file)  
-      end  
-    end  
+      else pout("cannot write to file "..lst.file)
+      end
+    end
   end
   return(doc)
 end
@@ -883,15 +883,15 @@ return{
     ,{Pandoc = function(d)
       for k, v in pairs(stylez) do
         pout(k..":  ".. type(v))
-      end 
-    end 
+      end
+    end
     }
     ]]--
   , {Meta = Meta_readxref, Div=fboxDiv_mark_for_processing,
-     Pandoc = Pandoc_prefix_count} 
+     Pandoc = Pandoc_prefix_count}
  -- , {Div=pandocdivs, Pandoc=pandocblocks}
   --[[ ]]
-   
+
   , {Div = Divs_getid, Pandoc = Pandoc_preparexref}
   , {Pandoc = Pandoc_resolvexref}
   , {Div = Divs_maketitle}
@@ -901,7 +901,6 @@ return{
   , {Pandoc = insertStylesPandoc}
   , {Div = Div_cleanupAttribs}
 --[[
-  
+
   -- ]]
 }
-

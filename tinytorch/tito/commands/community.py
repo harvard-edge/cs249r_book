@@ -51,19 +51,19 @@ class CommunityCommand(BaseCommand):
             help='Log out of TinyTorch'
         )
         LogoutCommand(self.config).add_arguments(logout_parser)
-        
+
         # Profile command
         subparsers.add_parser(
             'profile',
             help='View/Edit your community profile'
         )
-        
+
         # Status command
         subparsers.add_parser(
             'status',
             help='Show login status and user info'
         )
-        
+
         # Map command
         subparsers.add_parser(
             'map',
@@ -73,18 +73,18 @@ class CommunityCommand(BaseCommand):
     def _show_status(self) -> int:
         """Show detailed auth status display."""
         is_logged_in = auth.is_logged_in()
-        
+
         if is_logged_in:
             email = auth.get_user_email() or "Unknown Email"
-            
+
             # Create an "ID Card" style display
             table = Table(show_header=False, box=None, padding=(0, 2))
             table.add_column("Field", style="dim")
             table.add_column("Value", style="bold")
-            
+
             table.add_row("Status", "[green]● Online / Authenticated[/green]")
             table.add_row("User", f"[cyan]{email}[/cyan]")
-            
+
             self.console.print(Panel(
                 table,
                 title="👤 TinyTorch Community ID",

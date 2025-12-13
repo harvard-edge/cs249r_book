@@ -3,7 +3,7 @@
 MLSysBook Custom Extension Protection Checker
 
 Verifies that our custom extensions are protected from accidental reinstallation
-by checking that they use the mlsysbook/ namespace that won't conflict with 
+by checking that they use the mlsysbook/ namespace that won't conflict with
 standard `quarto add` commands.
 """
 
@@ -14,7 +14,7 @@ from pathlib import Path
 def main():
     print("MLSysBook Custom Extension Protection Check")
     print("=" * 50)
-    
+
     # Define expected custom extensions in mlsysbook-ext namespace
     protected_extensions = {
         "mlsysbook-ext/custom-numbered-blocks": {
@@ -23,7 +23,7 @@ def main():
             "description": "Custom numbered blocks with MLSysBook styling"
         },
         "mlsysbook-ext/titlepage": {
-            "type": "moved", 
+            "type": "moved",
             "original": "nmfs-opensci/titlepage",
             "description": "Custom titlepage with MLSysBook branding"
         },
@@ -33,20 +33,20 @@ def main():
             "description": "Custom margin video extension for YouTube embedding"
         }
     }
-    
+
     # Base path for extensions
     extensions_dir = Path("book/_extensions")
-    
+
     if not extensions_dir.exists():
         print(f"❌ Extensions directory not found: {extensions_dir}")
         sys.exit(1)
-    
+
     print("🔒 Checking custom extension protection via mlsysbook-ext/ namespace...")
-    
+
     # Check each protected extension
     all_protected = True
     found_extensions = []
-    
+
     for ext_path, info in protected_extensions.items():
         full_path = extensions_dir / ext_path
         if full_path.exists():
@@ -55,7 +55,7 @@ def main():
         else:
             print(f"❌ Missing protected extension: {ext_path}")
             all_protected = False
-    
+
     # Check for old naming scheme (should be migrated)
     old_naming = [
         "ute-mlsysbook-custom/custom-numbered-blocks",
@@ -65,16 +65,16 @@ def main():
         "mlsysbook/titlepage",
         "mlsysbook/margin-video"
     ]
-    
+
     found_old = []
     for old_path in old_naming:
         if (extensions_dir / old_path).exists():
             found_old.append(old_path)
             print(f"⚠️  Warning: Found old naming scheme: {old_path}")
             print(f"   Consider migrating to mlsysbook-ext/ namespace")
-    
+
     print()
-    
+
     if all_protected and not found_old:
         print(f"✅ All {len(found_extensions)} custom extensions are properly protected!")
         print()

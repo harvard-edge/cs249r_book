@@ -246,7 +246,7 @@ improvements_YYYYMMDD_HHMMSS.json  # Summary of changes made
 ### Quarto Compatibility
 The script works seamlessly with Quarto's build process:
 - **Preserves**: All Quarto attributes (`{#fig-id .class}`)
-- **Maintains**: Reference links and cross-references  
+- **Maintains**: Reference links and cross-references
 - **Follows**: _quarto-html.yml chapter ordering
 - **Supports**: TikZ, Markdown, and code block figures
 
@@ -299,6 +299,6 @@ open build/html/index.html
 
 ---
 
-**Last Updated**: December 2024  
-**Tested With**: Quarto 1.5+, Ollama 0.3+, Python 3.8+  
-**Script Version**: 2.0 (streamlined options) 
+**Last Updated**: December 2024
+**Tested With**: Quarto 1.5+, Ollama 0.3+, Python 3.8+
+**Script Version**: 2.0 (streamlined options)

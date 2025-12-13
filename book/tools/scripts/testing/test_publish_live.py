@@ -14,7 +14,7 @@ from pathlib import Path
 def check_git_status():
     """Check if there are any uncommitted changes"""
     try:
-        result = subprocess.run(['git', 'status', '--porcelain'], 
+        result = subprocess.run(['git', 'status', '--porcelain'],
                               capture_output=True, text=True, check=True)
         return result.stdout.strip()
     except subprocess.CalledProcessError as e:
@@ -24,7 +24,7 @@ def check_git_status():
 def check_pdf_in_git():
     """Check if the PDF is being tracked by git"""
     try:
-        result = subprocess.run(['git', 'ls-files', 'assets/Machine-Learning-Systems.pdf'], 
+        result = subprocess.run(['git', 'ls-files', 'assets/Machine-Learning-Systems.pdf'],
                               capture_output=True, text=True)
         return result.stdout.strip() != ""
     except subprocess.CalledProcessError:
@@ -48,7 +48,7 @@ def main():
     """Main test function"""
     print("🧪 Testing PDF handling in publish-live workflow...")
     print()
-    
+
     # Check 1: Git status
     print("1️⃣ Checking git status...")
     git_status = check_git_status()
@@ -60,14 +60,14 @@ def main():
             print("   ✅ PDF not in git status")
     else:
         print("   ⚠️ Could not check git status")
-    
+
     # Check 2: PDF in git tracking
     print("\n2️⃣ Checking if PDF is tracked by git...")
     if check_pdf_in_git():
         print("   ❌ PDF is being tracked by git!")
     else:
         print("   ✅ PDF is not tracked by git")
-    
+
     # Check 3: PDF exists
     print("\n3️⃣ Checking if PDF exists in assets...")
     if check_pdf_exists():
@@ -76,14 +76,14 @@ def main():
         print(f"   📊 PDF size: {size / (1024*1024):.1f} MB")
     else:
         print("   ⚠️ PDF not found in assets/")
-    
+
     # Check 4: Gitignore configuration
     print("\n4️⃣ Checking .gitignore configuration...")
     if check_gitignore():
         print("   ✅ PDF is properly ignored in .gitignore")
     else:
         print("   ❌ PDF not found in .gitignore")
-    
+
     print("\n📋 Summary:")
     print("   - PDF should exist in assets/ for download")
     print("   - PDF should NOT be tracked by git")
@@ -94,4 +94,4 @@ def main():
     print("   - Release: https://github.com/harvard-edge/cs249r_book/releases")
 
 if __name__ == "__main__":
-    main() 
+    main()

@@ -97,10 +97,3 @@ def get_dependencies(module_num: str) -> list:
 def get_capabilities(module_num: str) -> dict:
     """Get capability information for a module."""
     return MODULE_CAPABILITIES.get(module_num, {})
-
-
-
-
-
-
-

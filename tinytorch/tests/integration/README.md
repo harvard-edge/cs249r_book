@@ -47,14 +47,14 @@ These test complete use cases:
 def test_gradients_flow_through_mlp():
     """Gradients must reach all layers"""
     layers = [Linear(4, 4) for _ in range(5)]
-    
+
     x = Tensor(np.random.randn(1, 4), requires_grad=True)
     h = x
     for layer in layers:
         h = relu(layer(h))
     loss = mse_loss(h, target)
     loss.backward()
-    
+
     # ALL layers must have gradients
     for i, layer in enumerate(layers):
         assert layer.weight.grad is not None, f"Layer {i} has no gradient!"
@@ -89,7 +89,7 @@ pytest tests/integration/ -v
 # Run only gradient flow tests
 pytest tests/integration/test_gradient_flow.py -v
 
-# Run only training flow tests  
+# Run only training flow tests
 pytest tests/integration/test_training_flow.py -v
 
 # Run quick smoke tests (for CI)
@@ -117,7 +117,7 @@ def test_profiling_does_not_break_training():
     with profiler.profile():
         loss = model(x)
         loss.backward()  # Should still work!
-    
+
     assert model.weight.grad is not None
 ```
 
@@ -139,4 +139,3 @@ For each gap, create a test that:
 1. Uses the module in a **realistic scenario**
 2. Verifies **correctness** (not just "doesn't crash")
 3. Checks **boundaries** with connected modules
-

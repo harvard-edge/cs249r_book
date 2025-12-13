@@ -80,7 +80,7 @@ The modular CLI has successfully replaced the original monolithic binder script:
 
 All functionality has been preserved and enhanced:
 - All existing commands work the same way
-- Same configuration files and output directories  
+- Same configuration files and output directories
 - Same build processes and quality
 - Enhanced error handling and progress indication
 - New preview and doctor commands added

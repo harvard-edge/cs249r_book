@@ -12,7 +12,7 @@ Usage:
   - Auto-fix:       python check_images.py -d ./assets --fix
   - Show progress:  python check_images.py -d ./assets --verbose
 
-By default, only shows summary. Use --verbose (-v) to see progress 
+By default, only shows summary. Use --verbose (-v) to see progress
 for each file with ✅/❌ indicators. Use --debug for detailed info.
 
 Validation methods:
@@ -63,7 +63,7 @@ def is_valid_image(filepath, expected_format):
     """Validate image files using PIL for raster formats, custom logic for SVG."""
     if expected_format == 'SVG':
         return is_valid_svg(filepath)
-    
+
     try:
         with Image.open(filepath) as img:
             actual_format = img.format.upper()
@@ -76,7 +76,7 @@ def fix_image(filepath, expected_format):
     if expected_format == 'SVG':
         console.print(f"⚠️  [yellow]Cannot fix SVG files:[/yellow] {filepath}")
         return False
-    
+
     try:
         with Image.open(filepath) as img:
             img = img.convert('RGBA') if expected_format == 'PNG' else img.convert('RGB')
@@ -128,35 +128,35 @@ def check_directory(root_dir, strict=False, verbose=False, fix=False, show_progr
     total_files = 0
     image_files = 0
     format_stats = {}  # Track stats by format
-    
+
     if show_progress:
         console.print(f"\n🔍 [bold cyan]Scanning directory:[/bold cyan] {root_dir}")
         console.print()
-    
+
     for dirpath, _, filenames in os.walk(root_dir):
         for fname in filenames:
             total_files += 1
             fpath = os.path.join(dirpath, fname)
             ext = os.path.splitext(fname)[1].lower()
-            
+
             # Only process image files
             if ext in VALID_EXTENSIONS:
                 image_files += 1
                 expected_format = VALID_EXTENSIONS[ext]
-                
+
                 # Initialize format stats if not exists
                 if expected_format not in format_stats:
                     format_stats[expected_format] = {'total': 0, 'valid': 0, 'invalid': 0}
-                
+
                 format_stats[expected_format]['total'] += 1
-                
+
                 file_invalid = check_file(fpath, strict=strict, verbose=verbose, fix=fix, show_progress=show_progress)
                 if file_invalid:
                     format_stats[expected_format]['invalid'] += 1
                     invalid_files.extend(file_invalid)
                 else:
                     format_stats[expected_format]['valid'] += 1
-    
+
     return invalid_files, total_files, image_files, format_stats
 
 def print_invalid_files(invalid):
@@ -195,36 +195,36 @@ def main():
             console.print(f"\n🔍 [bold cyan]Checking single file:[/bold cyan] {args.file}")
             console.print()
         invalid = check_file(args.file, strict=args.strict, verbose=debug_mode, fix=args.fix, show_progress=show_progress)
-        
+
         # Track format stats for single file
         ext = os.path.splitext(args.file)[1].lower()
         if ext in VALID_EXTENSIONS:
             expected_format = VALID_EXTENSIONS[ext]
             format_stats[expected_format] = {'total': 1, 'valid': 0 if len(invalid) > 0 else 1, 'invalid': len(invalid)}
-    
+
     elif args.dir:
         invalid, total_files, image_files, format_stats = check_directory(args.dir, strict=args.strict, verbose=debug_mode, fix=args.fix, show_progress=show_progress)
         # Debug print to see what invalid actually is
         print(f"DEBUG: invalid type: {type(invalid)}, value: {invalid}")  # temporary debug
-    
+
     elif args.files:
         if show_progress:
             console.print(f"\n🔍 [bold cyan]Checking {len(args.files)} files...[/bold cyan]")
             console.print()
         image_files = len(args.files)
         total_files = len(args.files)
-        
+
         for fpath in args.files:
             ext = os.path.splitext(fpath)[1].lower()
             if ext in VALID_EXTENSIONS:
                 expected_format = VALID_EXTENSIONS[ext]
-                
+
                 # Initialize format stats if not exists
                 if expected_format not in format_stats:
                     format_stats[expected_format] = {'total': 0, 'valid': 0, 'invalid': 0}
-                
+
                 format_stats[expected_format]['total'] += 1
-                
+
                 file_invalid = check_file(fpath, strict=args.strict, verbose=debug_mode, fix=args.fix, show_progress=show_progress)
                 if file_invalid:
                     format_stats[expected_format]['invalid'] += 1
@@ -243,20 +243,20 @@ def main():
     console.print(f"   Image files found: [cyan]{image_files}[/cyan]")
     console.print(f"   Valid images: [green]{image_files - len(invalid)}[/green]")
     console.print(f"   Invalid images: [red]{len(invalid)}[/red]")
-    
+
     # Show format breakdown
     if format_stats:
         console.print()
         console.print("[bold]📋 Format Breakdown:[/bold]")
-        
+
         # Sort by total count (descending)
         sorted_formats = sorted(format_stats.items(), key=lambda x: x[1]['total'], reverse=True)
-        
+
         for format_name, stats in sorted_formats:
             total = stats['total']
             valid = stats['valid']
             invalid = stats['invalid']
-            
+
             status_color = "green" if invalid == 0 else "yellow" if invalid < total else "red"
             console.print(f"   {format_name}: [cyan]{total}[/cyan] total ([{status_color}]{valid} valid, {invalid} invalid[/{status_color}])")
 

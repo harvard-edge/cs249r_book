@@ -41,7 +41,7 @@ Let's make inference blazingly fast through computational reuse!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/17_memoization/kvcaching_dev.py`  
+**Learning Side:** You work in `modules/17_memoization/kvcaching_dev.py`
 **Building Side:** Code exports to `tinytorch.generation.kv_cache`
 
 ```python
@@ -360,7 +360,7 @@ class KVCache:
     Stores K,V matrices for each transformer layer to avoid recomputation
     during sequential token generation. This is THE critical optimization
     that makes production language model serving economically viable.
-    
+
     ⚠️  IMPORTANT: INFERENCE-ONLY (No Gradient Tracking)
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     KV caching is designed ONLY for inference (generation), NOT training.
@@ -368,14 +368,14 @@ class KVCache:
     - Cache operations use .data (no gradient tracking)
     - This is correct and intentional for maximum speed
     - DO NOT use caching during training (use standard forward pass)
-    
+
     Architecture:
     - Pre-allocates cache tensors with maximum sequence length
     - Tracks current sequence position for efficient O(1) updates
     - Provides update() method to append new K,V pairs without copying
     - Provides get() method to retrieve cached values for attention
     - Handles multiple layers and attention heads properly
-    
+
     Memory Layout:
     ```
     Layer 0: [Key_cache, Value_cache]  # Shape: (batch, num_heads, max_seq, head_dim)
@@ -928,87 +928,87 @@ def enable_kv_cache(model):
             def cached_forward(x, mask=None):
                 """
                 Cached attention forward pass with REAL speedup!
-                
+
                 PATH SELECTION STRATEGY (Key to Understanding KV Caching):
                 ──────────────────────────────────────────────────────────
-                
+
                 We have THREE possible paths through attention:
-                
+
                 1️⃣ TRAINING PATH (seq_len > 1):
                    - Input: Full sequence of tokens (e.g., 64 tokens)
                    - Action: Use ORIGINAL attention (no caching)
                    - Why: Need full gradient flow for backpropagation
                    - Complexity: O(n²) but that's fine for training
                    - Example: x.shape = (batch=1, seq=64, embed=128)
-                
+
                 2️⃣ FIRST TOKEN PATH (seq_len == 1 AND cache empty):
                    - Input: Single token (the first one in generation)
                    - Action: Use ORIGINAL attention (initialize cache)
                    - Why: Cache is empty, nothing to retrieve yet
                    - Complexity: O(1) - only one token
                    - Example: x.shape = (batch=1, seq=1, embed=128), cache.seq_pos=0
-                
+
                 3️⃣ CACHED GENERATION PATH (seq_len == 1 AND cache populated):
                    - Input: Single NEW token (during generation)
                    - Action: Compute K,V for new token ONLY, retrieve history from cache
                    - Why: This is where the speedup happens! O(n²) → O(n)
                    - Complexity: O(n) - only compute for new token, reuse cache
                    - Example: x.shape = (batch=1, seq=1, embed=128), cache.seq_pos=5
-                
-                
+
+
                 WHY .data INSTEAD OF TENSOR OPERATIONS?
                 ────────────────────────────────────────
-                
+
                 In the cached path, we use numpy via .data for three reasons:
-                
+
                 1. **Explicit Intent**: Makes it crystal clear this is inference-only
                    - Training: Uses Tensor operations → gradients tracked
                    - Inference: Uses .data → no gradient overhead
-                
+
                 2. **Performance**: Avoids any autograd bookkeeping
                    - Even if small, every bit counts in generation
                    - Production LLMs (vLLM, llama.cpp) use similar patterns
-                
+
                 3. **Educational Clarity**: Shows students the distinction
                    - "When do I need gradients?" (training)
                    - "When can I skip them?" (inference)
-                
+
                 We COULD use Tensor operations with requires_grad=False, but .data
                 is more explicit and is the industry-standard pattern.
-                
-                
+
+
                 THE O(n²) → O(n) TRANSFORMATION:
                 ─────────────────────────────────
-                
+
                 WITHOUT Cache (Standard Attention):
                   Step 1: Process token 1  → Compute attention for 1 token  (1²  = 1 op)
                   Step 2: Process tokens 1-2 → Compute attention for 2 tokens (2²  = 4 ops)
                   Step 3: Process tokens 1-3 → Compute attention for 3 tokens (3²  = 9 ops)
                   ...
                   Step N: Process tokens 1-N → Compute attention for N tokens (N² ops)
-                  
+
                   Total: 1 + 4 + 9 + ... + N² = O(N³) across all steps!
-                
+
                 WITH Cache (Our Implementation):
                   Step 1: Process token 1 → Compute K,V for token 1, cache it      (1 op)
                   Step 2: Process token 2 → Compute K,V for token 2, retrieve 1    (2 ops)
                   Step 3: Process token 3 → Compute K,V for token 3, retrieve 1-2  (3 ops)
                   ...
                   Step N: Process token N → Compute K,V for token N, retrieve 1-(N-1) (N ops)
-                  
+
                   Total: 1 + 2 + 3 + ... + N = O(N²) across all steps!
-                
+
                 That's why we see 5-7x speedup on short sequences, and 10-15x on longer ones!
                 """
                 from tinytorch.core.tensor import Tensor
                 import numpy as np
-                
+
                 seq_len = x.shape[1]
-                
+
                 # ═══════════════════════════════════════════════════════════════
                 # PATH SELECTION: Choose between training, first token, or cached
                 # ═══════════════════════════════════════════════════════════════
-                
+
                 # PATH 1: TRAINING (seq_len > 1)
                 # ───────────────────────────────────
                 # Input is a full sequence (e.g., 64 tokens during training)
@@ -1016,7 +1016,7 @@ def enable_kv_cache(model):
                 # No caching during training - we need backprop through everything
                 if seq_len > 1:
                     return original_forward(x, mask)  # O(n²) but preserves gradients
-                
+
                 # PATH 2: FIRST TOKEN (seq_len == 1, cache empty)
                 # ────────────────────────────────────────────────
                 # This is the very first token in generation (cache.seq_pos == 0)
@@ -1024,43 +1024,43 @@ def enable_kv_cache(model):
                 # Use original attention to process this token, which will populate cache
                 if cache_obj.seq_pos == 0:
                     return original_forward(x, mask)  # O(1) - just one token
-                
+
                 # PATH 3: CACHED GENERATION (seq_len == 1, cache populated)
                 # ──────────────────────────────────────────────────────────
                 # This is a NEW token during generation (cache has history)
                 # We can now use the cache for massive speedup!
                 # Compute K,V for ONLY this new token, retrieve cached history
-                
+
                 # Get attention layer (assumes block.attention has the attention object)
                 attention = block.attention
-                
+
                 # Step 1: Compute Q, K, V for NEW token only
                 # Access the linear projection layers
                 Q_new = attention.q_proj.forward(x)  # (batch, 1, embed_dim)
                 K_new = attention.k_proj.forward(x)  # (batch, 1, embed_dim)
                 V_new = attention.v_proj.forward(x)  # (batch, 1, embed_dim)
-                
+
                 # Step 2: Reshape to multi-head format
                 batch_size = x.shape[0]
                 num_heads = attention.num_heads
                 head_dim = attention.head_dim
-                
+
                 # Reshape: (batch, 1, embed_dim) → (batch, num_heads, 1, head_dim)
                 Q_heads = Q_new.reshape(batch_size, 1, num_heads, head_dim)
                 Q_heads = Tensor(np.transpose(Q_heads.data, (0, 2, 1, 3)))  # (batch, num_heads, 1, head_dim)
-                
+
                 K_heads = K_new.reshape(batch_size, 1, num_heads, head_dim)
                 K_heads = Tensor(np.transpose(K_heads.data, (0, 2, 1, 3)))
-                
+
                 V_heads = V_new.reshape(batch_size, 1, num_heads, head_dim)
                 V_heads = Tensor(np.transpose(V_heads.data, (0, 2, 1, 3)))
-                
+
                 # Step 3: Update cache with new K, V (using .data for performance)
                 cache_obj.update(layer_idx, K_heads, V_heads)
-                
+
                 # Step 4: Retrieve ALL cached K, V (includes history + new token)
                 K_all, V_all = cache_obj.get(layer_idx)
-                
+
                 # Step 5: Compute attention using new Q with ALL cached K, V
                 # ─────────────────────────────────────────────────────────
                 # Scaled dot-product attention: softmax(Q @ K^T / sqrt(d_k)) @ V
@@ -1073,44 +1073,44 @@ def enable_kv_cache(model):
                 #
                 # If this were training, we'd use Tensor operations for gradient flow.
                 # But in generation (inference), .data is the right choice.
-                
+
                 # Q @ K^T: (batch, num_heads, 1, head_dim) @ (batch, num_heads, head_dim, seq_len)
                 #        → (batch, num_heads, 1, seq_len)
                 K_transposed = np.transpose(K_all.data, (0, 1, 3, 2))  # .data = numpy array
                 scores = np.matmul(Q_heads.data, K_transposed)  # Pure numpy matmul
-                
+
                 # Scale by sqrt(head_dim)
                 scores = scores / np.sqrt(head_dim)
-                
+
                 # Apply mask if provided (causal mask for generation)
                 if mask is not None:
                     # Mask should be (1, 1, 1, seq_len) for this token
                     # In generation, we can attend to all previous tokens
                     pass  # No masking needed in generation (we see all history)
-                
+
                 # Softmax over key dimension
                 scores_max = np.max(scores, axis=-1, keepdims=True)
                 exp_scores = np.exp(scores - scores_max)
                 attention_weights = exp_scores / np.sum(exp_scores, axis=-1, keepdims=True)
-                
+
                 # Apply attention weights to values
                 # (batch, num_heads, 1, seq_len) @ (batch, num_heads, seq_len, head_dim)
                 # → (batch, num_heads, 1, head_dim)
                 attention_output = np.matmul(attention_weights, V_all.data)
-                
+
                 # Step 6: Reshape back and apply output projection
                 # (batch, num_heads, 1, head_dim) → (batch, 1, num_heads, head_dim)
                 attention_output_transposed = np.transpose(attention_output, (0, 2, 1, 3))
-                
+
                 # Concatenate heads: (batch, 1, num_heads * head_dim)
                 concat_data = attention_output_transposed.reshape(batch_size, 1, num_heads * head_dim)
                 concat_output = Tensor(concat_data)
-                
+
                 # Output projection
                 output = attention.out_proj.forward(concat_output)
-                
+
                 return output
-            
+
             return cached_forward
 
         # Patch this block's attention
@@ -1128,14 +1128,14 @@ def enable_kv_cache(model):
     ### END SOLUTION
 
 
-#| export  
+#| export
 def disable_kv_cache(model):
     """
     Disable KV caching and restore original attention behavior.
-    
+
     Args:
         model: Model with caching enabled
-    
+
     EXAMPLE:
         ```python
         cache = enable_kv_cache(model)
@@ -1155,14 +1155,14 @@ def disable_kv_cache(model):
         # Checking for monkey-patch backup before restoration
         if hasattr(block, '_original_attention_forward'):
             block.attention.forward = block._original_attention_forward
-    
+
     # Clean up
     model._cache_enabled = False
     # Educational Note: hasattr() is LEGITIMATE here because:
     # Safe cleanup check before deleting dynamically added attribute
     if hasattr(model, '_kv_cache'):
         delattr(model, '_kv_cache')
-    
+
     print("✓ KV cache disabled, original attention restored")
 
 
@@ -1551,29 +1551,29 @@ def demo_memoization():
     """🎯 See KV cache store and reuse values."""
     print("🎯 AHA MOMENT: KV Cache Avoids Recomputation")
     print("=" * 45)
-    
+
     # Create a cache for 2-layer transformer
     # (batch=1, max_seq=100, layers=2, heads=4, head_dim=64)
     cache = KVCache(batch_size=1, max_seq_len=100, num_layers=2,
                     num_heads=4, head_dim=64)
-    
+
     # Simulate generating 5 tokens one at a time
     print("Generating tokens and caching K,V pairs...")
     for token_idx in range(5):
         # For each new token, compute K,V (shape: batch, heads, 1, head_dim)
         new_k = Tensor(np.random.randn(1, 4, 1, 64))
         new_v = Tensor(np.random.randn(1, 4, 1, 64))
-        
+
         # Update cache for layer 0
         cache.update(0, new_k, new_v)
         cache.advance()  # Move to next position
-    
+
     print(f"Cached K,V for {cache.seq_pos} tokens")
-    
+
     # Retrieve all cached values
     k_all, v_all = cache.get(0)
     print(f"Retrieved: K{k_all.shape}, V{v_all.shape}")
-    
+
     print("\n✨ Compute once, reuse forever—10× faster generation!")
 
 # %%

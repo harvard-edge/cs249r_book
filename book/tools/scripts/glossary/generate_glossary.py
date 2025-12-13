@@ -23,17 +23,17 @@ def extract_section_id_from_qmd(qmd_path):
     try:
         with open(qmd_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        
+
         # Look for main chapter heading with section ID
         # Pattern: # Chapter Title {#sec-something}
         pattern = r'^#\s+[^{]*\{#(sec-[^}]+)\}'
         match = re.search(pattern, content, re.MULTILINE)
-        
+
         if match:
             return f"@{match.group(1)}"
-        
+
         return None
-        
+
     except Exception as e:
         print(f"Error reading {qmd_path}: {e}")
         return None
@@ -42,34 +42,34 @@ def build_simple_chapter_mapping():
     """Build mapping from chapter names to their actual section IDs."""
     project_root = Path(__file__).parent.parent.parent.parent
     chapters_dir = project_root / "quarto/contents/core"
-    
+
     chapter_mapping = {}
-    
+
     # List of chapter directories to scan
     chapter_dirs = [
-        "introduction", "ml_systems", "dl_primer", "dnn_architectures", 
+        "introduction", "ml_systems", "dl_primer", "dnn_architectures",
         "frameworks", "training", "benchmarking", "data_engineering",
         "hw_acceleration", "efficient_ai", "optimizations", "ops",
         "ondevice_learning", "robust_ai", "privacy_security", "responsible_ai",
-        "sustainable_ai", "ai_for_good", "workflow", "conclusion", 
+        "sustainable_ai", "ai_for_good", "workflow", "conclusion",
         "frontiers", "generative_ai"
     ]
-    
+
     for chapter_name in chapter_dirs:
         chapter_path = chapters_dir / chapter_name / f"{chapter_name}.qmd"
-        
+
         if chapter_path.exists():
             section_id = extract_section_id_from_qmd(chapter_path)
             if section_id:
                 chapter_mapping[chapter_name] = section_id
-    
+
     return chapter_mapping
 
 def format_chapter_link(chapter):
     """Format chapter name as Quarto cross-reference link."""
     if not chapter:
         return ""
-    
+
     # Use the simple section ID discovery to get actual section IDs from chapter files
     try:
         chapter_mapping = build_simple_chapter_mapping()
@@ -79,7 +79,7 @@ def format_chapter_link(chapter):
         # Fallback to manual mapping if section ID discovery fails
         fallback_mapping = {
             "introduction": "@sec-introduction",
-            "ml_systems": "@sec-ml-systems", 
+            "ml_systems": "@sec-ml-systems",
             "dl_primer": "@sec-dl-primer",
             "dnn_architectures": "@sec-dnn-architectures",
             "frameworks": "@sec-ai-frameworks",
@@ -107,7 +107,7 @@ def generate_glossary_qmd(glossary_data):
     """Generate the glossary QMD content."""
     terms = glossary_data["terms"]
     total_terms = len(terms)
-    
+
     # Header content
     content = [
         "---",
@@ -123,12 +123,12 @@ def generate_glossary_qmd(glossary_data):
         "",
         "- **Terms are alphabetically ordered** for easy reference",
         "- **Chapter references** show where terms are introduced or discussed",
-        "- **Cross-references** help you explore related concepts", 
+        "- **Cross-references** help you explore related concepts",
         "- **Interactive tooltips** appear when you hover over glossary terms throughout the book",
         ":::",
         ""
     ]
-    
+
     # Group terms by first letter
     terms_by_letter = {}
     for term in terms:
@@ -136,24 +136,24 @@ def generate_glossary_qmd(glossary_data):
         if first_letter not in terms_by_letter:
             terms_by_letter[first_letter] = []
         terms_by_letter[first_letter].append(term)
-    
+
     # Generate glossary entries organized by letter
     for letter in sorted(terms_by_letter.keys()):
         content.append(f"## {letter}")
         content.append("")
-        
+
         for term in sorted(terms_by_letter[letter], key=lambda x: x["term"]):
             term_name = term["term"]
             definition = term["definition"]
-            
+
             # Create the term entry with proper formatting
             content.append(f"**{term_name}**")
             content.append(f": {definition}")
-            
+
             # Handle chapter references consistently
             appears_in = term.get("appears_in", [])
             chapter_source = term.get("chapter_source", "")
-            
+
             if appears_in and len(appears_in) > 1:
                 # Multiple chapters - list them all
                 formatted_chapters = [format_chapter_link(ch) for ch in appears_in]
@@ -162,14 +162,14 @@ def generate_glossary_qmd(glossary_data):
                 # Single primary chapter - use consistent "Appears in:" label
                 formatted_chapter = format_chapter_link(chapter_source)
                 content.append(f"  *Appears in: {formatted_chapter}*")
-            
+
             # Add cross-references if available
             if term.get("see_also"):
                 see_also = ", ".join(term["see_also"])
                 content.append(f"  *See also: {see_also}*")
-            
+
             content.append("")  # Add spacing between terms
-    
+
     # Footer content
     content.extend([
         "---",
@@ -184,42 +184,42 @@ def generate_glossary_qmd(glossary_data):
         "",
         f"*Generated on {datetime.now().strftime('%Y-%m-%d at %H:%M')}*"
     ])
-    
+
     return "\n".join(content)
 
 def main():
     """Main function to generate the glossary."""
     print("🔧 Generating Glossary QMD File")
     print("=" * 50)
-    
+
     # Load glossary data
     print("📚 Loading master glossary...")
     glossary_data = load_global_glossary()
     total_terms = len(glossary_data["terms"])
     print(f"  → Found {total_terms} terms")
-    
+
     # Generate QMD content
     print("📝 Generating QMD content...")
     qmd_content = generate_glossary_qmd(glossary_data)
-    
+
     # Write to file
     project_root = Path(__file__).parent.parent.parent.parent
     output_path = project_root / "quarto/contents/backmatter/glossary/glossary.qmd"
     print(f"💾 Writing to {output_path}...")
-    
+
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(qmd_content)
-    
+
     print("✅ Glossary QMD file generated successfully!")
     print(f"  → Output: {output_path}")
     print(f"  → Terms: {total_terms}")
-    
+
     # Count terms by letter for summary
     terms_by_letter = {}
     for term in glossary_data["terms"]:
         first_letter = term["term"][0].upper()
         terms_by_letter[first_letter] = terms_by_letter.get(first_letter, 0) + 1
-    
+
     print(f"  → Sections: {len(terms_by_letter)} letter sections (A-Z)")
     print("  → Letter distribution:")
     for letter in sorted(terms_by_letter.keys()):

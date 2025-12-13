@@ -9,7 +9,7 @@ defaultOptions={
   numbered = "true",
   boxstyle = "foldbox.default",
   collapse = "true",
-  colors   = {"c0c0c0","808080"} 
+  colors   = {"c0c0c0","808080"}
 },
 
 blockStart = function (tt, fmt)
@@ -29,27 +29,27 @@ blockStart = function (tt, fmt)
     -- For ePub (XHTML), use open="open" instead of just open (boolean attribute)
     -- ePub requires strict XHTML syntax
     local isEpub = quarto.doc.is_format("epub")
-    if tt.collapse =="false" then 
+    if tt.collapse =="false" then
       if isEpub then
         Open=' open="open"'
       else
         Open=" open"
       end
     end
-    if tt.boxstyle =="foldbox.simple" 
-      then 
-        BoxStyle=" fbx-simplebox fbx-default" 
+    if tt.boxstyle =="foldbox.simple"
+      then
+        BoxStyle=" fbx-simplebox fbx-default"
     --    Open=" open" do not force override. Chose this in yaml or individually.
     --    we would want e.g to have remarks closed by default
       end
     result = ('<details class=\"'..tt.type..BoxStyle ..'\"'..Open..'><summary>'..'<strong>'..tt.typlabelTag..'</strong>'..tt.title .. '</summary><div>')
     return result
-  
+
   elseif fmt =="tex" then
     if tt.boxstyle=="foldbox.simple" then texEnv = "fbxSimple" end
     return('\\begin{'..texEnv..'}{'..tt.type..'}{'..tt.typlabelTag..'}{'..tt.title..'}\n'..
            '\\phantomsection\\label{'..tt.id..'}\n')
-  else  
+  else
     return("<details><summary>Hallihallo</summary>")
   end
 end,
@@ -62,7 +62,7 @@ blockEnd = function (tt, fmt)
     if tt.boxstyle=="foldbox.simple" then texEnv = "fbxSimple" end
      return('\\end{'..texEnv..'}\n')
   else return ('ende mit format '..fmt..'=================')
-  end  
+  end
 end,
 
 insertPreamble = function(doc, classDefs, fmt)
@@ -71,7 +71,7 @@ insertPreamble = function(doc, classDefs, fmt)
   local isepub = quarto.doc.is_format("epub")
   -- Note: ePub format is treated as HTML (fmt="html") since ePub uses HTML internally
   local StyleCSSTeX = {}
-  
+
   -- Set icon path from filter-metadata configuration if available
   local meta = doc.meta
   local filterMetadata = meta["filter-metadata"]
@@ -81,7 +81,7 @@ insertPreamble = function(doc, classDefs, fmt)
     if config["icon-path"] then
       local iconPath = str(config["icon-path"])
       local iconFormat = str(config["icon-format"] or "png")
-      
+
       if fmt == "html" then
         -- Generate dynamic CSS for icon paths - generic version using classDefs
         iconCSS = "<style>\n"
@@ -102,7 +102,7 @@ insertPreamble = function(doc, classDefs, fmt)
       end
     end
   end
-  
+
   -- if fmt==nil then pout("=== NIX ======= Format   ") else
   -- pout("============== Format :   "..str(fmt)) end
   -- make css or preamble tex for colors
@@ -116,28 +116,28 @@ insertPreamble = function(doc, classDefs, fmt)
           if fmt == "html" then
             table.insert(StyleCSSTeX, "."..cls.." {\n")
             for i, col in ipairs(options.colors) do
-              table.insert(StyleCSSTeX, "  --color"..i..": #"..col..";\n") 
-            end    
+              table.insert(StyleCSSTeX, "  --color"..i..": #"..col..";\n")
+            end
             table.insert(StyleCSSTeX, "}\n")
           elseif fmt == "pdf" then
             for i, col in ipairs(options.colors) do
               table.insert(StyleCSSTeX, "\\definecolor{"..cls.."-color"..i.."}{HTML}{"..col.."}\n")
-            end  
-          end  
-        end  
-      end  
-    end  
+            end
+          end
+        end
+      end
+    end
     result = pandoc.utils.stringify(StyleCSSTeX)
     if fmt == "html" then result = "<style>\n"..result.."</style>" end
     if fmt == "pdf" then result="%%==== colors from yaml ===%\n"..result.."%=============%\n" end
     return(result)
   end
-  
+
   local preamblestuff = extractStyleFromMeta(fmt)
   -- quarto.log.output(preamblestuff)
 
   if fmt == "html"
-  then 
+  then
     -- For ePub, we don't add the foldbox.css dependency as it's not needed
     -- The styles are defined in the main epub.css file
     if not isepub then

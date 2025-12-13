@@ -91,7 +91,7 @@ if __name__ == "__main__":
 """
 ## 🔬 Motivation: Why Quantization Matters
 
-Before we learn quantization, let's profile a model to see how much memory 
+Before we learn quantization, let's profile a model to see how much memory
 FP32 weights actually consume. This will show us why reduced precision matters.
 """
 
@@ -911,7 +911,7 @@ def test_unit_quantized_linear():
     print(f"  Compression ratio: {memory_info['compression_ratio']:.2f}×")
     print(f"  Original bytes: {memory_info['original_bytes']}")
     print(f"  Quantized bytes: {memory_info['quantized_bytes']}")
-    
+
     # The compression should be close to 4× (allowing for quantization parameter overhead)
     assert memory_info['compression_ratio'] > 2.5, f"Should achieve ~4× compression, got {memory_info['compression_ratio']:.2f}×"
 
@@ -1092,13 +1092,13 @@ def test_unit_quantize_model():
     layer1 = Linear(4, 8)
     activation = ReLU()
     layer2 = Linear(8, 3)
-    
+
     # Initialize weights
     layer1.weight = Tensor(np.random.randn(4, 8) * 0.5)
     layer1.bias = Tensor(np.random.randn(8) * 0.1)
     layer2.weight = Tensor(np.random.randn(8, 3) * 0.5)
     layer2.bias = Tensor(np.random.randn(3) * 0.1)
-    
+
     # Use Sequential from tinytorch.core.layers
     model = Sequential(layer1, activation, layer2)
 
@@ -1565,27 +1565,27 @@ def demo_quantization_with_profiler():
     """📊 Demonstrate memory savings using Profiler from Module 14."""
     print("📊 Measuring Quantization Memory Savings with Profiler")
     print("=" * 70)
-    
+
     profiler = Profiler()
-    
+
     # Create a simple model
     from tinytorch.core.layers import Linear
     model = Linear(512, 256)
     model.name = "baseline_model"
-    
+
     print("\n💾 BEFORE: FP32 Model")
     print("-" * 70)
-    
+
     # Measure baseline
     param_count = profiler.count_parameters(model)
     input_shape = (32, 512)
     memory_stats = profiler.measure_memory(model, input_shape)
-    
+
     print(f"   Parameters: {param_count:,}")
     print(f"   Parameter memory: {memory_stats['parameter_memory_mb']:.2f} MB")
     print(f"   Peak memory: {memory_stats['peak_memory_mb']:.2f} MB")
     print(f"   Precision: FP32 (4 bytes per parameter)")
-    
+
     # Quantize the model (in-place modification)
     print("\n🗜️  Quantizing to INT8...")
     # quantize_model expects a model with .layers attribute, so wrap single layer in Sequential
@@ -1593,29 +1593,29 @@ def demo_quantization_with_profiler():
     quantize_model(wrapped_model)  # Modifies model in-place, returns None
     quantized_model = wrapped_model.layers[0] if wrapped_model.layers else model
     quantized_model.name = "quantized_model"
-    
+
     print("\n📦 AFTER: INT8 Quantized Model")
     print("-" * 70)
-    
+
     # Measure quantized (simulated - in practice INT8 uses 1 byte)
     # For demonstration, we show the theoretical savings
     quantized_param_count = profiler.count_parameters(quantized_model)
     theoretical_memory_mb = param_count * BYTES_PER_INT8 / MB_TO_BYTES
-    
+
     print(f"   Parameters: {quantized_param_count:,} (same count, different precision)")
     print(f"   Parameter memory (theoretical): {theoretical_memory_mb:.2f} MB")
     print(f"   Precision: INT8 (1 byte per parameter)")
-    
+
     print("\n📈 MEMORY SAVINGS")
     print("=" * 70)
     savings_ratio = memory_stats['parameter_memory_mb'] / theoretical_memory_mb
     savings_percent = (1 - 1/savings_ratio) * 100
     savings_mb = memory_stats['parameter_memory_mb'] - theoretical_memory_mb
-    
+
     print(f"   Compression ratio: {savings_ratio:.1f}x smaller")
     print(f"   Memory saved: {savings_mb:.2f} MB ({savings_percent:.1f}% reduction)")
     print(f"   Original: {memory_stats['parameter_memory_mb']:.2f} MB → Quantized: {theoretical_memory_mb:.2f} MB")
-    
+
     print("\n💡 Key Insight:")
     print(f"   INT8 quantization reduces memory by 4x (FP32→INT8)")
     print(f"   This enables: 4x larger models, 4x bigger batches, or 4x lower cost!")
@@ -1839,35 +1839,35 @@ for export to the tinytorch package. This allows milestones to use the complete 
 class Quantizer:
     """
     Complete quantization system for milestone use.
-    
+
     Provides INT8 quantization with calibration for 4× memory reduction.
-    
+
     This class delegates to the standalone functions (quantize_int8, dequantize_int8)
     that students implement, providing a clean OOP interface for milestones.
-    
+
     Two APIs exist for different use cases:
     - Standalone quantize_model(): Modifies model in-place (for learning/testing)
     - Quantizer.quantize_model(): Returns stats dict (for milestones/benchmarking)
     """
-    
+
     @staticmethod
     def quantize_tensor(tensor: Tensor) -> Tuple[Tensor, float, int]:
         """Quantize FP32 tensor to INT8. Delegates to quantize_int8()."""
         return quantize_int8(tensor)
-    
+
     @staticmethod
     def dequantize_tensor(q_tensor: Tensor, scale: float, zero_point: int) -> Tensor:
         """Dequantize INT8 tensor back to FP32. Delegates to dequantize_int8()."""
         return dequantize_int8(q_tensor, scale, zero_point)
-    
+
     @staticmethod
     def quantize_model(model, calibration_data: Optional[List[Tensor]] = None) -> Dict[str, any]:
         """
         Quantize all Linear layers in a model and return stats.
-        
+
         Unlike the standalone quantize_model() which modifies in-place,
         this returns a dictionary with quantization info for benchmarking.
-        
+
         Returns:
             Dict with quantized_layers, original_size_mb, quantized_size_mb, compression_ratio
         """
@@ -1875,17 +1875,17 @@ class Quantizer:
         original_size = 0
         total_elements = 0
         param_idx = 0
-        
+
         # Iterate through model parameters
         for layer in model.layers:
             for param in layer.parameters():
                 param_size = param.data.nbytes
                 original_size += param_size
                 total_elements += param.data.size
-                
+
                 # Quantize parameter using the standalone function
                 q_param, scale, zp = quantize_int8(param)
-                
+
                 quantized_layers[f'param_{param_idx}'] = {
                     'quantized': q_param,
                     'scale': scale,
@@ -1893,17 +1893,17 @@ class Quantizer:
                     'original_shape': param.data.shape
                 }
                 param_idx += 1
-        
+
         # INT8 uses 1 byte per element
         quantized_size = total_elements
-        
+
         return {
             'quantized_layers': quantized_layers,
             'original_size_mb': original_size / MB_TO_BYTES,
             'quantized_size_mb': quantized_size / MB_TO_BYTES,
             'compression_ratio': original_size / quantized_size if quantized_size > 0 else 1.0
         }
-    
+
     @staticmethod
     def compare_models(original_model, quantized_info: Dict) -> Dict[str, float]:
         """Compare memory usage between original and quantized models."""

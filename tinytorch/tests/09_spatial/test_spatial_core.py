@@ -55,7 +55,7 @@ class TestConv2DLayer:
             from tinytorch.core.spatial import Conv2d
 
             conv = Conv2d(in_channels=3, out_channels=16, kernel_size=3)
-            
+
             assert conv.in_channels == 3, "in_channels not set correctly"
             assert conv.out_channels == 16, "out_channels not set correctly"
             # kernel_size can be int or tuple
@@ -80,11 +80,11 @@ class TestConv2DLayer:
             from tinytorch.core.spatial import Conv2d
 
             conv = Conv2d(in_channels=3, out_channels=16, kernel_size=5)
-            
+
             # Weights: (out_channels, in_channels, kH, kW)
             expected_shape = (16, 3, 5, 5)
             weight = conv.weight if hasattr(conv, 'weight') else conv.weights
-            
+
             assert weight.shape == expected_shape, (
                 f"Conv2d weight shape wrong.\n"
                 f"  Expected: {expected_shape} (out, in, kH, kW)\n"
@@ -94,7 +94,7 @@ class TestConv2DLayer:
 
         except ImportError:
             pytest.skip("Conv2d weights not implemented yet")
-    
+
     def test_conv2d_forward_shape(self):
         """
         WHAT: Verify Conv2d output has correct shape.
@@ -129,7 +129,7 @@ class TestConv2DLayer:
 
         except ImportError:
             pytest.skip("Conv2d forward pass not implemented yet")
-    
+
     def test_conv2d_simple_convolution(self):
         """
         WHAT: Verify convolution computes correctly with known kernel.
@@ -171,11 +171,11 @@ class TestConv2DLayer:
 class TestPoolingLayers:
     """
     Test pooling layers (MaxPool, AvgPool).
-    
+
     CONCEPT: Pooling reduces spatial dimensions by summarizing
     local regions. This adds translation invariance and reduces computation.
     """
-    
+
     def test_maxpool2d_creation(self):
         """
         WHAT: Verify MaxPool2d can be created.
@@ -198,7 +198,7 @@ class TestPoolingLayers:
 
         except ImportError:
             pytest.skip("MaxPool2d not implemented yet")
-    
+
     def test_maxpool2d_forward(self):
         """
         WHAT: Verify MaxPool2d takes maximum in each window.
@@ -215,7 +215,7 @@ class TestPoolingLayers:
             from tinytorch.core.tensor import Tensor
 
             pool = MaxPool2d(kernel_size=2, stride=2)
-            
+
             # Simple 4×4 input with known values
             x = Tensor(np.array([[
                 [[1], [2], [5], [6]],
@@ -223,15 +223,15 @@ class TestPoolingLayers:
                 [[9], [10], [13], [14]],
                 [[11], [12], [15], [16]]
             ]]))  # (1, 4, 4, 1)
-            
+
             output = pool(x)
-            
+
             # 2×2 pooling should give max of each 2×2 region
             # Top-left: max(1,2,3,4) = 4
             # Top-right: max(5,6,7,8) = 8
             # etc.
             expected = np.array([[[[4], [8]], [[12], [16]]]])
-            
+
             if output.shape == (1, 2, 2, 1):
                 assert np.array_equal(output.data, expected), (
                     f"MaxPool values wrong.\n"
@@ -242,7 +242,7 @@ class TestPoolingLayers:
 
         except ImportError:
             pytest.skip("MaxPool2d forward not implemented yet")
-    
+
     def test_avgpool2d_forward(self):
         """
         WHAT: Verify AvgPool2d computes average of each window.
@@ -259,11 +259,11 @@ class TestPoolingLayers:
             from tinytorch.core.tensor import Tensor
 
             pool = AvgPool2d(kernel_size=2, stride=2)
-            
+
             # All-ones input - average should be 1
             x = Tensor(np.ones((1, 4, 4, 1)))
             output = pool(x)
-            
+
             if output.shape == (1, 2, 2, 1):
                 assert np.allclose(output.data, 1.0), (
                     f"AvgPool of all-ones should be 1.0\n"
@@ -278,18 +278,18 @@ class TestPoolingLayers:
 class TestConvOutputShapes:
     """
     Test convolution output shape calculations.
-    
+
     CONCEPT: Output shape depends on kernel_size, stride, padding.
     Getting this right is essential for building architectures.
     """
-    
+
     def test_conv_padding_same(self):
         """
         WHAT: Verify 'same' padding preserves spatial dimensions.
-        
+
         WHY: Same padding is convenient - output = input size.
         Used when you want to stack many conv layers.
-        
+
         STUDENT LEARNING: For 'same' padding with odd kernel:
         padding = (kernel_size - 1) / 2
         For kernel=3: padding=1, for kernel=5: padding=2
@@ -315,14 +315,14 @@ class TestConvOutputShapes:
 
         except (ImportError, TypeError):
             pytest.skip("Conv2d padding='same' not implemented yet")
-    
+
     def test_conv_stride(self):
         """
         WHAT: Verify stride reduces output dimensions.
-        
+
         WHY: Stride > 1 downsamples the feature map.
         Stride=2 halves each dimension (like pooling).
-        
+
         STUDENT LEARNING: With stride=2:
         output_size = (input_size - kernel_size) / stride + 1
         For input=32, kernel=3, stride=2: (32-3)/2 + 1 = 15
@@ -356,11 +356,11 @@ class TestConvOutputShapes:
 class TestConvGradientFlow:
     """
     Test that gradients flow through convolutions.
-    
+
     CONCEPT: Conv layers must be differentiable for training.
     Gradients flow from output back to input AND kernel weights.
     """
-    
+
     def test_conv2d_gradient_to_input(self):
         """
         WHAT: Verify input receives gradients through Conv2d.

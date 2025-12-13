@@ -6,7 +6,7 @@
 document.addEventListener('DOMContentLoaded', function() {
     // Only inject if not already present
     if (document.getElementById('tinytorch-bar')) return;
-    
+
     const barHTML = `
         <div class="tinytorch-bar" id="tinytorch-bar">
             <div class="tinytorch-bar-content">
@@ -46,15 +46,15 @@ document.addEventListener('DOMContentLoaded', function() {
         </div>
     `;
     document.body.insertAdjacentHTML('afterbegin', barHTML);
-    
+
     // Smart sticky: hide on scroll down, show on scroll up
     const bar = document.getElementById('tinytorch-bar');
     let lastScrollY = window.scrollY;
     let ticking = false;
-    
+
     function updateBar() {
         const currentScrollY = window.scrollY;
-        
+
         if (currentScrollY < 50) {
             // Always show at top of page
             bar.classList.remove('hidden');
@@ -65,11 +65,11 @@ document.addEventListener('DOMContentLoaded', function() {
             // Scrolling up - show
             bar.classList.remove('hidden');
         }
-        
+
         lastScrollY = currentScrollY;
         ticking = false;
     }
-    
+
     window.addEventListener('scroll', function() {
         if (!ticking) {
             requestAnimationFrame(updateBar);

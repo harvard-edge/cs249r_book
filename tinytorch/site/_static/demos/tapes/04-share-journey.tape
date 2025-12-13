@@ -116,4 +116,3 @@ Sleep 3s  # Wait for welcome message
 
 Type "# Join 2,847 builders worldwide! 🌍"
 Sleep 3s
-

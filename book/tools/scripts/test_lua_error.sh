@@ -34,4 +34,4 @@ fi
 
 # Clean up
 rm -f test_invalid_key.qmd test_invalid_key.pdf
-echo "🧹 Cleaned up test files" 
+echo "🧹 Cleaned up test files"

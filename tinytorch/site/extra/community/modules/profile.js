@@ -13,20 +13,20 @@ export function closeProfileModal() {
 }
 
 export async function fetchUserProfile() {
-    let token = localStorage.getItem("tinytorch_token"); 
+    let token = localStorage.getItem("tinytorch_token");
     if (!token) {
         console.error("No token found for fetching profile.");
-        forceLogin(); 
+        forceLogin();
         return;
     }
 
     let profileData = null;
     let retryCount = 0;
-    const MAX_RETRIES = 1; 
+    const MAX_RETRIES = 1;
 
     do {
         try {
-            const response = await fetch(`${SUPABASE_URL}/get-profile-details`, { 
+            const response = await fetch(`${SUPABASE_URL}/get-profile-details`, {
                 method: 'GET',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -51,7 +51,7 @@ export async function fetchUserProfile() {
                 const refreshToken = localStorage.getItem("tinytorch_refresh_token");
                 if (!refreshToken) { forceLogin(); return; }
 
-                const refreshRes = await fetch(`${NETLIFY_URL}/api/auth/refresh`, { 
+                const refreshRes = await fetch(`${NETLIFY_URL}/api/auth/refresh`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ refreshToken })
@@ -60,7 +60,7 @@ export async function fetchUserProfile() {
                 if (!refreshRes.ok) { forceLogin(); return; }
 
                 const refreshData = await refreshRes.json();
-                const session = refreshData.session || refreshData; 
+                const session = refreshData.session || refreshData;
 
                 if (session && session.access_token) {
                     token = session.access_token;
@@ -68,8 +68,8 @@ export async function fetchUserProfile() {
                     if (session.refresh_token) {
                         localStorage.setItem("tinytorch_refresh_token", session.refresh_token);
                     }
-                    retryCount++; 
-                    continue; 
+                    retryCount++;
+                    continue;
                 } else {
                     console.warn("Refresh failed: No access token in response", refreshData);
                     forceLogin();
@@ -85,15 +85,15 @@ export async function fetchUserProfile() {
             }
 
             profileData = await response.json();
-            populateProfileForm(profileData.profile); 
-            return; 
+            populateProfileForm(profileData.profile);
+            return;
         } catch (error) {
             console.error("Error fetching user profile:", error);
             if (retryCount >= MAX_RETRIES || !error.message.includes("Invalid Token")) {
                 alert("Failed to load profile data. Please try again.");
                 closeProfileModal();
             }
-            return; 
+            return;
         }
     } while (retryCount < MAX_RETRIES);
 
@@ -117,19 +117,19 @@ function populateProfileForm(data) {
     const avatarPreview = document.getElementById('avatarPreview');
 
     profileDisplayNameInput.value = data.display_name || '';
-    profileAvatarUrlInput.value = data.avatar || data.avatar_url || ''; 
+    profileAvatarUrlInput.value = data.avatar || data.avatar_url || '';
 
     profileFullNameInput.value = data.full_name || '';
-    profileSummaryTextarea.value = data.bio || data.summary || ''; 
+    profileSummaryTextarea.value = data.bio || data.summary || '';
     profileLocationInput.value = data.location || '';
-    
+
     profileInstitutionInput.value = Array.isArray(data.institution) ? data.institution.join(', ') : (data.institution || '');
-    
-    const sites = data.website || data.websites; 
+
+    const sites = data.website || data.websites;
     profileWebsitesInput.value = Array.isArray(sites) ? sites.join(', ') : (sites || '');
-    
+
     try {
-        profileContactJsonTextarea.value = data.socials ? JSON.stringify(data.socials, null, 2) : ''; 
+        profileContactJsonTextarea.value = data.socials ? JSON.stringify(data.socials, null, 2) : '';
     } catch (e) {
         profileContactJsonTextarea.value = '';
     }
@@ -141,13 +141,13 @@ function populateProfileForm(data) {
     }
 
     if(avatarPreview) {
-         avatarPreview.src = data.avatar || ''; 
+         avatarPreview.src = data.avatar || '';
     }
 }
 
 export async function handleProfileUpdate(e) {
     e.preventDefault();
-    let token = localStorage.getItem("tinytorch_token"); 
+    let token = localStorage.getItem("tinytorch_token");
     if (!token) {
         console.error("No token found for updating profile.");
         forceLogin();
@@ -166,14 +166,14 @@ export async function handleProfileUpdate(e) {
 
     const updatedProfile = {
         display_name: profileDisplayNameInput.value,
-        avatar: profileAvatarUrlInput.value, 
+        avatar: profileAvatarUrlInput.value,
                 full_name: profileFullNameInput.value,
         summary: profileSummaryTextarea.value,
         location: profileLocationInput.value,
         institution: profileInstitutionInput.value.split(',').map(s => s.trim()).filter(s => s),
-        website: profileWebsitesInput.value.split(',').map(s => s.trim()).filter(s => s), 
+        website: profileWebsitesInput.value.split(',').map(s => s.trim()).filter(s => s),
     };
-    
+
     try {
         updatedProfile.contact_json = profileContactJsonTextarea.value ? JSON.parse(profileContactJsonTextarea.value) : null;
     } catch (e) {
@@ -188,11 +188,11 @@ export async function handleProfileUpdate(e) {
     }
 
     let retryCount = 0;
-    const MAX_RETRIES = 1; 
+    const MAX_RETRIES = 1;
 
     do {
         try {
-            const response = await fetch(`${SUPABASE_URL}/update-profile`, { 
+            const response = await fetch(`${SUPABASE_URL}/update-profile`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -228,7 +228,7 @@ export async function handleProfileUpdate(e) {
                 if (!refreshRes.ok) { forceLogin(); return; }
 
                 const refreshData = await refreshRes.json();
-                const session = refreshData.session || refreshData; 
+                const session = refreshData.session || refreshData;
 
                 if (session && session.access_token) {
                     token = session.access_token;
@@ -254,11 +254,11 @@ export async function handleProfileUpdate(e) {
 
             alert('Profile updated successfully!');
             closeProfileModal();
-            return; 
+            return;
         } catch (error) {
             console.error("Error updating user profile:", error);
             alert("Failed to update profile: " + error.message);
-            return; 
+            return;
         }
     } while (retryCount < MAX_RETRIES);
 }

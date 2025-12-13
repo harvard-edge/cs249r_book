@@ -35,22 +35,22 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 class TestCompleteMLPipelineStillWorks:
     """
     🔄 REGRESSION CHECK: Verify complete ML pipeline (01→08) still works after autograd development.
-    
+
     💡 If these fail: You may have broken something in the ML pipeline while implementing autograd.
     🔧 Fix: Check that autograd doesn't interfere with basic forward pass functionality.
     """
-    
+
     def test_end_to_end_ml_pipeline_stable(self):
         """
         ✅ TEST: Complete ML pipeline (data → model → output) should still work
-        
+
         📋 FULL PIPELINE COMPONENTS:
         - Data loading and batching
         - CNN feature extraction
         - Dense classification layers
         - Activation functions
         - End-to-end predictions
-        
+
         🚨 IF FAILS: Core ML pipeline broken by autograd development
         """
         try:
@@ -60,60 +60,60 @@ class TestCompleteMLPipelineStillWorks:
             from tinytorch.core.layers import Linear
             from tinytorch.core.activations import ReLU, Softmax
             from tinytorch.core.dataloader import Dataset, DataLoader
-            
+
             # Create simple dataset
             class TestDataset(Dataset):
                 def __init__(self):
                     self.data = np.random.randn(20, 3, 32, 32)
                     self.targets = np.random.randint(0, 10, 20)
-                
+
                 def __len__(self):
                     return 20
-                
+
                 def __getitem__(self, idx):
                     return Tensor(self.data[idx]), self.targets[idx]
-            
+
             # Create model components
             conv = Conv2D(3, 16, kernel_size=3, padding=1)
             pool = MaxPool2d(kernel_size=2)
             dense = Linear(16 * 16 * 16, 10)  # 4096 -> 10
             relu = ReLU()
             softmax = Softmax()
-            
+
             # Create data loader
             dataset = TestDataset()
             dataloader = DataLoader(dataset, batch_size=4)
-            
+
             # Test end-to-end pipeline
             for batch_x, batch_y in dataloader:
                 # CNN feature extraction
                 conv_out = relu(conv(batch_x))      # (4, 16, 32, 32)
                 pooled = pool(conv_out)             # (4, 16, 16, 16)
-                
+
                 # Flatten for dense layer
                 flattened = Tensor(pooled.data.reshape(4, -1))  # (4, 4096)
-                
+
                 # Classification
                 logits = dense(flattened)           # (4, 10)
                 probs = softmax(logits)             # (4, 10)
-                
+
                 # Verify pipeline works
                 assert probs.shape == (4, 10), \
                     f"❌ ML pipeline shape broken. Expected (4, 10), got {probs.shape}"
-                
+
                 # Verify probabilities
                 prob_sums = np.sum(probs.data, axis=1)
                 assert np.allclose(prob_sums, 1.0), \
                     f"❌ ML pipeline probabilities broken: {prob_sums}"
-                
+
                 break  # Test one batch
-                
+
         except ImportError as e:
             assert False, f"""
             ❌ ML PIPELINE IMPORTS BROKEN!
-            
+
             🔍 IMPORT ERROR: {str(e)}
-            
+
             🔧 PIPELINE REQUIREMENTS:
             All previous modules (01→08) must be working:
             1. Tensor operations (Module 02)
@@ -123,7 +123,7 @@ class TestCompleteMLPipelineStillWorks:
             5. Spatial operations (Module 06)
             6. Attention mechanisms (Module 07)
             7. Data loading (Module 08)
-            
+
             💡 DEBUG STEPS:
             1. Test each module individually
             2. Check exports: tito module complete XX_modulename
@@ -133,20 +133,20 @@ class TestCompleteMLPipelineStillWorks:
         except Exception as e:
             assert False, f"""
             ❌ ML PIPELINE FUNCTIONALITY BROKEN!
-            
+
             🔍 ERROR: {str(e)}
-            
+
             🔧 POSSIBLE CAUSES:
             1. Autograd interfering with forward pass
             2. Tensor operations corrupted
             3. Layer inheritance broken
             4. Data loading pipeline issues
             5. Memory or shape problems
-            
+
             💡 AUTOGRAD SAFETY:
             Autograd should be ADDITIVE - it adds gradient tracking
             but doesn't break existing forward pass functionality.
-            
+
             🧪 DEBUG CHECKLIST:
             □ Forward pass works without autograd?
             □ All modules import correctly?
@@ -154,17 +154,17 @@ class TestCompleteMLPipelineStillWorks:
             □ Tensor operations unchanged?
             □ Layer interfaces preserved?
             """
-    
+
     def test_attention_and_spatial_integration_stable(self):
         """
         ✅ TEST: Advanced architectures (attention + CNN) should still work
-        
+
         📋 ADVANCED INTEGRATION:
         - Spatial processing (Conv2D, pooling)
         - Attention mechanisms
         - Multi-modal architectures
         - Complex data flows
-        
+
         🎯 Ensures autograd doesn't break sophisticated models
         """
         try:
@@ -173,62 +173,62 @@ class TestCompleteMLPipelineStillWorks:
             from tinytorch.core.attention import MultiHeadAttention
             from tinytorch.core.layers import Linear
             from tinytorch.core.activations import ReLU
-            
+
             # Test sophisticated architecture integration
             # Vision + attention (like Vision Transformer components)
-            
+
             # Vision processing
             cnn = Conv2D(3, 64, kernel_size=3, padding=1)
             vision_proj = Linear(64 * 32 * 32, 256)  # Project spatial features
-            
+
             # Attention processing
             attention = MultiHeadAttention(embed_dim=256, num_heads=8)
-            
+
             # Activations
             relu = ReLU()
-            
+
             # Test multi-modal pipeline
             # Image input
             images = Tensor(np.random.randn(2, 3, 32, 32))
-            
+
             # Vision pathway
             vision_features = relu(cnn(images))     # (2, 64, 32, 32)
             vision_flat = Tensor(vision_features.data.reshape(2, -1))  # (2, 65536)
             vision_embed = vision_proj(vision_flat)  # (2, 256)
-            
+
             # Attention pathway (treating as sequence)
             # Reshape for attention: (seq_len, batch, embed_dim)
             seq_embed = Tensor(vision_embed.data.reshape(1, 2, 256))
             attention_out = attention(seq_embed)     # (1, 2, 256)
-            
+
             # Verify advanced integration
             assert attention_out.shape == (1, 2, 256), \
                 f"❌ Advanced integration broken. Expected (1, 2, 256), got {attention_out.shape}"
-            
+
             # Verify meaningful processing
             assert not np.allclose(attention_out.data, 0), \
                 "❌ Advanced integration produces zero outputs"
-            
+
         except Exception as e:
             assert False, f"""
             ❌ ADVANCED ARCHITECTURE INTEGRATION BROKEN!
-            
+
             🔍 ERROR: {str(e)}
-            
+
             🔧 ADVANCED REQUIREMENTS:
             1. CNN spatial processing must work
             2. Attention mechanisms must work
             3. Dense projections must work
             4. Multi-modal data flows must work
             5. Complex architectures must integrate
-            
+
             💡 WHAT THIS TESTS:
             Modern AI architectures combine:
             - Computer vision (CNNs)
             - Natural language processing (attention)
             - Multimodal understanding
             - Complex data transformations
-            
+
             🧪 COMPONENT ISOLATION:
             Test each component separately:
             1. CNN: conv = Conv2D(3, 16, 3); out = conv(x)
@@ -309,7 +309,7 @@ class TestModule09AutogradCore:
             4. Support computation graph via _grad_fn
             5. Enable backward() method for gradient computation
             """
-    
+
     def test_gradient_computation(self):
         """
         ✅ TEST: Gradient computation - Core of backpropagation
@@ -345,7 +345,7 @@ class TestModule09AutogradCore:
 
         except ImportError as e:
             assert False, f"❌ Tensor import failed: {str(e)}"
-    
+
     def test_computation_graph_building(self):
         """
         ✅ TEST: Computation graph - Track operations for backpropagation
@@ -461,7 +461,7 @@ class TestAutogradIntegration:
 
             🔍 ERROR: {str(e)}
             """
-    
+
     def test_autograd_with_spatial_operations(self):
         """
         ✅ TEST: Gradients flow through spatial operations (CNNs)
@@ -516,7 +516,7 @@ class TestAutogradIntegration:
 
             🔍 ERROR: {str(e)}
             """
-    
+
     def test_autograd_with_attention(self):
         """
         ✅ TEST: Gradients flow through attention mechanisms
@@ -635,7 +635,7 @@ class TestGradientBasedLearningFoundation:
 
             🔍 ERROR: {str(e)}
             """
-    
+
     def test_loss_function_gradients(self):
         """
         ✅ TEST: Loss functions are differentiable
@@ -677,7 +677,7 @@ class TestGradientBasedLearningFoundation:
 
             🔍 ERROR: {str(e)}
             """
-    
+
     def test_optimization_readiness(self):
         """
         ✅ TEST: Ready for gradient-based optimization

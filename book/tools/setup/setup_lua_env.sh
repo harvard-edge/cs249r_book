@@ -9,4 +9,4 @@ export LUA_CPATH='/usr/local/lib/lua/5.4/?.so;/usr/local/lib/lua/5.4/loadall.so;
 
 echo "✅ Lua environment set up for cross-reference filter"
 echo "🔗 You can now run: quarto render [file] --to [format]"
-echo "📄 Cross-references will be automatically injected during rendering" 
+echo "📄 Cross-references will be automatically injected during rendering"

@@ -211,6 +211,6 @@ When creating new AI agents or editing workflows:
 
 ---
 
-**Last Updated**: October 7, 2025  
-**Maintainer**: MLSysBook Team  
+**Last Updated**: October 7, 2025
+**Maintainer**: MLSysBook Team
 **Related Scripts**: `tools/scripts/restore_formatting.py`

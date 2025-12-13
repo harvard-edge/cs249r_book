@@ -276,4 +276,3 @@ echo "  2. Test TITO commands: tito --help"
 echo "  3. Update documentation references"
 echo "  4. Commit changes: git add -A && git commit -m 'refactor: professional project structure'"
 echo ""
-

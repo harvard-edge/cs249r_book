@@ -8,7 +8,7 @@ This document summarizes key organizational decisions and learnings from TinyTor
 
 **Evolution**: Initially developed with Jupyter notebooks as primary format, evolved to Python source files (`.py`) as source of truth.
 
-**Key Decision**: 
+**Key Decision**:
 - **Source of Truth**: `modules/NN_name/name_dev.py` (Python files with Jupytext percent format)
 - **Generated Artifacts**: `.ipynb` files generated via `tito nbgrader generate` for student assignments
 - **Never Commit**: `.ipynb` files excluded from version control during development
@@ -209,4 +209,3 @@ This document summarizes key organizational decisions and learnings from TinyTor
 4. **Tier flexibility as deployment pattern?** The three-tier architecture with flexible configurations represents a deployment pattern that could be emphasized more in Section 4.
 
 5. **Reference implementation pattern?** Using `08_optimizers` as canonical example represents a curriculum maintenance pattern that could be discussed.
-

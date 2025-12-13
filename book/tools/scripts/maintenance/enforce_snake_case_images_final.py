@@ -39,7 +39,7 @@ def main():
 
     all_files = get_all_files('.')
     image_extensions = ['.png', '.jpg', '.jpeg', '.svg', '.gif']
-    
+
     non_compliant_images = []
     for file_path in all_files:
         if file_path.suffix.lower() in image_extensions:
@@ -53,7 +53,7 @@ def main():
         snake_case_stem = to_snake_case(image_path.stem)
         new_filename = f"{snake_case_stem}{image_path.suffix}"
         new_path = image_path.parent / new_filename
-        
+
         # Rename the image
         if image_path.exists():
             os.rename(image_path, new_path)
@@ -65,7 +65,7 @@ def main():
                 try:
                     with open(file_to_update, 'r', encoding='utf-8') as f:
                         content = f.read()
-                    
+
                     # Case-insensitive replacement
                     pattern = re.compile(re.escape(image_path.name), re.IGNORECASE)
                     new_content = pattern.sub(new_filename, content)

@@ -28,7 +28,7 @@ Chapter QMDs → Agent → Individual JSONs → build_master_glossary.py → Mas
 ## Scripts
 
 - **`build_master_glossary.py`** - Main aggregation script (chapter JSONs → master JSON)
-- **`generate_glossary.py`** - Page generator (master JSON → glossary.qmd)  
+- **`generate_glossary.py`** - Page generator (master JSON → glossary.qmd)
 - **`clean_master_glossary.py`** - Legacy cleanup script (use build_master instead)
 
 ## Source Files

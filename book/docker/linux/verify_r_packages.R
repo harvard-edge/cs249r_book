@@ -10,4 +10,4 @@ if(length(missing_packages) > 0) {
   quit(status = 1)
 } else {
   cat('✅ All required R packages installed successfully\n')
-} 
+}

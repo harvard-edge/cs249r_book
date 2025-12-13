@@ -55,7 +55,7 @@ def test_linear_chain():
     layer1 = Linear(784, 256)
     layer2 = Linear(256, 128)
     layer3 = Linear(128, 10)
-    
+
     x = Tensor(np.random.randn(16, 784))
     x = layer1(x)
     assert x.shape == (16, 256), f"After layer1: expected (16, 256), got {x.shape}"
@@ -105,7 +105,7 @@ def test_conv2d_chain():
     """Chain of conv layers (typical CNN pattern)."""
     conv1 = Conv2d(1, 32, kernel_size=3)
     conv2 = Conv2d(32, 64, kernel_size=3)
-    
+
     x = Tensor(np.random.randn(4, 1, 28, 28))  # MNIST-like
     x = conv1(x)
     assert x.shape == (4, 32, 26, 26), f"After conv1: expected (4, 32, 26, 26), got {x.shape}"
@@ -259,15 +259,15 @@ def test_transformer_output_projection():
     """Transformer output projection with reshape."""
     batch, seq, embed = 4, 10, 128
     vocab = 1000
-    
+
     x = Tensor(np.random.randn(batch, seq, embed))
     x_2d = x.reshape(batch * seq, embed)
     assert x_2d.shape == (40, 128), f"Expected (40, 128), got {x_2d.shape}"
-    
+
     proj = Linear(embed, vocab)
     logits_2d = proj(x_2d)
     assert logits_2d.shape == (40, 1000), f"Expected (40, 1000), got {logits_2d.shape}"
-    
+
     logits = logits_2d.reshape(batch, seq, vocab)
     assert logits.shape == (4, 10, 1000), f"Expected (4, 10, 1000), got {logits.shape}"
 
@@ -335,30 +335,30 @@ def test_single_channel_conv():
 def test_mnist_cnn_dimensions():
     """Complete MNIST CNN dimension flow."""
     x = Tensor(np.random.randn(32, 1, 28, 28))  # MNIST batch
-    
+
     # Conv block 1
     conv1 = Conv2d(1, 32, kernel_size=3)
     x = conv1(x)
     assert x.shape == (32, 32, 26, 26), f"After conv1: {x.shape}"
     x = F.max_pool2d(x, 2)
     assert x.shape == (32, 32, 13, 13), f"After pool1: {x.shape}"
-    
+
     # Conv block 2
     conv2 = Conv2d(32, 64, kernel_size=3)
     x = conv2(x)
     assert x.shape == (32, 64, 11, 11), f"After conv2: {x.shape}"
     x = F.max_pool2d(x, 2)
     assert x.shape == (32, 64, 5, 5), f"After pool2: {x.shape}"
-    
+
     # Flatten for FC
     x = F.flatten(x, start_dim=1)
     assert x.shape == (32, 1600), f"After flatten: {x.shape}"
-    
+
     # FC layers
     fc1 = Linear(1600, 128)
     x = fc1(x)
     assert x.shape == (32, 128), f"After fc1: {x.shape}"
-    
+
     fc2 = Linear(128, 10)
     x = fc2(x)
     assert x.shape == (32, 10), f"Final output: {x.shape}"
@@ -367,25 +367,25 @@ def test_mnist_cnn_dimensions():
 def test_cifar10_cnn_dimensions():
     """Complete CIFAR-10 CNN dimension flow."""
     x = Tensor(np.random.randn(16, 3, 32, 32))  # CIFAR-10 batch
-    
+
     # Conv block 1
     conv1 = Conv2d(3, 32, kernel_size=3)
     x = conv1(x)
     assert x.shape == (16, 32, 30, 30), f"After conv1: {x.shape}"
     x = F.max_pool2d(x, 2)
     assert x.shape == (16, 32, 15, 15), f"After pool1: {x.shape}"
-    
+
     # Conv block 2
     conv2 = Conv2d(32, 64, kernel_size=3)
     x = conv2(x)
     assert x.shape == (16, 64, 13, 13), f"After conv2: {x.shape}"
     x = F.max_pool2d(x, 2)
     assert x.shape == (16, 64, 6, 6), f"After pool2: {x.shape}"
-    
+
     # Flatten and FC
     x = F.flatten(x, start_dim=1)
     assert x.shape == (16, 2304), f"After flatten: {x.shape}"
-    
+
     fc = Linear(2304, 10)
     x = fc(x)
     assert x.shape == (16, 10), f"Final output: {x.shape}"

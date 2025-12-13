@@ -34,14 +34,14 @@ import { setupCameraEvents } from './modules/camera.js';
     // Wire up events
     if (menuBtn && sidebar) {
         document.addEventListener('click', (e) => {
-            if (sidebar.classList.contains('active') && 
-                !sidebar.contains(e.target) && 
+            if (sidebar.classList.contains('active') &&
+                !sidebar.contains(e.target) &&
                 !menuBtn.contains(e.target)) {
                 menuBtn.classList.remove('active');
                 sidebar.classList.remove('active');
             }
         });
-        
+
         menuBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             menuBtn.classList.toggle('active');
@@ -52,11 +52,11 @@ import { setupCameraEvents } from './modules/camera.js';
     if (authBtn) {
         authBtn.addEventListener('click', (e) => {
             e.preventDefault();
-            const { isLoggedIn } = getSession(); 
+            const { isLoggedIn } = getSession();
             if (isLoggedIn) {
-                openProfileModal(); 
+                openProfileModal();
             } else {
-                openModal(); 
+                openModal();
             }
         });
     }
@@ -84,13 +84,13 @@ import { setupCameraEvents } from './modules/camera.js';
     // Check for redirect action
     const params = new URLSearchParams(window.location.search);
     const action = params.get('action');
-    
+
     if (action === 'login') {
         localStorage.removeItem("tinytorch_token");
         localStorage.removeItem("tinytorch_refresh_token");
         localStorage.removeItem("tinytorch_user");
         updateNavState();
-        openModal('login'); 
+        openModal('login');
     } else if (action === 'profile') {
         const { isLoggedIn } = getSession();
         if (isLoggedIn) {

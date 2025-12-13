@@ -1885,7 +1885,7 @@ def demo_capstone():
     """🎯 See your complete system come together."""
     print("🎯 AHA MOMENT: You Built a Complete ML System")
     print("=" * 45)
-    
+
     print("📚 Your TinyTorch Journey:")
     print()
     print("  Modules 01-08: Foundation")

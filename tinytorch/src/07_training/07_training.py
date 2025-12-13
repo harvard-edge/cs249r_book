@@ -41,7 +41,7 @@ Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/07_training/training_dev.py`  
+**Learning Side:** You work in `modules/07_training/training_dev.py`
 **Building Side:** Code exports to `tinytorch.core.training`
 
 ```python
@@ -1289,35 +1289,35 @@ def demo_training():
     """🎯 See the training loop in action."""
     print("🎯 AHA MOMENT: Training Just Works")
     print("=" * 45)
-    
+
     # Simple linear regression: learn y = 2x + 1
     np.random.seed(42)
     X = Tensor(np.random.randn(20, 1))
     y = Tensor(X.data * 2 + 1)  # True relationship
-    
+
     # Simple model: one weight, one bias
     w = Tensor(np.array([[0.0]]), requires_grad=True)
     b = Tensor(np.array([0.0]), requires_grad=True)
-    
+
     optimizer = SGD([w, b], lr=0.1)
     loss_fn = MSELoss()
-    
+
     print("Learning y = 2x + 1:")
     for epoch in range(5):
         # Forward
         pred = X.matmul(w) + b
         loss = loss_fn(pred, y)
-        
+
         # Backward
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        
+
         print(f"  Epoch {epoch+1}: w={w.data[0,0]:.2f}, b={b.data[0]:.2f}, loss={float(loss.data):.4f}")
-    
+
     print(f"\nLearned: y = {w.data[0,0]:.1f}x + {b.data[0]:.1f}")
     print("Target:  y = 2.0x + 1.0")
-    
+
     print("\n✨ Your training loop learned the pattern!")
 
 # %%

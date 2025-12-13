@@ -50,17 +50,17 @@ Let's optimize for speed!
 ## 📦 Where This Code Lives in the Final Package
 
 **Learning Side:** You work in `modules/18_acceleration/acceleration_dev.py`
-**Building Side:** Code exports to `tinytorch.nn.acceleration`
+**Building Side:** Code exports to `tinytorch.perf.acceleration`
 
 ```python
 # How to use this module:
-from tinytorch.nn.acceleration import vectorized_matmul, fused_gelu
+from tinytorch.perf.acceleration import vectorized_matmul, fused_gelu
 ```
 
 **Why this matters:**
 - **Learning:** Complete acceleration system in one focused module for deep understanding
 - **Production:** Proper organization like PyTorch's torch.cuda and torch.backends with optimization components
-- **Consistency:** All acceleration operations and optimization components in nn.acceleration
+- **Consistency:** All acceleration operations and optimization components in perf.acceleration
 - **Integration:** Works seamlessly with neural network layers for complete performance optimization
 """
 
@@ -1160,76 +1160,76 @@ def demo_acceleration_with_profiler():
     print("=" * 70)
 
     profiler = Profiler()
-    
+
     # Create two simple models: one slow (loop-based), one fast (vectorized)
     class SlowLinear:
         """Linear layer using explicit loops (slow)."""
         def __init__(self, in_features, out_features):
             self.weight = Tensor(np.random.randn(in_features, out_features).astype(np.float32) * 0.01)
             self.name = "slow_linear"
-        
+
         def forward(self, x):
             # Explicit loop implementation (for demonstration)
             batch_size = x.shape[0]
             out_features = self.weight.shape[1]
             result = np.zeros((batch_size, out_features), dtype=np.float32)
-            
+
             for i in range(batch_size):
                 for j in range(out_features):
                     for k in range(x.shape[1]):
                         result[i, j] += x.data[i, k] * self.weight.data[k, j]
-            
+
             return Tensor(result)
-    
+
     class FastLinear:
         """Linear layer using vectorized matmul (fast)."""
         def __init__(self, in_features, out_features):
             self.weight = Tensor(np.random.randn(in_features, out_features).astype(np.float32) * 0.01)
             self.name = "fast_linear"
-        
+
         def forward(self, x):
             # Vectorized implementation
             return vectorized_matmul(x, self.weight)
-    
+
     in_features, out_features = 128, 64
     batch_size = 32
-    
+
     # Create models
     slow_model = SlowLinear(in_features, out_features)
     fast_model = FastLinear(in_features, out_features)
-    
+
     # Create input
     input_tensor = Tensor(np.random.randn(batch_size, in_features).astype(np.float32))
-    
+
     print("\n🐢 BEFORE: Loop-based implementation")
     print("-" * 70)
-    
+
     # Measure slow model
     slow_latency = profiler.measure_latency(slow_model, input_tensor, warmup=3, iterations=10)
     slow_flops = profiler.count_flops(slow_model, (batch_size, in_features))
-    
+
     print(f"   Latency: {slow_latency:.2f} ms")
     print(f"   FLOPs: {slow_flops:,}")
     print(f"   Throughput: {slow_flops / (slow_latency / 1000) / 1e9:.2f} GFLOP/s")
-    
+
     print("\n🚀 AFTER: Vectorized implementation")
     print("-" * 70)
-    
+
     # Measure fast model
     fast_latency = profiler.measure_latency(fast_model, input_tensor, warmup=3, iterations=10)
     fast_flops = profiler.count_flops(fast_model, (batch_size, in_features))
-    
+
     print(f"   Latency: {fast_latency:.2f} ms")
     print(f"   FLOPs: {fast_flops:,}")
     print(f"   Throughput: {fast_flops / (fast_latency / 1000) / 1e9:.2f} GFLOP/s")
-    
+
     print("\n📈 ACCELERATION GAINS")
     print("=" * 70)
     speedup = slow_latency / fast_latency
     print(f"   Speedup: {speedup:.1f}x faster")
     print(f"   Time saved: {slow_latency - fast_latency:.2f} ms per inference")
     print(f"   Throughput improvement: {speedup:.1f}x more inferences/second")
-    
+
     print("\n💡 Key Insight:")
     print(f"   Vectorization with numpy.matmul leverages optimized BLAS libraries")
     print(f"   that use SIMD instructions and cache-friendly memory access patterns.")

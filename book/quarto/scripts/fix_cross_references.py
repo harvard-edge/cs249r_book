@@ -10,7 +10,7 @@ in the HTML output as unresolved references like: ?@sec-ml-systems
 
 This is a problem because:
 1. The glossary has 800+ cross-references to all chapters
-2. The introduction references many other chapters  
+2. The introduction references many other chapters
 3. We want fast builds during development (only building 2-3 files instead of 20+)
 4. But we still want all cross-reference links to work properly
 
@@ -52,7 +52,7 @@ from pathlib import Path
 CHAPTER_MAPPING = {
     # Top-level chapters
     "sec-introduction": "contents/core/introduction/introduction.html#sec-introduction",
-    "sec-ml-systems": "contents/core/ml_systems/ml_systems.html#sec-ml-systems", 
+    "sec-ml-systems": "contents/core/ml_systems/ml_systems.html#sec-ml-systems",
     "sec-dl-primer": "contents/core/dl_primer/dl_primer.html#sec-dl-primer",
     "sec-dnn-architectures": "contents/core/dnn_architectures/dnn_architectures.html#sec-dnn-architectures",
     "sec-ai-workflow": "contents/core/workflow/workflow.html#sec-ai-workflow",
@@ -72,15 +72,15 @@ CHAPTER_MAPPING = {
     "sec-ai-good": "contents/core/ai_for_good/ai_for_good.html#sec-ai-good",
     "sec-agi-systems": "contents/core/frontiers/frontiers.html#sec-agi-systems",
     "sec-conclusion": "contents/core/conclusion/conclusion.html#sec-conclusion",
-    
+
     # Subsections - AI Training chapter
     "sec-ai-training-distributed-systems-8fe8": "contents/core/training/training.html#sec-ai-training-distributed-systems-8fe8",
     "sec-ai-training-neural-network-computation-73f5": "contents/core/training/training.html#sec-ai-training-neural-network-computation-73f5",
     "sec-ai-training-optimization-algorithms-506e": "contents/core/training/training.html#sec-ai-training-optimization-algorithms-506e",
-    
+
     # Subsections - Efficient AI chapter
     "sec-efficient-ai-ai-scaling-laws-a043": "contents/core/efficient_ai/efficient_ai.html#sec-efficient-ai-ai-scaling-laws-a043",
-    
+
     # Subsections - Model Optimizations chapter
     "sec-model-optimizations-neural-architecture-search-3915": "contents/core/optimizations/optimizations.html#sec-model-optimizations-neural-architecture-search-3915",
     "sec-model-optimizations-numerical-precision-a93d": "contents/core/optimizations/optimizations.html#sec-model-optimizations-numerical-precision-a93d",
@@ -117,7 +117,7 @@ CHAPTER_MAPPING = {
 CHAPTER_TITLES = {
     # Top-level chapters
     "sec-introduction": "Chapter 1: Introduction",
-    "sec-ml-systems": "Chapter 2: ML Systems", 
+    "sec-ml-systems": "Chapter 2: ML Systems",
     "sec-dl-primer": "Chapter 3: Deep Learning Primer",
     "sec-dnn-architectures": "Chapter 4: DNN Architectures",
     "sec-ai-workflow": "Chapter 5: AI Workflow",
@@ -137,15 +137,15 @@ CHAPTER_TITLES = {
     "sec-ai-good": "Chapter 19: AI for Good",
     "sec-agi-systems": "Chapter 20: AGI Systems",
     "sec-conclusion": "Chapter 21: Conclusion",
-    
+
     # Subsections - AI Training chapter
     "sec-ai-training-distributed-systems-8fe8": "Distributed Systems",
     "sec-ai-training-neural-network-computation-73f5": "Neural Network Computation",
     "sec-ai-training-optimization-algorithms-506e": "Optimization Algorithms",
-    
+
     # Subsections - Efficient AI chapter
     "sec-efficient-ai-ai-scaling-laws-a043": "AI Scaling Laws",
-    
+
     # Subsections - Model Optimizations chapter
     "sec-model-optimizations-neural-architecture-search-3915": "Neural Architecture Search",
     "sec-model-optimizations-numerical-precision-a93d": "Numerical Precision",

@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 class TestCoreFeatures:
     """Test core functionality of the module."""
-    
+
     def test_basic_creation(self):
         """Test basic object creation."""
         # Example:
@@ -21,7 +21,7 @@ class TestCoreFeatures:
         # obj = MainClass()
         # assert obj is not None
         pass
-    
+
     def test_core_operation(self):
         """Test main operation of the module."""
         # Example:
@@ -29,7 +29,7 @@ class TestCoreFeatures:
         # result = obj.process(input_data)
         # assert result.shape == expected_shape
         pass
-    
+
     def test_edge_cases(self):
         """Test edge cases and boundary conditions."""
         # Example:
@@ -38,7 +38,7 @@ class TestCoreFeatures:
         # result = obj.process([])
         # assert result is not None
         pass
-    
+
     def test_error_handling(self):
         """Test proper error handling."""
         # Example:

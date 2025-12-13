@@ -23,11 +23,11 @@ import tinytorch.nn.functional as F
 
 class ForwardPassTester:
     """Test forward passes for various architectures."""
-    
+
     def __init__(self):
         self.passed = []
         self.failed = []
-    
+
     def test(self, name, func):
         """Run a test and track results."""
         try:
@@ -39,7 +39,7 @@ class ForwardPassTester:
             self.failed.append((name, str(e)))
             print(f"❌ {name}: {e}")
             return False
-    
+
     def summary(self):
         """Print test summary."""
         total = len(self.passed) + len(self.failed)
@@ -195,12 +195,12 @@ def test_mlp_forward():
             self.fc1 = Linear(784, 256)
             self.fc2 = Linear(256, 128)
             self.fc3 = Linear(128, 10)
-        
+
         def forward(self, x):
             x = F.relu(self.fc1(x))
             x = F.relu(self.fc2(x))
             return self.fc3(x)
-    
+
     model = MLP()
     x = Tensor(np.random.randn(32, 784))  # MNIST batch
     y = model.forward(x)
@@ -215,7 +215,7 @@ def test_cnn_forward():
             self.conv2 = Conv2d(32, 64, 3)
             self.fc1 = Linear(64 * 5 * 5, 128)
             self.fc2 = Linear(128, 10)
-        
+
         def forward(self, x):
             x = F.relu(self.conv1(x))
             x = F.max_pool2d(x, 2)
@@ -224,7 +224,7 @@ def test_cnn_forward():
             x = F.flatten(x, start_dim=1)
             x = F.relu(self.fc1(x))
             return self.fc2(x)
-    
+
     model = CNN()
     x = Tensor(np.random.randn(16, 1, 28, 28))  # MNIST batch
     y = model.forward(x)
@@ -240,7 +240,7 @@ def test_transformer_forward():
             self.transformer = TransformerBlock(128, 8)
             self.ln = LayerNorm(128)
             self.output = Linear(128, 1000)
-        
+
         def forward(self, x):
             x = self.embed(x)
             x = self.pos_enc(x)
@@ -251,7 +251,7 @@ def test_transformer_forward():
             x = x.reshape(batch * seq, embed)
             x = self.output(x)
             return x.reshape(batch, seq, 1000)
-    
+
     model = SimpleTransformer()
     x = Tensor(np.random.randint(0, 1000, (4, 20)))  # Token batch
     y = model.forward(x)
@@ -264,14 +264,14 @@ def test_residual_block_forward():
         def __init__(self, channels):
             self.conv1 = Conv2d(channels, channels, 3, padding=1)
             self.conv2 = Conv2d(channels, channels, 3, padding=1)
-        
+
         def forward(self, x):
             identity = x
             out = F.relu(self.conv1(x))
             out = self.conv2(out)
             out = out + identity  # Residual connection
             return F.relu(out)
-    
+
     block = ResidualBlock(64)
     x = Tensor(np.random.randn(2, 64, 16, 16))
     y = block.forward(x)
@@ -284,38 +284,38 @@ def run_all_forward_tests():
     print("FORWARD PASS TEST SUITE")
     print("Testing data flow through all layer types")
     print("="*60)
-    
+
     tester = ForwardPassTester()
-    
+
     # Basic layers
     print("\n📦 Basic Layers:")
     tester.test("Linear layer", test_linear_forward)
     tester.test("Conv2d layer", test_conv2d_forward)
     tester.test("Conv2d with padding", test_conv2d_with_padding)
     tester.test("Conv2d with stride", test_conv2d_with_stride)
-    
+
     # Activations
     print("\n⚡ Activation Functions:")
     tester.test("ReLU", test_relu_forward)
     tester.test("Sigmoid", test_sigmoid_forward)
     tester.test("Tanh", test_tanh_forward)
     tester.test("Softmax", test_softmax_forward)
-    
+
     # Pooling
     print("\n🏊 Pooling Operations:")
     tester.test("MaxPool2d", test_maxpool2d_forward)
     tester.test("AvgPool2d", test_avgpool2d_forward)
-    
+
     # Reshaping
     print("\n🔄 Reshape Operations:")
     tester.test("Flatten", test_flatten_forward)
     tester.test("Reshape", test_reshape_forward)
-    
+
     # Normalization
     print("\n📊 Normalization:")
     tester.test("LayerNorm", test_layernorm_forward)
     tester.test("BatchNorm", test_batchnorm_forward)
-    
+
     # Full architectures
     print("\n🏗️ Complete Architectures:")
     tester.test("Sequential container", test_sequential_forward)
@@ -323,7 +323,7 @@ def run_all_forward_tests():
     tester.test("CNN (Images)", test_cnn_forward)
     tester.test("Transformer (NLP)", test_transformer_forward)
     tester.test("Residual Block", test_residual_block_forward)
-    
+
     return tester.summary()
 
 

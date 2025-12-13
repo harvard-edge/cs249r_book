@@ -183,7 +183,3 @@ echo ""
 echo "🔍 Next: Verify website builds"
 echo "   cd docs && ./build.sh"
 echo ""
-
-
-
-

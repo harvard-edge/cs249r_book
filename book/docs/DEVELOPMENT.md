@@ -400,4 +400,4 @@ If you encounter issues with the development workflow:
 1. Check this guide first
 2. Run `make check` for diagnostics
 3. Review the cleanup script output with `make clean-dry`
-4. Ask for help in project discussions 
+4. Ask for help in project discussions

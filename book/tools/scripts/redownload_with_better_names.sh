@@ -21,4 +21,3 @@ python3 tools/scripts/manage_external_images.py -d quarto/contents/labs/
 
 echo ""
 echo "✅ Done! Images have been re-downloaded with proper filenames"
-

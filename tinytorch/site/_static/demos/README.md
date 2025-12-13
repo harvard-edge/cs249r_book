@@ -73,15 +73,15 @@ The script shows live output as commands run (not silent!):
 
   │ 🔥 TinyTorch Environment Setup
   │ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  │ 
+  │
   │ 📦 Creating virtual environment...
   │   ✓ Virtual environment created
-  │ 
+  │
   │ 📦 Installing dependencies...
   │   ✓ numpy installed
   │   ✓ pytest installed
   │   ...
-  │ 
+  │
   │ ✅ TinyTorch environment setup complete
 
   ✓ PASS (45.23s)

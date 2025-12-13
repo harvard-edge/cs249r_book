@@ -77,7 +77,7 @@ Chapter Glossaries → Global Glossary → Published Glossary
 ## Current Statistics
 
 - **Chapter glossaries**: 22 files (810 raw terms)
-- **Master glossary**: 611 unique terms after deduplication  
+- **Master glossary**: 611 unique terms after deduplication
 - **Processing scripts**: 7 Python files
 - **Published glossary**: 1 QMD file with 611 terms in 26 alphabetical sections
 

@@ -82,4 +82,3 @@ make e2e-full
 5. **Error Handling**
    - Graceful failures for invalid commands
    - Helpful error messages
-

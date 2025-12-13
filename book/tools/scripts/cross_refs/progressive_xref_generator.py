@@ -39,10 +39,10 @@ class ProgressiveXRefGenerator:
     def __init__(self, model="gemma2:27b"):
         self.model = model
         self.ollama_url = "http://localhost:11434/api/generate"
-        
+
         # Initialize chapter profiles with relationships
         self.chapter_profiles = self._initialize_chapter_profiles()
-        
+
         # Track state across generation
         self.connection_history = []  # All connections made so far
         self.chapter_exposure = defaultdict(lambda: {
@@ -50,10 +50,10 @@ class ProgressiveXRefGenerator:
             'last_section': -1,
             'connection_types': set()
         })
-        
+
     def _initialize_chapter_profiles(self) -> Dict[str, ChapterProfile]:
         """Initialize detailed profiles for each chapter"""
-        
+
         profiles = {
             # Fundamentals
             "introduction": ChapterProfile(
@@ -73,7 +73,7 @@ class ProgressiveXRefGenerator:
                 leads_to=["frameworks", "training"],
                 complements=["ml_systems"]
             ),
-            
+
             # Implementation
             "workflow": ChapterProfile(
                 name="workflow", category="implementation", complexity_level=2,
@@ -99,7 +99,7 @@ class ProgressiveXRefGenerator:
                 leads_to=["optimizations", "efficient_ai"],
                 complements=["data_engineering"]
             ),
-            
+
             # Optimization & Performance
             "efficient_ai": ChapterProfile(
                 name="efficient_ai", category="optimization", complexity_level=2,
@@ -124,7 +124,7 @@ class ProgressiveXRefGenerator:
                 prerequisites=["training"],
                 complements=["optimizations", "efficient_ai"]
             ),
-            
+
             # Operations & Deployment
             "ops": ChapterProfile(
                 name="ops", category="operations", complexity_level=2,
@@ -137,7 +137,7 @@ class ProgressiveXRefGenerator:
                 prerequisites=["ops", "efficient_ai"],
                 complements=["hw_acceleration", "privacy_security"]
             ),
-            
+
             # Advanced Topics
             "privacy_security": ChapterProfile(
                 name="privacy_security", category="advanced", complexity_level=3,
@@ -154,7 +154,7 @@ class ProgressiveXRefGenerator:
                 prerequisites=["training"],
                 complements=["privacy_security", "responsible_ai"]
             ),
-            
+
             # Specialized
             "generative_ai": ChapterProfile(
                 name="generative_ai", category="specialized", complexity_level=3,
@@ -171,7 +171,7 @@ class ProgressiveXRefGenerator:
                 prerequisites=["responsible_ai"],
                 complements=["sustainable_ai"]
             ),
-            
+
             # Future
             "frontiers": ChapterProfile(
                 name="frontiers", category="future", complexity_level=3,
@@ -188,36 +188,36 @@ class ProgressiveXRefGenerator:
                 complements=["frontiers", "emerging_topics"]
             )
         }
-        
+
         return profiles
-    
+
     def extract_sections(self, chapter_path: Path) -> List[SectionContext]:
         """Extract sections with their context from chapter"""
-        
+
         with open(chapter_path) as f:
             content = f.read()
-        
+
         sections = []
         lines = content.split('\n')
-        
+
         for i, line in enumerate(lines):
             if line.startswith('## ') and '{#sec-' in line:
                 # Extract section info
                 section_id = re.search(r'{#(sec-[^}]+)}', line).group(1)
                 title = re.sub(r'\s*{#[^}]+}', '', line.replace('## ', ''))
-                
+
                 # Get content preview (next 100 lines or until next section)
                 preview_lines = []
                 for j in range(i+1, min(i+101, len(lines))):
                     if lines[j].startswith('## '):
                         break
                     preview_lines.append(lines[j])
-                
+
                 content_preview = '\n'.join(preview_lines[:50])  # First 50 lines
-                
+
                 # Extract key concepts from preview
                 key_concepts = self.extract_concepts(content_preview)
-                
+
                 sections.append(SectionContext(
                     section_id=section_id,
                     title=title,
@@ -227,7 +227,7 @@ class ProgressiveXRefGenerator:
                     narrative_stage="",  # Will calculate
                     key_concepts=key_concepts
                 ))
-        
+
         # Update total sections and narrative stages
         total = len(sections)
         for section in sections:
@@ -235,38 +235,38 @@ class ProgressiveXRefGenerator:
             section.narrative_stage = self.determine_narrative_stage(
                 section.index, total
             )
-        
+
         return sections
-    
+
     def extract_concepts(self, text: str) -> List[str]:
         """Extract key concepts from text"""
         # Simple extraction - could be enhanced with NLP
         concepts = []
-        
+
         # Look for emphasized terms
         for match in re.finditer(r'\*\*([^*]+)\*\*', text):
             concepts.append(match.group(1).lower())
-        
+
         for match in re.finditer(r'\*([^*]+)\*', text):
             concepts.append(match.group(1).lower())
-        
+
         # Look for technical terms
         technical_patterns = [
             r'\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\b',  # CamelCase
             r'\b(?:learning|training|model|data|system|network|algorithm)\b',
             r'\b(?:performance|optimization|deployment|inference)\b'
         ]
-        
+
         for pattern in technical_patterns:
             for match in re.finditer(pattern, text, re.IGNORECASE):
                 concepts.append(match.group(0).lower())
-        
+
         return list(set(concepts))[:10]  # Top 10 unique concepts
-    
+
     def determine_narrative_stage(self, index: int, total: int) -> str:
         """Determine narrative stage based on position"""
         position = index / max(total - 1, 1)
-        
+
         if position < 0.25:
             return "foundation"  # Setting the stage
         elif position < 0.5:
@@ -275,48 +275,48 @@ class ProgressiveXRefGenerator:
             return "application"  # Practical aspects
         else:
             return "synthesis"  # Advanced/future topics
-    
+
     def find_relevant_section(self, target_chapter: str, key_concepts: List[str]) -> Optional[str]:
         """Find the most relevant section in target chapter based on concepts"""
-        
+
         # For now, return a generic overview section
         # In production, this would analyze the target chapter's sections
         # and find the best match based on concept overlap
-        
+
         # Common section patterns
         overview_patterns = [
             f"sec-{target_chapter}-overview",
-            f"sec-{target_chapter}-introduction", 
+            f"sec-{target_chapter}-introduction",
             f"sec-{target_chapter}-basics",
             f"sec-{target_chapter}-fundamentals"
         ]
-        
+
         # For now, return the overview section
         # You could enhance this to actually read the target chapter
         # and find the most relevant section
         return f"sec-{target_chapter}-overview"
-    
-    def select_connections(self, 
+
+    def select_connections(self,
                           section: SectionContext,
                           source_chapter: str,
                           max_refs: int = 4) -> List[Dict]:
         """Select diverse, contextually appropriate connections"""
-        
+
         connections = []
         source_profile = self.chapter_profiles.get(source_chapter)
-        
+
         if not source_profile:
             return connections
-        
+
         # Score each potential target chapter
         scores = {}
-        
+
         for target_name, target_profile in self.chapter_profiles.items():
             if target_name == source_chapter:
                 continue
-            
+
             score = 0
-            
+
             # 1. Narrative appropriateness
             stage_bonus = {
                 "foundation": {"foundation": 10, "implementation": 5},
@@ -324,11 +324,11 @@ class ProgressiveXRefGenerator:
                 "application": {"optimization": 10, "operations": 8, "advanced": 5},
                 "synthesis": {"advanced": 10, "specialized": 8, "future": 10}
             }
-            
+
             score += stage_bonus.get(section.narrative_stage, {}).get(
                 target_profile.category, 0
             )
-            
+
             # 2. Relationship strength
             if target_name in source_profile.prerequisites:
                 score += 8  # Strong prerequisite connection
@@ -336,52 +336,52 @@ class ProgressiveXRefGenerator:
                 score += 6  # Natural progression
             if target_name in source_profile.complements:
                 score += 4  # Complementary material
-            
+
             # 3. Complexity appropriateness
-            complexity_diff = abs(target_profile.complexity_level - 
+            complexity_diff = abs(target_profile.complexity_level -
                                  (section.index / section.total_sections * 3))
             score -= complexity_diff * 2  # Penalty for complexity mismatch
-            
+
             # 4. Diversity penalty (avoid overexposure)
             exposure = self.chapter_exposure[target_name]
             if exposure['count'] > 0:
                 # Stronger penalty if shown recently
                 recency_penalty = max(0, 5 - (section.index - exposure['last_section']))
                 score -= exposure['count'] * 3 + recency_penalty
-            
+
             # 5. Concept relevance
             target_concepts = target_profile.concepts
             if target_concepts:
                 overlap = len(set(section.key_concepts) & target_concepts)
                 score += overlap * 2
-            
+
             scores[target_name] = max(0, score)
-        
+
         # Select top scoring chapters
         sorted_targets = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-        
+
         for target_name, score in sorted_targets[:max_refs]:
             if score == 0:
                 continue
-            
+
             target_profile = self.chapter_profiles[target_name]
-            
+
             # Determine connection type
             connection_type = self.determine_connection_type(
                 source_profile, target_profile, section
             )
-            
+
             # Generate explanation
             explanation = self.generate_progressive_explanation(
                 section, source_chapter, target_name, connection_type
             )
-            
+
             # Calculate priority
             priority = 1 if score > 15 else (2 if score > 8 else 3)
-            
+
             # Try to find a relevant section in the target chapter
             target_section = self.find_relevant_section(target_name, section.key_concepts)
-            
+
             connection = {
                 "target_chapter": target_name,
                 "target_section": target_section,
@@ -392,22 +392,22 @@ class ProgressiveXRefGenerator:
                 "quality": 0.85,
                 "narrative_fit": section.narrative_stage
             }
-            
+
             connections.append(connection)
-            
+
             # Update exposure tracking
             self.chapter_exposure[target_name]['count'] += 1
             self.chapter_exposure[target_name]['last_section'] = section.index
             self.chapter_exposure[target_name]['connection_types'].add(connection_type)
-        
+
         return connections
-    
+
     def determine_connection_type(self,
                                  source: ChapterProfile,
                                  target: ChapterProfile,
                                  section: SectionContext) -> str:
         """Determine appropriate connection type"""
-        
+
         # Based on relationships
         if target.name in source.prerequisites:
             return "prerequisite"
@@ -415,7 +415,7 @@ class ProgressiveXRefGenerator:
             return "extends" if section.narrative_stage in ["development", "application"] else "foundation"
         elif target.name in source.complements:
             return "complements"
-        
+
         # Based on categories and stages
         stage_types = {
             "foundation": {
@@ -438,31 +438,31 @@ class ProgressiveXRefGenerator:
                 "future": "anticipates"
             }
         }
-        
+
         return stage_types.get(section.narrative_stage, {}).get(
             target.category, "complements"
         )
-    
+
     def generate_progressive_explanation(self,
                                         section: SectionContext,
                                         source: str,
                                         target: str,
                                         connection_type: str) -> str:
         """Generate contextually appropriate explanation"""
-        
+
         # Build context for LLM
         prompt = f"""
         Generate a brief, specific explanation for this cross-reference.
-        
+
         Context:
         - Section: "{section.title}" (position {section.index+1}/{section.total_sections})
         - Narrative stage: {section.narrative_stage}
         - From: {source} TO: {target}
         - Connection type: {connection_type}
         - Key concepts in section: {', '.join(section.key_concepts[:5])}
-        
+
         Previous connections to {target}: {self.chapter_exposure[target]['count']}
-        
+
         Requirements:
         1. Write one clear, concise sentence (not just a fragment)
         2. Be specific to this section's content and how it connects
@@ -473,10 +473,10 @@ class ProgressiveXRefGenerator:
            - development: "Practical patterns for..."
            - application: "Production considerations for..."
            - synthesis: "Advanced techniques in..."
-        
+
         Return only the explanation text.
         """
-        
+
         data = {
             "model": self.model,
             "prompt": prompt,
@@ -484,7 +484,7 @@ class ProgressiveXRefGenerator:
             "temperature": 0.8,
             "max_tokens": 100
         }
-        
+
         try:
             response = requests.post(self.ollama_url, json=data, timeout=30)
             if response.status_code == 200:
@@ -494,7 +494,7 @@ class ProgressiveXRefGenerator:
                 return explanation
         except Exception as e:
             print(f"    Warning: LLM generation failed: {e}")
-        
+
         # Contextual fallbacks
         fallbacks = {
             ("foundation", "prerequisite"): f"Essential {target.replace('_', ' ')} foundations",
@@ -506,90 +506,90 @@ class ProgressiveXRefGenerator:
             ("synthesis", "explores"): f"Advanced {target.replace('_', ' ')} topics",
             ("synthesis", "anticipates"): f"Future of {target.replace('_', ' ')}"
         }
-        
+
         return fallbacks.get(
             (section.narrative_stage, connection_type),
             f"{target.replace('_', ' ')} insights"
         )
-    
+
     def generate_chapter_xrefs(self, chapter_path: Path) -> Dict:
         """Generate progressive cross-references for entire chapter"""
-        
+
         chapter_name = chapter_path.stem
         print(f"\n🚀 Generating progressive xrefs for: {chapter_name}")
         print("=" * 60)
-        
+
         # Reset state for new chapter
         self.connection_history.clear()
         self.chapter_exposure.clear()
-        
+
         # Extract sections with context
         sections = self.extract_sections(chapter_path)
-        
+
         if not sections:
             print("❌ No sections found!")
             return {}
-        
+
         print(f"📊 Found {len(sections)} sections")
         print(f"   Narrative flow: foundation → development → application → synthesis\n")
-        
+
         # Generate connections for each section
         xrefs_data = {"cross_references": {}}
-        
+
         for section in sections:
             print(f"📝 Section {section.index+1}/{len(sections)}: {section.title[:40]}...")
             print(f"   Stage: {section.narrative_stage}")
-            
+
             # Select contextually appropriate connections
             connections = self.select_connections(section, chapter_name)
-            
+
             if connections:
                 xrefs_data["cross_references"][section.section_id] = connections
-                
+
                 # Log what was connected
                 chapters = [c["target_chapter"] for c in connections]
                 print(f"   Connected to: {', '.join(chapters)}")
-                
+
                 # Track for context
                 self.connection_history.extend(connections)
             else:
                 print(f"   No suitable connections found")
-        
+
         # Summary statistics
         self.print_summary(xrefs_data)
-        
+
         return xrefs_data
-    
+
     def print_summary(self, xrefs_data: Dict):
         """Print generation summary"""
-        
+
         print("\n" + "=" * 60)
         print("📈 GENERATION SUMMARY")
         print("=" * 60)
-        
+
         # Count unique chapters
         all_chapters = set()
         connection_types = defaultdict(int)
         priorities = defaultdict(int)
-        
+
         for refs in xrefs_data["cross_references"].values():
             for ref in refs:
                 all_chapters.add(ref["target_chapter"])
                 connection_types[ref["connection_type"]] += 1
                 priorities[ref["priority"]] += 1
-        
+
         print(f"\n✅ Unique chapters referenced: {len(all_chapters)}")
         print(f"   Chapters: {', '.join(sorted(all_chapters))}")
-        
+
         print(f"\n📊 Chapter exposure distribution:")
-        for chapter, data in sorted(self.chapter_exposure.items(), 
+        for chapter, data in sorted(self.chapter_exposure.items(),
                                    key=lambda x: x[1]['count'], reverse=True):
             print(f"   {chapter:20} : {data['count']} references")
-        
+
         print(f"\n🔗 Connection types:")
         for conn_type, count in sorted(connection_types.items()):
             print(f"   {conn_type:15} : {count}")
-        
+
         print(f"\n⭐ Priority distribution:")
         for priority in sorted(priorities.keys()):
             print(f"   Priority {priority}: {priorities[priority]} connections")
@@ -597,7 +597,7 @@ class ProgressiveXRefGenerator:
 
 def main():
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="Generate progressive cross-references")
     parser.add_argument("chapter", nargs="?", default="introduction",
                        help="Chapter name to process")
@@ -605,13 +605,13 @@ def main():
                        help="Ollama model to use")
     parser.add_argument("--all", action="store_true",
                        help="Process all chapters")
-    
+
     args = parser.parse_args()
-    
+
     generator = ProgressiveXRefGenerator(model=args.model)
-    
+
     base_path = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/core")
-    
+
     if args.all:
         # Process all chapters
         for chapter_dir in sorted(base_path.iterdir()):
@@ -619,23 +619,23 @@ def main():
                 chapter_file = chapter_dir / f"{chapter_dir.name}.qmd"
                 if chapter_file.exists():
                     xrefs = generator.generate_chapter_xrefs(chapter_file)
-                    
+
                     output_path = chapter_dir / f"{chapter_dir.name}_xrefs.json"
                     with open(output_path, 'w') as f:
                         json.dump(xrefs, f, indent=2)
-                    
+
                     print(f"💾 Saved to {output_path}\n")
     else:
         # Process single chapter
         chapter_path = base_path / args.chapter / f"{args.chapter}.qmd"
-        
+
         if chapter_path.exists():
             xrefs = generator.generate_chapter_xrefs(chapter_path)
-            
+
             output_path = chapter_path.parent / f"{args.chapter}_xrefs.json"
             with open(output_path, 'w') as f:
                 json.dump(xrefs, f, indent=2)
-            
+
             print(f"\n💾 Saved to {output_path}")
         else:
             print(f"❌ Chapter not found: {chapter_path}")

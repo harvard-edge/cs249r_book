@@ -34,4 +34,4 @@ echo "📋 Converted files:"
 ls -la icon_*.pdf
 
 echo ""
-echo "🎉 Icon conversion complete. PDF build should now work without icon errors." 
+echo "🎉 Icon conversion complete. PDF build should now work without icon errors."

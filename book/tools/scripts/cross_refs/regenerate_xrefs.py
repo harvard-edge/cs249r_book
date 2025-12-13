@@ -42,7 +42,7 @@ def clean_existing_xrefs():
 def generate_xrefs_with_production_script():
     """Use the production script to generate cross-references"""
     script_path = Path(__file__).parent / "production_xref_generator.py"
-    
+
     print("\n📊 Generating cross-references with production script...")
     try:
         result = subprocess.run(
@@ -51,7 +51,7 @@ def generate_xrefs_with_production_script():
             text=True,
             cwd=script_path.parent
         )
-        
+
         if result.returncode == 0:
             print("✅ Cross-references generated successfully")
             return True
@@ -65,56 +65,56 @@ def generate_xrefs_with_production_script():
 def enhance_with_llm():
     """Enhance cross-references with LLM explanations using Gemma 2"""
     base_dir = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/core")
-    
+
     print("\n🤖 Enhancing cross-references with Gemma 2 27B...")
-    
+
     chapters = [
         'introduction', 'ml_systems', 'dl_primer', 'workflow', 'data_engineering',
-        'frameworks', 'training', 'efficient_ai', 'optimizations', 'hw_acceleration', 
+        'frameworks', 'training', 'efficient_ai', 'optimizations', 'hw_acceleration',
         'benchmarking', 'ondevice_learning', 'ops', 'privacy_security', 'responsible_ai',
         'sustainable_ai', 'ai_for_good', 'robust_ai', 'generative_ai', 'frontiers',
         'emerging_topics', 'conclusion'
     ]
-    
+
     for chapter in chapters:
         xref_file = base_dir / chapter / f"{chapter}_xrefs.json"
         if not xref_file.exists():
             continue
-            
+
         print(f"  Enhancing {chapter}...")
-        
+
         with open(xref_file, 'r') as f:
             data = json.load(f)
-        
+
         # Enhance each cross-reference with better explanations
         for section_id, refs in data.get('cross_references', {}).items():
             for ref in refs:
                 # Generate enhanced explanation using Gemma 2
                 enhanced_explanation = generate_llm_explanation(
-                    chapter, 
+                    chapter,
                     ref.get('target_chapter'),
                     ref.get('connection_type'),
                     ref.get('concepts', [])
                 )
                 if enhanced_explanation:
                     ref['explanation'] = enhanced_explanation
-        
+
         # Save enhanced version
         with open(xref_file, 'w') as f:
             json.dump(data, f, indent=2)
-    
+
     print("✅ Enhancement complete")
 
-def generate_llm_explanation(source_chapter: str, target_chapter: str, 
+def generate_llm_explanation(source_chapter: str, target_chapter: str,
                             connection_type: str, concepts: list) -> str:
     """Generate explanation using Gemma 2 27B"""
-    
+
     if not target_chapter or not concepts:
         return ""
-    
+
     # Format concepts for display
     concept_str = ", ".join(concepts[:3]) if len(concepts) > 3 else ", ".join(concepts)
-    
+
     prompt = f"""You are an expert in machine learning systems education.
 
 Given a connection between textbook chapters:
@@ -143,22 +143,22 @@ Explanation:"""
             },
             timeout=30
         )
-        
+
         if response.status_code == 200:
             result = response.json().get('response', '').strip()
             # Clean up the response
             result = result.replace('\n', ' ').replace('  ', ' ')
-            
+
             # Limit length
             if len(result) > 80:
                 result = result[:77] + "..."
-            
+
             return result
-            
+
     except Exception as e:
         # Fallback to simple explanation
         pass
-    
+
     # Default fallback
     if connection_type == 'prerequisite':
         return f"Essential foundation in {concept_str}"
@@ -172,32 +172,32 @@ Explanation:"""
 def main():
     print("🚀 Cross-Reference Regeneration Tool")
     print("=" * 50)
-    
+
     # Step 1: Check Ollama
     if not check_ollama():
         print("\n⚠️  Continuing without LLM enhancement...")
         use_llm = False
     else:
         use_llm = True
-    
+
     # Step 2: Clean existing files
     clean_existing_xrefs()
-    
+
     # Step 3: Generate base cross-references
     if not generate_xrefs_with_production_script():
         print("❌ Failed to generate cross-references")
         return 1
-    
+
     # Step 4: Enhance with LLM if available
     if use_llm:
         enhance_with_llm()
-    
+
     print("\n✅ Cross-reference regeneration complete!")
     print("\n📝 To use these cross-references:")
     print("   1. The files are already in the correct locations")
     print("   2. Build the PDF: ./binder pdf intro")
     print("   3. The inject-xrefs.lua filter will automatically use them")
-    
+
     return 0
 
 if __name__ == "__main__":

@@ -4,8 +4,8 @@ The Perceptron (1957) - Frank Rosenblatt [FORWARD PASS ONLY]
 =============================================================
 
 📚 HISTORICAL CONTEXT:
-Frank Rosenblatt's Perceptron was the first trainable artificial neural network that 
-could learn from examples. It sparked the first AI boom and demonstrated that machines 
+Frank Rosenblatt's Perceptron was the first trainable artificial neural network that
+could learn from examples. It sparked the first AI boom and demonstrated that machines
 could actually learn to recognize patterns, launching the neural network revolution.
 
 🎯 MILESTONE 1: FORWARD PASS (BEFORE TRAINING)
@@ -20,7 +20,7 @@ This milestone shows you WHY training is essential - the model won't work withou
 ✅ REQUIRED MODULES (Run after Module 04):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Module 01 (Tensor)        : YOUR data structure (gradients dormant for now)
-  Module 02 (Activations)   : YOUR sigmoid activation function  
+  Module 02 (Activations)   : YOUR sigmoid activation function
   Module 03 (Layers)        : YOUR Linear layer with RANDOM weights
   Module 04 (Losses)        : YOUR loss functions (for measuring failure)
   Data Generation           : Directly generated within this script
@@ -37,15 +37,15 @@ This milestone shows you WHY training is essential - the model won't work withou
 
     WHAT YOU MIGHT EXPECT:           WHAT YOU'LL ACTUALLY GET:
     "I built it, so it works!"       "Wait... it's just guessing!"
-    
-    4 │ • • • • •                    4 │ • ○ • ○ • 
+
+    4 │ • • • • •                    4 │ • ○ • ○ •
       │ • • • • • ╱  Perfect!          │ ○ • • ○ • ╲  Random!
     2 │ • • • • ╱ •                  2 │ • ○ • • ○ •
       │ ○ ○ ○ ╱ ○ ○                    │ ○ • ○ ○ • ○
     0 │ ○ ○ ╱ ○ ○ ○                  0 │ • ○ • ○ ○ •
       └────────────                    └────────────
         0   2   4                        0   2   4
-    
+
     ❌ Accuracy: ~50%                ❌ Accuracy: ~50%
        (What you hoped for)             (What random weights give you)
 
@@ -54,10 +54,10 @@ This milestone shows you WHY training is essential - the model won't work withou
     - w₁, w₂, b are random numbers from initialization
     - The decision boundary is in a random position
     - Predictions are essentially coin flips
-    
+
     Mathematical Reality:
     y = sigmoid(w₁·x₁ + w₂·x₂ + b)  ← These are RANDOM values!
-    
+
     Where YOUR modules compute:
     - Linear: z = w₁·x₁ + w₂·x₂ + b  (random w₁, w₂, b!)
     - Sigmoid: y = 1/(1 + e⁻ᶻ)       (squash to [0,1])
@@ -112,31 +112,31 @@ console = Console()
 class Perceptron:
     """
     Simple perceptron: Linear + Sigmoid
-    
+
     This uses components YOU built in:
       - Module 01: Tensor (data structure)
-      - Module 02: Sigmoid (activation function)  
+      - Module 02: Sigmoid (activation function)
       - Module 03: Linear (layer with weights)
-    
+
     The entire model is just ~10 lines of code!
     """
-    
+
     def __init__(self, input_size=2, output_size=1):
         # Module 03: Linear layer (w1*x1 + w2*x2 + b)
         self.linear = Linear(input_size, output_size)
-        
+
         # Module 02: Sigmoid activation (squashes to [0,1])
         self.activation = Sigmoid()
-    
+
     def forward(self, x):
         # Step 1: Linear transformation (Module 03)
         x = self.linear(x)
-        
+
         # Step 2: Activation function (Module 02)
         x = self.activation(x)
-        
+
         return x
-    
+
     def __call__(self, x):
         """PyTorch-style: model(x) calls forward(x)"""
         return self.forward(x)
@@ -149,7 +149,7 @@ def draw_network_architecture():
     """Draw the perceptron architecture using ASCII art."""
     network = """
     Input Layer        Linear Layer              Activation         Output
-    
+
     ┌─────────┐       ┌──────────────┐         ┌──────────┐      ┌─────────┐
     │         │       │              │         │          │      │         │
     │   x₁    │───────┤              │         │          │      │         │
@@ -163,7 +163,7 @@ def draw_network_architecture():
     └─────────┘       └──────────────┘         └──────────┘
                             ↑
                             b (bias)
-    
+
     Computation Flow:
       1. Linear:  z = w₁·x₁ + w₂·x₂ + b
       2. Sigmoid: y = 1 / (1 + e⁻ᶻ)
@@ -176,11 +176,11 @@ def visualize_data_points(X, y, predictions=None, weights=None):
     # Create a simple scatter plot
     grid_size = 20
     grid = [[' ' for _ in range(grid_size)] for _ in range(grid_size)]
-    
+
     # Find bounds
     x_min, x_max = X[:, 0].min() - 0.5, X[:, 0].max() + 0.5
     y_min, y_max = X[:, 1].min() - 0.5, X[:, 1].max() + 0.5
-    
+
     # Draw decision boundary if weights provided
     # Decision boundary: w1*x1 + w2*x2 + b = 0 → x2 = -(w1*x1 + b)/w2
     if weights is not None:
@@ -189,7 +189,7 @@ def visualize_data_points(X, y, predictions=None, weights=None):
             # Determine slope for choosing line character
             slope = -w1 / w2
             line_char = '/' if slope > 0 else '\\'
-            
+
             for gx in range(grid_size):
                 # Map grid x to real x
                 px = x_min + (gx / (grid_size - 1)) * (x_max - x_min)
@@ -198,17 +198,17 @@ def visualize_data_points(X, y, predictions=None, weights=None):
                 # Map to grid y
                 gy = int((py - y_min) / (y_max - y_min) * (grid_size - 1))
                 gy = grid_size - 1 - gy  # Flip y-axis
-                
+
                 if 0 <= gy < grid_size and grid[gy][gx] == ' ':
                     grid[gy][gx] = line_char  # Decision boundary line
-    
+
     # Plot points (after boundary so they overlap)
     for i, (px, py) in enumerate(X):
         # Map to grid
         gx = int((px - x_min) / (x_max - x_min) * (grid_size - 1))
         gy = int((py - y_min) / (y_max - y_min) * (grid_size - 1))
         gy = grid_size - 1 - gy  # Flip y-axis
-        
+
         if 0 <= gx < grid_size and 0 <= gy < grid_size:
             true_label = int(y[i])
             if predictions is not None:
@@ -220,7 +220,7 @@ def visualize_data_points(X, y, predictions=None, weights=None):
                     grid[gy][gx] = '✗'  # Wrong prediction
             else:
                 grid[gy][gx] = '●' if true_label == 1 else '○'
-    
+
     # Build the plot
     lines = []
     lines.append("   " + "─" * grid_size)
@@ -233,13 +233,13 @@ def visualize_data_points(X, y, predictions=None, weights=None):
         lines.append("   / or \\ = Decision boundary (where z = 0)")
     if predictions is not None:
         lines.append("   ✗ = Incorrect prediction")
-    
+
     return "\n".join(lines)
 
 
 def main():
     """Demonstrate Rosenblatt's Perceptron using YOUR TinyTorch system!"""
-    
+
     # Header
     console.print()
     console.print(Panel.fit(
@@ -249,7 +249,7 @@ def main():
         border_style="cyan"
     ))
     console.print()
-    
+
     # Introduction - What to expect
     intro = (
         "[bold]What You're Demonstrating:[/bold]\n\n"
@@ -268,35 +268,35 @@ def main():
     )
     console.print(Panel(intro, title="[bold cyan]📖 Introduction[/bold cyan]", border_style="cyan"))
     console.print()
-    
+
     # Step 1: Prepare synthetic data
     console.print("[bold]📊 Step 1: Preparing Data[/bold]")
     console.print("   Creating linearly separable clusters...")
     console.print("   [dim]This is a SIMPLE problem - a trained model achieves 95%+ easily[/dim]")
     console.print("   [yellow]⚠️  No random seed - each run will be different![/yellow]")
-    
+
     cluster1 = np.random.normal([2, 2], 0.5, (5, 2))   # Class 1: top-right
     cluster2 = np.random.normal([-2, -2], 0.5, (5, 2)) # Class 0: bottom-left
     X = np.vstack([cluster1, cluster2]).astype(np.float32)
     y = np.array([1, 1, 1, 1, 1, 0, 0, 0, 0, 0], dtype=np.float32)  # True labels
-    
+
     # Show data visualization
     console.print()
     data_viz = visualize_data_points(X, y)
     console.print(Panel(data_viz, title="[cyan]Training Data[/cyan]", border_style="cyan"))
     console.print(f"   [green]✓[/green] Created {X.shape[0]} points in 2 clearly separated clusters\n")
 
-    # Step 2: Create the Perceptron model with YOUR components  
+    # Step 2: Create the Perceptron model with YOUR components
     console.print("[bold]🧠 Step 2: Building Model[/bold]")
     console.print("   [yellow]⚠️  No training yet - you haven't learned Modules 05-07![/yellow]")
     console.print("   🧠 Assembling perceptron with YOUR TinyTorch modules...")
-    
+
     model = Perceptron(input_size=2, output_size=1)
-    
+
     console.print(f"      [green]✓[/green] Linear layer: 2 → 1 [dim](YOUR Module 03!)[/dim]")
     console.print(f"      [green]✓[/green] Activation: Sigmoid [dim](YOUR Module 02!)[/dim]")
     console.print("   [yellow]⚠️  Model assembled - but weights are RANDOM![/yellow]\n")
-    
+
     # Show network architecture
     network_diagram = draw_network_architecture()
     console.print(Panel(network_diagram, title="[cyan]🏗️  Network Architecture (1957 Design)[/cyan]", border_style="cyan"))
@@ -305,28 +305,28 @@ def main():
     # Step 3: Test with random weights
     console.print("[bold]🔬 Step 3: Testing with Random Weights[/bold]")
     console.print("   Running forward pass...\n")
-    
+
     input_tensor = Tensor(X)
     predictions = model(input_tensor)
-    
+
     # Convert to binary predictions
     pred_classes = (predictions.data > 0.5).astype(int).flatten()
     accuracy = (pred_classes == y).mean()
-    
+
     # Format arrays nicely for display
     true_str = ' '.join([f"{int(val)}" for val in y])
     pred_str = ' '.join([f"{val}" for val in pred_classes])
     match_str = ' '.join(['[green]✓[/green]' if m else '[red]✗[/red]' for m in (pred_classes == y)])
-    
+
     # Create results table
     results_table = Table(title="📊 Prediction Results", box=box.ROUNDED, border_style="cyan")
     results_table.add_column("Metric", style="cyan", no_wrap=True)
     results_table.add_column("Value", style="white")
-    
+
     results_table.add_row("True Labels", f"[{true_str}]")
     results_table.add_row("Predictions", f"[{pred_str}]")
     results_table.add_row("Matches", match_str)
-    
+
     # Determine status
     if accuracy < 0.6:
         accuracy_display = f"[red]{accuracy:.1%} ❌ Random Guessing![/red]"
@@ -336,28 +336,28 @@ def main():
         accuracy_display = f"[yellow]{accuracy:.1%} 🎲 Got Lucky![/yellow]"
         status = "LUCKY"
         status_color = "yellow"
-    
+
     results_table.add_row("Accuracy", accuracy_display)
     console.print(results_table)
     console.print()
-    
+
     # Extract weights for visualization and display
     w1 = model.linear.weight.data[0,0]
     w2 = model.linear.weight.data[1,0]
     b = model.linear.bias.data[0]
-    
+
     # Calculate z values (linear output before sigmoid)
     z_values = X @ np.array([[w1], [w2]]) + b
-    
+
     # Show visualization with predictions AND decision boundary
     pred_viz = visualize_data_points(X, y, pred_classes, weights=(w1, w2, b))
     console.print(Panel(pred_viz, title="[cyan]Predictions with Decision Boundary[/cyan]", border_style=status_color))
     console.print()
-    
+
     # Show weights AND equation
     decision_eq = f"z = {w1:.4f}·x₁ + {w2:.4f}·x₂ + {b:.4f}"
     boundary_eq = f"Decision boundary (z=0): x₂ = {-w1/w2:.4f}·x₁ + {-b/w2:.4f}" if abs(w2) > 0.001 else "Decision boundary: vertical line"
-    
+
     weights_content = (
         f"[bold]Random Weights:[/bold]\n"
         f"  w₁ = [yellow]{w1:7.4f}[/yellow]\n"
@@ -371,7 +371,7 @@ def main():
     )
     console.print(Panel(weights_content, title="[yellow]🔧 Model Parameters[/yellow]", border_style="yellow"))
     console.print()
-    
+
     # Diagnosis
     if status == "FAILED":
         diagnosis = (
@@ -387,9 +387,9 @@ def main():
             "[bold cyan]💡 KEY INSIGHT:[/bold cyan] Even when it works, random weights\n"
             "   won't generalize. You need [bold]TRAINING[/bold]!"
         )
-    
+
     console.print(Panel(diagnosis, title=f"[{status_color}]🔍 Diagnosis: {status}[/{status_color}]", border_style=status_color))
-    
+
     # Tip for multiple runs
     tip = (
         "💡 [bold yellow]Run this script multiple times![/bold yellow]\n\n"
@@ -401,7 +401,7 @@ def main():
     )
     console.print(Panel(tip, title="[bold yellow]💡 Experiment[/bold yellow]", border_style="yellow"))
     console.print()
-    
+
     # Next steps
     next_steps = (
         "[bold]Complete Modules 05-07 to unlock TRAINING:[/bold]\n\n"

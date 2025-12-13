@@ -48,4 +48,3 @@ echo ""
 echo "📋 Optional Developer Tools:"
 echo "   VHS (GIF generation): brew install vhs"
 echo "   See docs/development/DEVELOPER_SETUP.md for details"
-

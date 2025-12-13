@@ -74,7 +74,7 @@ def test_adam_with_multi_layer_network():
     layer2 = Linear(8, 4)
     relu2 = ReLU()
     layer3 = Linear(4, 2)
-    
+
     # Collect all parameters
     params = layer1.parameters() + layer2.parameters() + layer3.parameters()
 
@@ -135,7 +135,7 @@ def test_optimizer_with_activations():
     relu = ReLU()
     layer2 = Linear(10, 5)
     sigmoid = Sigmoid()
-    
+
     params = layer1.parameters() + layer2.parameters()
     optimizer = Adam(params, lr=0.001)
 
@@ -193,7 +193,7 @@ def test_optimizer_memory_consistency():
         x = Tensor(np.random.randn(1, 3))
         output = layer(x)
         loss = output.sum()
-        
+
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -222,7 +222,7 @@ def test_unit_shape_manipulation():
     """Test tensor reshape operations."""
     print("🧪 Unit Test: Shape Manipulation...")
     t = Tensor(np.arange(6))
-    
+
     # Valid reshape
     reshaped = t.reshape(2, 3)
     assert reshaped.shape == (2, 3)
@@ -233,7 +233,7 @@ def test_unit_shape_manipulation():
         assert False, "Should have raised ValueError"
     except ValueError as e:
         assert "Total elements must match" in str(e)
-    
+
     print("✅ Shape manipulation works!")
 
 
@@ -271,18 +271,18 @@ def test_unit_linear_layer():
 def test_edge_cases_linear():
     """Test edge cases for Linear layer."""
     print("🧪 Edge Cases: Linear Layer...")
-    
+
     # Single sample
     layer = Linear(2, 3)
     x = Tensor(np.array([[1.0, 2.0]]))
     output = layer(x)
     assert output.shape == (1, 3)
-    
+
     # Batch
     x_batch = Tensor(np.random.randn(5, 2))
     output_batch = layer(x_batch)
     assert output_batch.shape == (5, 3)
-    
+
     print("✅ Linear layer edge cases pass!")
 
 
@@ -290,12 +290,12 @@ def test_gradient_preparation_linear():
     """Test that Linear layer gradients are prepared correctly."""
     print("🧪 Unit Test: Linear Gradient Preparation...")
     layer = Linear(2, 2)
-    
+
     x = Tensor(np.array([[1.0, 2.0]]), requires_grad=True)
     output = layer(x)
     loss = output.sum()
     loss.backward()
-    
+
     # Weight should have gradient
     assert layer.weight.grad is not None
     print("✅ Linear gradient preparation works!")
@@ -306,13 +306,13 @@ def test_unit_dropout_layer():
     print("🧪 Unit Test: Dropout Layer...")
     dropout = Dropout(p=0.5)
     x = Tensor(np.ones((10, 10)))
-    
+
     # During training (default), some values should be zeroed/scaled
     output = dropout(x)
-    
+
     # Create new input for eval
     x_eval = Tensor(np.ones((10, 10)))
-    
+
     # During eval, all values should pass through
     if hasattr(dropout, 'eval'):
         dropout.eval()
@@ -321,33 +321,33 @@ def test_unit_dropout_layer():
     else:
         # If no eval mode, just check dropout changes values
         assert not np.array_equal(output.data, x.data) or np.all(output.data == x.data * 2)
-    
+
     print("✅ Dropout layer works!")
 
 
 def test_unit_function_classes():
     """Test activation function classes."""
     print("🧪 Unit Test: Function Classes...")
-    
+
     activations = [ReLU(), Sigmoid(), Tanh()]
     x = Tensor(np.array([-1.0, 0.0, 1.0]))
-    
+
     for act in activations:
         output = act(x)
         assert output.shape == x.shape
-    
+
     print("✅ Function classes work!")
 
 
 def test_unit_tensor_autograd():
     """Test tensor autograd integration."""
     print("🧪 Unit Test: Tensor Autograd...")
-    
+
     x = Tensor(np.array([1.0, 2.0, 3.0]), requires_grad=True)
     y = x * 2
     loss = y.sum()
     loss.backward()
-    
+
     assert x.grad is not None
     print("✅ Tensor autograd works!")
 
@@ -355,11 +355,11 @@ def test_unit_tensor_autograd():
 def test_unit_log_softmax():
     """Test log softmax computation."""
     print("🧪 Unit Test: Log Softmax...")
-    
+
     x = Tensor(np.array([[1.0, 2.0, 3.0]]))
     softmax = Softmax()
     output = softmax(x)
-    
+
     # Output should sum to ~1
     assert np.isclose(output.data.sum(), 1.0, atol=1e-5)
     print("✅ Log Softmax works!")
@@ -368,13 +368,13 @@ def test_unit_log_softmax():
 def test_unit_mse_loss():
     """Test MSE loss computation."""
     print("🧪 Unit Test: MSE Loss...")
-    
+
     pred = Tensor(np.array([[1.0, 2.0]]))
     target = Tensor(np.array([[1.0, 3.0]]))
-    
+
     loss_fn = MSELoss()
     loss = loss_fn(pred, target)
-    
+
     # MSE should be 0.5 (average of [0, 1])
     assert np.isclose(loss.data, 0.5, atol=1e-5)
     print("✅ MSE Loss works!")
@@ -383,13 +383,13 @@ def test_unit_mse_loss():
 def test_unit_cross_entropy_loss():
     """Test Cross Entropy loss computation."""
     print("🧪 Unit Test: Cross Entropy Loss...")
-    
+
     pred = Tensor(np.array([[0.1, 0.9]]))  # Logits
     target = Tensor(np.array([1]))  # Class index
-    
+
     loss_fn = CrossEntropyLoss()
     loss = loss_fn(pred, target)
-    
+
     # Loss should be positive
     assert loss.data > 0
     print("✅ Cross Entropy Loss works!")
@@ -398,13 +398,13 @@ def test_unit_cross_entropy_loss():
 def test_unit_binary_cross_entropy_loss():
     """Test Binary Cross Entropy loss computation."""
     print("🧪 Unit Test: BCE Loss...")
-    
+
     pred = Tensor(np.array([[0.8]]))  # Probability
     target = Tensor(np.array([[1.0]]))  # Label
-    
+
     loss_fn = BinaryCrossEntropyLoss()
     loss = loss_fn(pred, target)
-    
+
     # Loss should be positive
     assert loss.data > 0
     print("✅ BCE Loss works!")
@@ -413,69 +413,69 @@ def test_unit_binary_cross_entropy_loss():
 def test_unit_optimizer_base():
     """Test base optimizer functionality."""
     print("🧪 Unit Test: Optimizer Base...")
-    
+
     param = Tensor(np.array([1.0, 2.0]), requires_grad=True)
     optimizer = SGD([param], lr=0.1)
-    
+
     # Set gradient
     param.grad = Tensor(np.array([1.0, 1.0]))
-    
+
     # Step
     optimizer.step()
-    
+
     # Values should decrease (gradient descent)
     assert param.data[0] < 1.0
     assert param.data[1] < 2.0
-    
+
     print("✅ Optimizer base works!")
 
 
 def test_unit_sgd_optimizer():
     """Test SGD optimizer with momentum."""
     print("🧪 Unit Test: SGD Optimizer...")
-    
+
     param = Tensor(np.array([1.0]), requires_grad=True)
     sgd = SGD([param], lr=0.1, momentum=0.9)
-    
+
     for _ in range(5):
         param.grad = Tensor(np.array([1.0]))
         sgd.step()
-    
+
     # With momentum, parameter should have moved significantly
     assert param.data[0] < 0
-    
+
     print("✅ SGD Optimizer works!")
 
 
 def test_unit_adam_optimizer():
     """Test Adam optimizer."""
     print("🧪 Unit Test: Adam Optimizer...")
-    
+
     param = Tensor(np.array([1.0]), requires_grad=True)
     adam = Adam([param], lr=0.1)
-    
+
     for _ in range(5):
         param.grad = Tensor(np.array([1.0]))
         adam.step()
-    
+
     # Adam should have moved the parameter
     assert param.data[0] < 1.0
-    
+
     print("✅ Adam Optimizer works!")
 
 
 def test_unit_adamw_optimizer():
     """Test AdamW optimizer (Adam with weight decay)."""
     print("🧪 Unit Test: AdamW Optimizer...")
-    
+
     param = Tensor(np.array([1.0]), requires_grad=True)
     adamw = AdamW([param], lr=0.1, weight_decay=0.01)
-    
+
     for _ in range(5):
         param.grad = Tensor(np.array([0.0]))  # Zero gradient
         adamw.step()
-    
+
     # With weight decay, parameter should decrease even with zero gradient
     assert param.data[0] < 1.0
-    
+
     print("✅ AdamW Optimizer works!")

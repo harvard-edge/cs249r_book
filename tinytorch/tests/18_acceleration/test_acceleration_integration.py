@@ -21,4 +21,3 @@ def test_acceleration_integration():
 if __name__ == "__main__":
     test_acceleration_integration()
     print("✅ Acceleration integration tests (pending implementation)")
-

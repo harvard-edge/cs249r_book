@@ -92,7 +92,7 @@ ls modules/                          # Check available modules
 
 ## 📚 **Course Planning17 TinyTorch Modules:**
 - **00-02**: Foundation (intro, setup, tensors)
-- **03-07**: Building Blocks (activations, layers, dense, spatial, attention)  
+- **03-07**: Building Blocks (activations, layers, dense, spatial, attention)
 - **08-11**: Training (dataloader, autograd, optimizers, training)
 - **12-16**: Production (compression, kernels, benchmarking, mlops, capstone)
 

@@ -215,4 +215,4 @@ tito nbgrader release 01_tensor
 4. **📧 Contact us** via GitHub Issues for instructor support
 
 
-*Ready to teach the most comprehensive ML systems course? Let's build something amazing together!* 
+*Ready to teach the most comprehensive ML systems course? Let's build something amazing together!*

@@ -551,4 +551,4 @@ Typical time estimates (varies by background):
 
 **Remember**: You're not just learning ML algorithms. You're building ML systems - from mathematical foundations to production deployment. This journey transforms you from a framework user into a systems engineer who truly understands how modern AI works.
 
-**Welcome to the learning journey. Let's build something amazing together.** 
+**Welcome to the learning journey. Let's build something amazing together.**

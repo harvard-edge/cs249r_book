@@ -25,4 +25,4 @@ if git diff --cached --name-only | grep -q "\.github/workflows/"; then
         exit 1
     fi
     echo "✅ Proceeding with workflow file changes"
-fi 
+fi

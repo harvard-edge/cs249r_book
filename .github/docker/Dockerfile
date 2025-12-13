@@ -45,7 +45,7 @@ RUN wget -qO /tmp/install-tl-unx.tar.gz "https://mirror.ctan.org/systems/texlive
 # **Ensure TeX Live is in PATH**
 ENV PATH="/usr/local/texlive/2023/bin/x86_64-linux:/usr/local/texlive/2023/bin/aarch64-linux:/usr/local/texlive/2023/bin:$PATH"
 # ------------------------
-# ✅ Verify Installations 
+# ✅ Verify Installations
 # ------------------------
 RUN if [ -d "/usr/local/texlive/2023/bin" ]; then \
       echo "TeX Live installed at /usr/local/texlive/2023"; \

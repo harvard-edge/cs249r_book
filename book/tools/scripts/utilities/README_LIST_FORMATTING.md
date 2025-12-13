@@ -123,4 +123,3 @@ tools/scripts/utilities/check_list_formatting.py
 ### Pre-commit Configuration
 
 The hook is configured in `.pre-commit-config.yaml` under the `local` repo in Phase 1.
-

@@ -37,7 +37,7 @@ export function setupCameraEvents() {
 
     if (profileAvatarUrlInput) {
         profileAvatarUrlInput.addEventListener('input', () => {
-            avatarPreview.src = profileAvatarUrlInput.value || ''; 
+            avatarPreview.src = profileAvatarUrlInput.value || '';
         });
     }
 
@@ -61,7 +61,7 @@ export function setupCameraEvents() {
     if (btnCamera) {
         btnCamera.addEventListener('click', startCamera);
     }
-    
+
     if (btnStopCamera) {
         btnStopCamera.addEventListener('click', stopCamera);
     }
@@ -69,10 +69,10 @@ export function setupCameraEvents() {
     if (btnSnap) {
         btnSnap.addEventListener('click', () => {
             if (!mediaStream) return;
-            
+
             let w = cameraVideo.videoWidth;
             let h = cameraVideo.videoHeight;
-            
+
             const MAX_DIM = 300;
             if (w > h) {
                 if (w > MAX_DIM) {
@@ -88,15 +88,15 @@ export function setupCameraEvents() {
 
             cameraCanvas.width = w;
             cameraCanvas.height = h;
-            
+
             const ctx = cameraCanvas.getContext('2d');
             ctx.drawImage(cameraVideo, 0, 0, w, h);
-            
+
             const dataUrl = cameraCanvas.toDataURL('image/jpeg', 0.7);
-            
+
             profileAvatarUrlInput.value = dataUrl;
             avatarPreview.src = dataUrl;
-            
+
             stopCamera();
         });
     }

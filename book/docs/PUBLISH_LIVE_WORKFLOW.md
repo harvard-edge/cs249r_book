@@ -50,7 +50,7 @@ The version number displayed on the website is **automatically updated** during 
    - Minor: v0.4.1 → v0.5.0 (new features)
    - Major: v0.4.1 → v1.0.0 (breaking changes)
 
-2. **Updates `quarto/index.qmd`**: 
+2. **Updates `quarto/index.qmd`**:
    - Modifies the `doi:` field with the new version
    - Commits to dev branch: "chore: update version to vX.X.X"
 
@@ -248,4 +248,4 @@ grep -n "Machine-Learning-Systems.pdf" .gitignore
 
 - [Development Guide](DEVELOPMENT.md)
 - [Build Process](BUILD.md)
-- [Container Builds](CONTAINER_BUILDS.md) 
+- [Container Builds](CONTAINER_BUILDS.md)

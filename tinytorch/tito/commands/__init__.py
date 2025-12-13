@@ -33,4 +33,4 @@ __all__ = [
     'SystemCommand',
     'ModuleWorkflowCommand',
     'PackageCommand',
-] 
+]

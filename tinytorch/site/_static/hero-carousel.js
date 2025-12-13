@@ -89,7 +89,7 @@ function fixGifPaths() {
             // e.g., '/TinyTorch/dev/intro.html' -> '/TinyTorch/dev/'
             const currentPath = window.location.pathname;
             const pathDir = currentPath.substring(0, currentPath.lastIndexOf('/') + 1);
-            
+
             // Update src to use absolute path from current directory
             img.src = pathDir + relativePath;
         }
@@ -100,7 +100,7 @@ function fixGifPaths() {
 document.addEventListener('DOMContentLoaded', function() {
     // Fix GIF paths first
     fixGifPaths();
-    
+
     // Only start auto-advance if carousel exists
     const slides = document.querySelectorAll('.carousel-item');
     if (slides.length > 0) {

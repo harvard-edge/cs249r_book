@@ -31,7 +31,7 @@ def get_section_context(section_id):
         'looking-ahead': 'future directions',
         'book-structure': 'learning path'
     }
-    
+
     for key, context in contexts.items():
         if key in section_id:
             return context
@@ -39,7 +39,7 @@ def get_section_context(section_id):
 
 def generate_context_aware_explanation(source_section, target_chapter, connection_type, section_context):
     """Generate explanation specific to section context"""
-    
+
     templates = {
         ('ml_systems', 'foundation'): {
             'ubiquitous AI applications': 'Systems architecture enabling widespread AI deployment',
@@ -82,21 +82,21 @@ def generate_context_aware_explanation(source_section, target_chapter, connectio
             'default': 'ML workflow and pipeline design'
         }
     }
-    
+
     template_key = (target_chapter, connection_type)
     if template_key in templates:
         return templates[template_key].get(section_context, templates[template_key]['default'])
-    
+
     return f"{connection_type.title()} connection to {target_chapter}"
 
 def consolidate_chapter_refs(refs):
     """Consolidate multiple refs to same chapter"""
     by_chapter = defaultdict(list)
-    
+
     for ref in refs:
         chapter = ref.get('target_chapter')
         by_chapter[chapter].append(ref)
-    
+
     consolidated = []
     for chapter, chapter_refs in by_chapter.items():
         if len(chapter_refs) == 1:
@@ -108,45 +108,45 @@ def consolidate_chapter_refs(refs):
                 section = r.get('target_section', '').replace('sec-', '').split('-')[0]
                 if section:
                     sections.append(section)
-            
+
             # Take the highest priority ref as base
             base_ref = min(chapter_refs, key=lambda x: x.get('priority', 99))
-            
+
             # Update with consolidated info
             if len(sections) > 1:
                 base_ref['multiple_sections'] = True
                 base_ref['section_count'] = len(sections)
-            
+
             consolidated.append(base_ref)
-    
+
     return consolidated
 
 def fix_chapter_xrefs(chapter_path):
     """Fix all issues in a chapter's xrefs"""
-    
+
     chapter_name = chapter_path.parent.name
     print(f"\n📖 Fixing {chapter_name}...")
-    
+
     with open(chapter_path, 'r') as f:
         data = json.load(f)
-    
+
     fixed_count = 0
-    
+
     for section_id, refs in data.get('cross_references', {}).items():
         section_context = get_section_context(section_id)
-        
+
         # First, remove bold markdown from all explanations
         for ref in refs:
             if 'explanation' in ref:
                 ref['explanation'] = remove_bold_markdown(ref['explanation'])
-        
+
         # Consolidate refs to same chapter
         consolidated_refs = consolidate_chapter_refs(refs)
-        
+
         # Generate section-specific explanations
         for ref in consolidated_refs:
             old_explanation = ref.get('explanation', '')
-            
+
             # Generate new context-aware explanation
             new_explanation = generate_context_aware_explanation(
                 section_id,
@@ -154,7 +154,7 @@ def fix_chapter_xrefs(chapter_path):
                 ref.get('connection_type'),
                 section_context
             )
-            
+
             # Only update if it's generic or repetitive
             if any(generic in old_explanation for generic in [
                 'Faster, cheaper', 'Tracks progress', 'Workflows reveal',
@@ -162,28 +162,28 @@ def fix_chapter_xrefs(chapter_path):
             ]):
                 ref['explanation'] = new_explanation
                 fixed_count += 1
-        
+
         # Update with consolidated refs
         data['cross_references'][section_id] = consolidated_refs
-    
+
     # Save fixed version
     with open(chapter_path, 'w') as f:
         json.dump(data, f, indent=2)
-    
+
     print(f"  ✅ Fixed {fixed_count} explanations")
     return fixed_count
 
 def main():
     print("🔧 Fixing Cross-Reference Issues")
     print("=" * 50)
-    
+
     base_dir = Path("/Users/VJ/GitHub/MLSysBook/quarto/contents/core")
-    
+
     # Fix all chapters
     total_fixed = 0
     for chapter_path in base_dir.glob("*/*_xrefs.json"):
         total_fixed += fix_chapter_xrefs(chapter_path)
-    
+
     print(f"\n✅ Total: Fixed {total_fixed} issues!")
     print("\nImprovements made:")
     print("  • Removed bold markdown from explanations")

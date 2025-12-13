@@ -5,28 +5,28 @@ Comprehensive testing organized by purpose and scope.
 ## Test Organization
 
 ### 📦 Module Tests (`XX_modulename/`)
-**Purpose**: Test individual module functionality  
-**Scope**: Single module, isolated behavior  
+**Purpose**: Test individual module functionality
+**Scope**: Single module, isolated behavior
 **Example**: `01_tensor/test_progressive_integration.py`
 
 These tests validate that each module works correctly in isolation.
 
 ### 🔗 Integration Tests (`integration/`)
-**Purpose**: Test cross-module interactions  
-**Scope**: Multiple modules working together  
+**Purpose**: Test cross-module interactions
+**Scope**: Multiple modules working together
 **Files**:
 - `test_gradient_flow.py` - **CRITICAL**: Validates gradients flow through entire training stack
 - `test_end_to_end_training.py` - Full training loops (TODO)
 - `test_module_compatibility.py` - Module interfaces (TODO)
 
-**Why this matters**: 
+**Why this matters**:
 - Catches bugs that unit tests miss
 - Validates the "seams" between modules
 - Ensures training actually works end-to-end
 
 ### 🐛 Debugging Tests (`debugging/`)
-**Purpose**: Catch common student pitfalls  
-**Scope**: Pedagogical - teaches debugging  
+**Purpose**: Catch common student pitfalls
+**Scope**: Pedagogical - teaches debugging
 **Files**:
 - `test_gradient_vanishing.py` - Detect/diagnose vanishing gradients (TODO)
 - `test_gradient_explosion.py` - Detect/diagnose exploding gradients (TODO)
@@ -35,8 +35,8 @@ These tests validate that each module works correctly in isolation.
 **Philosophy**: When these tests fail, the error message should teach the student what went wrong and how to fix it.
 
 ### ⚡ Autograd Edge Cases (`05_autograd/`)
-**Purpose**: Stress-test autograd system  
-**Scope**: Autograd internals and edge cases  
+**Purpose**: Stress-test autograd system
+**Scope**: Autograd internals and edge cases
 **Files**:
 - `test_broadcasting.py` - Broadcasting gradient bugs (TODO)
 - `test_computation_graph.py` - Graph construction edge cases (TODO)
@@ -60,7 +60,7 @@ pytest tests/01_tensor/ --tinytorch # Single module with education
 **Educational mode shows:**
 - Module groupings before running
 - What each test does (WHAT)
-- Why it matters (WHY) 
+- Why it matters (WHY)
 - Learning tips on failure (STUDENT LEARNING)
 - Clear pass/fail indicators with Rich formatting
 
@@ -84,11 +84,11 @@ All `*_core.py` test files use a structured docstring format:
 def test_tensor_addition(self):
     """
     WHAT: Element-wise tensor addition.
-    
+
     WHY: Addition is used everywhere in neural networks:
     - Adding bias to layer output: y = Wx + b
     - Residual connections: output = layer(x) + x
-    
+
     STUDENT LEARNING: Operations return new Tensors (functional style).
     """
 ```
@@ -115,7 +115,7 @@ When adding a test, ask:
 ## Test Coverage Goals
 
 - ✅ All tensor operations have gradient tests
-- ✅ All layers compute gradients correctly  
+- ✅ All layers compute gradients correctly
 - ✅ All activations integrate with autograd
 - ✅ All loss functions compute gradients
 - ✅ All optimizers update parameters

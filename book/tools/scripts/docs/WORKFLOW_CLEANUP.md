@@ -13,7 +13,7 @@ This script helps clean up old GitHub workflow runs while keeping a configurable
    ```bash
    # Option 1: Set environment variable (recommended)
    export GITHUB_TOKEN="your_token_here"
-   
+
    # Option 2: Use --token flag each time
    ```
 
@@ -27,7 +27,7 @@ This script helps clean up old GitHub workflow runs while keeping a configurable
    ```bash
    # Keep 5 most recent runs per workflow
    python3 tools/scripts/cleanup_workflow_runs.py --keep 5
-   
+
    # Keep 10 most recent runs per workflow
    python3 tools/scripts/cleanup_workflow_runs.py --keep 10
    ```

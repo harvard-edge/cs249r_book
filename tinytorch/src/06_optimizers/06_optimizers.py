@@ -40,7 +40,7 @@ Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/06_optimizers/optimizers_dev.py`  
+**Learning Side:** You work in `modules/06_optimizers/optimizers_dev.py`
 **Building Side:** Code exports to `tinytorch.core.optimizers`
 
 ```python
@@ -1545,21 +1545,21 @@ def demo_optimizers():
     """🎯 See optimizers update weights."""
     print("🎯 AHA MOMENT: Optimizers Update Weights")
     print("=" * 45)
-    
+
     # Create a parameter with a gradient
     weight = Tensor(np.array([5.0]), requires_grad=True)
     weight.grad = np.array([1.0])  # Gradient pointing "uphill"
-    
+
     print(f"Initial weight: {weight.data[0]:.2f}")
     print(f"Gradient:       {weight.grad[0]:.2f} (pointing uphill)")
-    
+
     # SGD takes a step in the opposite direction
     optimizer = SGD([weight], lr=0.5)
     optimizer.step()
-    
+
     print(f"\nAfter SGD step: {weight.data[0]:.2f}")
     print(f"Moved: {5.0 - weight.data[0]:.2f} (opposite to gradient)")
-    
+
     print("\n✨ Optimizer moves weights to reduce loss!")
 
 # %%

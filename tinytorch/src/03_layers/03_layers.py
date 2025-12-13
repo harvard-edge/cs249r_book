@@ -628,7 +628,7 @@ class Dropout(Layer):
         # Apply mask and scale using Tensor operations to preserve gradients!
         mask_tensor = Tensor(mask.astype(np.float32), requires_grad=False)  # Mask doesn't need gradients
         scale = Tensor(np.array(1.0 / keep_prob), requires_grad=False)
-        
+
         # Use Tensor operations: x * mask * scale
         output = x * mask_tensor * scale
         return output
@@ -651,7 +651,7 @@ class Dropout(Layer):
 
 `Sequential` chains layers together, calling forward() on each in order.
 
-**Progressive Disclosure**: After learning to compose layers explicitly 
+**Progressive Disclosure**: After learning to compose layers explicitly
 (h = relu(linear1(x)); out = linear2(h)), you can use Sequential for convenience:
 
 ```python
@@ -667,10 +667,10 @@ This is TinyTorch's equivalent of PyTorch's nn.Sequential - simpler but same ide
 class Sequential:
     """
     Container that chains layers together sequentially.
-    
+
     After you understand explicit layer composition, Sequential provides
     a convenient way to bundle layers together.
-    
+
     Example:
         >>> model = Sequential(
         ...     Linear(784, 128),
@@ -680,7 +680,7 @@ class Sequential:
         >>> output = model(input_tensor)
         >>> params = model.parameters()  # All parameters from all layers
     """
-    
+
     def __init__(self, *layers):
         """Initialize with layers to chain together."""
         # Accept both Sequential(layer1, layer2) and Sequential([layer1, layer2])
@@ -688,24 +688,24 @@ class Sequential:
             self.layers = list(layers[0])
         else:
             self.layers = list(layers)
-    
+
     def forward(self, x):
         """Forward pass through all layers sequentially."""
         for layer in self.layers:
             x = layer.forward(x)
         return x
-    
+
     def __call__(self, x):
         """Allow model to be called like a function."""
         return self.forward(x)
-    
+
     def parameters(self):
         """Collect all parameters from all layers."""
         params = []
         for layer in self.layers:
             params.extend(layer.parameters())
         return params
-    
+
     def __repr__(self):
         layer_reprs = ", ".join(repr(layer) for layer in self.layers)
         return f"Sequential({layer_reprs})"
@@ -1192,20 +1192,20 @@ def demo_layers():
     """🎯 See how layers transform shapes."""
     print("🎯 AHA MOMENT: Layers Transform Shapes")
     print("=" * 45)
-    
+
     # Create a layer that transforms 784 → 10 (like MNIST)
     layer = Linear(784, 10)
-    
+
     # Simulate a batch of 32 flattened images
     batch = Tensor(np.random.randn(32, 784))
-    
+
     # Forward pass
     output = layer(batch)
-    
+
     print(f"Input shape:  {batch.shape}  ← 32 images, 784 pixels each")
     print(f"Output shape: {output.shape}  ← 32 images, 10 classes each")
     print(f"Parameters:   {784 * 10 + 10:,} (weights + biases)")
-    
+
     print("\n✨ Your layer transforms images to class predictions!")
 
 # %%

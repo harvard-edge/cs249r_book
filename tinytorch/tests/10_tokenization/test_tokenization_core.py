@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 class TestTokenizerBasics:
     """Test basic tokenization functionality."""
-    
+
     def test_tokenizer_encode(self):
         """
         WHAT: Verify tokenizer converts text to IDs.
@@ -46,17 +46,17 @@ class TestTokenizerBasics:
 
             text = "hello world"
             token_ids = tokenizer.encode(text)
-            
+
             assert isinstance(token_ids, (list, np.ndarray)), (
                 "encode() should return list or array of IDs"
             )
             assert all(isinstance(id, (int, np.integer)) for id in token_ids), (
                 "Token IDs should be integers"
             )
-            
+
         except ImportError:
             pytest.skip("Tokenizer not implemented yet")
-    
+
     def test_tokenizer_decode(self):
         """
         WHAT: Verify tokenizer converts IDs back to text.
@@ -77,16 +77,16 @@ class TestTokenizerBasics:
             text = "hello world"
             token_ids = tokenizer.encode(text)
             decoded = tokenizer.decode(token_ids)
-            
+
             assert "hello" in decoded.lower() and "world" in decoded.lower(), (
                 f"decode(encode(text)) should recover the text.\n"
                 f"  Original: '{text}'\n"
                 f"  Recovered: '{decoded}'"
             )
-            
+
         except ImportError:
             pytest.skip("Tokenizer decode not implemented yet")
-    
+
     def test_vocabulary_size(self):
         """
         WHAT: Verify tokenizer has a defined vocabulary.
@@ -102,16 +102,15 @@ class TestTokenizerBasics:
 
             tokenizer = CharTokenizer()
             tokenizer.build_vocab(["hello world"])
-            
+
             vocab_size = tokenizer.vocab_size
             assert isinstance(vocab_size, int) and vocab_size > 0, (
                 "Tokenizer should have positive vocab_size"
             )
-            
+
         except (ImportError, AttributeError):
             pytest.skip("Tokenizer vocab_size not implemented yet")
 
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
-

@@ -13,10 +13,10 @@ import numpy as np
 
 def test_layers_module_integration():
     """Test that layers module integrates correctly with package."""
-    
+
     # Suppress warnings for cleaner test output
     warnings.filterwarnings("ignore")
-    
+
     results = {
         "module_name": "04_layers",
         "integration_type": "layers_validation",
@@ -24,7 +24,7 @@ def test_layers_module_integration():
         "success": True,
         "errors": []
     }
-    
+
     try:
         # Test 1: Layers module imports from package
         try:
@@ -43,7 +43,7 @@ def test_layers_module_integration():
             results["success"] = False
             results["errors"].append(f"Layers import error: {e}")
             return results
-        
+
         # Test 2: Basic layer instantiation
         try:
             linear = Linear(4, 2)  # input_size=4, output_size=2
@@ -61,7 +61,7 @@ def test_layers_module_integration():
             results["success"] = False
             results["errors"].append(f"Layer creation error: {e}")
             return results
-        
+
         # Test 3: Layer has required properties
         try:
             assert hasattr(linear, 'weight'), "Linear layer should have weight"
@@ -79,20 +79,20 @@ def test_layers_module_integration():
             })
             results["success"] = False
             results["errors"].append(f"Layer properties error: {e}")
-        
+
         # Test 4: Integration with previous modules
         try:
             from tinytorch.core.tensor import Tensor
             from tinytorch.core.activations import ReLU
-            
+
             # Test forward pass
             data = np.random.randn(1, 4)
             tensor = Tensor(data)
-            
+
             # Forward through linear layer
             output = linear.forward(tensor)
             assert hasattr(output, 'data'), "Layer should return tensor-like object"
-            
+
             results["tests"].append({
                 "name": "module_integration",
                 "status": "✅ PASS",
@@ -112,16 +112,16 @@ def test_layers_module_integration():
             })
             results["success"] = False
             results["errors"].append(f"Module integration error: {e}")
-        
+
         # Test 5: Required methods exist
         try:
             required_methods = ['forward', 'parameters']
             missing_methods = []
-            
+
             for method in required_methods:
                 if not hasattr(linear, method):
                     missing_methods.append(method)
-            
+
             if not missing_methods:
                 results["tests"].append({
                     "name": "required_methods",
@@ -136,7 +136,7 @@ def test_layers_module_integration():
                 })
                 results["success"] = False
                 results["errors"].append(f"Missing methods: {missing_methods}")
-                
+
         except Exception as e:
             results["tests"].append({
                 "name": "required_methods",
@@ -145,7 +145,7 @@ def test_layers_module_integration():
             })
             results["success"] = False
             results["errors"].append(f"Method check error: {e}")
-            
+
     except Exception as e:
         results["success"] = False
         results["errors"].append(f"Unexpected error in layers integration test: {e}")
@@ -154,7 +154,7 @@ def test_layers_module_integration():
             "status": "❌ FAIL",
             "description": f"Unexpected error: {e}"
         })
-    
+
     return results
 
 
@@ -166,19 +166,19 @@ def run_integration_test():
 if __name__ == "__main__":
     # Run test when script is executed directly
     result = run_integration_test()
-    
+
     print(f"=== Integration Test: {result['module_name']} ===")
     print(f"Type: {result['integration_type']}")
     print(f"Overall Success: {result['success']}")
     print("\nTest Results:")
-    
+
     for test in result["tests"]:
         print(f"  {test['status']} {test['name']}: {test['description']}")
-    
+
     if result["errors"]:
         print(f"\nErrors:")
         for error in result["errors"]:
             print(f"  - {error}")
-    
+
     # Exit with appropriate code
     sys.exit(0 if result["success"] else 1)

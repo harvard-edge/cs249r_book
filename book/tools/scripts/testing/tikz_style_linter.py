@@ -197,7 +197,7 @@ def scan_quarto_root(root: Path) -> int:
             for token in sorted(unknown):
                 # find usage position within block (simplified matcher for robustness)
                 usage_pattern = (
-                    r"\\(draw|node|path|filldraw|shade|clip|coordinate|begin\{scope\})\s*\[" 
+                    r"\\(draw|node|path|filldraw|shade|clip|coordinate|begin\{scope\})\s*\["
                     + r"[^\]]*" + re.escape(token) + r"[^\]]*\]"
                 )
                 m = re.search(usage_pattern, btext)
@@ -228,5 +228,3 @@ def main(argv: List[str]) -> int:
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv))
-
-

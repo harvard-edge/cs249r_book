@@ -86,7 +86,7 @@ output = model(input)             # Trust it works, don't understand how
 class Linear:
     def forward(self, x):
         return x @ self.weight + self.bias  # You write this
-        
+
 # 2. USE: Your implementation in action
 from tinytorch.core.layers import Linear  # YOUR code
 model = Linear(784, 10)                  # YOUR implementation

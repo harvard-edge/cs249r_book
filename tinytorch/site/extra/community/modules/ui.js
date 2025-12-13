@@ -3,7 +3,7 @@ import { getSession } from './state.js';
 
 export function updateNavState() {
     const { isLoggedIn, email: userEmail } = getSession();
-    
+
     const logoutIcon = `<path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/>`;
     const userIcon = `<path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>`;
 
@@ -20,7 +20,7 @@ export function updateNavState() {
         authBtnElement.querySelector('.login-icon').innerHTML = currentIcon;
         authBtnElement.querySelector('.btn-text').textContent = btnText;
     }
-    
+
     // Show/Hide Extra Icons
     if (navDashboard) navDashboard.style.display = isLoggedIn ? 'flex' : 'none';
     if (navCommunity) navCommunity.style.display = isLoggedIn ? 'flex' : 'none';
@@ -29,10 +29,10 @@ export function updateNavState() {
 export function renderLayout() {
     const basePath = getBasePath();
     const { isLoggedIn, email: userEmail } = getSession();
-    
+
     const logoutIcon = `<path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/>`;
     const userIcon = `<path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>`;
-    
+
     const footprintsIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-footprints-icon lucide-footprints"><path d="M4 16v-2.38C4 11.5 2.97 10.5 3 8c.03-2.72 1.49-6 4.5-6C9.37 2 10 3.8 10 5.5c0 3.11-2 5.66-2 8.68V16a2 2 0 1 1-4 0Z"/><path d="M20 20v-2.38c0-2.12 1.03-3.12 1-5.62-.03-2.72-1.49-6-4.5-6C14.63 6 14 7.8 14 9.5c0 3.11 2 5.66 2 8.68V20a2 2 0 1 0 4 0Z"/><path d="M16 17h4"/><path d="M4 13h4"/></svg>`;
     const globeIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-earth-icon lucide-earth"><path d="M21.54 15H17a2 2 0 0 0-2 2v4.54"/><path d="M7 3.34V5a3 3 0 0 0 3 3a2 2 0 0 1 2 2c0 1.1.9 2 2 2a2 2 0 0 0 2-2c0-1.1.9-2 2-2h3.17"/><path d="M11 21.95V18a2 2 0 0 0-2-2a2 2 0 0 1-2-2v-1a2 2 0 0 0-2-2H2.05"/><circle cx="12" cy="12" r="10"/></svg>`;
 
@@ -47,7 +47,7 @@ export function renderLayout() {
             <span></span>
             <span></span>
         </button>
-        
+
         <div class="top-right-actions">
             <a href="#" class="${btnClass}" id="authBtn">
                 <svg class="login-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -55,11 +55,11 @@ export function renderLayout() {
                 </svg>
                 <span class="btn-text">${btnText}</span>
             </a>
-            
+
             <a href="${basePath}/dashboard.html" class="nav-icon-btn" id="navDashboardBtn" style="display: ${displayExtras};" title="Dashboard">
                 ${footprintsIcon}
             </a>
-            
+
             <a href="${basePath}/community.html" class="nav-icon-btn" id="navCommunityBtn" style="display: flex;" title="Community">
                 ${globeIcon}
             </a>
@@ -110,7 +110,7 @@ export function renderLayout() {
                         <label for="profileDisplayName" class="profile-label">Display Name:</label>
                         <input type="text" class="profile-input" id="profileDisplayName" placeholder="Display Name">
                     </div>
-                    
+
                     <!-- Avatar Section -->
                     <div class="profile-form-group">
                         <label class="profile-label">Avatar:</label>
@@ -122,7 +122,7 @@ export function renderLayout() {
                             </div>
                             <input type="file" id="fileInput" accept="image/*" style="display: none;">
                         </div>
-                        
+
                         <!-- Camera UI (Hidden) -->
                         <div id="cameraContainer" style="display: none; margin-bottom: 10px; text-align: center;">
                             <video id="cameraVideo" autoplay playsinline style="width: 100%; max-width: 300px; background: #000; border-radius: 8px;"></video>
@@ -171,7 +171,7 @@ export function renderLayout() {
             </div>
         </div>
     `;
-    
+
     document.body.insertAdjacentHTML('afterbegin', layoutHTML);
-    updateNavState(); 
+    updateNavState();
 }

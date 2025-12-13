@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 class TestConv2DLayer:
     """Test 2D convolution layer."""
-    
+
     def test_conv2d_creation(self):
         """Test Conv2D layer creation."""
         try:
@@ -28,24 +28,24 @@ class TestConv2DLayer:
 
         except ImportError:
             assert True, "Conv2D not implemented yet"
-    
+
     def test_conv2d_weight_shape(self):
         """Test Conv2D weight tensor has correct shape."""
         try:
             from tinytorch.core.spatial import Conv2d as Conv2D
-            
+
             conv = Conv2D(in_channels=3, out_channels=16, kernel_size=5)
-            
+
             # Weights should be (out_channels, in_channels, kernel_height, kernel_width)
             expected_shape = (16, 3, 5, 5)
             if hasattr(conv, 'weight'):
                 assert conv.weight.shape == expected_shape
             elif hasattr(conv, 'weight'):
                 assert conv.weight.shape == expected_shape
-                
+
         except ImportError:
             assert True, "Conv2D weights not implemented yet"
-    
+
     def test_conv2d_forward_shape(self):
         """Test Conv2D forward pass output shape."""
         try:
@@ -65,7 +65,7 @@ class TestConv2DLayer:
 
         except ImportError:
             assert True, "Conv2D forward pass not implemented yet"
-    
+
     def test_conv2d_simple_convolution(self):
         """Test simple convolution operation."""
         try:
@@ -94,7 +94,7 @@ class TestConv2DLayer:
 
 class TestPoolingLayers:
     """Test pooling layers."""
-    
+
     def test_maxpool2d_creation(self):
         """Test MaxPool2d layer creation."""
         try:
@@ -107,7 +107,7 @@ class TestPoolingLayers:
 
         except ImportError:
             assert True, "MaxPool2d not implemented yet"
-    
+
     def test_maxpool2d_forward_shape(self):
         """Test MaxPool2d forward pass output shape."""
         try:
@@ -126,7 +126,7 @@ class TestPoolingLayers:
 
         except ImportError:
             assert True, "MaxPool2d forward pass not implemented yet"
-    
+
     def test_maxpool2d_operation(self):
         """Test MaxPool2d actually finds maximum values."""
         try:
@@ -153,113 +153,113 @@ class TestPoolingLayers:
 
         except ImportError:
             assert True, "MaxPool2d operation not implemented yet"
-    
+
     def test_avgpool2d_operation(self):
         """Test average pooling."""
         try:
             from tinytorch.core.spatial import AvgPool2D
             from tinytorch.core.tensor import Tensor
-            
+
             pool = AvgPool2D(pool_size=2)
-            
+
             # 2x2 input with known values
             x_data = np.array([[[[1, 2],
                                 [3, 4]]]])  # Shape: (1, 2, 2, 1)
-            
+
             x = Tensor(x_data)
             output = pool(x)
-            
+
             # Average should be (1+2+3+4)/4 = 2.5
             if output.shape == (1, 1, 1, 1):
                 assert np.isclose(output.data[0, 0, 0, 0], 2.5)
-            
+
         except ImportError:
             assert True, "AvgPool2D not implemented yet"
 
 
 class TestSpatialUtilities:
     """Test spatial operation utilities."""
-    
+
     def test_padding_operation(self):
         """Test padding functionality."""
         try:
             from tinytorch.core.spatial import pad2d
             from tinytorch.core.tensor import Tensor
-            
+
             # Simple 2x2 input
             x = Tensor(np.array([[[[1, 2],
                                   [3, 4]]]]))  # Shape: (1, 2, 2, 1)
-            
+
             # Pad with 1 pixel on all sides
             padded = pad2d(x, padding=1, value=0)
-            
+
             # Should become 4x4 with zeros around border
             expected_shape = (1, 4, 4, 1)
             assert padded.shape == expected_shape
-            
+
             # Center should contain original values
             assert padded.data[0, 1, 1, 0] == 1
             assert padded.data[0, 1, 2, 0] == 2
             assert padded.data[0, 2, 1, 0] == 3
             assert padded.data[0, 2, 2, 0] == 4
-            
+
         except ImportError:
             assert True, "Padding operation not implemented yet"
-    
+
     def test_im2col_operation(self):
         """Test im2col operation for efficient convolution."""
         try:
             from tinytorch.core.spatial import im2col
             from tinytorch.core.tensor import Tensor
-            
+
             # Simple 3x3 input
             x = Tensor(np.arange(9).reshape(1, 3, 3, 1))
-            
+
             # Extract 2x2 patches
             patches = im2col(x, kernel_size=2, stride=1)
-            
+
             # Should get 4 patches (2x2 sliding window on 3x3 input)
             # Each patch should have 4 values (2x2 kernel)
             expected_num_patches = 4
             expected_patch_size = 4
-            
+
             if hasattr(patches, 'shape'):
                 assert patches.shape[1] == expected_patch_size
-            
+
         except ImportError:
             assert True, "im2col operation not implemented yet"
-    
+
     def test_spatial_dimensions(self):
         """Test spatial dimension calculations."""
         try:
             from tinytorch.core.spatial import calc_output_size
-            
+
             # Common convolution size calculation
             input_size = 32
             kernel_size = 5
             stride = 1
             padding = 2
-            
+
             output_size = calc_output_size(input_size, kernel_size, stride, padding)
-            
+
             # Formula: (input + 2*padding - kernel) / stride + 1
             expected = (32 + 2*2 - 5) // 1 + 1  # = 32
             assert output_size == expected
-            
+
         except ImportError:
             # Manual calculation test
             input_size = 32
             kernel_size = 5
             stride = 1
             padding = 2
-            
+
             output_size = (input_size + 2*padding - kernel_size) // stride + 1
             assert output_size == 32
 
 
 class TestCNNArchitecture:
     """Test CNN architecture components working together."""
-    
+
     def test_conv_relu_pool_chain(self):
         """Test Conv -> ReLU -> Pool chain."""
         try:
@@ -285,7 +285,7 @@ class TestCNNArchitecture:
 
         except ImportError:
             assert True, "CNN architecture chaining not ready yet"
-    
+
     def test_feature_map_progression(self):
         """Test feature map size progression through CNN."""
         try:
@@ -315,23 +315,23 @@ class TestCNNArchitecture:
 
         except ImportError:
             assert True, "Feature map progression not ready yet"
-    
+
     def test_global_average_pooling(self):
         """Test global average pooling for classification."""
         try:
             from tinytorch.core.spatial import GlobalAvgPool2D
             from tinytorch.core.tensor import Tensor
-            
+
             gap = GlobalAvgPool2D()
-            
+
             # Feature maps from CNN
             x = Tensor(np.random.randn(1, 7, 7, 512))  # Typical CNN output
             output = gap(x)
-            
+
             # Should average over spatial dimensions
             expected_shape = (1, 1, 1, 512)  # or (1, 512)
             assert output.shape == expected_shape or output.shape == (1, 512)
-            
+
         except ImportError:
             # Manual global average pooling
             x_data = np.random.randn(1, 7, 7, 512)

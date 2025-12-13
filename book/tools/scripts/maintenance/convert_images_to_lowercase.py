@@ -44,11 +44,11 @@ def update_references_in_file(file_path: Path, original_path: Path, new_path: Pa
     """Updates all references to an old image path with the new path in a file."""
     try:
         content = file_path.read_text(encoding='utf-8')
-        
+
         # We need to construct a relative path for the reference update
         original_ref = os.path.relpath(original_path, file_path.parent)
         new_ref = os.path.relpath(new_path, file_path.parent)
-        
+
         # To handle both markdown and HTML style references, we perform a case-insensitive replacement.
         # This is a simple string replacement, which should be effective for most cases.
         if content.lower().count(str(original_path.name).lower()) > 0:
@@ -72,16 +72,16 @@ def main():
         help="The root directory to search for images and content files. Defaults to 'quarto/contents'."
     )
     args = parser.parse_args()
-    
+
     content_root = args.path
-    
+
     print(f"Scanning for images in: {content_root}")
     image_files = get_image_files(content_root)
-    
+
     print(f"Found {len(image_files)} image files to process.")
-    
+
     files_to_check = get_files_to_check(content_root)
-    
+
     for image_path in image_files:
         original_path, new_path = rename_image_to_lowercase(image_path)
         if original_path and new_path:
