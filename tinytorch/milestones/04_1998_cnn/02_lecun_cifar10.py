@@ -1,80 +1,43 @@
 #!/usr/bin/env python3
 """
-CIFAR-10 CNN (Modern) - Convolutional Revolution
-===============================================
+CIFAR-10 CNN - Convolutional Revolution
+========================================
 
-📚 HISTORICAL CONTEXT:
-Convolutional Neural Networks revolutionized computer vision by exploiting spatial
-structure in images. Unlike MLPs that flatten images (losing spatial relationships),
-CNNs preserve spatial hierarchies through local connectivity and weight sharing,
-enabling recognition of complex patterns in natural images.
+🎯 WHAT YOU'LL PROVE:
+YOUR TinyTorch implementations can achieve 70%+ accuracy on natural images,
+demonstrating that YOUR spatial modules extract hierarchical features from
+real-world photographs!
 
-🎯 WHAT YOU'RE BUILDING:
-Using YOUR TinyTorch implementations, you'll build a CNN that achieves 65%+ accuracy
-on CIFAR-10 natural images - proving YOUR spatial modules can extract hierarchical
-features from real-world photographs!
+✅ PREREQUISITES: Modules 01-09 complete
+📊 EXPECTED: 70%+ accuracy in ~5 minutes (demo mode)
+🌟 SHOWCASES: YOUR DataLoader (Module 08) + YOUR Conv2d (Module 09)
 
-✅ REQUIRED MODULES (Run after Module 09):
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Module 01 (Tensor)        : YOUR data structure with autodiff
-  Module 02 (Activations)   : YOUR ReLU for feature extraction
-  Module 03 (Layers)        : YOUR Linear layers for classification
-  Module 04 (Losses)        : YOUR CrossEntropy loss
-  Module 05 (Autograd)      : YOUR gradient computation
-  Module 06 (Optimizers)    : YOUR Adam optimizer
-  Module 07 (Training)      : YOUR training loops
-  Module 08 (DataLoader)    : YOUR Dataset/DataLoader for batching!  <-- SHOWCASED HERE
-  Module 09 (Spatial)       : YOUR Conv2D, MaxPool2D, Flatten
+📖 RUN FIRST, THEN EXPLORE:
+After running this script, scroll down to the code comments for detailed
+analysis of what YOUR modules accomplished. The ASCII diagrams and tables
+explain the systems concepts after you've seen the results!
+
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-🏗️ ARCHITECTURE (Modern Pattern with BatchNorm):
-    ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
-    │ Input Image │  │   Conv2D    │  │ BatchNorm2D │  │   MaxPool   │  │   Conv2D    │  │ BatchNorm2D │  │   MaxPool   │  │   Linear    │  │   Linear    │
-    │ 32×32×3 RGB │─▶│    3→32     │─▶│  Normalize  │─▶│     2×2     │─▶│    32→64    │─▶│  Normalize  │─▶│     2×2     │─▶│  2304→256   │─▶│   256→10    │
-    │   Pixels    │  │   YOUR M9   │  │   YOUR M9   │  │   YOUR M9   │  │   YOUR M9   │  │   YOUR M9   │  │   YOUR M9   │  │   YOUR M4   │  │   YOUR M4   │
-    └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘
-                      Edge Detection   Stabilize Train     Downsample      Shape Detect.   Stabilize Train    Downsample      Hidden Layer    Classification
-                           ↓                                                                                                                       ↓
-                    Low-level features                                   High-level features                                                 10 Class Probs
+📚 DEEP DIVE (read after running):
 
-    🆕 DATA AUGMENTATION (Training only):
-    RandomHorizontalFlip (50%) + RandomCrop with padding - prevents overfitting!
+HISTORICAL CONTEXT:
+CNNs revolutionized computer vision by exploiting spatial structure in images.
+Unlike MLPs that flatten images (losing spatial relationships), CNNs preserve
+spatial hierarchies through local connectivity and weight sharing.
 
-🔍 CIFAR-10 DATASET - REAL NATURAL IMAGES:
+ARCHITECTURE:
+Input(32×32×3) → Conv(3→32) → BN → Pool → Conv(32→64) → BN → Pool → FC(2304→256→10)
 
-CIFAR-10 contains 60,000 32×32 color images in 10 classes:
+CIFAR-10 DATASET:
+60,000 32×32 color images in 10 classes:
+plane, car, bird, cat, deer, dog, frog, horse, ship, truck
 
-    Sample Images:                    Feature Hierarchy YOUR CNN Learns:
-
-    ┌──────────┐                     Layer 1 (Conv 3→32):
-    │   Plane  │                     • Edge detectors
-    │[Sky blue │                     • Color gradients
-    │[White    │                     • Simple textures
-    │[Wings    │
-    └──────────┘                     Layer 2 (Conv 32→64):
-                                     • Object parts
-    ┌──────────┐                     • Complex patterns
-    │    Car   │                     • Spatial relationships
-    │[Red body]│
-    │[Wheels]  │                     Output Layer:
-    │[Windows] │                     • Complete objects
-    └──────────┘                     • Class probabilities
-
-    Classes: plane, car, bird, cat, deer, dog, frog, horse, ship, truck
-
-    Why CNNs Excel at Natural Images:
-    • LOCAL CONNECTIVITY: Pixels near each other are related
-    • WEIGHT SHARING: Same filter detects patterns everywhere
-    • HIERARCHICAL LEARNING: Edges → Shapes → Objects
-    • TRANSLATION INVARIANCE: Detects cat anywhere in image
-
-📊 EXPECTED PERFORMANCE:
-- Dataset: 50,000 training images, 10,000 test images
-- Training time: 3-5 minutes (demonstration mode)
-- Expected accuracy: 70%+ (with YOUR CNN + BatchNorm + Augmentation!)
-- Parameters: ~600K (mostly in conv layers)
-- 🆕 BatchNorm: Stabilizes training, faster convergence
-- 🆕 Augmentation: Reduces overfitting, better generalization
+WHY CNNs EXCEL:
+• LOCAL CONNECTIVITY: Pixels near each other are related
+• WEIGHT SHARING: Same filter detects patterns everywhere
+• HIERARCHICAL LEARNING: Edges → Shapes → Objects
+• TRANSLATION INVARIANCE: Detects cat anywhere in image
 """
 
 import sys
@@ -130,6 +93,27 @@ from data_manager import DatasetManager
 # │            MaxPool2d│ with 3×3 kernels, reduces      │ weight sharing = 100×       │
 # │            BatchNorm│ dimensions, stabilizes train   │ fewer params than MLP       │
 # └─────────────────────┴────────────────────────────────┴─────────────────────────────┘
+#
+# =============================================================================
+
+# =============================================================================
+# 🆕 WHAT'S NEW SINCE MODULE 07 (MNIST MLP)
+# =============================================================================
+#
+# You've built MNIST MLPs before. This milestone adds significant new capabilities:
+#
+# ┌──────────────────┬─────────────────────┬────────────────────────────┐
+# │ Module 07        │ This Milestone      │ Why It Matters             │
+# ├──────────────────┼─────────────────────┼────────────────────────────┤
+# │ Linear layers    │ + Conv2d layers     │ Spatial structure preserved│
+# │ Simple batching  │ + DataLoader class  │ Shuffling + memory control │
+# │ Grayscale 28×28  │ + Color 32×32×3     │ Real images are complex!   │
+# │ No augmentation  │ + Flip & Crop       │ Prevents overfitting       │
+# │ No normalization │ + BatchNorm2d       │ Stabilizes deep training   │
+# │ ~50K params      │ + ~600K params      │ More capacity for patterns │
+# └──────────────────┴─────────────────────┴────────────────────────────┘
+#
+# This is the progression from "ML basics" to "ML systems engineering"!
 #
 # =============================================================================
 
@@ -535,7 +519,7 @@ def test_cifar_cnn(model, test_loader, class_names):
 # ML systems is about understanding trade-offs: parameters vs. computation,
 # memory vs. speed, accuracy vs. efficiency. YOUR CNN embodies these choices.
 
-def analyze_cnn_systems(model):
+def analyze_cnn_systems(model, batch_size=32):
     """Analyze YOUR CNN from an ML systems perspective."""
     print("\n🔬 SYSTEMS ANALYSIS of YOUR CNN Implementation:")
 
@@ -551,10 +535,24 @@ def analyze_cnn_systems(model):
     print(f"   • Dense: 2,304×256 + 256×10 = 592,384 ops")
     print(f"   • Total: ~4.5M ops per image")
 
-    print(f"\n   Memory Requirements:")
-    print(f"   • Parameters: {model.total_params * 4 / 1024:.1f} KB")
-    print(f"   • Activations (peak): ~500 KB per image")
-    print(f"   • YOUR implementation: Pure Python + NumPy")
+    # Memory profiling table - quantitative systems thinking
+    params_mem = model.total_params * 4 / 1024  # KB
+    activations_mem = 500  # Peak activations ~500KB per image
+    batch_mem = batch_size * 32 * 32 * 3 * 4 / 1024  # Input batch in KB
+    total_mem = params_mem + activations_mem + batch_mem
+
+    print(f"\n   🧮 MEMORY PROFILING - Where YOUR RAM Goes:")
+    print(f"   ┌────────────────────────┬──────────────┬─────────────┐")
+    print(f"   │ Component              │ Memory (KB)  │ Percentage  │")
+    print(f"   ├────────────────────────┼──────────────┼─────────────┤")
+    print(f"   │ Parameters (weights)   │ {params_mem:10.1f}   │ {100*params_mem/total_mem:5.1f}%      │")
+    print(f"   │ Activations (forward)  │ {activations_mem:10.1f}   │ {100*activations_mem/total_mem:5.1f}%      │")
+    print(f"   │ Batch data ({batch_size} imgs)   │ {batch_mem:10.1f}   │ {100*batch_mem/total_mem:5.1f}%      │")
+    print(f"   ├────────────────────────┼──────────────┼─────────────┤")
+    print(f"   │ TOTAL per batch        │ {total_mem:10.1f}   │ 100.0%      │")
+    print(f"   └────────────────────────┴──────────────┴─────────────┘")
+    print(f"\n   💡 KEY INSIGHT: Activations dominate! This is why gradient checkpointing")
+    print(f"      trades compute (recompute activations) for memory (don't store them).")
 
     print(f"\n   🏛️ CNN Evolution:")
     print(f"   • 1989: LeCun's CNN for handwritten digits")
@@ -665,7 +663,7 @@ def main():
     accuracy = test_cifar_cnn(model, test_loader, class_names)
 
     # Step 5: Analysis
-    analyze_cnn_systems(model)
+    analyze_cnn_systems(model, batch_size=args.batch_size)
 
     print(f"\n⏱️  Training time: {train_time:.1f} seconds")
     print(f"   Images/sec: {len(train_dataset) * args.epochs / train_time:.0f}")
