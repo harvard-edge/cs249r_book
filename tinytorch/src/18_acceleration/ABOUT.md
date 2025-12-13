@@ -1,209 +1,229 @@
----
-title: "Acceleration - CPU Vectorization & Cache Optimization"
-description: "Master hardware-aware optimization through BLAS vectorization, cache-friendly algorithms, and roofline analysis"
-difficulty: "●●●"
-time_estimate: "6-8 hours"
-prerequisites: ["Profiling"]
-next_steps: ["Benchmarking"]
-learning_objectives:
-  - "Understand the roofline model and arithmetic intensity for predicting performance bottlenecks"
-  - "Leverage optimized BLAS libraries for CPU vectorization achieving 10-100x speedups"
-  - "Implement cache-aware algorithms and analyze memory hierarchy impact"
-  - "Apply kernel fusion to reduce memory bandwidth for element-wise operations"
-  - "Measure acceleration gains systematically using profiling integration"
----
+# Acceleration
 
-# Acceleration - CPU Vectorization & Cache Optimization
+**OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 5-7 hours | Prerequisites: 01-07, 14
 
-**OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 6-8 hours
+**Prerequisites: Modules 01-07, 14** means you need:
+- Tensor operations (Module 01) for understanding data structures
+- Neural network layers (Module 03) for knowing what to accelerate
+- Training loops (Module 07) for understanding the performance context
+- Profiling tools (Module 14) for measuring acceleration gains
+
+If you can multiply matrices and understand why matrix multiplication is expensive, you're ready.
 
 ## Overview
 
-The Acceleration module teaches you to extract maximum performance from modern CPUs through hardware-aware optimization techniques. You'll learn to leverage optimized BLAS libraries for vectorized matrix operations, implement cache-friendly algorithms that exploit memory hierarchy, and apply kernel fusion to eliminate memory bandwidth bottlenecks. By mastering the roofline model and arithmetic intensity analysis, you'll develop the systematic thinking needed to accelerate real ML systems from research prototypes to production deployments.
+Neural network training and inference spend 90% of their time on matrix operations. A single forward pass through a transformer model can involve billions of floating-point operations, and training requires thousands of these passes. The difference between a model that trains in hours versus days, or that serves predictions in milliseconds versus seconds, comes down to how efficiently these operations execute on hardware.
 
-This is CPU-focused acceleration—the foundation for understanding GPU perf. You'll work with NumPy's BLAS backend (MKL, OpenBLAS) to achieve 10-100x speedups over naive Python, understand why most operations are memory-bound rather than compute-bound, and learn the measurement-driven optimization workflow used by PyTorch, TensorFlow, and production ML systems.
+This module teaches you hardware-aware optimization through vectorization and kernel fusion. You'll learn to leverage SIMD instructions, optimize memory access patterns, and eliminate unnecessary memory traffic. By the end, you'll understand why a naive matrix multiplication can be 100x slower than an optimized one, and how to achieve 2-5x speedups in your own code.
+
+Acceleration isn't about clever algorithms. It's about understanding how processors work and writing code that exploits their design.
 
 ## Learning Objectives
 
-By the end of this module, you will be able to:
+```{admonition} By completing this module, you will:
+:class: tip
 
-- **Understand Hardware Bottlenecks**: Apply the roofline model to determine whether operations are compute-bound or memory-bound, and predict performance limits from hardware specifications
-- **Leverage BLAS Vectorization**: Use optimized linear algebra libraries that exploit SIMD instructions and multi-threading to achieve 10-100x speedups over naive implementations
-- **Implement Cache-Aware Algorithms**: Design blocked/tiled algorithms that maximize cache hit rates by fitting working sets into L1/L2 cache for 2-5x memory performance gains
-- **Apply Kernel Fusion**: Reduce memory bandwidth usage by 60-80% through fusing element-wise operations into single expressions that eliminate intermediate array allocations
-- **Measure Systematically**: Integrate with Module 14 profiling to validate optimization impact, measure FLOPs efficiency, and calculate arithmetic intensity for real workloads
-
-## Build → Use → Optimize
-
-This module follows TinyTorch's **Build → Use → Optimize** framework:
-
-1. **Build**: Implement vectorized matrix multiplication using BLAS, fused GELU activation, and tiled algorithms for cache efficiency
-2. **Use**: Apply acceleration to realistic transformer blocks, analyze memory access patterns, and measure performance across different tensor sizes
-3. **Optimize**: Analyze roofline characteristics, measure arithmetic intensity, and develop systematic decision frameworks for production optimization strategies
-
-## Why This Matters: The Hardware Reality
-
-### The Performance Gap
-
-Modern ML workloads face a fundamental challenge: **the speed gap between computation and memory access grows every year**. Consider a typical CPU:
-
-- **Peak Compute**: 200-500 GFLOP/s (billions of floating-point operations per second)
-- **Memory Bandwidth**: 20-50 GB/s (data transfer rate from RAM to CPU)
-- **Imbalance**: CPUs can perform 10-20 floating-point operations in the time it takes to fetch a single float from memory
-
-This means **most ML operations are memory-bound, not compute-bound**. Naive implementations waste computation cycles waiting for data. Professional optimization is about feeding the compute units efficiently.
-
-### From Naive Python to Production Performance
-
-The performance hierarchy for ML operations:
-
-```
-Naive Python loops:       1 GFLOP/s    (baseline)
-NumPy (vectorized):       10-50 GFLOP/s  (10-50x faster)
-Optimized BLAS (this module): 100-500 GFLOP/s (100-500x faster)
-GPU CUDA kernels:         1,000-10,000 GFLOP/s (1,000-10,000x faster)
+- **Implement** vectorized matrix multiplication using optimized BLAS libraries for maximum throughput
+- **Master** kernel fusion techniques that eliminate memory bandwidth bottlenecks by combining operations
+- **Understand** the roofline model and arithmetic intensity to predict performance bottlenecks
+- **Analyze** production acceleration strategies for different deployment scenarios (edge, cloud, GPU)
 ```
 
-This module focuses on the **100-500x speedup** achievable on CPUs through:
-- **SIMD vectorization**: Process 4-8 floats per instruction (AVX2/AVX-512)
-- **Multi-threading**: Use all CPU cores (4-8x parallelism)
-- **Cache blocking**: Keep data in fast cache memory (10-100x faster than RAM)
-- **Kernel fusion**: Reduce memory traffic by 4-10x
+## What You'll Build
 
-### Real-World Impact
+```{mermaid}
+flowchart LR
+    subgraph "Acceleration Techniques"
+        A["Vectorized Matmul<br/>BLAS optimization"]
+        B["Fused GELU<br/>Kernel fusion"]
+        C["Tiled Matmul<br/>Cache awareness"]
+        D["Performance Analysis<br/>Roofline model"]
+    end
 
-These techniques enable:
-- **Faster iteration**: Train models in hours instead of days during research
-- **Lower costs**: More efficient use of cloud compute resources
-- **Edge deployment**: Run models on CPUs without GPU requirements
-- **Better scaling**: Handle larger models and batch sizes within memory limits
+    A --> B --> C --> D
 
-Understanding CPU optimization is prerequisite for GPU programming—same principles, different scale.
-
-## The Roofline Model: Your Performance Compass
-
-### Understanding Hardware Limits
-
-The **roofline model** is the fundamental tool for understanding performance bottlenecks. It plots two hardware limits:
-
-1. **Compute Roof**: Maximum FLOPs the processor can execute per second
-2. **Memory Roof**: Maximum data bandwidth × arithmetic intensity
-
-**Arithmetic Intensity (AI)** = FLOPs performed / Bytes accessed
-
-```
-Performance         Compute Bound Region
-(GFLOPS)           ┌─────────────────────
-                   │ Peak Compute (500 GFLOP/s)
-                   │
-                  ╱│
-                 ╱ │ Memory Bound Region
-                ╱  │
-               ╱   │
-              ╱────│──────────────────────
-             ╱     │
-            ╱      │
-           ╱───────│──────────────────── Arithmetic Intensity
-                   │           (FLOPs/Byte)
-                Low│          High
-                (<1)│         (>10)
+    style A fill:#e1f5ff
+    style B fill:#fff3cd
+    style C fill:#f8d7da
+    style D fill:#d4edda
 ```
 
-**Key Insight**: If your operation falls below the roofline (left side), adding more compute won't help—you need to reduce memory traffic through algorithmic improvements.
+**Implementation roadmap:**
 
-### Example Calculations
+| Part | What You'll Implement | Key Concept |
+|------|----------------------|-------------|
+| 1 | `vectorized_matmul()` | SIMD and BLAS optimization |
+| 2 | `fused_gelu()` | Memory bandwidth reduction |
+| 3 | `unfused_gelu()` | Comparison baseline |
+| 4 | `tiled_matmul()` | Cache-aware computation |
+| 5 | Performance analysis | Roofline and arithmetic intensity |
 
-**Element-wise addition**: `c = a + b`
-- FLOPs: N (one addition per element)
-- Bytes: 3N × 4 bytes (read a, read b, write c)
-- AI = N / (12N) = **0.08 FLOPs/byte** → Severely memory-bound
+**The pattern you'll enable:**
+```python
+# Fast matrix operations using BLAS
+output = vectorized_matmul(x, weights)  # 10-100x faster than naive loops
 
-**Matrix multiplication**: `C = A @ B` for N×N matrices
-- FLOPs: 2N³ (dot product for each of N² output elements)
-- Bytes: 3N² × 4 bytes (read A, read B, write C)
-- AI = 2N³ / (12N²) = **N/6 FLOPs/byte** → Compute-bound for large N
+# Memory-efficient activations
+activated = fused_gelu(output)  # 60% less memory bandwidth
+```
 
-For N=1024: AI = 171 FLOPs/byte—squarely in the compute-bound region. This is why matrix multiplication is ideal for GPUs and why transformers (which are mostly matmuls) run efficiently on accelerators.
+### What You're NOT Building (Yet)
 
-## Implementation Guide
+To keep this module focused, you will **not** implement:
 
-### 1. Vectorized Matrix Multiplication
+- GPU kernels (that requires CUDA programming, covered in production frameworks)
+- Custom CPU assembly (BLAS libraries already provide this)
+- Automatic kernel fusion (compilers like XLA do this automatically)
+- Multi-threading control (NumPy handles this via OpenBLAS/MKL)
 
-**The Challenge**: Naive triple-nested loops in Python achieve ~1 GFLOP/s. We need 100-500 GFLOP/s.
+**You are building the understanding.** Hardware-specific implementations come later.
 
-**The Solution**: Leverage optimized BLAS (Basic Linear Algebra Subprograms) libraries that implement:
-- **SIMD vectorization**: AVX2/AVX-512 instructions process 4-8 floats simultaneously
-- **Multi-threading**: Automatic parallelization across CPU cores (OpenMP)
-- **Cache blocking**: Tiled algorithms that keep working sets in L1/L2 cache
+## API Reference
+
+This section provides a quick reference for the acceleration functions you'll build. These functions demonstrate optimization techniques that apply to any ML framework.
+
+### Vectorized Operations
+
+```python
+vectorized_matmul(a: Tensor, b: Tensor) -> Tensor
+```
+
+High-performance matrix multiplication using optimized BLAS libraries that leverage SIMD instructions and cache blocking.
+
+### Kernel Fusion
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `fused_gelu` | `fused_gelu(x: Tensor) -> Tensor` | GELU activation with all operations in single kernel |
+| `unfused_gelu` | `unfused_gelu(x: Tensor) -> Tensor` | Baseline implementation for comparison |
+
+### Cache-Aware Operations
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `tiled_matmul` | `tiled_matmul(a: Tensor, b: Tensor, tile_size: int) -> Tensor` | Cache-optimized matrix multiplication |
+
+## Core Concepts
+
+This section covers the fundamental acceleration techniques that apply to any hardware platform. Understanding these concepts will help you optimize neural networks whether you're targeting CPUs, GPUs, or specialized accelerators.
+
+### Vectorization with NumPy
+
+Modern processors can execute the same operation on multiple data elements simultaneously through SIMD (Single Instruction, Multiple Data) instructions. A traditional loop processes one element per clock cycle, but SIMD can process 4, 8, or even 16 elements in the same time.
+
+Consider a simple element-wise addition. A naive Python loop visits each element sequentially:
+
+```python
+# Slow: one element per iteration
+for i in range(len(x)):
+    result[i] = x[i] + y[i]
+```
+
+NumPy's vectorized operations automatically use SIMD when you write `x + y`. The processor loads multiple elements into special vector registers and adds them in parallel. This is why vectorized NumPy code can be 10-100x faster than explicit loops.
+
+Here's how vectorized matrix multiplication works in your implementation:
 
 ```python
 def vectorized_matmul(a: Tensor, b: Tensor) -> Tensor:
-    """
-    High-performance matrix multiplication using optimized BLAS.
+    """Matrix multiplication using optimized BLAS libraries."""
+    # Validate shapes - inner dimensions must match
+    if a.shape[-1] != b.shape[-2]:
+        raise ValueError(
+            f"Matrix multiplication shape mismatch: {a.shape} @ {b.shape}. "
+            f"Inner dimensions must match: a.shape[-1]={a.shape[-1]} != b.shape[-2]={b.shape[-2]}"
+        )
 
-    NumPy's matmul calls GEMM (General Matrix Multiply) from:
-    - Intel MKL (Math Kernel Library) - 200-500 GFLOP/s on modern CPUs
-    - OpenBLAS - 100-300 GFLOP/s
-    - Apple Accelerate - optimized for M1/M2 chips
+    # NumPy calls BLAS GEMM which uses:
+    # - SIMD vectorization for parallel arithmetic
+    # - Cache blocking for memory efficiency
+    # - Multi-threading on multi-core systems
+    result_data = np.matmul(a.data, b.data)
 
-    These libraries implement decades of optimization research.
-    """
-    # Input validation
+    return Tensor(result_data)
+```
+
+The magic happens inside `np.matmul`. NumPy delegates to BLAS (Basic Linear Algebra Subprograms) libraries like OpenBLAS or Intel MKL. These libraries have been optimized over decades to exploit every hardware feature: SIMD instructions, cache hierarchies, and multiple cores. The same Python code that takes 800ms with naive loops completes in 8ms with BLAS.
+
+### BLAS and LAPACK
+
+BLAS provides three levels of operations, each with different performance characteristics:
+
+- **Level 1**: Vector operations (AXPY: y = αx + y). These are memory-bound with low arithmetic intensity.
+- **Level 2**: Matrix-vector operations (GEMV: y = αAx + βy). Better arithmetic intensity but still memory-limited.
+- **Level 3**: Matrix-matrix operations (GEMM: C = αAB + βC). High arithmetic intensity, compute-bound.
+
+Matrix multiplication (GEMM) dominates neural network training because every linear layer, every attention mechanism, and every convolution ultimately reduces to matrix multiplication. GEMM performs 2N³ floating-point operations while reading only 3N² elements from memory. For a 1024×1024 matrix, that's 2.1 billion operations on just 12 MB of data - an arithmetic intensity of 170 FLOPs/byte. This high ratio of computation to memory access makes GEMM perfect for hardware acceleration.
+
+### Memory Layout Optimization
+
+When a processor needs data from main memory, it doesn't fetch individual bytes. It fetches entire cache lines (typically 64 bytes). If your data is laid out sequentially in memory, you get spatial locality: one cache line brings in many useful values. If your data is scattered randomly, every access causes a cache miss and a 100-cycle stall.
+
+Matrix multiplication has interesting memory access patterns. Computing one output element requires reading an entire row from the first matrix and an entire column from the second matrix. Rows are stored sequentially in memory (good), but columns are strided by the matrix width (potentially bad). This is why cache-aware tiling helps:
+
+```python
+# Cache-aware tiling breaks large matrices into blocks
+# Each block fits in cache for maximum reuse
+for i_tile in range(0, M, tile_size):
+    for j_tile in range(0, N, tile_size):
+        for k_tile in range(0, K, tile_size):
+            # Multiply tile blocks that fit in L1/L2 cache
+            C[i_tile:i_tile+tile_size, j_tile:j_tile+tile_size] +=
+                A[i_tile:i_tile+tile_size, k_tile:k_tile+tile_size] @
+                B[k_tile:k_tile+tile_size, j_tile:j_tile+tile_size]
+```
+
+Your `tiled_matmul` implementation demonstrates this concept, though in practice NumPy's BLAS backend already implements optimal tiling:
+
+```python
+def tiled_matmul(a: Tensor, b: Tensor, tile_size: int = 64) -> Tensor:
+    """Cache-aware matrix multiplication using tiling."""
+    # Validate shapes
     if a.shape[-1] != b.shape[-2]:
         raise ValueError(f"Shape mismatch: {a.shape} @ {b.shape}")
 
-    # Delegate to highly optimized BLAS implementation
-    # This single line replaces thousands of lines of hand-tuned assembly
+    # BLAS libraries automatically implement cache-aware tiling
+    # tile_size would control block size in explicit implementation
     result_data = np.matmul(a.data, b.data)
     return Tensor(result_data)
 ```
 
-**Performance Characteristics**:
-- **Small matrices** (N < 64): 10-30 GFLOP/s, limited by overhead
-- **Medium matrices** (N = 64-512): 100-300 GFLOP/s, optimal cache reuse
-- **Large matrices** (N > 1024): 200-500 GFLOP/s, memory bandwidth saturated
+### Kernel Fusion
 
-**Measured Speedups** (vs. naive triple loop):
-- 128×128: **50x faster** (5ms → 0.1ms)
-- 512×512: **120x faster** (800ms → 6.5ms)
-- 2048×2048: **150x faster** (100s → 0.67s)
-
-### 2. Kernel Fusion: Eliminating Memory Traffic
-
-**The Problem**: Element-wise operations are memory-bound. Consider GELU activation:
+Element-wise operations like GELU activation are memory-bound: they spend more time loading and storing data than computing results. Consider the GELU formula:
 
 ```
 GELU(x) = 0.5 * x * (1 + tanh(√(2/π) * (x + 0.044715 * x³)))
 ```
 
-**Unfused implementation** (naive):
+A naive implementation creates seven intermediate arrays:
+
 ```python
-temp1 = x ** 3                    # Read x, write temp1
-temp2 = 0.044715 * temp1         # Read temp1, write temp2
-temp3 = x + temp2                # Read x, temp2, write temp3
-temp4 = sqrt_2_pi * temp3        # Read temp3, write temp4
-temp5 = tanh(temp4)              # Read temp4, write temp5
-temp6 = 1.0 + temp5              # Read temp5, write temp6
-temp7 = x * temp6                # Read x, temp6, write temp7
-result = 0.5 * temp7             # Read temp7, write result
-
-# Total: 8 reads + 8 writes = 16 memory operations per element
-```
-
-**Fused implementation**:
-```python
-def fused_gelu(x: Tensor) -> Tensor:
-    """
-    Fused GELU activation - all operations in single expression.
-
-    Memory efficiency:
-    - Unfused: 16 memory ops per element
-    - Fused: 2 memory ops per element (read x, write result)
-    - Reduction: 87.5% less memory traffic
-    """
+def unfused_gelu(x: Tensor) -> Tensor:
+    """Unfused GELU - creates many temporary arrays."""
     sqrt_2_over_pi = np.sqrt(2.0 / np.pi)
 
-    # Single expression - NumPy optimizes into minimal memory operations
+    temp1 = Tensor(x.data**3)                        # x³
+    temp2 = Tensor(0.044715 * temp1.data)           # 0.044715 * x³
+    temp3 = Tensor(x.data + temp2.data)             # x + 0.044715 * x³
+    temp4 = Tensor(sqrt_2_over_pi * temp3.data)     # √(2/π) * (...)
+    temp5 = Tensor(np.tanh(temp4.data))             # tanh(...)
+    temp6 = Tensor(1.0 + temp5.data)                # 1 + tanh(...)
+    temp7 = Tensor(x.data * temp6.data)             # x * (1 + tanh(...))
+    result = Tensor(0.5 * temp7.data)               # 0.5 * x * (...)
+
+    return result
+```
+
+Each temporary array allocation writes to memory, and each subsequent operation reads from memory. For a 4 million element tensor, this unfused version performs 28 million memory operations (7 reads + 7 writes per element). Memory bandwidth on a typical CPU is around 50 GB/s, so moving 112 MB takes 2.24 milliseconds - just for memory traffic, before any computation.
+
+Kernel fusion combines all operations into a single expression:
+
+```python
+def fused_gelu(x: Tensor) -> Tensor:
+    """Fused GELU - all operations in single kernel."""
+    sqrt_2_over_pi = np.sqrt(2.0 / np.pi)
+
+    # Single expression - no intermediate arrays
     result_data = 0.5 * x.data * (
         1.0 + np.tanh(sqrt_2_over_pi * (x.data + 0.044715 * x.data**3))
     )
@@ -211,391 +231,336 @@ def fused_gelu(x: Tensor) -> Tensor:
     return Tensor(result_data)
 ```
 
-**Measured Performance** (2000×2000 tensor):
-- Unfused: 45ms (7 temporary arrays allocated)
-- Fused: 18ms (0 temporary arrays)
-- **Speedup: 2.5x faster** through memory bandwidth reduction alone
+Now there are only two memory operations: read the input, write the output. For the same 4 million element tensor, that's just 32 MB of memory traffic, completing in 0.64 milliseconds. The fused version is 3.5x faster purely from memory bandwidth reduction, even though both versions perform the same arithmetic.
 
-**Memory Usage**:
-- Unfused: ~320MB (8 arrays × 2000×2000 × 4 bytes × overhead)
-- Fused: ~32MB (input + output only)
-- **Memory reduction: 90%**
+### Parallel Processing
 
-### 3. Cache-Aware Tiling (Blocked Algorithms)
+Modern CPUs have multiple cores that can execute operations simultaneously. BLAS libraries automatically spawn threads to parallelize matrix multiplication across cores. A 4-core system can theoretically achieve 4x speedup on compute-bound operations.
 
-**The Memory Hierarchy**:
+However, parallel processing has overhead. Creating threads, synchronizing results, and merging data takes time. For small matrices, this overhead exceeds the benefit. BLAS libraries use heuristics to decide when to parallelize: large matrices get multiple threads, small matrices run on a single core.
+
+This is why you see sublinear speedups in practice. A 4-core system might achieve 3x speedup rather than 4x, due to:
+- Thread creation and destruction overhead
+- Cache coherence traffic between cores
+- Memory bandwidth saturation (all cores sharing the same memory bus)
+- Load imbalance (some threads finish before others)
+
+### Hardware Acceleration
+
+This module uses NumPy and BLAS for CPU acceleration. Production frameworks go further with specialized hardware:
+
+**GPUs** have thousands of simple cores optimized for data parallelism. A matrix multiplication that takes 100ms on a CPU can complete in 1ms on a GPU - a 100x speedup. But GPUs require explicit data transfer between CPU and GPU memory, and this transfer can dominate small operations.
+
+**TPUs** (Tensor Processing Units) are Google's custom accelerators with systolic array architectures designed specifically for matrix multiplication. A TPU can sustain 100+ TFLOPS on matrix operations.
+
+The acceleration techniques you implement in this module - vectorization, fusion, and cache awareness - apply to all these platforms. The specific implementations differ, but the principles remain constant.
+
+### Arithmetic Intensity and the Roofline Model
+
+Not all operations are created equal. The roofline model helps predict whether an operation will be limited by memory bandwidth or computational throughput. Arithmetic intensity is the ratio of floating-point operations to bytes transferred:
+
 ```
-L1 Cache:   32-64 KB    1-4 cycles     ~1 TB/s bandwidth
-L2 Cache:   256KB-1MB   10-20 cycles   ~500 GB/s bandwidth
-L3 Cache:   8-32 MB     40-75 cycles   ~200 GB/s bandwidth
-Main RAM:   8-64 GB     100-300 cycles ~20-50 GB/s bandwidth
-```
-
-**The Problem**: Naive matrix multiplication for 2048×2048 matrices accesses:
-- Data size: 3 × 2048² × 4 bytes = 50MB (doesn't fit in L1/L2 cache)
-- Result: Most accesses hit L3 or RAM (100-300 cycle latency)
-
-**The Solution**: Block/tile matrices into cache-sized chunks
-
-**Conceptual Tiled Algorithm**:
-```python
-def tiled_matmul_concept(A, B, tile_size=64):
-    """
-    Conceptual tiling algorithm (educational).
-
-    In practice, BLAS libraries implement this automatically
-    with hardware-specific tuning for optimal tile sizes.
-    """
-    N = A.shape[0]
-    C = np.zeros((N, N))
-
-    # Process matrix in tile_size × tile_size blocks
-    for i in range(0, N, tile_size):
-        for j in range(0, N, tile_size):
-            for k in range(0, N, tile_size):
-                # This block fits in L1/L2 cache (64×64×4 = 16KB)
-                # All accesses hit fast cache instead of slow RAM
-                i_end = min(i + tile_size, N)
-                j_end = min(j + tile_size, N)
-                k_end = min(k + tile_size, N)
-
-                C[i:i_end, j:j_end] += A[i:i_end, k:k_end] @ B[k:k_end, j:j_end]
-
-    return C
+Arithmetic Intensity (AI) = FLOPs / Bytes
 ```
 
-**Cache Efficiency Analysis**:
-- **Naive algorithm**: 99% L3/RAM accesses (slow)
-- **Blocked algorithm** (64×64 tiles): 95% L1/L2 hits (fast)
-- **Latency reduction**: 300 cycles → 10 cycles average
-- **Effective speedup**: 2-5x for large matrices
+For element-wise addition of two N-element arrays:
+- FLOPs: N (one addition per element)
+- Bytes: 3N × 4 = 12N (read A, read B, write C, each 4 bytes for float32)
+- AI = N / 12N = 0.083 FLOPs/byte
 
-**Optimal Tile Sizes** (empirically determined):
-- L1-focused: 32×32 (4KB per block)
-- L2-focused: 64×64 (16KB per block) ← sweet spot for most CPUs
-- L3-focused: 128×128 (64KB per block)
+For matrix multiplication of N×N matrices:
+- FLOPs: 2N³ (N³ multiplications + N³ additions)
+- Bytes: 3N² × 4 = 12N² (read A, read B, write C)
+- AI = 2N³ / 12N² = N/6 FLOPs/byte
 
-Note: In this module, we use NumPy's `matmul` which delegates to BLAS libraries (MKL, OpenBLAS) that already implement sophisticated cache blocking with hardware-specific tuning. Production implementations use tile sizes, loop unrolling, and prefetching tuned for specific CPU architectures.
+For a 1024×1024 matrix: AI = 170 FLOPs/byte. Matrix multiplication performs 2000x more computation per byte transferred than element-wise addition. This is why GPUs excel at matrix operations but struggle with element-wise ops.
 
-### 4. Roofline Analysis in Practice
+| Operation | Arithmetic Intensity | Bottleneck | Optimization Strategy |
+|-----------|---------------------|------------|----------------------|
+| Element-wise add | ~0.08 FLOPs/byte | Memory bandwidth | Kernel fusion |
+| Element-wise multiply | ~0.08 FLOPs/byte | Memory bandwidth | Kernel fusion |
+| GELU activation | ~1.0 FLOPs/byte | Memory bandwidth | Kernel fusion |
+| Matrix multiply (1024×1024) | ~170 FLOPs/byte | Compute throughput | Vectorization, tiling |
 
-**Measuring Your Hardware**:
+The roofline model plots achievable performance against arithmetic intensity. Your hardware has a peak memory bandwidth (horizontal line) and peak computational throughput (diagonal line). The minimum of these two lines is your performance ceiling.
+
+## Common Errors
+
+These are the errors you'll encounter when optimizing neural networks. Understanding them will save you from subtle performance bugs.
+
+### Shape Mismatches in Vectorized Code
+
+**Error**: `ValueError: shapes (128, 256) and (128, 512) not aligned`
+
+Matrix multiplication requires inner dimensions to match. For A @ B, `A.shape[-1]` must equal `B.shape[-2]`. This error occurs when you try to multiply incompatible shapes.
+
+**Fix**: Always validate shapes before matrix operations:
 
 ```python
-def analyze_arithmetic_intensity():
-    """Measure actual performance vs. theoretical roofline."""
-
-    # Theoretical hardware limits (example: modern Intel CPU)
-    peak_compute = 400  # GFLOP/s (AVX-512, 8 cores, 3.5 GHz)
-    peak_bandwidth = 45  # GB/s (DDR4-2666, dual-channel)
-
-    operations = {
-        "Element-wise add": {
-            "flops": N,
-            "bytes": 3 * N * 4,
-            "ai": 0.08  # FLOPs/byte
-        },
-        "Matrix multiply": {
-            "flops": 2 * N**3,
-            "bytes": 3 * N**2 * 4,
-            "ai": N / 6  # For N=1024: 171 FLOPs/byte
-        }
-    }
-
-    # Predicted performance = min(peak_compute, ai × peak_bandwidth)
-    for op, metrics in operations.items():
-        predicted_gflops = min(
-            peak_compute,
-            metrics["ai"] * peak_bandwidth
-        )
-        print(f"{op}: {predicted_gflops:.1f} GFLOP/s (predicted)")
+assert a.shape[-1] == b.shape[-2], f"Shape mismatch: {a.shape} @ {b.shape}"
 ```
 
-**Example Analysis** (N=1024):
+### Memory Bandwidth Bottlenecks
 
-| Operation | AI (FLOPs/byte) | Predicted GFLOP/s | Measured GFLOP/s | Efficiency |
-|-----------|----------------|-------------------|------------------|------------|
-| Element-wise add | 0.08 | 3.6 (memory-bound) | 3.2 | 89% |
-| GELU (fused) | 1.0 | 45 (memory-bound) | 38 | 84% |
-| Matrix multiply | 171 | 400 (compute-bound) | 320 | 80% |
+**Symptom**: GPU shows 20% utilization but code is still slow
 
-**Key Insights**:
-- Element-wise operations hit **memory roof** at 3-4 GFLOP/s (only 1% of peak compute)
-- Fusion improves AI by reducing memory operations (0.08 → 1.0 AI)
-- Matrix multiplication approaches **compute roof** (80% of peak)
-- Optimization strategy should focus on memory-bound operations first
+This indicates a memory-bound operation. The GPU cores are idle, waiting for data from memory. Element-wise operations often hit this bottleneck.
 
-## Getting Started
+**Fix**: Use kernel fusion to reduce memory traffic. Combine multiple element-wise operations into a single fused kernel.
 
-### Prerequisites
+### Cache Thrashing
 
-Ensure you've completed:
-- **Module 14 (Profiling)**: You'll use profiling tools to measure acceleration gains
-- **Module 01 (Tensor)**: Tensor class provides foundation for operations
-- **NumPy/BLAS**: Verify optimized BLAS backend is installed
+**Symptom**: Performance degrades dramatically for matrices larger than 1024×1024
 
-Check your BLAS configuration:
-```bash
-# Activate TinyTorch environment
-source scripts/activate-tinytorch
+When your working set exceeds cache size, the CPU spends most of its time loading data from main memory rather than computing.
 
-# Check which BLAS backend NumPy uses
-python -c "import numpy as np; np.show_config()"
+**Fix**: Use tiling/blocking to keep working sets in cache. Break large matrices into smaller tiles that fit in L2 or L3 cache.
 
-# Look for: openblas, mkl, or accelerate (Apple Silicon)
-# MKL is fastest on Intel CPUs (200-500 GFLOP/s)
-# OpenBLAS is good cross-platform (100-300 GFLOP/s)
-```
+### False Dependencies
 
-Verify prerequisite modules work:
-```bash
-tito test tensor
-tito test profiling
-```
+**Symptom**: Parallel code runs slower than sequential code
 
-### Development Workflow
+Creating temporary arrays in a loop can prevent parallelization because each iteration depends on the previous one's memory allocation.
 
-1. **Open the development file**: `modules/18_acceleration/acceleration.py`
-
-2. **Implement vectorized matrix multiplication**:
-   - Validate input shapes for compatibility
-   - Delegate to `np.matmul` (calls optimized BLAS GEMM)
-   - Return result wrapped in Tensor
-   - Test correctness and measure speedup vs. naive loops
-
-3. **Build fused GELU activation**:
-   - Implement complete GELU formula in single expression
-   - Avoid creating intermediate Tensor objects
-   - Test numerical correctness against reference implementation
-   - Measure memory bandwidth reduction
-
-4. **Create tiled matrix multiplication**:
-   - Understand cache blocking concept (educational)
-   - Use NumPy's matmul which implements tiling internally
-   - Analyze cache hit rates and memory access patterns
-   - Compare performance across different matrix sizes
-
-5. **Perform roofline analysis**:
-   - Measure FLOPs and memory bandwidth for each operation
-   - Calculate arithmetic intensity
-   - Plot operations on roofline model
-   - Identify optimization priorities
-
-6. **Export and verify**:
-   ```bash
-   tito module complete 18
-   tito test acceleration
-   ```
-
-## Testing
-
-### Comprehensive Test Suite
-
-Run the full test suite to verify acceleration functionality:
-
-```bash
-# TinyTorch CLI (recommended)
-tito test acceleration
-
-# Direct pytest execution
-python -m pytest tests/ -k acceleration -v
-
-# Run development file directly (includes inline tests)
-python modules/18_acceleration/acceleration.py
-```
-
-### Test Coverage Areas
-
-- **Vectorized Operations Correctness**: Matrix multiplication produces numerically correct results, handles batching and broadcasting, validates incompatible shapes
-- **Kernel Fusion Correctness**: Fused GELU matches reference implementation, handles extreme values without NaN/Inf, preserves data types and shapes
-- **Performance Validation**: Vectorized matmul achieves 10-150x speedup over naive loops, kernel fusion provides 2-5x speedup and 60-80% memory reduction, performance scales appropriately with tensor size
-- **Integration Testing**: Acceleration techniques work together in realistic transformer blocks, profiler integration measures speedups correctly, memory efficiency validated with tracemalloc
-- **Roofline Analysis**: Arithmetic intensity calculated correctly for different operations, performance predictions match measurements within 20%, memory-bound vs. compute-bound classification accurate
-
-### Inline Testing & Performance Analysis
-
-The module includes comprehensive validation and measurement:
+**Fix**: Preallocate output arrays and reuse them:
 
 ```python
-# Run all inline tests
-python modules/18_acceleration/acceleration.py
+# Bad: creates new array each iteration
+for i in range(1000):
+    result = x + y
 
-# Expected output:
- Unit Test: Vectorized Matrix Multiplication...
- vectorized_matmul works correctly!
-
- Unit Test: Fused GELU...
- fused_gelu works correctly!
-
- Unit Test: Kernel Fusion Performance Impact...
- Kernel Fusion Performance Analysis:
-   Tensor size: 2000×2000 = 4,000,000 elements
-   Unfused time: 45.23 ms
-   Fused time:   18.12 ms
-   Speedup: 2.50× faster
-   Per-element: 11.3 ns → 4.5 ns
-   Memory efficiency: 7→2 memory ops
-   Effective bandwidth: 15.2→38.5 GB/s
- Excellent! Kernel fusion providing significant speedup
-
- Analyzing vectorization scaling behavior...
-┌─────────┬─────────────┬─────────────┬─────────────┬─────────────┐
-│  Size   │ Time (ms)   │ GFLOPS      │ Bandwidth   │ Efficiency  │
-├─────────┼─────────────┼─────────────┼─────────────┼─────────────┤
-│     64  │      0.05   │      33.6   │      15.8   │      16.8   │
-│    128  │      0.18   │     114.2   │      26.7   │      57.1   │
-│    256  │      1.12   │     188.5   │      22.1   │      94.3   │
-│    512  │      6.45   │     328.7   │      19.3   │     164.4   │
-│   1024  │     42.18   │     405.1   │      16.1   │     202.6   │
-│   2048  │    281.34   │     485.2   │      15.3   │     242.6   │
-└─────────┴─────────────┴─────────────┴─────────────┴─────────────┘
-
- RUNNING MODULE INTEGRATION TEST
-Running unit tests...
- All tests passed!
-
- ALL TESTS PASSED! Module ready for export.
+# Good: reuses same output array
+result = np.zeros_like(x)
+for i in range(1000):
+    np.add(x, y, out=result)
 ```
 
-### Manual Testing Examples
+## Production Context
 
+### Your Implementation vs. PyTorch
+
+Your acceleration techniques demonstrate the same principles PyTorch uses internally. The difference is scale: PyTorch supports GPUs, automatic kernel fusion through compilers, and thousands of optimized operations.
+
+| Feature | Your Implementation | PyTorch |
+|---------|---------------------|---------|
+| **Vectorization** | NumPy BLAS | CUDA/cuBLAS for GPU |
+| **Kernel Fusion** | Manual fusion | Automatic via TorchScript/JIT |
+| **Backend** | CPU only | CPU, CUDA, Metal, ROCm |
+| **Multi-threading** | Automatic (OpenBLAS) | Configurable thread pools |
+| **Operations** | ~5 accelerated ops | 2000+ optimized ops |
+
+### Code Comparison
+
+The following comparison shows how acceleration appears in TinyTorch versus PyTorch. The API patterns are similar, but PyTorch adds GPU support and automatic optimization.
+
+`````{tab-set}
+````{tab-item} Your Tiny🔥Torch
 ```python
-from modules.18_acceleration.acceleration import *
+from tinytorch.perf.acceleration import vectorized_matmul, fused_gelu
 
-# Test vectorized matrix multiplication
-A = Tensor(np.random.randn(512, 512).astype(np.float32))
-B = Tensor(np.random.randn(512, 512).astype(np.float32))
+# CPU-based acceleration
+x = Tensor(np.random.randn(128, 512))
+w = Tensor(np.random.randn(512, 256))
 
-# Measure performance
-import time
-start = time.time()
-C = vectorized_matmul(A, B)
-elapsed = time.time() - start
+# Vectorized matrix multiplication
+h = vectorized_matmul(x, w)
 
-# Calculate metrics
-flops = 2 * 512**3  # 268 million FLOPs
-gflops = flops / (elapsed * 1e9)
-print(f"Performance: {gflops:.1f} GFLOP/s")
-print(f"Time: {elapsed*1000:.2f} ms")
+# Fused activation
+output = fused_gelu(h)
+```
+````
 
-# Test kernel fusion
-x = Tensor(np.random.randn(1000, 1000).astype(np.float32))
+````{tab-item} ⚡ PyTorch
+```python
+import torch
 
-# Compare fused vs unfused
-start = time.time()
-y_fused = fused_gelu(x)
-fused_time = time.time() - start
+# GPU acceleration with same concepts
+x = torch.randn(128, 512, device='cuda')
+w = torch.randn(512, 256, device='cuda')
 
-start = time.time()
-y_unfused = unfused_gelu(x)
-unfused_time = time.time() - start
+# Vectorized (cuBLAS on GPU)
+h = x @ w
 
-print(f"Speedup: {unfused_time/fused_time:.2f}x")
-print(f"Numerically equivalent: {np.allclose(y_fused.data, y_unfused.data)}")
+# Fused via JIT compilation
+@torch.jit.script
+def fused_gelu(x):
+    return 0.5 * x * (1 + torch.tanh(0.797885 * (x + 0.044715 * x**3)))
 
-# Measure with profiler
-from tinytorch.perf.profiling import Profiler
+output = fused_gelu(h)
+```
+````
+`````
 
-profiler = Profiler()
+Let's walk through the key differences:
 
-class SimpleModel:
-    def __init__(self):
-        self.weight = Tensor(np.random.randn(256, 256).astype(np.float32))
+- **Line 1 (Import)**: TinyTorch provides explicit acceleration functions; PyTorch integrates acceleration into the core tensor operations.
+- **Line 4-5 (Device)**: TinyTorch runs on CPU via NumPy; PyTorch supports `device='cuda'` for GPU acceleration.
+- **Line 8 (Matrix multiply)**: Both use optimized BLAS, but PyTorch uses cuBLAS on GPU for 10-100x additional speedup.
+- **Line 11-13 (Fusion)**: TinyTorch requires manual fusion; PyTorch's JIT compiler can automatically fuse operations.
+- **Performance**: For this example, TinyTorch might take 5ms on CPU; PyTorch takes 0.05ms on GPU - a 100x speedup.
 
-    def forward(self, x):
-        return fused_gelu(vectorized_matmul(x, self.weight))
+```{admonition} What's Identical
+:class: tip
 
-model = SimpleModel()
-input_tensor = Tensor(np.random.randn(32, 256).astype(np.float32))
-
-latency = profiler.measure_latency(model, input_tensor, warmup=5, iterations=20)
-flops = profiler.count_flops(model, (32, 256))
-
-print(f"Latency: {latency:.2f} ms")
-print(f"FLOPs: {flops:,}")
-print(f"Throughput: {flops / (latency/1000) / 1e9:.2f} GFLOP/s")
+The acceleration principles: vectorization reduces instruction count, fusion reduces memory traffic, and hardware awareness guides optimization choices. These concepts apply everywhere.
 ```
 
-## Systems Thinking Questions
+### Why Acceleration Matters at Scale
 
-### Real-World Applications
+Real-world systems demonstrate the impact of acceleration:
 
-- **Training Acceleration**: How do vectorized operations reduce training time for transformers? What's the speedup for attention computation (mostly matrix multiplies) vs. layer normalization (element-wise operations)?
+- **GPT-3 training**: 175 billion parameters × 300 billion tokens = **10²³ FLOPs**. Without GPU acceleration, this would take centuries. With optimized TPUs, it takes weeks.
+- **Real-time inference**: Serving 1000 requests/second requires **sub-millisecond latency** per request. Every 2x speedup doubles your throughput.
+- **Cost efficiency**: Cloud GPU time costs $2-10/hour. A 2x speedup saves **$1000-5000 per week** for a production model.
 
-- **Inference Optimization**: Why is kernel fusion more important for inference than training? How does batch size affect the benefit of vectorization vs. fusion?
+Small percentage improvements at this scale translate to millions in savings and fundamentally new capabilities.
 
-- **Hardware Selection**: Given a model with 70% matrix multiplies and 30% element-wise operations, should you optimize for compute or memory bandwidth? How does this affect CPU vs. GPU selection?
+## Check Your Understanding
 
-- **Cloud Cost Reduction**: If vectorization provides 100x speedup on matrix operations that take 80% of training time, what's the overall training time reduction and cost savings?
+Test your understanding of acceleration techniques with these quantitative questions.
 
-### Roofline Analysis Foundations
+**Q1: Arithmetic Intensity**
 
-- **Arithmetic Intensity Calculation**: For convolution with kernel size K×K, input channels C_in, output channels C_out, and spatial dimensions H×W, what's the arithmetic intensity? Is it compute-bound or memory-bound?
+Matrix multiplication of two 1024×1024 float32 matrices performs 2,147,483,648 FLOPs. It reads 8 MB (matrix A) + 8 MB (matrix B) = 16 MB and writes 8 MB (matrix C) = 24 MB total. What is the arithmetic intensity?
 
-- **Memory Hierarchy Impact**: Why does cache blocking improve performance by 2-5x even though it performs the same FLOPs? What's the latency difference between L1 cache hits (4 cycles) vs. RAM accesses (300 cycles)?
+```{admonition} Answer
+:class: dropdown
 
-- **BLAS Library Performance**: Why does NumPy's matmul achieve 200-500 GFLOP/s while naive Python loops achieve 1 GFLOP/s? What optimizations do BLAS libraries implement that interpreted Python can't?
+Arithmetic Intensity = 2,147,483,648 FLOPs / 24,000,000 bytes = **~89 FLOPs/byte**
 
-- **Batch Size Effects**: How does batch size affect arithmetic intensity for matrix multiplication? Why do larger batches achieve higher GFLOP/s on the same hardware?
+This high arithmetic intensity (compared to ~0.08 for element-wise ops) is why matrix multiplication is ideal for GPUs and why it dominates neural network training time.
+```
 
-### Optimization Strategy Characteristics
+**Q2: Memory Bandwidth Savings**
 
-- **Memory-Bound Operations**: Why does adding more CPU cores NOT improve element-wise addition performance? What's the fundamental bottleneck, and how do you fix it?
+Your fused GELU processes a tensor with 1,000,000 elements (4 MB as float32). The unfused version creates 7 intermediate arrays. How much memory bandwidth does fusion save?
 
-- **Kernel Fusion Trade-offs**: Fused GELU reduces memory operations from 16 to 2 per element. Why doesn't this give 8x speedup? What other factors limit acceleration?
+```{admonition} Answer
+:class: dropdown
 
-- **Production Optimization Priority**: Given profiling data showing 40% time in attention softmax (memory-bound), 30% in matmuls (compute-bound), and 30% in data loading (I/O-bound), which should you optimize first? Why?
+**Unfused**: 7 reads + 7 writes + 1 input read + 1 output write = 16 memory operations × 4 MB = **64 MB**
 
-- **Cross-Platform Performance**: Why do vectorized operations using BLAS achieve different speedups on Intel CPUs (MKL: 500 GFLOP/s) vs. AMD CPUs (OpenBLAS: 200 GFLOP/s) vs. Apple Silicon (Accelerate: 300 GFLOP/s)? What's hardware-dependent vs. algorithmic?
+**Fused**: 1 input read + 1 output write = 2 memory operations × 4 MB = **8 MB**
 
-## Ready to Build?
+**Savings**: 64 - 8 = **56 MB saved (87.5% reduction)**
 
-You're about to learn the hardware-aware optimization techniques that separate research prototypes from production ML systems. Understanding how to extract maximum performance from CPUs—through vectorization, cache optimization, and memory bandwidth reduction—is foundational knowledge for any ML engineer.
+For typical CPUs with ~50 GB/s bandwidth, this saves ~1 millisecond per GELU call. In a transformer with 96 GELU activations per forward pass, that's 96ms saved - enough to improve throughput by 10-20%.
+```
 
-These aren't just academic exercises. Every time you use PyTorch or TensorFlow, you're benefiting from these exact techniques implemented in their backend libraries. By building them yourself, you'll understand:
+**Q3: Cache Tiling**
 
-- Why transformers (mostly matmuls) run efficiently on GPUs while RNNs (sequential operations) struggle
-- How to predict whether adding more hardware will help before spending cloud budget
-- When to optimize code vs. when to redesign algorithms for better arithmetic intensity
-- How to measure and validate performance improvements systematically
+A CPU has 256 KB L2 cache. You're multiplying two 2048×2048 float32 matrices (16 MB each). What tile size keeps the working set in L2 cache?
 
-The roofline model and arithmetic intensity analysis you'll master here apply directly to GPUs, TPUs, and custom AI accelerators. Hardware changes, but the fundamental memory-vs-compute trade-offs remain constant. This module gives you the mental models and measurement tools to optimize on any platform.
+```{admonition} Answer
+:class: dropdown
 
-Choose your preferred way to engage with this module:
+For tiled multiplication, we need 3 tiles in cache simultaneously:
+- Tile from matrix A: tile_size × tile_size × 4 bytes
+- Tile from matrix B: tile_size × tile_size × 4 bytes
+- Output tile: tile_size × tile_size × 4 bytes
+
+Total: 3 × tile_size² × 4 bytes ≤ 256 KB
+
+Solving: tile_size² ≤ 256,000 / 12 = 21,333
+
+**tile_size ≈ 146**
+
+In practice, use powers of 2: **128 works well** (3 × 128² × 4 = 196 KB, leaving room for other data).
+```
+
+**Q4: BLAS Performance**
+
+Your vectorized matmul completes a 1024×1024 multiplication in 10ms. The operation requires 2.15 billion FLOPs. What is your achieved performance in GFLOPS?
+
+```{admonition} Answer
+:class: dropdown
+
+GFLOPS = 2,150,000,000 FLOPs / (0.01 seconds × 1,000,000,000) = **215 GFLOPS**
+
+For reference:
+- Modern CPU peak: 500-1000 GFLOPS (AVX-512)
+- Your efficiency: 215/500 = **43% of peak** (typical for real code)
+- GPU equivalent: ~50 TFLOPS (230x faster than single CPU core)
+```
+
+**Q5: Speedup from Fusion**
+
+Unfused GELU takes 8ms on a 2000×2000 tensor. Fused GELU takes 2.5ms. What percentage of the unfused time was memory overhead?
+
+```{admonition} Answer
+:class: dropdown
+
+Speedup = 8ms / 2.5ms = **3.2x faster**
+
+Assuming both versions do the same computation, the difference is memory bandwidth:
+- Memory overhead = (8 - 2.5) / 8 = **68.75%**
+
+Nearly **70% of the unfused version's time** was spent waiting for memory! This is typical for element-wise operations with low arithmetic intensity.
+```
+
+## Further Reading
+
+For students who want to understand the academic foundations and implementation details of neural network acceleration:
+
+### Seminal Papers
+
+- **Roofline Model** - Williams et al. (2009). The foundational framework for understanding performance bottlenecks based on arithmetic intensity. Essential for diagnosing whether your code is compute-bound or memory-bound. [IEEE](https://doi.org/10.1145/1498765.1498785)
+
+- **BLAS: The Basic Linear Algebra Subprograms** - Lawson et al. (1979). The specification that defines standard matrix operations. Every ML framework ultimately calls BLAS for performance-critical operations. [ACM TOMS](https://doi.org/10.1145/355841.355847)
+
+- **Optimizing Matrix Multiplication** - Goto & Geijn (2008). Detailed explanation of cache blocking, register tiling, and microkernel design for high-performance GEMM. This is how BLAS libraries achieve near-peak performance. [ACM TOMS](https://doi.org/10.1145/1356052.1356053)
+
+- **TVM: An Automated End-to-End Optimizing Compiler** - Chen et al. (2018). Demonstrates automatic optimization including kernel fusion and memory planning for deep learning. Shows how compilers can automatically apply the techniques you learned manually. [OSDI](https://www.usenix.org/conference/osdi18/presentation/chen)
+
+### Additional Resources
+
+- **Tutorial**: "What Every Programmer Should Know About Memory" by Ulrich Drepper - Deep dive into cache hierarchies and their performance implications
+- **Documentation**: [Intel MKL Developer Reference](https://www.intel.com/content/www/us/en/develop/documentation/onemkl-developer-reference-c/top.html) - See how production BLAS libraries implement vectorization and threading
+
+## What's Next
+
+```{admonition} Coming Up: Module 19 - Benchmarking
+:class: seealso
+
+Learn to measure and compare performance systematically. You'll build benchmarking tools that isolate hardware effects, statistical analysis for reliable measurements, and comparison frameworks for evaluating optimization techniques.
+```
+
+**Preview - How Acceleration Gets Used in Future Modules:**
+
+| Module | What It Does | Your Acceleration In Action |
+|--------|--------------|---------------------------|
+| **19: Benchmarking** | Systematic performance measurement | `benchmark(vectorized_matmul, sizes=[128, 256, 512])` |
+| **20: Capstone** | Complete optimized model | Acceleration throughout model pipeline |
+
+## Get Started
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card}  Launch Binder
-:link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/18_acceleration/acceleration_dev.ipynb
+```{grid-item-card} 🚀 Launch Binder
+:link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/18_acceleration/18_acceleration.py
 :class-header: bg-light
 
-Run this module interactively in your browser. No installation required!
+Run interactively in browser - no setup required
 ```
 
-```{grid-item-card}  Open in Colab
-:link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/18_acceleration/acceleration_dev.ipynb
+```{grid-item-card} ☁️ Open in Colab
+:link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/18_acceleration/18_acceleration.py
 :class-header: bg-light
 
-Use Google Colab for GPU access and cloud compute power.
+Use Google Colab for cloud compute
 ```
 
-```{grid-item-card}  View Source
-:link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/18_acceleration/acceleration.py
+```{grid-item-card} 📄 View Source
+:link: https://github.com/mlsysbook/TinyTorch/blob/main/src/18_acceleration/18_acceleration.py
 :class-header: bg-light
 
-Browse the Python source code and understand the implementation.
+Browse the implementation code
 ```
 
 ````
 
-```{admonition}  Save Your Progress
-:class: tip
-**Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
+```{admonition} Performance Note
+:class: warning
+
+Acceleration techniques depend on hardware. Results will vary between CPUs. Use Module 14's profiler to measure your specific hardware's characteristics.
 ```
-
----
-
-<div class="prev-next-area">
-<a class="left-prev" href="17_memoization_ABOUT.html" title="previous page">← Module 17: Memoization</a>
-<a class="right-next" href="19_benchmarking_ABOUT.html" title="next page">Module 19: Benchmarking →</a>
-</div>

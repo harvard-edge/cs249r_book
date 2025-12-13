@@ -1,31 +1,31 @@
 # Activations
 
-**FOUNDATION TIER** | Difficulty: ● (1/4) | Time: 3-4 hours | Prerequisites: Module 01
+**FOUNDATION TIER** | Difficulty: ● (1/4) | Time: 3-5 hours | Prerequisites: 01 (Tensor)
 
-This module builds directly on Module 01 (Tensor). You should be comfortable with:
-- Creating and manipulating Tensors
-- Broadcasting semantics
-- Element-wise operations
+**Prerequisites: Module 01 (Tensor)** means you need:
+- Completed Tensor implementation with element-wise operations
+- Understanding of tensor shapes and broadcasting
+- Familiarity with NumPy mathematical functions
 
-If you can create a Tensor and perform arithmetic on it, you're ready.
+If you can create a Tensor and perform element-wise arithmetic (`x + y`, `x * 2`), you're ready.
 
 ## Overview
 
-Every neural network needs activation functions to learn complex patterns. Without them, stacking layers would be mathematically equivalent to having a single layer. No matter how deep your network, linear transformations composed together are still just linear transformations. Activation functions introduce the non-linearity that lets networks curve, bend, and approximate any function.
+Activation functions are the nonlinear transformations that give neural networks their power. Without them, stacking multiple layers would be pointless: no matter how many linear transformations you chain together, the result is still just one linear transformation. A 100-layer network without activations is mathematically identical to a single-layer network.
 
-In this module, you'll build five essential activation functions: Sigmoid, ReLU, Tanh, GELU, and Softmax. Each serves a different purpose in neural networks, from gating probabilities to creating sparsity to producing probability distributions. By implementing them yourself, you'll understand exactly what happens when you call `torch.relu()` or `torch.softmax()` in production code.
+Activations introduce nonlinearity. ReLU zeros out negative values. Sigmoid squashes any input to a probability between 0 and 1. Softmax converts raw scores into a valid probability distribution. These simple mathematical functions are what enable neural networks to learn complex patterns like recognizing faces, translating languages, and playing games at superhuman levels.
 
-These activations operate on the Tensor class you built in Module 01. They take a Tensor as input and return a new Tensor with the transformed values. This pattern of Tensor-in, Tensor-out is fundamental to how neural networks work.
+In this module, you'll implement five essential activation functions from scratch. By the end, you'll understand why ReLU replaced sigmoid in hidden layers, how numerical stability prevents catastrophic failures in softmax, and when to use each activation in production systems.
 
 ## Learning Objectives
 
 ```{admonition} By completing this module, you will:
 :class: tip
 
-- **Implement** five core activation functions (Sigmoid, ReLU, Tanh, GELU, Softmax) with proper numerical stability
-- **Understand** why non-linearity is essential for neural network expressiveness
-- **Analyze** computational costs and numerical stability considerations for each activation
-- **Connect** your implementations to production usage patterns in PyTorch and modern architectures
+- **Implement** five core activation functions (ReLU, Sigmoid, Tanh, GELU, Softmax) with proper numerical stability
+- **Understand** why nonlinearity is essential for neural network expressiveness and how activations enable learning
+- **Master** computational trade-offs between activation choices and their impact on training speed
+- **Connect** your implementations to production patterns in PyTorch and real-world architecture decisions
 ```
 
 ## What You'll Build
@@ -33,20 +33,29 @@ These activations operate on the Tensor class you built in Module 01. They take 
 ```{mermaid}
 flowchart LR
     subgraph "Your Activation Functions"
-        A["Sigmoid<br/>(0, 1) range"]
-        B["ReLU<br/>zeros negatives"]
-        C["Tanh<br/>(-1, 1) range"]
-        D["GELU<br/>smooth ReLU"]
-        E["Softmax<br/>probabilities"]
+        A["ReLU<br/>max(0, x)"]
+        B["Sigmoid<br/>1/(1+e^-x)"]
+        C["Tanh<br/>(e^x - e^-x)/(e^x + e^-x)"]
+        D["GELU<br/>x·Φ(x)"]
+        E["Softmax<br/>e^xi / Σe^xj"]
     end
 
-    T["Input Tensor"] --> A & B & C & D & E
-    A & B & C & D & E --> O["Output Tensor"]
+    F[Input Tensor] --> A
+    F --> B
+    F --> C
+    F --> D
+    F --> E
+
+    A --> G[Output Tensor]
+    B --> G
+    C --> G
+    D --> G
+    E --> G
 
     style A fill:#e1f5ff
     style B fill:#fff3cd
-    style C fill:#d4edda
-    style D fill:#f8d7da
+    style C fill:#f8d7da
+    style D fill:#d4edda
     style E fill:#e2d5f1
 ```
 
@@ -54,168 +63,291 @@ flowchart LR
 
 | Part | What You'll Implement | Key Concept |
 |------|----------------------|-------------|
-| 1 | `Sigmoid.forward()` | Squashing to (0, 1) for probabilities |
-| 2 | `ReLU.forward()` | Zeroing negatives for sparsity |
-| 3 | `Tanh.forward()` | Zero-centered outputs in (-1, 1) |
-| 4 | `GELU.forward()` | Smooth approximation for transformers |
-| 5 | `Softmax.forward()` | Converting to probability distribution |
+| 1 | `ReLU.forward()` | Sparsity through zeroing negatives |
+| 2 | `Sigmoid.forward()` | Mapping to (0,1) for probabilities |
+| 3 | `Tanh.forward()` | Zero-centered activation for better gradients |
+| 4 | `GELU.forward()` | Smooth nonlinearity for transformers |
+| 5 | `Softmax.forward()` | Probability distributions with numerical stability |
 
 **The pattern you'll enable:**
+
 ```python
-# Applying non-linearity to tensor data
+# Transforming tensors through nonlinear functions
 relu = ReLU()
-activated = relu(x)  # x is a Tensor, activated is a new Tensor
+activated = relu(x)  # Zeros negatives, keeps positives
+
+softmax = Softmax()
+probabilities = softmax(logits)  # Converts to probability distribution (sums to 1)
 ```
 
 ### What You're NOT Building (Yet)
 
 To keep this module focused, you will **not** implement:
 
-- Backward pass (that's Module 05: Autograd)
-- Learnable parameters (activations are parameter-free)
-- GPU-optimized kernels (PyTorch uses CUDA implementations)
-- Variants like LeakyReLU, ELU, Swish (we focus on the core five)
+- Gradient computation (that's Module 05: Autograd - `backward()` methods are stubs for now)
+- Learnable parameters (activations are fixed mathematical functions)
+- Advanced variants (LeakyReLU, ELU, Swish - PyTorch has dozens, you'll build the core five)
+- GPU acceleration (your NumPy implementation runs on CPU)
 
-**You are building the forward transformations.** Gradient computation comes in Module 05.
+**You are building the nonlinear transformations.** Automatic differentiation comes in Module 05.
 
 ## API Reference
 
-This section provides a quick reference for the activation classes you'll build. Each activation follows the same interface: instantiate, then call with a Tensor.
+This section provides a quick reference for the activation classes you'll build. Each activation is a callable object with a `forward()` method that transforms an input tensor element-wise.
 
-### Common Interface
+### Activation Pattern
 
-All activations implement:
+All activations follow this structure:
 
 ```python
-class Activation:
-    def forward(self, x: Tensor) -> Tensor: ...
-    def __call__(self, x: Tensor) -> Tensor: ...  # Delegates to forward()
-    def parameters(self) -> list: ...  # Returns [] (no learnable parameters)
+class ActivationName:
+    def forward(self, x: Tensor) -> Tensor:
+        # Apply mathematical transformation
+        pass
+
+    def __call__(self, x: Tensor) -> Tensor:
+        return self.forward(x)
+
+    def backward(self, grad: Tensor) -> Tensor:
+        # Stub for Module 05
+        pass
 ```
 
-### Activation Functions
+### Core Activations
 
-| Class | Formula | Output Range | Primary Use |
-|-------|---------|--------------|-------------|
-| `Sigmoid` | 1/(1 + e^(-x)) | (0, 1) | Binary classification, gates |
-| `ReLU` | max(0, x) | [0, +inf) | Hidden layers (default) |
-| `Tanh` | (e^x - e^(-x))/(e^x + e^(-x)) | (-1, 1) | Hidden layers, RNNs |
-| `GELU` | x * sigmoid(1.702x) | (-inf, +inf) | Transformers |
-| `Softmax` | e^(x_i) / sum(e^(x_j)) | (0, 1), sum=1 | Multi-class output |
+| Activation | Mathematical Form | Output Range | Primary Use Case |
+|------------|------------------|--------------|------------------|
+| `ReLU` | `max(0, x)` | `[0, ∞)` | Hidden layers (CNNs, MLPs) |
+| `Sigmoid` | `1/(1 + e^-x)` | `(0, 1)` | Binary classification output |
+| `Tanh` | `(e^x - e^-x)/(e^x + e^-x)` | `(-1, 1)` | RNNs, zero-centered needs |
+| `GELU` | `x · Φ(x)` | `(-∞, ∞)` | Transformers (GPT, BERT) |
+| `Softmax` | `e^xi / Σe^xj` | `(0, 1)`, sum=1 | Multi-class classification |
+
+### Method Signatures
+
+**ReLU**
+```python
+ReLU.forward(x: Tensor) -> Tensor
+```
+Sets negative values to zero, preserves positive values.
+
+**Sigmoid**
+```python
+Sigmoid.forward(x: Tensor) -> Tensor
+```
+Maps any real number to (0, 1) range using logistic function.
+
+**Tanh**
+```python
+Tanh.forward(x: Tensor) -> Tensor
+```
+Maps any real number to (-1, 1) range using hyperbolic tangent.
+
+**GELU**
+```python
+GELU.forward(x: Tensor) -> Tensor
+```
+Smooth approximation to ReLU using Gaussian error function.
+
+**Softmax**
+```python
+Softmax.forward(x: Tensor, dim: int = -1) -> Tensor
+```
+Converts vector to probability distribution along specified dimension.
 
 ## Core Concepts
 
-This section explains the fundamental ideas behind activation functions. Understanding these concepts will help you make informed choices when building neural networks.
+This section covers the fundamental ideas you need to understand activation functions deeply. These concepts explain why neural networks need nonlinearity, how each activation behaves differently, and what trade-offs you're making when you choose one over another.
 
 ### Why Non-linearity Matters
 
-Consider what happens when you stack linear transformations. If layer 1 computes `W1 @ x + b1` and layer 2 computes `W2 @ y + b2`, the combined result is `W2 @ (W1 @ x + b1) + b2 = (W2 @ W1) @ x + (W2 @ b1 + b2)`. This is still just a linear transformation! You could replace both layers with a single layer and get the same result.
+Consider what happens when you stack linear transformations. If you multiply a matrix by a vector, then multiply the result by another matrix, the composition is still just matrix multiplication. Mathematically:
 
-Activation functions break this equivalence. When you apply ReLU between layers, you're introducing non-linear behavior that can't be collapsed. Each layer can now learn something that the previous layers couldn't represent. This is why deep networks can approximate complex functions: they're not just stacking linear maps, they're building up increasingly sophisticated non-linear transformations.
-
-The mathematical proof is elegant: without non-linearity, an N-layer network has the same representational power as a 1-layer network. With non-linearity, representational power grows with depth.
-
-### Output Ranges and Use Cases
-
-Each activation maps inputs to a specific output range, and this determines where you use it.
-
-Sigmoid outputs values in (0, 1), making it perfect for probabilities. When you need to predict "spam or not spam," sigmoid gives you a probability like 0.87. But sigmoid saturates for large inputs (both positive and negative), which can slow down learning in hidden layers.
-
-ReLU outputs values in [0, +inf), zeroing out negatives. This creates sparsity: many neurons output exactly zero, which makes computation more efficient and can help prevent overfitting. ReLU is the default choice for hidden layers in most networks.
-
-Tanh outputs values in (-1, 1), similar to sigmoid but centered around zero. This zero-centering can help with the flow of information through networks, especially recurrent networks where the same weights are applied repeatedly.
-
-GELU is like a smooth version of ReLU. Instead of the sharp corner at zero, it curves gently. This smoothness helps with optimization in transformers, which is why GPT and BERT use GELU.
-
-Softmax converts any vector to a probability distribution where all values are positive and sum to 1. It's essential for multi-class classification: given 1000 ImageNet classes, softmax gives you probabilities for each.
-
-### Numerical Stability
-
-Naive implementations of activations can fail catastrophically with extreme inputs. Consider sigmoid with x = 1000: computing e^(-1000) underflows to 0.0, and computing e^(1000) overflows to infinity. Your implementation handles this by clipping inputs and using numerically stable formulas.
-
-Softmax is particularly tricky. Computing e^(1000) for one element while others are e^(1) would give infinity. The standard trick is to subtract the maximum value first: `softmax(x) = softmax(x - max(x))`. This keeps all exponentials in a safe range without changing the result.
-
-These stability tricks are essential for production code. A model that works on small test inputs but crashes on real data is useless.
-
-### Computational Cost
-
-Not all activations are equal in speed. Understanding these costs matters when you're processing billions of activations per training step.
-
-| Activation | Operations | Relative Cost |
-|------------|------------|---------------|
-| ReLU | 1 comparison per element | 1x (baseline) |
-| Sigmoid | 1 exp + 1 division per element | 3-4x |
-| Tanh | 2 exp + 1 division per element | 3-4x |
-| GELU | 1 exp + 2 multiplications per element | 4-5x |
-| Softmax | n exp + n-1 additions + n divisions | 5x+ |
-
-ReLU's simplicity is one reason it became the default. When you apply an activation billions of times per training step, a 4x speedup matters. GELU's extra cost is worth it in transformers because the improved optimization outweighs the computational overhead.
-
-## Common Errors
-
-### Numerical Overflow in Sigmoid
-
-**Symptom**: `RuntimeWarning: overflow encountered in exp`
-
-**Cause**: Computing `exp(-x)` for very large positive x, or `exp(x)` for very large negative x.
-
-**Fix**: Clip inputs to a safe range (approximately -500 to 500), or use the numerically stable formulation that handles positive and negative inputs separately.
-
-### Softmax Dimension Confusion
-
-**Symptom**: Probabilities don't sum to 1, or shape is wrong
-
-**Cause**: Applying softmax along the wrong axis in multi-dimensional tensors
-
-**Fix**: Always specify the `dim` parameter explicitly. For classification with shape `(batch, classes)`, use `dim=-1` to normalize across classes.
-
-```python
-# Wrong: softmax over entire tensor
-probs = softmax(logits)  # Sum might not be 1 per sample
-
-# Right: softmax over class dimension
-probs = softmax(logits, dim=-1)  # Each row sums to 1
+```
+f(x) = W₂(W₁x) = (W₂W₁)x = Wx
 ```
 
-### Dead ReLU Neurons
+A 100-layer network of pure matrix multiplications is identical to a single matrix multiplication. The depth buys you nothing.
 
-**Symptom**: Some neurons always output 0 during training
+Activation functions break this linearity. When you insert `f(x) = max(0, x)` between layers, the composition becomes nonlinear:
 
-**Cause**: Large negative input causes ReLU to output 0, gradient is also 0, so weights never update
+```
+f(x) = max(0, W₂ max(0, W₁x))
+```
 
-**Fix**: This is a known issue with ReLU. Monitor the percentage of dead neurons. If too many die, consider using LeakyReLU (not implemented in this module) or reducing learning rate.
+Now you can't simplify the layers away. Each layer can learn to detect increasingly complex patterns. Layer 1 might detect edges in an image. Layer 2 combines edges into shapes. Layer 3 combines shapes into objects. This hierarchical feature learning is only possible because activations introduce nonlinearity.
+
+Without activations, neural networks are just linear regression, no matter how many layers you stack. With activations, they become universal function approximators capable of learning any pattern from data.
+
+### ReLU and Its Variants
+
+ReLU (Rectified Linear Unit) is deceptively simple: it zeros out negative values and leaves positive values unchanged. Here's the complete implementation from your module:
+
+```python
+class ReLU:
+    def forward(self, x: Tensor) -> Tensor:
+        """Apply ReLU activation element-wise."""
+        result = np.maximum(0, x.data)
+        return Tensor(result)
+```
+
+This simplicity is ReLU's greatest strength. The operation is a single comparison per element: O(n) with a tiny constant factor. Modern CPUs can execute billions of comparisons per second. Compare this to sigmoid, which requires computing an exponential for every element.
+
+ReLU creates **sparsity**. When half your activations are exactly zero, computations become faster (multiplying by zero is free) and models generalize better (sparse representations are less prone to overfitting). In a 1000-neuron layer, ReLU typically activates 300-500 neurons, effectively creating a smaller, specialized network for each input.
+
+The discontinuity at zero is both a feature and a bug. During training (Module 05), you'll discover that ReLU's gradient is exactly 1 for positive inputs and exactly 0 for negative inputs. This prevents the vanishing gradient problem that plagued sigmoid-based networks. But it creates a new problem: **dying ReLU**. If a neuron's weights shift such that it always receives negative inputs, it will output zero forever, and the zero gradient means it can never recover.
+
+Despite this limitation, ReLU remains the default choice for hidden layers in CNNs and feedforward networks. Its speed and effectiveness at preventing vanishing gradients make it hard to beat.
+
+### Sigmoid and Tanh
+
+Sigmoid maps any real number to the range (0, 1), making it perfect for representing probabilities:
+
+```python
+class Sigmoid:
+    def forward(self, x: Tensor) -> Tensor:
+        """Apply sigmoid activation element-wise."""
+        z = np.clip(x.data, -500, 500)  # Prevent overflow
+        result_data = np.zeros_like(z)
+
+        # Positive values: 1 / (1 + exp(-x))
+        pos_mask = z >= 0
+        result_data[pos_mask] = 1.0 / (1.0 + np.exp(-z[pos_mask]))
+
+        # Negative values: exp(x) / (1 + exp(x))
+        neg_mask = z < 0
+        exp_z = np.exp(z[neg_mask])
+        result_data[neg_mask] = exp_z / (1.0 + exp_z)
+
+        return Tensor(result_data)
+```
+
+Notice the numerical stability measures. Computing `1 / (1 + exp(-x))` directly fails for `x = 1000` because `exp(-1000)` underflows to zero, giving `1 / 1 = 1`. But the mathematically equivalent `exp(x) / (1 + exp(x))` fails for `x = 1000` because `exp(1000)` overflows to infinity. The solution is to compute different formulas depending on the sign of x, and clip extreme values to prevent overflow entirely.
+
+Sigmoid's smooth S-curve makes it interpretable as a probability, which is why it's still used for binary classification outputs. But for hidden layers, it has fatal flaws. When |x| is large, the output saturates near 0 or 1, and the gradient becomes nearly zero. In deep networks, these tiny gradients multiply together as they backpropagate, vanishing exponentially. This is why sigmoid was largely replaced by ReLU for hidden layers around 2012.
+
+Tanh is sigmoid's zero-centered cousin, mapping inputs to (-1, 1):
+
+```python
+class Tanh:
+    def forward(self, x: Tensor) -> Tensor:
+        """Apply tanh activation element-wise."""
+        result = np.tanh(x.data)
+        return Tensor(result)
+```
+
+The zero-centering matters because it means the output has roughly equal numbers of positive and negative values. This can help with gradient flow in recurrent networks, where the same weights are applied repeatedly. Tanh still suffers from vanishing gradients at extreme values, but the zero-centering makes it preferable to sigmoid when you need bounded outputs.
+
+### Softmax and Numerical Stability
+
+Softmax converts any vector into a valid probability distribution. All outputs are positive, and they sum to exactly 1. This makes it essential for multi-class classification:
+
+```python
+class Softmax:
+    def forward(self, x: Tensor, dim: int = -1) -> Tensor:
+        """Apply softmax activation along specified dimension."""
+        # Numerical stability: subtract max to prevent overflow
+        x_max_data = np.max(x.data, axis=dim, keepdims=True)
+        x_max = Tensor(x_max_data, requires_grad=False)
+        x_shifted = x - x_max
+
+        # Compute exponentials
+        exp_values = Tensor(np.exp(x_shifted.data), requires_grad=x_shifted.requires_grad)
+
+        # Sum along dimension
+        exp_sum_data = np.sum(exp_values.data, axis=dim, keepdims=True)
+        exp_sum = Tensor(exp_sum_data, requires_grad=exp_values.requires_grad)
+
+        # Normalize to get probabilities
+        result = exp_values / exp_sum
+        return result
+```
+
+The max subtraction is critical. Without it, `softmax([1000, 1001, 1002])` would compute `exp(1000)`, which overflows to infinity, producing NaN results. Subtracting the max first gives `softmax([0, 1, 2])`, which computes safely. Mathematically, this is identical because the max factor cancels out:
+
+```
+exp(x - max) / Σ exp(x - max) = exp(x) / Σ exp(x)
+```
+
+Softmax amplifies differences. If the input is `[1, 2, 3]`, the output is approximately `[0.09, 0.24, 0.67]`. The largest input gets 67% of the probability mass, even though it's only 3× larger than the smallest input. This is because exponentials grow superlinearly. In classification, this is desirable: you want the network to be confident when it's confident.
+
+But softmax's coupling is a gotcha. When you change one input, all outputs change because they're normalized by the same sum. This means the gradient involves a Jacobian matrix, not just element-wise derivatives. You'll see this complexity when you implement `backward()` in Module 05.
+
+### Choosing Activations
+
+Here's the decision tree production ML engineers use:
+
+**For hidden layers:**
+- Default choice: **ReLU** (fast, prevents vanishing gradients, creates sparsity)
+- Modern transformers: **GELU** (smooth, better gradient flow, state-of-the-art results)
+- Recurrent networks: **Tanh** (zero-centered helps with recurrence)
+- Experimental: LeakyReLU, ELU, Swish (variants that fix dying ReLU problem)
+
+**For output layers:**
+- Binary classification: **Sigmoid** (outputs valid probability in [0, 1])
+- Multi-class classification: **Softmax** (outputs probability distribution summing to 1)
+- Regression: **None** (linear output, no activation)
+
+**Computational cost matters:**
+- ReLU: 1× (baseline, just comparisons)
+- GELU: 4-5× (exponential in approximation)
+- Sigmoid/Tanh: 3-4× (exponentials)
+- Softmax: 5×+ (exponentials + normalization)
+
+For a 1 billion parameter model, using GELU instead of ReLU in every hidden layer might increase training time by 20-30%. But if GELU gives you 2% better accuracy, that trade-off is worth it for production systems where model quality matters more than training speed.
+
+### Computational Complexity
+
+All activation functions are element-wise operations, meaning they apply independently to each element of the tensor. This gives O(n) time complexity where n is the total number of elements. But the constant factors differ dramatically:
+
+| Operation | Complexity | Cost Relative to ReLU |
+|-----------|------------|----------------------|
+| ReLU (`max(0, x)`) | O(n) comparisons | 1× (baseline) |
+| Sigmoid/Tanh | O(n) exponentials | 3-4× |
+| GELU | O(n) exponentials + multiplies | 4-5× |
+| Softmax | O(n) exponentials + O(n) sum + O(n) divisions | 5×+ |
+
+Exponentials are expensive. A modern CPU can execute 1 billion comparisons per second but only 250 million exponentials per second. This is why ReLU is so popular: at scale, a 4× speedup in activation computation can mean the difference between training in 1 day versus 4 days.
+
+Memory complexity is O(n) for all activations because they create an output tensor the same size as the input. Softmax requires small temporary buffers for the exponentials and sum, but this overhead is negligible compared to the tensor sizes in production networks.
 
 ## Production Context
 
-Your TinyTorch activations and PyTorch's `torch.nn.functional` activations share the same mathematical definitions. The differences are in implementation: PyTorch uses C++/CUDA kernels optimized for specific hardware, while yours use NumPy operations.
-
 ### Your Implementation vs. PyTorch
+
+Your TinyTorch activations and PyTorch's `torch.nn.functional` activations implement the same mathematical functions with the same numerical stability measures. The differences are in optimization and GPU support:
 
 | Feature | Your Implementation | PyTorch |
 |---------|---------------------|---------|
-| **Backend** | NumPy (Python) | C++/CUDA kernels |
-| **Speed** | 1x (baseline) | 5-20x faster |
-| **GPU** | CPU only | CUDA, Metal, ROCm |
-| **Fused ops** | Separate operations | Fused kernels (e.g., bias + ReLU) |
-| **Autograd** | forward() only | Full backward support |
+| **Backend** | NumPy (Python/C) | C++/CUDA kernels |
+| **Speed** | 1× (CPU baseline) | 10-100× faster (GPU) |
+| **Numerical Stability** | ✓ Max subtraction (Softmax), clipping (Sigmoid) | ✓ Same techniques |
+| **Autograd** | Stubs (Module 05) | Full gradient computation |
+| **Variants** | 5 core activations | 30+ variants (LeakyReLU, PReLU, Mish, etc.) |
 
 ### Code Comparison
 
-The following comparison shows equivalent operations in TinyTorch and PyTorch. Notice that the API and behavior are identical; only the import changes.
+The following comparison shows equivalent activation usage in TinyTorch and PyTorch. Notice how the APIs are nearly identical, differing only in import paths and minor syntax.
 
 `````{tab-set}
-````{tab-item} 🔥 Your TinyTorch
+````{tab-item} Your Tiny🔥Torch
 ```python
-from tinytorch import Tensor
-from tinytorch.core.activations import ReLU, Softmax
+from tinytorch.core.activations import ReLU, Sigmoid, Softmax
+from tinytorch.core.tensor import Tensor
 
-x = Tensor([[-1, 0, 1], [2, -2, 3]])
+# Element-wise activations
+x = Tensor([[-1, 0, 1, 2]])
 relu = ReLU()
-activated = relu(x)  # [0, 0, 1], [2, 0, 3]
+activated = relu(x)  # [0, 0, 1, 2]
 
+# Binary classification output
+sigmoid = Sigmoid()
+probability = sigmoid(x)  # All values in (0, 1)
+
+# Multi-class classification output
 logits = Tensor([[1, 2, 3]])
 softmax = Softmax()
-probs = softmax(logits)  # [0.09, 0.24, 0.67]
+probs = softmax(logits)  # [0.09, 0.24, 0.67], sum = 1
 ```
 ````
 
@@ -224,107 +356,152 @@ probs = softmax(logits)  # [0.09, 0.24, 0.67]
 import torch
 import torch.nn.functional as F
 
-x = torch.tensor([[-1, 0, 1], [2, -2, 3]], dtype=torch.float32)
-activated = F.relu(x)  # Same result!
+# Element-wise activations
+x = torch.tensor([[-1, 0, 1, 2]], dtype=torch.float32)
+activated = F.relu(x)  # [0, 0, 1, 2]
 
+# Binary classification output
+probability = torch.sigmoid(x)  # All values in (0, 1)
+
+# Multi-class classification output
 logits = torch.tensor([[1, 2, 3]], dtype=torch.float32)
-probs = F.softmax(logits, dim=-1)  # Same result!
+probs = F.softmax(logits, dim=-1)  # [0.09, 0.24, 0.67], sum = 1
 ```
 ````
 `````
 
-Let's walk through each operation to understand the comparison:
+Let's walk through the key similarities and differences:
 
-- **Lines 1-2 (Import)**: TinyTorch organizes activations in `core.activations`; PyTorch provides them as both `torch.nn` modules and `torch.nn.functional` functions. The functional interface (`F.relu`) is more common for stateless activations.
-- **Lines 4-6 (ReLU)**: TinyTorch uses class instantiation then calling; PyTorch's functional interface is a single function call. Both produce identical output: negative values become 0, positive values unchanged.
-- **Lines 8-10 (Softmax)**: Both normalize the input to a probability distribution. Note that PyTorch requires explicit `dim` specification, which is good practice for avoiding bugs.
+- **Line 1 (Import)**: TinyTorch imports activation classes; PyTorch uses functional interface `torch.nn.functional`. Both approaches work; PyTorch also supports class-based activations via `torch.nn.ReLU()`.
+- **Line 4-6 (ReLU)**: Identical semantics. Both zero out negative values, preserve positive values.
+- **Line 9-10 (Sigmoid)**: Identical mathematical function. Both use numerically stable implementations to prevent overflow.
+- **Line 13-15 (Softmax)**: Same mathematical operation. Both require specifying the dimension for multi-dimensional tensors. PyTorch uses `dim` keyword argument; TinyTorch defaults to `dim=-1`.
 
 ```{admonition} What's Identical
 :class: tip
 
-The mathematical transformations, output ranges, and numerical stability considerations. When you understand how your ReLU handles negative values, you understand exactly what PyTorch's ReLU does. The only difference is speed.
+Mathematical functions, numerical stability techniques (max subtraction in softmax), and the concept of element-wise transformations. When you debug PyTorch activation issues, you'll understand exactly what's happening because you implemented the same logic.
 ```
 
 ### Why Activations Matter at Scale
 
-Activation functions are applied to every neuron in every layer. Consider the scale:
+To appreciate why activation choice matters, consider the scale of modern ML systems:
 
-- **GPT-3**: 175 billion parameters means billions of activation function calls per forward pass
-- **ResNet-152**: 60 million activations per image, multiplied by batch size
-- **Real-time inference**: 30+ frames per second requires activations to complete in microseconds
+- **Large language models**: GPT-3 has 96 transformer layers, each with 2 GELU activations. That's **192 GELU operations per forward pass** on billions of parameters.
+- **Image classification**: ResNet-50 has 49 convolutional layers, each followed by ReLU. Processing a batch of 256 images at 224×224 resolution means **12 billion ReLU operations** per batch.
+- **Production serving**: A model serving 1000 requests per second performs **86 million activation computations per day**. A 20% speedup from ReLU vs GELU saves hours of compute time.
 
-ReLU's simplicity is a competitive advantage. In a network with 1 billion parameters, using ReLU instead of GELU saves approximately 3 billion floating-point operations per forward pass. At scale, this translates to measurable time and energy savings.
+Activation functions account for **5-15% of total training time** in typical networks (the rest is matrix multiplication). But in transformer models with many layers and small matrix sizes, activations can account for **20-30% of compute time**. This is why GELU vs ReLU is a real trade-off: slower computation but potentially better accuracy.
 
 ## Check Your Understanding
 
-Test yourself with these questions. They're designed to build intuition for activation behavior and computational characteristics.
+Test yourself with these systems thinking questions. They're designed to build intuition for how activations behave in real neural networks.
 
-**Q1: Output Range Prediction**
+**Q1: Memory Calculation**
 
-What is the output range of `Sigmoid(Tensor([-1000, 0, 1000]))`?
+A batch of 32 samples passes through a hidden layer with 4096 neurons and ReLU activation. How much memory is required to store the activation outputs (float32)?
 
 ```{admonition} Answer
 :class: dropdown
 
-Output: approximately `[0, 0.5, 1]`
+32 × 4096 × 4 bytes = **524,288 bytes ≈ 512 KB**
 
-Sigmoid(-1000) approaches 0 (but never reaches it)
-Sigmoid(0) = exactly 0.5
-Sigmoid(1000) approaches 1 (but never reaches it)
-
-The output is always in the open interval (0, 1), never exactly 0 or 1.
+This is the activation memory for ONE layer. A 100-layer network needs 50 MB just to store activations for one forward pass. This is why activation memory dominates training memory usage (you'll see this in Module 05 when you cache activations for backpropagation).
 ```
 
 **Q2: Computational Cost**
 
-A network has 10 hidden layers, each with 1 million neurons. How many more floating-point operations does GELU require compared to ReLU for a single forward pass?
+If ReLU takes 1ms to activate 1 million neurons, approximately how long will GELU take on the same input?
 
 ```{admonition} Answer
 :class: dropdown
 
-ReLU: 1 operation per element = 10 million operations total
-GELU: ~4-5 operations per element = 40-50 million operations total
+GELU is approximately **4-5× slower** than ReLU due to exponential computation in the sigmoid approximation.
 
-Difference: **30-40 million extra operations**
+Expected time: **4-5ms**
 
-For 10 layers: 300-400 million extra operations per forward pass!
+At scale, this matters: if you have 100 activation layers in your model, switching from ReLU to GELU adds 300-400ms per forward pass. For training that requires millions of forward passes, this multiplies into hours or days of extra compute time.
 ```
 
-**Q3: Softmax Properties**
+**Q3: Numerical Stability**
 
-Given input `[10, 10, 10]`, what is the softmax output?
+Why does softmax subtract the maximum value before computing exponentials? What would happen without this step?
 
 ```{admonition} Answer
 :class: dropdown
 
-Output: `[0.333..., 0.333..., 0.333...]` (equal probabilities)
+**Without max subtraction**: Computing `softmax([1000, 1001, 1002])` requires `exp(1000)`, which overflows to infinity in float32/float64, producing NaN.
 
-When all inputs are equal, softmax produces a uniform distribution regardless of the actual values. This is because `e^10 / (3 * e^10) = 1/3` for each element.
+**With max subtraction**: First compute `x_shifted = x - max(x) = [0, 1, 2]`, then compute `exp([0, 1, 2])` which stays within float range.
 
-The same result would occur for `[0, 0, 0]` or `[100, 100, 100]`.
+**Why this works mathematically**:
+```
+exp(x - max) / Σ exp(x - max) = [exp(x) / exp(max)] / [Σ exp(x) / exp(max)]
+                                = exp(x) / Σ exp(x)
 ```
 
-**Q4: Memory for Activation Caching**
+The `exp(max)` factor cancels out, so the result is mathematically identical. But numerically, it prevents overflow. This is a classic example of why production ML requires careful numerical engineering, not just correct math.
+```
 
-ResNet-50 applies ReLU to approximately 23 million elements per forward pass for a single image. During training with batch size 32, how much memory is required just to cache these activations for backpropagation (assuming float32)?
+**Q4: Sparsity Analysis**
+
+A ReLU layer processes input tensor with shape (128, 1024) containing values drawn from a normal distribution N(0, 1). Approximately what percentage of outputs will be exactly zero?
 
 ```{admonition} Answer
 :class: dropdown
 
-23 million elements × 32 batch × 4 bytes = **2.94 GB**
+For a standard normal distribution N(0, 1), approximately **50% of values are negative**.
 
-This is why activation memory often dominates GPU memory usage during training, and why techniques like gradient checkpointing (recomputing activations instead of storing them) are used for very large models.
+ReLU zeros all negative values, so approximately **50% of outputs will be exactly zero**.
+
+Total elements: 128 × 1024 = 131,072
+Zeros: ≈ 65,536
+
+This sparsity has major implications:
+- **Speed**: Multiplying by zero is free, so downstream computations can skip ~50% of operations
+- **Memory**: Sparse formats can compress the output by 2×
+- **Generalization**: Sparse representations often generalize better (less overfitting)
+
+This is why ReLU is so effective: it creates natural sparsity without requiring explicit regularization.
+```
+
+**Q5: Activation Selection**
+
+You're building a sentiment classifier that outputs "positive" or "negative". Which activation should you use for the output layer, and why?
+
+```{admonition} Answer
+:class: dropdown
+
+**Use Sigmoid** for the output layer.
+
+**Reasoning**:
+- Binary classification needs a single probability value in [0, 1]
+- Sigmoid maps any real number to (0, 1)
+- Output can be interpreted as P(positive) where 0.8 means "80% confident this is positive"
+- Decision rule: predict positive if sigmoid(output) > 0.5
+
+**Why NOT other activations**:
+- **Softmax**: Overkill for binary classification (designed for multi-class), though technically works with 2 outputs
+- **ReLU**: Outputs unbounded positive values, not interpretable as probabilities
+- **Tanh**: Outputs in (-1, 1), not directly interpretable as probabilities
+
+**Production pattern**:
+```
+Input → Linear + ReLU → Linear + ReLU → Linear + Sigmoid → Binary Probability
+```
+
+For multi-class sentiment (positive/negative/neutral), you'd use Softmax instead to get a 3-element probability distribution.
 ```
 
 ## Further Reading
 
-For students who want to understand the academic foundations and evolution of activation functions:
+For students who want to understand the academic foundations and historical development of activation functions:
 
 ### Seminal Papers
 
 - **Deep Sparse Rectifier Neural Networks** - Glorot, Bordes, Bengio (2011). The paper that established ReLU as the default activation for deep networks, showing how its sparsity and constant gradient enable training of very deep networks. [AISTATS](http://proceedings.mlr.press/v15/glorot11a.html)
 
-- **Gaussian Error Linear Units (GELUs)** - Hendrycks & Gimpel (2016). Introduced the smooth activation that powers modern transformers like GPT and BERT. Explains the probabilistic interpretation and why smoothness helps optimization. [arXiv](https://arxiv.org/abs/1606.08415)
+- **Gaussian Error Linear Units (GELUs)** - Hendrycks & Gimpel (2016). Introduced the smooth activation that powers modern transformers like GPT and BERT. Explains the probabilistic interpretation and why smoothness helps optimization. [arXiv:1606.08415](https://arxiv.org/abs/1606.08415)
 
 - **Attention Is All You Need** - Vaswani et al. (2017). While primarily about transformers, this paper's use of specific activations (ReLU in position-wise FFN, Softmax in attention) established patterns still used today. [NeurIPS](https://arxiv.org/abs/1706.03762)
 
@@ -346,8 +523,8 @@ Implement Linear layers that combine your Tensor operations with your activation
 | Module | What It Does | Your Activations In Action |
 |--------|--------------|---------------------------|
 | **03: Layers** | Neural network building blocks | `Linear(x)` followed by `ReLU()(output)` |
-| **04: Losses** | Training objectives | Softmax + cross-entropy for classification |
-| **05: Autograd** | Automatic gradients | `ReLU.backward()` computes gradients |
+| **04: Losses** | Training objectives | Softmax probabilities feed into cross-entropy loss |
+| **05: Autograd** | Automatic gradients | `relu.backward(grad)` computes activation gradients |
 
 ## Get Started
 

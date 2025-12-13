@@ -1,673 +1,455 @@
----
-title: "Profiling - Performance Measurement for ML Systems"
-description: "Build profilers that measure parameters, FLOPs, memory, and latency to guide optimization decisions"
-difficulty: "●●●"
-time_estimate: "5-6 hours"
-prerequisites: ["Modules 01-13 - Complete ML implementation stack"]
-next_steps: ["Module 15 - Quantization"]
-learning_objectives:
-  - "Implement parameter counting to predict model memory requirements"
-  - "Build FLOP counters to measure computational complexity across architectures"
-  - "Create memory profilers that track allocations and identify usage patterns"
-  - "Design timing profilers with statistical rigor to measure latency accurately"
-  - "Apply profiling data to identify bottlenecks and prioritize optimizations"
----
+# Profiling
 
-# Profiling - Performance Measurement for ML Systems
+**OPTIMIZATION TIER** | Difficulty: ●● (2/4) | Time: 3-5 hours | Prerequisites: 01-07
 
-**OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 5-6 hours
+**Prerequisites: Modules 01-07** means you should have:
+- Built tensors with shape manipulation and operations
+- Implemented layers with forward passes
+- Understanding of training loops and batching
+
+If you can calculate matrix multiplication cost and track memory usage patterns, you're ready.
 
 ## Overview
 
-Build profiling tools that measure where compute and memory go in ML systems. This module implements parameter counters, FLOP analyzers, memory trackers, and timing profilers with statistical rigor. You'll profile real models to identify bottlenecks—memory-bound vs compute-bound, attention vs feedforward, batch size effects—and use data to guide optimization decisions.
+Profiling is the foundation of performance optimization. Before making a model faster or smaller, you need to measure where time and memory go. In this module, you'll build professional profiling tools that measure parameters, FLOPs, memory usage, and latency with statistical rigor.
 
-**Optimization Tier Focus**: Modules 1-13 taught you to build ML systems. Modules 14-20 teach you to measure and optimize them. Profiling is the foundation—you can't optimize what you don't measure.
+Every optimization decision starts with measurement. Is your model memory-bound or compute-bound? Which layers consume the most resources? How does batch size affect throughput? Your profiler will answer these questions with data, not guesses, enabling the targeted optimizations in later modules.
 
-## Why This Matters
-
-### Production Context: Profiling Drives Optimization Economics
-
-Every major ML organization profiles extensively:
-
-- **Google TPU teams** profile every kernel to achieve 40-50% MFU (Model FLOPs Utilization), translating to millions in compute savings
-- **OpenAI** profiles GPT training runs to identify gradient checkpointing opportunities, reducing memory by 10× with minimal speed cost
-- **Meta** profiles PyTorch inference serving billions of requests daily, using data to guide operator fusion and quantization decisions
-- **NVIDIA** uses Nsight profiler to optimize cuDNN kernels, achieving near-theoretical-peak performance on tensor cores
-
-**The Economics**: A 10% optimization on a $10M training run saves $1M. But only if you measure first—guessing wastes engineering time on non-bottlenecks.
-
-### Historical Evolution: From Ad-Hoc Timing to Systematic Measurement
-
-Profiling evolved with ML scale:
-
-- **Pre-2012 (Small models)**: Ad-hoc timing with `time.time()`, no systematic methodology
-- **2012-2017 (Deep learning era)**: NVIDIA profiler, TensorBoard timing; focus on GPU utilization
-- **2018+ (Production scale)**: Comprehensive profiling (compute, memory, I/O, network); optimization becomes economically critical
-- **2020+ (Modern systems)**: Automated profiling guides ML compilers; tools like PyTorch Profiler integrate with training workflows
-
-### What You'll Actually Build
-
-Let's be precise about what you implement in this module:
-
-**You WILL build**:
-- Parameter counter: Walks model structure, sums weight and bias elements
-- FLOP counter: Calculates theoretical operations for Linear, Conv2d based on dimensions
-- Memory profiler: Uses Python's tracemalloc to track allocations during forward/backward
-- Timing profiler: Uses time.perf_counter() with warmup runs and statistical analysis (median latency)
-
-**You will NOT build** (these are production tools requiring kernel instrumentation):
-- GPU profiler (requires CUDA kernel hooks)
-- PyTorch Profiler integration (requires autograd instrumentation)
-- Operator-level timeline traces (requires framework integration)
-
-**Why this scope matters**: You'll understand profiling fundamentals that transfer to production tools. The techniques you implement (parameter counting formulas, FLOP calculations, statistical timing) are exactly what PyTorch Profiler and TensorBoard use internally. You're building the same measurement primitives, just without kernel-level instrumentation.
+By the end, you'll have built the same measurement infrastructure used by production ML teams to make data-driven optimization decisions.
 
 ## Learning Objectives
 
-By the end of this module, you will be able to:
+```{admonition} By completing this module, you will:
+:class: tip
 
-- **Count parameters accurately**: Predict model size and memory footprint by counting weights and biases across different layer types
-- **Measure computational cost**: Implement FLOP counters that calculate theoretical compute for matrix multiplications, convolutions, and attention operations
-- **Track memory usage**: Build memory profilers using tracemalloc to measure parameter, activation, and gradient memory during forward and backward passes
-- **Profile latency rigorously**: Create timing profilers with warmup runs, multiple iterations, and statistical analysis (median, confidence intervals)
-- **Identify performance bottlenecks**: Analyze profiling data to distinguish memory-bound from compute-bound operations and prioritize optimization efforts
-
-## Build → Use → Reflect
-
-This module follows TinyTorch's **Build → Use → Reflect** framework:
-
-1. **Build**: Implement Profiler class with parameter counting, FLOP calculation, memory tracking, and latency measurement using time.perf_counter() and tracemalloc
-2. **Use**: Profile complete models to measure characteristics, compare MLP vs attention operations, analyze batch size impact on throughput, and benchmark different architectures
-3. **Reflect**: Where does compute time actually go in transformers? When is your system memory-bound vs compute-bound? How do measurement choices affect optimization decisions?
-
-## Implementation Guide
-
-### Core Component: Profiler Class
-
-The Profiler class provides comprehensive performance analysis:
-
-```python
-class Profiler:
-    """Professional-grade ML model profiler.
-
-    Measures parameters, FLOPs, memory, and latency with statistical rigor.
-    Used for bottleneck identification and optimization guidance.
-    """
-
-    def __init__(self):
-        self.measurements = {}
-        self.operation_counts = defaultdict(int)
-
-    def count_parameters(self, model) -> int:
-        """Count total trainable parameters.
-
-        Returns:
-            Total parameter count (e.g., 125M for GPT-2 Small)
-        """
-        total = 0
-        if hasattr(model, 'parameters'):
-            for param in model.parameters():
-                total += param.data.size  # Count elements
-        return total
-
-    def count_flops(self, model, input_shape: Tuple) -> int:
-        """Count FLOPs (Floating Point Operations) for forward pass.
-
-        Linear layer: 2 × M × K × N (matmul is M×K @ K×N)
-        Conv2d: 2 × output_h × output_w × kernel_h × kernel_w × in_ch × out_ch
-
-        Returns:
-            Total FLOPs for one forward pass (hardware-independent)
-        """
-        # Implementation calculates based on layer type and dimensions
-
-    def measure_memory(self, model, input_shape: Tuple) -> Dict:
-        """Measure memory usage during forward pass.
-
-        Uses tracemalloc to track:
-        - Parameter memory (weights, biases)
-        - Activation memory (intermediate tensors)
-        - Peak memory (maximum allocation)
-
-        Returns:
-            Dict with memory breakdown in MB
-        """
-        tracemalloc.start()
-        # Run forward pass, measure peak allocation
-
-    def measure_latency(self, model, input_tensor,
-                       warmup: int = 10, iterations: int = 100) -> float:
-        """Measure inference latency with statistical rigor.
-
-        Protocol:
-        1. Warmup runs (cache warming, JIT compilation)
-        2. Multiple measurements (statistical significance)
-        3. Median calculation (robust to outliers)
-
-        Returns:
-            Median latency in milliseconds
-        """
-        # Warmup runs (discard results)
-        for _ in range(warmup):
-            _ = model.forward(input_tensor)
-
-        # Timed runs
-        times = []
-        for _ in range(iterations):
-            start = time.perf_counter()  # High-precision timer
-            _ = model.forward(input_tensor)
-            times.append((time.perf_counter() - start) * 1000)  # Convert to ms
-
-        return np.median(times)  # Median is robust to outliers
+- **Implement** a comprehensive Profiler class that measures parameters, FLOPs, memory, and latency
+- **Analyze** performance characteristics to identify compute-bound vs memory-bound workloads
+- **Master** statistical measurement techniques with warmup runs and outlier handling
+- **Connect** profiling insights to optimization opportunities in quantization, compression, and caching
 ```
 
-### Parameter Counting: Memory Footprint Analysis
+## What You'll Build
 
-Parameter counting predicts model size and memory requirements:
+```{mermaid}
+flowchart LR
+    subgraph "Your Profiler Class"
+        A["Parameter Counter<br/>count_parameters()"]
+        B["FLOP Counter<br/>count_flops()"]
+        C["Memory Tracker<br/>measure_memory()"]
+        D["Latency Timer<br/>measure_latency()"]
+        E["Analysis Tools<br/>profile_forward_pass()"]
+    end
 
+    A --> E
+    B --> E
+    C --> E
+    D --> E
+
+    style A fill:#e1f5ff
+    style B fill:#fff3cd
+    style C fill:#f8d7da
+    style D fill:#d4edda
+    style E fill:#e2d5f1
+```
+
+**Implementation roadmap:**
+
+| Step | What You'll Implement | Key Concept |
+|------|----------------------|-------------|
+| 1 | `count_parameters()` | Model size and memory footprint |
+| 2 | `count_flops()` | Computational cost estimation |
+| 3 | `measure_memory()` | Activation and gradient memory tracking |
+| 4 | `measure_latency()` | Statistical timing with warmup |
+| 5 | `profile_forward_pass()` | Comprehensive performance analysis |
+| 6 | `profile_backward_pass()` | Training cost estimation |
+
+**The pattern you'll enable:**
 ```python
-# Linear layer example
-layer = Linear(768, 3072)  # GPT-2 feedforward dimension
-
-# Manual calculation:
-weight_params = 768 × 3072 = 2,359,296
-bias_params = 3072
-total_params = 2,362,368
-
-# Memory at FP32 (4 bytes per parameter):
-memory_bytes = 2,362,368 × 4 = 9,449,472 bytes = 9.01 MB
-
-# Profiler implementation:
+# Comprehensive model analysis for optimization decisions
 profiler = Profiler()
-count = profiler.count_parameters(layer)
-assert count == 2_362_368
-
-# Why this matters:
-# GPT-2 Small: 124M params → 496 MB
-# GPT-2 XL: 1.5B params → 6.0 GB
-# Knowing parameter count predicts deployment hardware requirements
+profile = profiler.profile_forward_pass(model, input_data)
+print(f"Bottleneck: {profile['bottleneck']}")  # "memory" or "compute"
 ```
 
-**Parameter Counting Strategy**:
-- Linear layers: `(input_features × output_features) + output_features`
-- Conv2d layers: `(kernel_h × kernel_w × in_channels × out_channels) + out_channels`
-- Embeddings: `vocab_size × embedding_dim`
-- Attention: Count Q/K/V projection weights separately
+### What You're NOT Building (Yet)
 
-### FLOP Counting: Computational Cost Analysis
+To keep this module focused, you will **not** implement:
 
-FLOPs measure compute independently of hardware:
+- GPU profiling (we measure CPU performance with NumPy)
+- Distributed profiling (that's for multi-GPU setups)
+- CUDA kernel profilers (PyTorch uses `torch.profiler` for GPU analysis)
+- Layer-by-layer visualization dashboards (TensorBoard provides this)
+
+**You are building the measurement foundation.** Visualization and GPU profiling come with production frameworks.
+
+## API Reference
+
+This section provides a quick reference for the Profiler class you'll build. Use it while implementing and debugging.
+
+### Constructor
 
 ```python
-# Matrix multiplication FLOP calculation
-# C = A @ B where A is (M, K) and B is (K, N)
-
-def count_matmul_flops(M, K, N):
-    """Each output element C[i,j] requires K multiply-adds.
-
-    Total outputs: M × N
-    FLOPs per output: 2 × K (multiply + add)
-    Total FLOPs: 2 × M × K × N
-    """
-    return 2 * M * K * N
-
-# Example: GPT-2 feedforward forward pass
-batch_size = 32
-seq_len = 512
-d_model = 768
-d_ff = 3072
-
-# First linear: (batch × seq, d_model) @ (d_model, d_ff)
-flops_1 = count_matmul_flops(batch_size * seq_len, d_model, d_ff)
-# = 2 × 16384 × 768 × 3072 = 77,309,411,328 FLOPs
-
-# Second linear: (batch × seq, d_ff) @ (d_ff, d_model)
-flops_2 = count_matmul_flops(batch_size * seq_len, d_ff, d_model)
-# = 2 × 16384 × 3072 × 768 = 77,309,411,328 FLOPs
-
-total_flops = flops_1 + flops_2  # ~154 GFLOPs for one feedforward layer
-
-# Hardware context:
-# NVIDIA A100: 312 TFLOPS (FP16) → theoretical time = 154 / 312000 = 0.5 ms
-# Actual time will be higher due to memory bandwidth and kernel overhead
+Profiler()
 ```
+Initializes profiler with measurement tracking structures.
 
-**FLOP Formulas Reference**:
-```python
-# Linear layer
-flops = 2 × batch_size × seq_len × input_features × output_features
+### Core Methods
 
-# Conv2d
-flops = 2 × batch × output_h × output_w × kernel_h × kernel_w × in_ch × out_ch
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `count_parameters` | `count_parameters(model) -> int` | Count total trainable parameters |
+| `count_flops` | `count_flops(model, input_shape) -> int` | Count FLOPs for one forward pass |
+| `measure_memory` | `measure_memory(model, input_shape) -> Dict` | Measure memory usage components |
+| `measure_latency` | `measure_latency(model, input_tensor, warmup, iterations) -> float` | Measure inference latency in milliseconds |
 
-# Multi-head attention (simplified)
-# QKV projections: 3 × linear projections
-# Attention scores: batch × heads × seq × seq × d_k
-# Attention weighting: batch × heads × seq × seq × d_k
-# Output projection: 1 × linear projection
-flops = (4 × batch × seq × d_model × d_model) +
-        (4 × batch × heads × seq × seq × d_k)
-```
+### Analysis Methods
 
-### Memory Profiling: Understanding Allocation Patterns
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `profile_layer` | `profile_layer(layer, input_shape) -> Dict` | Comprehensive single-layer profile |
+| `profile_forward_pass` | `profile_forward_pass(model, input_tensor) -> Dict` | Complete forward pass analysis |
+| `profile_backward_pass` | `profile_backward_pass(model, input_tensor) -> Dict` | Training iteration analysis |
 
-Memory profiling reveals where RAM goes during training:
+## Core Concepts
+
+This section covers the fundamental ideas you need to understand profiling deeply. Measurement is the foundation of optimization, and understanding what you're measuring matters as much as how you measure it.
+
+### Why Profile First
+
+Optimization without measurement is guessing. You might spend days optimizing the wrong bottleneck, achieving minimal speedup while the real problem goes untouched. Profiling reveals ground truth: where time and memory actually go, not where you think they go.
+
+Consider a transformer model running slowly. Is it the attention mechanism? The feed-forward layers? Matrix multiplications? Memory transfers? Without profiling, you're guessing. With profiling, you know. If 80% of time is in attention and it's memory-bound, you know exactly what to optimize and how.
+
+The profiling workflow follows a systematic process. You measure first to establish a baseline. Then you analyze the measurements to identify bottlenecks. Next you optimize the critical path, not every operation. Finally you measure again to verify improvement. This cycle repeats until you hit performance targets.
+
+Your profiler implements the measurement and analysis steps, providing the data needed for optimization decisions in later modules.
+
+### Timing Operations
+
+Accurate timing is harder than it looks. Systems have variance, warmup effects, and measurement overhead. Your `measure_latency` method handles these challenges with statistical rigor:
 
 ```python
-class MemoryProfiler:
-    """Track memory allocations and identify usage patterns."""
-
-    def __init__(self):
-        self.snapshots = []
-
-    def snapshot(self, label: str):
-        """Take memory snapshot at execution point."""
-        import psutil
-        process = psutil.Process()
-        mem_info = process.memory_info()
-
-        self.snapshots.append({
-            'label': label,
-            'rss': mem_info.rss / 1024**2,  # Resident Set Size (MB)
-            'timestamp': time.time()
-        })
-
-    def report(self):
-        """Generate memory usage report."""
-        print("Memory Timeline:")
-        for i, snap in enumerate(self.snapshots):
-            delta = ""
-            if i > 0:
-                delta_val = snap['rss'] - self.snapshots[i-1]['rss']
-                delta = f" ({delta_val:+.2f} MB)"
-            print(f"  {snap['label']:30s}: {snap['rss']:8.2f} MB{delta}")
-
-# Example: Profile transformer forward pass
-mem = MemoryProfiler()
-mem.snapshot("baseline")
-
-# Forward pass
-output = model.forward(input_tensor)
-mem.snapshot("after_forward")
-
-# Backward pass
-loss = criterion(output, target)
-loss.backward()
-mem.snapshot("after_backward")
-
-# Update weights
-optimizer.step()
-mem.snapshot("after_optimizer")
-
-mem.report()
-
-# Output interpretation:
-# baseline                     : 1024.00 MB
-# after_forward               : 1124.00 MB (+100.00 MB)  ← Activation memory
-# after_backward              : 1624.00 MB (+500.00 MB)  ← Gradient memory
-# after_optimizer             : 2124.00 MB (+500.00 MB)  ← Adam state (momentum + velocity)
-#
-# Total training memory = 2.1× forward memory (for Adam optimizer)
-```
-
-**Memory Components Breakdown**:
-```
-Training Memory = Parameters + Activations + Gradients + Optimizer State
-
-Example for GPT-2 Small (124M parameters):
-Parameters:    496 MB  (124M × 4 bytes)
-Activations:   200 MB  (depends on batch size and sequence length)
-Gradients:     496 MB  (same as parameters)
-Adam state:    992 MB  (momentum + velocity = 2× parameters)
-─────────────────────────────────────
-Total:        2184 MB  (4.4× parameter memory!)
-
-Optimization strategies by component:
-- Parameters: Quantization (reduce precision)
-- Activations: Gradient checkpointing (recompute instead of store)
-- Gradients: Mixed precision (FP16 gradients)
-- Optimizer: SGD instead of Adam (0× vs 2× parameter memory)
-```
-
-### Latency Measurement: Statistical Timing Methodology
-
-Accurate latency measurement requires handling variance:
-
-```python
-def measure_latency_correctly(model, input_tensor):
-    """Production-quality latency measurement."""
-
-    # Step 1: Warmup runs (stabilize system state)
-    # - JIT compilation happens on first runs
-    # - CPU/GPU caches warm up
-    # - Operating system scheduling stabilizes
-    warmup_runs = 10
-    for _ in range(warmup_runs):
+def measure_latency(self, model, input_tensor, warmup: int = 10, iterations: int = 100) -> float:
+    """Measure model inference latency with statistical rigor."""
+    # Warmup runs to stabilize performance
+    for _ in range(warmup):
         _ = model.forward(input_tensor)
 
-    # Step 2: Multiple measurements (statistical significance)
+    # Measurement runs
     times = []
-    measurement_runs = 100
-
-    for _ in range(measurement_runs):
-        start = time.perf_counter()  # Nanosecond precision
+    for _ in range(iterations):
+        start_time = time.perf_counter()
         _ = model.forward(input_tensor)
-        elapsed = time.perf_counter() - start
-        times.append(elapsed * 1000)  # Convert to milliseconds
+        end_time = time.perf_counter()
+        times.append((end_time - start_time) * 1000)  # Convert to milliseconds
 
-    # Step 3: Statistical analysis
+    # Calculate statistics - use median for robustness
     times = np.array(times)
+    median_latency = np.median(times)
 
-    results = {
-        'mean': np.mean(times),
-        'median': np.median(times),      # Robust to outliers
-        'std': np.std(times),
-        'min': np.min(times),
-        'max': np.max(times),
-        'p50': np.percentile(times, 50),  # Median
-        'p95': np.percentile(times, 95),  # 95th percentile
-        'p99': np.percentile(times, 99)   # 99th percentile (tail latency)
+    return float(median_latency)
+```
+
+The warmup phase is critical. The first few runs are slower due to cold CPU caches, Python interpreter warmup, and NumPy initialization. Running 10+ warmup iterations ensures the system reaches steady state before measurement begins.
+
+Using median instead of mean makes the measurement robust against outliers. If the operating system interrupts your process once during measurement, that outlier won't skew the result. The median captures typical performance, not worst-case spikes.
+
+### Memory Profiling
+
+Memory profiling reveals three distinct components: parameter memory (model weights), activation memory (forward pass intermediate values), and gradient memory (backward pass derivatives). Each has different characteristics and optimization strategies.
+
+Here's how your profiler tracks memory usage:
+
+```python
+def measure_memory(self, model, input_shape: Tuple[int, ...]) -> Dict[str, float]:
+    """Measure memory usage during forward pass."""
+    # Start memory tracking
+    tracemalloc.start()
+
+    # Calculate parameter memory
+    param_count = self.count_parameters(model)
+    parameter_memory_bytes = param_count * BYTES_PER_FLOAT32
+    parameter_memory_mb = parameter_memory_bytes / MB_TO_BYTES
+
+    # Create input and measure activation memory
+    dummy_input = Tensor(np.random.randn(*input_shape))
+    input_memory_bytes = dummy_input.data.nbytes
+
+    # Estimate activation memory (simplified)
+    activation_memory_bytes = input_memory_bytes * 2  # Rough estimate
+    activation_memory_mb = activation_memory_bytes / MB_TO_BYTES
+
+    # Run forward pass to measure peak memory usage
+    _ = model.forward(dummy_input)
+
+    # Get peak memory
+    _current_memory, peak_memory = tracemalloc.get_traced_memory()
+    peak_memory_mb = (peak_memory - _baseline_memory) / MB_TO_BYTES
+
+    tracemalloc.stop()
+
+    return {
+        'parameter_memory_mb': parameter_memory_mb,
+        'activation_memory_mb': activation_memory_mb,
+        'peak_memory_mb': max(peak_memory_mb, useful_memory),
+        'memory_efficiency': min(memory_efficiency, 1.0)
     }
-
-    return results
-
-# Example output:
-# {
-#   'mean': 5.234,
-#   'median': 5.180,    ← Use this for reporting (robust)
-#   'std': 0.456,
-#   'min': 4.890,
-#   'max': 8.120,       ← Outlier (OS scheduling event)
-#   'p50': 5.180,
-#   'p95': 5.890,
-#   'p99': 6.340        ← Important for user-facing latency
-# }
-
-# Why median, not mean?
-# Mean is sensitive to outliers (8.120 ms max skews average)
-# Median represents typical performance
-# For user-facing systems, report p95 or p99 (worst-case experience)
 ```
 
-**Measurement Pitfalls and Solutions**:
-```python
-#  WRONG: Single measurement
-start = time.time()  # Low precision
-output = model(input)
-latency = time.time() - start  # Affected by system noise
+Parameter memory is persistent and constant regardless of batch size. A model with 125 million parameters uses 500 MB (125M × 4 bytes per float32) whether you're processing one sample or a thousand.
 
-#  CORRECT: Statistical measurement
+Activation memory scales with batch size. Doubling the batch doubles activation memory. This is why large batch training requires more GPU memory than inference.
+
+Gradient memory matches parameter memory exactly. Every parameter needs a gradient during training, adding another 500 MB for a 125M parameter model.
+
+### Bottleneck Identification
+
+The most important profiling insight is whether your workload is compute-bound or memory-bound. This determines which optimizations will help.
+
+Compute-bound workloads are limited by arithmetic throughput. The CPU or GPU can't compute fast enough to keep up with available memory bandwidth. Optimizations focus on better algorithms, vectorization, and reducing FLOPs.
+
+Memory-bound workloads are limited by data movement. The hardware can compute faster than it can load data from memory. Optimizations focus on reducing memory transfers, improving cache locality, and data layout.
+
+Your profiler identifies bottlenecks by comparing computational intensity to memory bandwidth. If you're achieving low GFLOP/s despite high theoretical compute capability, you're memory-bound. If you're achieving high GFLOP/s and high computational efficiency, you're compute-bound.
+
+### Profiling Tools
+
+Your implementation uses Python's built-in profiling tools: `time.perf_counter()` for high-precision timing and `tracemalloc` for memory tracking. These provide the foundation for accurate measurement.
+
+`time.perf_counter()` uses the system's highest-resolution timer, typically nanosecond precision. It measures wall-clock time, which includes all system effects (cache misses, context switches) that affect real-world performance.
+
+`tracemalloc` tracks Python memory allocations with byte-level precision. It records both current and peak memory usage, letting you identify memory spikes during execution.
+
+Production profilers add GPU support (CUDA events, NVTX markers), distributed tracing (for multi-GPU setups), and kernel-level analysis. But the core concepts remain the same: measure, analyze, identify bottlenecks, optimize.
+
+## Production Context
+
+### Your Implementation vs. PyTorch
+
+Your TinyTorch Profiler and PyTorch's profiling tools share the same conceptual foundation. The differences are in implementation detail: PyTorch adds GPU support, kernel-level profiling, and distributed tracing. But the core metrics (parameters, FLOPs, memory, latency) are identical.
+
+| Feature | Your Implementation | PyTorch |
+|---------|---------------------|---------|
+| **Parameter counting** | Direct tensor size | `model.parameters()` |
+| **FLOP counting** | Per-layer formulas | FlopCountAnalysis (fvcore) |
+| **Memory tracking** | tracemalloc | torch.profiler, CUDA events |
+| **Latency measurement** | time.perf_counter() | torch.profiler, NVTX |
+| **GPU profiling** | ✗ CPU only | ✓ CUDA kernels, memory |
+| **Distributed** | ✗ Single process | ✓ Multi-GPU, NCCL |
+
+### Code Comparison
+
+The following comparison shows equivalent profiling operations in TinyTorch and PyTorch. Notice how the concepts transfer directly, even though PyTorch provides more sophisticated tooling.
+
+`````{tab-set}
+````{tab-item} Your Tiny🔥Torch
+```python
+from tinytorch.profiling import Profiler
+
+# Create profiler
 profiler = Profiler()
-latency = profiler.measure_latency(model, input, warmup=10, iterations=100)
-# Returns median of 100 measurements after 10 warmup runs
 
-#  WRONG: Measuring cold start
-latency = time_function_once(model.forward, input)  # Includes JIT compilation
+# Profile model
+params = profiler.count_parameters(model)
+flops = profiler.count_flops(model, input_shape)
+memory = profiler.measure_memory(model, input_shape)
+latency = profiler.measure_latency(model, input_tensor)
 
-#  CORRECT: Warmup runs
-for _ in range(10):
-    model.forward(input)  # Discard these results
-latency = measure_with_statistics(model.forward, input)  # Now measure
-
-#  WRONG: Using mean with outliers
-times = [5.1, 5.2, 5.0, 5.3, 50.0]  # 50ms outlier from OS scheduling
-mean = np.mean(times)  # = 14.12 ms (misleading!)
-
-#  CORRECT: Using median
-median = np.median(times)  # = 5.2 ms (representative)
-```
-
-## Getting Started
-
-### Prerequisites
-
-Ensure you understand the foundations from previous modules:
-
-```bash
-# Activate TinyTorch environment
-source scripts/activate-tinytorch
-
-# Verify prerequisite modules (all modules 1-13)
-tito test tensor
-tito test activations
-tito test transformer
-```
-
-**Why these prerequisites**: You'll profile models built in Modules 1-13. Understanding the implementations helps you interpret profiling results (e.g., why attention is memory-bound).
-
-### Development Workflow
-
-1. **Open the development file**: `modules/14_profiling/profiling_dev.ipynb` or `.py`
-2. **Implement parameter counting**: Walk model structure, sum parameter elements
-3. **Build FLOP counter**: Calculate operations based on layer types and dimensions
-4. **Create memory profiler**: Use tracemalloc to track allocations during forward/backward
-5. **Add timing profiler**: Implement warmup runs, multiple measurements, statistical analysis
-6. **Implement advanced profiling**: Build `profile_forward_pass()` and `profile_backward_pass()` combining all metrics
-7. **Export and verify**: `tito module complete 14 && tito test profiling`
-
-**Development tips**:
-```python
-# Test parameter counting manually first
-layer = Linear(128, 64)
-expected_params = (128 * 64) + 64  # weight + bias = 8256
-actual_params = profiler.count_parameters(layer)
-assert actual_params == expected_params
-
-# Verify FLOP calculations with small examples
-flops = profiler.count_flops(layer, (1, 128))
-expected_flops = 2 * 128 * 64  # matmul FLOPs = 16384
-assert flops == expected_flops
-
-# Check memory profiler returns expected keys
-mem = profiler.measure_memory(layer, (32, 128))
-assert 'parameter_memory_mb' in mem
-assert 'activation_memory_mb' in mem
-assert 'peak_memory_mb' in mem
-
-# Validate latency measurement stability
-latencies = [profiler.measure_latency(layer, input_tensor) for _ in range(3)]
-std_dev = np.std(latencies)
-assert std_dev < np.mean(latencies) * 0.2  # Coefficient of variation < 20%
-```
-
-## Testing
-
-### Comprehensive Test Suite
-
-Run the full test suite to verify profiling functionality:
-
-```bash
-# TinyTorch CLI (recommended)
-tito test profiling
-
-# Direct pytest execution
-python -m pytest tests/ -k profiling -v
-```
-
-### Test Coverage Areas
-
-- ✓ **Parameter counting accuracy**: Verifies correct counts for Linear, Conv2d, models with/without parameters
-- ✓ **FLOP calculation correctness**: Validates formulas for different layer types (Linear, Conv2d, attention)
-- ✓ **Memory measurement reliability**: Checks tracemalloc integration, memory component tracking
-- ✓ **Latency measurement consistency**: Tests statistical timing with warmup runs and multiple iterations
-- ✓ **Advanced profiling completeness**: Validates forward/backward profiling returns all required metrics
-
-### Inline Testing & Validation
-
-The module includes comprehensive unit tests:
-
-```python
-# Parameter counting validation
- Unit Test: Parameter Counting...
- Simple model: 55 parameters (10×5 weight + 5 bias)
- No parameter model: 0 parameters
- Direct tensor: 0 parameters
- Parameter counting works correctly!
-
-# FLOP counting validation
- Unit Test: FLOP Counting...
- Tensor operation: 32 FLOPs
- Linear layer: 16384 FLOPs (128 × 64 × 2)
- Batch independence: 16384 FLOPs (same for batch 1 and 32)
- FLOP counting works correctly!
-
-# Memory measurement validation
- Unit Test: Memory Measurement...
- Basic measurement: 0.153 MB peak
- Scaling: Small 0.002 MB → Large 0.020 MB
- Efficiency: 0.524 (0-1 range)
- Memory measurement works correctly!
-
-# Latency measurement validation
- Unit Test: Latency Measurement...
- Basic latency: 0.008 ms
- Consistency: 0.010 ± 0.002 ms
- Scaling: Small 0.006 ms, Large 0.012 ms
- Latency measurement works correctly!
-```
-
-### Manual Testing Examples
-
-```python
-from profiling_dev import Profiler, quick_profile
-from tinytorch.nn.layers import Linear
-from tinytorch.core.tensor import Tensor
-
-# Example 1: Profile a simple layer
-layer = Linear(256, 128)
-input_tensor = Tensor(np.random.randn(32, 256))
-
-profiler = Profiler()
-profile = profiler.profile_forward_pass(layer, input_tensor)
-
-print(f"Parameters: {profile['parameters']:,}")
-print(f"FLOPs: {profile['flops']:,}")
-print(f"Latency: {profile['latency_ms']:.2f} ms")
-print(f"Memory: {profile['peak_memory_mb']:.2f} MB")
+# Comprehensive analysis
+profile = profiler.profile_forward_pass(model, input_tensor)
 print(f"Bottleneck: {profile['bottleneck']}")
-# Output:
-# Parameters: 32,896
-# FLOPs: 2,097,152
-# Latency: 0.15 ms
-# Memory: 2.10 MB
-# Bottleneck: memory
+print(f"GFLOP/s: {profile['gflops_per_second']:.2f}")
+```
+````
 
-# Example 2: Compare architectures
-mlp = Linear(512, 512)
-attention = MultiHeadAttention(d_model=512, num_heads=8)
+````{tab-item} ⚡ PyTorch
+```python
+import torch
+from torch.profiler import profile, ProfilerActivity
 
-mlp_profile = profiler.profile_forward_pass(mlp, mlp_input)
-attention_profile = profiler.profile_forward_pass(attention, attention_input)
+# Count parameters
+params = sum(p.numel() for p in model.parameters())
 
-print(f"MLP GFLOP/s: {mlp_profile['gflops_per_second']:.2f}")
-print(f"Attention GFLOP/s: {attention_profile['gflops_per_second']:.2f}")
-# Output reveals which operation is more efficient
+# Profile with PyTorch profiler
+with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
+    output = model(input_tensor)
 
-# Example 3: Analyze training memory
-training_profile = profiler.profile_backward_pass(model, input_tensor)
+# Analyze results
+print(prof.key_averages().table(sort_by="cpu_time_total"))
 
-print(f"Forward memory: {training_profile['forward_memory_mb']:.1f} MB")
-print(f"Gradient memory: {training_profile['gradient_memory_mb']:.1f} MB")
-print(f"Total training memory: {training_profile['total_memory_mb']:.1f} MB")
+# FLOPs (requires fvcore)
+from fvcore.nn import FlopCountAnalysis
+flops = FlopCountAnalysis(model, input_tensor)
+print(f"FLOPs: {flops.total()}")
+```
+````
+`````
 
-for opt_name, opt_memory in training_profile['optimizer_memory_estimates'].items():
-    total_with_opt = training_profile['total_memory_mb'] + opt_memory
-    print(f"{opt_name.upper()}: {total_with_opt:.1f} MB total")
-# Output:
-# Forward memory: 2.1 MB
-# Gradient memory: 2.0 MB
-# Total training memory: 4.1 MB
-# SGD: 4.1 MB total
-# ADAM: 8.1 MB total (2× extra for momentum + velocity)
+Let's walk through the comparison:
+
+- **Parameter counting**: Both frameworks count total trainable parameters. TinyTorch uses `count_parameters()`, PyTorch uses `sum(p.numel() for p in model.parameters())`.
+- **FLOP counting**: TinyTorch implements per-layer formulas. PyTorch uses the `fvcore` library's `FlopCountAnalysis` for more sophisticated analysis.
+- **Memory tracking**: TinyTorch uses `tracemalloc`. PyTorch profiler tracks CUDA memory events for GPU memory analysis.
+- **Latency measurement**: TinyTorch uses `time.perf_counter()` with warmup. PyTorch profiler uses CUDA events for precise GPU timing.
+- **Analysis output**: Both provide bottleneck identification and throughput metrics. PyTorch adds kernel-level detail and distributed profiling.
+
+```{admonition} What's Identical
+:class: tip
+
+The profiling workflow: measure parameters, FLOPs, memory, and latency to identify bottlenecks. Production frameworks add GPU support and more sophisticated analysis, but the core measurement principles you're learning here transfer directly.
 ```
 
-## Systems Thinking Questions
+### Why Profiling Matters at Scale
 
-### Real-World Applications
+To appreciate profiling's importance, consider production ML systems:
 
-- **Google TPU Optimization**: Profile every kernel to achieve 40-50% MFU (Model FLOPs Utilization). Google improved T5 training from 35% to 48% MFU through profiling-guided optimization, saving millions in compute costs at scale across thousands of TPUs. How would you use profiling to identify and fix utilization bottlenecks?
+- **GPT-3 (175B parameters)**: 700 GB model size at FP32. Profiling reveals which layers to quantize for deployment.
+- **BERT training**: 80% of time in self-attention. Profiling identifies FlashAttention as the optimization to implement.
+- **Image classification**: Batch size 256 uses 12 GB GPU memory. Profiling shows 10 GB is activations, suggesting gradient checkpointing.
 
-- **OpenAI GPT Training**: Profile forward and backward passes separately to measure memory usage across parameters, activations, gradients, and optimizer state. OpenAI identified activation memory as the bottleneck and implemented gradient checkpointing, reducing memory by 10× with only 20% compute overhead while achieving 50%+ MFU. What trade-offs exist between recomputation time and storage memory?
+A single profiling session can reveal optimization opportunities worth 10× speedups or 4× memory reduction. Understanding profiling isn't just academic; it's essential for deploying real ML systems.
 
-- **Meta PyTorch Inference**: Profile operator-by-operator timelines to measure kernel launch overhead and identify operator fusion opportunities. Meta reduced inference latency by 2-3× through operator fusion and optimized p99 latency for billions of daily requests serving Facebook/Instagram recommendations. Why optimize for latency percentiles rather than average?
+## Check Your Understanding
 
-- **NVIDIA cuDNN Development**: Use Nsight profiler to analyze warp occupancy, register pressure, and memory bandwidth utilization to achieve 90%+ of theoretical peak performance. NVIDIA's profiling data guides both kernel optimization and next-generation hardware design (H100 architecture). How do you distinguish compute-bound from memory-bound kernels?
+Test yourself with these systems thinking questions about profiling and performance measurement.
 
-### Profiling Foundations
+**Q1: Parameter Memory Calculation**
 
-- **Amdahl's Law and ROI**: If attention takes 70% of time and you achieve 2× speedup on attention only, overall speedup is just 1.53× (not 2×) because unoptimized portions limit gains. Why does this mean optimization is iterative—requiring re-profiling after each change to identify new bottlenecks?
+A transformer model has 12 layers, each with a feed-forward network containing two Linear layers: Linear(768, 3072) and Linear(3072, 768). How much memory do the feed-forward network parameters consume across all layers?
 
-- **Memory Bandwidth Bottlenecks**: An elementwise ReLU operation on 1B elements achieves only 112 GFLOPs/s despite 100 TFLOPS peak compute (0.11% utilization) because it's memory-bound (8.89 ms to move 8 GB data vs 0.01 ms to compute). What optimization strategies help memory-bound operations vs compute-bound operations?
+```{admonition} Answer
+:class: dropdown
 
-- **Statistical Timing Methodology**: Single measurements include system noise (OS scheduling, thermal throttling, cache effects). Proper profiling uses warmup runs (JIT compilation, cache warming), multiple measurements (100+ iterations), and reports median (robust to outliers) plus p95/p99 percentiles (tail latency). Why does mean latency hide outliers that affect user experience?
+Each feed-forward network:
+- First layer: (768 × 3072) + 3072 = 2,362,368 parameters
+- Second layer: (3072 × 768) + 768 = 2,360,064 parameters
+- Total per layer: 4,722,432 parameters
 
-- **Profiling Overhead Trade-offs**: Instrumentation profiling (15% overhead) provides precise per-operation timing but distorts fast operations, while sampling profiling (2% overhead) enables always-on production monitoring but may miss operations <1 ms. When should you choose instrumentation vs sampling profilers?
+Across 12 layers: 12 × 4,722,432 = 56,669,184 parameters
 
-### Performance Characteristics
+Memory: 56,669,184 × 4 bytes = 226,676,736 bytes ≈ **227 MB**
 
-- **Batch Size Scaling**: Throughput doesn't scale linearly with batch size due to fixed overhead (kernel launch amortizes), memory bandwidth saturation (transfers dominate at large batches), and memory constraints (OOM limits maximum batch size). For a system showing 200→667→914→985 samples/s at batch sizes 1→8→32→64, what's the optimal batch size for throughput vs efficiency vs latency?
+This is just the feed-forward networks. Attention adds more parameters.
+```
 
-- **GPU vs CPU Crossover**: Small matrices (128×128) run faster on CPU despite GPU's 1000× more cores because GPU overhead (1 ms kernel launch) dominates compute time. Large matrices (4096×4096) achieve 267× GPU speedup because overhead amortizes and parallelism saturates GPU cores. What's the crossover point and why does PyTorch automatically dispatch based on operation size?
+**Q2: FLOP Counting and Computational Cost**
 
-- **Parameter vs Activation Memory**: Training memory = Parameters + Activations + Gradients + Optimizer State. For GPT-2 Small (124M params = 496 MB), total training memory is 2.18 GB (4.4× parameter memory) due to activations (200 MB), gradients (496 MB), and Adam state (992 MB = 2× parameters). Which component should you optimize for different memory constraints?
+A Linear(512, 512) layer processes a batch of 64 samples. How many FLOPs are required? If your CPU achieves 50 GFLOP/s, what's the minimum latency?
 
-- **FLOPs vs Latency**: Theoretical FLOPs predict compute cost hardware-independently, but actual latency depends on memory bandwidth and kernel efficiency. A GPT-2 feedforward layer requires 154 GFLOPs, suggesting 0.5 ms on A100 (312 TFLOPS), but actual time is higher due to memory overhead. Why is profiling real hardware essential despite theoretical calculations?
+```{admonition} Answer
+:class: dropdown
 
-## Ready to Build?
+FLOPs per sample: 512 × 512 × 2 = 524,288 FLOPs
 
-You're about to implement the profiling tools that enable all subsequent optimization work. These techniques transform research models into production systems by revealing exactly where time and memory go.
+Total FLOPs: 64 × 524,288 = 33,554,432 FLOPs
 
-**What you'll achieve**:
-- Understand where compute time actually goes in ML models (measure, don't guess)
-- Distinguish memory-bound from compute-bound operations (guides optimization strategy)
-- Make data-driven optimization decisions using Amdahl's Law (maximize ROI on engineering time)
-- Build the measurement foundation for Modules 15-20 (optimization techniques)
+Minimum latency: 33,554,432 FLOPs ÷ 50 GFLOP/s = 33.55M ÷ 50B/s = **0.67 ms**
 
-**The profiling mindset**:
-> "Measure twice, optimize once. Profile before every optimization decision. Without measurement, you're flying blind."
-> — Every production ML engineer
+This assumes perfect computational efficiency (100%). Real latency is higher due to memory bandwidth and overhead.
+```
 
-Choose your preferred way to engage with this module:
+**Q3: Memory Bottleneck Analysis**
+
+A model achieves 5 GFLOP/s on hardware with 100 GFLOP/s peak compute. The memory bandwidth is 50 GB/s. Is this workload compute-bound or memory-bound?
+
+```{admonition} Answer
+:class: dropdown
+
+Computational efficiency: 5 GFLOP/s ÷ 100 GFLOP/s = **5% efficiency**
+
+This extremely low efficiency suggests the workload is **memory-bound**. The hardware can compute 100 GFLOP/s but only achieves 5 GFLOP/s because it spends most of the time waiting for data transfers.
+
+Optimization strategy: Focus on reducing memory transfers, improving cache locality, and data layout optimization. Improving the algorithm's FLOPs won't help because compute isn't the bottleneck.
+```
+
+**Q4: Training Memory Estimation**
+
+A model has 125M parameters (500 MB). You're training with Adam optimizer. What's the total memory requirement during training, including gradients and optimizer state?
+
+```{admonition} Answer
+:class: dropdown
+
+- Parameters: 500 MB
+- Gradients: 500 MB (same as parameters)
+- Adam momentum: 500 MB (first moment estimates)
+- Adam velocity: 500 MB (second moment estimates)
+
+Total: 500 + 500 + 500 + 500 = **2,000 MB (2 GB)**
+
+This is just model state. Activations add more memory that scales with batch size. A typical training run might use 4-8 GB total including activations.
+```
+
+**Q5: Latency Measurement Statistics**
+
+You measure latency 100 times and get: median = 10.5 ms, mean = 12.3 ms, min = 10.1 ms, max = 45.2 ms. Which statistic should you report and why?
+
+```{admonition} Answer
+:class: dropdown
+
+Report the **median (10.5 ms)** as the typical latency.
+
+The mean (12.3 ms) is skewed by the outlier (45.2 ms), likely caused by OS interruption or garbage collection. The median is robust to outliers and represents typical performance.
+
+For production SLA planning, you might also report p95 or p99 latency (95th or 99th percentile) to capture worst-case behavior without being skewed by extreme outliers.
+```
+
+## Further Reading
+
+For students who want to understand the academic foundations and professional practices of ML profiling:
+
+### Seminal Papers
+
+- **Roofline: An Insightful Visual Performance Model** - Williams et al. (2009). Introduces the roofline model for understanding compute vs memory bottlenecks. Essential framework for performance analysis. [ACM CACM](https://doi.org/10.1145/1498765.1498785)
+
+- **PyTorch Profiler: Performance Analysis Tool** - Ansel et al. (2024). Describes PyTorch's production profiling infrastructure. Shows how profiling scales to distributed GPU systems. [arXiv](https://arxiv.org/abs/2404.05033)
+
+- **MLPerf Inference Benchmark** - Reddi et al. (2020). Industry-standard benchmarking methodology for ML systems. Defines rigorous profiling protocols. [arXiv](https://arxiv.org/abs/1911.02549)
+
+### Additional Resources
+
+- **Tool**: [PyTorch Profiler](https://pytorch.org/tutorials/intermediate/tensorboard_profiler_tutorial.html) - Production profiling with GPU support
+- **Tool**: [TensorFlow Profiler](https://www.tensorflow.org/guide/profiler) - Alternative framework's profiling approach
+- **Book**: "Computer Architecture: A Quantitative Approach" - Hennessy & Patterson - Chapter 4 covers memory hierarchy and performance measurement
+
+## What's Next
+
+```{admonition} Coming Up: Module 15 - Quantization
+:class: seealso
+
+Implement quantization to reduce model size and accelerate inference. You'll use profiling insights to identify which layers benefit most from reduced precision, achieving 4× memory reduction with minimal accuracy loss.
+```
+
+**Preview - How Your Profiler Gets Used in Future Modules:**
+
+| Module | What It Does | Your Profiler In Action |
+|--------|--------------|------------------------|
+| **15: Quantization** | Reduce precision to INT8 | `profile_layer()` identifies quantization candidates |
+| **16: Compression** | Prune and compress weights | `count_parameters()` measures compression ratio |
+| **17: Memoization** | Cache attention computations | `measure_latency()` validates speedup |
+
+## Get Started
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card}  Launch Binder
-:link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/14_profiling/profiling_dev.ipynb
+```{grid-item-card} 🚀 Launch Binder
+:link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/14_profiling/14_profiling.py
 :class-header: bg-light
 
-Run this module interactively in your browser. No installation required!
+Run interactively in browser - no setup required
 ```
 
-```{grid-item-card}  Open in Colab
-:link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/14_profiling/profiling_dev.ipynb
+```{grid-item-card} ☁️ Open in Colab
+:link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/14_profiling/14_profiling.py
 :class-header: bg-light
 
-Use Google Colab for cloud compute power and easy sharing.
+Use Google Colab for cloud compute
 ```
 
-```{grid-item-card}  View Source
-:link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/14_profiling/profiling_dev.py
+```{grid-item-card} 📄 View Source
+:link: https://github.com/mlsysbook/TinyTorch/blob/main/src/14_profiling/14_profiling.py
 :class-header: bg-light
 
-Browse the Python source code and understand the implementation.
+Browse the implementation code
 ```
 
 ````
-
-```{admonition}  Save Your Progress
-:class: tip
-**Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
-```
-
-```bash
-cd modules/14_profiling
-tito module start 14
-python profiling_dev.py  # Inline tests as you build
-```
-
----
-
-<div class="prev-next-area">
-<a class="left-prev" href="13_transformers_ABOUT.html" title="previous page">← Module 13: Transformers</a>
-<a class="right-next" href="15_quantization_ABOUT.html" title="next page">Module 15: Quantization →</a>
-</div>
