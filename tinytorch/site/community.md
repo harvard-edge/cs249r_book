@@ -8,62 +8,69 @@
 :align: center
 :caption: TinyTorch Community Ecosystem
 flowchart TB
-    subgraph Benefit[" "]
-        direction TB
-        BenefitTitle["Benefit: Build Systems Intuition & Understand ML Frameworks"]
-        BenefitSub["From Tensors to Systems: Debug, Implement, Optimize"]
-    end
+ %% Top benefit
+ B["Benefit: Build Systems Intuition & Understand ML Frameworks<br/>From Tensors to Systems: Debug, Implement, Optimize"]
 
-    Community(("TinyTorch<br/>Community"))
+ %% Center
+ C(("TinyTorch<br/>Community"))
 
-    Community --> Benefit
+ %% Main branches
+ L["Progress & Connection"]
+ R["Competition & Growth"]
+ S["Learning & Support Ecosystem"]
 
-    subgraph Progress["Progress & Connection"]
-        direction TB
-        P1["Share<br/>Progress"]
-        P2["Connect with<br/>Builders"]
-        P3["Add Yourself<br/>to the Map"]
-    end
+ %% Left branch leaves
+ L1["Share<br/>Progress"]
+ L2["Connect with<br/>Builders"]
+ L3["Add Yourself<br/>to the Map"]
 
-    subgraph Competition["Competition & Growth"]
-        direction TB
-        C1["Torch Olympics<br/>(Capstone)"]
-        C2["Leaderboard"]
-    end
+ %% Right branch leaves
+ R1["Torch Olympics<br/>(Capstone)"]
+ R2["Leaderboard"]
 
-    subgraph Learning["Learning & Support Ecosystem"]
-        direction TB
-        L1["Course Structure<br/>& Resources"]
-        L2["Historical<br/>Milestones"]
-        L3["FAQ &<br/>Troubleshooting"]
-    end
+ %% Support branch leaves
+ S1["Course Structure<br/>& Resources"]
+ S2["Historical<br/>Milestones"]
+ S3["FAQ &<br/>Troubleshooting"]
 
-    Community --> Progress
-    Community --> Competition
-    Community --> Learning
+ %% Connections
+ B --> C
+ C --> L
+ C --> R
+ C --> S
 
-    style Benefit fill:#f5f5f5,stroke:#333
-    style BenefitTitle fill:#f5f5f5,stroke:none
-    style BenefitSub fill:#f5f5f5,stroke:none
-    style Community fill:#e0e0e0,stroke:#333
-    style Progress fill:#f5f5f5,stroke:#333
-    style Competition fill:#f5f5f5,stroke:#333
-    style Learning fill:#f5f5f5,stroke:#333
-    style P1 fill:#fff,stroke:#333,rx:10
-    style P2 fill:#fff,stroke:#333,rx:10
-    style P3 fill:#fff,stroke:#333,rx:10
-    style C1 fill:#fff,stroke:#333,rx:10
-    style C2 fill:#fff,stroke:#333,rx:10
-    style L1 fill:#fff,stroke:#333,rx:10
-    style L2 fill:#fff,stroke:#333,rx:10
-    style L3 fill:#fff,stroke:#333,rx:10
+ L --> L1
+ L --> L2
+ L --> L3
+
+ R --> R1
+ R --> R2
+
+ S --> S1
+ S --> S2
+ S --> S3
+
+ %% Styling - TinyTorch brand colors
+ classDef benefit fill:#fff3cd,stroke:#333,stroke-width:1px,color:#111;
+ classDef center fill:#1b3a5f,stroke:#333,stroke-width:2px,color:#fff;
+ classDef branch fill:#e1f5ff,stroke:#333,stroke-width:1px,color:#111;
+ classDef leafProgress fill:#d4edda,stroke:#333,stroke-width:1px,color:#111;
+ classDef leafCompete fill:#f8d7da,stroke:#333,stroke-width:1px,color:#111;
+ classDef leafSupport fill:#e2d5f1,stroke:#333,stroke-width:1px,color:#111;
+
+ class B benefit;
+ class C center;
+ class L,R,S branch;
+ class L1,L2,L3 leafProgress;
+ class R1,R2 leafCompete;
+ class S1,S2,S3 leafSupport;
 ```
 
 **Learn together, build together, grow together.**
 
 TinyTorch is more than a course—it's a growing community of students, educators, and ML engineers learning systems engineering from first principles.
 
-### Community Dashboard (Available Now ✓)
+### Community Dashboard (Available Now )
 
 Join the global TinyTorch community and see your progress:
 
@@ -82,9 +89,9 @@ There are two primary ways to join and engage with the TinyTorch community:
 You can explore the interactive TinyTorch Community Dashboard directly in your browser:
 
 <p align="center">
-    <a href="community/community.html" target="_blank" class="btn btn-primary btn-lg" style="background-color: #ff6600; color: white; padding: 15px 30px; text-align: center; text-decoration: none; display: inline-block; font-size: 20px; margin: 10px 2px; cursor: pointer; border-radius: 8px; border: none;">
-        Explore Dashboard <span class="badge badge-light">🌎</span>
-    </a>
+ <a href="community/community.html" target="_blank" class="btn btn-primary btn-lg" style="background-color: #ff6600; color: white; padding: 15px 30px; text-align: center; text-decoration: none; display: inline-block; font-size: 20px; margin: 10px 2px; cursor: pointer; border-radius: 8px; border: none;">
+ Explore Dashboard <span class="badge badge-light"></span>
+ </a>
 </p>
 
 ### Option 2: Join via TinyTorch CLI

@@ -1,4 +1,4 @@
-#  Torch Olympics (Module 20)
+# Torch Olympics (Module 20)
 
 ```{image} ../_static/images/tito_olympics.png
 :alt: TinyTorch Olympics
@@ -28,31 +28,31 @@ This isn't a traditional homework assignment. It's a **systems engineering compe
 
 ```{mermaid}
 graph TB
-    FOUNDATION[🏗 Foundation<br/>Tensor, Autograd, Training]
-    ARCHITECTURE[🏛️ Architecture<br/>CNNs, Transformers]
-    OPTIMIZATION[⏱️ Optimization<br/>Quantization, Acceleration]
+ FOUNDATION[ Foundation<br/>Tensor, Autograd, Training]
+ ARCHITECTURE[️ Architecture<br/>CNNs, Transformers]
+ OPTIMIZATION[⏱️ Optimization<br/>Quantization, Acceleration]
 
-    FOUNDATION --> SYSTEM[🏅 Production System]
-    ARCHITECTURE --> SYSTEM
-    OPTIMIZATION --> SYSTEM
+ FOUNDATION --> SYSTEM[ Production System]
+ ARCHITECTURE --> SYSTEM
+ OPTIMIZATION --> SYSTEM
 
-    SYSTEM --> CHALLENGES[Competition Challenges]
+ SYSTEM --> CHALLENGES[Competition Challenges]
 
-    CHALLENGES --> C1[Vision: CIFAR-10<br/>Goal: 80%+ accuracy]
-    CHALLENGES --> C2[Language: TinyTalks<br/>Goal: Coherent generation]
-    CHALLENGES --> C3[Optimization: Speed<br/>Goal: 100 tokens/sec]
-    CHALLENGES --> C4[Compression: Size<br/>Goal: <10MB model]
+ CHALLENGES --> C1[Vision: CIFAR-10<br/>Goal: 80%+ accuracy]
+ CHALLENGES --> C2[Language: TinyTalks<br/>Goal: Coherent generation]
+ CHALLENGES --> C3[Optimization: Speed<br/>Goal: 100 tokens/sec]
+ CHALLENGES --> C4[Compression: Size<br/>Goal: <10MB model]
 
-    C1 --> LEADERBOARD[🏆 TinyTorch Leaderboard]
-    C2 --> LEADERBOARD
-    C3 --> LEADERBOARD
-    C4 --> LEADERBOARD
+ C1 --> LEADERBOARD[ TinyTorch Leaderboard]
+ C2 --> LEADERBOARD
+ C3 --> LEADERBOARD
+ C4 --> LEADERBOARD
 
-    style FOUNDATION fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
-    style ARCHITECTURE fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
-    style OPTIMIZATION fill:#fff3e0,stroke:#f57c00,stroke-width:2px
-    style SYSTEM fill:#fef3c7,stroke:#f59e0b,stroke-width:4px
-    style LEADERBOARD fill:#c8e6c9,stroke:#388e3c,stroke-width:4px
+ style FOUNDATION fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+ style ARCHITECTURE fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+ style OPTIMIZATION fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+ style SYSTEM fill:#fef3c7,stroke:#f59e0b,stroke-width:4px
+ style LEADERBOARD fill:#c8e6c9,stroke:#388e3c,stroke-width:4px
 ```
 
 
@@ -63,7 +63,7 @@ graph TB
 **Challenge**: Achieve the highest accuracy on CIFAR-10 (color images) using YOUR Conv2d implementation.
 
 **Constraints**:
-- Must use YOUR TinyTorch implementation (no PyTorch/TensorFlow)
+- Must use YOUR Tiny🔥Torch implementation (no PyTorch/TensorFlow)
 - Training time: <2 hours on standard hardware
 - Model size: <50MB
 
@@ -161,20 +161,20 @@ Pick one or more competition tracks based on your interests:
 Use all 19 modules you've completed:
 
 ```python
-from tinytorch import Tensor, Linear, Conv2d, Attention  # YOUR code
-from tinytorch import Adam, CrossEntropyLoss             # YOUR optimizers
-from tinytorch import DataLoader, train_loop             # YOUR infrastructure
+from tinytorch import Tensor, Linear, Conv2d, Attention # YOUR code
+from tinytorch import Adam, CrossEntropyLoss # YOUR optimizers
+from tinytorch import DataLoader, train_loop # YOUR infrastructure
 
 # Design your architecture
-model = YourCustomArchitecture()  # Your design choices matter!
+model = YourCustomArchitecture() # Your design choices matter!
 
 # Train with YOUR framework
 optimizer = Adam(model.parameters(), lr=0.001)
 train_loop(model, train_loader, optimizer, epochs=50)
 
 # Optimize for production
-quantized_model = quantize(model)  # YOUR quantization
-pruned_model = prune(quantized_model, sparsity=0.5)  # YOUR pruning
+quantized_model = quantize(model) # YOUR quantization
+pruned_model = prune(quantized_model, sparsity=0.5) # YOUR pruning
 ```
 
 ### 3. Benchmark Rigorously
@@ -304,10 +304,10 @@ Starter code will be provided for each track.
 ## Prerequisites
 
 **Required**:
-- ✓ **All 19 modules completed** (Foundation + Architecture + Optimization)
-- ✓ Experience training models on real datasets
-- ✓ Understanding of profiling and benchmarking
-- ✓ Comfort with YOUR TinyTorch codebase
+- **All 19 modules completed** (Foundation + Architecture + Optimization)
+- Experience training models on real datasets
+- Understanding of profiling and benchmarking
+- Comfort with YOUR Tiny🔥Torch codebase
 
 **Highly recommended**:
 - Complete all 6 historical milestones (1957-2018)

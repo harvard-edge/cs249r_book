@@ -18,7 +18,7 @@ LeNet achieved 99%+ accuracy on handwritten digits, launching the deep learning
 revolution that led to modern computer vision.
 
 🎯 MILESTONE 4 PART 1: PROVE CNNs > MLPs (Offline)
-Using YOUR TinyTorch spatial modules, you'll build a CNN that OUTPERFORMS the
+Using YOUR Tiny🔥Torch spatial modules, you'll build a CNN that OUTPERFORMS the
 MLP from Milestone 03 on the SAME dataset. This proves spatial operations matter!
 
 ✅ REQUIRED MODULES (Run after Module 09):

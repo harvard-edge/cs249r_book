@@ -9,7 +9,7 @@ could learn from examples. It sparked the first AI boom and demonstrated that ma
 could actually learn to recognize patterns, launching the neural network revolution.
 
 🎯 MILESTONE 1: FORWARD PASS (BEFORE TRAINING)
-Using YOUR TinyTorch implementations, you'll build a perceptron with RANDOM weights.
+Using YOUR Tiny🔥Torch implementations, you'll build a perceptron with RANDOM weights.
 This milestone shows you WHY training is essential - the model won't work without it!
 
 ⚠️ IMPORTANT: This is NOT the trained version!
@@ -238,7 +238,7 @@ def visualize_data_points(X, y, predictions=None, weights=None):
 
 
 def main():
-    """Demonstrate Rosenblatt's Perceptron using YOUR TinyTorch system!"""
+    """Demonstrate Rosenblatt's Perceptron using YOUR Tiny🔥Torch system!"""
 
     # Header
     console.print()
@@ -289,7 +289,7 @@ def main():
     # Step 2: Create the Perceptron model with YOUR components
     console.print("[bold]🧠 Step 2: Building Model[/bold]")
     console.print("   [yellow]⚠️  No training yet - you haven't learned Modules 05-07![/yellow]")
-    console.print("   🧠 Assembling perceptron with YOUR TinyTorch modules...")
+    console.print("   🧠 Assembling perceptron with YOUR Tiny🔥Torch modules...")
 
     model = Perceptron(input_size=2, output_size=1)
 

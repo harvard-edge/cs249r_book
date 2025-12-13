@@ -153,7 +153,7 @@ Capstone: Vision • Language • Speed • Compression tracks
 
 ## Recreate ML History
 
-Walk through ML history by rebuilding its greatest breakthroughs with YOUR TinyTorch implementations. Click each milestone to see what you'll build and how it shaped modern AI.
+Walk through ML history by rebuilding its greatest breakthroughs with YOUR Tiny🔥Torch implementations. Click each milestone to see what you'll build and how it shaped modern AI.
 
 ```{raw} html
 <div class="ml-timeline-container">

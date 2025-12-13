@@ -1,4 +1,4 @@
-#  Optimization Tier (Modules 14-19)
+# Optimization Tier (Modules 14-19)
 
 **Transform research prototypes into production-ready systems.**
 
@@ -21,36 +21,36 @@ The Optimization tier teaches you how to make ML systems fast, small, and deploy
 :align: center
 :caption: Architecture Overview
 graph TB
-    A[🏛️ Architecture<br/>CNNs + Transformers]
+ A[️ Architecture<br/>CNNs + Transformers]
 
-    A --> M14[14. Profiling<br/>Find bottlenecks]
+ A --> M14[14. Profiling<br/>Find bottlenecks]
 
-    M14 --> M15[15. Quantization<br/>INT8 compression]
-    M14 --> M16[16. Compression<br/>Structured pruning]
+ M14 --> M15[15. Quantization<br/>INT8 compression]
+ M14 --> M16[16. Compression<br/>Structured pruning]
 
-    M15 --> SMALL[💡 Smaller Models<br/>4-16× size reduction]
-    M16 --> SMALL
+ M15 --> SMALL[ Smaller Models<br/>4-16× size reduction]
+ M16 --> SMALL
 
-    M14 --> M17[17. Memoization<br/>KV-cache for inference]
-    M17 --> M18[18. Acceleration<br/>Batching + optimizations]
+ M14 --> M17[17. Memoization<br/>KV-cache for inference]
+ M17 --> M18[18. Acceleration<br/>Batching + optimizations]
 
-    M18 --> FAST[💡 Faster Inference<br/>12-40× speedup]
+ M18 --> FAST[ Faster Inference<br/>12-40× speedup]
 
-    SMALL --> M19[19. Benchmarking<br/>Systematic measurement]
-    FAST --> M19
+ SMALL --> M19[19. Benchmarking<br/>Systematic measurement]
+ FAST --> M19
 
-    M19 --> OLYMPICS[🏅 MLPerf Torch Olympics<br/>Production-ready systems]
+ M19 --> OLYMPICS[ MLPerf Torch Olympics<br/>Production-ready systems]
 
-    style A fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
-    style M14 fill:#fff3e0,stroke:#f57c00,stroke-width:3px
-    style M15 fill:#ffe0b2,stroke:#ef6c00,stroke-width:3px
-    style M16 fill:#ffe0b2,stroke:#ef6c00,stroke-width:3px
-    style M17 fill:#ffcc80,stroke:#e65100,stroke-width:3px
-    style M18 fill:#ffb74d,stroke:#e65100,stroke-width:3px
-    style M19 fill:#ffa726,stroke:#e65100,stroke-width:4px
-    style SMALL fill:#c8e6c9,stroke:#388e3c,stroke-width:3px
-    style FAST fill:#c8e6c9,stroke:#388e3c,stroke-width:3px
-    style OLYMPICS fill:#fef3c7,stroke:#f59e0b,stroke-width:4px
+ style A fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+ style M14 fill:#fff3e0,stroke:#f57c00,stroke-width:3px
+ style M15 fill:#ffe0b2,stroke:#ef6c00,stroke-width:3px
+ style M16 fill:#ffe0b2,stroke:#ef6c00,stroke-width:3px
+ style M17 fill:#ffcc80,stroke:#e65100,stroke-width:3px
+ style M18 fill:#ffb74d,stroke:#e65100,stroke-width:3px
+ style M19 fill:#ffa726,stroke:#e65100,stroke-width:4px
+ style SMALL fill:#c8e6c9,stroke:#388e3c,stroke-width:3px
+ style FAST fill:#c8e6c9,stroke:#388e3c,stroke-width:3px
+ style OLYMPICS fill:#fef3c7,stroke:#f59e0b,stroke-width:4px
 ```
 
 
@@ -140,26 +140,26 @@ graph TB
 :align: center
 :caption: Architecture Overview
 timeline
-    title Production-Ready Systems
-    Baseline : 100MB model, 0.5 tokens/sec, 95% accuracy
-    Quantization : 25MB model (4× smaller), same accuracy
-    Pruning : 12MB model (8× smaller), 94% accuracy
-    KV-Cache : 50 tokens/sec (100× faster generation)
-    Batching : 500 tokens/sec (1000× throughput)
-    MLPerf Olympics : Production-ready transformer deployment
+ title Production-Ready Systems
+ Baseline : 100MB model, 0.5 tokens/sec, 95% accuracy
+ Quantization : 25MB model (4× smaller), same accuracy
+ Pruning : 12MB model (8× smaller), 94% accuracy
+ KV-Cache : 50 tokens/sec (100× faster generation)
+ Batching : 500 tokens/sec (1000× throughput)
+ MLPerf Olympics : Production-ready transformer deployment
 ```
 
 After completing the Optimization tier, you'll be able to:
 
 - **Milestone 06 (2018)**: Achieve production-ready optimization:
-  - 8-16× smaller models (quantization + pruning)
-  - 12-40× faster inference (KV-cache + batching)
-  - Systematic profiling and benchmarking workflows
+ - 8-16× smaller models (quantization + pruning)
+ - 12-40× faster inference (KV-cache + batching)
+ - Systematic profiling and benchmarking workflows
 
 - Deploy models that run on:
-  - Edge devices (Raspberry Pi, mobile phones)
-  - Cloud infrastructure (cost-effective serving)
-  - Real-time applications (low-latency requirements)
+ - Edge devices (Raspberry Pi, mobile phones)
+ - Cloud infrastructure (cost-effective serving)
+ - Real-time applications (low-latency requirements)
 
 
 ## Prerequisites
@@ -202,9 +202,9 @@ This mirrors production ML workflows where optimization is an iterative, data-dr
 
 ```bash
 cd milestones/06_2018_mlperf
-python 01_baseline_profile.py   # Identify bottlenecks
-python 02_compression.py         # Quantize + prune (8-16× smaller)
-python 03_generation_opts.py    # KV-cache + batching (12-40× faster)
+python 01_baseline_profile.py # Identify bottlenecks
+python 02_compression.py # Quantize + prune (8-16× smaller)
+python 03_generation_opts.py # KV-cache + batching (12-40× faster)
 ```
 
 **What makes this special**: You'll have built the entire optimization pipeline from scratch—profiling tools, quantization engine, pruning algorithms, caching systems, and benchmarking infrastructure.

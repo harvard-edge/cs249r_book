@@ -1,6 +1,6 @@
 # Getting Started with TinyTorch
 
-```{warning} 🔬 Early Explorer Territory
+```{warning} Early Explorer Territory
 
 You're ahead of the curve. TinyTorch is functional but still being refined. Expect rough edges, incomplete documentation, and things that might change. If you proceed, you're helping us shape this by finding what works and what doesn't.
 
@@ -34,7 +34,7 @@ Welcome to TinyTorch! This comprehensive guide will get you started whether you'
 
 
 <a id="students"></a>
-##  For Students: Build Your ML Framework
+## For Students: Build Your ML Framework
 
 ### Quick Setup (2 Minutes)
 
@@ -59,7 +59,7 @@ tito setup
 
 **Keeping up to date:**
 ```bash
-tito update    # Check for and install updates (your work is preserved)
+tito update # Check for and install updates (your work is preserved)
 ```
 
 ### Join the Community (Optional)
@@ -84,13 +84,13 @@ TinyTorch follows a simple three-step workflow that you'll repeat for each modul
 :align: center
 :caption: Architecture Overview
 graph LR
-    A[1. Edit Module<br/>modules/NN_name.ipynb] --> B[2. Export to Package<br/>tito module complete N]
-    B --> C[3. Validate with Milestones<br/>Run milestone scripts]
-    C --> A
+ A[1. Edit Module<br/>modules/NN_name.ipynb] --> B[2. Export to Package<br/>tito module complete N]
+ B --> C[3. Validate with Milestones<br/>Run milestone scripts]
+ C --> A
 
-    style A fill:#fffbeb
-    style B fill:#f0fdf4
-    style C fill:#fef3c7
+ style A fill:#fffbeb
+ style B fill:#f0fdf4
+ style C fill:#fef3c7
 ```
 
 #### Step 1: Edit Modules
@@ -117,12 +117,12 @@ Once your implementation is complete, export it to the main TinyTorch package:
 tito module complete MODULE_NUMBER
 
 # Example:
-tito module complete 01  # Export Module 01 (Tensor)
+tito module complete 01 # Export Module 01 (Tensor)
 ```
 
 After export, your code becomes importable:
 ```python
-from tinytorch.core.tensor import Tensor  # YOUR implementation!
+from tinytorch.core.tensor import Tensor # YOUR implementation!
 ```
 
 #### Step 3: Validate with Milestones
@@ -131,8 +131,8 @@ Run milestone scripts to prove your implementation works:
 
 ```bash
 cd milestones/01_1957_perceptron
-python 01_rosenblatt_forward.py  # Uses YOUR Tensor (M01)
-python 02_rosenblatt_trained.py  # Uses YOUR implementation (M01-M07)
+python 01_rosenblatt_forward.py # Uses YOUR Tensor (M01)
+python 02_rosenblatt_trained.py # Uses YOUR implementation (M01-M07)
 ```
 
 Each milestone has a README explaining:
@@ -157,7 +157,7 @@ tito module complete 01
 
 # Step 3: Validate
 from tinytorch.core.tensor import Tensor
-x = Tensor([1, 2, 3])  # YOUR implementation!
+x = Tensor([1, 2, 3]) # YOUR implementation!
 ```
 
 **What you'll implement:**
@@ -226,10 +226,10 @@ The goal isn't just to write code - it's to **understand** how modern ML framewo
 
 
 <a id="instructors"></a>
-##  For Instructors & TAs: Classroom Support Coming Soon
+## For Instructors & TAs: Classroom Support Coming Soon
 
 <div style="background: #fff3cd; border: 1px solid #ffc107; padding: 1.5rem; border-radius: 0.5rem; margin: 1.5rem 0;">
-<h4 style="margin: 0 0 0.5rem 0; color: #856404;">📢 Stay Tuned: NBGrader Integration In Development</h4>
+<h4 style="margin: 0 0 0.5rem 0; color: #856404;"> Stay Tuned: NBGrader Integration In Development</h4>
 <p style="margin: 0 0 1rem 0; color: #856404;">We're building comprehensive classroom support with NBGrader integration that will enable:</p>
 
 <ul style="margin: 0; color: #664d03; padding-left: 1.5rem;">
@@ -293,7 +293,7 @@ We're actively seeking instructor feedback to shape the classroom experience.
 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin: 2rem 0;">
 
 <div style="background: #f0f9ff; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #3b82f6;">
-<h4 style="margin: 0 0 0.5rem 0; color: #1e40af;">📚 Course Documentation</h4>
+<h4 style="margin: 0 0 0.5rem 0; color: #1e40af;"> Course Documentation</h4>
 <ul style="margin: 0.5rem 0; padding-left: 1.25rem; font-size: 0.9rem;">
 <li><a href="chapters/00-introduction.html">Complete Course Structure</a></li>
 <li><a href="chapters/milestones.html">Historical Milestones</a></li>
@@ -303,7 +303,7 @@ We're actively seeking instructor feedback to shape the classroom experience.
 </div>
 
 <div style="background: #f0fdf4; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #22c55e;">
-<h4 style="margin: 0 0 0.5rem 0; color: #166534;">🛠 CLI & Tools</h4>
+<h4 style="margin: 0 0 0.5rem 0; color: #166534;"> CLI & Tools</h4>
 <ul style="margin: 0.5rem 0; padding-left: 1.25rem; font-size: 0.9rem;">
 <li><a href="tito/overview.html">TITO CLI Overview</a></li>
 <li><a href="tito/modules.html">Module Workflow</a></li>

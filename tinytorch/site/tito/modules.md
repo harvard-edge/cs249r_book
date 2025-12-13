@@ -15,16 +15,16 @@ TinyTorch follows a simple build-export-validate cycle:
 :align: center
 :caption: Architecture Overview
 graph LR
-    A[Start/Resume Module] --> B[Edit in Jupyter]
-    B --> C[Complete & Export]
-    C --> D[Test Import]
-    D --> E[Next Module]
+ A[Start/Resume Module] --> B[Edit in Jupyter]
+ B --> C[Complete & Export]
+ C --> D[Test Import]
+ D --> E[Next Module]
 
-    style A fill:#e3f2fd
-    style B fill:#fffbeb
-    style C fill:#f0fdf4
-    style D fill:#fef3c7
-    style E fill:#f3e5f5
+ style A fill:#e3f2fd
+ style B fill:#fffbeb
+ style C fill:#f0fdf4
+ style D fill:#fef3c7
+ style E fill:#f3e5f5
 ```
 
 **The essential command**: `tito module complete XX` - exports your code to the TinyTorch package
@@ -79,7 +79,7 @@ Here's what a complete session looks like:
 ```bash
 cd TinyTorch
 source activate.sh
-tito system health         # Verify environment
+tito system health # Verify environment
 ```
 
 **2. Start or Resume Module**
@@ -97,9 +97,9 @@ This opens Jupyter Lab with the module notebook.
 ```python
 # In the generated notebook
 class Linear:
-    def __init__(self, in_features, out_features):
-        # YOUR implementation here
-        ...
+ def __init__(self, in_features, out_features):
+ # YOUR implementation here
+ ...
 ```
 
 Work interactively:
@@ -153,10 +153,10 @@ Verifies:
 
 **Output**:
 ```
-✅ Environment validation passed
-  • Virtual environment: Active
-  • Dependencies: NumPy, Jupyter, Rich installed
-  • TinyTorch: Development mode
+ Environment validation passed
+ • Virtual environment: Active
+ • Dependencies: NumPy, Jupyter, Rich installed
+ • TinyTorch: Development mode
 ```
 
 **System Information**
@@ -198,7 +198,7 @@ tito module start 01
 
 **Example**:
 ```bash
-tito module start 05  # Start Module 05 (Autograd)
+tito module start 05 # Start Module 05 (Autograd)
 ```
 
 Jupyter Lab opens with the generated notebook for Module 05
@@ -242,7 +242,7 @@ tito module complete 01
 
 **Example**:
 ```bash
-tito module complete 05  # Export Module 05 (Autograd)
+tito module complete 05 # Export Module 05 (Autograd)
 ```
 
 **After exporting**:
@@ -255,7 +255,7 @@ from tinytorch import Tensor
 x = Tensor([[1.0, 2.0]], requires_grad=True)
 y = x * 2
 y.backward()
-print(x.grad)  # Uses YOUR autograd!
+print(x.grad) # Uses YOUR autograd!
 ```
 
 </div>
@@ -275,13 +275,13 @@ tito module status
 
 **Example Output**:
 ```
-📦 Module Progress
+ Module Progress
 
-✅ Module 01: Tensor (completed 2025-11-16)
-✅ Module 02: Activations (completed 2025-11-16)
-✅ Module 03: Layers (completed 2025-11-16)
-🔒 Module 04: Losses (not started)
-🔒 Module 05: Autograd (not started)
+ Module 01: Tensor (completed 2025-11-16)
+ Module 02: Activations (completed 2025-11-16)
+ Module 03: Layers (completed 2025-11-16)
+ Module 04: Losses (not started)
+ Module 05: Autograd (not started)
 
 Progress: 3/20 modules (15%)
 
@@ -306,7 +306,7 @@ tito module reset 01
 
 **Use this when**: You want to start a module completely fresh
 
-⚠ **Warning**: This removes your implementation. Use with caution!
+ **Warning**: This removes your implementation. Use with caution!
 
 </div>
 
@@ -319,32 +319,32 @@ When you run `tito module complete XX`, here's what happens:
 
 **Step 1: Validation**
 ```
-✓ Checking NBGrader metadata
-✓ Validating Python syntax
-✓ Running inline tests
+ Checking NBGrader metadata
+ Validating Python syntax
+ Running inline tests
 ```
 
 **Step 2: Export**
 ```
-✓ Converting src/XX_name/XX_name.py
-  → modules/XX_name/XX_name.ipynb (notebook)
-  → tinytorch/path/name.py (package)
-✓ Adding "DO NOT EDIT" warning
-✓ Making file read-only
+ Converting src/XX_name/XX_name.py
+ → modules/XX_name/XX_name.ipynb (notebook)
+ → tinytorch/path/name.py (package)
+ Adding "DO NOT EDIT" warning
+ Making file read-only
 ```
 
 **Step 3: Tracking**
 ```
-✓ Recording completion in .tito/progress.json
-✓ Updating module status
+ Recording completion in .tito/progress.json
+ Updating module status
 ```
 
 **Step 4: Success**
 ```
-🎉 Module XX complete!
-   Your code is now part of TinyTorch!
+ Module XX complete!
+ Your code is now part of TinyTorch!
 
-   Import with: from tinytorch import YourClass
+ Import with: from tinytorch import YourClass
 ```
 
 </div>
@@ -355,21 +355,21 @@ When you run `tito module complete XX`, here's what happens:
 ### Development Structure
 
 ```
-src/                          ← Developer source code
+src/ ← Developer source code
 ├── 01_tensor/
-│   └── 01_tensor.py         ← SOURCE OF TRUTH (devs edit)
+│ └── 01_tensor.py ← SOURCE OF TRUTH (devs edit)
 ├── 02_activations/
-│   └── 02_activations.py    ← SOURCE OF TRUTH (devs edit)
+│ └── 02_activations.py ← SOURCE OF TRUTH (devs edit)
 └── 03_layers/
-    └── 03_layers.py         ← SOURCE OF TRUTH (devs edit)
+ └── 03_layers.py ← SOURCE OF TRUTH (devs edit)
 
-modules/                      ← Generated notebooks (students use)
+modules/ ← Generated notebooks (students use)
 ├── 01_tensor/
-│   └── 01_tensor.ipynb      ← AUTO-GENERATED for students
+│ └── 01_tensor.ipynb ← AUTO-GENERATED for students
 ├── 02_activations/
-│   └── 02_activations.ipynb ← AUTO-GENERATED for students
+│ └── 02_activations.ipynb ← AUTO-GENERATED for students
 └── 03_layers/
-    └── 03_layers.ipynb      ← AUTO-GENERATED for students
+ └── 03_layers.ipynb ← AUTO-GENERATED for students
 ```
 
 ### Where Code Exports
@@ -377,10 +377,10 @@ modules/                      ← Generated notebooks (students use)
 ```
 tinytorch/
 ├── core/
-│   └── tensor.py           ← AUTO-GENERATED (DO NOT EDIT)
+│ └── tensor.py ← AUTO-GENERATED (DO NOT EDIT)
 ├── nn/
-│   ├── activations.py      ← AUTO-GENERATED (DO NOT EDIT)
-│   └── layers.py           ← AUTO-GENERATED (DO NOT EDIT)
+│ ├── activations.py ← AUTO-GENERATED (DO NOT EDIT)
+│ └── layers.py ← AUTO-GENERATED (DO NOT EDIT)
 └── ...
 ```
 

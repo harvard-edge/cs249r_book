@@ -17,7 +17,7 @@ You've already proven you can build them - now let's make them production-ready!
 Usage:
     from networks import DigitMLP, SimpleCNN, MinimalTransformer
 
-    # These use YOUR TinyTorch implementations under the hood!
+    # These use YOUR Tiny🔥Torch implementations under the hood!
     mlp = DigitMLP()       # YOUR Linear, ReLU
     cnn = SimpleCNN()      # YOUR Conv2d, MaxPool2d
     transformer = MinimalTransformer()  # YOUR Attention, Embeddings

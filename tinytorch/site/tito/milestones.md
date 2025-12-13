@@ -11,7 +11,7 @@ See [Historical Milestones](chapters/milestones.md) for the full historical cont
 
 ## What Are Milestones?
 
-Milestones are **runnable recreations of historical ML papers** that use YOUR TinyTorch implementations:
+Milestones are **runnable recreations of historical ML papers** that use YOUR Tiny🔥Torch implementations:
 
 - **1957 - Rosenblatt's Perceptron**: The first trainable neural network
 - **1969 - XOR Solution**: Solving the problem that stalled AI
@@ -30,13 +30,13 @@ Each milestone script imports **YOUR code** from the TinyTorch package you built
 
 ```bash
 # 1. Build the required modules (e.g., Foundation Tier for Milestone 03)
-tito module complete 01  # Tensor
-tito module complete 02  # Activations
-tito module complete 03  # Layers
-tito module complete 04  # Losses
-tito module complete 05  # Autograd
-tito module complete 06  # Optimizers
-tito module complete 07  # Training
+tito module complete 01 # Tensor
+tito module complete 02 # Activations
+tito module complete 03 # Layers
+tito module complete 04 # Losses
+tito module complete 05 # Autograd
+tito module complete 06 # Optimizers
+tito module complete 07 # Training
 
 # 2. See what milestones you can run
 tito milestone list
@@ -62,9 +62,9 @@ tito milestone list
 ```
 
 Shows all 6 historical milestones with status:
-- 🔒 **LOCKED** - Need to complete required modules first
-- 🎯 **READY TO RUN** - All prerequisites met!
-- ✓ **COMPLETE** - You've already achieved this
+- **LOCKED** - Need to complete required modules first
+- **READY TO RUN** - All prerequisites met!
+- **COMPLETE** - You've already achieved this
 
 **Simple View** (compact list):
 ```bash
@@ -85,7 +85,7 @@ tito milestone info 03
 Shows:
 - Historical context (year, researchers, significance)
 - Description of what you'll recreate
-- Required modules with ✓/✗ status
+- Required modules with / status
 - Whether you're ready to run it
 
 </div>
@@ -105,7 +105,7 @@ What happens:
 3. **Shows context** - Historical background and what you'll recreate
 4. **Runs the script** - Executes the milestone using YOUR code
 5. **Tracks achievement** - Records your completion
-6. **Celebrates!** - Shows achievement message 🏆
+6. **Celebrates!** - Shows achievement message
 
 **Skip prerequisite checks** (not recommended):
 ```bash
@@ -140,7 +140,7 @@ See your journey through ML history in a visual tree format.
 
 ## The 6 Milestones
 
-### Milestone 01: Perceptron (1957) 🧠
+### Milestone 01: Perceptron (1957)
 
 **What**: Frank Rosenblatt's first trainable neural network
 
@@ -157,7 +157,7 @@ tito milestone run 01
 ```
 
 
-### Milestone 02: XOR Crisis (1969) 🔀
+### Milestone 02: XOR Crisis (1969)
 
 **What**: Solving the problem that stalled AI research
 
@@ -191,7 +191,7 @@ tito milestone run 03
 ```
 
 
-### Milestone 04: CNN Revolution (1998) 👁
+### Milestone 04: CNN Revolution (1998)
 
 **What**: LeNet - Computer Vision Breakthrough
 
@@ -208,7 +208,7 @@ tito milestone run 04
 ```
 
 
-### Milestone 05: Transformer Era (2017) 🤖
+### Milestone 05: Transformer Era (2017)
 
 **What**: "Attention is All You Need"
 
@@ -225,7 +225,7 @@ tito milestone run 05
 ```
 
 
-### Milestone 06: MLPerf Benchmarks (2018) 🏆
+### Milestone 06: MLPerf Benchmarks (2018)
 
 **What**: Production ML Systems
 
@@ -252,26 +252,26 @@ Each milestone requires specific modules to be complete. The `run` command autom
 ```bash
 tito milestone run 03
 
-🔍 Checking prerequisites for Milestone 03...
-  ✓ Module 01 - complete
-  ✓ Module 02 - complete
-  ✓ Module 03 - complete
-  ✓ Module 04 - complete
-  ✓ Module 05 - complete
-  ✓ Module 06 - complete
-  ✓ Module 07 - complete
+ Checking prerequisites for Milestone 03...
+ Module 01 - complete
+ Module 02 - complete
+ Module 03 - complete
+ Module 04 - complete
+ Module 05 - complete
+ Module 06 - complete
+ Module 07 - complete
 
-✅ All prerequisites met!
+ All prerequisites met!
 ```
 
 **Import Validation**:
 ```bash
-🧪 Testing YOUR implementations...
-  ✓ Tensor import successful
-  ✓ Activations import successful
-  ✓ Layers import successful
+ Testing YOUR implementations...
+ Tensor import successful
+ Activations import successful
+ Layers import successful
 
-✅ YOUR TinyTorch is ready!
+ YOUR Tiny🔥Torch is ready!
 ```
 
 ### If Prerequisites Are Missing
@@ -279,15 +279,15 @@ tito milestone run 03
 You'll see a helpful error:
 
 ```bash
-❌ Missing Required Modules
+ Missing Required Modules
 
 Milestone 03 requires modules: 01, 02, 03, 04, 05, 06, 07
 Missing: 05, 06, 07
 
 Complete the missing modules first:
-  tito module start 05
-  tito module start 06
-  tito module start 07
+ tito module start 05
+ tito module start 06
+ tito module start 07
 ```
 
 ## Achievement Celebration
@@ -296,11 +296,11 @@ When you successfully complete a milestone, you'll see:
 
 ```
 ╔════════════════════════════════════════════════╗
-║  🎓 Milestone 03: MLP Revival (1986)           ║
-║  Backpropagation Breakthrough                  ║
+║ Milestone 03: MLP Revival (1986) ║
+║ Backpropagation Breakthrough ║
 ╚════════════════════════════════════════════════╝
 
-🏆 MILESTONE ACHIEVED!
+ MILESTONE ACHIEVED!
 
 You completed Milestone 03: MLP Revival (1986)
 Backpropagation Breakthrough
@@ -312,7 +312,7 @@ What makes this special:
 
 Achievement saved to your progress!
 
-🎯 What's Next:
+ What's Next:
 Milestone 04: CNN Revolution (1998)
 Unlock by completing modules: 08, 09
 ```
@@ -346,13 +346,13 @@ TinyTorch tracks progress in three ways (all are related but distinct):
 
 ```
 Complete Modules (01-07)
-    ↓
+ ↓
 Unlock Milestone 03
-    ↓
+ ↓
 Run: tito milestone run 03
-    ↓
+ ↓
 Achievement Recorded
-    ↓
+ ↓
 Capability Unlocked (optional checkpoint system)
 ```
 
@@ -383,8 +383,8 @@ python -c "from tinytorch import Tensor; print(Tensor([[1,2]]))"
 Learn what you're about to do:
 
 ```bash
-tito milestone info 03  # Read the context first
-tito milestone run 03   # Then run it
+tito milestone info 03 # Read the context first
+tito milestone run 03 # Then run it
 ```
 
 ### 4. Celebrate Achievements

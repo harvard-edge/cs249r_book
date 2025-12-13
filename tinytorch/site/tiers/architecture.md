@@ -1,4 +1,4 @@
-#  Architecture Tier (Modules 08-13)
+# Architecture Tier (Modules 08-13)
 
 **Build modern neural architectures—from computer vision to language models.**
 
@@ -21,30 +21,30 @@ The Architecture tier teaches you how to build the neural network architectures 
 :align: center
 :caption: Architecture Overview
 graph TB
-    F[🏗 Foundation<br/>Tensor, Autograd, Training]
+ F[ Foundation<br/>Tensor, Autograd, Training]
 
-    F --> M08[08. DataLoader<br/>Efficient data pipelines]
-    F --> M09[09. Spatial<br/>Conv2d + Pooling]
+ F --> M08[08. DataLoader<br/>Efficient data pipelines]
+ F --> M09[09. Spatial<br/>Conv2d + Pooling]
 
-    M08 --> M09
-    M09 --> VISION[💡 Computer Vision<br/>CNNs unlock spatial intelligence]
+ M08 --> M09
+ M09 --> VISION[ Computer Vision<br/>CNNs unlock spatial intelligence]
 
-    F --> M10[10. Tokenization<br/>Text → integers]
-    M10 --> M11[11. Embeddings<br/>Integers → vectors]
-    M11 --> M12[12. Attention<br/>Context-aware representations]
-    M12 --> M13[13. Transformers<br/>Complete architecture]
+ F --> M10[10. Tokenization<br/>Text → integers]
+ M10 --> M11[11. Embeddings<br/>Integers → vectors]
+ M11 --> M12[12. Attention<br/>Context-aware representations]
+ M12 --> M13[13. Transformers<br/>Complete architecture]
 
-    M13 --> LLM[💡 Language Models<br/>Transformers generate text]
+ M13 --> LLM[ Language Models<br/>Transformers generate text]
 
-    style F fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
-    style M08 fill:#f3e5f5,stroke:#7b1fa2,stroke-width:3px
-    style M09 fill:#f3e5f5,stroke:#7b1fa2,stroke-width:3px
-    style M10 fill:#e1bee7,stroke:#6a1b9a,stroke-width:3px
-    style M11 fill:#e1bee7,stroke:#6a1b9a,stroke-width:3px
-    style M12 fill:#ce93d8,stroke:#4a148c,stroke-width:3px
-    style M13 fill:#ba68c8,stroke:#4a148c,stroke-width:4px
-    style VISION fill:#fef3c7,stroke:#f59e0b,stroke-width:3px
-    style LLM fill:#fef3c7,stroke:#f59e0b,stroke-width:3px
+ style F fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+ style M08 fill:#f3e5f5,stroke:#7b1fa2,stroke-width:3px
+ style M09 fill:#f3e5f5,stroke:#7b1fa2,stroke-width:3px
+ style M10 fill:#e1bee7,stroke:#6a1b9a,stroke-width:3px
+ style M11 fill:#e1bee7,stroke:#6a1b9a,stroke-width:3px
+ style M12 fill:#ce93d8,stroke:#4a148c,stroke-width:3px
+ style M13 fill:#ba68c8,stroke:#4a148c,stroke-width:4px
+ style VISION fill:#fef3c7,stroke:#f59e0b,stroke-width:3px
+ style LLM fill:#fef3c7,stroke:#f59e0b,stroke-width:3px
 ```
 
 
@@ -126,9 +126,9 @@ graph TB
 :align: center
 :caption: Architecture Overview
 timeline
-    title Historical Achievements Unlocked
-    1998 : CNN Revolution : 75%+ accuracy on CIFAR-10 with spatial intelligence
-    2017 : Transformer Era : Text generation with attention mechanisms
+ title Historical Achievements Unlocked
+ 1998 : CNN Revolution : 75%+ accuracy on CIFAR-10 with spatial intelligence
+ 2017 : Transformer Era : Text generation with attention mechanisms
 ```
 
 After completing the Architecture tier, you'll be able to:
@@ -172,24 +172,24 @@ Each module follows the **Build → Use → Reflect** cycle with **real datasets
 
 ## Key Achievements
 
-### 🎯 Milestone 04: CNN Revolution (1998)
+### Milestone 04: CNN Revolution (1998)
 
 **After Module 09**, you'll recreate Yann LeCun's breakthrough:
 
 ```bash
 cd milestones/04_1998_cnn
-python 02_lecun_cifar10.py  # 75%+ accuracy on CIFAR-10
+python 02_lecun_cifar10.py # 75%+ accuracy on CIFAR-10
 ```
 
 **What makes this special**: You're not just importing `torch.nn.Conv2d`—you built the entire convolutional architecture from scratch.
 
-### 🎯 Milestone 05: Transformer Era (2017)
+### Milestone 05: Transformer Era (2017)
 
 **After Module 13**, you'll implement the attention revolution:
 
 ```bash
 cd milestones/05_2017_transformer
-python 01_vaswani_generation.py  # Text generation with YOUR transformer
+python 01_vaswani_generation.py # Text generation with YOUR transformer
 ```
 
 **What makes this special**: Your attention implementation powers the same architecture behind GPT, ChatGPT, and modern LLMs.

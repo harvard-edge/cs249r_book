@@ -328,7 +328,7 @@ This can happen if you create new Tensor objects incorrectly, breaking the autog
 
 ### Your Implementation vs. PyTorch
 
-Your TinyTorch attention and PyTorch's `nn.MultiheadAttention` implement the same mathematical operations. The differences are in implementation efficiency, features, and flexibility. PyTorch uses highly optimized C++ kernels, supports additional attention variants, and integrates with production training systems.
+Your Tiny🔥Torch attention and PyTorch's `nn.MultiheadAttention` implement the same mathematical operations. The differences are in implementation efficiency, features, and flexibility. PyTorch uses highly optimized C++ kernels, supports additional attention variants, and integrates with production training systems.
 
 | Feature | Your Implementation | PyTorch |
 |---------|---------------------|---------|
@@ -346,7 +346,7 @@ Your TinyTorch attention and PyTorch's `nn.MultiheadAttention` implement the sam
 The following comparison shows equivalent attention operations in TinyTorch and PyTorch. Notice how the high-level API and shape conventions match almost exactly.
 
 `````{tab-set}
-````{tab-item} Your TinyTorch
+````{tab-item} Your Tiny🔥Torch
 ```python
 from tinytorch.core.attention import MultiHeadAttention
 from tinytorch.core.tensor import Tensor

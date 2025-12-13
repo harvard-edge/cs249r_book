@@ -379,7 +379,7 @@ Your autograd system and PyTorch's share the same design: computation graphs bui
 The following comparison shows identical conceptual patterns in TinyTorch and PyTorch. The APIs mirror each other because both implement the same autograd algorithm.
 
 `````{tab-set}
-````{tab-item} Your TinyTorch
+````{tab-item} Your Tiny🔥Torch
 ```python
 from tinytorch import Tensor
 

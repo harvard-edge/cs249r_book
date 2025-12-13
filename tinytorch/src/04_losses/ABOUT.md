@@ -291,7 +291,7 @@ loss = BinaryCrossEntropyLoss()(probabilities, targets)
 
 ### Your Implementation vs. PyTorch
 
-Your TinyTorch loss functions and PyTorch's implementations share the same mathematical foundations and numerical stability techniques. The differences are in performance optimizations, GPU support, and additional features for production use.
+Your Tiny🔥Torch loss functions and PyTorch's implementations share the same mathematical foundations and numerical stability techniques. The differences are in performance optimizations, GPU support, and additional features for production use.
 
 | Feature | Your Implementation | PyTorch |
 |---------|---------------------|---------|
@@ -307,7 +307,7 @@ Your TinyTorch loss functions and PyTorch's implementations share the same mathe
 The following comparison shows equivalent loss computations in TinyTorch and PyTorch. Notice how the high-level API is nearly identical - you're learning the same patterns used in production.
 
 `````{tab-set}
-````{tab-item} Your TinyTorch
+````{tab-item} Your Tiny🔥Torch
 ```python
 from tinytorch import Tensor
 from tinytorch.core.losses import MSELoss, CrossEntropyLoss

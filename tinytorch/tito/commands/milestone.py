@@ -1100,7 +1100,7 @@ class MilestoneCommand(BaseCommand):
                     from tinytorch import Linear
                     console.print("  [green]✓[/green] Layers import successful")
 
-                console.print(f"\n[green]✅ YOUR TinyTorch is ready![/green]\n")
+                console.print(f"\n[green]✅ YOUR Tiny🔥Torch is ready![/green]\n")
 
             except ImportError as e:
                 console.print(Panel(
@@ -1132,7 +1132,7 @@ class MilestoneCommand(BaseCommand):
             f"[bold]🎯 What You'll Do:[/bold]\n"
             f"{milestone['description']}\n\n"
             f"{scripts_info}\n\n"
-            f"[dim]All code uses YOUR TinyTorch implementations![/dim]",
+            f"[dim]All code uses YOUR Tiny🔥Torch implementations![/dim]",
             title=f"🏆 Milestone {milestone_id} ({milestone['year']})",
             border_style="bright_magenta",
             padding=(1, 2)

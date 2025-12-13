@@ -372,7 +372,7 @@ In production, engineers maintain this documentation across hundreds of experime
 
 ### Your Implementation vs. Industry Standards
 
-Your TinyTorch benchmarking system implements the same principles used by production ML frameworks and research competitions, just at educational scale.
+Your Tiny🔥Torch benchmarking system implements the same principles used by production ML frameworks and research competitions, just at educational scale.
 
 | Feature | Your Implementation | Production Systems |
 |---------|---------------------|-------------------|
@@ -387,7 +387,7 @@ Your TinyTorch benchmarking system implements the same principles used by produc
 The following comparison shows how your educational implementation translates to production tools.
 
 `````{tab-set}
-````{tab-item} Your TinyTorch
+````{tab-item} Your Tiny🔥Torch
 ```python
 from tinytorch.capstone import BenchmarkReport, generate_submission
 

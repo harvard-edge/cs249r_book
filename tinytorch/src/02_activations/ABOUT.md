@@ -316,7 +316,7 @@ Memory complexity is O(n) for all activations because they create an output tens
 
 ### Your Implementation vs. PyTorch
 
-Your TinyTorch activations and PyTorch's `torch.nn.functional` activations implement the same mathematical functions with the same numerical stability measures. The differences are in optimization and GPU support:
+Your Tiny🔥Torch activations and PyTorch's `torch.nn.functional` activations implement the same mathematical functions with the same numerical stability measures. The differences are in optimization and GPU support:
 
 | Feature | Your Implementation | PyTorch |
 |---------|---------------------|---------|
@@ -331,7 +331,7 @@ Your TinyTorch activations and PyTorch's `torch.nn.functional` activations imple
 The following comparison shows equivalent activation usage in TinyTorch and PyTorch. Notice how the APIs are nearly identical, differing only in import paths and minor syntax.
 
 `````{tab-set}
-````{tab-item} Your TinyTorch
+````{tab-item} Your Tiny🔥Torch
 ```python
 from tinytorch.core.activations import ReLU, Sigmoid, Softmax
 from tinytorch.core.tensor import Tensor

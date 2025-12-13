@@ -82,7 +82,7 @@ Running validation tests...
 │ All 65 required checks passed.                                               │
 │ 3 optional checks skipped.                                                   │
 │                                                                              │
-│ Your TinyTorch environment is ready to use! 🎉                               │
+│ Your Tiny🔥Torch environment is ready to use! 🎉                               │
 │                                                                              │
 │ Next: tito module 01                                                         │
 ╰──────────────────────────────────────────────────────────────────────────────╯

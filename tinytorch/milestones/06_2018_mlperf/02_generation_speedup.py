@@ -90,7 +90,7 @@ def main():
     # IMPORT YOUR IMPLEMENTATIONS
     # ========================================================================
 
-    console.print("\n[bold cyan]📦 Loading YOUR TinyTorch implementations...[/bold cyan]\n")
+    console.print("\n[bold cyan]📦 Loading YOUR Tiny🔥Torch implementations...[/bold cyan]\n")
 
     try:
         # Core components

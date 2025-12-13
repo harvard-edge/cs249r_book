@@ -364,7 +364,7 @@ Your transformer implementation and PyTorch's production transformers share the 
 The following comparison shows equivalent transformer usage in TinyTorch and PyTorch. The API patterns are nearly identical because your implementation follows production design principles.
 
 `````{tab-set}
-````{tab-item} Your TinyTorch
+````{tab-item} Your Tiny🔥Torch
 ```python
 from tinytorch.core.transformer import TransformerBlock, GPT
 

@@ -231,7 +231,7 @@ Production profilers add GPU support (CUDA events, NVTX markers), distributed tr
 
 ### Your Implementation vs. PyTorch
 
-Your TinyTorch Profiler and PyTorch's profiling tools share the same conceptual foundation. The differences are in implementation detail: PyTorch adds GPU support, kernel-level profiling, and distributed tracing. But the core metrics (parameters, FLOPs, memory, latency) are identical.
+Your Tiny🔥Torch Profiler and PyTorch's profiling tools share the same conceptual foundation. The differences are in implementation detail: PyTorch adds GPU support, kernel-level profiling, and distributed tracing. But the core metrics (parameters, FLOPs, memory, latency) are identical.
 
 | Feature | Your Implementation | PyTorch |
 |---------|---------------------|---------|
@@ -247,7 +247,7 @@ Your TinyTorch Profiler and PyTorch's profiling tools share the same conceptual 
 The following comparison shows equivalent profiling operations in TinyTorch and PyTorch. Notice how the concepts transfer directly, even though PyTorch provides more sophisticated tooling.
 
 `````{tab-set}
-````{tab-item} Your TinyTorch
+````{tab-item} Your Tiny🔥Torch
 ```python
 from tinytorch.perf.profiling import Profiler
 

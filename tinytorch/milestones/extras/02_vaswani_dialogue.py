@@ -11,7 +11,7 @@
 - The difference? Scale: Copilot trains on BILLIONS of code patterns
 
 🎯 WHAT YOU'RE BUILDING:
-A mini version of GitHub Copilot using YOUR TinyTorch implementations!
+A mini version of GitHub Copilot using YOUR Tiny🔥Torch implementations!
 Train a transformer on 50 Python patterns and watch it learn to autocomplete.
 
 Student Journey:

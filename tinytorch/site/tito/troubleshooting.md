@@ -21,11 +21,11 @@ tito system health
 ```
 
 This checks:
-- ✓ Virtual environment activated
-- ✓ Dependencies installed (NumPy, Jupyter, Rich)
-- ✓ TinyTorch in development mode
-- ✓ Data files intact
-- ✓ All systems ready
+- Virtual environment activated
+- Dependencies installed (NumPy, Jupyter, Rich)
+- TinyTorch in development mode
+- Data files intact
+- All systems ready
 
 **If health shows errors**: Follow the specific fixes below.
 
@@ -55,7 +55,7 @@ cd TinyTorch
 source activate.sh
 
 # 2. Verify activation
-which python  # Should show TinyTorch/venv/bin/python
+which python # Should show TinyTorch/venv/bin/python
 
 # 3. Re-install TinyTorch in development mode
 pip install -e .
@@ -83,7 +83,7 @@ ModuleNotFoundError: No module named 'tinytorch'
 **Solution**:
 ```bash
 # 1. Verify you're in the right directory
-pwd  # Should end with /TinyTorch
+pwd # Should end with /TinyTorch
 
 # 2. Activate environment
 source activate.sh
@@ -127,8 +127,8 @@ rm -rf venv/
 source activate.sh
 
 # 4. Verify
-python --version  # Should be 3.8+
-which pip  # Should show TinyTorch/venv/bin/pip
+python --version # Should be 3.8+
+which pip # Should show TinyTorch/venv/bin/pip
 ```
 
 **Expected**: `(venv)` prefix appears in terminal prompt.
@@ -145,7 +145,7 @@ which pip  # Should show TinyTorch/venv/bin/pip
 **Symptom**:
 ```bash
 $ tito module complete 03
-❌ Export failed: SyntaxError in source file
+ Export failed: SyntaxError in source file
 ```
 
 **Causes**:
@@ -190,7 +190,7 @@ tito module complete 03
 ```bash
 $ tito module complete 05
 Running tests...
-❌ Test failed: test_backward_simple
+ Test failed: test_backward_simple
 ```
 
 **Cause**: Your implementation doesn't match expected behavior.
@@ -208,8 +208,8 @@ tito module resume 05
 ```python
 # Add print statements to see what's happening
 def backward(self):
-    print(f"Debug: self.grad = {self.grad}")
-    # ... your implementation
+ print(f"Debug: self.grad = {self.grad}")
+ # ... your implementation
 ```
 
 **Step 3: Compare with expected behavior**:
@@ -321,7 +321,7 @@ ImportError: cannot import name 'Linear' from 'tinytorch'
 **Step 1: Verify module completed**:
 ```bash
 tito module status
-# Check if module shows as ✅ completed
+# Check if module shows as completed
 ```
 
 **Step 2: Check exported file exists**:
@@ -369,8 +369,8 @@ ImportError: cannot import name 'Tensor' from partially initialized module 'tiny
 ```python
 # Inside functions, not at module level
 def some_function():
-    from tinytorch.core import Tensor  # Local import
-    ...
+ from tinytorch.core import Tensor # Local import
+ ...
 ```
 
 **Step 3: Re-export**:
@@ -390,8 +390,8 @@ tito module complete XX
 **Symptom**:
 ```bash
 $ tito milestone run 04
-❌ Prerequisites not met
-   Missing modules: 08, 09
+ Prerequisites not met
+ Missing modules: 08, 09
 ```
 
 **Cause**: You haven't completed required modules yet.
@@ -406,8 +406,8 @@ tito milestone info 04
 
 **Step 2: Complete required modules**:
 ```bash
-tito module status  # See what's completed
-tito module start 08  # Complete missing modules
+tito module status # See what's completed
+tito module start 08 # Complete missing modules
 # ... implement and export
 tito module complete 08
 ```
@@ -569,7 +569,7 @@ tito module reset 05
 ```bash
 # Remove progress tracking (will be recreated)
 rm .tito/progress.json
-tito system health  # Recreates the file
+tito system health # Recreates the file
 ```
 
 **Option 3: Manually edit `.tito/progress.json`**:
@@ -744,7 +744,7 @@ source venv/Scripts/activate
 ```bash
 python3.8 -m venv venv
 source activate.sh
-python --version  # Verify
+python --version # Verify
 ```
 
 </div>
@@ -809,35 +809,35 @@ python -c "from tinytorch import Tensor" 2>&1 | less
 **Avoid issues before they happen**:
 
 1. **Always activate environment first**:
-   ```bash
-   source activate.sh
-   ```
+ ```bash
+ source activate.sh
+ ```
 
 2. **Run `tito system health` regularly**:
-   ```bash
-   tito system health
-   ```
+ ```bash
+ tito system health
+ ```
 
 3. **Test in Jupyter before exporting**:
-   ```bash
-   # Run all cells, verify output
-   # THEN run tito module complete
-   ```
+ ```bash
+ # Run all cells, verify output
+ # THEN run tito module complete
+ ```
 
 4. **Keep backups** (automatic):
-   ```bash
-   # Backups happen automatically
-   # Don't delete .tito/backups/ unless needed
-   ```
+ ```bash
+ # Backups happen automatically
+ # Don't delete .tito/backups/ unless needed
+ ```
 
 5. **Use git for your code**:
-   ```bash
-   git commit -m "Working Module 05 implementation"
-   ```
+ ```bash
+ git commit -m "Working Module 05 implementation"
+ ```
 
 6. **Read error messages carefully**:
-   - They usually tell you exactly what's wrong
-   - Pay attention to file paths and line numbers
+ - They usually tell you exactly what's wrong
+ - Pay attention to file paths and line numbers
 
 </div>
 

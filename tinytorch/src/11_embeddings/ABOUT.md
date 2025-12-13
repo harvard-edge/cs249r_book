@@ -398,7 +398,7 @@ embeddings = embed(tokens)  # Shape: (1, 3, 512) - correct
 
 ### Your Implementation vs. PyTorch
 
-Your TinyTorch embedding system and PyTorch's `torch.nn.Embedding` share the same conceptual design and API patterns. The differences are in scale, optimization, and device support.
+Your Tiny🔥Torch embedding system and PyTorch's `torch.nn.Embedding` share the same conceptual design and API patterns. The differences are in scale, optimization, and device support.
 
 | Feature | Your Implementation | PyTorch |
 |---------|---------------------|---------|
@@ -416,7 +416,7 @@ Your TinyTorch embedding system and PyTorch's `torch.nn.Embedding` share the sam
 The following comparison shows equivalent embedding operations in TinyTorch and PyTorch. Notice how the APIs mirror each other closely.
 
 `````{tab-set}
-````{tab-item} Your TinyTorch
+````{tab-item} Your Tiny🔥Torch
 ```python
 from tinytorch.core.embeddings import Embedding, EmbeddingLayer
 

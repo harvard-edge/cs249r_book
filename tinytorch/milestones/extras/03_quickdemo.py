@@ -11,7 +11,7 @@ random noise becomes coherent answers - the same progression that happens
 (at much larger scale) when training GPT, Claude, and other LLMs.
 
 🎯 WHAT YOU'RE BUILDING:
-A live training dashboard using YOUR TinyTorch implementations!
+A live training dashboard using YOUR Tiny🔥Torch implementations!
 See model responses evolve from gibberish to coherent answers in ~2 minutes.
 
 Features:

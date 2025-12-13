@@ -314,7 +314,7 @@ The relationship between learning rate and batch size matters for distributed tr
 
 ### Your Implementation vs. PyTorch
 
-Your TinyTorch optimizers and PyTorch's `torch.optim` share the same algorithmic foundations and API patterns. The differences lie in implementation details: PyTorch uses optimized C++/CUDA kernels, supports mixed precision training, and includes specialized optimizers for specific domains.
+Your Tiny🔥Torch optimizers and PyTorch's `torch.optim` share the same algorithmic foundations and API patterns. The differences lie in implementation details: PyTorch uses optimized C++/CUDA kernels, supports mixed precision training, and includes specialized optimizers for specific domains.
 
 | Feature | Your Implementation | PyTorch |
 |---------|---------------------|---------|
@@ -329,7 +329,7 @@ Your TinyTorch optimizers and PyTorch's `torch.optim` share the same algorithmic
 The following comparison shows how optimizer usage looks nearly identical in TinyTorch and PyTorch. This similarity is intentional: by learning TinyTorch's patterns, you're simultaneously learning production PyTorch patterns.
 
 `````{tab-set}
-````{tab-item} Your TinyTorch
+````{tab-item} Your Tiny🔥Torch
 ```python
 from tinytorch.core.optimizers import Adam
 

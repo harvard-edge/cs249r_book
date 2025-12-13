@@ -437,7 +437,7 @@ Your Trainer class and PyTorch's training infrastructure (Lightning, Hugging Fac
 The following comparison shows equivalent training pipelines in TinyTorch and PyTorch. Notice how the conceptual flow is identical: create model, optimizer, loss, trainer, then loop through epochs.
 
 `````{tab-set}
-````{tab-item} Your TinyTorch
+````{tab-item} Your Tiny🔥Torch
 ```python
 from tinytorch import Trainer, CosineSchedule, SGD, MSELoss
 
