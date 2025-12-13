@@ -67,7 +67,7 @@ if result['newly_unlocked']:
 
 **Purpose**: Display current milestone progress.
 
-**When to call**: When student runs `tito milestones progress`.
+**When to call**: When student runs `tito milestone status`.
 
 **Example**:
 ```python
@@ -91,7 +91,7 @@ show_progress()
 
 **Purpose**: List all unlocked milestone tests.
 
-**When to call**: When student runs `tito milestones list`.
+**When to call**: When student runs `tito milestone list`.
 
 **Example**:
 ```python
@@ -135,7 +135,7 @@ MILESTONES = {
 # In module_workflow.py
 def complete_module(self, module_number):
     # ... run tests, export ...
-    
+
     # Check for milestone unlocks
     self._check_milestone_unlocks(module_name)
 
@@ -145,25 +145,25 @@ def _check_milestone_unlocks(self, module_name):
     check_module_export(module_name, console=self.console)
 ```
 
-### Milestones Command (`tito milestones`)
+### Milestone Command (`tito milestone`)
 
 ```python
 # In milestones.py
 class MilestonesCommand(BaseCommand):
     def run(self, args):
         from milestone_tracker import MilestoneTracker, MILESTONES
-        
+
         tracker = MilestoneTracker()
-        
+
         if args.action == "progress":
             tracker.show_progress()
-        
+
         elif args.action == "run":
             # Verify requirements
             if not tracker.can_run_milestone(milestone_id):
                 # Show what's needed
                 return 1
-            
+
             # Run pytest test
             # Mark complete if passed
 ```
@@ -201,7 +201,7 @@ if module in completed:
         if requirements_met(milestone_id):
             show_unlock_message(milestone_id)
 
-# In module_workflow.py  
+# In module_workflow.py
 if module in completed:
     for milestone_id in MILESTONES:  # DUPLICATE!
         if requirements_met(milestone_id):  # DUPLICATE!
@@ -318,4 +318,3 @@ check_module_export(module_name, console)
 
 # That's it! Milestone tracker handles everything else.
 ```
-

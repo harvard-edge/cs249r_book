@@ -35,13 +35,16 @@ CNNs that exploit spatial structure in images:
 
 ## Milestone Structure
 
-This milestone uses **spatial architecture progression** with 2 scripts:
+This milestone has **two parts** that progressively showcase your TinyTorch modules:
 
-### 01_lecun_tinydigits.py
+### Part 1: TinyDigits (works offline)
+
+**Script:** `01_lecun_tinydigits.py`
+
 **Purpose:** Prove CNNs > MLPs on same data
 
-- **Dataset:** TinyDigits (8×8 handwritten digits)
-- **Architecture:** Conv(1→8) → Pool → Conv(8→16) → Pool → Linear(→10)
+- **Dataset:** TinyDigits (8x8 handwritten digits, ships with repo)
+- **Architecture:** Conv(1->8) -> Pool -> Conv(8->16) -> Pool -> Linear(->10)
 - **Comparison:** CNN ~90% vs MLP ~80% (Milestone 03)
 - **Key Learning:** "Convolution preserves spatial structure!"
 
@@ -50,13 +53,22 @@ This milestone uses **spatial architecture progression** with 2 scripts:
 - Direct proof that spatial operations help
 - ~10% accuracy gain from exploiting locality
 
-### 02_lecun_cifar10.py
-**Purpose:** Scale to natural color images
+### Part 2: CIFAR-10 (requires download)
 
-- **Dataset:** CIFAR-10 (60K images, 32×32 RGB, 10 classes)
-- **Architecture:** Deeper CNN with multiple conv blocks
-- **Expected:** 65-75% accuracy (decent for pure Python!)
-- **Key Learning:** "CNNs scale to realistic vision tasks!"
+**Script:** `02_lecun_cifar10.py`
+
+**Purpose:** Scale to natural color images + showcase YOUR DataLoader!
+
+- **Dataset:** CIFAR-10 (60K images, 32x32 RGB, 10 classes)
+- **Architecture:** Deeper CNN with BatchNorm + data augmentation
+- **Expected:** 70%+ accuracy
+- **Key Learning:** "YOUR DataLoader + CNN scale to realistic vision!"
+
+**What Part 2 Showcases:**
+- **YOUR DataLoader (Module 08)** batches 50,000 images efficiently
+- **YOUR Dataset abstraction** handles real image data
+- Shuffling prevents memorization, improves generalization
+- First-run prompts for download (~170 MB) with space check
 
 **Historical Note:** CIFAR-10 (2009) became the benchmark for evaluating CNN architectures before ImageNet.
 

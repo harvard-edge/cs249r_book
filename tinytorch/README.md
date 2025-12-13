@@ -4,7 +4,7 @@
 
 ### Build Your Own ML Framework From Scratch
 
-[![CI](https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/tinytorch-ci.yml?branch=dev&label=CI&logo=githubactions)](https://github.com/harvard-edge/cs249r_book/actions/workflows/tinytorch-ci.yml)
+[![Status](https://img.shields.io/badge/status-preview-orange?logo=github)](https://github.com/harvard-edge/cs249r_book/discussions/1076)
 [![Docs](https://img.shields.io/badge/docs-mlsysbook.ai-blue?logo=readthedocs)](https://mlsysbook.ai/tinytorch)
 [![Python](https://img.shields.io/badge/python-3.8+-3776ab?logo=python&logoColor=white)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -12,15 +12,15 @@
 
 **Most ML courses teach you to *use* frameworks. TinyTorch teaches you to *build* them.**
 
-[Get Started](#-quick-start) · [20 Modules](#-20-progressive-modules) · [Documentation](https://mlsysbook.ai/tinytorch) · [Contributing](CONTRIBUTING.md)
+[The Vision](#why-tinytorch) · [20 Modules](#-20-progressive-modules) · [Share Feedback](https://github.com/harvard-edge/cs249r_book/discussions/1076)
 
 </div>
 
 ---
 
-> 🧪 **Early Access** - TinyTorch is available for early adopters! All 20 modules are implemented with complete solutions and the `tito` CLI for streamlined workflows.
+> 🚧 **Preview Release** — TinyTorch is functional but evolving. We're sharing early to shape the direction with community input rather than building in isolation.
 >
-> 🎯 **Spring 2025**: Full public release with community features and classroom deployment resources.
+> 📅 **Classroom Ready**: Summer/Fall 2026 · **Right Now**: [We want your feedback](#-help-shape-tinytorch)
 
 ---
 
@@ -61,22 +61,38 @@ A **complete ML framework** capable of:
 
 ---
 
-## Quick Start
+## 🛠 Help Shape TinyTorch
 
-```bash
-# One-line install
-curl -sSL tinytorch.ai/install | bash
+We're sharing TinyTorch early because we'd rather shape the direction with community input than build in isolation. Before diving into code, we want to hear from you:
 
-# Activate and get started
-cd tinytorch
-source .venv/bin/activate
-tito setup
+**If you're a student:**
+→ What hands-on labs or projects would help you learn ML systems?
 
-# Start building!
-tito module start 01
-```
+**If you teach:**
+→ What would make TinyTorch easy to bring into a course?
 
-> **Tip**: Run the installer from a project folder (e.g., `~/projects`). It will create a `tinytorch/` directory with everything you need. Update anytime with `tito update`.
+**If you're a practitioner:**
+→ What real-world systems tasks should we simulate?
+
+**For everyone:**
+→ What natural extensions belong in this "AI bricks" model?
+
+📣 **[Share your thoughts in the discussion →](https://github.com/harvard-edge/cs249r_book/discussions/1076)**
+
+---
+
+## Current Status
+
+| Ready | In Progress | Coming Soon |
+|-------|-------------|-------------|
+| ✅ All 20 modules implemented | 🔧 Documentation polish | 📅 NBGrader integration |
+| ✅ Complete test suite (600+ tests) | 🔧 Edge case handling | 📅 Community leaderboard |
+| ✅ `tito` CLI for workflows | 🔧 Instructor resources | 📅 Binder/Colab support |
+| ✅ Historical milestone scripts | | |
+
+**Want to explore the code?** [Browse the repository structure](#repository-structure) to see how modules are organized.
+
+**Adventurous early adopter?** Local installation works, but expect rough edges. See the [setup guide](site/getting-started.md).
 
 ---
 

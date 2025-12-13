@@ -2,7 +2,7 @@
 Milestone command group for TinyTorch CLI: capability-based learning progression.
 
 The milestone system transforms module completion into meaningful capability achievements.
-Instead of just finishing modules, students unlock epic milestones that represent 
+Instead of just finishing modules, students unlock epic milestones that represent
 real-world ML engineering skills.
 """
 
@@ -82,10 +82,23 @@ MILESTONE_SCRIPTS = {
         "name": "CNN Revolution (1998)",
         "year": 1998,
         "title": "LeNet - Computer Vision Breakthrough",
-        "script": "milestones/04_1998_cnn/01_lecun_tinydigits.py",
-        "required_modules": [1, 2, 3, 4, 5, 6, 8, 9],  # + Spatial (09)
-        "description": "Build LeNet for digit recognition",
-        "historical_context": "Yann LeCun's convolutional networks",
+        "scripts": [
+            {
+                "name": "TinyDigits",
+                "script": "milestones/04_1998_cnn/01_lecun_tinydigits.py",
+                "description": "Prove CNNs > MLPs on synthetic 8x8 digits (works offline)",
+                "required_modules": [1, 2, 3, 4, 5, 6, 9]  # Core + Spatial (no DataLoader needed)
+            },
+            {
+                "name": "CIFAR-10",
+                "script": "milestones/04_1998_cnn/02_lecun_cifar10.py",
+                "description": "Scale to natural images with YOUR DataLoader (requires download)",
+                "required_modules": [1, 2, 3, 4, 5, 6, 8, 9]  # Core + DataLoader + Spatial
+            }
+        ],
+        "required_modules": [1, 2, 3, 4, 5, 6, 9],  # Minimum for Part 1 (no DataLoader)
+        "description": "Build LeNet for digit recognition, then scale to natural images",
+        "historical_context": "Yann LeCun's convolutional networks revolutionized computer vision",
         "emoji": "👁️"
     },
     "05": {
@@ -128,60 +141,60 @@ MILESTONE_SCRIPTS = {
 
 class MilestoneSystem:
     """Core milestone tracking and management system."""
-    
+
     def __init__(self, config):
         self.config = config
         self.console = get_console()
-        
+
         # Load milestones from configuration file
         self.MILESTONES = self._load_milestones_config()
-    
+
     def _load_milestones_config(self) -> dict:
         """Load milestone configuration from YAML files (main and era-specific)."""
         config_path = Path("milestones") / "milestones.yml"
         milestones = {}
-        
+
         # Try to load main milestones.yml first
         if config_path.exists():
             try:
                 with open(config_path, 'r') as f:
                     config = yaml.safe_load(f)
-                    
+
                 # Convert to expected format
                 for milestone_id, milestone_data in config['milestones'].items():
                     milestone_data['id'] = str(milestone_id)
                     milestones[str(milestone_id)] = milestone_data
-                    
+
             except Exception as e:
                 self.console.print(f"[yellow]Warning: Could not load main milestone config: {e}[/yellow]")
-        
+
         # Also try to load era-specific configurations
         era_paths = [
             Path("milestones") / "foundation" / "milestone.yml",
-            Path("milestones") / "revolution" / "milestone.yml", 
+            Path("milestones") / "revolution" / "milestone.yml",
             Path("milestones") / "generation" / "milestone.yml"
         ]
-        
+
         for era_path in era_paths:
             if era_path.exists():
                 try:
                     with open(era_path, 'r') as f:
                         era_config = yaml.safe_load(f)
-                        
+
                     if 'milestone' in era_config:
                         milestone_data = era_config['milestone']
                         milestone_id = milestone_data['id']
                         milestones[str(milestone_id)] = milestone_data
-                        
+
                 except Exception as e:
                     self.console.print(f"[yellow]Warning: Could not load era config {era_path}: {e}[/yellow]")
-        
+
         # If no milestones loaded, use MILESTONE_SCRIPTS as fallback
         if not milestones:
             return MILESTONE_SCRIPTS
 
         return milestones
-    
+
     def get_milestone_status(self) -> dict:
         """Get current milestone progress status."""
         milestone_data = self._get_milestone_progress_data()
@@ -231,19 +244,19 @@ class MilestoneSystem:
                 "can_unlock": required_complete and trigger_complete and not is_unlocked,
                 "unlock_date": milestone_data.get("unlock_dates", {}).get(milestone_id)
             }
-            
+
             status["milestones"][milestone_id] = milestone_status
-            
+
             if is_unlocked:
                 unlocked_count += 1
             elif milestone_status["can_unlock"] and not status["next_milestone"]:
                 status["next_milestone"] = milestone_id
-        
+
         status["total_unlocked"] = unlocked_count
         status["overall_progress"] = (unlocked_count / total_milestones) * 100 if total_milestones > 0 else 0
-        
+
         return status
-    
+
     def check_milestone_unlock(self, completed_module: str) -> dict:
         """Check if completing a module unlocks a milestone."""
         result = {
@@ -252,13 +265,13 @@ class MilestoneSystem:
             "milestone_data": None,
             "celebration_needed": False
         }
-        
+
         # Find milestone triggered by this module
         for milestone_id, milestone in self.MILESTONES.items():
             if milestone["trigger_module"] == completed_module:
                 status = self.get_milestone_status()
                 milestone_status = status["milestones"][milestone_id]
-                
+
                 if milestone_status["can_unlock"]:
                     # Unlock the milestone!
                     self._unlock_milestone(milestone_id)
@@ -269,9 +282,9 @@ class MilestoneSystem:
                         "celebration_needed": True
                     })
                 break
-        
+
         return result
-    
+
     def run_milestone_test(self, milestone_id: str) -> dict:
         """Run tests to validate milestone achievement."""
         if milestone_id not in self.MILESTONES:
@@ -312,18 +325,18 @@ class MilestoneSystem:
             "capability": milestone.get("capability", ""),
             "victory_condition": milestone.get("victory_condition", "")
         }
-    
+
     def _unlock_milestone(self, milestone_id: str) -> None:
         """Record milestone unlock in progress tracking."""
         milestone_data = self._get_milestone_progress_data()
-        
+
         if milestone_id not in milestone_data["unlocked_milestones"]:
             milestone_data["unlocked_milestones"].append(milestone_id)
             milestone_data["unlock_dates"][milestone_id] = datetime.now().isoformat()
             milestone_data["total_unlocked"] = len(milestone_data["unlocked_milestones"])
-        
+
         self._save_milestone_progress_data(milestone_data)
-    
+
     def _is_module_completed(self, module_name: str) -> bool:
         """Check if a module has been completed."""
         # Check module progress file
@@ -336,35 +349,35 @@ class MilestoneSystem:
             except (json.JSONDecodeError, IOError):
                 pass
         return False
-    
+
     def _get_milestone_progress_data(self) -> dict:
         """Get or create milestone progress data."""
         progress_dir = Path(".tito")
         progress_file = progress_dir / "milestones.json"
-        
+
         progress_dir.mkdir(exist_ok=True)
-        
+
         if progress_file.exists():
             try:
                 with open(progress_file, 'r') as f:
                     return json.load(f)
             except (json.JSONDecodeError, IOError):
                 pass
-        
+
         return {
             "unlocked_milestones": [],
             "unlock_dates": {},
             "total_unlocked": 0,
             "achievements": []
         }
-    
+
     def _save_milestone_progress_data(self, milestone_data: dict) -> None:
         """Save milestone progress data."""
         progress_dir = Path(".tito")
         progress_file = progress_dir / "milestones.json"
-        
+
         progress_dir.mkdir(exist_ok=True)
-        
+
         try:
             with open(progress_file, 'w') as f:
                 json.dump(milestone_data, f, indent=2)
@@ -527,7 +540,7 @@ class MilestoneCommand(BaseCommand):
         console = self.console
         milestone_system = MilestoneSystem(self.config)
         status = milestone_system.get_milestone_status()
-        
+
         # Show header with overall progress
         total_milestones = len(milestone_system.MILESTONES)
         console.print(Panel(
@@ -538,12 +551,12 @@ class MilestoneCommand(BaseCommand):
             title="🚀 Your Epic Journey",
             border_style="bright_blue"
         ))
-        
+
         # Show milestone status
         for milestone_id in sorted(milestone_system.MILESTONES.keys()):
             milestone = status["milestones"][milestone_id]
             self._show_milestone_status(milestone, args.detailed)
-        
+
         # Show next steps
         if status["next_milestone"]:
             next_milestone = status["milestones"][status["next_milestone"]]
@@ -565,13 +578,13 @@ class MilestoneCommand(BaseCommand):
                 title="🌟 FULL MASTERY ACHIEVED",
                 border_style="bright_green"
             ))
-        
+
         return 0
-    
+
     def _show_milestone_status(self, milestone: dict, detailed: bool = False) -> None:
         """Show status for a single milestone."""
         console = self.console
-        
+
         # Status indicator
         if milestone["is_unlocked"]:
             status_icon = "🔓"
@@ -589,13 +602,13 @@ class MilestoneCommand(BaseCommand):
             status_icon = "🔒"
             status_color = "dim"
             status_text = "LOCKED"
-        
+
         # Basic display
         milestone_content = (
             f"[{status_color}]{status_icon} {milestone['emoji']} {milestone['title']}[/{status_color}]\n"
             f"[dim]{milestone['victory_condition']}[/dim]"
         )
-        
+
         # Add detailed information if requested
         if detailed:
             req_status = "✅" if milestone["required_complete"] else "❌"
@@ -610,11 +623,11 @@ class MilestoneCommand(BaseCommand):
                 f"[bold]Capability:[/bold] {milestone['capability']}\n"
                 f"[bold]Impact:[/bold] {milestone['real_world_impact']}"
             )
-            
+
             if milestone["is_unlocked"] and milestone.get("unlock_date"):
                 unlock_date = datetime.fromisoformat(milestone["unlock_date"]).strftime("%Y-%m-%d")
                 milestone_content += f"\n[dim]Unlocked: {unlock_date}[/dim]"
-        
+
         console.print(Panel(
             milestone_content,
             title=f"Milestone {milestone['id']}",
@@ -626,18 +639,18 @@ class MilestoneCommand(BaseCommand):
         console = self.console
         milestone_system = MilestoneSystem(self.config)
         status = milestone_system.get_milestone_status()
-        
+
         if args.horizontal:
             self._show_horizontal_timeline(status, milestone_system)
         else:
             self._show_tree_timeline(status, milestone_system)
-        
+
         return 0
-    
+
     def _show_horizontal_timeline(self, status: dict, milestone_system: MilestoneSystem) -> None:
         """Show horizontal progress bar timeline."""
         console = self.console
-        
+
         total_milestones = len(milestone_system.MILESTONES)
         console.print(Panel(
             f"[bold cyan]🎮 Milestone Timeline[/bold cyan]\n\n"
@@ -645,52 +658,52 @@ class MilestoneCommand(BaseCommand):
             title="Your Epic Journey",
             border_style="bright_blue"
         ))
-        
+
         # Create progress bar
         progress_width = 50
         total_milestones = len(milestone_system.MILESTONES)
         unlocked_width = int((status["total_unlocked"] / total_milestones) * progress_width)
-        
+
         # Create milestone markers
         timeline = []
         for milestone_id in sorted(milestone_system.MILESTONES.keys()):
             milestone = status["milestones"][milestone_id]
-            
+
             if milestone["is_unlocked"]:
                 marker = f"[green]{milestone['emoji']}[/green]"
             elif milestone["can_unlock"]:
                 marker = f"[yellow blink]{milestone['emoji']}[/yellow blink]"
             else:
                 marker = f"[dim]{milestone['emoji']}[/dim]"
-            
+
             timeline.append(marker)
-        
+
         # Show timeline
         console.print(f"\n{'  '.join(timeline)}")
-        
+
         # Progress bar
         filled = "█" * unlocked_width
         empty = "░" * (progress_width - unlocked_width)
         console.print(f"\n[green]{filled}[/green][dim]{empty}[/dim]")
         console.print(f"[dim]{status['overall_progress']:.0f}% complete[/dim]\n")
-    
+
     def _show_tree_timeline(self, status: dict, milestone_system: MilestoneSystem) -> None:
         """Show tree-style milestone timeline."""
         console = self.console
-        
+
         console.print(Panel(
             f"[bold cyan]🎮 Milestone Progression Tree[/bold cyan]\n\n"
             f"[bold]Your journey from student to ML Systems Engineer[/bold]",
             title="Epic Timeline",
             border_style="bright_blue"
         ))
-        
+
         # Create tree structure
         tree = Tree("🚀 [bold]TinyTorch Mastery Journey[/bold]")
-        
+
         for milestone_id in sorted(milestone_system.MILESTONES.keys()):
             milestone = status["milestones"][milestone_id]
-            
+
             if milestone["is_unlocked"]:
                 node_style = "green"
                 icon = "✅"
@@ -700,20 +713,20 @@ class MilestoneCommand(BaseCommand):
             else:
                 node_style = "dim"
                 icon = "🔒"
-            
+
             branch = tree.add(
                 f"[{node_style}]{icon} {milestone['emoji']} {milestone['title']}[/{node_style}]"
             )
-            
+
             # Add capability description
             branch.add(f"[dim]{milestone['capability']}[/dim]")
-            
+
             # Add trigger module info
             if milestone["trigger_complete"]:
                 branch.add(f"[green]✅ {milestone['trigger_module']} completed[/green]")
             else:
                 branch.add(f"[dim]🎯 Complete: {milestone['trigger_module']}[/dim]")
-        
+
         console.print(tree)
         console.print()
 
@@ -721,7 +734,7 @@ class MilestoneCommand(BaseCommand):
         """Handle milestone test command."""
         console = self.console
         milestone_system = MilestoneSystem(self.config)
-        
+
         # Determine which milestone to test
         if args.milestone_id:
             milestone_id = args.milestone_id
@@ -739,7 +752,7 @@ class MilestoneCommand(BaseCommand):
                     border_style="yellow"
                 ))
                 return 0
-        
+
         # Validate milestone ID
         if milestone_id not in milestone_system.MILESTONES:
             console.print(Panel(
@@ -749,9 +762,9 @@ class MilestoneCommand(BaseCommand):
                 border_style="red"
             ))
             return 1
-        
+
         milestone = milestone_system.MILESTONES[milestone_id]
-        
+
         console.print(Panel(
             f"[bold cyan]🧪 Testing Milestone {milestone_id}[/bold cyan]\n\n"
             f"[bold]{milestone['emoji']} {milestone['title']}[/bold]\n"
@@ -759,11 +772,11 @@ class MilestoneCommand(BaseCommand):
             title="Milestone Test",
             border_style="bright_cyan"
         ))
-        
+
         # Run the test with progress animation
         with console.status(f"[bold green]Testing milestone requirements...", spinner="dots"):
             result = milestone_system.run_milestone_test(milestone_id)
-        
+
         # Show results
         if result["success"]:
             console.print(Panel(
@@ -784,7 +797,7 @@ class MilestoneCommand(BaseCommand):
                 title="Requirements Missing",
                 border_style="yellow"
             ))
-        
+
         return 0
 
     def _handle_demo_command(self, args: Namespace) -> int:
@@ -792,7 +805,7 @@ class MilestoneCommand(BaseCommand):
         console = self.console
         milestone_system = MilestoneSystem(self.config)
         milestone_id = args.milestone_id
-        
+
         # Validate milestone ID
         if milestone_id not in milestone_system.MILESTONES:
             console.print(Panel(
@@ -802,11 +815,11 @@ class MilestoneCommand(BaseCommand):
                 border_style="red"
             ))
             return 1
-        
+
         milestone = milestone_system.MILESTONES[milestone_id]
         status = milestone_system.get_milestone_status()
         milestone_status = status["milestones"][milestone_id]
-        
+
         # Check if milestone is unlocked
         if not milestone_status["is_unlocked"]:
             console.print(Panel(
@@ -819,7 +832,7 @@ class MilestoneCommand(BaseCommand):
                 border_style="yellow"
             ))
             return 0
-        
+
         # Check if demo file exists
         demo_path = Path("capabilities") / milestone["demo_file"]
         if not demo_path.exists():
@@ -831,7 +844,7 @@ class MilestoneCommand(BaseCommand):
                 border_style="yellow"
             ))
             return 0
-        
+
         # Run the demo
         console.print(Panel(
             f"[bold cyan]🎬 Launching Milestone {milestone_id} Demo[/bold cyan]\n\n"
@@ -842,14 +855,14 @@ class MilestoneCommand(BaseCommand):
             title="Capability Demo",
             border_style="bright_cyan"
         ))
-        
+
         try:
             result = subprocess.run(
                 [sys.executable, str(demo_path)],
                 capture_output=False,
                 text=True
             )
-            
+
             if result.returncode == 0:
                 console.print(Panel(
                     f"[bold green]✅ Demo completed successfully![/bold green]\n\n"
@@ -860,7 +873,7 @@ class MilestoneCommand(BaseCommand):
                 ))
             else:
                 console.print(f"[yellow]⚠️ Demo completed with status: {result.returncode}[/yellow]")
-        
+
         except Exception as e:
             console.print(Panel(
                 f"[red]❌ Error running demo: {e}[/red]\n\n"
@@ -1006,7 +1019,7 @@ class MilestoneCommand(BaseCommand):
                 console.print(f"[yellow]⚠️ Milestone {milestone_id} has only one part, ignoring --part flag[/yellow]\n")
             scripts_to_run = [("Main", milestone["script"], milestone.get("description", ""))]
             script_configs = [milestone]  # Single script uses milestone-level config
-        
+
         # Check if all scripts exist
         for script_name, script_file, _ in scripts_to_run:
             script_path = Path(script_file)
@@ -1028,13 +1041,13 @@ class MilestoneCommand(BaseCommand):
             from .module.workflow import ModuleWorkflowCommand
             from .src import SrcCommand
             from .test import TestCommand
-            
+
             module_workflow = ModuleWorkflowCommand(self.config)
             progress_data = module_workflow.get_progress_data()
-            
+
             source_cmd = SrcCommand(self.config)
             test_cmd = TestCommand(self.config)
-            
+
             # Determine required modules based on what we're running
             # If running specific part(s), use per-part requirements if available
             # Otherwise use milestone-level requirements
@@ -1064,7 +1077,7 @@ class MilestoneCommand(BaseCommand):
                     border_style="yellow"
                 ))
                 return 1
-            
+
             console.print(f"[green]✅ All required modules completed![/green]\n")
 
             # Test imports work
@@ -1108,7 +1121,7 @@ class MilestoneCommand(BaseCommand):
             )
         else:
             scripts_info = f"[bold]📂 Running:[/bold] {scripts_to_run[0][1]}"
-        
+
         console.print(Panel(
             f"[bold magenta]╔════════════════════════════════════════════════╗[/bold magenta]\n"
             f"[bold magenta]║[/bold magenta]  {milestone['emoji']} Milestone {milestone_id}: {milestone['name']:<30} [bold magenta]║[/bold magenta]\n"
@@ -1142,7 +1155,7 @@ class MilestoneCommand(BaseCommand):
                     console.print(f"[dim]{script_desc}[/dim]\n")
             else:
                 console.print(f"\n[bold green]🚀 Starting Milestone {milestone_id}...[/bold green]\n")
-            
+
             console.print("━" * 80 + "\n")
 
             try:
@@ -1151,9 +1164,9 @@ class MilestoneCommand(BaseCommand):
                     capture_output=False,
                     text=True
                 )
-                
+
                 console.print("\n" + "━" * 80)
-                
+
                 if result.returncode != 0:
                     all_passed = False
                     console.print(f"[yellow]⚠️ Part {script_name} completed with errors[/yellow]")
@@ -1169,7 +1182,7 @@ class MilestoneCommand(BaseCommand):
                         else:
                             # Non-interactive: stop on first failure
                             return result.returncode
-                            
+
             except KeyboardInterrupt:
                 console.print(f"\n\n[yellow]⚠️ Milestone interrupted by user[/yellow]")
                 return 130
@@ -1180,7 +1193,7 @@ class MilestoneCommand(BaseCommand):
         if all_passed:
             # Success! Mark milestone as complete
             self._mark_milestone_complete(milestone_id)
-            
+
             parts_text = ""
             if len(scripts_to_run) > 1:
                 parts_text = f"\n\n[bold]All {len(scripts_to_run)} parts completed:[/bold]\n" + "\n".join(
@@ -1200,7 +1213,7 @@ class MilestoneCommand(BaseCommand):
                 border_style="bright_green",
                 padding=(1, 2)
             ))
-            
+
             # Offer to sync progress (uses centralized SubmissionHandler)
             self._offer_progress_sync(milestone_id, milestone['name'])
 
@@ -1375,9 +1388,9 @@ class MilestoneCommand(BaseCommand):
         from ..core import auth
         from ..core.submission import SubmissionHandler
         from rich.prompt import Confirm
-        
+
         console = self.console
-        
+
         # Check if user is logged in
         if auth.is_logged_in():
             console.print()
@@ -1385,16 +1398,16 @@ class MilestoneCommand(BaseCommand):
                 f"[cyan]Would you like to sync this achievement to your profile?[/cyan]",
                 default=True
             )
-            
+
             if should_sync:
                 try:
                     # Use the centralized SubmissionHandler
                     handler = SubmissionHandler(self.config, console)
-                    
+
                     # Sync progress (includes modules and milestones)
                     # The handler reads from both progress.json and .tito/milestones.json
                     handler.sync_progress()
-                    
+
                     console.print(f"[green]✅ Milestone {milestone_id} synced to your profile![/green]")
                 except Exception as e:
                     console.print(f"[yellow]⚠️ Could not sync: {e}[/yellow]")

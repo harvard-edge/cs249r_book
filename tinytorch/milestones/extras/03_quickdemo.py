@@ -1,16 +1,83 @@
 #!/usr/bin/env python3
 """
-TinyTalks Quick Demo - Watch Your Transformer Learn to Talk!
-=============================================================
+╔══════════════════════════════════════════════════════════════════════════════╗
+║           🚀 MILESTONE 05.3: TinyTalks Quick Demo (2-Minute Training)        ║
+║           Watch Your Transformer Learn to Answer Questions Live!             ║
+╚══════════════════════════════════════════════════════════════════════════════╝
 
-A fast, visual demonstration of transformer training.
-See the model go from gibberish to coherent answers in ~2 minutes!
+📚 HISTORICAL CONTEXT:
+This demo shows the magic of transformer learning in real-time. Watch as
+random noise becomes coherent answers - the same progression that happens
+(at much larger scale) when training GPT, Claude, and other LLMs.
+
+🎯 WHAT YOU'RE BUILDING:
+A live training dashboard using YOUR TinyTorch implementations!
+See model responses evolve from gibberish to coherent answers in ~2 minutes.
 
 Features:
 - Smaller model (~50K params) for fast training
 - Live dashboard showing training progress
 - Rotating prompts to show diverse capabilities
-- Learning progression display (gibberish -> coherent)
+- Learning progression display (gibberish → coherent)
+
+✅ REQUIRED MODULES (Run after Module 13):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Module 01 (Tensor)         : YOUR data structure for all computations
+  Module 04 (Losses)         : YOUR CrossEntropyLoss for training
+  Module 07 (Optimizers)     : YOUR Adam optimizer for fast convergence
+  Module 10 (Tokenization)   : YOUR CharTokenizer for text → tokens
+  Module 13 (Transformer)    : YOUR GPT model for generation
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🏗️ ARCHITECTURE (Live Training Pipeline):
+    ┌──────────────────────────────────────────────────────────────┐
+    │                    LIVE TRAINING DASHBOARD                    │
+    ├──────────────────────────────────────────────────────────────┤
+    │  ┌─────────────┐  ┌─────────────────────────────────────┐   │
+    │  │ Progress    │  │ Learning Progression                 │   │
+    │  │ Epoch: 3/8  │  │ Q: What is 2+2?                      │   │
+    │  │ Loss: 1.234 │  │   Ep1: sdfj3kj... (gibberish)        │   │
+    │  │ ████░░ 40%  │  │   Ep2: four is th... (learning)      │   │
+    │  └─────────────┘  │   Ep3: 4 (correct!)                  │   │
+    │  ┌─────────────┐  └─────────────────────────────────────┘   │
+    │  │ Systems     │                                             │
+    │  │ Tokens/s    │  YOUR GPT model processes batches and       │
+    │  │ Memory      │  updates weights using YOUR optimizer       │
+    │  └─────────────┘                                             │
+    └──────────────────────────────────────────────────────────────┘
+
+# =============================================================================
+# 📊 YOUR MODULES IN ACTION
+# =============================================================================
+#
+# ┌─────────────────────┬────────────────────────────────┬─────────────────────────────┐
+# │ What You Built      │ How It's Used Here             │ Systems Impact              │
+# ├─────────────────────┼────────────────────────────────┼─────────────────────────────┤
+# │ Module 04: Loss     │ Computes cross-entropy loss    │ Guides learning direction   │
+# │                     │ to measure prediction error    │ (gradient information)      │
+# │                     │                                │                             │
+# │ Module 07: Adam     │ Updates weights with adaptive  │ Fast convergence in 2 min   │
+# │                     │ learning rates                 │ (vs hours with vanilla SGD) │
+# │                     │                                │                             │
+# │ Module 10: Tokenize │ Converts Q&A text to tokens    │ Character-level enables     │
+# │                     │ for model processing           │ learning any vocabulary     │
+# │                     │                                │                             │
+# │ Module 13: GPT      │ Learns to predict next token   │ Watch answers evolve from   │
+# │                     │ given question context         │ noise to coherent text!     │
+# └─────────────────────┴────────────────────────────────┴─────────────────────────────┘
+#
+# =============================================================================
+
+💡 KEY INSIGHT:
+This demo shows the same learning progression as GPT training:
+  Epoch 1: "sdf3kj2l" (random weights = random output)
+  Epoch 4: "fouris" (learning patterns, merging words)
+  Epoch 8: "4" or "four" (correct answers!)
+
+📊 EXPECTED RESULTS:
+  Training time: ~2 minutes
+  Final loss: ~1.0-1.5 (down from ~4.0)
+  Visible progression: gibberish → partial → coherent answers
 """
 
 import sys

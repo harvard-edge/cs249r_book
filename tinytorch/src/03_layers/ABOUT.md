@@ -1,7 +1,7 @@
 ---
 title: "Layers"
 description: "Build the fundamental neural network building blocks: Linear layers with weight initialization and Dropout for regularization"
-difficulty: "⭐⭐"
+difficulty: "●●"
 time_estimate: "4-5 hours"
 prerequisites: ["01_tensor", "02_activations"]
 next_steps: ["04_losses"]
@@ -13,9 +13,9 @@ learning_objectives:
   - "Compose layers into multi-layer architectures"
 ---
 
-# 03. Layers
+# Layers
 
-**FOUNDATION TIER** | Difficulty: ⭐⭐ (2/4) | Time: 4-5 hours
+**FOUNDATION TIER** | Difficulty: ●● (2/4) | Time: 4-5 hours
 
 ## Overview
 
@@ -38,38 +38,6 @@ This module follows TinyTorch's **Build → Use → Reflect** framework:
 1. **Build**: Implement Linear and Dropout layer classes with proper initialization, forward passes, and parameter tracking
 2. **Use**: Compose layers manually to create multi-layer networks for MNIST digit classification
 3. **Reflect**: Analyze memory scaling, computational complexity, and the trade-offs between model capacity and efficiency
-
-## Getting Started
-
-### Prerequisites
-
-Ensure you've completed the prerequisite modules:
-
-```bash
-# Activate TinyTorch environment
-source scripts/activate-tinytorch
-
-# Verify prerequisites
-tito test tensor      # Module 01
-tito test activations # Module 02
-
-# Expected: ✓ All prerequisite tests pass!
-```
-
-### Development Workflow
-
-1. **Open the development file**: `modules/03_layers/layers_dev.ipynb` (or `.py` via Jupytext)
-2. **Implement Linear layer**: Build `y = xW + b` with Xavier initialization
-3. **Add parameter tracking**: Implement `parameters()` method to return weight and bias tensors
-4. **Build Dropout layer**: Implement training/inference mode switching with inverted dropout scaling
-5. **Compose layers**: Create multi-layer networks by chaining Linear, activation, and Dropout
-6. **Export and verify**: Run `tito module complete 03 && tito test layers`
-
-**Development Tips**:
-- Verify Xavier initialization maintains variance across layers
-- Test dropout with both training=True and training=False modes
-- Check parameter counts match expected values for each layer
-- Ensure proper tensor shape propagation through composed layers
 
 ## Implementation Guide
 
@@ -161,83 +129,31 @@ all_params = layer1.parameters() + layer2.parameters() + layer3.parameters()
 print(f"Total trainable parameters: {len(all_params)}")  # 6 tensors (3 weights, 3 biases)
 ```
 
-## Common Pitfalls
+## Getting Started
 
-### Incorrect Xavier Initialization
+### Prerequisites
 
-**Problem**: Using standard normal initialization `N(0, 1)` causes gradient explosion/vanishing in deep networks.
+Ensure you've completed the prerequisite modules:
 
-**Solution**: Scale weights by `sqrt(1/in_features)` to maintain variance across layers (Xavier/Glorot initialization):
+```bash
+# Activate TinyTorch environment
+source scripts/activate-tinytorch
 
-```python
-# ❌ Wrong - gradients explode or vanish
-self.weight = Tensor(np.random.randn(in_features, out_features))
+# Verify Module 01 (Tensor) is complete
+tito test tensor
 
-# ✅ Correct - Xavier initialization
-std = np.sqrt(1.0 / in_features)
-self.weight = Tensor(np.random.randn(in_features, out_features) * std)
+# Verify Module 02 (Activations) is complete
+tito test activations
 ```
 
-### Forgetting to Set requires_grad
+### Development Workflow
 
-**Problem**: Parameters don't get gradients during backpropagation because `requires_grad=False`.
-
-**Solution**: Always set `requires_grad=True` when creating parameter tensors:
-
-```python
-# ❌ Wrong - won't update during training
-self.weight = Tensor(data)
-
-# ✅ Correct - enables gradient tracking
-self.weight = Tensor(data, requires_grad=True)
-```
-
-### Dropout in Evaluation Mode
-
-**Problem**: Forgetting to set `training=False` during evaluation causes random zeroing of outputs, leading to inconsistent predictions.
-
-**Solution**: Always explicitly set training mode. Track model state and pass to dropout:
-
-```python
-# ❌ Wrong - applies dropout during evaluation
-output = dropout(x)  # Defaults to training=True, zeros elements randomly
-
-# ✅ Correct - disable dropout for inference
-output = dropout(x, training=False)  # Passes input unchanged
-```
-
-### Missing Inverted Dropout Scaling
-
-**Problem**: Not scaling by `1/(1-p)` during training causes expected values to differ between training and inference.
-
-**Solution**: Use inverted dropout - scale survivors during training, no scaling during inference:
-
-```python
-# ❌ Wrong - needs scaling at inference time
-mask = np.random.rand(*x.shape) > p
-return Tensor(x.data * mask)  # Expected value is (1-p) * x
-
-# ✅ Correct - inverted dropout, no inference scaling
-mask = np.random.rand(*x.shape) > p
-return Tensor(x.data * mask / (1 - p))  # Expected value is x
-```
-
-### Parameter Count Miscalculation
-
-**Problem**: Forgetting to include bias terms when counting parameters, leading to memory estimation errors.
-
-**Solution**: Remember that Linear(in, out) has `in × out + out` parameters (weights + biases):
-
-```python
-# For Linear(784, 256):
-# Weight parameters: 784 × 256 = 200,704
-# Bias parameters: 256
-# Total: 200,960 parameters
-
-# Calculate correctly:
-params = in_features * out_features + out_features
-memory_bytes = params * 4  # float32 = 4 bytes per parameter
-```
+1. **Open the development file**: `modules/03_layers/layers_dev.py`
+2. **Implement Linear layer**: Build `__init__` with Xavier initialization, `forward` with matrix multiplication, and `parameters()` method
+3. **Add Dropout layer**: Implement training/inference mode switching with proper mask generation and scaling
+4. **Test layer composition**: Verify manual composition of multi-layer networks with mixed layer types
+5. **Analyze systems behavior**: Run memory analysis to understand parameter scaling with network size
+6. **Export and verify**: `tito module complete 03 && tito test layers`
 
 ## Testing
 
@@ -255,13 +171,13 @@ python -m pytest tests/ -k layers -v
 
 ### Test Coverage Areas
 
-- ✅ **Linear Layer Functionality**: Verify `y = xW + b` computation with correct matrix dimensions and broadcasting
-- ✅ **Xavier Initialization**: Ensure weights scaled by `sqrt(1/in_features)` for gradient stability
-- ✅ **Parameter Management**: Confirm `parameters()` returns all trainable tensors with `requires_grad=True`
-- ✅ **Dropout Training Mode**: Validate probabilistic masking with correct `1/(1-p)` scaling
-- ✅ **Dropout Inference Mode**: Verify passthrough behavior without modification during evaluation
-- ✅ **Layer Composition**: Test multi-layer forward passes with mixed layer types
-- ✅ **Edge Cases**: Handle empty batches, single samples, no-bias configurations, and probability boundaries
+- ✓ **Linear Layer Functionality**: Verify `y = xW + b` computation with correct matrix dimensions and broadcasting
+- ✓ **Xavier Initialization**: Ensure weights scaled by `sqrt(1/in_features)` for gradient stability
+- ✓ **Parameter Management**: Confirm `parameters()` returns all trainable tensors with `requires_grad=True`
+- ✓ **Dropout Training Mode**: Validate probabilistic masking with correct `1/(1-p)` scaling
+- ✓ **Dropout Inference Mode**: Verify passthrough behavior without modification during evaluation
+- ✓ **Layer Composition**: Test multi-layer forward passes with mixed layer types
+- ✓ **Edge Cases**: Handle empty batches, single samples, no-bias configurations, and probability boundaries
 
 ### Inline Testing & Validation
 
@@ -269,27 +185,27 @@ The module includes comprehensive inline tests with educational feedback:
 
 ```python
 # Example inline test output
-🔬 Unit Test: Linear Layer...
-✅ Linear layer computes y = xW + b correctly
-✅ Weight initialization within expected Xavier range
-✅ Bias initialized to zeros
-✅ Output shape matches expected dimensions (32, 256)
-✅ Parameter list contains weight and bias tensors
-📈 Progress: Linear Layer ✓
+ Unit Test: Linear Layer...
+ Linear layer computes y = xW + b correctly
+ Weight initialization within expected Xavier range
+ Bias initialized to zeros
+ Output shape matches expected dimensions (32, 256)
+ Parameter list contains weight and bias tensors
+ Progress: Linear Layer ✓
 
-🔬 Unit Test: Dropout Layer...
-✅ Inference mode passes through unchanged
-✅ Training mode zeros ~50% of elements
-✅ Survivors scaled by 1/(1-p) = 2.0
-✅ Zero dropout (p=0.0) preserves all values
-✅ Full dropout (p=1.0) zeros everything
-📈 Progress: Dropout Layer ✓
+ Unit Test: Dropout Layer...
+ Inference mode passes through unchanged
+ Training mode zeros ~50% of elements
+ Survivors scaled by 1/(1-p) = 2.0
+ Zero dropout (p=0.0) preserves all values
+ Full dropout (p=1.0) zeros everything
+ Progress: Dropout Layer ✓
 
-🔬 Integration Test: Multi-layer Network...
-✅ 3-layer network processes batch: (32, 784) → (32, 10)
-✅ Parameter count: 235,146 parameters across 6 tensors
-✅ All parameters have requires_grad=True
-📈 Progress: Layer Composition ✓
+ Integration Test: Multi-layer Network...
+ 3-layer network processes batch: (32, 784) → (32, 10)
+ Parameter count: 235,146 parameters across 6 tensors
+ All parameters have requires_grad=True
+ Progress: Layer Composition ✓
 ```
 
 ### Manual Testing Examples
@@ -321,147 +237,6 @@ print(f"Inference: {np.count_nonzero(y_eval.data)} survived")   # 100
 # Test composition
 net = lambda x: layer3(dropout2(activation2(layer2(dropout1(activation1(layer1(x)))))))
 ```
-
-## Production Context
-
-### Your Implementation vs. Production Frameworks
-
-| Feature | Your Layers | PyTorch torch.nn | TensorFlow tf.keras |
-|---------|------------|------------------|---------------------|
-| **Backend** | NumPy (CPU) | C++/CUDA (CPU/GPU) | C++/CUDA/XLA |
-| **Linear Layer** | `y = x @ W + b` | `nn.Linear(in, out)` | `Dense(units)` |
-| **Dropout** | Manual mask | `nn.Dropout(p)` | `Dropout(rate)` |
-| **Xavier Init** | Manual `sqrt(1/fan_in)` | `init.xavier_uniform_()` | `glorot_uniform` |
-| **Parameter Tracking** | `parameters()` list | `model.parameters()` | `model.trainable_weights` |
-| **Training Mode** | Manual flag | `model.train()/eval()` | `training=True/False` |
-| **Composition** | Explicit chaining | `nn.Sequential()` | `Sequential()` |
-
-**Educational Focus**: Your implementation shows explicit parameter management and composition. Production frameworks provide convenience abstractions (Sequential containers, automatic mode switching) while maintaining the same underlying mathematics.
-
-### Side-by-Side Code Comparison
-
-**Your implementation:**
-```python
-from tinytorch.core.layers import Linear, Dropout
-from tinytorch.core.activations import ReLU
-from tinytorch.core.tensor import Tensor
-
-# Explicit composition - see every step
-layer1 = Linear(784, 256)
-relu1 = ReLU()
-dropout1 = Dropout(0.5)
-layer2 = Linear(256, 10)
-
-def forward(x):
-    x = layer1(x)
-    x = relu1(x)
-    x = dropout1(x, training=True)
-    x = layer2(x)
-    return x
-
-# Manual parameter collection
-params = layer1.parameters() + layer2.parameters()
-```
-
-**Equivalent PyTorch:**
-```python
-import torch.nn as nn
-
-# Container abstraction - convenient but hides details
-model = nn.Sequential(
-    nn.Linear(784, 256),
-    nn.ReLU(),
-    nn.Dropout(0.5),
-    nn.Linear(256, 10)
-)
-
-# Or explicit (closer to your approach)
-class MLP(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.layer1 = nn.Linear(784, 256)
-        self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(0.5)
-        self.layer2 = nn.Linear(256, 10)
-
-    def forward(self, x):
-        x = self.layer1(x)
-        x = self.relu(x)
-        x = self.dropout(x)  # Automatically uses model mode
-        x = self.layer2(x)
-        return x
-
-# Automatic parameter collection
-params = model.parameters()  # Returns iterator over all parameters
-```
-
-**Key Differences:**
-1. **Module Base Class**: PyTorch's `nn.Module` provides automatic parameter discovery - submodules are automatically tracked
-2. **Training Mode**: PyTorch uses `model.train()` and `model.eval()` to set mode globally - Dropout knows model state automatically
-3. **Sequential Container**: PyTorch's `nn.Sequential` eliminates boilerplate for linear chains, but makes debugging harder
-4. **GPU Support**: PyTorch layers work on CUDA tensors: `model.cuda()` then all operations run on GPU
-
-### Real-World Production Usage
-
-**OpenAI GPT-3**: Uses massive Linear layers in feedforward networks (12,288 → 49,152 → 12,288 per layer × 96 layers). Each layer has billions of parameters, requiring distributed training across thousands of GPUs.
-
-**Google BERT**: Linear layers in classification head transform 768-dimensional contextualized embeddings to class logits. Dropout (p=0.1) prevents overfitting on fine-tuning tasks with limited labeled data.
-
-**Meta ResNet**: Final fully-connected layer is Linear(2048, 1000) for ImageNet classification. This single layer has 2M+ parameters but is tiny compared to convolutional layers.
-
-**Tesla Autopilot**: Neural networks use Linear layers in prediction heads after CNN feature extraction. Quantized INT8 Linear layers reduce model size by 4× for efficient on-device deployment.
-
-**Netflix Recommendations**: Multi-layer perceptrons with Dropout process user-item embeddings. Dropout (p=0.2-0.5) is critical for generalizing to unseen user-item pairs in sparse interaction matrices.
-
-### Performance Characteristics at Scale
-
-**Parameter Memory**: A Linear(4096, 4096) layer has 16M parameters × 4 bytes = 64MB. GPT-3 scale models require hundreds of GB just for parameter storage across all layers.
-
-**Computational Cost**: Matrix multiplication in Linear layers dominates training time. A batch of 64 images through Linear(2048, 1000) requires 64 × 2048 × 1000 × 2 = 262M FLOPs.
-
-**Dropout Randomness**: During distributed training, each GPU must use different random seeds for Dropout masks to avoid synchronized noise patterns that hurt convergence.
-
-**Xavier Initialization Impact**: Without proper initialization, gradients can vanish (too small) or explode (too large) exponentially with depth. A 50-layer network becomes untrainable without careful init.
-
-### How Your Implementation Maps to PyTorch
-
-**What you just built:**
-```python
-# Your Linear layer implementation
-class Linear:
-    def __init__(self, in_features, out_features):
-        std = np.sqrt(1.0 / in_features)  # Xavier
-        self.weight = Tensor(np.random.randn(in_features, out_features) * std,
-                            requires_grad=True)
-        self.bias = Tensor(np.zeros(out_features), requires_grad=True)
-
-    def forward(self, x):
-        return x @ self.weight + self.bias
-
-    def parameters(self):
-        return [self.weight, self.bias]
-```
-
-**How PyTorch does it:**
-```python
-# PyTorch C++ implementation (simplified)
-# torch/nn/modules/linear.py calls into C++
-class Linear(Module):
-    def __init__(self, in_features, out_features):
-        self.weight = Parameter(torch.empty(out_features, in_features))
-        self.bias = Parameter(torch.empty(out_features))
-        # Uses kaiming_uniform_ (variant of Xavier) by default
-        init.kaiming_uniform_(self.weight, a=math.sqrt(5))
-        # Bias initialization is more sophisticated
-        fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
-        bound = 1 / math.sqrt(fan_in)
-        init.uniform_(self.bias, -bound, bound)
-
-    def forward(self, input):
-        return F.linear(input, self.weight, self.bias)  # Calls BLAS
-```
-
-**Key Insight**: Your implementation uses **the same linear algebra** (`x @ W + b`) as PyTorch. The differences are execution (NumPy vs BLAS/cuBLAS), initialization details (uniform vs normal distribution), and parameter management (manual list vs automatic Module discovery).
 
 ## Systems Thinking Questions
 
@@ -505,21 +280,21 @@ Choose your preferred way to engage with this module:
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card} 🚀 Launch Binder
+```{grid-item-card}  Launch Binder
 :link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/03_layers/layers_dev.ipynb
 :class-header: bg-light
 
 Run this module interactively in your browser. No installation required!
 ```
 
-```{grid-item-card} ⚡ Open in Colab
+```{grid-item-card}  Open in Colab
 :link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/03_layers/layers_dev.ipynb
 :class-header: bg-light
 
 Use Google Colab for GPU access and cloud compute power.
 ```
 
-```{grid-item-card} 📖 View Source
+```{grid-item-card}  View Source
 :link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/03_layers/layers_dev.py
 :class-header: bg-light
 
@@ -528,7 +303,7 @@ Browse the Python source code and understand the implementation.
 
 ````
 
-```{admonition} 💾 Save Your Progress
+```{admonition}  Save Your Progress
 :class: tip
 **Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
 
@@ -537,6 +312,6 @@ Browse the Python source code and understand the implementation.
 ---
 
 <div class="prev-next-area">
-<a class="left-prev" href="../modules/02_activations_ABOUT.html" title="previous page">← Previous Module</a>
-<a class="right-next" href="../modules/04_losses_ABOUT.html" title="next page">Next Module →</a>
+<a class="left-prev" href="02_activations_ABOUT.html" title="previous page">← Module 02: Activations</a>
+<a class="right-next" href="04_losses_ABOUT.html" title="next page">Module 04: Losses →</a>
 </div>

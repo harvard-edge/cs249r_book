@@ -1,9 +1,18 @@
 #!/usr/bin/env python3
 """
-CodeBot - Python Autocomplete Demo
-===================================
+╔══════════════════════════════════════════════════════════════════════════════╗
+║              🤖 MILESTONE 05.2: CodeBot - Python Autocomplete                ║
+║          Train a Transformer to Complete Python Code (Copilot Style)         ║
+╚══════════════════════════════════════════════════════════════════════════════╝
 
-Train a transformer to autocomplete Python code in 2 minutes!
+📚 HISTORICAL CONTEXT (2021):
+- 2021: GitHub Copilot launches - Transformer-based code completion
+- Same core idea: predict the next token based on context
+- The difference? Scale: Copilot trains on BILLIONS of code patterns
+
+🎯 WHAT YOU'RE BUILDING:
+A mini version of GitHub Copilot using YOUR TinyTorch implementations!
+Train a transformer on 50 Python patterns and watch it learn to autocomplete.
 
 Student Journey:
 1. Watch it train (2 min)
@@ -11,6 +20,59 @@ Student Journey:
 3. Try it yourself (5 min)
 4. Find its limits (2 min)
 5. Teach it new patterns (3 min)
+
+✅ REQUIRED MODULES (Run after Module 13):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Module 01 (Tensor)         : YOUR data structure for all computations
+  Module 10 (Tokenization)   : YOUR CharTokenizer for code → tokens
+  Module 11 (Embeddings)     : YOUR embeddings for token representations
+  Module 12 (Attention)      : YOUR attention mechanism (pattern matching!)
+  Module 13 (Transformer)    : YOUR GPT model for autoregressive generation
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🏗️ ARCHITECTURE (Code Completion Pipeline):
+    ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+    │ Python Code │     │ Tokenizer   │     │ GPT Model   │
+    │ "def add("  │────▶│ YOUR M10    │────▶│ YOUR M13    │
+    │             │     │ char-level  │     │ transformer │
+    └─────────────┘     └─────────────┘     └──────┬──────┘
+                                                   │
+                              ┌────────────────────┘
+                              ▼
+                        ┌─────────────┐     ┌─────────────┐
+                        │ Next Token  │     │ Completed   │
+                        │ Prediction  │────▶│ "a, b):"    │
+                        │ (greedy)    │     │             │
+                        └─────────────┘     └─────────────┘
+
+# =============================================================================
+# 📊 YOUR MODULES IN ACTION
+# =============================================================================
+#
+# ┌─────────────────────┬────────────────────────────────┬─────────────────────────────┐
+# │ What You Built      │ How It's Used Here             │ Systems Impact              │
+# ├─────────────────────┼────────────────────────────────┼─────────────────────────────┤
+# │ Module 10: Tokenize │ Converts Python code to chars  │ Enables character-level     │
+# │                     │ and back to readable code      │ code understanding          │
+# │                     │                                │                             │
+# │ Module 12: Attn     │ Finds patterns in code context │ "def" often followed by     │
+# │                     │ to predict next characters     │ function name + "("         │
+# │                     │                                │                             │
+# │ Module 13: GPT      │ Autoregressively generates     │ Same architecture as        │
+# │                     │ code character by character    │ GitHub Copilot (smaller!)   │
+# └─────────────────────┴────────────────────────────────┴─────────────────────────────┘
+#
+# =============================================================================
+
+💡 KEY INSIGHT:
+Code completion is just next-token prediction! The model learns patterns like:
+  "def add(a, b):\n    return a" → predicts " + b"
+GitHub Copilot = same idea, trained on billions of code examples!
+
+📊 EXPECTED RESULTS:
+  Training: ~2 minutes on 50 Python patterns
+  Demo success rate: 4-5/5 completions working
+  Limitation: Pattern matching, not true understanding
 """
 
 import sys
@@ -48,7 +110,7 @@ PYTHON_PATTERNS = [
     "def min_of_two(a, b):\n    return a if a < b else b",
     "def absolute(x):\n    return x if x >= 0 else -x",
     "def square(x):\n    return x * x",
-    
+
     # For loops (10)
     "for i in range(10):\n    print(i)",
     "for i in range(5):\n    print(i * 2)",
@@ -60,7 +122,7 @@ PYTHON_PATTERNS = [
     "for key in dict:\n    print(key, dict[key])",
     "for i, val in enumerate(items):\n    print(i, val)",
     "for x in range(3):\n    for y in range(3):\n        print(x, y)",
-    
+
     # If statements (10)
     "if x > 0:\n    print('positive')",
     "if x < 0:\n    print('negative')",
@@ -72,7 +134,7 @@ PYTHON_PATTERNS = [
     "if x == 5 or x == 10:\n    print('five or ten')",
     "if not done:\n    continue_work()",
     "if condition:\n    do_something()\nelse:\n    do_other()",
-    
+
     # List operations (10)
     "numbers = [1, 2, 3, 4, 5]",
     "squares = [x**2 for x in range(10)]",
@@ -84,7 +146,7 @@ PYTHON_PATTERNS = [
     "items.remove(old_item)",
     "length = len(items)",
     "sorted_items = sorted(items)",
-    
+
     # String operations (10)
     "text = 'Hello, World!'",
     "upper = text.upper()",
@@ -102,14 +164,14 @@ PYTHON_PATTERNS = [
 def create_code_dataset() -> Tuple[List[str], List[str]]:
     """
     Split patterns into train and test sets.
-    
+
     Returns:
         (train_patterns, test_patterns)
     """
     # Use first 45 for training, last 5 for testing
     train = PYTHON_PATTERNS[:45]
     test = PYTHON_PATTERNS[45:]
-    
+
     return train, test
 
 
@@ -120,7 +182,7 @@ def create_code_dataset() -> Tuple[List[str], List[str]]:
 def create_tokenizer(texts: List[str]) -> CharTokenizer:
     """
     Create tokenizer using students' CharTokenizer from Module 10.
-    
+
     This shows how YOUR tokenizer from Module 10 enables real applications!
     """
     tokenizer = CharTokenizer()
@@ -141,7 +203,7 @@ def train_codebot(
     seq_length: int = 128,
 ):
     """Train CodeBot on Python patterns."""
-    
+
     print("\n" + "="*70)
     print("TRAINING CODEBOT...")
     print("="*70)
@@ -151,7 +213,7 @@ def train_codebot(
     print(f"Model size: ~{sum(np.prod(p.shape) for p in model.parameters()):,} parameters")
     print(f"Training for ~{max_steps:,} steps (estimated 2 minutes)")
     print()
-    
+
     # Encode and pad patterns
     train_tokens = []
     for pattern in train_patterns:
@@ -162,15 +224,15 @@ def train_codebot(
         else:
             tokens = tokens + [0] * (seq_length - len(tokens))  # Pad with 0
         train_tokens.append(tokens)
-    
+
     # Loss function
     loss_fn = CrossEntropyLoss()
-    
+
     # Training loop
     start_time = time.time()
     step = 0
     losses = []
-    
+
     # Progress markers
     progress_points = [0, 500, 1000, 2000, max_steps]
     messages = [
@@ -180,69 +242,69 @@ def train_codebot(
         "[Almost there...]",
         "[Training complete!]"
     ]
-    
+
     while step <= max_steps:
         # Sample random pattern
         tokens = train_tokens[np.random.randint(len(train_tokens))]
-        
+
         # Create input/target
         input_seq = tokens[:-1]
         target_seq = tokens[1:]
-        
+
         # Convert to tensors
         x = Tensor(np.array([input_seq], dtype=np.int32), requires_grad=False)
         y_true = Tensor(np.array([target_seq], dtype=np.int32), requires_grad=False)
-        
+
         # Forward pass
         logits = model.forward(x)
-        
+
         # Compute loss
         batch_size = 1
         seq_len = logits.data.shape[1]
         vocab_size = logits.data.shape[2]
-        
+
         logits_flat = logits.reshape((batch_size * seq_len, vocab_size))
         targets_flat = y_true.reshape((batch_size * seq_len,))
-        
+
         loss = loss_fn(logits_flat, targets_flat)
-        
+
         # Backward pass
         optimizer.zero_grad()
         loss.backward()
-        
+
         # Gradient clipping
         for param in model.parameters():
             if param.grad is not None:
                 param.grad = np.clip(param.grad, -1.0, 1.0)
-        
+
         # Update
         optimizer.step()
-        
+
         # Track
         losses.append(loss.data.item())
-        
+
         # Print progress at markers
         if step in progress_points:
             avg_loss = np.mean(losses[-100:]) if losses else loss.data.item()
             elapsed = time.time() - start_time
             msg_idx = progress_points.index(step)
             print(f"Step {step:4d}/{max_steps} | Loss: {avg_loss:.3f} | {messages[msg_idx]}")
-        
+
         step += 1
-        
+
         # Time limit
         if time.time() - start_time > 180:  # 3 minutes max
             break
-    
+
     total_time = time.time() - start_time
     final_loss = np.mean(losses[-100:])
     loss_decrease = ((losses[0] - final_loss) / losses[0]) * 100
-    
+
     print()
     print(f"✓ CodeBot trained in {int(total_time)} seconds!")
     print(f"✓ Loss decreased by {loss_decrease:.0f}%!")
     print()
-    
+
     return losses
 
 
@@ -258,36 +320,36 @@ def complete_code(
 ) -> str:
     """
     Complete partial Python code.
-    
+
     Args:
         model: Trained GPT model
         tokenizer: Tokenizer
         partial_code: Incomplete code
         max_gen_length: Max characters to generate
-    
+
     Returns:
         Completed code
     """
     tokens = tokenizer.encode(partial_code)
-    
+
     # Generate
     for _ in range(max_gen_length):
         x = Tensor(np.array([tokens], dtype=np.int32), requires_grad=False)
         logits = model.forward(x)
-        
+
         # Get next token (greedy)
         next_logits = logits.data[0, -1, :]
         next_token = int(np.argmax(next_logits))
-        
+
         # Stop at padding (0) or if we've generated enough
         if next_token == 0:
             break
-        
+
         tokens.append(next_token)
-    
+
     # Decode
     completed = tokenizer.decode(tokens)
-    
+
     # Return just the generated part
     return completed[len(partial_code):]
 
@@ -298,14 +360,14 @@ def complete_code(
 
 def demo_mode(model: GPT, tokenizer: CharTokenizer):
     """Show 5 demo completions."""
-    
+
     print("\n" + "="*70)
     print("🎯 DEMO MODE: WATCH CODEBOT AUTOCOMPLETE")
     print("="*70)
     print()
     print("I'll show you 5 examples of what CodeBot learned:")
     print()
-    
+
     demos = [
         ("def subtract(a, b):\n    return a", "Basic Function"),
         ("for i in range(", "For Loop"),
@@ -313,28 +375,28 @@ def demo_mode(model: GPT, tokenizer: CharTokenizer):
         ("squares = [x**2 for x in ", "List Comprehension"),
         ("def multiply(x, y):\n    return x", "Function Return"),
     ]
-    
+
     success_count = 0
-    
+
     for i, (partial, name) in enumerate(demos, 1):
         print(f"Example {i}: {name}")
         print("─" * 70)
         print(f"You type:     {partial.replace(chr(10), chr(10) + '              ')}")
-        
+
         completion = complete_code(model, tokenizer, partial, max_gen_length=30)
-        
+
         print(f"CodeBot adds: {completion[:50]}...")
-        
+
         # Simple success check (generated something)
         if completion.strip():
             print("✓ Completion generated")
             success_count += 1
         else:
             print("✗ No completion")
-        
+
         print("─" * 70)
         print()
-    
+
     print(f"Demo success rate: {success_count}/5 ({success_count*20}%)")
     if success_count >= 4:
         print("🎉 CodeBot is working great!")
@@ -343,7 +405,7 @@ def demo_mode(model: GPT, tokenizer: CharTokenizer):
 
 def interactive_mode(model: GPT, tokenizer: CharTokenizer):
     """Let student try CodeBot."""
-    
+
     print("\n" + "="*70)
     print("🎮 YOUR TURN: TRY CODEBOT!")
     print("="*70)
@@ -351,35 +413,35 @@ def interactive_mode(model: GPT, tokenizer: CharTokenizer):
     print("Type partial Python code and see what CodeBot suggests.")
     print("Type 'demo' to see examples, 'quit' to exit.")
     print()
-    
+
     examples = [
         "def add(a, b):\n    return a",
         "for i in range(",
         "if name:\n    print(",
         "numbers = [1, 2, 3]",
     ]
-    
+
     while True:
         try:
             user_input = input("\nCodeBot> ").strip()
-            
+
             if not user_input:
                 continue
-            
+
             if user_input.lower() == 'quit':
                 print("\n👋 Thanks for trying CodeBot!")
                 break
-            
+
             if user_input.lower() == 'demo':
                 print("\nTry these examples:")
                 for ex in examples:
                     print(f"  → {ex[:40]}...")
                 continue
-            
+
             # Complete the code
             print()
             completion = complete_code(model, tokenizer, user_input, max_gen_length=50)
-            
+
             if completion.strip():
                 print(f"🤖 CodeBot suggests: {completion}")
                 print()
@@ -387,7 +449,7 @@ def interactive_mode(model: GPT, tokenizer: CharTokenizer):
                 print(user_input + completion)
             else:
                 print("⚠️  CodeBot couldn't complete this (maybe it wasn't trained on this pattern?)")
-            
+
         except KeyboardInterrupt:
             print("\n\n👋 Interrupted. Thanks for trying CodeBot!")
             break
@@ -401,7 +463,7 @@ def interactive_mode(model: GPT, tokenizer: CharTokenizer):
 
 def main():
     """Run CodeBot autocomplete demo."""
-    
+
     print("\n" + "="*70)
     print("🤖 CODEBOT - BUILD YOUR OWN MINI-COPILOT!")
     print("="*70)
@@ -416,14 +478,14 @@ def main():
     print("  • Common Python patterns")
     print()
     input("Press ENTER to begin training...")
-    
+
     # Create dataset
     train_patterns, test_patterns = create_code_dataset()
-    
+
     # Create tokenizer
     all_patterns = train_patterns + test_patterns
     tokenizer = create_tokenizer(all_patterns)
-    
+
     # Model config (based on proven sweep results)
     config = {
         'vocab_size': tokenizer.vocab_size,
@@ -432,7 +494,7 @@ def main():
         'num_heads': 8,       # Proven winner from sweep
         'max_seq_len': 128,   # Enough for code snippets
     }
-    
+
     # Create model
     model = GPT(
         vocab_size=config['vocab_size'],
@@ -441,11 +503,11 @@ def main():
         num_heads=config['num_heads'],
         max_seq_len=config['max_seq_len'],
     )
-    
+
     # Optimizer (proven winning LR)
     learning_rate = 0.0015
     optimizer = Adam(model.parameters(), lr=learning_rate)
-    
+
     # Train
     losses = train_codebot(
         model=model,
@@ -455,18 +517,18 @@ def main():
         max_steps=5000,
         seq_length=config['max_seq_len'],
     )
-    
+
     print("Ready to test CodeBot!")
     input("Press ENTER to see demo...")
-    
+
     # Demo mode
     demo_mode(model, tokenizer)
-    
+
     input("Press ENTER to try it yourself...")
-    
+
     # Interactive mode
     interactive_mode(model, tokenizer)
-    
+
     # Summary
     print("\n" + "="*70)
     print("🎓 WHAT YOU LEARNED")
@@ -495,4 +557,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

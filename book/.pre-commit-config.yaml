@@ -1,0 +1,184 @@
+# Book Pre-commit Configuration
+# =============================================================================
+# Quarto content validation hooks for the ML Systems textbook
+#
+# This config is called by the root .pre-commit-config.yaml router
+# Run manually: cd book && pre-commit run --config .pre-commit-config.yaml --all-files
+# =============================================================================
+
+repos:
+  # ===========================================================================
+  # AUTO-FORMATTERS
+  # ===========================================================================
+
+  - repo: https://github.com/executablebooks/mdformat
+    rev: 0.7.9
+    hooks:
+      - id: mdformat
+        name: "Format quarto markdown"
+        additional_dependencies: [mdformat-frontmatter]
+        files: ^quarto/contents/.*\.qmd$
+        pass_filenames: true
+
+  - repo: https://github.com/FlamingTempura/bibtex-tidy
+    rev: v1.14.0
+    hooks:
+      - id: bibtex-tidy
+        name: "Tidy bibtex files"
+        args: [
+          '--align=space',
+          '--curly',
+          '--sort=key',
+          '--sort-fields',
+          '--duplicates=key',
+          '--remove-empty-fields',
+          '--space=2',
+          '--trailing-commas',
+          '--escape',
+          '--wrap=100',
+          '--blank-lines'
+        ]
+        files: ^quarto/contents/.*\.bib$
+
+  # ===========================================================================
+  # CONTENT VALIDATORS
+  # ===========================================================================
+
+  - repo: local
+    hooks:
+      - id: collapse-blank-lines
+        name: "Collapse extra blank lines"
+        entry: python tools/scripts/content/format_blank_lines.py
+        language: python
+        pass_filenames: true
+        files: ^quarto/contents/.*\.qmd$
+
+      - id: format-python
+        name: "Format Python code blocks (Black, 70 chars)"
+        entry: python tools/scripts/content/format_python_in_qmd.py
+        language: python
+        additional_dependencies: [black>=23.0.0]
+        pass_filenames: true
+        files: ^quarto/contents/.*\.qmd$
+
+      - id: check-list-formatting
+        name: "Fix markdown list formatting"
+        entry: python tools/scripts/utilities/check_list_formatting.py --fix
+        language: python
+        pass_filenames: true
+        files: ^quarto/contents/.*\.qmd$
+
+      - id: validate-json
+        name: "Validate JSON files"
+        entry: python tools/scripts/utilities/validate_json.py
+        language: python
+        files: \.json$
+        pass_filenames: true
+
+      - id: check-unreferenced-labels
+        name: "Check for unreferenced labels"
+        entry: python tools/scripts/content/check_unreferenced_labels.py ./quarto/contents/core
+        language: python
+        pass_filenames: false
+        files: ^quarto/contents/.*\.qmd$
+
+      - id: check-duplicate-labels
+        name: "Check for duplicate labels"
+        entry: python tools/scripts/content/check_duplicate_labels.py
+        args: ['-d', 'quarto/contents/', '--figures', '--tables', '--listings', '--quiet', '--strict']
+        language: python
+        pass_filenames: false
+        files: ^quarto/contents/.*\.qmd$
+
+      - id: validate-citations
+        name: "Validate citation references"
+        entry: python tools/scripts/content/validate_citations.py --quiet
+        language: python
+        pass_filenames: true
+        files: ^quarto/contents/.*\.qmd$
+
+      - id: validate-footnotes
+        name: "Validate footnote references"
+        entry: python tools/scripts/content/footnote_cleanup.py -d quarto/contents/ --validate
+        language: python
+        pass_filenames: false
+        files: ^quarto/contents/.*\.qmd$
+
+      - id: check-forbidden-footnotes
+        name: "Check for footnotes in tables/captions"
+        entry: python tools/scripts/content/check_forbidden_footnotes.py -d quarto/contents/
+        language: python
+        pass_filenames: false
+        files: ^quarto/contents/.*\.qmd$
+
+      - id: check-purpose-unnumbered
+        name: "Ensure Purpose sections are unnumbered"
+        entry: bash -c 'grep -n "^## Purpose" "$@" | grep -v "\.unnumbered" && exit 1 || exit 0' --
+        language: system
+        pass_filenames: true
+        files: ^quarto/contents/.*\.qmd$
+
+      - id: check-table-formatting
+        name: "Check table formatting"
+        entry: python tools/scripts/content/format_tables.py --check -d quarto/contents/
+        language: python
+        pass_filenames: false
+        files: ^quarto/contents/.*\.qmd$
+
+      - id: validate-part-keys
+        name: "Validate part keys"
+        entry: python tools/scripts/utilities/validate_part_keys.py
+        language: python
+        additional_dependencies: [pyyaml]
+        pass_filenames: false
+        files: \.qmd$
+
+  # ===========================================================================
+  # IMAGE VALIDATORS
+  # ===========================================================================
+
+  - repo: local
+    hooks:
+      - id: validate-images
+        name: "Validate image files"
+        entry: python tools/scripts/images/manage_images.py
+        language: python
+        additional_dependencies: [pillow, rich]
+        pass_filenames: true
+        files: ^quarto/contents/.*\.(png|jpg|jpeg|gif)$
+
+      - id: validate-external-images
+        name: "Check for external images"
+        entry: python tools/scripts/images/manage_external_images.py --validate quarto/contents/
+        language: python
+        additional_dependencies: [requests]
+        pass_filenames: false
+        files: ^quarto/contents/.*\.qmd$
+
+      - id: validate-image-references
+        name: "Check image references exist"
+        entry: python tools/scripts/images/validate_image_references.py -d quarto/contents/ --quiet
+        language: python
+        pass_filenames: false
+        files: ^quarto/contents/.*\.qmd$
+
+      - id: prevent-svg
+        name: "Prevent manual SVG files"
+        entry: bash -c 'echo "❌ Manual SVG files are not allowed. Convert to PNG."; exit 1'
+        language: system
+        files: \.svg$
+        exclude: ".*_files/mediabag/.*\\.svg$"
+
+  # ===========================================================================
+  # SYSTEM CHECKS
+  # ===========================================================================
+
+  - repo: local
+    hooks:
+      - id: cleanup-artifacts
+        name: "Auto-cleanup build artifacts"
+        entry: python tools/scripts/maintenance/cleanup_build_artifacts.py
+        language: python
+        additional_dependencies: [rich]
+        pass_filenames: false
+        stages: [pre-commit]

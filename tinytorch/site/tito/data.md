@@ -136,17 +136,17 @@ TinyTorch/
 
 ---
 
-## Unified Progress View
+## Progress Views
 
-### See Everything: `tito status`
+### Module Progress: `tito module status`
 
 <div style="background: #e8eaf6; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #5e35b1; margin: 1.5rem 0;">
 
 ```bash
-tito status
+tito module status
 ```
 
-**Shows your complete learning journey in one view**:
+**Shows your module completion progress**:
 
 ```
 ╭─────────────── 📊 TinyTorch Progress ────────────────╮
@@ -181,10 +181,24 @@ Milestone Achievements:
 ```
 
 **Use this to**:
-- Check overall progress
+- Check module completion
 - See next recommended steps
-- Understand milestone prerequisites
 - Track your learning journey
+
+</div>
+
+### Milestone Achievements: `tito milestone status`
+
+<div style="background: #f3e5f5; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #9c27b0; margin: 1.5rem 0;">
+
+```bash
+tito milestone status
+```
+
+**Shows your milestone achievements**:
+- Which historical recreations you've completed
+- Which milestones are unlocked
+- What prerequisites remain
 
 </div>
 
@@ -192,85 +206,58 @@ Milestone Achievements:
 
 ## Data Management Commands
 
-### Reset Your Progress
+### Reset a Module
 
 <div style="background: #fff5f5; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #e74c3c; margin: 1.5rem 0;">
 
-**Starting fresh?** Reset commands let you start over cleanly.
+**Need to start a module over?** The reset command lets you reset a specific module cleanly.
 
-#### Reset Everything
+#### Reset a Specific Module
 
 ```bash
-tito reset all
+tito module reset XX
 ```
 
 **What this does**:
-- Clears all module completion
-- Clears all milestone achievements
-- Resets configuration to defaults
-- Keeps your code in `modules/` safe
+- Resets the specified module to its clean state
+- Creates a backup of your current implementation
+- Keeps other modules untouched
 - Asks for confirmation before proceeding
+
+**Example**:
+```bash
+tito module reset 03
+```
 
 **Example output**:
 ```
-⚠️  Warning: This will reset ALL progress
+⚠️  Warning: This will reset Module 03 (Layers)
 
-This will clear:
-  • Module completion (7 modules)
-  • Milestone achievements (1 milestone)
-  • Configuration settings
+This will:
+  • Backup current implementation
+  • Reset module to clean state
+  • Clear module completion status
 
-Your code in modules/ will NOT be deleted.
+Your code will be backed up to .tito/backups/
 
 Continue? [y/N]: y
 
-✅ Creating backup at .tito_backup_20251116_143000/
-✅ Clearing module progress
-✅ Clearing milestone achievements
-✅ Resetting configuration
+✅ Creating backup at .tito/backups/03_layers_20251116_143000.py
+✅ Resetting module to clean state
 
 🔄 Reset Complete!
 
-You're ready to start fresh.
-Run: tito module start 01
+You're ready to start fresh on Module 03.
+Run: tito module start 03
 ```
 
-#### Reset Module Progress Only
+#### Automatic Backups
 
-```bash
-tito reset progress
-```
-
-**What this does**:
-- Clears module completion tracking only
-- Keeps milestone achievements
-- Keeps configuration
-- Useful for re-doing module workflow
-
-#### Reset Milestone Achievements Only
-
-```bash
-tito reset milestones
-```
-
-**What this does**:
-- Clears milestone achievements only
-- Keeps module completion
-- Keeps configuration
-- Useful for re-running historical recreations
-
-#### Safety: Automatic Backups
-
-```bash
-# Create backup before reset
-tito reset all --backup
-```
-
-**What this does**:
-- Creates timestamped backup: `.tito_backup_YYYYMMDD_HHMMSS/`
-- Contains complete copy of `.tito/` folder
+Before any reset, TinyTorch automatically:
+- Creates timestamped backup of your implementation
+- Stores it in `.tito/backups/`
+- Format: `XX_name_YYYYMMDD_HHMMSS.py`
 - Allows manual restore if needed
-- Automatic before any destructive operation
 
 </div>
 
@@ -367,8 +354,9 @@ All systems ready! 🚀
 ❌ Data files corrupted
   ✗ .tito/progress.json is malformed
 
-Fix:
-  tito reset progress
+Fix by removing and recreating:
+  rm .tito/progress.json
+  tito system health  # Recreates the file
 
 Or restore from backup:
   cp .tito_backup_YYYYMMDD/.tito/progress.json .tito/
@@ -388,7 +376,8 @@ Or restore from backup:
 
 1. **Check status regularly**:
    ```bash
-   tito status
+   tito module status
+   tito milestone status
    ```
    See where you are, what's next
 
@@ -403,9 +392,9 @@ Or restore from backup:
    - They're your safety net
    - Cleanup happens automatically
 
-4. **Backup before experiments**:
+4. **Reset modules when needed**:
    ```bash
-   tito reset all --backup  # If trying something risky
+   tito module reset XX  # Reset a specific module
    ```
 
 5. **Version control for code**:
@@ -431,7 +420,6 @@ Or restore from backup:
 
 **Visible in**:
 - `tito module status`
-- `tito status`
 - `.tito/progress.json`
 
 ### Milestones (Achievement Progress)
@@ -445,7 +433,6 @@ Or restore from backup:
 
 **Visible in**:
 - `tito milestone status`
-- `tito status`
 - `.tito/milestones.json`
 
 ### What's NOT Tracked
@@ -468,39 +455,32 @@ Or restore from backup:
 
 ## Common Data Scenarios
 
-### Scenario 1: "I want to start completely fresh"
+### Scenario 1: "I want to reset a specific module"
 
 <div style="background: #f8f9fa; padding: 1.5rem; border: 1px solid #dee2e6; border-radius: 0.5rem; margin: 1.5rem 0;">
 
 ```bash
-# Create backup first (recommended)
-tito reset all --backup
+# Reset module 03 to start fresh
+tito module reset 03
 
-# Or just reset
-tito reset all
-
-# Start from Module 01
-tito module start 01
+# Start working on it again
+tito module start 03
 ```
 
-**Result**: Clean slate, progress tracking reset, your code untouched
+**Result**: Module 03 reset to clean state, backup created, other modules untouched
 
 </div>
 
-### Scenario 2: "I want to re-run milestones but keep module progress"
+### Scenario 2: "I want to re-run a milestone"
 
 <div style="background: #f8f9fa; padding: 1.5rem; border: 1px solid #dee2e6; border-radius: 0.5rem; margin: 1.5rem 0;">
 
 ```bash
-# Reset only milestone achievements
-tito reset milestones
-
-# Re-run historical recreations
+# Just run the milestone again
 tito milestone run 03
-tito milestone run 04
 ```
 
-**Result**: Module completion preserved, milestone achievements reset
+**Result**: Milestone re-runs using your current implementations
 
 </div>
 
@@ -527,11 +507,8 @@ cp -r .tito_backup_YYYYMMDD/ .tito/
 <div style="background: #f8f9fa; padding: 1.5rem; border: 1px solid #dee2e6; border-radius: 0.5rem; margin: 1.5rem 0;">
 
 ```bash
-# Create backup with timestamp
-tito reset all --backup  # (then cancel when prompted)
-
-# Share the backup folder
-cp -r .tito_backup_YYYYMMDD/ ~/Desktop/my-tinytorch-progress/
+# Copy your progress folder
+cp -r .tito/ ~/Desktop/my-tinytorch-progress/
 ```
 
 **Result**: Friend can see your progress by copying to their `.tito/` folder
@@ -556,7 +533,7 @@ cp -r .tito_backup_YYYYMMDD/ ~/Desktop/my-tinytorch-progress/
 
 ### Q: How do I see my completion dates?
 
-**A**: Run `tito status` for a formatted view, or check `.tito/progress.json` and `.tito/milestones.json` directly.
+**A**: Run `tito module status` for a formatted view, or check `.tito/progress.json` and `.tito/milestones.json` directly.
 
 ### Q: Can I delete backups?
 

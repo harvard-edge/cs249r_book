@@ -28,7 +28,7 @@ tito system health
 - Before asking a TA for help
 
 ```bash
-tito system check
+tito system health
 ```
 
 **What it shows**:
@@ -57,7 +57,7 @@ tito system check
 ### When Everything Works ✅
 
 ```bash
-$ tito system check
+$ tito system health
 
 ╭─────────────────────────────── TinyTorch Health Check ───────────────────────╮
 │ 🧪 Running Comprehensive Environment Validation                              │
@@ -93,7 +93,7 @@ Running validation tests...
 ### When Something Fails ❌
 
 ```bash
-$ tito system check
+$ tito system health
 
 ╭─────────────────────────────── TinyTorch Health Check ───────────────────────╮
 │ 🧪 Running Comprehensive Environment Validation                              │
@@ -123,7 +123,7 @@ Running validation tests...
 │ 2. Include the error messages below                                          │
 │ 3. Mention what you were trying to do                                        │
 │                                                                              │
-│ Or try: tito setup to reinstall                                              │
+│ Or try: tito setup to reinstall                                             │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 
 ╭──────────────────────────────────────────────────────────────────────────────╮
@@ -146,7 +146,7 @@ FAILED tests/environment/test_all_requirements.py::TestRequiredPackages::test_pa
 │ • Missing packages: pip install -r requirements.txt                          │
 │ • Jupyter issues: pip install --upgrade jupyterlab                           │
 │ • Import errors: pip install -e . (reinstall TinyTorch)                      │
-│ • Still stuck: Run tito system check --verbose                     │
+│ • Still stuck: Run tito system health --verbose                    │
 │                                                                              │
 │ Then share the full output with your TA                                      │
 ╰──────────────────────────────────────────────────────────────────────────────╯
@@ -159,11 +159,11 @@ FAILED tests/environment/test_all_requirements.py::TestRequiredPackages::test_pa
 **When to use**: When you need even more details for debugging or sharing with TAs.
 
 ```bash
-tito system check --verbose
+tito system health --verbose
 ```
 
 **What it shows**:
-- Everything from `--verify`
+- Everything from the basic health check
 - Plus: Full pytest output with all test details
 - Plus: Complete error messages and stack traces
 
@@ -171,7 +171,7 @@ tito system check --verbose
 
 ## For TAs: How to Read Reports
 
-When a student shares their `tito system check` output, look for:
+When a student shares their `tito system health` output, look for:
 
 ### 1. **Test Results Summary Table**
 - Shows passed/failed/skipped counts
@@ -226,10 +226,10 @@ cd TinyTorch
 tito setup
 
 # 3. Verify everything works
-tito system check
+tito system health
 
 # If all ✅ green, you're ready!
-tito module 01
+tito module start 01
 ```
 
 ### Before Starting a Module
@@ -237,14 +237,14 @@ tito module 01
 # Quick health check
 tito system health
 
-# If you see any ❌ red, run full verification
-tito system check
+# If you see any ❌ red, run with verbose for details
+tito system health --verbose
 ```
 
 ### When Something Breaks
 ```bash
 # 1. Run full verification
-tito system check --verbose
+tito system health --verbose
 
 # 2. Copy the entire output
 
@@ -261,7 +261,7 @@ tito system check --verbose
 ### Q: How often should I run this?
 **A**:
 - Quick check (`tito system health`): Anytime, it's fast
-- Full verification (`--verify`): After setup, when issues occur, before asking for help
+- Verbose output (`--verbose`): After setup, when issues occur, before asking for help
 
 ### Q: What if tests are failing?
 **A**:
@@ -277,7 +277,7 @@ tito system check --verbose
 
 ### Q: What if the validation says I'm healthy but I still have issues?
 **A**:
-1. Try `tito system check --verbose` for more details
+1. Try `tito system health --verbose` for more details
 2. The validation tests core environment - your specific issue might be module-specific
 3. Run `tito module test N` to test a specific module
 4. Share both outputs with your TA
@@ -302,4 +302,4 @@ pytest tests/environment/test_all_requirements.py -v
 pytest tests/environment/test_setup_validation.py::TestPythonEnvironment -v
 ```
 
-But for students, we recommend using `tito system check` instead - it has prettier output! 🎨
+But for students, we recommend using `tito system health` instead - it has prettier output! 🎨

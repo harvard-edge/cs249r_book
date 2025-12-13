@@ -1,5 +1,15 @@
 # Getting Started with TinyTorch
 
+```{admonition} 🔬 Early Explorer Territory
+:class: warning
+
+You're ahead of the curve. TinyTorch is functional but still being refined. Expect rough edges, incomplete documentation, and things that might change. If you proceed, you're helping us shape this by finding what works and what doesn't.
+
+**Best approach right now:** Browse the code and concepts. For hands-on building, check back when we announce classroom readiness (Summer/Fall 2026).
+
+Questions or feedback? [Join the discussion →](https://github.com/harvard-edge/cs249r_book/discussions/1076)
+```
+
 Welcome to TinyTorch! This comprehensive guide will get you started whether you're a student building ML systems, an instructor setting up a course, or a TA supporting learners.
 
 <div style="background: #f8f9fa; padding: 2rem; border-radius: 0.5rem; margin: 2rem 0; text-align: center;">
@@ -16,14 +26,8 @@ Welcome to TinyTorch! This comprehensive guide will get you started whether you'
 
 <a href="#instructors" style="display: block; background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%); padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #7b1fa2; text-decoration: none; transition: transform 0.2s;">
 <div style="font-size: 2rem; margin-bottom: 0.5rem;"></div>
-<div style="color: #4a148c; font-weight: 600; font-size: 1.1rem;">Instructors</div>
-<div style="color: #6a1b9a; font-size: 0.85rem; margin-top: 0.5rem;">Course Setup + Grading</div>
-</a>
-
-<a href="#tas" style="display: block; background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%); padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #f57c00; text-decoration: none; transition: transform 0.2s;">
-<div style="font-size: 2rem; margin-bottom: 0.5rem;"></div>
-<div style="color: #e65100; font-weight: 600; font-size: 1.1rem;">Teaching Assistants</div>
-<div style="color: #ef6c00; font-size: 0.85rem; margin-top: 0.5rem;">Student Support + Debugging</div>
+<div style="color: #4a148c; font-weight: 600; font-size: 1.1rem;">Instructors & TAs</div>
+<div style="color: #6a1b9a; font-size: 0.85rem; margin-top: 0.5rem;">Coming Soon</div>
 </a>
 
 </div>
@@ -65,8 +69,8 @@ tito update    # Check for and install updates (your work is preserved)
 After setup, join the global TinyTorch community and validate your installation:
 
 ```bash
-# Join with optional information
-tito community join
+# Log in to join the community
+tito community login
 
 # Run baseline benchmark to validate setup
 tito benchmark baseline
@@ -181,14 +185,14 @@ The most important commands you'll use daily:
 # Export module to package
 tito module complete MODULE_NUMBER
 
-# Check module status (optional)
-tito checkpoint status
+# Check module status
+tito module status
 
 # System information
 tito system info
 
 # Community features
-tito community join
+tito community login
 tito benchmark baseline
 ```
 
@@ -223,338 +227,66 @@ The goal isn't just to write code - it's to **understand** how modern ML framewo
 ---
 
 <a id="instructors"></a>
-##  For Instructors: Turn-Key ML Systems Course
+##  For Instructors & TAs: Classroom Support Coming Soon
 
-### Course Overview
+<div style="background: #fff3cd; border: 1px solid #ffc107; padding: 1.5rem; border-radius: 0.5rem; margin: 1.5rem 0;">
+<h4 style="margin: 0 0 0.5rem 0; color: #856404;">📢 Stay Tuned: NBGrader Integration In Development</h4>
+<p style="margin: 0 0 1rem 0; color: #856404;">We're building comprehensive classroom support with NBGrader integration that will enable:</p>
 
-TinyTorch provides a complete ML systems engineering course with NBGrader integration, automated grading, and production-ready teaching materials.
-
-<div style="background: #d4edda; border: 1px solid #28a745; padding: 1.5rem; border-radius: 0.5rem; margin: 1.5rem 0;">
-<h4 style="margin: 0 0 0.5rem 0; color: #155724;">✓ Complete NBGrader Integration Available</h4>
-<p style="margin: 0; color: #155724;">TinyTorch includes automated grading workflows, rubrics, and sample solutions ready for classroom use.</p>
+<ul style="margin: 0; color: #664d03; padding-left: 1.5rem;">
+<li><strong>Automated Assignment Generation</strong> - Create student assignments from TinyTorch modules with solutions removed</li>
+<li><strong>Auto-Grading</strong> - Automatically grade student implementations against test suites</li>
+<li><strong>Manual Review Interface</strong> - Grade ML Systems Thinking questions through a browser-based interface</li>
+<li><strong>Progress Tracking</strong> - Monitor student progress across all 20 modules</li>
+<li><strong>Grade Export</strong> - Export grades to CSV for LMS integration</li>
+</ul>
 </div>
 
-**Course Duration:** 14-16 weeks (flexible pacing)
-**Student Outcome:** Complete ML framework supporting vision AND language models
-**Teaching Approach:** Systems-focused learning through building, not just using
+### What's Planned
 
-### 30-Minute Instructor Setup
+**Course Structure:**
+- 14-16 week curriculum covering all 20 modules
+- Progressive difficulty from tensors to transformers to optimization
+- Historical milestones that validate student implementations
+- Capstone competition (Torch Olympics)
 
-<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem; margin: 2rem 0;">
+**Grading Components:**
+- **70% Auto-Graded**: Code implementation correctness via NBGrader test cells
+- **30% Manual Review**: ML Systems Thinking questions (3 per module)
 
-<div style="background: white; padding: 1.5rem; border-radius: 0.5rem; border: 1px solid #dee2e6;">
-<h4 style="color: #495057; margin: 0 0 0.5rem 0;">1⃣ Install & Setup (10 min)</h4>
-<div style="background: #f8f9fa; padding: 1rem; border-radius: 0.25rem; font-family: monospace; font-size: 0.85rem; margin: 0.5rem 0;">
-curl -sSL tinytorch.ai/install | bash<br>
-cd tinytorch<br>
-source .venv/bin/activate<br>
-pip install nbgrader
-</div>
-<p style="font-size: 0.9rem; margin: 0; color: #6c757d;">One-time environment setup</p>
-</div>
+**Assessment Tools:**
+- `tito grade generate` - Create instructor versions with solutions
+- `tito grade release` - Generate student versions (solutions removed)
+- `tito grade collect` - Collect student submissions
+- `tito grade autograde` - Run automatic grading
+- `tito grade feedback` - Generate student feedback
+- `tito grade export` - Export grades to CSV
 
-<div style="background: white; padding: 1.5rem; border-radius: 0.5rem; border: 1px solid #dee2e6;">
-<h4 style="color: #495057; margin: 0 0 0.5rem 0;">2⃣ Initialize Grading (10 min)</h4>
-<div style="background: #f8f9fa; padding: 1rem; border-radius: 0.25rem; font-family: monospace; font-size: 0.85rem; margin: 0.5rem 0;">
-tito grade setup<br>
-tito system health
-</div>
-<p style="font-size: 0.9rem; margin: 0; color: #6c757d;">NBGrader integration & health check</p>
-</div>
+### Current Status
 
-<div style="background: white; padding: 1.5rem; border-radius: 0.5rem; border: 1px solid #dee2e6;">
-<h4 style="color: #495057; margin: 0 0 0.5rem 0;">3⃣ First Assignment (10 min)</h4>
-<div style="background: #f8f9fa; padding: 1rem; border-radius: 0.25rem; font-family: monospace; font-size: 0.85rem; margin: 0.5rem 0;">
-tito grade generate 01_tensor<br>
-tito grade release 01_tensor
-</div>
-<p style="font-size: 0.9rem; margin: 0; color: #6c757d;">Ready to distribute to students!</p>
-</div>
+TinyTorch is fully functional for **self-paced learning** today. Students can:
+- Work through all 20 modules independently
+- Run milestone validation scripts
+- Use the complete `tito` CLI for module management
+- Join the community and run benchmarks
 
-</div>
+**For classroom deployment**, we recommend waiting for the official NBGrader integration announcement (target: Summer/Fall 2026).
 
-### Assignment Workflow
+### Interested in Early Adoption?
 
-TinyTorch wraps NBGrader behind simple `tito grade` commands:
+If you're considering using TinyTorch in your course before full classroom support is ready:
 
-**1. Prepare Assignments**
-```bash
-# Generate instructor version (with solutions)
-tito grade generate 01_tensor
+1. **Review the curriculum** - Browse modules and milestones to assess fit
+2. **Test the workflow** - Complete a few modules yourself to understand the student experience
+3. **Contact us** - [Join the discussion](https://github.com/harvard-edge/cs249r_book/discussions/1076) to share your use case
 
-# Create student version (solutions removed)
-tito grade release 01_tensor
-```
+We're actively seeking instructor feedback to shape the classroom experience.
 
-**2. Collect Submissions**
-```bash
-# Collect all students
-tito grade collect 01_tensor
+### Stay Updated
 
-# Or specific student
-tito grade collect 01_tensor --student student_id
-```
-
-**3. Auto-Grade**
-```bash
-# Grade all submissions
-tito grade autograde 01_tensor
-
-# Grade specific student
-tito grade autograde 01_tensor --student student_id
-```
-
-**4. Manual Review**
-```bash
-# Open grading interface (browser-based)
-tito grade manual 01_tensor
-```
-
-**5. Export Grades**
-```bash
-# Export all grades to CSV
-tito grade export
-
-# Or specific module
-tito grade export --module 01_tensor --output grades_module01.csv
-```
-
-### Grading Components
-
-**Auto-Graded (70%)**
-- Code implementation correctness
-- Test passing
-- Function signatures
-- Output validation
-
-**Manually Graded (30%)**
-- ML Systems Thinking questions (3 per module)
-- Each question: 10 points
-- Focus on understanding, not perfection
-
-### Grading Rubric for ML Systems Questions
-
-| Points | Criteria |
-|--------|----------|
-| 9-10 | Demonstrates deep understanding, references specific code, discusses systems implications |
-| 7-8 | Good understanding, some code references, basic systems thinking |
-| 5-6 | Surface understanding, generic response, limited systems perspective |
-| 3-4 | Attempted but misses key concepts |
-| 0-2 | No attempt or completely off-topic |
-
-**What to Look For:**
-- References to actual implemented code
-- Memory/performance analysis
-- Scaling considerations
-- Production system comparisons
-- Understanding of trade-offs
-
-### Module Teaching Notes
-
-**Module 01: Tensor**
-- Focus: Memory layout, data structures
-- Key Concept: Understanding memory is crucial for ML performance
-- Demo: Show memory profiling, copying behavior
-
-**Module 05: Autograd**
-- Focus: Computational graphs, backpropagation
-- Key Concept: Automatic differentiation enables deep learning
-- Demo: Visualize computational graphs
-
-**Module 09: Spatial (CNNs)**
-- Focus: Algorithmic complexity, memory patterns
-- Key Concept: O(N²) operations become bottlenecks
-- Demo: Profile convolution memory usage
-
-**Module 12: Attention**
-- Focus: Attention mechanisms, scaling
-- Key Concept: Attention is compute-intensive but powerful
-- Demo: Profile attention with different sequence lengths
-
-**Module 20: Capstone**
-- Focus: End-to-end system integration
-- Key Concept: Production requires optimization across all components
-- Project: Torch Olympics Competition
-
-### Sample Schedule (16 Weeks)
-
-| Week | Module | Focus |
-|------|--------|-------|
-| 1 | 01 Tensor | Data Structures, Memory |
-| 2 | 02 Activations | Non-linearity Functions |
-| 3 | 03 Layers | Neural Network Components |
-| 4 | 04 Losses | Optimization Objectives |
-| 5 | 05 Autograd | Automatic Differentiation |
-| 6 | 06 Optimizers | Training Algorithms |
-| 7 | 07 Training | Complete Training Loop |
-| 8 | Midterm Project | Build and Train Network |
-| 9 | 08 DataLoader | Data Pipeline |
-| 10 | 09 Spatial | Convolutions, CNNs |
-| 11 | 10 Tokenization | Text Processing |
-| 12 | 11 Embeddings | Word Representations |
-| 13 | 12 Attention | Attention Mechanisms |
-| 14 | 13 Transformers | Transformer Architecture |
-| 15 | 14-19 Optimization | Profiling, Quantization |
-| 16 | 20 Capstone | Torch Olympics |
-
-### Assessment Strategy
-
-**Continuous Assessment (70%)**
-- Module completion: 4% each × 16 = 64%
-- Checkpoint achievements: 6%
-
-**Projects (30%)**
-- Midterm: Build and train CNN (15%)
-- Final: Torch Olympics Competition (15%)
-
-### Instructor Resources
-
-- **Complete grading rubrics** with sample solutions
-- **Module-specific teaching notes** in each ABOUT.md file
-- **Progress tracking tools** (`tito checkpoint status --student ID`)
-- **System health monitoring** (`tito module status --comprehensive`)
-- **Community support** via GitHub Issues
-
-**See [Complete Course Structure](chapters/00-introduction.md)** for full curriculum overview.
-
----
-
-<a id="tas"></a>
-##  For Teaching Assistants: Student Support Guide
-
-### TA Preparation
-
-Develop deep familiarity with modules where students commonly struggle:
-
-**Critical Modules:**
-1. **Module 05: Autograd** - Most conceptually challenging
-2. **Module 09: CNNs (Spatial)** - Complex nested loops and memory patterns
-3. **Module 13: Transformers** - Attention mechanisms and scaling
-
-**Preparation Process:**
-1. Complete all three critical modules yourself
-2. Introduce bugs intentionally to understand error patterns
-3. Practice debugging common scenarios
-4. Review past student submissions
-
-### Common Student Errors
-
-#### Module 05: Autograd
-
-**Error 1: Gradient Shape Mismatches**
-- Symptom: `ValueError: shapes don't match for gradient`
-- Common Cause: Incorrect gradient accumulation or shape handling
-- Debugging: Check gradient shapes match parameter shapes, verify accumulation logic
-
-**Error 2: Disconnected Computational Graph**
-- Symptom: Gradients are None or zero
-- Common Cause: Operations not tracked in computational graph
-- Debugging: Verify `requires_grad=True`, check operations create new Tensor objects
-
-**Error 3: Broadcasting Failures**
-- Symptom: Shape errors during backward pass
-- Common Cause: Incorrect handling of broadcasted operations
-- Debugging: Understand NumPy broadcasting, check gradient accumulation for broadcasted dims
-
-#### Module 09: CNNs (Spatial)
-
-**Error 1: Index Out of Bounds**
-- Symptom: `IndexError` in convolution loops
-- Common Cause: Incorrect padding or stride calculations
-- Debugging: Verify output shape calculations, check padding logic
-
-**Error 2: Memory Issues**
-- Symptom: Out of memory errors
-- Common Cause: Creating unnecessary intermediate arrays
-- Debugging: Profile memory usage, look for unnecessary copies, optimize loop structure
-
-#### Module 13: Transformers
-
-**Error 1: Attention Scaling Issues**
-- Symptom: Attention weights don't sum to 1
-- Common Cause: Missing softmax or incorrect scaling
-- Debugging: Verify softmax is applied, check scaling factor (1/sqrt(d_k))
-
-**Error 2: Positional Encoding Errors**
-- Symptom: Model doesn't learn positional information
-- Common Cause: Incorrect positional encoding implementation
-- Debugging: Verify sinusoidal patterns, check encoding is added correctly
-
-### Debugging Strategies
-
-When students ask for help, guide them with questions rather than giving answers:
-
-1. **What error message are you seeing?** - Read full traceback
-2. **What did you expect to happen?** - Clarify their mental model
-3. **What actually happened?** - Compare expected vs actual
-4. **What have you tried?** - Avoid repeating failed approaches
-5. **Can you test with a simpler case?** - Reduce complexity
-
-### Productive vs Unproductive Struggle
-
-**Productive Struggle (encourage):**
-- Trying different approaches
-- Making incremental progress
-- Understanding error messages
-- Passing additional tests over time
-
-**Unproductive Frustration (intervene):**
-- Repeated identical errors
-- Random code changes
-- Unable to articulate the problem
-- No progress after 30+ minutes
-
-### Office Hour Patterns
-
-**Expected Demand Spikes:**
-
-- **Module 05 (Autograd)**: Highest demand
-  - Schedule additional TA capacity
-  - Pre-record debugging walkthroughs
-  - Create FAQ document
-
-- **Module 09 (CNNs)**: High demand
-  - Focus on memory profiling
-  - Loop optimization strategies
-  - Padding/stride calculations
-
-- **Module 13 (Transformers)**: Moderate-high demand
-  - Attention mechanism debugging
-  - Positional encoding issues
-  - Scaling problems
-
-### Manual Review Focus Areas
-
-While NBGrader automates 70-80% of assessment, focus manual review on:
-
-1. **Code Clarity and Design Choices**
-   - Is code readable?
-   - Are design decisions justified?
-   - Is the implementation clean?
-
-2. **Edge Case Handling**
-   - Does code handle edge cases?
-   - Are there appropriate checks?
-   - Is error handling present?
-
-3. **Systems Thinking Analysis**
-   - Do students understand complexity?
-   - Can they analyze their code?
-   - Do they recognize bottlenecks?
-
-### Teaching Tips
-
-1. **Encourage Exploration** - Let students try different approaches
-2. **Connect to Production** - Reference PyTorch equivalents and real-world scenarios
-3. **Make Systems Visible** - Profile memory usage, analyze complexity together
-4. **Build Confidence** - Acknowledge progress and validate understanding
-
-### TA Resources
-
-- Module-specific ABOUT.md files with common pitfalls
-- Grading rubrics with sample excellent/good/acceptable solutions
-- System diagnostics tools (`tito system health`)
-- Progress tracking (`tito checkpoint status --student ID`)
+- **[GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions/1076)** - Join the conversation
+- **[Course Structure Overview](chapters/00-introduction.md)** - Full curriculum details
+- **[Module Documentation](tito/modules.md)** - Technical module specifications
 
 ---
 

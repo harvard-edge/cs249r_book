@@ -27,7 +27,7 @@ TinyTorch is an **educational framework** where every contribution should:
 2. **Verify installation**:
    ```bash
    tito system health
-   tito checkpoint status
+   tito module status
    ```
 
 3. **Read the development guidelines**:
@@ -77,7 +77,7 @@ git checkout -b feature/your-improvement
 # 3. Make changes following standards in CLAUDE.md
 # 4. Test thoroughly
 python tests/run_all_modules.py
-tito checkpoint test 01
+tito module test 01
 
 # 5. Commit with descriptive messages (NO auto-attribution)
 git add .
@@ -115,9 +115,9 @@ All contributions must pass:
    python tests/integration/run_integration_tests.py
    ```
 
-3. **Checkpoint Validation**:
+3. **Module Testing**:
    ```bash
-   tito checkpoint test XX
+   tito module test XX
    ```
 
 4. **Example Verification**:
@@ -138,7 +138,7 @@ All contributions must pass:
 
 **For Contributors** (improving the framework):
 - **Source Files**: Edit `*_dev.py` files (source of truth)
-- **Notebooks**: Generated from `.py` files using `tito notebooks`
+- **Notebooks**: Generated from source files using `tito src export`
 - **Structure**: Follow the standardized module structure
 - **Testing**: Include immediate testing after each implementation
 - **Systems Analysis**: MANDATORY memory and performance analysis
@@ -170,7 +170,7 @@ All contributions must pass:
 Every contribution should emphasize:
 - **Memory usage** and optimization
 - **Computational complexity** analysis
-- **Performance characteristics** 
+- **Performance characteristics**
 - **Scaling behavior** and bottlenecks
 - **Production implications**
 
@@ -205,7 +205,7 @@ For new features, please:
 ## 💬 Communication
 
 - **Issues**: Use GitHub Issues for bugs and feature requests
-- **Discussions**: GitHub Discussions for questions and ideas  
+- **Discussions**: GitHub Discussions for questions and ideas
 - **Documentation**: Check `docs/` directory for detailed guides
 - **Development**: Follow `CLAUDE.md` for complete standards
 
@@ -225,7 +225,7 @@ Contributors who follow these guidelines and make valuable educational improveme
 
 ### Quick References
 - **Module Structure**: See any `modules/XX_name/` directory
-- **Testing Patterns**: Check `tests/module_template/` 
+- **Testing Patterns**: Check `tests/module_template/`
 - **Example Code**: Look at `examples/xornet/` and `examples/cifar10/`
 
 ---

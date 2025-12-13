@@ -234,7 +234,7 @@ pip install -e .
 tito system health
 
 # 5. Start with Module 01
-tito view 01_tensor
+tito module start 01
 ```
 
 ### Team-Specific Customization
@@ -279,4 +279,3 @@ tito view 01_tensor
 ---
 
 **For Questions**: See `INSTRUCTOR.md` or contact TinyTorch maintainers
-

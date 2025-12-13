@@ -5,10 +5,14 @@
 ║         KV-Cache + Batching + Early Stopping (Production Inference)         ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
-Historical Context (2017-2020):
-- 2017: Vaswani et al. - Transformers enable autoregressive generation
-- 2019: GPT-2 release - Real-time generation becomes critical
-- 2020: Production deployment - Need for inference optimization
+📚 HISTORICAL CONTEXT (2017-2020):
+- 2017: Vaswani et al. introduce transformers with autoregressive generation
+- 2019: GPT-2 release makes real-time generation critical for production
+- 2020: Production deployment demands inference optimization at scale
+
+🎯 WHAT YOU'RE BUILDING:
+Using YOUR TinyTorch implementations, you'll build a complete generation
+optimization pipeline that makes inference 12-40× faster!
 
 This milestone demonstrates generation-specific optimizations:
 1. Baseline autoregressive generation (slow, quadratic)
@@ -21,11 +25,6 @@ Learning Objectives:
 - Implement KV-cache to reduce to O(n)
 - Batch multiple sequences for throughput
 - Use stop tokens and max length effectively
-
-Expected Output:
-- 6-10× speedup from KV-caching
-- 2-4× additional from batching
-- Overall: 12-40× faster inference vs naive implementation
 
 ✅ REQUIRED MODULES (Run after Module 18):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -43,23 +42,45 @@ Expected Output:
            │
     ┌──────▼───────────────┐
     │ Baseline Generation  │
-    │ (Slow, O(n²))       │
-    └──────┬───────────────┘
+    │ (Slow, O(n²))        │
+    └──────────────────────┘
            │
     ┌──────▼───────────────┐
-    │ + KV Cache          │
-    │ (6-10× faster)      │
-    └──────┬───────────────┘
+    │ + KV Cache           │
+    │ (6-10× faster)       │
+    └──────────────────────┘
            │
     ┌──────▼───────────────┐
-    │ + Batching          │
-    │ (2-4× faster)       │
-    └──────┬───────────────┘
+    │ + Batching           │
+    │ (2-4× faster)        │
+    └──────────────────────┘
            │
     ┌──────▼───────────────┐
-    │ Optimized Output    │
-    │ (12-40× overall)    │
-    └─────────────────────┘
+    │ Optimized Output     │
+    │ (12-40× overall)     │
+    └──────────────────────┘
+
+# =============================================================================
+# 📊 YOUR MODULES IN ACTION
+# =============================================================================
+#
+# ┌─────────────────────┬────────────────────────────────┬─────────────────────────────┐
+# │ What You Built      │ How It's Used Here             │ Systems Impact              │
+# ├─────────────────────┼────────────────────────────────┼─────────────────────────────┤
+# │ Module 13: GPT      │ Baseline autoregressive gen    │ O(n²) attention per token   │
+# │                     │ generates tokens one at a time │ (we'll optimize this!)      │
+# │                     │                                │                             │
+# │ Module 14: Profiler │ Measures tokens/sec, latency   │ Quantify optimization gains │
+# │                     │ before and after optimization  │ with scientific rigor       │
+# │                     │                                │                             │
+# │ Module 17: KV Cache │ Caches key/value matrices      │ 6-10× speedup by avoiding   │
+# │                     │ across generation steps        │ redundant attention compute │
+# │                     │                                │                             │
+# │ Module 18: Batching │ Processes multiple sequences   │ 2-4× additional throughput  │
+# │                     │ simultaneously                 │ by amortizing overhead      │
+# └─────────────────────┴────────────────────────────────┴─────────────────────────────┘
+#
+# =============================================================================
 
 📊 PERFORMANCE COMPARISON:
   Method              | Tokens/sec | Speedup
@@ -67,6 +88,11 @@ Expected Output:
   Baseline (naive)    |     2-5    |   1×
   + KV-cache         |    20-50   |  6-10×
   + Batching (4)     |   80-200   | 12-40×
+
+💡 KEY INSIGHT:
+Generation is the bottleneck for LLM serving. YOUR optimizations show how
+production systems like ChatGPT achieve real-time responses. The KV-cache
+is particularly important: it transforms O(n²) into O(n)!
 
 TODO: Implementation needed for modules 17-18
 """

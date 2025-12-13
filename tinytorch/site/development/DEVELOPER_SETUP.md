@@ -137,7 +137,7 @@ pip install click
 # Test CLI commands
 tito --help
 tito module --help
-tito milestones --help
+tito milestone --help
 ```
 
 ---
@@ -181,7 +181,7 @@ isort .
 # Test TITO commands
 tito system health
 tito module status
-tito milestones list
+tito milestone list
 
 # Run specific tests
 pytest tests/test_specific.py -v
@@ -254,7 +254,7 @@ TinyTorch/
 2. Inherit from `BaseCommand`
 3. Implement `name`, `description`, `add_arguments()`, `run()`
 4. Register in `tito/commands/__init__.py`
-5. Test with `tito your-command --help`
+5. Test with `tito <command-name> --help`
 6. Add tests in `tests/`
 7. Update documentation
 
@@ -415,4 +415,3 @@ See `CONTRIBUTING.md` for:
 ---
 
 **Remember**: Students never need to install VHS or other dev tools. They just need Python, the TinyTorch environment, and Jupyter. All dev tooling is optional and for maintainers only.
-

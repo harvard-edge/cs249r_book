@@ -1,12 +1,244 @@
-# Minimal pre-commit configuration
-# This allows pre-commit to run without errors
-repos: []
+# MLSysBook Pre-commit Configuration
+# =============================================================================
+# Combined configuration for both Book and TinyTorch projects
+#
+# Install: pip install pre-commit && pre-commit install
+# Run all: pre-commit run --all-files
+# Run specific hook: pre-commit run <hook-id> --all-files
+#
+# STRUCTURE:
+#   1. GLOBAL HOOKS - Apply to entire repo
+#   2. BOOK HOOKS - Quarto content validation (book/ directory)
+#   3. TINYTORCH HOOKS - CLI and module validation (tinytorch/ directory)
+# =============================================================================
 
+repos:
+  # ===========================================================================
+  # SECTION 1: GLOBAL HOOKS (apply to entire repo)
+  # ===========================================================================
 
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        name: "Global: Trim trailing whitespace"
+        exclude: "^(_site/|_book/|node_modules/)"
+      - id: end-of-file-fixer
+        name: "Global: Fix end of file newlines"
+        exclude: "^(_site/|_book/|node_modules/)"
+      - id: check-json
+        name: "Global: Validate JSON syntax"
+      - id: check-yaml
+        name: "Global: Validate YAML syntax"
+        exclude: "^(_site/)"
 
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.3.0
+    hooks:
+      - id: codespell
+        name: "Global: Check for common misspellings"
+        args: ["--skip", "*.json,*.bib,_site,_book,node_modules,.venv,htmlcov"]
+        exclude: "^(_site/|_book/|htmlcov/)"
 
+  # ===========================================================================
+  # SECTION 2: BOOK HOOKS (quarto content validation)
+  # Files: book/quarto/contents/**/*.qmd
+  # ===========================================================================
 
+  # --- Book: Auto-formatters ---
+  - repo: https://github.com/executablebooks/mdformat
+    rev: 0.7.9
+    hooks:
+      - id: mdformat
+        name: "Book: Format quarto markdown"
+        additional_dependencies: [mdformat-frontmatter]
+        files: ^book/quarto/contents/.*\.qmd$
+        pass_filenames: true
 
+  - repo: https://github.com/FlamingTempura/bibtex-tidy
+    rev: v1.14.0
+    hooks:
+      - id: bibtex-tidy
+        name: "Book: Tidy bibtex files"
+        args: [
+          '--align=space',
+          '--curly',
+          '--sort=key',
+          '--sort-fields',
+          '--duplicates=key',
+          '--remove-empty-fields',
+          '--space=2',
+          '--trailing-commas',
+          '--escape',
+          '--wrap=100',
+          '--blank-lines'
+        ]
+        files: ^book/quarto/contents/.*\.bib$
 
+  # --- Book: Content validators ---
+  - repo: local
+    hooks:
+      - id: book-collapse-blank-lines
+        name: "Book: Collapse extra blank lines"
+        entry: python book/tools/scripts/content/format_blank_lines.py
+        language: python
+        pass_filenames: true
+        files: ^book/quarto/contents/.*\.qmd$
 
+      - id: book-format-python
+        name: "Book: Format Python code blocks (Black, 70 chars)"
+        entry: python book/tools/scripts/content/format_python_in_qmd.py
+        language: python
+        additional_dependencies: [black>=23.0.0]
+        pass_filenames: true
+        files: ^book/quarto/contents/.*\.qmd$
 
+      - id: book-check-list-formatting
+        name: "Book: Fix markdown list formatting"
+        entry: python book/tools/scripts/utilities/check_list_formatting.py --fix
+        language: python
+        pass_filenames: true
+        files: ^book/quarto/contents/.*\.qmd$
+
+      - id: book-validate-json
+        name: "Book: Validate JSON files"
+        entry: python book/tools/scripts/utilities/validate_json.py
+        language: python
+        files: ^book/.*\.json$
+        pass_filenames: true
+
+      - id: book-check-unreferenced-labels
+        name: "Book: Check for unreferenced labels"
+        entry: python book/tools/scripts/content/check_unreferenced_labels.py ./book/quarto/contents/core
+        language: python
+        pass_filenames: false
+        files: ^book/quarto/contents/.*\.qmd$
+
+      - id: book-check-duplicate-labels
+        name: "Book: Check for duplicate labels"
+        entry: python book/tools/scripts/content/check_duplicate_labels.py
+        args: ['-d', 'book/quarto/contents/', '--figures', '--tables', '--listings', '--quiet', '--strict']
+        language: python
+        pass_filenames: false
+        files: ^book/quarto/contents/.*\.qmd$
+
+      - id: book-validate-citations
+        name: "Book: Validate citation references"
+        entry: python book/tools/scripts/content/validate_citations.py --quiet
+        language: python
+        pass_filenames: true
+        files: ^book/quarto/contents/.*\.qmd$
+
+      - id: book-validate-footnotes
+        name: "Book: Validate footnote references"
+        entry: python book/tools/scripts/content/footnote_cleanup.py -d book/quarto/contents/ --validate
+        language: python
+        pass_filenames: false
+        files: ^book/quarto/contents/.*\.qmd$
+
+      - id: book-check-forbidden-footnotes
+        name: "Book: Check for footnotes in tables/captions"
+        entry: python book/tools/scripts/content/check_forbidden_footnotes.py -d book/quarto/contents/
+        language: python
+        pass_filenames: false
+        files: ^book/quarto/contents/.*\.qmd$
+
+      - id: book-check-purpose-unnumbered
+        name: "Book: Ensure Purpose sections are unnumbered"
+        entry: bash -c 'grep -n "^## Purpose" "$@" | grep -v "\.unnumbered" && exit 1 || exit 0' --
+        language: system
+        pass_filenames: true
+        files: ^book/quarto/contents/.*\.qmd$
+
+      - id: book-check-table-formatting
+        name: "Book: Check table formatting"
+        entry: python book/tools/scripts/content/format_tables.py --check -d book/quarto/contents/
+        language: python
+        pass_filenames: false
+        files: ^book/quarto/contents/.*\.qmd$
+
+      - id: book-validate-part-keys
+        name: "Book: Validate part keys"
+        entry: python book/tools/scripts/utilities/validate_part_keys.py
+        language: python
+        additional_dependencies: [pyyaml]
+        pass_filenames: false
+        files: ^book/.*\.qmd$
+
+  # --- Book: Image validators ---
+  - repo: local
+    hooks:
+      - id: book-validate-images
+        name: "Book: Validate image files"
+        entry: python book/tools/scripts/images/manage_images.py
+        language: python
+        additional_dependencies: [pillow, rich]
+        pass_filenames: true
+        files: ^book/quarto/contents/.*\.(png|jpg|jpeg|gif)$
+
+      - id: book-validate-external-images
+        name: "Book: Check for external images"
+        entry: python book/tools/scripts/images/manage_external_images.py --validate book/quarto/contents/
+        language: python
+        additional_dependencies: [requests]
+        pass_filenames: false
+        files: ^book/quarto/contents/.*\.qmd$
+
+      - id: book-validate-image-references
+        name: "Book: Check image references exist"
+        entry: python book/tools/scripts/images/validate_image_references.py -d book/quarto/contents/ --quiet
+        language: python
+        pass_filenames: false
+        files: ^book/quarto/contents/.*\.qmd$
+
+      - id: book-prevent-svg
+        name: "Book: Prevent manual SVG files"
+        entry: bash -c 'echo "❌ Manual SVG files are not allowed. Convert to PNG."; exit 1'
+        language: system
+        files: ^book/quarto/contents/.*\.svg$
+        exclude: ".*_files/mediabag/.*\\.svg$"
+
+  # --- Book: System checks ---
+  - repo: local
+    hooks:
+      - id: book-cleanup-artifacts
+        name: "Book: Auto-cleanup build artifacts"
+        entry: python book/tools/scripts/maintenance/cleanup_build_artifacts.py
+        language: python
+        additional_dependencies: [rich]
+        pass_filenames: false
+        stages: [pre-commit]
+
+  # ===========================================================================
+  # SECTION 3: TINYTORCH HOOKS (CLI and module validation)
+  # Files: tinytorch/**/*.md, tinytorch/**/*.py
+  # ===========================================================================
+
+  - repo: local
+    hooks:
+      - id: tinytorch-validate-cli-docs
+        name: "TinyTorch: Validate CLI docs"
+        description: "Ensure tito commands in docs match actual CLI"
+        entry: python3 tinytorch/tools/dev/validate_cli_docs.py
+        language: system
+        files: ^tinytorch/.*\.md$
+        pass_filenames: false
+
+  # ===========================================================================
+  # DISABLED/OPTIONAL HOOKS
+  # ===========================================================================
+
+  # - repo: https://github.com/igorshubovych/markdownlint-cli
+  #   rev: v0.45.0
+  #   hooks:
+  #     - id: markdownlint
+  #       name: "Book: Lint quarto markdown"
+  #       files: ^book/quarto/contents/.*\.qmd$
+  #       args: ["--quiet", "-c", "config/linting/.mdlintconfig.yml"]
+
+  # - id: book-yamllint
+  #   name: "Book: Validate YAML files"
+  #   entry: yamllint
+  #   language: system
+  #   args: [--config-file=.yamllint]
+  #   files: ^book/.*\.(yml|yaml)$

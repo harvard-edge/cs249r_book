@@ -52,11 +52,11 @@ tito community login
 # View your profile
 tito community profile
 
-# Update your progress
-tito community update
+# Check your community status
+tito community status
 
-# View community statistics
-tito community stats
+# Open the community map
+tito community map
 ```
 
 **Features:**

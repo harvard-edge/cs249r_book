@@ -1,7 +1,7 @@
 ---
 title: "Embeddings - Token to Vector Representations"
 description: "Build embedding layers that convert discrete tokens to dense, learnable vector representations powering modern NLP"
-difficulty: "⭐⭐"
+difficulty: "●●"
 time_estimate: "4-5 hours"
 prerequisites: ["Tensor", "Tokenization"]
 next_steps: ["Attention"]
@@ -13,9 +13,9 @@ learning_objectives:
   - "Apply dimensionality principles to semantic vector space design and trade-offs"
 ---
 
-# 11. Embeddings - Token to Vector Representations
+# Embeddings - Token to Vector Representations
 
-**ARCHITECTURE TIER** | Difficulty: ⭐⭐ (2/4) | Time: 4-5 hours
+**ARCHITECTURE TIER** | Difficulty: ●● (2/4) | Time: 4-5 hours
 
 ## Overview
 
@@ -48,35 +48,6 @@ This module follows TinyTorch's **Build → Use → Reflect** framework:
 
 **Performance Note**: During training, only ~1% of vocabulary appears in each batch. Sparse gradient updates avoid computing gradients for the other 99% of embedding parameters, saving massive computation and memory bandwidth. This is why frameworks like PyTorch implement specialized sparse gradient operations for embeddings.
 ```
-
-## Getting Started
-
-### Prerequisites
-
-Before starting this module, ensure you have completed:
-
-- **Module 01 (Tensor)**: Provides the foundational Tensor class with gradient tracking and operations
-- **Module 10 (Tokenization)**: Required for converting text to token IDs that embeddings consume
-
-Verify your prerequisites:
-
-```bash
-# Activate TinyTorch environment
-source scripts/activate-tinytorch
-
-# Verify prerequisite modules
-tito test tensor
-tito test tokenization
-```
-
-### Development Workflow
-
-1. **Open the development notebook**: `modules/11_embeddings/embeddings_dev.ipynb`
-2. **Implement Embedding class**: Create lookup table with Xavier initialization and efficient indexing
-3. **Build sinusoidal encodings**: Compute sine/cosine position representations using mathematical formula
-4. **Create learned positions**: Add trainable position embedding table with proper initialization
-5. **Integrate complete system**: Combine token and position embeddings with flexible encoding strategies
-6. **Export and verify**: `tito module complete 11 && tito test embeddings`
 
 ## Implementation Guide
 
@@ -318,81 +289,34 @@ class EmbeddingLayer:
 - **Batch processing** handles variable sequence lengths efficiently
 - **Parameter management** tracks all trainable components for optimization
 
-## Common Pitfalls
+## Getting Started
 
-### Incorrect Embedding Dimension Alignment
+### Prerequisites
 
-**Problem**: Position embeddings and token embeddings have mismatched dimensions, causing addition failures
+Before starting this module, ensure you have completed:
 
-**Solution**: Ensure both token embeddings and positional encodings use the same `embedding_dim`:
-```python
-# ❌ Wrong: Dimension mismatch
-token_emb = Embedding(vocab_size=10000, embedding_dim=256)
-pos_emb = PositionalEncoding(max_seq_len=512, embedding_dim=512)  # Mismatch!
+- **Module 01 (Tensor)**: Provides the foundational Tensor class with gradient tracking and operations
+- **Module 10 (Tokenization)**: Required for converting text to token IDs that embeddings consume
 
-# ✅ Correct: Matching dimensions
-token_emb = Embedding(vocab_size=10000, embedding_dim=256)
-pos_emb = PositionalEncoding(max_seq_len=512, embedding_dim=256)  # Same dimension
+Verify your prerequisites:
+
+```bash
+# Activate TinyTorch environment
+source scripts/activate-tinytorch
+
+# Verify prerequisite modules
+tito test tensor
+tito test tokenization
 ```
 
-### Position Index Out of Bounds
+### Development Workflow
 
-**Problem**: Sequence length exceeds `max_seq_len` for learned positional encodings
-
-**Solution**: Either increase `max_seq_len` or truncate sequences during preprocessing:
-```python
-# ❌ Wrong: Sequence too long
-pos_emb = PositionalEncoding(max_seq_len=128, embedding_dim=256)
-long_sequence = tokens[:, :256]  # 256 > 128 causes error
-
-# ✅ Correct: Ensure sequences fit
-pos_emb = PositionalEncoding(max_seq_len=512, embedding_dim=256)  # Larger capacity
-sequence = tokens[:, :512]  # Truncate if needed
-```
-
-### Improper Embedding Initialization
-
-**Problem**: Using standard normal initialization causes gradient instability
-
-**Solution**: Use Xavier/Glorot initialization for proper gradient scale:
-```python
-# ❌ Wrong: Standard normal (variance grows with dimensions)
-self.weight = Tensor(np.random.randn(vocab_size, embedding_dim))
-
-# ✅ Correct: Xavier initialization (stable variance)
-limit = math.sqrt(6.0 / (vocab_size + embedding_dim))
-self.weight = Tensor(np.random.uniform(-limit, limit, (vocab_size, embedding_dim)))
-```
-
-### Sparse Gradient Memory Waste
-
-**Problem**: Dense gradient updates for entire vocabulary when only few tokens present
-
-**Solution**: Use sparse gradient accumulation (framework-dependent):
-```python
-# Conceptually: Only update embeddings for tokens in batch
-# PyTorch handles this automatically with nn.Embedding
-# In TinyTorch, ensure gradient accumulation only affects accessed indices
-if self.weight.requires_grad:
-    # Only indices present in current batch receive gradients
-    result._grad_fn = EmbeddingBackward(self.weight, indices)
-```
-
-### Sinusoidal Encoding Frequency Errors
-
-**Problem**: Incorrect frequency calculation causes position patterns to collapse
-
-**Solution**: Use the exact formula from "Attention is All You Need":
-```python
-# ❌ Wrong: Linear frequency spacing
-div_term = np.arange(0, embedding_dim, 2) * (1.0 / 10000.0)
-
-# ✅ Correct: Exponential frequency spacing
-div_term = np.exp(
-    np.arange(0, embedding_dim, 2, dtype=np.float32) *
-    -(math.log(10000.0) / embedding_dim)
-)
-```
+1. **Open the development notebook**: `modules/11_embeddings/embeddings_dev.ipynb`
+2. **Implement Embedding class**: Create lookup table with Xavier initialization and efficient indexing
+3. **Build sinusoidal encodings**: Compute sine/cosine position representations using mathematical formula
+4. **Create learned positions**: Add trainable position embedding table with proper initialization
+5. **Integrate complete system**: Combine token and position embeddings with flexible encoding strategies
+6. **Export and verify**: `tito module complete 11 && tito test embeddings`
 
 ## Testing
 
@@ -410,11 +334,11 @@ python -m pytest tests/ -k embeddings -v
 
 ### Test Coverage Areas
 
-- ✅ **Embedding lookup correctness**: Verify token IDs map to correct vector rows in weight table
-- ✅ **Gradient flow verification**: Ensure sparse gradient updates accumulate properly during backpropagation
-- ✅ **Positional encoding math**: Validate sinusoidal formula implementation with correct frequencies
-- ✅ **Shape broadcasting**: Test token + position combination across batch dimensions
-- ✅ **Memory efficiency profiling**: Verify parameter count and lookup performance characteristics
+- ✓ **Embedding lookup correctness**: Verify token IDs map to correct vector rows in weight table
+- ✓ **Gradient flow verification**: Ensure sparse gradient updates accumulate properly during backpropagation
+- ✓ **Positional encoding math**: Validate sinusoidal formula implementation with correct frequencies
+- ✓ **Shape broadcasting**: Test token + position combination across batch dimensions
+- ✓ **Memory efficiency profiling**: Verify parameter count and lookup performance characteristics
 
 ### Inline Testing & Validation
 
@@ -422,32 +346,32 @@ The module includes comprehensive unit tests during development:
 
 ```python
 # Example inline test output
-🔬 Unit Test: Embedding layer...
-✅ Lookup table created: 10K vocab × 256 dims = 2.56M parameters
-✅ Forward pass shape correct: (32, 20, 256) for batch of 32 sequences
-✅ Backward pass sparse gradients accumulate correctly
-✅ Xavier initialization keeps variance stable
-📈 Progress: Embedding Layer ✓
+ Unit Test: Embedding layer...
+ Lookup table created: 10K vocab × 256 dims = 2.56M parameters
+ Forward pass shape correct: (32, 20, 256) for batch of 32 sequences
+ Backward pass sparse gradients accumulate correctly
+ Xavier initialization keeps variance stable
+ Progress: Embedding Layer ✓
 
-🔬 Unit Test: Sinusoidal positional encoding...
-✅ Encodings computed for 512 positions × 256 dimensions
-✅ Sine/cosine patterns verified (pos 0: [0, 1, 0, 1, ...])
-✅ Different positions have unique signatures
-✅ Frequency spectrum correct (high to low across dimensions)
-📈 Progress: Sinusoidal Positions ✓
+ Unit Test: Sinusoidal positional encoding...
+ Encodings computed for 512 positions × 256 dimensions
+ Sine/cosine patterns verified (pos 0: [0, 1, 0, 1, ...])
+ Different positions have unique signatures
+ Frequency spectrum correct (high to low across dimensions)
+ Progress: Sinusoidal Positions ✓
 
-🔬 Unit Test: Learned positional encoding...
-✅ Trainable position embeddings initialized
-✅ Addition with token embeddings preserves gradients
-✅ Batch broadcasting handled correctly
-📈 Progress: Learned Positions ✓
+ Unit Test: Learned positional encoding...
+ Trainable position embeddings initialized
+ Addition with token embeddings preserves gradients
+ Batch broadcasting handled correctly
+ Progress: Learned Positions ✓
 
-🔬 Unit Test: Complete embedding system...
-✅ Token + position combination works for all strategies
-✅ Embedding scaling (√d) applied correctly
-✅ Variable sequence lengths handled gracefully
-✅ Parameter counting correct for each configuration
-📈 Progress: Complete System ✓
+ Unit Test: Complete embedding system...
+ Token + position combination works for all strategies
+ Embedding scaling (√d) applied correctly
+ Variable sequence lengths handled gracefully
+ Parameter counting correct for each configuration
+ Progress: Complete System ✓
 ```
 
 ### Manual Testing Examples
@@ -482,66 +406,6 @@ print(f"Sinusoidal combined: {combined.shape}")  # (2, 3, 256)
 print(f"Position 0 pattern: {sin_pe.data[0, :8]}")
 # Expected: [~0.0, ~1.0, ~0.0, ~1.0, ~0.0, ~1.0, ~0.0, ~1.0]
 ```
-
-## Production Context
-
-### Your Implementation vs. Production Frameworks
-
-| Feature | Your Embeddings | PyTorch nn.Embedding | TensorFlow tf.keras.layers.Embedding |
-|---------|----------------|---------------------|-------------------------------------|
-| **Backend** | NumPy (CPU) | C++/CUDA (CPU/GPU) | C++/CUDA/XLA |
-| **Lookup** | Advanced indexing | Optimized sparse ops | Sparse tensor operations |
-| **Gradient Updates** | Dense simulation | Sparse gradient accumulation | Sparse gradient updates |
-| **Initialization** | Xavier/Glorot | Normal (default) / Xavier option | Uniform (default) / custom |
-| **Positional Encoding** | Manual implementation | Manual (user-provided) | Manual (user-provided) |
-| **Memory Pooling** | Python GC | GPU caching allocator | TensorFlow memory manager |
-
-### Side-by-Side Code Comparison
-
-**Your implementation:**
-```python
-from tinytorch.core.embeddings import Embedding, PositionalEncoding
-
-# Create embedding layer
-token_emb = Embedding(vocab_size=50000, embedding_dim=768)
-pos_emb = PositionalEncoding(max_seq_len=512, embedding_dim=768)
-
-# Forward pass
-token_ids = Tensor([[1, 42, 7, 99]])  # (batch=1, seq_len=4)
-token_vectors = token_emb.forward(token_ids)  # (1, 4, 768)
-output = pos_emb.forward(token_vectors)  # Add positions
-```
-
-**Equivalent PyTorch:**
-```python
-import torch
-import torch.nn as nn
-
-# Create embedding layer (GPU-enabled)
-token_emb = nn.Embedding(num_embeddings=50000, embedding_dim=768).cuda()
-pos_emb = nn.Parameter(torch.randn(512, 768)).cuda()  # Learned positions
-
-# Forward pass (automatic gradient tracking)
-token_ids = torch.tensor([[1, 42, 7, 99]]).cuda()
-token_vectors = token_emb(token_ids)  # (1, 4, 768)
-output = token_vectors + pos_emb[:4]  # Broadcasting adds positions
-```
-
-**Key differences:**
-1. **GPU Support**: PyTorch embeddings leverage GPU for 10-100x speedup via parallel lookups
-2. **Sparse Gradients**: PyTorch automatically handles sparse gradient updates - only embeddings for tokens in batch receive gradients
-3. **Memory Efficiency**: PyTorch caching allocator reuses GPU memory across batches
-4. **Optimized Kernels**: cuDNN and custom CUDA kernels optimize embedding lookup and gradient scatter operations
-
-### Real-World Applications
-
-**Meta (Facebook AI)**: BERT-based models power News Feed ranking, ad targeting, and content understanding. Their production embeddings handle billions of user interactions daily, with vocabulary sizes exceeding 100K tokens. Sparse gradient optimization is critical - processing a batch of 1024 samples with ~50 unique tokens per sample means updating 0.05% of the embedding table per iteration.
-
-**OpenAI GPT Models**: GPT-3's 50K vocabulary × 12,288 embedding dimension = 617M parameters (2.4GB at FP32). This is 20% of the model's total 175B parameters. During inference, embedding lookups for a 2048-token context require reading 100MB from memory - making this a bandwidth-bottleneck operation that benefits from quantization and caching strategies.
-
-**Google Translate**: Multilingual models use shared embedding spaces for 100+ languages, enabling zero-shot translation. The embedding table contains representations for millions of subword tokens across all supported languages, with dimension sizes balancing memory constraints (mobile deployment) versus translation quality.
-
-**Hugging Face Transformers**: The transformers library provides pre-trained embeddings for thousands of models. BERT-base (110M parameters) includes 23M embedding parameters (21% of total), while RoBERTa-large has 50M embedding parameters (14% of 355M total). These pre-trained embeddings transfer semantic knowledge across tasks, reducing training data requirements.
 
 ## Systems Thinking Questions
 
@@ -589,21 +453,21 @@ Choose your preferred way to engage with this module:
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card} 🚀 Launch Binder
+```{grid-item-card}  Launch Binder
 :link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/11_embeddings/embeddings_dev.ipynb
 :class-header: bg-light
 
 Run this module interactively in your browser. No installation required!
 ```
 
-```{grid-item-card} ⚡ Open in Colab
+```{grid-item-card}  Open in Colab
 :link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/11_embeddings/embeddings_dev.ipynb
 :class-header: bg-light
 
 Use Google Colab for GPU access and cloud compute power.
 ```
 
-```{grid-item-card} 📖 View Source
+```{grid-item-card}  View Source
 :link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/11_embeddings/embeddings_dev.ipynb
 :class-header: bg-light
 
@@ -612,7 +476,7 @@ Browse the Jupyter notebook source and understand the implementation.
 
 ````
 
-```{admonition} 💾 Save Your Progress
+```{admonition}  Save Your Progress
 :class: tip
 **Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
 ```
@@ -620,6 +484,6 @@ Browse the Jupyter notebook source and understand the implementation.
 ---
 
 <div class="prev-next-area">
-<a class="left-prev" href="../modules/10_tokenization_ABOUT.html" title="previous page">← Previous Module</a>
-<a class="right-next" href="../modules/12_attention_ABOUT.html" title="next page">Next Module →</a>
+<a class="left-prev" href="10_tokenization_ABOUT.html" title="previous page">← Module 10: Tokenization</a>
+<a class="right-next" href="12_attention_ABOUT.html" title="next page">Module 12: Attention →</a>
 </div>

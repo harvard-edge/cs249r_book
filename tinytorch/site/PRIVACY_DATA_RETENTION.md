@@ -37,26 +37,26 @@ All users are assigned an **anonymous UUID** when joining the community. This UU
 ## Data Retention
 
 **Local Storage**: Data persists until you:
-- Run `tito community leave` (removes profile)
+- Run `tito community logout` (removes profile)
 - Delete `.tinytorch/` directory
 - Remove specific files manually
 
 **Website Sync** (when enabled):
 - Data synced to website is retained according to website privacy policy
-- You can request deletion via `tito community leave`
+- You can request deletion via `tito community logout`
 - Local data is always removed immediately
 
 ## User Rights
 
 **Right to Access**: View your data with `tito community profile`
 
-**Right to Update**: Update your data with `tito community update`
+**Right to Update**: Update your data with `tito community profile`
 
-**Right to Deletion**: Remove your data with `tito community leave`
+**Right to Deletion**: Remove your data with `tito community logout`
 
 **Right to Opt-Out**: All data collection is optional. You can:
-- Skip fields during `tito community join`
-- Leave community anytime with `tito community leave`
+- Skip fields during `tito community login`
+- Leave community anytime with `tito community logout`
 - Never join community (all features work without joining)
 
 ## Consent
@@ -93,7 +93,7 @@ All users are assigned an **anonymous UUID** when joining the community. This UU
 - ✓ Data minimization (only optional fields)
 - ✓ Purpose limitation (community map only)
 - ✓ User consent (explicit opt-in)
-- ✓ Right to deletion (`tito community leave`)
+- ✓ Right to deletion (`tito community logout`)
 - ✓ Data portability (JSON files)
 
 **FERPA**: For educational institutions:
@@ -105,6 +105,5 @@ All users are assigned an **anonymous UUID** when joining the community. This UU
 
 For privacy questions or concerns:
 - Review your data: `tito community profile`
-- Remove your data: `tito community leave`
+- Remove your data: `tito community logout`
 - Check configuration: `.tinytorch/config.json`
-

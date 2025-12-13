@@ -11,10 +11,10 @@ Comprehensive tests to ensure TinyTorch environment is correctly configured and 
 tito system health
 
 # Comprehensive validation (5 seconds)
-tito system check
+tito system health
 
 # Verbose output for debugging
-tito system check --verbose
+tito system health --verbose
 ```
 
 **Perfect for**:
@@ -32,7 +32,7 @@ tito system check --verbose
 ### Run All Validation Tests
 ```bash
 # Via TITO (recommended - beautiful output)
-tito system check
+tito system health
 
 # Via pytest (raw test output)
 pytest tests/environment/ -v
@@ -191,10 +191,10 @@ tito system health
 # ✅ Jupyter available
 ```
 
-### `tito system check`
+### `tito system health`
 Comprehensive validation (runs all tests):
 ```bash
-tito system check
+tito system health
 
 # Runs both test suites:
 # 1. test_setup_validation.py (50+ checks)
@@ -304,9 +304,9 @@ python -m ipykernel install --user
 
 ## Best Practices
 
-1. **Run before starting work**: `tito system check`
+1. **Run before starting work**: `tito system health`
 2. **Run after setup**: Automatically runs at end of `tito setup`
-3. **Run after package updates**: `pip install -r requirements.txt && pytest tests/environment/`
+3. **Run after package updates**: `pip install -r requirements.txt && tito system health`
 4. **Include in CI/CD**: Ensures environment consistency
 5. **Add tests for new dependencies**: Keep validation comprehensive
 

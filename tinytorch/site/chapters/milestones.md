@@ -202,7 +202,7 @@ python 02_rumelhart_mnist.py       # Full MNIST
 
 ### 04. CNN Revolution (1998) - LeCun's Breakthrough
 
-**After Modules 02-09** • **🎯 North Star Achievement**
+**After Modules 01-09** • **🎯 North Star Achievement**
 
 ```
 Images → Conv → ReLU → Pool → Conv → ReLU → Pool → Flatten → Linear → Classes
@@ -212,7 +212,7 @@ Images → Conv → ReLU → Pool → Conv → ReLU → Pool → Flatten → Lin
 
 **What You'll Build**:
 - Convolutional feature extraction
-- Natural image classification (CIFAR-10)
+- Natural image classification
 - YOUR Conv2d + MaxPool2d unlock spatial intelligence
 
 **Systems Insights**:
@@ -220,13 +220,33 @@ Images → Conv → ReLU → Pool → Conv → ReLU → Pool → Flatten → Lin
 - Compute: Convolution is intensive but parallelizable
 - Architecture: Local connectivity + translation invariance
 
+#### Part 1: TinyDigits (works offline)
+
+Prove your spatial modules work on synthetic 8x8 digit images.
+
 ```bash
 cd milestones/04_1998_cnn
-python 01_lecun_tinydigits.py  # Spatial features on digits
-python 02_lecun_cifar10.py     # CIFAR-10 @ 75%+ accuracy
+python 01_lecun_tinydigits.py
 ```
 
-**Expected Results**: **75%+ accuracy on CIFAR-10** ✨
+**Expected Results**: ~85%+ accuracy on TinyDigits
+
+#### Part 2: CIFAR-10 (requires download)
+
+Scale up with YOUR DataLoader on 50,000 real natural images!
+
+```bash
+cd milestones/04_1998_cnn
+python 02_lecun_cifar10.py
+```
+
+**What Part 2 Showcases**:
+- YOUR **DataLoader** (Module 08) batches 50,000 images efficiently
+- YOUR **Dataset** abstraction handles real image data
+- Shuffling prevents memorization, improves generalization
+- First-run prompts for download (~170 MB)
+
+**Expected Results**: **70%+ accuracy on CIFAR-10** ✨
 
 ---
 
@@ -321,11 +341,11 @@ Each milestone teaches critical systems thinking:
 
 ```bash
 # Check which modules you've completed
-tito checkpoint status
+tito module status
 
 # Complete required modules
-tito module complete 02_tensor
-tito module complete 03_activations
+tito module complete 01
+tito module complete 02
 # ... and so on
 ```
 
@@ -406,5 +426,4 @@ cd milestones/01_1957_perceptron
 python 02_rosenblatt_trained.py
 ```
 
-**Build the future by understanding the past.** 
-
+**Build the future by understanding the past.**

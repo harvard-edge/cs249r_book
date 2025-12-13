@@ -46,14 +46,14 @@ The milestone system is now **self-contained** with **zero code duplication**.
 │                                                             │
 │  🔓 MILESTONE UNLOCKED!                                     │
 │  1957 - The Perceptron                                      │
-│  Run: tito milestones run perceptron                        │
+│  Run: tito milestone run perceptron                         │
 └─────────────────────────────────────────────────────────────┘
                             │
                             │ 4. Run milestone test
                             ▼
 ┌─────────────────────────────────────────────────────────────┐
-│              tito milestones run perceptron                 │
-│           (tito/commands/milestones.py)                     │
+│              tito milestone run perceptron                  │
+│           (tito/commands/milestone.py)                      │
 │                                                             │
 │  • Verify requirements met                                  │
 │  • Run pytest test                                          │
@@ -194,13 +194,13 @@ Milestone Tracker:
 Student sees:
   🔓 MILESTONE UNLOCKED!
   1957 - The Perceptron
-  Run: tito milestones run perceptron
+  Run: tito milestone run perceptron
 ```
 
 ### Test Run Flow
 
 ```
-Student runs: tito milestones run perceptron
+Student runs: tito milestone run perceptron
     ↓
 MilestonesCommand.run()
     ↓
@@ -306,7 +306,7 @@ tito module complete 01
 # Should automatically check for unlocks
 
 # Run milestone test
-tito milestones run perceptron
+tito milestone run perceptron
 # Should verify requirements and run test
 ```
 
@@ -366,4 +366,3 @@ The system automatically:
 - Marks milestones complete when tests pass
 
 Students get a **gamified learning experience** with clear progression through 60+ years of ML history! 🚀
-

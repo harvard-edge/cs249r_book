@@ -1,7 +1,7 @@
 ---
 title: "DataLoader - Data Pipeline Engineering"
 description: "Build production-grade data loading infrastructure for efficient ML training"
-difficulty: "⭐⭐⭐"
+difficulty: "●●●"
 time_estimate: "4-5 hours"
 prerequisites: ["Tensor", "Layers", "Training"]
 next_steps: ["Spatial (CNNs)"]
@@ -13,9 +13,9 @@ learning_objectives:
   - "Analyze trade-offs between batch size, memory usage, and throughput"
 ---
 
-# 08. DataLoader
+# DataLoader
 
-**ARCHITECTURE TIER** | Difficulty: ⭐⭐⭐ (3/4) | Time: 4-5 hours
+**ARCHITECTURE TIER** | Difficulty: ●●● (3/4) | Time: 4-5 hours
 
 ## Overview
 
@@ -38,37 +38,6 @@ This module follows TinyTorch's **Build → Use → Optimize** framework:
 1. **Build**: Implement Dataset abstraction, TensorDataset for in-memory data, and DataLoader with batching/shuffling
 2. **Use**: Load synthetic datasets, create train/validation splits, and integrate with training loops
 3. **Optimize**: Profile throughput, analyze memory scaling, and measure shuffle overhead
-
-## Getting Started
-
-### Prerequisites
-
-Ensure you understand the foundations:
-
-```bash
-# Activate TinyTorch environment
-source scripts/activate-tinytorch
-
-# Verify prerequisite modules
-tito test tensor
-tito test layers
-tito test training
-```
-
-**Required Knowledge:**
-- Tensor operations and NumPy arrays (Module 01)
-- Neural network basics (Modules 03-04)
-- Training loop structure (Module 07)
-- Python protocols (`__getitem__`, `__len__`, `__iter__`)
-
-### Development Workflow
-
-1. **Open the development file**: `modules/08_dataloader/dataloader.py`
-2. **Implement Dataset abstraction**: Define abstract base class with `__len__` and `__getitem__`
-3. **Build TensorDataset**: Create concrete implementation for tensor-based data
-4. **Create DataLoader**: Implement batching, shuffling, and iterator protocol
-5. **Test integration**: Verify with training workflow simulation
-6. **Export and verify**: `tito module complete 08 && tito test dataloader`
 
 ## Implementation Guide
 
@@ -228,100 +197,36 @@ DataLoader Batching (batch_size=2):
     labels: [0]              ← Shape: (1,)
 ```
 
-## Common Pitfalls
+## Getting Started
 
-### Forgetting to Shuffle Training Data
+### Prerequisites
 
-**Problem**: Not shuffling training data causes the model to learn spurious patterns from data ordering, leading to poor generalization and potential overfitting to batch structure.
+Ensure you understand the foundations:
 
-**Solution**: Always set `shuffle=True` for training data, `shuffle=False` for validation/test:
+```bash
+# Activate TinyTorch environment
+source scripts/activate-tinytorch
 
-```python
-# ❌ Wrong - no shuffling for training
-train_loader = DataLoader(train_dataset, batch_size=32, shuffle=False)
-# Model may learn data ordering patterns instead of true features!
-
-# ✅ Correct - shuffle training, don't shuffle validation
-train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
+# Verify prerequisite modules
+tito test tensor
+tito test layers
+tito test training
 ```
 
-### Mismatched Tensor Dimensions in TensorDataset
+**Required Knowledge:**
+- Tensor operations and NumPy arrays (Module 01)
+- Neural network basics (Modules 03-04)
+- Training loop structure (Module 07)
+- Python protocols (`__getitem__`, `__len__`, `__iter__`)
 
-**Problem**: Creating TensorDataset with tensors that have different first dimensions causes indexing errors when loading batches.
+### Development Workflow
 
-**Solution**: Ensure all tensors have aligned first dimension (number of samples):
-
-```python
-# ❌ Wrong - mismatched dimensions
-features = Tensor(np.random.randn(100, 10))  # 100 samples
-labels = Tensor(np.random.randn(50))         # 50 samples (mismatch!)
-dataset = TensorDataset(features, labels)    # Error when accessing!
-
-# ✅ Correct - aligned dimensions
-features = Tensor(np.random.randn(100, 10))  # 100 samples
-labels = Tensor(np.random.randn(100))        # 100 samples (matches!)
-dataset = TensorDataset(features, labels)    # Works correctly
-```
-
-### Incorrect Batch Size Leading to Single-Batch Training
-
-**Problem**: Setting batch_size larger than dataset length creates single batch with all data, defeating the purpose of mini-batch training.
-
-**Solution**: Choose batch_size appropriate for dataset size and memory constraints:
-
-```python
-# ❌ Wrong - batch size exceeds dataset
-dataset = TensorDataset(features, labels)  # 100 samples
-loader = DataLoader(dataset, batch_size=500, shuffle=True)
-# Creates 1 batch with all 100 samples - no mini-batch training!
-
-# ✅ Correct - reasonable batch size
-loader = DataLoader(dataset, batch_size=32, shuffle=True)
-# Creates ~3 batches (32, 32, 36 samples) - proper mini-batch training
-```
-
-### Not Handling Uneven Final Batch
-
-**Problem**: Assuming all batches have identical size causes errors when the final batch contains fewer samples than batch_size.
-
-**Solution**: Design model and training code to handle variable batch sizes:
-
-```python
-# ❌ Wrong - assumes fixed batch size
-for batch_features, batch_labels in loader:
-    # Assumes batch_features.shape[0] == batch_size always
-    outputs = model(batch_features)
-    assert outputs.shape[0] == 32  # Fails on last batch!
-
-# ✅ Correct - handles variable batch sizes
-for batch_features, batch_labels in loader:
-    batch_size = batch_features.shape[0]  # Get actual batch size
-    outputs = model(batch_features)
-    assert outputs.shape[0] == batch_size  # Works for all batches
-```
-
-### Modifying Dataset During Iteration
-
-**Problem**: Changing dataset contents while DataLoader is iterating causes inconsistent batches or crashes.
-
-**Solution**: Avoid modifying dataset during training iteration:
-
-```python
-# ❌ Wrong - modifying dataset during iteration
-for batch in train_loader:
-    # Training code...
-    train_dataset.tensors[0].data += 1  # Modifying dataset mid-iteration!
-
-# ✅ Correct - modify dataset between epochs
-for epoch in range(epochs):
-    for batch in train_loader:
-        # Training code (don't modify dataset)
-        pass
-    # Safe to modify dataset here (between epochs)
-    if epoch % 10 == 0:
-        train_dataset = augment_dataset(train_dataset)
-```
+1. **Open the development file**: `modules/08_dataloader/dataloader.py`
+2. **Implement Dataset abstraction**: Define abstract base class with `__len__` and `__getitem__`
+3. **Build TensorDataset**: Create concrete implementation for tensor-based data
+4. **Create DataLoader**: Implement batching, shuffling, and iterator protocol
+5. **Test integration**: Verify with training workflow simulation
+6. **Export and verify**: `tito module complete 08 && tito test dataloader`
 
 ## Testing
 
@@ -339,11 +244,11 @@ python -m pytest tests/ -k dataloader -v
 
 ### Test Coverage Areas
 
-- ✅ **Dataset Interface**: Abstract base class enforcement, protocol implementation
-- ✅ **TensorDataset**: Tensor alignment validation, indexing correctness
-- ✅ **DataLoader Batching**: Batch shape consistency, handling uneven final batch
-- ✅ **Shuffling**: Randomization correctness, deterministic seeding
-- ✅ **Training Integration**: Complete workflow with train/validation splits
+- ✓ **Dataset Interface**: Abstract base class enforcement, protocol implementation
+- ✓ **TensorDataset**: Tensor alignment validation, indexing correctness
+- ✓ **DataLoader Batching**: Batch shape consistency, handling uneven final batch
+- ✓ **Shuffling**: Randomization correctness, deterministic seeding
+- ✓ **Training Integration**: Complete workflow with train/validation splits
 
 ### Inline Testing & Validation
 
@@ -354,21 +259,21 @@ The module includes comprehensive unit tests:
 python modules/08_dataloader/dataloader.py
 
 # Expected output:
-🔬 Unit Test: Dataset Abstract Base Class...
-✅ Dataset is properly abstract
-✅ Dataset interface works correctly!
+ Unit Test: Dataset Abstract Base Class...
+ Dataset is properly abstract
+ Dataset interface works correctly!
 
-🔬 Unit Test: TensorDataset...
-✅ TensorDataset works correctly!
+ Unit Test: TensorDataset...
+ TensorDataset works correctly!
 
-🔬 Unit Test: DataLoader...
-✅ DataLoader works correctly!
+ Unit Test: DataLoader...
+ DataLoader works correctly!
 
-🔬 Unit Test: DataLoader Deterministic Shuffling...
-✅ Deterministic shuffling works correctly!
+ Unit Test: DataLoader Deterministic Shuffling...
+ Deterministic shuffling works correctly!
 
-🔬 Integration Test: Training Workflow...
-✅ Training integration works correctly!
+ Integration Test: Training Workflow...
+ Training integration works correctly!
 ```
 
 ### Manual Testing Examples
@@ -391,130 +296,6 @@ for batch_features, batch_labels in loader:
     print(f"Batch labels shape: {batch_labels.shape}")
     # Output: (2, 2) and (2,)
 ```
-
-## Production Context
-
-### Your Implementation vs. Production Frameworks
-
-Understanding what you're building vs. what production frameworks provide:
-
-| Feature | Your DataLoader (Module 08) | PyTorch DataLoader | TensorFlow tf.data |
-|---------|---------------------------|-------------------|-------------------|
-| **Backend** | NumPy (CPU-only) | Python/C++ (CPU) | C++/XLA |
-| **Dataset Protocol** | `__len__`, `__getitem__` | ✅ Same protocol | ✅ `tf.data.Dataset` |
-| **Batching** | Manual np.stack | ✅ Automatic collate_fn | ✅ batch() method |
-| **Shuffling** | Random index permutation | ✅ Same approach | ✅ shuffle(buffer_size) |
-| **Multi-Processing** | ❌ Single thread | ✅ num_workers parameter | ✅ parallel interleave |
-| **Prefetching** | ❌ No async loading | ✅ pin_memory, prefetch | ✅ prefetch() method |
-| **Data Augmentation** | ❌ Manual | ✅ torchvision.transforms | ✅ tf.image.* functions |
-| **Memory Mapping** | ❌ Load all to RAM | ✅ Memory-mapped files | ✅ TFRecord format |
-| **Distributed Loading** | ❌ Single device | ✅ DistributedSampler | ✅ distribute strategy |
-
-**Educational Focus**: Your implementation demonstrates core batching and iteration mechanics. Production frameworks add parallel data loading, prefetching, and memory-efficient file formats while maintaining the same Dataset/DataLoader abstraction.
-
-### Side-by-Side Code Comparison
-
-**Your implementation:**
-```python
-from tinytorch.core.tensor import Tensor
-from tinytorch.core.dataloader import TensorDataset, DataLoader
-
-# Create dataset from tensors
-features = Tensor(np.random.randn(1000, 784))  # 1000 samples, 784 features
-labels = Tensor(np.random.randint(0, 10, 1000))  # 10 classes
-
-dataset = TensorDataset(features, labels)
-
-# Create DataLoader with batching and shuffling
-train_loader = DataLoader(dataset, batch_size=32, shuffle=True)
-
-# Iterate through batches
-for batch_features, batch_labels in train_loader:
-    # Training code
-    outputs = model(batch_features)
-    loss = criterion(outputs, batch_labels)
-    loss.backward()
-    optimizer.step()
-```
-
-**Equivalent PyTorch:**
-```python
-import torch
-from torch.utils.data import TensorDataset, DataLoader
-
-# Create dataset from tensors (same API!)
-features = torch.randn(1000, 784)
-labels = torch.randint(0, 10, (1000,))
-
-dataset = TensorDataset(features, labels)
-
-# Create DataLoader with multi-processing and prefetching
-train_loader = DataLoader(
-    dataset,
-    batch_size=32,
-    shuffle=True,
-    num_workers=4,    # Parallel data loading
-    pin_memory=True   # Faster GPU transfer
-)
-
-# Iterate through batches (same API!)
-for batch_features, batch_labels in train_loader:
-    # Training code
-    outputs = model(batch_features)
-    loss = criterion(outputs, batch_labels)
-    loss.backward()
-    optimizer.step()
-```
-
-**Key Differences:**
-1. **Parallel Loading**: PyTorch spawns worker processes (`num_workers=4`) to load and preprocess data in parallel with training, hiding data loading latency.
-2. **Pin Memory**: `pin_memory=True` allocates batches in pinned (non-pageable) memory for faster CPU→GPU transfer.
-3. **Collation**: PyTorch's `collate_fn` parameter allows custom batch assembly logic (e.g., padding variable-length sequences).
-4. **Samplers**: PyTorch separates shuffling logic into Sampler classes (RandomSampler, SequentialSampler, DistributedSampler) for flexibility.
-
-### Real-World Production Usage
-
-**ImageNet Training**: Standard workflow loads 1.2M 224×224 RGB images (150GB total) using DataLoader with `num_workers=8`. Each worker loads and preprocesses images (decode JPEG, resize, augment) in parallel with GPU training. Prefetching ensures GPU never waits for data. Typical setup: batch_size=256, 8 workers, ~10GB RAM for prefetch buffers.
-
-**Google BERT Pre-training**: Uses TensorFlow's `tf.data.Dataset` to stream billions of tokens from TFRecord files. Data pipeline: read TFRecord → parse examples → shuffle (buffer_size=10K) → batch (batch_size=256) → prefetch (buffer_size=2). Distributed training shards data across TPU pods using `distribute.Strategy` ensuring each TPU sees different data.
-
-**Tesla Autopilot**: Streams terabytes of driving videos from SSD arrays. DataLoader handles multi-modal data: 8 camera streams + LIDAR + GPS + CAN bus. Custom collate_fn synchronizes timestamps across modalities. Uses memory-mapped files to avoid loading entire dataset into RAM. Batch size limited by GPU memory (typically 8-16 clips per GPU).
-
-**Hugging Face Datasets**: Library built on Apache Arrow provides efficient DataLoader for NLP tasks. Supports datasets larger than RAM through memory mapping. Typical workflow: load dataset from Hub → map tokenization → DataLoader for batching. Handles variable-length sequences with dynamic padding collate_fn.
-
-**Medical Imaging (PathAI)**: Whole-slide pathology images (10GB+ per slide) processed via patch extraction. DataLoader yields 256×256 patches sampled from slide. Uses worker processes to decode and extract patches in parallel. Batch size=128 patches, 16 workers to saturate GPU. Careful memory management prevents OOM on large slides.
-
-### Performance Characteristics at Scale
-
-**Data Loading Bottleneck Analysis**: For ResNet-50 ImageNet training on single V100 GPU:
-- **Without parallel loading** (num_workers=0): GPU utilization 60% (GPU waits for data 40% of time)
-- **With num_workers=4**: GPU utilization 95% (data loading parallelized)
-- **With num_workers=8**: GPU utilization 98% (diminishing returns, CPU-bound)
-- **Optimal workers**: 4-8 for most systems (balance I/O parallelism vs CPU overhead)
-
-**Memory Scaling with Batch Size**: For ImageNet training (224×224 RGB images):
-- **Batch size 32**: ~600MB GPU memory (32 × 224 × 224 × 3 × 4 bytes + activations)
-- **Batch size 256**: ~4.8GB GPU memory (8× batch size → 8× activation memory)
-- **Batch size 512**: OOM on 16GB GPU (activations + model + gradients exceed capacity)
-- **Rule**: Activation memory scales linearly with batch size, often dominates GPU memory
-
-**Shuffle Overhead Measurement**: For 1M sample dataset with batch_size=256:
-- **No shuffle**: 0.5 seconds to create indices
-- **Shuffle=True**: 1.2 seconds (0.7s shuffle overhead via random.shuffle)
-- **Overhead per epoch**: ~0.07% of total training time (negligible)
-- **Production practice**: Always shuffle training data despite small overhead
-
-**Prefetching Impact**: For BERT pre-training with tf.data pipeline:
-- **Without prefetch**: 180ms per step (110ms training + 70ms data loading serialized)
-- **With prefetch(2)**: 115ms per step (110ms training, data loading parallelized)
-- **Speedup**: 1.56× throughput improvement by hiding data loading latency
-- **Buffer size**: Typically 1-4 batches (balance latency hiding vs memory usage)
-
-**Distributed Data Loading**: For 8-GPU ImageNet training:
-- Each GPU gets 1/8 of dataset via `DistributedSampler` (no data duplication)
-- Worker processes: 8 GPUs × 4 workers = 32 parallel data loaders
-- Data loading scales linearly with GPUs (8× training throughput, 8× data pipeline throughput)
-- Critical: Ensure each GPU sees different data (avoid redundant computation)
 
 ## Systems Thinking Questions
 
@@ -551,21 +332,21 @@ Choose your preferred way to engage with this module:
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card} 🚀 Launch Binder
+```{grid-item-card}  Launch Binder
 :link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=modules/08_dataloader/dataloader_dev.ipynb
 :class-header: bg-light
 
 Run this module interactively in your browser. No installation required!
 ```
 
-```{grid-item-card} ⚡ Open in Colab
+```{grid-item-card}  Open in Colab
 :link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/modules/08_dataloader/dataloader_dev.ipynb
 :class-header: bg-light
 
 Use Google Colab for GPU access and cloud compute power.
 ```
 
-```{grid-item-card} 📖 View Source
+```{grid-item-card}  View Source
 :link: https://github.com/mlsysbook/TinyTorch/blob/main/modules/08_dataloader/dataloader.py
 :class-header: bg-light
 
@@ -574,7 +355,7 @@ Browse the Python source code and understand the implementation.
 
 ````
 
-```{admonition} 💾 Save Your Progress
+```{admonition}  Save Your Progress
 :class: tip
 **Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
 
@@ -588,6 +369,6 @@ These milestones include download utilities and preprocessing for production dat
 ---
 
 <div class="prev-next-area">
-<a class="left-prev" href="../chapters/07_training.html" title="previous page">← Previous Module: Training</a>
-<a class="right-next" href="../chapters/09_spatial.html" title="next page">Next Module: Spatial (CNNs) →</a>
+<a class="left-prev" href="07_training_ABOUT.html" title="previous page">← Module 07: Training</a>
+<a class="right-next" href="09_spatial_ABOUT.html" title="next page">Module 09: Spatial →</a>
 </div>

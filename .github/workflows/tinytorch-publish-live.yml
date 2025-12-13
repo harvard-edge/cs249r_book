@@ -1,7 +1,7 @@
 name: 🔥 TinyTorch Publish (Live)
 
 # Builds and deploys TinyTorch site to mlsysbook.ai/tinytorch/
-# First syncs dev → main, then builds PDFs and deploys from main
+# Runs full preflight, syncs dev → main, builds PDFs, then deploys
 # This ensures live site always reflects tested dev state
 
 on:
@@ -16,9 +16,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  preflight:
+    name: '✈️ Preflight Checks'
+    uses: ./.github/workflows/tinytorch-ci.yml
+    with:
+      preflight_level: 'standard'
+
   sync-from-dev:
     name: '🔄 Sync dev → main'
     runs-on: ubuntu-latest
+    needs: [preflight]
 
     steps:
       - name: 📥 Checkout main
@@ -44,7 +51,7 @@ jobs:
 
   build-pdfs:
     name: '📚 Build PDFs'
-    needs: [sync-from-dev]
+    needs: [preflight, sync-from-dev]
     uses: ./.github/workflows/tinytorch-build-pdfs.yml
     with:
       ref: main
@@ -52,8 +59,8 @@ jobs:
   build-and-deploy:
     name: '🔥 Build & Deploy'
     runs-on: ubuntu-latest
-    needs: [sync-from-dev, build-pdfs]
-    if: always() && needs.sync-from-dev.result == 'success'
+    needs: [preflight, sync-from-dev, build-pdfs]
+    if: always() && needs.preflight.result == 'success' && needs.sync-from-dev.result == 'success'
 
     steps:
       - name: 📥 Checkout
@@ -73,7 +80,6 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r site/requirements.txt
-          pip install -e .
 
       - name: 🔨 Build Jupyter Book
         working-directory: tinytorch/site
