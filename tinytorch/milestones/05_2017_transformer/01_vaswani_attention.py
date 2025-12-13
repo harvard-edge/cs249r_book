@@ -3,66 +3,100 @@
 Attention is All You Need (2017) - The Transformer Challenge
 =============================================================
 
-MILESTONE 05: PROVE YOUR ATTENTION MECHANISM WORKS
+📚 HISTORICAL CONTEXT:
+In 2017, Vaswani et al. published "Attention is All You Need," introducing the
+Transformer architecture that would power GPT, BERT, and all modern LLMs. The
+key innovation: SELF-ATTENTION allows each position to attend to all others,
+enabling parallel training and capturing long-range dependencies.
 
+🎯 MILESTONE 05: PROVE YOUR ATTENTION MECHANISM WORKS
 Before GPT changed everything, Vaswani et al. proved transformers work using
 simple sequence tasks. Now YOU must prove YOUR attention implementation works
 by passing THREE increasingly difficult challenges.
 
-REQUIRED MODULES:
+✅ REQUIRED MODULES (Run after Module 13):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Module 01 (Tensor)        : YOUR data structure with autograd
   Module 02 (Activations)   : YOUR ReLU activation
   Module 03 (Layers)        : YOUR Linear layers
   Module 04 (Losses)        : YOUR CrossEntropyLoss
   Module 05 (Autograd)      : YOUR automatic differentiation
   Module 06 (Optimizers)    : YOUR Adam optimizer
-  Module 11 (Embeddings)    : YOUR token & positional embeddings
-  Module 12 (Attention)     : YOUR multi-head self-attention
-  Module 13 (Transformer)   : YOUR transformer blocks
+  Module 11 (Embeddings)    : YOUR token & positional embeddings  <-- NEW!
+  Module 12 (Attention)     : YOUR multi-head self-attention      <-- NEW!
+  Module 13 (Transformer)   : YOUR transformer blocks             <-- NEW!
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-THE THREE CHALLENGES:
+🏗️ ARCHITECTURE (The Original Transformer):
+    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+    │   Tokens    │    │  Embedding  │    │ Positional  │    │ Multi-Head  │    │    FFN      │
+    │  "PYTHON"   │───▶│ YOUR Module │───▶│   Encoding  │───▶│  Attention  │───▶│ YOUR Modules│
+    │   Input     │    │     11      │    │   YOUR M11  │    │   YOUR M12  │    │   02 + 03   │
+    └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
+                         Token→Vector      Position info       Self-attention     Feed-forward
+                                           injected            Q·K·V computed     network
 
-  Challenge 1: SEQUENCE REVERSAL (Warm-up)
-  ----------------------------------------
-  Input:  PYTHON  ->  Output: NOHTYP
+    🔍 ATTENTION MECHANISM - The Key Innovation:
 
-  This is IMPOSSIBLE without attention working correctly.
-  Each output position must attend to the OPPOSITE input position.
+    Query (Q): "What am I looking for?"     ┌──────────────────────────────────────┐
+    Key (K):   "What do I contain?"         │ Attention(Q,K,V) = softmax(Q·Kᵀ/√d)·V │
+    Value (V): "What information to pass?"  └──────────────────────────────────────┘
+
+    For sequence reversal "PYTHON" → "NOHTYP":
+
+    Output position 0 (N) must attend to input position 5 (N)
+    Output position 1 (O) must attend to input position 4 (O)
+    Output position 2 (H) must attend to input position 3 (H)
+    ...
+
+    This is IMPOSSIBLE without correct attention!
+
+🎮 THE THREE CHALLENGES:
+
+    Challenge 1: SEQUENCE REVERSAL (Warm-up)
+    ────────────────────────────────────────
+    Input:  P Y T H O N  →  Output: N O H T Y P
+
+    ┌─┬─┬─┬─┬─┬─┐              ┌─┬─┬─┬─┬─┬─┐
+    │P│Y│T│H│O│N│     →       │N│O│H│T│Y│P│
+    └─┴─┴─┴─┴─┴─┘              └─┴─┴─┴─┴─┴─┘
+     0 1 2 3 4 5                5 4 3 2 1 0  ← Attention pattern
+
+    Success requires: Anti-diagonal attention weights!
 
 
-  Challenge 2: SEQUENCE COPYING (Verification)
-  --------------------------------------------
-  Input:  TENSOR  ->  Output: TENSOR
+    Challenge 2: SEQUENCE COPYING (Verification)
+    ────────────────────────────────────────────
+    Input:  T E N S O R  →  Output: T E N S O R
 
-  Sounds easy? The model must learn DIFFERENT attention patterns:
-  - Reversal: anti-diagonal attention
-  - Copying: diagonal attention
+    Same model must learn DIFFERENT attention pattern:
+    - Reversal: anti-diagonal
+    - Copying: diagonal (identity)
 
-  Same model, two opposite tasks = real understanding.
+    This proves YOUR attention can learn task-specific patterns!
 
 
-  Challenge 3: MIXED TASK INFERENCE (The Real Test)
-  -------------------------------------------------
-  Given a PREFIX token, the model must:
-  - [R] PYTHON  ->  NOHTYP  (reverse)
-  - [C] PYTHON  ->  PYTHON  (copy)
+    Challenge 3: MIXED TASK INFERENCE (The Real Test)
+    ─────────────────────────────────────────────────
+    [R] PYTHON  →  NOHTYP  (reverse prefix)
+    [C] PYTHON  →  PYTHON  (copy prefix)
 
-  This proves your attention can dynamically route information
-  based on context - the foundation of all modern LLMs.
+    The PREFIX token controls the behavior!
+    This is how GPT-style models work: context determines output.
 
-SUCCESS CRITERIA:
-  - Challenge 1: 95%+ accuracy on reversal
-  - Challenge 2: 95%+ accuracy on copying
-  - Challenge 3: 90%+ accuracy on mixed tasks
+📊 SUCCESS CRITERIA:
+  ✅ Challenge 1: 95%+ accuracy on reversal
+  ✅ Challenge 2: 95%+ accuracy on copying
+  ✅ Challenge 3: 90%+ accuracy on mixed tasks
 
   Pass all three = Your attention is production-ready!
 
-WHAT THIS PROVES:
-  Query-Key-Value computation works
-  Attention weights are computed correctly
-  Multi-head attention aggregates properly
-  Positional encoding preserves position information
-  Your architecture can dynamically route information
+🔥 WHAT THIS PROVES ABOUT YOUR IMPLEMENTATION:
+  • Query-Key-Value computation works correctly
+  • Attention weights are computed properly (softmax(Q·K/√d))
+  • Multi-head attention aggregates information from multiple perspectives
+  • Positional encoding preserves sequence position information
+  • YOUR architecture can dynamically route information based on context
 """
 
 import sys
@@ -89,6 +123,51 @@ from rich.progress import Progress, SpinnerColumn, TimeElapsedColumn, BarColumn
 from rich import box
 
 console = Console()
+
+# =============================================================================
+# 🎯 YOUR TINYTORCH MODULES IN ACTION
+# =============================================================================
+#
+# This milestone showcases YOUR attention and transformer modules:
+#
+# ┌─────────────────────┬────────────────────────────────┬─────────────────────────────┐
+# │ What You Built      │ How It's Used Here             │ Systems Impact              │
+# ├─────────────────────┼────────────────────────────────┼─────────────────────────────┤
+# │ Module 01: Tensor   │ 3D tensors for sequences       │ (batch, seq_len, embed_dim) │
+# │                     │ + attention weight matrices    │ format for transformer ops  │
+# │                     │                                │                             │
+# │ Module 02: ReLU     │ Non-linearity in FFN blocks    │ Feed-forward network after  │
+# │                     │ after attention                │ each attention layer        │
+# │                     │                                │                             │
+# │ Module 03: Linear   │ Q, K, V projections + FFN      │ 4× width expansion in FFN   │
+# │                     │ + output projection            │ (standard transformer)      │
+# │                     │                                │                             │
+# │ Module 11: Embedding│ Token → Dense vector           │ Learned representations     │
+# │ ★ NEW MODULE ★      │ + Positional encoding          │ with position information   │
+# │                     │                                │                             │
+# │ Module 12: Attention│ Multi-head self-attention      │ Q·K·V computation with      │
+# │ ★ NEW MODULE ★      │ computes attention weights     │ softmax and scaling         │
+# │                     │                                │                             │
+# │ Module 13: LayerNorm│ Normalizes activations         │ Stabilizes deep transformer │
+# │ ★ NEW MODULE ★      │ before/after attention         │ training                    │
+# └─────────────────────┴────────────────────────────────┴─────────────────────────────┘
+#
+# =============================================================================
+# 🆕 WHAT'S NEW SINCE MILESTONE 04 (CNN)
+# =============================================================================
+#
+# ┌──────────────────────┬─────────────────────────┬────────────────────────────┐
+# │ CNN (Milestone 04)   │ Transformer (This)      │ Why It's Different         │
+# ├──────────────────────┼─────────────────────────┼────────────────────────────┤
+# │ Local connectivity   │ Global attention        │ Every position sees all!   │
+# │ Spatial features     │ Sequence features       │ Text/audio/time series     │
+# │ Fixed receptive field│ Dynamic attention       │ Model decides what to see  │
+# │ Conv2d kernels       │ Q·K·V projections       │ Learned attention patterns │
+# │ Translation invariance│ Position encoding      │ Explicit position info     │
+# │ Images only          │ ANY sequence data       │ Language, music, code...   │
+# └──────────────────────┴─────────────────────────┴────────────────────────────┘
+#
+# =============================================================================
 
 
 class AttentionTransformer:

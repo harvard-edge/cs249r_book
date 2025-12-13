@@ -3,57 +3,73 @@
 The XOR Crisis (1969) - Minsky & Papert
 ========================================
 
-HISTORICAL CONTEXT:
+📚 HISTORICAL CONTEXT:
 In 1969, Marvin Minsky and Seymour Papert published "Perceptrons," mathematically
 proving that single-layer perceptrons CANNOT solve the XOR problem. This revelation
 killed neural network research funding for over a decade - the "AI Winter."
 
-MILESTONE 2 PART 1: THE CRISIS (After Modules 01-03)
-
+🎯 MILESTONE 2 PART 1: THE CRISIS (After Modules 01-03)
 This demonstrates WHY the crisis happened. We'll show that NO MATTER what weights
 you choose, a single-layer perceptron cannot correctly classify all XOR patterns.
 This is a mathematical impossibility - not a training failure.
 
-REQUIRED MODULES:
+✅ REQUIRED MODULES (Run after Module 03):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Module 01 (Tensor)        : YOUR data structure
   Module 02 (Activations)   : YOUR sigmoid activation
   Module 03 (Layers)        : YOUR Linear layer
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-THE XOR PROBLEM - Why It's Impossible for Single Layers:
+🏗️ ARCHITECTURE (The Failing Single-Layer Perceptron):
+    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+    │ Input       │    │   Linear    │    │  Sigmoid    │    │ Binary      │
+    │ Features    │───▶│ YOUR Module │───▶│ YOUR Module │───▶│ Output      │
+    │ (x1, x2)    │    │     03      │    │     02      │    │ (0 or 1)    │
+    └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
+                           │                    │
+                           │   y = sigmoid(w1·x1 + w2·x2 + b)
+                           │   Decision boundary: w1·x1 + w2·x2 + b = 0
+                           │
+                           ↓
+                    Always a STRAIGHT LINE - cannot solve XOR!
+
+🔍 THE XOR PROBLEM - Why It's Impossible for Single Layers:
 
 XOR (Exclusive OR) outputs 1 when inputs DIFFER, 0 when they're the SAME:
 
     Visual Representation:        Truth Table:
 
-    1 | O (0,1)    * (1,1)        | x1 | x2 | XOR |
-      |   [1]       [0]           |----|----| --- |
-      |                           | 0  | 0  |  0  | same
-    0 | * (0,0)    O (1,0)        | 0  | 1  |  1  | different
-      |   [0]       [1]           | 1  | 0  |  1  | different
-      +-----------                | 1  | 1  |  0  | same
-        0          1
+    1 │ ○ (0,1)    ● (1,1)        ┌────┬────┬─────┐
+      │   [1]       [0]           │ x1 │ x2 │ XOR │
+      │                           ├────┼────┼─────┤
+    0 │ ● (0,0)    ○ (1,0)        │ 0  │ 0  │  0  │ same
+      │   [0]       [1]           │ 0  │ 1  │  1  │ different
+      └─────────────              │ 1  │ 0  │  1  │ different
+        0          1              │ 1  │ 1  │  0  │ same
+                                  └────┴────┴─────┘
 
-THE FUNDAMENTAL PROBLEM:
+    THE FUNDAMENTAL PROBLEM - No single line can separate the points:
 
-No single straight line can separate the points!
+    Try 1: Vertical line?      Try 2: Horizontal line?    Try 3: Diagonal line?
+    1 │ ○   │ ●                1 │ ○     ●                1 │ ○     ●
+      │     │                    │───────────               │  ╲
+    0 │ ●   │ ○                0 │ ●     ○                0 │ ●   ╲ ○
+      └─────┼──                  └───────────               └────────╲
+        0   │ 1                    0       1                  0       1
+    ❌ Wrong: (0,1) with (0,0) ❌ Wrong: (0,1) with (1,1) ❌ Wrong: (0,0) with (1,0)
 
-A single-layer perceptron computes: y = sigmoid(w1*x1 + w2*x2 + b)
-The decision boundary is: w1*x1 + w2*x2 + b = 0 (a straight line!)
+    THERE IS NO SOLUTION! This is called "non-linear separability"
 
-No matter how you draw this line, you CANNOT separate:
-  - (0,0) and (1,1) on one side (both should be 0)
-  - (0,1) and (1,0) on the other side (both should be 1)
-
-This is called "non-linear separability" - the problem that ended the first
-neural network era.
-
-WHAT TO EXPECT:
+📊 WHAT TO EXPECT:
 - We'll try MANY different weight configurations
 - NONE of them will achieve 100% accuracy
 - Best possible: 75% (3 out of 4 correct)
 - This proves Minsky was right!
+- ❌ Expected accuracy: 75% max (mathematically impossible to do better!)
 
+🚀 WHAT COMES NEXT:
 Part 2 (02_xor_solved.py) shows how hidden layers solve this!
+The secret? Multi-layer networks can learn NON-LINEAR decision boundaries.
 """
 
 import sys
@@ -72,6 +88,30 @@ sys.path.insert(0, os.getcwd())
 from tinytorch import Tensor, Linear, Sigmoid
 
 console = Console()
+
+# =============================================================================
+# 🎯 YOUR TINYTORCH MODULES IN ACTION
+# =============================================================================
+#
+# This milestone uses YOUR modules to demonstrate a fundamental limitation:
+#
+# ┌─────────────────────┬────────────────────────────────┬─────────────────────────────┐
+# │ What You Built      │ How It's Used Here             │ What It Proves              │
+# ├─────────────────────┼────────────────────────────────┼─────────────────────────────┤
+# │ Module 01: Tensor   │ Stores XOR inputs and outputs  │ Data flows correctly        │
+# │                     │                                │                             │
+# │ Module 02: Sigmoid  │ Squashes linear output to [0,1]│ Activation works, but...    │
+# │                     │                                │ can't fix linear limits     │
+# │                     │                                │                             │
+# │ Module 03: Linear   │ Computes w1·x1 + w2·x2 + b     │ Creates LINEAR boundary     │
+# │                     │                                │ ❌ XOR needs NON-linear!    │
+# └─────────────────────┴────────────────────────────────┴─────────────────────────────┘
+#
+# KEY INSIGHT: YOUR modules work perfectly! The failure is ARCHITECTURAL.
+# A single Linear layer can only create straight-line decision boundaries.
+# XOR requires a curved boundary - that's why hidden layers are needed!
+#
+# =============================================================================
 
 
 # ============================================================================

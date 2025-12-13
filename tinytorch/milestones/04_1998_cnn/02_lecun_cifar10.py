@@ -1,43 +1,80 @@
 #!/usr/bin/env python3
 """
-CIFAR-10 CNN - Convolutional Revolution
-========================================
+CIFAR-10 CNN (Modern) - Convolutional Revolution
+===============================================
 
-🎯 WHAT YOU'LL PROVE:
-YOUR TinyTorch implementations can achieve 70%+ accuracy on natural images,
-demonstrating that YOUR spatial modules extract hierarchical features from
-real-world photographs!
+📚 HISTORICAL CONTEXT:
+Convolutional Neural Networks revolutionized computer vision by exploiting spatial
+structure in images. Unlike MLPs that flatten images (losing spatial relationships),
+CNNs preserve spatial hierarchies through local connectivity and weight sharing,
+enabling recognition of complex patterns in natural images.
 
-✅ PREREQUISITES: Modules 01-09 complete
-📊 EXPECTED: 70%+ accuracy in ~5 minutes (demo mode)
-🌟 SHOWCASES: YOUR DataLoader (Module 08) + YOUR Conv2d (Module 09)
+🎯 WHAT YOU'RE BUILDING:
+Using YOUR TinyTorch implementations, you'll build a CNN that achieves 65%+ accuracy
+on CIFAR-10 natural images - proving YOUR spatial modules can extract hierarchical
+features from real-world photographs!
 
-📖 RUN FIRST, THEN EXPLORE:
-After running this script, scroll down to the code comments for detailed
-analysis of what YOUR modules accomplished. The ASCII diagrams and tables
-explain the systems concepts after you've seen the results!
-
+✅ REQUIRED MODULES (Run after Module 09):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Module 01 (Tensor)        : YOUR data structure with autodiff
+  Module 02 (Activations)   : YOUR ReLU for feature extraction
+  Module 03 (Layers)        : YOUR Linear layers for classification
+  Module 04 (Losses)        : YOUR CrossEntropy loss
+  Module 05 (Autograd)      : YOUR gradient computation
+  Module 06 (Optimizers)    : YOUR Adam optimizer
+  Module 07 (Training)      : YOUR training loops
+  Module 08 (DataLoader)    : YOUR Dataset/DataLoader for batching!  <-- SHOWCASED HERE
+  Module 09 (Spatial)       : YOUR Conv2D, MaxPool2D, Flatten
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-📚 DEEP DIVE (read after running):
+🏗️ ARCHITECTURE (Modern Pattern with BatchNorm):
+    ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
+    │ Input Image │  │   Conv2D    │  │ BatchNorm2D │  │   MaxPool   │  │   Conv2D    │  │ BatchNorm2D │  │   MaxPool   │  │   Linear    │  │   Linear    │
+    │ 32×32×3 RGB │─▶│    3→32     │─▶│  Normalize  │─▶│     2×2     │─▶│    32→64    │─▶│  Normalize  │─▶│     2×2     │─▶│  2304→256   │─▶│   256→10    │
+    │   Pixels    │  │   YOUR M9   │  │   YOUR M9   │  │   YOUR M9   │  │   YOUR M9   │  │   YOUR M9   │  │   YOUR M9   │  │   YOUR M4   │  │   YOUR M4   │
+    └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘
+                      Edge Detection   Stabilize Train     Downsample      Shape Detect.   Stabilize Train    Downsample      Hidden Layer    Classification
+                           ↓                                                                                                                       ↓
+                    Low-level features                                   High-level features                                                 10 Class Probs
 
-HISTORICAL CONTEXT:
-CNNs revolutionized computer vision by exploiting spatial structure in images.
-Unlike MLPs that flatten images (losing spatial relationships), CNNs preserve
-spatial hierarchies through local connectivity and weight sharing.
+    🆕 DATA AUGMENTATION (Training only):
+    RandomHorizontalFlip (50%) + RandomCrop with padding - prevents overfitting!
 
-ARCHITECTURE:
-Input(32×32×3) → Conv(3→32) → BN → Pool → Conv(32→64) → BN → Pool → FC(2304→256→10)
+🔍 CIFAR-10 DATASET - REAL NATURAL IMAGES:
 
-CIFAR-10 DATASET:
-60,000 32×32 color images in 10 classes:
-plane, car, bird, cat, deer, dog, frog, horse, ship, truck
+CIFAR-10 contains 60,000 32×32 color images in 10 classes:
 
-WHY CNNs EXCEL:
-• LOCAL CONNECTIVITY: Pixels near each other are related
-• WEIGHT SHARING: Same filter detects patterns everywhere
-• HIERARCHICAL LEARNING: Edges → Shapes → Objects
-• TRANSLATION INVARIANCE: Detects cat anywhere in image
+    Sample Images:                    Feature Hierarchy YOUR CNN Learns:
+
+    ┌──────────┐                     Layer 1 (Conv 3→32):
+    │ ✈️ Plane │                     • Edge detectors
+    │[Sky blue │                     • Color gradients
+    │[White    │                     • Simple textures
+    │[Wings    │
+    └──────────┘                     Layer 2 (Conv 32→64):
+                                      • Object parts
+    ┌──────────┐                     • Complex patterns
+    │ 🚗 Car    │                     • Spatial relationships
+    │[Red body]│
+    │[Wheels]  │                     Output Layer:
+    │[Windows] │                     • Complete objects
+    └──────────┘                     • Class probabilities
+
+    Classes: plane, car, bird, cat, deer, dog, frog, horse, ship, truck
+
+    Why CNNs Excel at Natural Images:
+    • LOCAL CONNECTIVITY: Pixels near each other are related
+    • WEIGHT SHARING: Same filter detects patterns everywhere
+    • HIERARCHICAL LEARNING: Edges → Shapes → Objects
+    • TRANSLATION INVARIANCE: Detects cat anywhere in image
+
+📊 EXPECTED PERFORMANCE:
+- Dataset: 50,000 training images, 10,000 test images
+- Training time: 3-5 minutes (demonstration mode)
+- Expected accuracy: 70%+ (with YOUR CNN + BatchNorm + Augmentation!)
+- Parameters: ~600K (mostly in conv layers)
+- 🆕 BatchNorm: Stabilizes training, faster convergence
+- 🆕 Augmentation: Reduces overfitting, better generalization
 """
 
 import sys
