@@ -408,7 +408,7 @@ ls submitted/*/MODULE/
 
 ## Additional Resources
 
-- **[Complete Course Structure](chapters/00-introduction.md)** - Full curriculum overview
+- **[Learning Journey](chapters/learning-journey.md)** - Full curriculum overview
 - **[Student Getting Started](getting-started.md)** - Send this to students
 - **[CLI Documentation](tito/overview.md)** - Detailed command reference
 - **[Troubleshooting Guide](tito/troubleshooting.md)** - Common issues and solutions

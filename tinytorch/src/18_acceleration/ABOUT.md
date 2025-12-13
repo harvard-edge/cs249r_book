@@ -355,7 +355,7 @@ Your acceleration techniques demonstrate the same principles PyTorch uses intern
 The following comparison shows how acceleration appears in TinyTorch versus PyTorch. The API patterns are similar, but PyTorch adds GPU support and automatic optimization.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch.perf.acceleration import vectorized_matmul, fused_gelu
 

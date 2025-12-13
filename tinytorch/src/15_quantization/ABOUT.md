@@ -276,7 +276,7 @@ Your quantization system implements the core algorithms used in production frame
 The following comparison shows quantization in TinyTorch versus PyTorch. The APIs are remarkably similar, reflecting the universal nature of the quantization problem.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch.perf.quantization import quantize_model, QuantizedLinear
 from tinytorch.core.layers import Linear, Sequential

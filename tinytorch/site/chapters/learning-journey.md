@@ -1,23 +1,8 @@
 # The Learning Journey: From Atoms to Intelligence
 
-**Understand the pedagogical narrative connecting modules 01-20 into a complete learning story from atomic components to production AI systems.**
+This page tells the **pedagogical story** behind TinyTorch's module progression—why modules flow the way they do, and how 20 individual modules transform into a coherent journey from mathematical foundations to production AI systems.
 
-
-## What This Page Is About
-
-This page tells the **pedagogical story** behind TinyTorch's module progression. While other pages explain:
-- **WHAT you'll build** ([Three-Tier Structure](00-introduction.md)) - organized module breakdown
-- **WHEN in history** ([Milestones](milestones.md)) - recreating ML breakthroughs
-- **WHERE you are** ([Student Workflow](../student-workflow.md)) - development workflow and progress
-
-This page explains **WHY modules flow this way** - the learning narrative that transforms 20 individual modules into a coherent journey from mathematical foundations to production AI systems.
-
-### How to Use This Narrative
-
-- **Starting TinyTorch?** Read this to understand the complete arc before diving into modules
-- **Mid-journey?** Return here when wondering "Why am I building DataLoader now?"
-- **Planning your path?** Use this to understand how modules build on each other pedagogically
-- **Teaching TinyTorch?** Share this narrative to help students see the big picture
+If you're just starting, read this to understand the complete arc before diving in. If you're mid-journey, return here when wondering "Why am I building this now?" If you're teaching TinyTorch, share this narrative to help students see the big picture.
 
 
 ## The Six-Act Learning Story
@@ -325,33 +310,33 @@ As you progress through TinyTorch, you advance along **two dimensions simultaneo
 
 ### Journey vs. Capabilities: Tracking Your Skills
 
-The learning journey also maps to **21 capability checkpoints** you can track:
+The learning journey maps to **20 module capabilities** you can track:
 
 **Foundation Capabilities (Act I-II)**:
-- Checkpoint 01: Tensor manipulation
-- Checkpoint 02: Nonlinearity
-- Checkpoint 03: Network layers
-- Checkpoint 04: Loss measurement
-- Checkpoint 05: Gradient computation
-- Checkpoint 06: Parameter optimization
-- Checkpoint 07: Model training
+- Module 01: Tensor manipulation
+- Module 02: Nonlinearity
+- Module 03: Network layers
+- Module 04: Loss measurement
+- Module 05: Gradient computation
+- Module 06: Parameter optimization
+- Module 07: Model training
 
 **Architecture Capabilities (Act III-IV)**:
-- Checkpoint 08: Image processing
-- Checkpoint 09: Data loading
-- Checkpoint 10: Text processing
-- Checkpoint 11: Embeddings
-- Checkpoint 12: Attention mechanisms
-- Checkpoint 13: Transformers
+- Module 08: Data loading
+- Module 09: Image processing
+- Module 10: Text processing
+- Module 11: Embeddings
+- Module 12: Attention mechanisms
+- Module 13: Transformers
 
 **Production Capabilities (Act V-VI)**:
-- Checkpoint 14: Performance profiling
-- Checkpoint 15: Model quantization
-- Checkpoint 16: Network compression
-- Checkpoint 17: Computation caching
-- Checkpoint 18: Algorithm acceleration
-- Checkpoint 19: Competitive benchmarking
-- Checkpoint 20: Complete systems
+- Module 14: Performance profiling
+- Module 15: Model quantization
+- Module 16: Network compression
+- Module 17: Computation caching
+- Module 18: Algorithm acceleration
+- Module 19: Competitive benchmarking
+- Module 20: Complete systems
 
 See [Student Workflow](../student-workflow.md) for the development workflow and progress tracking.
 
@@ -540,15 +525,15 @@ Typical time estimates (varies by background):
 <div style="background: #f8f9fa; padding: 2rem; border-radius: 0.5rem; margin: 2rem 0; text-align: center;">
 <h3 style="margin: 0 0 1rem 0; color: #495057;">Start Your Learning Journey</h3>
 <p style="margin: 0 0 1.5rem 0; color: #6c757d;">Begin with Act I: Foundation - build the atomic components</p>
-<a href="../quickstart-guide.html" style="display: inline-block; background: #007bff; color: white; padding: 0.75rem 1.5rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500; margin-right: 1rem;">15-Minute Quick Start →</a>
-<a href="00-introduction.html" style="display: inline-block; background: #28a745; color: white; padding: 0.75rem 1.5rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500;">View Course Structure →</a>
+<a href="../getting-started.html" style="display: inline-block; background: #007bff; color: white; padding: 0.75rem 1.5rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500; margin-right: 1rem;">15-Minute Quick Start →</a>
+<a href="../tiers/foundation.html" style="display: inline-block; background: #28a745; color: white; padding: 0.75rem 1.5rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500;">Start Foundation Tier →</a>
 </div>
 
 **Related Resources**:
-- **[Three-Tier Structure](00-introduction.md)** - Organized module breakdown with time estimates
+- **[Foundation Tier](../tiers/foundation.md)** - Modules 01-07 breakdown
 - **[Journey Through ML History](milestones.md)** - Historical milestones you'll recreate
 - **[Student Workflow](../student-workflow.md)** - Development workflow and progress tracking
-- **[Quick Start Guide](../quickstart-guide.md)** - Hands-on setup and first module
+- **[Quick Start](../getting-started.md)** - Hands-on setup and first module
 
 
 **Remember**: You're not just learning ML algorithms. You're building ML systems - from mathematical foundations to production deployment. This journey transforms you from a framework user into a systems engineer who truly understands how modern AI works.

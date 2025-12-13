@@ -1,6 +1,6 @@
 # Journey Through ML History
 
-**Experience the evolution of AI by rebuilding history's most important breakthroughs with YOUR Tiny🔥Torch implementations.**
+**Experience the evolution of AI by rebuilding history's most important breakthroughs with YOUR TinyTorch implementations.**
 
 
 ## What Are Milestones?

@@ -366,7 +366,7 @@ Your KVCache implementation uses the same conceptual design as production framew
 The following comparison shows how KV caching is used in TinyTorch versus production PyTorch. The API patterns are similar because the underlying concept is identical.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch.perf.memoization import enable_kv_cache
 

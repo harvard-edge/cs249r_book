@@ -1,128 +1,59 @@
 # Prerequisites & Self-Assessment
 
-**Purpose**: Ensure you have the foundational knowledge to succeed in TinyTorch and discover complementary resources for deeper learning.
+This page helps you assess whether you're ready to start TinyTorch and points you to resources if you need to brush up on fundamentals.
 
 
 ## Core Requirements
 
-You need TWO things to start building:
+You need two things to start building:
 
-### 1. Python Programming
-- Comfortable writing functions and classes
-- Familiarity with basic NumPy arrays
-- No ML framework experience required—you'll build your own!
+**Python Programming.** You should be comfortable writing functions and classes, and have basic familiarity with NumPy arrays. No ML framework experience is required—you'll build your own! If you can write a Python class with `__init__` and methods, you're ready.
 
-**Self-check**: Can you write a Python class with `__init__` and methods?
+**Basic Linear Algebra.** You should understand matrix multiplication conceptually and know what a gradient (derivative) represents at a high level. If you know what multiplying two matrices means, you're ready.
 
-### 2. Basic Linear Algebra
-- Understand matrix multiplication conceptually
-- Know what a gradient (derivative) represents at a high level
-
-**Self-check**: Do you know what multiplying two matrices means?
-
-**That's it. You're ready to start building.**
+That's it. You're ready to start building.
 
 
-## "Nice to Have" Background
+## What We Teach As You Build
 
-**We teach these concepts as you build**—you don't need them upfront:
+You don't need deep expertise in these upfront—we teach them through implementation:
 
-- **Calculus (derivatives)**: Module 05 (Autograd) teaches this through implementation
-- **Deep learning theory**: You'll learn by building, not lectures
-- **Advanced NumPy**: We introduce operations as needed in each module
+**Calculus derivatives.** Module 05 (Autograd) teaches automatic differentiation by having you build it. However, you should have seen derivatives conceptually (high school or intro calculus level). If "chain rule" is unfamiliar, watch [3Blue1Brown's calculus series](https://www.youtube.com/playlist?list=PLZHQObOWTQDMsr9K-rj53DwVRMYO3t5Yr) first—it's 3 hours that will save you 10 hours of confusion.
 
-**Learning Philosophy**: TinyTorch teaches ML systems through implementation. You'll understand backpropagation by building it, not by watching lectures about it.
+**Deep learning theory.** You'll learn by building networks, not by watching lectures. We introduce advanced NumPy operations as needed in each module.
+
+TinyTorch's philosophy: understand backpropagation by building it, not just by reading about it.
 
 
-## Self-Assessment: Which Learning Path Fits You?
+## Which Learning Path Fits You?
 
-### Path A: Foundation-First Builder (Recommended for most)
-**You are:**
-- Strong Python programmer
-- Curious about ML systems
-- Want to understand how frameworks work
+**Path A: Foundation-First Builder** (Recommended for most). If you're a strong Python programmer curious about ML systems who wants to understand how frameworks work, start with Module 01 (Tensor) and work through sequentially. Best for CS students, software engineers transitioning to ML, and anyone wanting deep systems understanding.
 
-**Start with**: Module 01 (Tensor)
+**Path B: Focused Systems Engineer.** If you're a professional ML engineer who needs specific optimization skills and production deployment knowledge, review the Foundation Tier (01-07) then focus on the Optimization Tier (14-19). Best for working engineers debugging production systems and performance optimization specialists.
 
-**Best for**: CS students, software engineers transitioning to ML, anyone wanting deep systems understanding
-
-### Path B: Focused Systems Engineer
-**You are:**
-- Professional ML engineer
-- Need specific optimization skills
-- Want production deployment knowledge
-
-**Start with**: Review Foundation Tier (01-07), focus on Optimization Tier (14-19)
-
-**Best for**: Working engineers debugging production systems, performance optimization specialists
-
-### Path C: Academic Researcher
-**You are:**
-- ML theory background
-- Need implementation skills
-- Want to prototype novel architectures
-
-**Start with**: Module 01, accelerate through familiar concepts
-
-**Best for**: PhD students, research engineers, anyone implementing custom operations
+**Path C: Academic Researcher.** If you have ML theory background but need implementation skills to prototype novel architectures, start with Module 01 and accelerate through familiar concepts. Best for PhD students, research engineers, and anyone implementing custom operations.
 
 
 ## Complementary Learning Resources
 
-### Essential Systems Context
+**Mathematical Foundations.** The [Deep Learning Book](https://www.deeplearningbook.org/) by Goodfellow, Bengio, and Courville provides comprehensive theoretical foundations and mathematical background for concepts you'll implement. Use it alongside TinyTorch for deeper understanding.
 
-**[Machine Learning Systems](https://mlsysbook.ai)** by Prof. Vijay Janapa Reddi (Harvard)
-- TinyTorch's companion textbook providing systems perspective
-- Covers production ML engineering, hardware acceleration, deployment
-- **Perfect pairing**: TinyTorch teaches implementation, ML Systems book teaches context
+**Visual Intuition.** [3Blue1Brown's Neural Networks series](https://www.youtube.com/playlist?list=PLZHQObOWTQDNU6R1_67000Dx_ZCJB-3pi) offers visual explanations of backpropagation, gradient descent, and neural networks—a perfect complement to hands-on implementation. The [Linear Algebra series](https://www.youtube.com/playlist?list=PLZHQObOWTQDPD3MizzM2xVFitgF8hE_ab) provides geometric intuition for vectors, matrices, and transformations.
 
-### Mathematical Foundations
-
-**[Deep Learning Book](https://www.deeplearningbook.org/)** by Goodfellow, Bengio, Courville
-- Comprehensive theoretical foundations
-- Mathematical background for concepts you'll implement
-- **Use alongside TinyTorch** for deeper understanding
-
-### Visual Intuition
-
-**[3Blue1Brown: Neural Networks](https://www.youtube.com/playlist?list=PLZHQObOWTQDNU6R1_67000Dx_ZCJB-3pi)**
-- Visual explanations of backpropagation, gradient descent, neural networks
-- **Perfect visual complement** to TinyTorch's hands-on implementation
-
-**[3Blue1Brown: Linear Algebra](https://www.youtube.com/playlist?list=PLZHQObOWTQDPD3MizzM2xVFitgF8hE_ab)**
-- Geometric intuition for vectors, matrices, transformations
-- **Helpful refresher** for tensor operations and matrix multiplication
-
-### Python & NumPy
-
-**[NumPy Quickstart Tutorial](https://numpy.org/doc/stable/user/quickstart.md)**
-- Essential NumPy operations and array manipulation
-- **Review before Module 01** if NumPy is unfamiliar
+**Python & NumPy.** If NumPy is unfamiliar, review the [NumPy Quickstart Tutorial](https://numpy.org/doc/stable/user/quickstart.html) before Module 01.
 
 
 ## Ready to Begin?
 
-**If you can:**
-1. ✓ Write a Python class with methods
-2. ✓ Explain what matrix multiplication does
-3. ✓ Debug Python code using print statements
+If you can write a Python class with methods, explain what matrix multiplication does, and debug code using print statements, you're ready to start building.
 
-**Then you're ready to start building!**
-
-**Not quite there?** Work through the resources above, then return when ready. TinyTorch will still be here, and you'll get more value once foundations are solid.
+Not quite there? Work through the resources above, then return when ready. TinyTorch will still be here, and you'll get more value once foundations are solid.
 
 
 ## Next Steps
 
-**Ready to Build:**
-- See [Quick Start Guide](quickstart-guide.md) for hands-on experience
-- See [Student Workflow](student-workflow.md) for development process
-- See [Course Structure](chapters/00-introduction.md) for full curriculum
+**Ready to build?** See the [Quick Start Guide](getting-started.md) to install TinyTorch and complete your first module.
 
-**Need More Context:**
-- See [Additional Resources](resources.md) for broader ML learning materials
-- See [FAQ](faq.md) for common questions about TinyTorch
-- See [Community](community.md) to connect with other learners
+**Want the full picture?** See the [Learning Journey](chapters/learning-journey.md) to understand the complete pedagogical arc from tensors to transformers.
 
-
-**Your journey from ML user to ML systems engineer starts here.**
+**Have questions?** Check the [FAQ](faq.md) or join the [Community](community.md).

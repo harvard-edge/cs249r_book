@@ -149,11 +149,11 @@ Capstone: Vision • Language • Speed • Compression tracks
 
 </div>
 
-**[Complete course structure](chapters/00-introduction)** • **[Getting started guide](getting-started)** • **[Join the community](community)**
+**[Learning Journey](chapters/learning-journey)** • **[Getting started guide](getting-started)** • **[Join the community](community)**
 
 ## Recreate ML History
 
-Walk through ML history by rebuilding its greatest breakthroughs with YOUR Tiny🔥Torch implementations. Click each milestone to see what you'll build and how it shaped modern AI.
+Walk through ML history by rebuilding its greatest breakthroughs with YOUR TinyTorch implementations. Click each milestone to see what you'll build and how it shaped modern AI.
 
 ```{raw} html
 <div class="ml-timeline-container">
@@ -259,7 +259,7 @@ output = model(input)
 
 **Systems Thinking**: TinyTorch emphasizes understanding how components interact—memory hierarchies, computational complexity, and optimization trade-offs—not just isolated algorithms. Every module connects mathematical theory to systems understanding.
 
-**See [Course Philosophy](chapters/00-introduction)** for the full origin story and pedagogical approach.
+**See [Preface](preface)** for the full origin story and pedagogical approach.
 
 ## The Build → Use → Reflect Approach
 
@@ -320,4 +320,4 @@ Perfect if you want to **debug ML systems**, **implement custom operations**, or
 </div>
 
 
-**Next Steps**: **[Quick Start Guide](quickstart-guide)** (15 min) • **[Course Structure](chapters/00-introduction)** • **[FAQ](faq.md)**
+**Next Steps**: **[Quick Start](getting-started)** (15 min) • **[Learning Journey](chapters/learning-journey)** • **[FAQ](faq.md)**

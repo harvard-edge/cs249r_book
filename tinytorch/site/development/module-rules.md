@@ -100,7 +100,7 @@ import sys
 from typing import Union, List, Tuple, Optional, Any
 
 # %% nbgrader={"grade": false, "grade_id": "modulename-setup", "locked": false, "schema_version": 3, "solution": false, "task": false}
-print("Tiny🔥Torch [Module] Module")
+print("TinyTorch [Module] Module")
 print(f"Python version: {sys.version_info.major}.{sys.version_info.minor}")
 print("Ready to [action]!")
 ```

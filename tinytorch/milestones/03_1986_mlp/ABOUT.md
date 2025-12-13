@@ -6,7 +6,7 @@
 
 In 1986, **Rumelhart, Hinton, and Williams** published "Learning representations by back-propagating errors," proving that multi-layer networks could be trained effectively on real-world data. This **ended the AI Winter** and launched modern deep learning.
 
-This milestone recreates that breakthrough using YOUR Tiny🔥Torch on image classification.
+This milestone recreates that breakthrough using YOUR TinyTorch on image classification.
 
 ## What You'll Build
 

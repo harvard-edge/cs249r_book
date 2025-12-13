@@ -63,7 +63,7 @@ graph TB
 **Challenge**: Achieve the highest accuracy on CIFAR-10 (color images) using YOUR Conv2d implementation.
 
 **Constraints**:
-- Must use YOUR Tiny🔥Torch implementation (no PyTorch/TensorFlow)
+- Must use YOUR TinyTorch implementation (no PyTorch/TensorFlow)
 - Training time: <2 hours on standard hardware
 - Model size: <50MB
 
@@ -307,7 +307,7 @@ Starter code will be provided for each track.
 - **All 19 modules completed** (Foundation + Architecture + Optimization)
 - Experience training models on real datasets
 - Understanding of profiling and benchmarking
-- Comfort with YOUR Tiny🔥Torch codebase
+- Comfort with YOUR TinyTorch codebase
 
 **Highly recommended**:
 - Complete all 6 historical milestones (1957-2018)

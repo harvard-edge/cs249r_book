@@ -231,4 +231,4 @@ tito module start 10_tokenization
 - **[ Torch Olympics](olympics)** (Module 20): Compete in ML systems challenges
 
 
-**[← Back to Home](../intro)** • **[View All Modules](../chapters/00-introduction)** • **[Historical Milestones](../chapters/milestones)**
+**[← Back to Home](../intro)** • **[Learning Journey](../chapters/learning-journey)** • **[Historical Milestones](../chapters/milestones)**

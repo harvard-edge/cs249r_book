@@ -429,7 +429,7 @@ Large feature maps consume enormous memory. A batch of 64 images at 224×224×64
 
 ### Your Implementation vs. PyTorch
 
-Your Tiny🔥Torch spatial operations and PyTorch's `torch.nn.Conv2d` share the same conceptual foundation: sliding kernels, stride, padding, output shape formulas. The differences lie in optimization and hardware support.
+Your TinyTorch spatial operations and PyTorch's `torch.nn.Conv2d` share the same conceptual foundation: sliding kernels, stride, padding, output shape formulas. The differences lie in optimization and hardware support.
 
 | Feature | Your Implementation | PyTorch |
 |---------|---------------------|---------|
@@ -444,7 +444,7 @@ Your Tiny🔥Torch spatial operations and PyTorch's `torch.nn.Conv2d` share the 
 The following comparison shows equivalent operations in TinyTorch and PyTorch. Notice how the API mirrors perfectly, making your knowledge transfer directly to production frameworks.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch.core.spatial import Conv2d, MaxPool2d, AvgPool2d
 from tinytorch.core.activations import ReLU

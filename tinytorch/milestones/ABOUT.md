@@ -4,7 +4,7 @@
 
 ## Overview
 
-Milestones are **hands-on recreations of ML breakthroughs** using YOUR Tiny🔥Torch implementations. Each milestone proves your code works by recreating a historically significant achievement - from Rosenblatt's 1957 Perceptron to modern optimization techniques.
+Milestones are **hands-on recreations of ML breakthroughs** using YOUR TinyTorch implementations. Each milestone proves your code works by recreating a historically significant achievement - from Rosenblatt's 1957 Perceptron to modern optimization techniques.
 
 Unlike modules (which teach concepts), milestones demonstrate mastery by showing what you can BUILD.
 

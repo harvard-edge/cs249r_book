@@ -6,7 +6,7 @@
 
 Frank Rosenblatt's Perceptron was the **first trainable artificial neural network**. In 1957, he demonstrated that machines could learn from examples, launching the neural network revolution.
 
-This milestone recreates that pivotal moment using YOUR Tiny🔥Torch implementations.
+This milestone recreates that pivotal moment using YOUR TinyTorch implementations.
 
 ## What You'll Build
 

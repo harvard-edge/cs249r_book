@@ -74,4 +74,4 @@
   *Custom operators and autograd functions*
 
 
-**Ready to start?** See the **[Quick Start Guide](quickstart-guide)** for a 15-minute hands-on introduction.
+**Ready to start?** See the **[Quick Start](getting-started)** for a 15-minute hands-on introduction.

@@ -4,67 +4,9 @@
 
 **See yourself on the TinyTorch Globe!** Create an account and join the global community to track your progress and connect with other builders.
 
-```{mermaid}
-:align: center
-:caption: TinyTorch Community Ecosystem
-flowchart TB
- %% Top benefit
- B["Benefit: Build Systems Intuition & Understand ML Frameworks<br/>From Tensors to Systems: Debug, Implement, Optimize"]
-
- %% Center
- C(("TinyTorch<br/>Community"))
-
- %% Main branches
- L["Progress & Connection"]
- R["Competition & Growth"]
- S["Learning & Support Ecosystem"]
-
- %% Left branch leaves
- L1["Share<br/>Progress"]
- L2["Connect with<br/>Builders"]
- L3["Add Yourself<br/>to the Map"]
-
- %% Right branch leaves
- R1["Torch Olympics<br/>(Capstone)"]
- R2["Leaderboard"]
-
- %% Support branch leaves
- S1["Course Structure<br/>& Resources"]
- S2["Historical<br/>Milestones"]
- S3["FAQ &<br/>Troubleshooting"]
-
- %% Connections
- B --> C
- C --> L
- C --> R
- C --> S
-
- L --> L1
- L --> L2
- L --> L3
-
- R --> R1
- R --> R2
-
- S --> S1
- S --> S2
- S --> S3
-
- %% Styling - TinyTorch brand colors
- classDef benefit fill:#fff3cd,stroke:#333,stroke-width:1px,color:#111;
- classDef center fill:#1b3a5f,stroke:#333,stroke-width:2px,color:#fff;
- classDef branch fill:#e1f5ff,stroke:#333,stroke-width:1px,color:#111;
- classDef leafProgress fill:#d4edda,stroke:#333,stroke-width:1px,color:#111;
- classDef leafCompete fill:#f8d7da,stroke:#333,stroke-width:1px,color:#111;
- classDef leafSupport fill:#e2d5f1,stroke:#333,stroke-width:1px,color:#111;
-
- class B benefit;
- class C center;
- class L,R,S branch;
- class L1,L2,L3 leafProgress;
- class R1,R2 leafCompete;
- class S1,S2,S3 leafSupport;
-```
+<p align="center">
+<img src="_static/images/diagram_tiny-commununity.png" alt="TinyTorch Community Ecosystem" width="100%">
+</p>
 
 **Learn together, build together, grow together.**
 

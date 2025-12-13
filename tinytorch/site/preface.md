@@ -43,7 +43,7 @@ TinyTorch teaches you the **AI bricks**—the stable engineering foundations you
 <p style="margin: 0.5rem 0 0 0;">The <a href="https://mlsysbook.ai">Machine Learning Systems</a> textbook teaches you the <em>concepts</em> of the rocket ship: propulsion, guidance, life support.</p>
 </div>
 <div style="background: #fff3e0; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #ff8247;">
-<strong style="color: #e65100;">Tiny🔥Torch</strong>
+<strong style="color: #e65100;">TinyTorch</strong>
 <p style="margin: 0.5rem 0 0 0;">TinyTorch is where you actually <em>build</em> a small rocket with your own hands. Not a toy—a real framework.</p>
 </div>
 </div>
@@ -96,19 +96,11 @@ By the end of TinyTorch, you will have implemented:
 
 This is not a simulation. This is the actual architecture of modern ML frameworks, implemented at a scale you can fully understand.
 
-## How to Use This Guide
+## How to Learn
 
-Each module follows a **Build-Use-Reflect** cycle:
+Each module follows a **Build-Use-Reflect** cycle: implement from scratch, apply to real problems, then connect what you built to production systems and understand the tradeoffs. Work through Foundation first, then choose your path based on your interests.
 
-1. **Build**: Implement the component from scratch, understanding every line
-2. **Use**: Apply it to real problems: training networks, processing data
-3. **Reflect**: Connect what you built to production systems and understand the tradeoffs
-
-The curriculum follows a three-tier structure. **Foundation Tier (Modules 01-07)** builds the core infrastructure: tensors, activations, layers, losses, autograd, optimizers, and training loops. **Architecture Tier (Modules 08-13)** implements modern deep learning: data loading, spatial operations, tokenization, embeddings, attention mechanisms, and transformers. **Optimization Tier (Modules 14-19)** focuses on production: profiling, quantization, compression, memoization, acceleration, and benchmarking. **Module 20: Capstone** brings everything together as a launchpad for community competitions.
-
-Work through Foundation first, then choose your path based on your interests.
-
-## Learning Approach
+### Learning Approach
 
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1.5rem 0;">
 
@@ -136,10 +128,6 @@ Work through Foundation first, then choose your path based on your interests.
 
 Take your time. The goal is not to finish fast. The goal is to understand deeply.
 
-## Prerequisites
-
-Familiarity with Python and basic linear algebra is helpful but not required. We explain concepts as we build.
-
 ## The Bigger Picture
 
 TinyTorch is part of a larger effort to educate a million learners at the edge of AI. The [Machine Learning Systems](https://mlsysbook.ai) textbook provides the conceptual foundation. TinyTorch provides the hands-on implementation experience. Together, they form a complete path into ML systems engineering.
@@ -151,3 +139,12 @@ That is what TinyTorch offers: the confidence that comes from building something
 *Prof. Vijay Janapa Reddi*</br>
 *(Harvard University)*</br>
 *2025*
+
+
+## What to Read Next
+
+**Ready to build right now?** → [Quick Start](getting-started.md) — Install and complete your first module in 15 minutes.
+
+**Not sure if you're ready?** → [Prerequisites](prerequisites.md) — Self-assessment + resources to fill any gaps.
+
+**Want to see the full journey?** → [Learning Journey](chapters/learning-journey.md) — The complete pedagogical arc from tensors to transformers.

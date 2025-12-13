@@ -427,7 +427,7 @@ weight_data = np.random.randn(in_features, out_features) * scale
 
 ### Your Implementation vs. PyTorch
 
-Your Tiny🔥Torch layers and PyTorch's `nn.Linear` and `nn.Dropout` share the same conceptual design. The differences are in implementation details: PyTorch uses C++ for speed, supports GPU acceleration, and provides hundreds of specialized layer types. But the core abstractions are identical.
+Your TinyTorch layers and PyTorch's `nn.Linear` and `nn.Dropout` share the same conceptual design. The differences are in implementation details: PyTorch uses C++ for speed, supports GPU acceleration, and provides hundreds of specialized layer types. But the core abstractions are identical.
 
 | Feature | Your Implementation | PyTorch |
 |---------|---------------------|---------|
@@ -443,7 +443,7 @@ Your Tiny🔥Torch layers and PyTorch's `nn.Linear` and `nn.Dropout` share the s
 The following comparison shows equivalent layer operations in TinyTorch and PyTorch. Notice how closely the APIs mirror each other.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch.core.layers import Linear, Dropout, Sequential
 from tinytorch.core.activations import ReLU

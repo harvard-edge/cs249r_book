@@ -347,7 +347,7 @@ The systems insight is that compression ratio alone doesn't determine deployment
 
 ### Your Implementation vs. PyTorch
 
-Your Tiny🔥Torch compression functions and PyTorch's pruning utilities share the same core algorithms. The differences are in integration depth: PyTorch provides hooks for pruning during training, automatic mask management, and integration with quantization-aware training. But the fundamental magnitude-based and structured pruning logic is identical.
+Your TinyTorch compression functions and PyTorch's pruning utilities share the same core algorithms. The differences are in integration depth: PyTorch provides hooks for pruning during training, automatic mask management, and integration with quantization-aware training. But the fundamental magnitude-based and structured pruning logic is identical.
 
 | Feature | Your Implementation | PyTorch |
 |---------|---------------------|---------|
@@ -362,7 +362,7 @@ Your Tiny🔥Torch compression functions and PyTorch's pruning utilities share t
 The following comparison shows equivalent compression operations in TinyTorch and PyTorch. Notice how the core concepts translate directly while PyTorch provides additional automation for production workflows.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch.perf.compression import magnitude_prune, measure_sparsity
 

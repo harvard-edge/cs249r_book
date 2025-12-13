@@ -414,7 +414,7 @@ print(f"{result.mean:.3f}ms ± {result.std:.3f}ms, 95% CI: [{result.ci_lower:.3f
 
 ### Your Implementation vs. Industry Benchmarks
 
-Your Tiny🔥Torch benchmarking infrastructure implements the same statistical principles used in production ML benchmarking frameworks. The difference is scale and automation.
+Your TinyTorch benchmarking infrastructure implements the same statistical principles used in production ML benchmarking frameworks. The difference is scale and automation.
 
 | Feature | Your Implementation | MLPerf / Industry |
 |---------|---------------------|-------------------|
@@ -430,7 +430,7 @@ Your Tiny🔥Torch benchmarking infrastructure implements the same statistical p
 The following shows equivalent benchmarking patterns in TinyTorch and production frameworks like MLPerf.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch.benchmarking import Benchmark
 

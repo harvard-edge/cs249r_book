@@ -397,7 +397,7 @@ Your DataLoader and PyTorch's `torch.utils.data.DataLoader` share the same conce
 The following comparison shows identical usage patterns between TinyTorch and PyTorch. Notice how the APIs mirror each other exactly.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch.core.dataloader import TensorDataset, DataLoader
 

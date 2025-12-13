@@ -11,7 +11,7 @@ See [Historical Milestones](chapters/milestones.md) for the full historical cont
 
 ## What Are Milestones?
 
-Milestones are **runnable recreations of historical ML papers** that use YOUR Tiny🔥Torch implementations:
+Milestones are **runnable recreations of historical ML papers** that use YOUR TinyTorch implementations:
 
 - **1957 - Rosenblatt's Perceptron**: The first trainable neural network
 - **1969 - XOR Solution**: Solving the problem that stalled AI
@@ -271,7 +271,7 @@ tito milestone run 03
  Activations import successful
  Layers import successful
 
- YOUR Tiny🔥Torch is ready!
+ YOUR TinyTorch is ready!
 ```
 
 ### If Prerequisites Are Missing

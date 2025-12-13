@@ -103,7 +103,7 @@
 
 The TinyTorch course consists of 20 progressive modules organized into learning stages.
 
-**See [Complete Course Structure](../chapters/00-introduction.md)** for detailed module descriptions, learning objectives, and prerequisites for each module.
+**See [Complete Course Structure](../chapters/learning-journey.md)** for detailed module descriptions, learning objectives, and prerequisites for each module.
 
 
 ## Academic Learning Goals
@@ -193,7 +193,7 @@ tito nbgrader release 01_tensor
 - **[Complete Instructor Guide](../instructor-guide.md)** - 30-minute setup, grading rubrics, sample solutions, common errors
 - **[TA Guide](ta-guide.md)** - Common student errors, debugging strategies, office hour patterns
 - Module-specific teaching notes in each ABOUT.md file
-- [Course Structure](../chapters/00-introduction.md) - Full curriculum overview
+- [Course Structure](../chapters/learning-journey.md) - Full curriculum overview
 - [Student Workflow](../student-workflow.md) - Essential development cycle
 
 ### Support Tools
@@ -209,7 +209,7 @@ tito nbgrader release 01_tensor
 
 ## 📞 Next Steps
 
-1. ** Review [Course Structure](../chapters/00-introduction.md)** for complete curriculum overview
+1. ** Review [Course Structure](../chapters/learning-journey.md)** for complete curriculum overview
 2. ** Explore [Student Workflow](../student-workflow.md)** to understand the development cycle
 3. **💻 Set up your environment** using the [Quick Start Guide](../quickstart-guide.md)
 4. **📧 Contact us** via GitHub Issues for instructor support

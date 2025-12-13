@@ -445,7 +445,7 @@ Your arithmetic methods need to handle both Tensor and scalar operands. When som
 
 ### Your Implementation vs. PyTorch
 
-Your Tiny🔥Torch Tensor and PyTorch's `torch.Tensor` share the same conceptual design. The differences are in implementation: PyTorch uses a C++ backend for speed, supports GPUs for massive parallelism, and implements thousands of specialized operations. But the Python API, broadcasting rules, and shape semantics are identical.
+Your TinyTorch Tensor and PyTorch's `torch.Tensor` share the same conceptual design. The differences are in implementation: PyTorch uses a C++ backend for speed, supports GPUs for massive parallelism, and implements thousands of specialized operations. But the Python API, broadcasting rules, and shape semantics are identical.
 
 | Feature | Your Implementation | PyTorch |
 |---------|---------------------|---------|
@@ -460,7 +460,7 @@ Your Tiny🔥Torch Tensor and PyTorch's `torch.Tensor` share the same conceptual
 The following comparison shows equivalent operations in TinyTorch and PyTorch. Notice how closely the APIs mirror each other. This is intentional: by learning TinyTorch's patterns, you're simultaneously learning PyTorch's patterns.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch.core.tensor import Tensor
 

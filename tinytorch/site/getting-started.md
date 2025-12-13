@@ -9,6 +9,10 @@ You're ahead of the curve. TinyTorch is functional but still being refined. Expe
 Questions or feedback? [Join the discussion →](https://github.com/harvard-edge/cs249r_book/discussions/1076)
 ```
 
+```{note} Prerequisites Check
+This guide requires **Python programming** (classes, functions, NumPy basics) and **basic linear algebra** (matrix multiplication). Not sure if you're ready? Take the [Prerequisites Self-Assessment](prerequisites.md) first.
+```
+
 Welcome to TinyTorch! This comprehensive guide will get you started whether you're a student building ML systems, an instructor setting up a course, or a TA supporting learners.
 
 <div style="background: #f8f9fa; padding: 2rem; border-radius: 0.5rem; margin: 2rem 0; text-align: center;">
@@ -141,6 +145,12 @@ Each milestone has a README explaining:
 - Expected results
 - What you're learning
 
+**What if validation fails?** If a milestone script produces errors:
+1. Read the error message carefully—it usually points to the problem
+2. Run module tests: `tito module test 01` to check your implementation
+3. Return to your Jupyter notebook to debug and fix
+4. Re-export with `tito module complete 01` and try again
+
 **See [Historical Milestones](chapters/milestones.md)** for the complete progression through ML history.
 
 ### Your First Module (15 Minutes)
@@ -170,12 +180,16 @@ x = Tensor([1, 2, 3]) # YOUR implementation!
 
 TinyTorch has 20 modules organized in progressive tiers:
 
-- **Foundation (01-07)**: Core ML infrastructure - tensors, autograd, training
-- **Architecture (08-13)**: Neural architectures - data loading, CNNs, transformers
-- **Optimization (14-19)**: Production optimization - profiling, quantization, benchmarking
-- **Capstone (20)**: Torch Olympics Competition
+| Tier | Modules | Focus | Time Estimate |
+|------|---------|-------|---------------|
+| **Foundation** | 01-07 | Core ML infrastructure (tensors, autograd, training) | ~15-20 hours |
+| **Architecture** | 08-13 | Neural architectures (data loading, CNNs, transformers) | ~18-24 hours |
+| **Optimization** | 14-19 | Production optimization (profiling, quantization) | ~18-24 hours |
+| **Capstone** | 20 | Torch Olympics Competition | ~8-10 hours |
 
-**See [Complete Course Structure](chapters/00-introduction.md)** for detailed module descriptions.
+**Total: ~60-80 hours** over 14-18 weeks (4-6 hours/week pace).
+
+**See [Foundation Tier Overview](tiers/foundation.md)** for detailed module descriptions, or [Learning Journey](chapters/learning-journey.md) for the complete pedagogical narrative.
 
 ### Essential Commands Reference
 
@@ -225,67 +239,24 @@ To actually build the framework, you need local installation:
 The goal isn't just to write code - it's to **understand** how modern ML frameworks work by building one yourself.
 
 
-<a id="instructors"></a>
 ## For Instructors & TAs: Classroom Support Coming Soon
 
-<div style="background: #fff3cd; border: 1px solid #ffc107; padding: 1.5rem; border-radius: 0.5rem; margin: 1.5rem 0;">
-<h4 style="margin: 0 0 0.5rem 0; color: #856404;"> Stay Tuned: NBGrader Integration In Development</h4>
-<p style="margin: 0 0 1rem 0; color: #856404;">We're building comprehensive classroom support with NBGrader integration that will enable:</p>
+```{note}
+We're building comprehensive classroom support with NBGrader integration. For hands-on building today, TinyTorch is fully functional for self-paced learning.
+```
 
-<ul style="margin: 0; color: #664d03; padding-left: 1.5rem;">
-<li><strong>Automated Assignment Generation</strong> - Create student assignments from TinyTorch modules with solutions removed</li>
-<li><strong>Auto-Grading</strong> - Automatically grade student implementations against test suites</li>
-<li><strong>Manual Review Interface</strong> - Grade ML Systems Thinking questions through a browser-based interface</li>
-<li><strong>Progress Tracking</strong> - Monitor student progress across all 20 modules</li>
-<li><strong>Grade Export</strong> - Export grades to CSV for LMS integration</li>
-</ul>
-</div>
+**What's Planned:**
+- Automated assignment generation with solutions removed
+- Auto-grading against test suites
+- Manual review interface for ML Systems Thinking questions
+- Progress tracking across all 20 modules
+- Grade export to CSV for LMS integration
 
-### What's Planned
+**Current Status:** TinyTorch works for self-paced learning today. For classroom deployment, we recommend waiting for the official NBGrader integration (target: Summer/Fall 2026).
 
-**Course Structure:**
-- 14-16 week curriculum covering all 20 modules
-- Progressive difficulty from tensors to transformers to optimization
-- Historical milestones that validate student implementations
-- Capstone competition (Torch Olympics)
+**Interested in early adoption?** [Join the discussion](https://github.com/harvard-edge/cs249r_book/discussions/1076) to share your use case.
 
-**Grading Components:**
-- **70% Auto-Graded**: Code implementation correctness via NBGrader test cells
-- **30% Manual Review**: ML Systems Thinking questions (3 per module)
-
-**Assessment Tools:**
-- `tito grade generate` - Create instructor versions with solutions
-- `tito grade release` - Generate student versions (solutions removed)
-- `tito grade collect` - Collect student submissions
-- `tito grade autograde` - Run automatic grading
-- `tito grade feedback` - Generate student feedback
-- `tito grade export` - Export grades to CSV
-
-### Current Status
-
-TinyTorch is fully functional for **self-paced learning** today. Students can:
-- Work through all 20 modules independently
-- Run milestone validation scripts
-- Use the complete `tito` CLI for module management
-- Join the community and run benchmarks
-
-**For classroom deployment**, we recommend waiting for the official NBGrader integration announcement (target: Summer/Fall 2026).
-
-### Interested in Early Adoption?
-
-If you're considering using TinyTorch in your course before full classroom support is ready:
-
-1. **Review the curriculum** - Browse modules and milestones to assess fit
-2. **Test the workflow** - Complete a few modules yourself to understand the student experience
-3. **Contact us** - [Join the discussion](https://github.com/harvard-edge/cs249r_book/discussions/1076) to share your use case
-
-We're actively seeking instructor feedback to shape the classroom experience.
-
-### Stay Updated
-
-- **[GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions/1076)** - Join the conversation
-- **[Course Structure Overview](chapters/00-introduction.md)** - Full curriculum details
-- **[Module Documentation](tito/modules.md)** - Technical module specifications
+See the **[Instructor Guide](instructor-guide.md)** for detailed setup instructions and grading rubrics.
 
 
 ## Additional Resources
@@ -295,7 +266,7 @@ We're actively seeking instructor feedback to shape the classroom experience.
 <div style="background: #f0f9ff; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #3b82f6;">
 <h4 style="margin: 0 0 0.5rem 0; color: #1e40af;"> Course Documentation</h4>
 <ul style="margin: 0.5rem 0; padding-left: 1.25rem; font-size: 0.9rem;">
-<li><a href="chapters/00-introduction.html">Complete Course Structure</a></li>
+<li><a href="chapters/learning-journey.html">Learning Journey</a></li>
 <li><a href="chapters/milestones.html">Historical Milestones</a></li>
 <li><a href="prerequisites.html">Prerequisites & Resources</a></li>
 <li><a href="faq.html">Frequently Asked Questions</a></li>

@@ -366,7 +366,7 @@ Modern language models balance these factors:
 
 ### Your Implementation vs. Production Tokenizers
 
-Your Tiny🔥Torch tokenizers demonstrate the core algorithms, but production tokenizers optimize for speed and scale. The conceptual differences are minimal: the same BPE algorithm, the same vocabulary mappings, the same encode/decode operations. The implementation differences are dramatic.
+Your TinyTorch tokenizers demonstrate the core algorithms, but production tokenizers optimize for speed and scale. The conceptual differences are minimal: the same BPE algorithm, the same vocabulary mappings, the same encode/decode operations. The implementation differences are dramatic.
 
 | Feature | Your Implementation | Hugging Face Tokenizers |
 |---------|---------------------|-------------------------|
@@ -382,7 +382,7 @@ Your Tiny🔥Torch tokenizers demonstrate the core algorithms, but production to
 The following comparison shows equivalent tokenization in TinyTorch and Hugging Face. Notice how the high-level API mirrors production tools, making your learning transferable.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch.core.tokenization import BPETokenizer
 
