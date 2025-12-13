@@ -134,7 +134,7 @@ Your implementation uses asymmetric quantization for maximum flexibility:
 
 ```python
 def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
-    """Quantize FP32 tensor to INT8 using symmetric quantization."""
+    """Quantize FP32 tensor to INT8 using asymmetric quantization."""
     data = tensor.data
 
     # Step 1: Find dynamic range

@@ -615,21 +615,21 @@ Implement efficient data loading with batching, shuffling, and iteration. Your T
 
 ````{grid} 1 2 3 3
 
-```{grid-item-card} Launch Binder
+```{grid-item-card} 🚀 Launch Binder
 :link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/07_training/07_training.py
 :class-header: bg-light
 
 Run interactively in browser - no setup required
 ```
 
-```{grid-item-card} Open in Colab
+```{grid-item-card} ☁️ Open in Colab
 :link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/07_training/07_training.py
 :class-header: bg-light
 
 Use Google Colab for cloud compute
 ```
 
-```{grid-item-card} View Source
+```{grid-item-card} 📄 View Source
 :link: https://github.com/mlsysbook/TinyTorch/blob/main/src/07_training/07_training.py
 :class-header: bg-light
 

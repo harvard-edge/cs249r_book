@@ -78,7 +78,7 @@ output = mha(embeddings, mask)  # Learn different relationship types in parallel
 To keep this module focused, you will **not** implement:
 
 - Full transformer blocks (that's Module 13: Transformers)
-- Positional encoding (covered in Module 13)
+- Positional encoding (you built this in Module 11: Embeddings)
 - Efficient attention variants like FlashAttention (production optimization beyond scope)
 - Cross-attention for encoder-decoder models (PyTorch does this with separate Q vs K/V inputs)
 

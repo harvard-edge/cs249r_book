@@ -70,9 +70,9 @@ sparsity = measure_sparsity(model)  # Returns ~80%
 To keep this module focused, you will **not** implement:
 
 - Sparse storage formats like CSR (scipy.sparse handles this in production)
-- Fine-tuning after pruning (that requires the training loop from Module 07)
+- Fine-tuning after pruning (iterative pruning schedules)
 - Dynamic pruning during training (PyTorch does this with hooks and callbacks)
-- Quantization-aware pruning (that's Module 15: Quantization)
+- Combined quantization and pruning (advanced technique for maximum compression)
 
 **You are building compression algorithms.** Sparse execution optimizations come from specialized libraries.
 

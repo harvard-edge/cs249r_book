@@ -558,7 +558,7 @@ For students who want to understand the academic foundations and production impl
 
 ### Seminal Papers
 
-- **Neural Machine Translation of Rare Words with Subword Units** - Sennrich et al. (2016). The original BPE paper that introduced subword tokenization for NMT. Shows how BPE handles rare words through decomposition and achieves better translation quality. [arXiv:1508.07909](https://arxiv.org/abs/1508.07909)
+- **Neural Machine Translation of Rare Words with Subword Units** - Sennrich et al. (2016). The original BPE paper that introduced subword tokenization for neural machine translation. Shows how BPE handles rare words through decomposition and achieves better translation quality. [arXiv:1508.07909](https://arxiv.org/abs/1508.07909)
 
 - **SentencePiece: A simple and language independent approach to subword tokenization** - Kudo & Richardson (2018). Extends BPE with language-agnostic tokenization that handles raw text without pre-tokenization. Used in T5, ALBERT, and many multilingual models. [arXiv:1808.06226](https://arxiv.org/abs/1808.06226)
 
