@@ -33,7 +33,7 @@ Students cannot learn this from production code. PyTorch is too large, too compl
 
 They also cannot learn it from toy scripts. A hundred-line neural network does not reveal the architecture of a framework. It hides it.
 
-## The Solution: AI Bricks 🧱
+## The Solution: AI Bricks
 
 TinyTorch teaches you the **AI bricks**—the stable engineering foundations you can use to build any AI system. Small enough to learn from: bite-sized code that runs even on a Raspberry Pi. Big enough to matter: showing the real architecture of how frameworks are built.
 

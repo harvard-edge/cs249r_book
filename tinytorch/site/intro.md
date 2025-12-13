@@ -81,7 +81,7 @@ Build a complete machine learning (ML) framework from tensors to systems—under
   <p class="vision-title">The "AI Bricks" Approach</p>
   <div class="vision-grid">
     <div class="vision-item">
-      <span class="vision-icon">🧱</span>
+      <span class="vision-icon">🔧</span>
       <span class="vision-text"><strong>Build each piece</strong> — Tensors, autograd, optimizers, attention. No magic imports.</span>
     </div>
     <div class="vision-item">
