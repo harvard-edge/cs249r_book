@@ -919,8 +919,8 @@ def main():
 
     # Determine files to process
     script_path = Path(__file__).resolve()
-    # Script is now at tools/scripts/content/format_tables.py, need 4 parents to get to workspace root
-    workspace_root = script_path.parent.parent.parent.parent
+    # Script is at book/tools/scripts/content/format_tables.py, need 5 parents to get to repo root
+    workspace_root = script_path.parent.parent.parent.parent.parent
     files_to_process = []
 
     if args.file:
