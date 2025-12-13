@@ -1,4 +1,4 @@
-# Capstone
+# Module 20: Capstone
 
 **OPTIMIZATION TIER** | Difficulty: ●●●● (4/4) | Time: 6-8 hours | Prerequisites: All modules (01-19)
 
@@ -19,8 +19,7 @@ By the end, you'll have a professional benchmarking system that demonstrates you
 
 ## Learning Objectives
 
-```{admonition} By completing this module, you will:
-:class: tip
+```{tip} By completing this module, you will:
 
 - **Implement** comprehensive benchmarking infrastructure measuring accuracy, latency, throughput, and memory
 - **Master** the three pillars of reliable benchmarking: repeatability, comparability, and completeness
@@ -32,6 +31,8 @@ By the end, you'll have a professional benchmarking system that demonstrates you
 ## What You'll Build
 
 ```{mermaid}
+:align: center
+:caption: Benchmarking System
 flowchart LR
     subgraph "Benchmarking System"
         A["BenchmarkReport<br/>measure performance"]
@@ -386,7 +387,7 @@ Your TinyTorch benchmarking system implements the same principles used by produc
 The following comparison shows how your educational implementation translates to production tools.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch.capstone import BenchmarkReport, generate_submission
 
@@ -441,8 +442,7 @@ Let's walk through the comparison line by line:
 - **Line 12 (Generate submission)**: TinyTorch generates JSON. MLflow logs to a database that supports querying, visualization, and comparison.
 - **Line 18 (Save)**: TinyTorch saves to file. MLflow persists to SQL database with version control and artifact storage.
 
-```{admonition} What's Identical
-:class: tip
+```{tip} What's Identical
 
 The workflow pattern: baseline → optimize → benchmark → compare → decide. Whether you use TinyTorch or MLflow, this cycle is fundamental to production ML. The tools scale, but the methodology remains the same.
 ```
@@ -601,8 +601,7 @@ For students who want to understand the academic foundations and industry standa
 
 ## What's Next
 
-```{admonition} Congratulations: You've Completed TinyTorch!
-:class: seealso
+```{seealso} Congratulations: You've Completed TinyTorch!
 
 You've built a complete ML framework from scratch—from basic tensors to production-ready benchmarking. You understand how PyTorch works under the hood, how optimizations affect performance, and how to measure and document results professionally. These skills transfer directly to production ML engineering.
 ```
@@ -618,16 +617,14 @@ You've built a complete ML framework from scratch—from basic tensors to produc
 
 ## Get Started
 
-```{admonition} Interactive Options
-:class: tip
+```{tip} Interactive Options
 
 - **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/20_capstone/20_capstone.py)** - Run interactively in browser, no setup required
 - **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/20_capstone/20_capstone.py)** - Use Google Colab for cloud compute
 - **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/20_capstone/20_capstone.py)** - Browse the implementation code
 ```
 
-```{admonition} Save Your Progress
-:class: warning
+```{warning} Save Your Progress
 
 Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 ```

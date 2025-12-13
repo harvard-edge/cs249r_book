@@ -4,7 +4,7 @@
 <img src="_static/images/tito.png" alt="TinyTorch" style="width: 300px;">
 </div>
 
-Everyone wants to be an astronaut 🧑‍🚀. Very few want to be the rocket scientist 🚀.
+Everyone wants to be an astronaut 🧑‍. Very few want to be the rocket scientist .
 
 In machine learning, we see the same pattern. Everyone wants to train models, run inference, deploy AI. Very few want to understand how the frameworks actually work. Even fewer want to build one.
 
@@ -60,7 +60,7 @@ This is how people move from *using* machine learning to *engineering* machine l
 </div>
 
 <div style="background: #fafafa; padding: 1.25rem; border-radius: 0.5rem; border-left: 4px solid #4caf50;">
-<strong>⚙️ ML Engineers</strong>
+<strong>⚙ ML Engineers</strong>
 <p style="margin: 0.5rem 0 0 0; font-size: 0.95rem;">Need to debug, optimize, and deploy models in production. Understanding the systems underneath makes you more effective.</p>
 </div>
 
@@ -70,7 +70,7 @@ This is how people move from *using* machine learning to *engineering* machine l
 </div>
 
 <div style="background: #fafafa; padding: 1.25rem; border-radius: 0.5rem; border-left: 4px solid #ffc107;">
-<strong>🛠️ Self-taught Engineers</strong>
+<strong>🛠 Self-taught Engineers</strong>
 <p style="margin: 0.5rem 0 0 0; font-size: 0.95rem;">Can use frameworks but want to know how they work. Preparing for ML infrastructure roles and need systems-level understanding.</p>
 </div>
 
@@ -104,21 +104,9 @@ Each module follows a **Build-Use-Reflect** cycle:
 2. **Use**: Apply it to real problems: training networks, processing data
 3. **Reflect**: Connect what you built to production systems and understand the tradeoffs
 
-### Three-Tier Structure
+The curriculum follows a three-tier structure. **Foundation Tier (Modules 01-07)** builds the core infrastructure: tensors, activations, layers, losses, autograd, optimizers, and training loops. **Architecture Tier (Modules 08-13)** implements modern deep learning: data loading, spatial operations, tokenization, embeddings, attention mechanisms, and transformers. **Optimization Tier (Modules 14-19)** focuses on production: profiling, quantization, compression, memoization, acceleration, and benchmarking. **Module 20: Capstone** brings everything together as a launchpad for community competitions.
 
-<div style="background: #f8f9fa; padding: 1.5rem; border-radius: 0.5rem; margin: 1rem 0;">
-
-**Foundation Tier (Modules 01-09)** builds the core infrastructure: tensors, activations, layers, losses, autograd, optimizers, training loops, data loading, and spatial operations.
-
-**Architecture Tier (Modules 10-13)** implements modern deep learning: tokenization, embeddings, attention mechanisms, and transformers.
-
-**Optimization Tier (Modules 14-19)** focuses on production: profiling, quantization, compression, memoization, acceleration, and benchmarking.
-
-**Module 20: Capstone** brings everything together. It is designed as a launchpad for community competitions we plan to run, fostering lifelong learning and connection among builders who share this path.
-
-</div>
-
-Work through Foundation first. Then choose your path based on your interests.
+Work through Foundation first, then choose your path based on your interests.
 
 ## Learning Approach
 

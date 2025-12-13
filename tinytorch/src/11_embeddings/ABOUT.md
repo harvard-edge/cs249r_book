@@ -1,4 +1,4 @@
-# Embeddings
+# Module 11: Embeddings
 
 **ARCHITECTURE TIER** | Difficulty: ●● (2/4) | Time: 3-5 hours | Prerequisites: 01, 10
 
@@ -17,8 +17,7 @@ Every transformer model, from BERT to GPT-4, relies on embeddings to convert lan
 
 ## Learning Objectives
 
-```{admonition} By completing this module, you will:
-:class: tip
+```{tip} By completing this module, you will:
 
 - **Implement** embedding layers that convert token IDs to dense vectors through efficient table lookup
 - **Master** positional encoding strategies including learned and sinusoidal approaches
@@ -29,6 +28,8 @@ Every transformer model, from BERT to GPT-4, relies on embeddings to convert lan
 ## What You'll Build
 
 ```{mermaid}
+:align: center
+:caption: Your Embedding System
 flowchart LR
     subgraph "Your Embedding System"
         A["Embedding<br/>Token → Vector"]
@@ -415,7 +416,7 @@ Your TinyTorch embedding system and PyTorch's `torch.nn.Embedding` share the sam
 The following comparison shows equivalent embedding operations in TinyTorch and PyTorch. Notice how the APIs mirror each other closely.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch.core.embeddings import Embedding, EmbeddingLayer
 
@@ -475,8 +476,7 @@ Let's walk through each section to understand the comparison:
 - **Line 11-20 (Complete System)**: Your `EmbeddingLayer` provides a complete system in one class. In PyTorch, you implement this pattern yourself by composing `nn.Embedding` layers for tokens and positions. The HuggingFace Transformers library implements this exact pattern for BERT, GPT, and other models.
 - **Line 22-24 (Forward Pass)**: Both systems add token and position embeddings element-wise. Your implementation handles this internally; PyTorch requires you to manage position indices explicitly.
 
-```{admonition} What's Identical
-:class: tip
+```{tip} What's Identical
 
 Embedding lookup semantics, gradient flow patterns, and the addition of positional information. When you debug PyTorch transformer models, you'll recognize these exact patterns because you built them yourself.
 ```
@@ -601,8 +601,7 @@ For students who want to understand the academic foundations and mathematical un
 
 ## What's Next
 
-```{admonition} Coming Up: Module 12 - Attention
-:class: seealso
+```{seealso} Coming Up: Module 12 - Attention
 
 Implement attention mechanisms that let embeddings interact with each other. You'll build the scaled dot-product attention that enables transformers to learn which tokens should influence each other, creating context-aware representations.
 ```
@@ -616,16 +615,14 @@ Implement attention mechanisms that let embeddings interact with each other. You
 
 ## Get Started
 
-```{admonition} Interactive Options
-:class: tip
+```{tip} Interactive Options
 
 - **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/11_embeddings/11_embeddings.py)** - Run interactively in browser, no setup required
 - **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/11_embeddings/11_embeddings.py)** - Use Google Colab for cloud compute
 - **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/11_embeddings/11_embeddings.py)** - Browse the implementation code
 ```
 
-```{admonition} Save Your Progress
-:class: warning
+```{warning} Save Your Progress
 
 Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 ```

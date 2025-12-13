@@ -1,4 +1,4 @@
-# Tokenization
+# Module 10: Tokenization
 
 **ARCHITECTURE TIER** | Difficulty: ●● (2/4) | Time: 4-6 hours | Prerequisites: 01-07 (Foundation tier)
 
@@ -19,8 +19,7 @@ By the end, you'll understand why GPT uses 50,000 tokens, how tokenizers handle 
 
 ## Learning Objectives
 
-```{admonition} By completing this module, you will:
-:class: tip
+```{tip} By completing this module, you will:
 
 - **Implement** character-level tokenization for robust text coverage and BPE tokenization for efficient subword representation
 - **Understand** the vocabulary size versus sequence length trade-off and its impact on memory and computation
@@ -31,6 +30,8 @@ By the end, you'll understand why GPT uses 50,000 tokens, how tokenizers handle 
 ## What You'll Build
 
 ```{mermaid}
+:align: center
+:caption: Your Tokenization System
 flowchart LR
     subgraph "Your Tokenization System"
         A["Base Interface<br/>encode/decode"]
@@ -381,7 +382,7 @@ Your TinyTorch tokenizers demonstrate the core algorithms, but production tokeni
 The following comparison shows equivalent tokenization in TinyTorch and Hugging Face. Notice how the high-level API mirrors production tools, making your learning transferable.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch.core.tokenization import BPETokenizer
 
@@ -430,8 +431,7 @@ Let's walk through each section to understand the comparison:
 
 - **Lines 14-15 (Decoding)**: Both use `decode()` with the token ID list. Output is identical. The core operation is the same: look up each ID in the vocabulary and join the tokens.
 
-```{admonition} What's Identical
-:class: tip
+```{tip} What's Identical
 
 The BPE algorithm, merge rule learning, vocabulary structure, and encode/decode logic. When you debug tokenization issues in production, you'll understand exactly what's happening because you built the same system.
 ```
@@ -581,8 +581,7 @@ For students who want to understand the academic foundations and production impl
 
 ## What's Next
 
-```{admonition} Coming Up: Module 11 - Embeddings
-:class: seealso
+```{seealso} Coming Up: Module 11 - Embeddings
 
 Convert your token IDs into learnable dense vector representations. You'll implement embedding tables that transform discrete tokens into continuous vectors, enabling neural networks to capture semantic relationships in text.
 ```
@@ -597,16 +596,14 @@ Convert your token IDs into learnable dense vector representations. You'll imple
 
 ## Get Started
 
-```{admonition} Interactive Options
-:class: tip
+```{tip} Interactive Options
 
 - **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/10_tokenization/10_tokenization.py)** - Run interactively in browser, no setup required
 - **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/10_tokenization/10_tokenization.py)** - Use Google Colab for cloud compute
 - **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/10_tokenization/10_tokenization.py)** - Browse the implementation code
 ```
 
-```{admonition} Save Your Progress
-:class: warning
+```{warning} Save Your Progress
 
 Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 ```

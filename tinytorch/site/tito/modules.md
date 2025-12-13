@@ -12,6 +12,8 @@
 TinyTorch follows a simple build-export-validate cycle:
 
 ```{mermaid}
+:align: center
+:caption: Architecture Overview
 graph LR
     A[Start/Resume Module] --> B[Edit in Jupyter]
     B --> C[Complete & Export]

@@ -1,4 +1,4 @@
-# Losses
+# Module 04: Losses
 
 **FOUNDATION TIER** | Difficulty: ●● (2/4) | Time: 4-6 hours | Prerequisites: 01, 02, 03
 
@@ -19,8 +19,7 @@ By the end, you'll understand not just how to compute loss, but why different pr
 
 ## Learning Objectives
 
-```{admonition} By completing this module, you will:
-:class: tip
+```{tip} By completing this module, you will:
 
 - **Implement** MSELoss for regression, CrossEntropyLoss for multi-class classification, and BinaryCrossEntropyLoss for binary decisions
 - **Master** the log-sum-exp trick for numerically stable softmax computation
@@ -32,6 +31,8 @@ By the end, you'll understand not just how to compute loss, but why different pr
 ## What You'll Build
 
 ```{mermaid}
+:align: center
+:caption: Your Loss Functions
 flowchart LR
     subgraph "Your Loss Functions"
         A["log_softmax()<br/>Numerical Stability"]
@@ -306,7 +307,7 @@ Your TinyTorch loss functions and PyTorch's implementations share the same mathe
 The following comparison shows equivalent loss computations in TinyTorch and PyTorch. Notice how the high-level API is nearly identical - you're learning the same patterns used in production.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch import Tensor
 from tinytorch.core.losses import MSELoss, CrossEntropyLoss
@@ -353,8 +354,7 @@ Let's walk through the key similarities and differences:
 - **Line 6 (Computation)**: Both compute loss by calling the loss function object. Under the hood, this calls the `forward()` method you implemented.
 - **Line 9 (Classification)**: Both expect raw logits (not probabilities) for cross-entropy. The `log_softmax` computation happens internally in both frameworks.
 
-```{admonition} What's Identical
-:class: tip
+```{tip} What's Identical
 
 The mathematical formulas, numerical stability techniques (log-sum-exp trick), and high-level API patterns. When you debug PyTorch loss functions, you'll understand exactly what's happening because you built the same abstractions.
 ```
@@ -540,8 +540,7 @@ For students who want to understand the academic foundations and explore deeper:
 
 ## What's Next
 
-```{admonition} Coming Up: Module 05 - Autograd
-:class: seealso
+```{seealso} Coming Up: Module 05 - Autograd
 
 Implement automatic differentiation to compute gradients of your loss functions. You'll build the computational graph that tracks operations and use the chain rule to flow gradients backward through your network - the foundation of all deep learning optimization.
 ```
@@ -556,16 +555,14 @@ Implement automatic differentiation to compute gradients of your loss functions.
 
 ## Get Started
 
-```{admonition} Interactive Options
-:class: tip
+```{tip} Interactive Options
 
 - **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/04_losses/04_losses.py)** - Run interactively in browser, no setup required
 - **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/04_losses/04_losses.py)** - Use Google Colab for cloud compute
 - **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/04_losses/04_losses.py)** - Browse the implementation code
 ```
 
-```{admonition} Save Your Progress
-:class: warning
+```{warning} Save Your Progress
 
 Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 ```

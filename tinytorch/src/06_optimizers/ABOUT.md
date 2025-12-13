@@ -1,4 +1,4 @@
-# Optimizers
+# Module 06: Optimizers
 
 **FOUNDATION TIER** | Difficulty: ●● (2/4) | Time: 3-5 hours | Prerequisites: Modules 01-05
 
@@ -19,8 +19,7 @@ By the end, you'll understand not just how optimizers work but also the systems 
 
 ## Learning Objectives
 
-```{admonition} By completing this module, you will:
-:class: tip
+```{tip} By completing this module, you will:
 
 - **Implement** SGD with momentum to reduce oscillations and accelerate convergence in narrow valleys
 - **Master** Adam's adaptive learning rate mechanism with first and second moment estimation
@@ -31,6 +30,8 @@ By the end, you'll understand not just how optimizers work but also the systems 
 ## What You'll Build
 
 ```{mermaid}
+:align: center
+:caption: Your Optimizer Classes
 flowchart LR
     subgraph "Your Optimizer Classes"
         A["Optimizer Base<br/>zero_grad(), step()"]
@@ -328,7 +329,7 @@ Your TinyTorch optimizers and PyTorch's `torch.optim` share the same algorithmic
 The following comparison shows how optimizer usage looks nearly identical in TinyTorch and PyTorch. This similarity is intentional: by learning TinyTorch's patterns, you're simultaneously learning production PyTorch patterns.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch.core.optimizers import Adam
 
@@ -367,8 +368,7 @@ Let's walk through each line to understand the comparison:
 - **Line 9 (Update)**: Both call `optimizer.step()` to update parameters using computed gradients. The update rules are mathematically identical.
 - **Line 10 (Clear)**: Both call `optimizer.zero_grad()` to clear gradients before the next iteration. Without this, gradients would accumulate across batches.
 
-```{admonition} What's Identical
-:class: tip
+```{tip} What's Identical
 
 The optimizer API, update algorithms, and memory patterns are identical. When you debug Adam's learning rate or analyze optimizer memory usage in production, you'll understand exactly what's happening because you built these mechanisms yourself.
 ```
@@ -498,8 +498,7 @@ For students who want to understand the academic foundations and mathematical un
 
 ## What's Next
 
-```{admonition} Coming Up: Module 07 - Training
-:class: seealso
+```{seealso} Coming Up: Module 07 - Training
 
 Combine optimizers with training loops to actually train neural networks. You'll implement learning rate scheduling, checkpointing, and the complete training/validation workflow that makes everything work together.
 ```
@@ -514,16 +513,14 @@ Combine optimizers with training loops to actually train neural networks. You'll
 
 ## Get Started
 
-```{admonition} Interactive Options
-:class: tip
+```{tip} Interactive Options
 
 - **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/06_optimizers/06_optimizers.py)** - Run interactively in browser, no setup required
 - **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/06_optimizers/06_optimizers.py)** - Use Google Colab for cloud compute
 - **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/06_optimizers/06_optimizers.py)** - Browse the implementation code
 ```
 
-```{admonition} Save Your Progress
-:class: warning
+```{warning} Save Your Progress
 
 Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 ```

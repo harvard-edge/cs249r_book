@@ -25,6 +25,8 @@ This page explains **WHY modules flow this way** - the learning narrative that t
 TinyTorch's 20 modules follow a carefully crafted six-act narrative arc. Each act represents a fundamental shift in what you're learning and what you can build.
 
 ```{mermaid}
+:align: center
+:caption: Architecture Overview
 graph LR
     Act1["Act I: Foundation<br/>01-04<br/>Atomic Components"] --> Act2["Act II: Learning<br/>05-07<br/>Gradient Revolution"]
     Act2 --> Act3["Act III: Data & Scale<br/>08-09<br/>Real Complexity"]

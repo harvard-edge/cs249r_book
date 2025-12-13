@@ -1,4 +1,4 @@
-# Memoization
+# Module 17: Memoization
 
 **OPTIMIZATION TIER** | Difficulty: ●● (2/4) | Time: 3-5 hours | Prerequisites: 01-07
 
@@ -19,8 +19,7 @@ In this module, you'll implement a production-grade KV cache system that makes t
 
 ## Learning Objectives
 
-```{admonition} By completing this module, you will:
-:class: tip
+```{tip} By completing this module, you will:
 
 - **Implement** a KVCache class with efficient memory management and O(1) update operations
 - **Master** the memory-compute trade-off: accepting O(n) memory overhead for O(n²) to O(n) speedup
@@ -31,6 +30,8 @@ In this module, you'll implement a production-grade KV cache system that makes t
 ## What You'll Build
 
 ```{mermaid}
+:align: center
+:caption: KV Cache System
 flowchart LR
     subgraph "KV Cache System"
         A["Cache Storage<br/>Pre-allocated tensors"]
@@ -365,7 +366,7 @@ Your KVCache implementation uses the same conceptual design as production framew
 The following comparison shows how KV caching is used in TinyTorch versus production PyTorch. The API patterns are similar because the underlying concept is identical.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch.perf.memoization import enable_kv_cache
 
@@ -412,8 +413,7 @@ Let's examine each approach to understand the similarities and differences:
 
 The core difference is abstraction level. TinyTorch exposes the cache as an explicit object you control, making the optimization visible for learning. PyTorch hides caching inside `generate()` for ease of use in production. Both implementations use the same O(1) append pattern you built.
 
-```{admonition} What's Identical
-:class: tip
+```{tip} What's Identical
 
 The fundamental algorithm: compute K,V once, append to cache, retrieve for attention. Production systems add memory management and batching, but the core optimization is exactly what you implemented.
 ```
@@ -559,8 +559,7 @@ For students who want to understand the academic foundations and production impl
 
 ## What's Next
 
-```{admonition} Coming Up: Module 18 - Acceleration
-:class: seealso
+```{seealso} Coming Up: Module 18 - Acceleration
 
 Implement kernel fusion, operator batching, and CPU/GPU optimization techniques. You'll combine multiple operations to reduce memory bandwidth bottlenecks and maximize hardware utilization.
 ```
@@ -575,16 +574,14 @@ Implement kernel fusion, operator batching, and CPU/GPU optimization techniques.
 
 ## Get Started
 
-```{admonition} Interactive Options
-:class: tip
+```{tip} Interactive Options
 
 - **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/17_memoization/17_memoization.py)** - Run interactively in browser, no setup required
 - **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/17_memoization/17_memoization.py)** - Use Google Colab for cloud compute
 - **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/17_memoization/17_memoization.py)** - Browse the implementation code
 ```
 
-```{admonition} Save Your Progress
-:class: warning
+```{warning} Save Your Progress
 
 Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 ```

@@ -1,4 +1,4 @@
-# Quantization
+# Module 15: Quantization
 
 **OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 4-6 hours | Prerequisites: 01-07, 14
 
@@ -20,8 +20,7 @@ This isn't just academic compression. Your implementation uses the same symmetri
 
 ## Learning Objectives
 
-```{admonition} By completing this module, you will:
-:class: tip
+```{tip} By completing this module, you will:
 
 - **Implement** INT8 quantization with symmetric scaling and zero-point calculation for 4× memory reduction
 - **Master** calibration techniques that optimize quantization parameters using sample data distributions
@@ -33,6 +32,8 @@ This isn't just academic compression. Your implementation uses the same symmetri
 ## What You'll Build
 
 ```{mermaid}
+:align: center
+:caption: Quantization System
 flowchart TB
     subgraph "Quantization System"
         A["quantize_int8()<br/>FP32 → INT8 conversion"]
@@ -275,7 +276,7 @@ Your quantization system implements the core algorithms used in production frame
 The following comparison shows quantization in TinyTorch versus PyTorch. The APIs are remarkably similar, reflecting the universal nature of the quantization problem.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch.perf.quantization import quantize_model, QuantizedLinear
 from tinytorch.core.layers import Linear, Sequential
@@ -328,8 +329,7 @@ Let's walk through the key differences:
 - **Lines 13 (Calibration)**: TinyTorch passes calibration data as argument; PyTorch requires explicit calibration loop with forward passes.
 - **Lines 15-16 (Inference)**: Both use standard forward pass. The quantized weights are transparent to the user.
 
-```{admonition} What's Identical
-:class: tip
+```{tip} What's Identical
 
 The core quantization mathematics: scale calculation, zero-point mapping, INT8 range clipping. When you debug PyTorch quantization errors, you'll understand exactly what's happening because you implemented the same algorithms.
 ```
@@ -483,8 +483,7 @@ For students who want to understand the academic foundations and production impl
 
 ## What's Next
 
-```{admonition} Coming Up: Module 16 - Compression
-:class: seealso
+```{seealso} Coming Up: Module 16 - Compression
 
 Implement model pruning and weight compression techniques. You'll build structured pruning that removes entire neurons and channels, achieving 2-10× speedup by reducing computation, not just memory.
 ```
@@ -499,16 +498,14 @@ Implement model pruning and weight compression techniques. You'll build structur
 
 ## Get Started
 
-```{admonition} Interactive Options
-:class: tip
+```{tip} Interactive Options
 
 - **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/15_quantization/15_quantization.py)** - Run interactively in browser, no setup required
 - **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/15_quantization/15_quantization.py)** - Use Google Colab for cloud compute
 - **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/15_quantization/15_quantization.py)** - Browse the implementation code
 ```
 
-```{admonition} Save Your Progress
-:class: warning
+```{warning} Save Your Progress
 
 Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 ```

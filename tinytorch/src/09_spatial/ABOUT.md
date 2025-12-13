@@ -1,4 +1,4 @@
-# Spatial (Convolutions)
+# Module 09: Spatial
 
 **ARCHITECTURE TIER** | Difficulty: ●●● (3/4) | Time: 6-8 hours | Prerequisites: 01-08
 
@@ -19,8 +19,7 @@ By the end, your spatial operations will enable convolutional neural networks (C
 
 ## Learning Objectives
 
-```{admonition} By completing this module, you will:
-:class: tip
+```{tip} By completing this module, you will:
 
 - **Implement** Conv2d with explicit 7-nested loops revealing O(B×C×H×W×K²×C_in) computational complexity
 - **Master** spatial dimension calculations with stride, padding, and kernel size interactions
@@ -32,6 +31,8 @@ By the end, your spatial operations will enable convolutional neural networks (C
 ## What You'll Build
 
 ```{mermaid}
+:align: center
+:caption: Your Spatial Operations
 flowchart LR
     subgraph "Your Spatial Operations"
         A["Conv2d<br/>Spatial feature extraction"]
@@ -443,7 +444,7 @@ Your TinyTorch spatial operations and PyTorch's `torch.nn.Conv2d` share the same
 The following comparison shows equivalent operations in TinyTorch and PyTorch. Notice how the API mirrors perfectly, making your knowledge transfer directly to production frameworks.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch.core.spatial import Conv2d, MaxPool2d, AvgPool2d
 from tinytorch.core.activations import ReLU
@@ -492,8 +493,7 @@ Let's walk through each line to understand the comparison:
 - **Lines 11-14 (Forward pass)**: Identical call patterns. ReLU activations, pooling for dimension reduction, growing channels (3→64→128). This is the standard CNN building block.
 - **Shapes**: Every intermediate shape matches between frameworks because the formulas are identical.
 
-```{admonition} What's Identical
-:class: tip
+```{tip} What's Identical
 
 Convolution mathematics, stride and padding formulas, receptive field growth, and parameter sharing. The APIs are intentionally identical so your understanding transfers directly to production systems.
 ```
@@ -652,8 +652,7 @@ For students who want to understand the academic foundations and explore spatial
 
 ## What's Next
 
-```{admonition} Coming Up: Module 10 - Tokenization
-:class: seealso
+```{seealso} Coming Up: Module 10 - Tokenization
 
 Shift from spatial processing (images) to sequential processing (text). You'll implement tokenizers that convert text into numeric representations, unlocking natural language processing and transformers.
 ```
@@ -668,16 +667,14 @@ Shift from spatial processing (images) to sequential processing (text). You'll i
 
 ## Get Started
 
-```{admonition} Interactive Options
-:class: tip
+```{tip} Interactive Options
 
 - **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/09_spatial/09_spatial.py)** - Run interactively in browser, no setup required
 - **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/09_spatial/09_spatial.py)** - Use Google Colab for cloud compute
 - **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/09_spatial/09_spatial.py)** - Browse the implementation code
 ```
 
-```{admonition} Save Your Progress
-:class: warning
+```{warning} Save Your Progress
 
 Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 ```

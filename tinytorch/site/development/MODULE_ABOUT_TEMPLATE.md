@@ -206,8 +206,7 @@ Browse the Python source code and understand the implementation.
 
 ````
 
-```{admonition} Save Your Progress
-:class: tip
+```{tip} Save Your Progress
 **Binder sessions are temporary!** Download your completed notebook when done, or switch to local development for persistent work.
 ```
 ```

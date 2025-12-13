@@ -1,4 +1,4 @@
-# Autograd
+# Module 05: Autograd
 
 **FOUNDATION TIER** | Difficulty: ●●● (3/4) | Time: 6-8 hours | Prerequisites: 01, 02, 03, 04
 
@@ -20,8 +20,7 @@ This is the most conceptually challenging module in the Foundation tier, but it 
 
 ## Learning Objectives
 
-```{admonition} By completing this module, you will:
-:class: tip
+```{tip} By completing this module, you will:
 
 - **Implement** the Function base class that enables gradient computation for all operations
 - **Build** computation graphs that track dependencies between tensors during forward pass
@@ -33,6 +32,8 @@ This is the most conceptually challenging module in the Foundation tier, but it 
 ## What You'll Build
 
 ```{mermaid}
+:align: center
+:caption: Autograd System
 flowchart LR
     subgraph "Autograd System"
         A["Function<br/>Base Class"]
@@ -378,7 +379,7 @@ Your autograd system and PyTorch's share the same design: computation graphs bui
 The following comparison shows identical conceptual patterns in TinyTorch and PyTorch. The APIs mirror each other because both implement the same autograd algorithm.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch import Tensor
 
@@ -428,8 +429,7 @@ Let's walk through the comparison line by line:
 - **Line 11 (Backward pass)**: Single method call triggers reverse-mode differentiation through the entire graph.
 - **Line 14-15 (Gradient access)**: Both store gradients in the `.grad` attribute. Gradients have the same shape as the original tensor.
 
-```{admonition} What's Identical
-:class: tip
+```{tip} What's Identical
 
 Computation graph construction, chain rule implementation, and gradient accumulation semantics. When you debug PyTorch autograd issues, you're debugging the same algorithm you implemented here.
 ```
@@ -562,8 +562,7 @@ For students who want to understand the academic foundations and mathematical un
 
 ## What's Next
 
-```{admonition} Coming Up: Module 06 - Optimizers
-:class: seealso
+```{seealso} Coming Up: Module 06 - Optimizers
 
 Implement SGD, Adam, and other optimization algorithms that use your autograd gradients to update parameters and train neural networks. You'll complete the training loop and make your networks learn from data.
 ```
@@ -578,16 +577,14 @@ Implement SGD, Adam, and other optimization algorithms that use your autograd gr
 
 ## Get Started
 
-```{admonition} Interactive Options
-:class: tip
+```{tip} Interactive Options
 
 - **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/05_autograd/05_autograd.py)** - Run interactively in browser, no setup required
 - **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/05_autograd/05_autograd.py)** - Use Google Colab for cloud compute
 - **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/05_autograd/05_autograd.py)** - Browse the implementation code
 ```
 
-```{admonition} Save Your Progress
-:class: warning
+```{warning} Save Your Progress
 
 Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 ```

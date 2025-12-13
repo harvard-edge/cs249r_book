@@ -42,6 +42,8 @@ See [The Learning Journey](learning-journey.md) for the complete pedagogical nar
 ### How They Connect
 
 ```{mermaid}
+:align: center
+:caption: Pedagogical Acts (What You're Learning)
 graph TB
     subgraph "Pedagogical Acts (What You're Learning)"
         A1["Act I: Foundation<br/>Modules 01-04<br/>Atomic Components"]
@@ -97,6 +99,8 @@ graph TB
 ## The Timeline
 
 ```{mermaid}
+:align: center
+:caption: Architecture Overview
 timeline
     title Journey Through ML History
     1957 : Perceptron : Binary classification with gradient descent

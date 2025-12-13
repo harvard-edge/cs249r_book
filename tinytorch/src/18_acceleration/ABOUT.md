@@ -1,4 +1,4 @@
-# Acceleration
+# Module 18: Acceleration
 
 **OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 5-7 hours | Prerequisites: 01-07, 14
 
@@ -20,8 +20,7 @@ Acceleration isn't about clever algorithms. It's about understanding how process
 
 ## Learning Objectives
 
-```{admonition} By completing this module, you will:
-:class: tip
+```{tip} By completing this module, you will:
 
 - **Implement** vectorized matrix multiplication using optimized BLAS libraries for maximum throughput
 - **Master** kernel fusion techniques that eliminate memory bandwidth bottlenecks by combining operations
@@ -32,6 +31,8 @@ Acceleration isn't about clever algorithms. It's about understanding how process
 ## What You'll Build
 
 ```{mermaid}
+:align: center
+:caption: Acceleration Techniques
 flowchart LR
     subgraph "Acceleration Techniques"
         A["Vectorized Matmul<br/>BLAS optimization"]
@@ -354,7 +355,7 @@ Your acceleration techniques demonstrate the same principles PyTorch uses intern
 The following comparison shows how acceleration appears in TinyTorch versus PyTorch. The API patterns are similar, but PyTorch adds GPU support and automatic optimization.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch.perf.acceleration import vectorized_matmul, fused_gelu
 
@@ -399,8 +400,7 @@ Let's walk through the key differences:
 - **Line 11-13 (Fusion)**: TinyTorch requires manual fusion; PyTorch's JIT compiler can automatically fuse operations.
 - **Performance**: For this example, TinyTorch might take 5ms on CPU; PyTorch takes 0.05ms on GPU - a 100x speedup.
 
-```{admonition} What's Identical
-:class: tip
+```{tip} What's Identical
 
 The acceleration principles: vectorization reduces instruction count, fusion reduces memory traffic, and hardware awareness guides optimization choices. These concepts apply everywhere.
 ```
@@ -519,8 +519,7 @@ For students who want to understand the academic foundations and implementation 
 
 ## What's Next
 
-```{admonition} Coming Up: Module 19 - Benchmarking
-:class: seealso
+```{seealso} Coming Up: Module 19 - Benchmarking
 
 Learn to measure and compare performance systematically. You'll build benchmarking tools that isolate hardware effects, statistical analysis for reliable measurements, and comparison frameworks for evaluating optimization techniques.
 ```
@@ -534,22 +533,19 @@ Learn to measure and compare performance systematically. You'll build benchmarki
 
 ## Get Started
 
-```{admonition} Interactive Options
-:class: tip
+```{tip} Interactive Options
 
 - **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/18_acceleration/18_acceleration.py)** - Run interactively in browser, no setup required
 - **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/18_acceleration/18_acceleration.py)** - Use Google Colab for cloud compute
 - **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/18_acceleration/18_acceleration.py)** - Browse the implementation code
 ```
 
-```{admonition} Save Your Progress
-:class: warning
+```{warning} Save Your Progress
 
 Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 ```
 
-```{admonition} Performance Note
-:class: warning
+```{warning} Performance Note
 
 Acceleration techniques depend on hardware. Results will vary between CPUs. Use Module 14's profiler to measure your specific hardware's characteristics.
 ```

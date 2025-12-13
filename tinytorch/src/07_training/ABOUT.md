@@ -1,4 +1,4 @@
-# Training
+# Module 07: Training
 
 **FOUNDATION TIER** | Difficulty: ●● (2/4) | Time: 5-7 hours | Prerequisites: 01-06
 
@@ -14,8 +14,7 @@ By the end, you'll have a production-grade training infrastructure ready for the
 
 ## Learning Objectives
 
-```{admonition} By completing this module, you will:
-:class: tip
+```{tip} By completing this module, you will:
 
 - **Implement** a complete Trainer class orchestrating forward pass, loss computation, backward pass, and parameter updates
 - **Master** learning rate scheduling with cosine annealing that adapts training speed over time
@@ -27,6 +26,8 @@ By the end, you'll have a production-grade training infrastructure ready for the
 ## What You'll Build
 
 ```{mermaid}
+:align: center
+:caption: Training Infrastructure
 flowchart TD
     subgraph "Training Infrastructure"
         A["CosineSchedule<br/>Adaptive learning rate"]
@@ -436,7 +437,7 @@ Your Trainer class and PyTorch's training infrastructure (Lightning, Hugging Fac
 The following comparison shows equivalent training pipelines in TinyTorch and PyTorch. Notice how the conceptual flow is identical: create model, optimizer, loss, trainer, then loop through epochs.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch import Trainer, CosineSchedule, SGD, MSELoss
 
@@ -484,8 +485,7 @@ Let's walk through the key similarities and differences:
 - **Line 9-13 (Training Loop)**: TinyTorch makes the epoch loop explicit; Lightning hides it inside `trainer.fit()`. Under the hood, Lightning runs the exact same loop you implemented.
 - **Checkpointing**: TinyTorch requires manual `save_checkpoint()` calls; Lightning checkpoints automatically based on validation metrics.
 
-```{admonition} What's Identical
-:class: tip
+```{tip} What's Identical
 
 The core training loop pattern: forward pass → loss → backward → gradient clipping → optimizer step → learning rate scheduling. When debugging PyTorch training, you'll understand exactly what's happening because you built it yourself.
 ```
@@ -645,8 +645,7 @@ For students who want to understand the academic foundations and advanced traini
 
 ## What's Next
 
-```{admonition} Coming Up: Module 08 - DataLoader
-:class: seealso
+```{seealso} Coming Up: Module 08 - DataLoader
 
 Implement efficient data loading with batching, shuffling, and iteration. Your Trainer currently requires pre-batched data. Module 08 adds automatic batching from raw datasets, completing the training infrastructure needed for the MLP milestone.
 ```
@@ -661,16 +660,14 @@ Implement efficient data loading with batching, shuffling, and iteration. Your T
 
 ## Get Started
 
-```{admonition} Interactive Options
-:class: tip
+```{tip} Interactive Options
 
 - **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/07_training/07_training.py)** - Run interactively in browser, no setup required
 - **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/07_training/07_training.py)** - Use Google Colab for cloud compute
 - **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/07_training/07_training.py)** - Browse the implementation code
 ```
 
-```{admonition} Save Your Progress
-:class: warning
+```{warning} Save Your Progress
 
 Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 ```

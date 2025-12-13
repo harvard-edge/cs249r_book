@@ -83,6 +83,8 @@ See [Community Guide](community.md) for complete features.
 Let's build your first neural network component following the **TinyTorch workflow**:
 
 ```{mermaid}
+:align: center
+:caption: Architecture Overview
 graph TD
     Start[Clone & Setup] --> Edit[Edit Module<br/>01_tensor.ipynb]
     Edit --> Export[Export to Package<br/>tito module complete 01]

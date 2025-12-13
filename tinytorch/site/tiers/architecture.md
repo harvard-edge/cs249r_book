@@ -18,6 +18,8 @@ The Architecture tier teaches you how to build the neural network architectures 
 ## Module Progression
 
 ```{mermaid}
+:align: center
+:caption: Architecture Overview
 graph TB
     F[🏗 Foundation<br/>Tensor, Autograd, Training]
 
@@ -121,6 +123,8 @@ graph TB
 ## What You Can Build After This Tier
 
 ```{mermaid}
+:align: center
+:caption: Architecture Overview
 timeline
     title Historical Achievements Unlocked
     1998 : CNN Revolution : 75%+ accuracy on CIFAR-10 with spatial intelligence

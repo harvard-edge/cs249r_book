@@ -12,6 +12,8 @@
 TinyTorch uses a clean, simple approach to track your ML systems engineering journey:
 
 ```{mermaid}
+:align: center
+:caption: Architecture Overview
 graph LR
     A[Build Modules] --> B[Complete 01-20]
     B --> C[Export to Package]

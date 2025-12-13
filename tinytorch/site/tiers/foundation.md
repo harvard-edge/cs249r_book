@@ -18,6 +18,8 @@ The Foundation tier teaches you how to build a complete learning system from scr
 ## Module Progression
 
 ```{mermaid}
+:align: center
+:caption: Architecture Overview
 graph TB
     M01[01. Tensor<br/>Multidimensional arrays] --> M03[03. Layers<br/>Linear transformations]
     M02[02. Activations<br/>Non-linear functions] --> M03
@@ -122,6 +124,8 @@ graph TB
 ## What You Can Build After This Tier
 
 ```{mermaid}
+:align: center
+:caption: Architecture Overview
 timeline
     title Historical Achievements Unlocked
     1957 : Perceptron : Binary classification with gradient descent

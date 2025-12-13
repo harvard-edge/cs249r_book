@@ -1,4 +1,4 @@
-# Attention
+# Module 12: Attention
 
 **ARCHITECTURE TIER** | Difficulty: ●●● (3/4) | Time: 5-7 hours | Prerequisites: 01-05, 10-11
 
@@ -19,8 +19,7 @@ You'll build scaled dot-product attention and multi-head attention from scratch,
 
 ## Learning Objectives
 
-```{admonition} By completing this module, you will:
-:class: tip
+```{tip} By completing this module, you will:
 
 - **Implement** scaled dot-product attention with vectorized operations that reveal O(n²) memory complexity
 - **Build** multi-head attention for parallel processing of different relationship types across representation subspaces
@@ -32,6 +31,8 @@ You'll build scaled dot-product attention and multi-head attention from scratch,
 ## What You'll Build
 
 ```{mermaid}
+:align: center
+:caption: Your Attention System
 flowchart LR
     subgraph "Your Attention System"
         A["Query (Q)<br/>What to look for"]
@@ -345,7 +346,7 @@ Your TinyTorch attention and PyTorch's `nn.MultiheadAttention` implement the sam
 The following comparison shows equivalent attention operations in TinyTorch and PyTorch. Notice how the high-level API and shape conventions match almost exactly.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch.core.attention import MultiHeadAttention
 from tinytorch.core.tensor import Tensor
@@ -396,8 +397,7 @@ Let's walk through the key differences:
 - **Line 11 (Forward Pass)**: TinyTorch uses `mha.forward(x)` with x as both Q, K, V (self-attention). PyTorch makes this explicit with `mha(x, x, x)`, allowing cross-attention where Q differs from K/V.
 - **Line 14-15 (Masking)**: TinyTorch uses 0/1 masks (0=masked). PyTorch uses additive masks (-inf=masked). Both work, but PyTorch's convention integrates better with certain optimizations.
 
-```{admonition} What's Identical
-:class: tip
+```{tip} What's Identical
 
 The mathematical operations, architectural patterns, and shape conventions are identical. Multi-head attention works the same way in production. Understanding your implementation means understanding PyTorch's attention.
 ```
@@ -588,8 +588,7 @@ For students who want to understand the academic foundations and explore the res
 
 ## What's Next
 
-```{admonition} Coming Up: Module 13 - Transformers
-:class: seealso
+```{seealso} Coming Up: Module 13 - Transformers
 
 Build complete transformer blocks by combining your attention mechanism with feed-forward networks, layer normalization, and residual connections. You'll assemble the architecture behind GPT, BERT, and modern language models.
 ```
@@ -604,16 +603,14 @@ Build complete transformer blocks by combining your attention mechanism with fee
 
 ## Get Started
 
-```{admonition} Interactive Options
-:class: tip
+```{tip} Interactive Options
 
 - **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/12_attention/12_attention.py)** - Run interactively in browser, no setup required
 - **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/12_attention/12_attention.py)** - Use Google Colab for cloud compute
 - **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/12_attention/12_attention.py)** - Browse the implementation code
 ```
 
-```{admonition} Save Your Progress
-:class: warning
+```{warning} Save Your Progress
 
 Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 ```

@@ -1,4 +1,4 @@
-# Benchmarking
+# Module 19: Benchmarking
 
 **OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 5-7 hours | Prerequisites: 01-07, 14
 
@@ -14,8 +14,7 @@ By the end, you will have the evaluation framework needed to systematically comb
 
 ## Learning Objectives
 
-```{admonition} By completing this module, you will:
-:class: tip
+```{tip} By completing this module, you will:
 
 - **Implement** professional benchmarking infrastructure with statistical analysis including confidence intervals and variance control
 - **Master** multi-objective optimization trade-offs between accuracy, latency, and memory through Pareto frontier analysis
@@ -26,6 +25,8 @@ By the end, you will have the evaluation framework needed to systematically comb
 ## What You'll Build
 
 ```{mermaid}
+:align: center
+:caption: Benchmarking Infrastructure
 flowchart TB
     subgraph "Benchmarking Infrastructure"
         A["BenchmarkResult<br/>Statistical container"]
@@ -429,7 +430,7 @@ Your TinyTorch benchmarking infrastructure implements the same statistical princ
 The following shows equivalent benchmarking patterns in TinyTorch and production frameworks like MLPerf.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch.benchmarking import Benchmark
 
@@ -474,8 +475,7 @@ Let's understand the comparison:
 - **Line 11-13 (Execution)**: TinyTorch returns BenchmarkResult objects with statistics. MLPerf logs results to standardized formats that compare across hardware vendors. Both provide statistical analysis.
 - **Statistical Rigor**: Both use repeated measurements, warmup, and confidence intervals. TinyTorch teaches the foundations; MLPerf adds industry-specific requirements.
 
-```{admonition} What's Identical
-:class: tip
+```{tip} What's Identical
 
 The statistical methodology, warmup protocols, and reproducibility requirements are identical. Production frameworks add automation, standardization across organizations, and hardware-specific optimizations. Understanding TinyTorch benchmarking gives you the foundation to work with any industry benchmarking framework.
 ```
@@ -610,8 +610,7 @@ For students who want to understand the academic and industry foundations of ML 
 
 ## What's Next
 
-```{admonition} Coming Up: Module 20 - Capstone
-:class: seealso
+```{seealso} Coming Up: Module 20 - Capstone
 
 Apply everything you have learned in Modules 01-19 to compete in the TorchPerf Olympics! You will strategically combine optimization techniques, benchmark your results, and compete for the fastest, smallest, or most accurate model on the leaderboard.
 ```
@@ -627,16 +626,14 @@ Apply everything you have learned in Modules 01-19 to compete in the TorchPerf O
 
 ## Get Started
 
-```{admonition} Interactive Options
-:class: tip
+```{tip} Interactive Options
 
 - **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/19_benchmarking/19_benchmarking.py)** - Run interactively in browser, no setup required
 - **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/19_benchmarking/19_benchmarking.py)** - Use Google Colab for cloud compute
 - **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/19_benchmarking/19_benchmarking.py)** - Browse the implementation code
 ```
 
-```{admonition} Save Your Progress
-:class: warning
+```{warning} Save Your Progress
 
 Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 ```

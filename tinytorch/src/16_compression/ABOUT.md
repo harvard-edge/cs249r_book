@@ -1,4 +1,4 @@
-# Compression
+# Module 16: Compression
 
 **OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 5-7 hours | Prerequisites: 01-07, 14
 
@@ -17,8 +17,7 @@ In this module, you'll implement four fundamental compression techniques: magnit
 
 ## Learning Objectives
 
-```{admonition} By completing this module, you will:
-:class: tip
+```{tip} By completing this module, you will:
 
 - **Implement** magnitude-based pruning to remove 80-90% of small weights while preserving accuracy
 - **Master** structured pruning that creates hardware-friendly sparsity patterns by removing entire channels
@@ -30,6 +29,8 @@ In this module, you'll implement four fundamental compression techniques: magnit
 ## What You'll Build
 
 ```{mermaid}
+:align: center
+:caption: Your Compression System
 flowchart LR
     subgraph "Your Compression System"
         A["Sparsity<br/>Measurement"]
@@ -361,7 +362,7 @@ Your TinyTorch compression functions and PyTorch's pruning utilities share the s
 The following comparison shows equivalent compression operations in TinyTorch and PyTorch. Notice how the core concepts translate directly while PyTorch provides additional automation for production workflows.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch.perf.compression import magnitude_prune, measure_sparsity
 
@@ -413,8 +414,7 @@ Let's walk through the key differences:
 - **Line 13 (Permanence)**: TinyTorch immediately zeros weights. PyTorch uses masks that can be removed or made permanent, enabling experimentation with different sparsity levels.
 - **Line 16-19 (Measurement)**: TinyTorch provides a dedicated `measure_sparsity()` function. PyTorch requires manual counting, giving you full control over what counts as "sparse."
 
-```{admonition} What's Identical
-:class: tip
+```{tip} What's Identical
 
 The core algorithms for magnitude thresholding, L2 norm channel ranking, and knowledge distillation loss are identical. When you understand TinyTorch compression, you understand PyTorch compression. The production differences are in automation, not algorithms.
 ```
@@ -550,8 +550,7 @@ For students who want to understand the academic foundations and explore compres
 
 ## What's Next
 
-```{admonition} Coming Up: Module 17 - Memoization
-:class: seealso
+```{seealso} Coming Up: Module 17 - Memoization
 
 Implement caching and memoization strategies to eliminate redundant computations. You'll cache repeated forward passes, attention patterns, and embedding lookups for dramatic speedups in production inference.
 ```
@@ -566,16 +565,14 @@ Implement caching and memoization strategies to eliminate redundant computations
 
 ## Get Started
 
-```{admonition} Interactive Options
-:class: tip
+```{tip} Interactive Options
 
 - **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/16_compression/16_compression.py)** - Run interactively in browser, no setup required
 - **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/16_compression/16_compression.py)** - Use Google Colab for cloud compute
 - **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/16_compression/16_compression.py)** - Browse the implementation code
 ```
 
-```{admonition} Save Your Progress
-:class: warning
+```{warning} Save Your Progress
 
 Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 ```

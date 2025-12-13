@@ -1,4 +1,4 @@
-# Activations
+# Module 02: Activations
 
 **FOUNDATION TIER** | Difficulty: ● (1/4) | Time: 3-5 hours | Prerequisites: 01 (Tensor)
 
@@ -19,8 +19,7 @@ In this module, you'll implement five essential activation functions from scratc
 
 ## Learning Objectives
 
-```{admonition} By completing this module, you will:
-:class: tip
+```{tip} By completing this module, you will:
 
 - **Implement** five core activation functions (ReLU, Sigmoid, Tanh, GELU, Softmax) with proper numerical stability
 - **Understand** why nonlinearity is essential for neural network expressiveness and how activations enable learning
@@ -31,6 +30,8 @@ In this module, you'll implement five essential activation functions from scratc
 ## What You'll Build
 
 ```{mermaid}
+:align: center
+:caption: Your Activation Functions
 flowchart LR
     subgraph "Your Activation Functions"
         A["ReLU<br/>max(0, x)"]
@@ -330,7 +331,7 @@ Your TinyTorch activations and PyTorch's `torch.nn.functional` activations imple
 The following comparison shows equivalent activation usage in TinyTorch and PyTorch. Notice how the APIs are nearly identical, differing only in import paths and minor syntax.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch.core.activations import ReLU, Sigmoid, Softmax
 from tinytorch.core.tensor import Tensor
@@ -377,8 +378,7 @@ Let's walk through the key similarities and differences:
 - **Line 9-10 (Sigmoid)**: Identical mathematical function. Both use numerically stable implementations to prevent overflow.
 - **Line 13-15 (Softmax)**: Same mathematical operation. Both require specifying the dimension for multi-dimensional tensors. PyTorch uses `dim` keyword argument; TinyTorch defaults to `dim=-1`.
 
-```{admonition} What's Identical
-:class: tip
+```{tip} What's Identical
 
 Mathematical functions, numerical stability techniques (max subtraction in softmax), and the concept of element-wise transformations. When you debug PyTorch activation issues, you'll understand exactly what's happening because you implemented the same logic.
 ```
@@ -512,8 +512,7 @@ For students who want to understand the academic foundations and historical deve
 
 ## What's Next
 
-```{admonition} Coming Up: Module 03 - Layers
-:class: seealso
+```{seealso} Coming Up: Module 03 - Layers
 
 Implement Linear layers that combine your Tensor operations with your activation functions. You'll build the building blocks that stack to form neural networks: weights, biases, and the forward pass that transforms inputs to outputs.
 ```
@@ -528,16 +527,14 @@ Implement Linear layers that combine your Tensor operations with your activation
 
 ## Get Started
 
-```{admonition} Interactive Options
-:class: tip
+```{tip} Interactive Options
 
 - **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/02_activations/02_activations.py)** - Run interactively in browser, no setup required
 - **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/02_activations/02_activations.py)** - Use Google Colab for cloud compute
 - **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/02_activations/02_activations.py)** - Browse the implementation code
 ```
 
-```{admonition} Save Your Progress
-:class: warning
+```{warning} Save Your Progress
 
 Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 ```

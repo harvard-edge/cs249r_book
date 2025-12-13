@@ -1,4 +1,4 @@
-# Layers
+# Module 03: Layers
 
 **FOUNDATION TIER** | Difficulty: ●● (2/4) | Time: 5-7 hours | Prerequisites: 01, 02
 
@@ -19,8 +19,7 @@ By the end, your layers will support parameter management, proper initialization
 
 ## Learning Objectives
 
-```{admonition} By completing this module, you will:
-:class: tip
+```{tip} By completing this module, you will:
 
 - **Implement** Linear layers with Xavier initialization and proper parameter management for gradient-based training
 - **Master** the mathematical operation `y = xW + b` and understand how parameter counts scale with layer dimensions
@@ -31,6 +30,8 @@ By the end, your layers will support parameter management, proper initialization
 ## What You'll Build
 
 ```{mermaid}
+:align: center
+:caption: Your Layer System
 flowchart LR
     subgraph "Your Layer System"
         A["Layer Base Class<br/>forward(), parameters()"]
@@ -442,7 +443,7 @@ Your TinyTorch layers and PyTorch's `nn.Linear` and `nn.Dropout` share the same 
 The following comparison shows equivalent layer operations in TinyTorch and PyTorch. Notice how closely the APIs mirror each other.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch.core.layers import Linear, Dropout, Sequential
 from tinytorch.core.activations import ReLU
@@ -509,8 +510,7 @@ Let's walk through each difference:
 - **Line 15-19 (Sequential)**: Identical pattern for composing layers into a container.
 - **Line 22 (Parameters)**: Both use `.parameters()` method to collect all trainable tensors. PyTorch returns a generator; TinyTorch returns a list.
 
-```{admonition} What's Identical
-:class: tip
+```{tip} What's Identical
 
 Layer initialization API, forward pass mechanics, and parameter collection patterns. When you debug PyTorch shape errors or parameter counts, you'll understand exactly what's happening because you built the same abstractions.
 ```
@@ -648,8 +648,7 @@ For students who want to understand the academic foundations and mathematical un
 
 ## What's Next
 
-```{admonition} Coming Up: Module 04 - Losses
-:class: seealso
+```{seealso} Coming Up: Module 04 - Losses
 
 Implement loss functions (MSELoss, CrossEntropyLoss) that measure prediction error. You'll combine your layers with loss computation to evaluate how wrong your model is - the foundation for learning.
 ```
@@ -664,16 +663,14 @@ Implement loss functions (MSELoss, CrossEntropyLoss) that measure prediction err
 
 ## Get Started
 
-```{admonition} Interactive Options
-:class: tip
+```{tip} Interactive Options
 
 - **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/03_layers/03_layers.py)** - Run interactively in browser, no setup required
 - **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/03_layers/03_layers.py)** - Use Google Colab for cloud compute
 - **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/03_layers/03_layers.py)** - Browse the implementation code
 ```
 
-```{admonition} Save Your Progress
-:class: warning
+```{warning} Save Your Progress
 
 Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 ```

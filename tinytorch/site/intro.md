@@ -85,7 +85,7 @@ Build a complete machine learning (ML) framework from tensors to systems—under
       <span class="vision-text"><strong>Build each piece</strong> — Tensors, autograd, optimizers, attention. No magic imports.</span>
     </div>
     <div class="vision-item">
-      <span class="vision-icon">🏛️</span>
+      <span class="vision-icon"></span>
       <span class="vision-text"><strong>Recreate history</strong> — Perceptron (1957) to Transformers (2017) to MLPerf (Present).</span>
     </div>
     <div class="vision-item">
@@ -266,6 +266,8 @@ output = model(input)
 Every module follows a proven learning cycle that builds deep understanding:
 
 ```{mermaid}
+:align: center
+:caption: Architecture Overview
 graph LR
     B[Build<br/>Implement from scratch] --> U[Use<br/>Real data, real problems]
     U --> R[Reflect<br/>Systems thinking questions]

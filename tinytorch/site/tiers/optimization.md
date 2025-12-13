@@ -18,6 +18,8 @@ The Optimization tier teaches you how to make ML systems fast, small, and deploy
 ## Module Progression
 
 ```{mermaid}
+:align: center
+:caption: Architecture Overview
 graph TB
     A[🏛️ Architecture<br/>CNNs + Transformers]
 
@@ -135,6 +137,8 @@ graph TB
 ## What You Can Build After This Tier
 
 ```{mermaid}
+:align: center
+:caption: Architecture Overview
 timeline
     title Production-Ready Systems
     Baseline : 100MB model, 0.5 tokens/sec, 95% accuracy

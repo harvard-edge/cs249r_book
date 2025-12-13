@@ -1,4 +1,4 @@
-# Tensor
+# Module 01: Tensor
 
 **FOUNDATION TIER** | Difficulty: ● (1/4) | Time: 4-6 hours | Prerequisites: None
 
@@ -17,8 +17,7 @@ By the end, your tensor will support arithmetic, broadcasting, matrix multiplica
 
 ## Learning Objectives
 
-```{admonition} By completing this module, you will:
-:class: tip
+```{tip} By completing this module, you will:
 
 - **Implement** a complete Tensor class with arithmetic, matrix multiplication, shape manipulation, and reductions
 - **Master** broadcasting semantics that enable efficient computation without data copying
@@ -29,6 +28,8 @@ By the end, your tensor will support arithmetic, broadcasting, matrix multiplica
 ## What You'll Build
 
 ```{mermaid}
+:align: center
+:caption: Your Tensor Class
 flowchart LR
     subgraph "Your Tensor Class"
         A["Properties<br/>shape, size, dtype"]
@@ -167,6 +168,8 @@ def __add__(self, other):
 The elegance is that NumPy's broadcasting rules apply automatically when you write `self.data + other.data`. NumPy aligns the shapes from right to left and expands dimensions where needed, all without copying data.
 
 ```{mermaid}
+:align: center
+:caption: Broadcasting Example
 flowchart LR
     subgraph "Broadcasting Example"
         M["Matrix (2,3)<br/>[[1,2,3], [4,5,6]]"]
@@ -344,6 +347,8 @@ Visual:
 Your Tensor sits at the top of a stack that reaches down to hardware. When you call `x + y`, Python calls your `__add__` method, which delegates to NumPy, which calls optimized BLAS libraries written in C and Fortran, which use CPU SIMD instructions that process multiple numbers in a single clock cycle.
 
 ```{mermaid}
+:align: center
+:caption: Your Code
 flowchart TB
     subgraph "Your Code"
         A["Python Interface<br/>x = Tensor([[1,2],[3,4]])"]
@@ -455,7 +460,7 @@ Your TinyTorch Tensor and PyTorch's `torch.Tensor` share the same conceptual des
 The following comparison shows equivalent operations in TinyTorch and PyTorch. Notice how closely the APIs mirror each other. This is intentional: by learning TinyTorch's patterns, you're simultaneously learning PyTorch's patterns.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch.core.tensor import Tensor
 
@@ -488,8 +493,7 @@ Let's walk through each line to understand the comparison:
 - **Line 6 (Reduction)**: Both use `.mean()` to reduce the tensor to a scalar. Reductions like this are fundamental to computing loss values.
 - **Line 7 (Autograd)**: PyTorch includes `.backward()` for automatic differentiation. You'll implement this yourself in Module 05, gaining deep insight into how gradients flow through computation graphs.
 
-```{admonition} What's Identical
-:class: tip
+```{tip} What's Identical
 
 Broadcasting rules, shape semantics, and API design patterns. When you debug PyTorch shape errors, you'll understand exactly what's happening because you built the same abstractions.
 ```
@@ -598,8 +602,7 @@ For students who want to understand the academic foundations and mathematical un
 
 ## What's Next
 
-```{admonition} Coming Up: Module 02 - Activations
-:class: seealso
+```{seealso} Coming Up: Module 02 - Activations
 
 Implement ReLU, Sigmoid, Tanh, and Softmax. You'll apply element-wise operations to your Tensor and learn why these functions are essential for neural networks to learn complex patterns.
 ```
@@ -614,16 +617,14 @@ Implement ReLU, Sigmoid, Tanh, and Softmax. You'll apply element-wise operations
 
 ## Get Started
 
-```{admonition} Interactive Options
-:class: tip
+```{tip} Interactive Options
 
 - **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/01_tensor/01_tensor.py)** - Run interactively in browser, no setup required
 - **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/01_tensor/01_tensor.py)** - Use Google Colab for cloud compute
 - **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/01_tensor/01_tensor.py)** - Browse the implementation code
 ```
 
-```{admonition} Save Your Progress
-:class: warning
+```{warning} Save Your Progress
 
 Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 ```

@@ -1,4 +1,4 @@
-# Transformers
+# Module 13: Transformers
 
 **ARCHITECTURE TIER** | Difficulty: ●●●● (4/4) | Time: 8-10 hours | Prerequisites: 01-07, 10-12
 
@@ -14,8 +14,7 @@ You'll implement the complete GPT architecture, from token embeddings through mu
 
 ## Learning Objectives
 
-```{admonition} By completing this module, you will:
-:class: tip
+```{tip} By completing this module, you will:
 
 - **Implement** layer normalization to stabilize training across deep networks with learnable scale and shift parameters
 - **Design** complete transformer blocks combining self-attention, feed-forward networks, and residual connections using pre-norm architecture
@@ -27,6 +26,8 @@ You'll implement the complete GPT architecture, from token embeddings through mu
 ## What You'll Build
 
 ```{mermaid}
+:align: center
+:caption: Complete GPT Architecture
 flowchart TB
     subgraph "Complete GPT Architecture"
         A["Token IDs<br/>[15496, 1917]"]
@@ -363,7 +364,7 @@ Your transformer implementation and PyTorch's production transformers share the 
 The following comparison shows equivalent transformer usage in TinyTorch and PyTorch. The API patterns are nearly identical because your implementation follows production design principles.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch.core.transformer import TransformerBlock, GPT
 
@@ -401,8 +402,7 @@ Let's walk through the key similarities and differences:
 - **Line 5-6 (Model creation)**: Both create complete language models. PyTorch typically uses pre-trained models via HuggingFace; you build from scratch.
 - **Line 7 (Generation)**: Both support autoregressive generation with temperature control. PyTorch adds beam search, top-k/top-p sampling, and other advanced techniques.
 
-```{admonition} What's Identical
-:class: tip
+```{tip} What's Identical
 
 The core architecture, pre-norm pattern, residual connections, and causal masking are identical. When you debug transformer models in PyTorch, you'll understand exactly what's happening because you built it yourself.
 ```
@@ -560,8 +560,7 @@ For students who want to understand the theoretical foundations and explore adva
 
 ## What's Next
 
-```{admonition} Coming Up: Module 14 - Profiling
-:class: seealso
+```{seealso} Coming Up: Module 14 - Profiling
 
 Profile your transformer to identify performance bottlenecks. You'll learn to measure forward pass time, memory allocation, and computation distribution across layers, preparing for optimization in later modules.
 ```
@@ -576,16 +575,14 @@ Profile your transformer to identify performance bottlenecks. You'll learn to me
 
 ## Get Started
 
-```{admonition} Interactive Options
-:class: tip
+```{tip} Interactive Options
 
 - **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/13_transformers/13_transformers.py)** - Run interactively in browser, no setup required
 - **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/13_transformers/13_transformers.py)** - Use Google Colab for cloud compute
 - **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/13_transformers/13_transformers.py)** - Browse the implementation code
 ```
 
-```{admonition} Save Your Progress
-:class: warning
+```{warning} Save Your Progress
 
 Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 ```

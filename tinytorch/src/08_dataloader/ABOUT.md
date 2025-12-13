@@ -1,4 +1,4 @@
-# DataLoader
+# Module 08: DataLoader
 
 **ARCHITECTURE TIER** | Difficulty: ●● (2/4) | Time: 3-5 hours | Prerequisites: 01-07
 
@@ -12,8 +12,7 @@ In this module, you'll build the data pipeline infrastructure that sits between 
 
 ## Learning Objectives
 
-```{admonition} By completing this module, you will:
-:class: tip
+```{tip} By completing this module, you will:
 
 - **Implement** the Dataset abstraction and TensorDataset for in-memory data storage
 - **Build** a DataLoader with intelligent batching, shuffling, and memory-efficient iteration
@@ -25,6 +24,8 @@ In this module, you'll build the data pipeline infrastructure that sits between 
 ## What You'll Build
 
 ```{mermaid}
+:align: center
+:caption: Your Data Pipeline
 flowchart LR
     subgraph "Your Data Pipeline"
         A["Dataset<br/>__len__, __getitem__"]
@@ -396,7 +397,7 @@ Your DataLoader and PyTorch's `torch.utils.data.DataLoader` share the same conce
 The following comparison shows identical usage patterns between TinyTorch and PyTorch. Notice how the APIs mirror each other exactly.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch.core.dataloader import TensorDataset, DataLoader
 
@@ -456,8 +457,7 @@ Walking through the differences:
 - **Lines 8-12 (DataLoader Creation)**: PyTorch adds `num_workers` for parallel data loading. With `num_workers=4`, four processes load batches in parallel, overlapping data loading with GPU computation. Your implementation is single-process.
 - **Lines 14-20 (Training Loop)**: Completely identical. The iterator protocol means both frameworks use the same `for batch in loader` syntax.
 
-```{admonition} What's Identical
-:class: tip
+```{tip} What's Identical
 
 The Dataset abstraction, DataLoader interface, and batching semantics are identical. When you understand TinyTorch's data pipeline, you understand PyTorch's data pipeline. The only difference is PyTorch adds parallel loading to hide I/O latency.
 ```
@@ -596,8 +596,7 @@ For students who want to understand the academic foundations and engineering dec
 
 ## What's Next
 
-```{admonition} Coming Up: Module 09 - Spatial
-:class: seealso
+```{seealso} Coming Up: Module 09 - Spatial
 
 Implement Conv2d, MaxPool2d, and Flatten layers to build convolutional neural networks. You'll apply your DataLoader to image datasets and discover why CNNs revolutionized computer vision.
 ```
@@ -612,16 +611,14 @@ Implement Conv2d, MaxPool2d, and Flatten layers to build convolutional neural ne
 
 ## Get Started
 
-```{admonition} Interactive Options
-:class: tip
+```{tip} Interactive Options
 
 - **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/08_dataloader/08_dataloader.py)** - Run interactively in browser, no setup required
 - **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/08_dataloader/08_dataloader.py)** - Use Google Colab for cloud compute
 - **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/08_dataloader/08_dataloader.py)** - Browse the implementation code
 ```
 
-```{admonition} Save Your Progress
-:class: warning
+```{warning} Save Your Progress
 
 Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 ```

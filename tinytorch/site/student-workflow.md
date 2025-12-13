@@ -7,6 +7,8 @@ This guide explains the actual day-to-day workflow for building your ML framewor
 TinyTorch follows a simple three-step cycle:
 
 ```{mermaid}
+:align: center
+:caption: Architecture Overview
 graph LR
     A[Work in Notebooks<br/>modules/NN_name.ipynb] --> B[Export to Package<br/>tito module complete N]
     B --> C[Validate with Milestones<br/>Run milestone scripts]

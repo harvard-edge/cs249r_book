@@ -4,10 +4,59 @@
 
 **See yourself on the TinyTorch Globe!** Create an account and join the global community to track your progress and connect with other builders.
 
-```{image} _static/images/diagram_tiny-commununity.png
-:alt: TinyTorch Community Ecosystem
-:width: 100%
+```{mermaid}
 :align: center
+:caption: TinyTorch Community Ecosystem
+flowchart TB
+    subgraph Benefit[" "]
+        direction TB
+        BenefitTitle["Benefit: Build Systems Intuition & Understand ML Frameworks"]
+        BenefitSub["From Tensors to Systems: Debug, Implement, Optimize"]
+    end
+
+    Community(("TinyTorch<br/>Community"))
+
+    Community --> Benefit
+
+    subgraph Progress["Progress & Connection"]
+        direction TB
+        P1["Share<br/>Progress"]
+        P2["Connect with<br/>Builders"]
+        P3["Add Yourself<br/>to the Map"]
+    end
+
+    subgraph Competition["Competition & Growth"]
+        direction TB
+        C1["Torch Olympics<br/>(Capstone)"]
+        C2["Leaderboard"]
+    end
+
+    subgraph Learning["Learning & Support Ecosystem"]
+        direction TB
+        L1["Course Structure<br/>& Resources"]
+        L2["Historical<br/>Milestones"]
+        L3["FAQ &<br/>Troubleshooting"]
+    end
+
+    Community --> Progress
+    Community --> Competition
+    Community --> Learning
+
+    style Benefit fill:#f5f5f5,stroke:#333
+    style BenefitTitle fill:#f5f5f5,stroke:none
+    style BenefitSub fill:#f5f5f5,stroke:none
+    style Community fill:#e0e0e0,stroke:#333
+    style Progress fill:#f5f5f5,stroke:#333
+    style Competition fill:#f5f5f5,stroke:#333
+    style Learning fill:#f5f5f5,stroke:#333
+    style P1 fill:#fff,stroke:#333,rx:10
+    style P2 fill:#fff,stroke:#333,rx:10
+    style P3 fill:#fff,stroke:#333,rx:10
+    style C1 fill:#fff,stroke:#333,rx:10
+    style C2 fill:#fff,stroke:#333,rx:10
+    style L1 fill:#fff,stroke:#333,rx:10
+    style L2 fill:#fff,stroke:#333,rx:10
+    style L3 fill:#fff,stroke:#333,rx:10
 ```
 
 **Learn together, build together, grow together.**

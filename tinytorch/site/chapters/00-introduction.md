@@ -283,8 +283,7 @@ After each tier, you become the team member who:
 - **Ready to Commit**: Begin [Module 01: Tensor](../modules/01_tensor_ABOUT.md) to start building
 - **Teaching a Course**: Review [Getting Started Guide - For Instructors](../getting-started.html#instructors) for classroom integration
 
-```{admonition} Your Three-Tier Journey Awaits
-:class: tip
+```{tip} Your Three-Tier Journey Awaits
 By completing all three tiers, you'll have built a complete ML framework that rivals production implementations:
 
 **Foundation Tier Achievement**: 95%+ accuracy on MNIST with YOUR mathematical implementations

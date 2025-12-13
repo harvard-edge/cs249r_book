@@ -1,7 +1,6 @@
 # Getting Started with TinyTorch
 
-```{admonition} 🔬 Early Explorer Territory
-:class: warning
+```{warning} 🔬 Early Explorer Territory
 
 You're ahead of the curve. TinyTorch is functional but still being refined. Expect rough edges, incomplete documentation, and things that might change. If you proceed, you're helping us shape this by finding what works and what doesn't.
 
@@ -82,6 +81,8 @@ All community data is stored locally in `.tinytorch/` directory. See **[Communit
 TinyTorch follows a simple three-step workflow that you'll repeat for each module:
 
 ```{mermaid}
+:align: center
+:caption: Architecture Overview
 graph LR
     A[1. Edit Module<br/>modules/NN_name.ipynb] --> B[2. Export to Package<br/>tito module complete N]
     B --> C[3. Validate with Milestones<br/>Run milestone scripts]
@@ -312,7 +313,7 @@ We're actively seeking instructor feedback to shape the classroom experience.
 </div>
 
 <div style="background: #fef3c7; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #eab308;">
-<h4 style="margin: 0 0 0.5rem 0; color: #a16207;">🤝 Community</h4>
+<h4 style="margin: 0 0 0.5rem 0; color: #a16207;"> Community</h4>
 <ul style="margin: 0.5rem 0; padding-left: 1.25rem; font-size: 0.9rem;">
 <li><a href="community.html">Community Ecosystem</a></li>
 <li><a href="resources.html">Learning Resources</a></li>

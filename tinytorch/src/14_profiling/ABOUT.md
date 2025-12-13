@@ -1,4 +1,4 @@
-# Profiling
+# Module 14: Profiling
 
 **OPTIMIZATION TIER** | Difficulty: ●● (2/4) | Time: 3-5 hours | Prerequisites: 01-07
 
@@ -19,8 +19,7 @@ By the end, you'll have built the same measurement infrastructure used by produc
 
 ## Learning Objectives
 
-```{admonition} By completing this module, you will:
-:class: tip
+```{tip} By completing this module, you will:
 
 - **Implement** a comprehensive Profiler class that measures parameters, FLOPs, memory, and latency
 - **Analyze** performance characteristics to identify compute-bound vs memory-bound workloads
@@ -31,6 +30,8 @@ By the end, you'll have built the same measurement infrastructure used by produc
 ## What You'll Build
 
 ```{mermaid}
+:align: center
+:caption: Your Profiler Class
 flowchart LR
     subgraph "Your Profiler Class"
         A["Parameter Counter<br/>count_parameters()"]
@@ -246,7 +247,7 @@ Your TinyTorch Profiler and PyTorch's profiling tools share the same conceptual 
 The following comparison shows equivalent profiling operations in TinyTorch and PyTorch. Notice how the concepts transfer directly, even though PyTorch provides more sophisticated tooling.
 
 `````{tab-set}
-````{tab-item} Your Tiny🔥Torch
+````{tab-item} Your TinyTorch
 ```python
 from tinytorch.perf.profiling import Profiler
 
@@ -297,8 +298,7 @@ Let's walk through the comparison:
 - **Latency measurement**: TinyTorch uses `time.perf_counter()` with warmup. PyTorch profiler uses CUDA events for precise GPU timing.
 - **Analysis output**: Both provide bottleneck identification and throughput metrics. PyTorch adds kernel-level detail and distributed profiling.
 
-```{admonition} What's Identical
-:class: tip
+```{tip} What's Identical
 
 The profiling workflow: measure parameters, FLOPs, memory, and latency to identify bottlenecks. Production frameworks add GPU support and more sophisticated analysis, but the core measurement principles you're learning here transfer directly.
 ```
@@ -419,8 +419,7 @@ For students who want to understand the academic foundations and professional pr
 
 ## What's Next
 
-```{admonition} Coming Up: Module 15 - Quantization
-:class: seealso
+```{seealso} Coming Up: Module 15 - Quantization
 
 Implement quantization to reduce model size and accelerate inference. You'll use profiling insights to identify which layers benefit most from reduced precision, achieving 4× memory reduction with minimal accuracy loss.
 ```
@@ -435,16 +434,14 @@ Implement quantization to reduce model size and accelerate inference. You'll use
 
 ## Get Started
 
-```{admonition} Interactive Options
-:class: tip
+```{tip} Interactive Options
 
 - **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/14_profiling/14_profiling.py)** - Run interactively in browser, no setup required
 - **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/14_profiling/14_profiling.py)** - Use Google Colab for cloud compute
 - **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/14_profiling/14_profiling.py)** - Browse the implementation code
 ```
 
-```{admonition} Save Your Progress
-:class: warning
+```{warning} Save Your Progress
 
 Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 ```
