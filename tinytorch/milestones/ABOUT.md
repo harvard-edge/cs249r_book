@@ -4,9 +4,13 @@
 
 ## Overview
 
-Milestones are **hands-on recreations of ML breakthroughs** using YOUR TinyTorch implementations. Each milestone proves your code works by recreating a historically significant achievement - from Rosenblatt's 1957 Perceptron to modern optimization techniques.
+You've been building TinyTorch components for weeks. But does your code actually work? Can YOUR tensor class, YOUR autograd engine, YOUR attention mechanism recreate what took the world's brightest researchers decades to discover?
 
-Unlike modules (which teach concepts), milestones demonstrate mastery by showing what you can BUILD.
+There's only one way to find out: **rebuild history**.
+
+These six milestones are your proof - not just that you understand the theory, but that you built something real. Every line of code executing in these milestones is YOURS. When the Perceptron learns, it's using YOUR gradient descent. When the transformer generates text, it's YOUR attention mechanism routing information. When you hit 75% on CIFAR-10, those are YOUR convolutional layers extracting features.
+
+This isn't a demo - it's proof that you understand ML systems engineering from the ground up.
 
 ## The Journey
 
@@ -19,13 +23,13 @@ Unlike modules (which teach concepts), milestones demonstrate mastery by showing
 | **2017** | Transformers | Language generation with attention | Module 13 |
 | **2018** | MLPerf | Production optimization pipeline | Module 18 |
 
-## Why Milestones Matter
+## Why Milestones Transform Learning
 
-**Deep Understanding**: Experience the actual challenges researchers faced. When your single-layer perceptron fails on XOR, you understand WHY Minsky's critique nearly ended AI research.
+**You'll Feel the Historical Struggle**: When your single-layer perceptron hits 50% accuracy on XOR and refuses to budge - loss stuck at 0.69, epoch after epoch - you'll viscerally understand why Minsky's proof nearly killed neural network research. The AI Winter wasn't abstract skepticism; it was researchers watching their perceptrons fail exactly like yours just did.
 
-**Progressive Building**: Each milestone builds on previous foundations. The perceptron's limitations motivate hidden layers; hidden layers enable CNNs; CNNs inspire transformers.
+**You'll Experience the Breakthrough**: Then you add one hidden layer. Same data, same problem. Suddenly: 100% accuracy. Loss plummets to zero. You didn't just read about how depth enables non-linear representations - you watched YOUR two-layer network solve what YOUR single layer couldn't. That's not textbook knowledge; that's lived experience.
 
-**Real Achievements**: These aren't toy examples. You're recreating breakthroughs that shaped the entire field of machine learning.
+**You'll Build Something Real**: By Milestone 04, you're not running toy demos anymore. You're processing 50,000 natural images through YOUR DataLoader, extracting features with YOUR convolutional layers, and achieving 75%+ accuracy on CIFAR-10. That's better than many published results from the early 2010s. With code you wrote yourself.
 
 ## How to Use Milestones
 

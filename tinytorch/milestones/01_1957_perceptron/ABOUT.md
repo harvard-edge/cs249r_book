@@ -4,9 +4,11 @@
 
 ## Overview
 
-Frank Rosenblatt's Perceptron was the **first trainable artificial neural network**. In 1957, he demonstrated that machines could learn from examples, launching the neural network revolution.
+It's 1957. Computers fill entire rooms and can barely add numbers. Then Frank Rosenblatt makes an outrageous claim: he's built a machine that can LEARN. Not through programming - through experience, like a human child.
 
-This milestone recreates that pivotal moment using YOUR TinyTorch implementations.
+The press goes wild. The Navy funds research expecting machines that will "walk, talk, see, write, reproduce itself and be conscious of its existence." The New York Times runs the headline: *"New Navy Device Learns by Doing."*
+
+The optimism was premature - but the core insight was revolutionary. You're about to recreate that moment - the exact moment machine learning was born - using components YOU built yourself.
 
 ## What You'll Build
 
@@ -49,27 +51,36 @@ python 02_rosenblatt_trained.py
 | 01 (Forward Only) | ~50% | Random weights = random guessing |
 | 02 (Trained) | 95%+ | Training learns the pattern |
 
-## Key Learning
+## The Aha Moment: Learning IS the Intelligence
 
-**Forward pass is not intelligence.** The architecture alone doesn't solve problems - training does. This milestone demonstrates the fundamental learning loop:
+You'll run two scripts. Both use the same architecture - YOUR Linear layer, YOUR sigmoid. But one achieves 50% accuracy (random chance), the other 95%+.
 
+**What's the difference?** Not the model. Not the data. The learning loop.
+
+```python
+# Script 01: Forward-only (50% accuracy)
+output = model(input)           # YOUR code computes
+loss = loss_fn(output, target)  # YOUR code measures
+# No backward(), no optimization, no learning
+# Result: Random weights stay random
+
+# Script 02: Complete training (95%+ accuracy)
+output = model(input)           # Same YOUR code
+loss = loss_fn(output, target)  # Same YOUR code
+loss.backward()                 # YOUR autograd computes gradients
+optimizer.step()                # YOUR optimizer learns from mistakes
+# Result: Random weights become intelligent
 ```
-forward --> loss --> backward --> update --> repeat
-```
+
+Run script 01 and watch YOUR Linear layer make random guesses - 50% accuracy, no better than a coin flip. Now run script 02. Same architecture. Same data. But now YOUR autograd engine computes gradients, YOUR optimizer updates weights. Within seconds, accuracy climbs: 60%... 75%... 85%... 95%+.
+
+**You just watched YOUR implementation learn.** This is the moment Rosenblatt proved machines could improve through experience. And you recreated it with your own code.
 
 ## Systems Insights
 
 - **Memory**: O(n) parameters for n input features
 - **Compute**: O(n) operations per sample
 - **Limitation**: Can only solve linearly separable problems
-
-## Historical Context
-
-The New York Times headline (1958): *"New Navy Device Learns by Doing"*
-
-Rosenblatt's Perceptron sparked the first AI boom. The US Navy funded research expecting perceptrons to "walk, talk, see, write, reproduce itself and be conscious of its existence."
-
-The optimism was premature - but the core insight was revolutionary: machines can learn from data.
 
 ## What's Next
 

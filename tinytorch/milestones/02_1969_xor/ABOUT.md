@@ -4,9 +4,11 @@
 
 ## Overview
 
-In 1969, Minsky and Papert's book "Perceptrons" mathematically proved that single-layer networks **cannot solve XOR**. This revelation killed neural network funding for over a decade - the infamous **AI Winter**.
+It's 1969. Neural networks are the hottest thing in AI. Funding is pouring in. Then Marvin Minsky and Seymour Papert publish a 308-page mathematical proof that destroys everything: perceptrons **cannot solve XOR**. Not "struggle with" - CANNOT. Mathematically impossible.
 
-This milestone recreates the crisis... and shows how multi-layer networks solved it.
+Funding evaporates overnight. Research labs shut down. The field dies for 17 years - the infamous **AI Winter**.
+
+You're about to experience that crisis firsthand. You'll watch YOUR perceptron fail on XOR despite perfect training. Loss stuck at 0.69. Accuracy frozen at 50%. Epoch after epoch of futility. Then you'll discover what Minsky missed: add ONE hidden layer, and the impossible becomes trivial.
 
 ## What You'll Build
 
@@ -64,11 +66,27 @@ python 02_xor_solved.py
 | 01 (Single Layer) | 1 | ~0.69 (stuck!) | ~50% | Cannot learn XOR |
 | 02 (Multi-Layer) | 2 | --> 0.0 | 100% | Hidden layers solve it |
 
+## The Emotional Journey
+
+**Minute 1-2**: Script 01 starts training. Loss: 0.69... 0.69... 0.69. Still 0.69. Why isn't it learning? Did I break something?
+
+**Minute 3**: You check the code. Everything's correct. YOUR Linear layer works. YOUR autograd computes gradients. YOUR optimizer updates weights. But accuracy stays at 50%.
+
+**Minute 4**: The realization hits - it's not broken. It's IMPOSSIBLE. This is what Minsky proved. This is why funding died.
+
+**Minute 5**: You run script 02. Add one hidden layer. Loss drops immediately: 0.5... 0.3... 0.1... 0.01... 0.0. Accuracy: 100%.
+
+That's the emotional arc of the AI Winter, compressed into 5 minutes. The despair of impossibility. The revelation that depth changes everything.
+
 ## Key Learning
 
 **Depth enables non-linear decision boundaries.** The hidden layer learns to transform the input space so XOR becomes linearly separable.
 
 Single layers can only draw straight lines. Multiple layers can draw any shape.
+
+Script 01 isn't just a demo of failure - it's YOUR code hitting the same mathematical wall that nearly ended AI research. YOUR Linear layer, YOUR autograd, YOUR optimizer - all working perfectly, all completely useless against XOR's geometry.
+
+Then script 02 adds one hidden layer. Same YOUR implementations, same training loop. Suddenly the impossible becomes trivial. YOUR multi-layer network just solved what YOUR single layer couldn't. This is the moment you truly understand why "deep" learning is called DEEP.
 
 ## Systems Insights
 

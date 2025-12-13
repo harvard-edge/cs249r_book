@@ -4,9 +4,11 @@
 
 ## Overview
 
-As ML models grew larger, MLCommons' MLPerf (2018) established **systematic optimization** as a discipline. The focus shifted from "can we build it?" to "can we deploy it efficiently?"
+2018. The ML world has a dirty secret: everyone's publishing state-of-the-art results, but nobody can deploy them. GPT-2 takes 30 seconds to generate a single sentence. BERT won't fit on edge devices. Production teams are stuck using years-old models because new ones are too slow, too big, too expensive.
 
-This milestone teaches production optimization - profiling, compressing, and accelerating YOUR models for real-world deployment.
+MLCommons launches MLPerf - the first systematic benchmark for ML systems engineering. The message is clear: research breakthroughs don't matter if you can't ship them. Optimization isn't an afterthought; it's a core competency.
+
+This milestone teaches you the same systematic approach production ML engineers use. You'll compress YOUR models 8× and speed up YOUR transformer generation 10×. That's the difference between research demos and shipped products.
 
 ## What You'll Build
 
@@ -60,16 +62,32 @@ python 02_generation_speedup.py
 | Without KV-Cache | ~10ms | 1x |
 | With KV-Cache | ~1ms | 6-10x |
 
-## Key Learning
+## The Aha Moment: Systematic Beats Heroic
 
-**Optimization is systematic, not magical.** The MLPerf methodology:
+**The Wrong Way (Heroic Optimization)**:
+```
+"It's too slow! Let me rewrite everything in C++!"
+"Memory is too high! Let me redesign the architecture!"
+"KV-cache sounds complex! Let me try CUDA kernels first!"
+```
+Result: Weeks of work, marginal gains, introduced bugs.
 
-1. **Profile**: Measure to find actual bottlenecks (not assumed ones)
-2. **Optimize**: Apply targeted techniques to bottlenecks
-3. **Validate**: Verify accuracy didn't degrade unacceptably
-4. **Repeat**: Iterate until deployment targets met
+**The Right Way (Systematic Optimization)**:
+```
+1. MEASURE: Profile shows 70% of time is in attention, 80% of memory is Linear layers
+2. OPTIMIZE: Add KV-cache (targets the 70%), quantize Linear layers (targets the 80%)
+3. VALIDATE: Accuracy drops 1.5% (acceptable), 8× faster (huge win)
+4. REPEAT: Profile again, find next bottleneck
+```
+Result: 10× faster, 8× smaller, 2% accuracy cost - achieved in days.
 
-This workflow is used by every production ML team.
+**This is what separates ML researchers from ML engineers:**
+- YOUR Profiler (Module 14) identifies real bottlenecks (not assumed ones)
+- YOUR Quantization (Module 15) reduces memory 4×
+- YOUR Pruning (Module 16) reduces parameters 50%+
+- YOUR KV-Cache (Module 17) speeds up generation 10×
+
+The complete workflow - measure, optimize, validate - using YOUR tools.
 
 ## Optimization Techniques
 

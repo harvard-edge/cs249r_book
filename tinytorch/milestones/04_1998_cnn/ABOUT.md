@@ -4,9 +4,11 @@
 
 ## Overview
 
-In 1998, **Yann LeCun's LeNet-5** revolutionized computer vision with Convolutional Neural Networks (CNNs). By exploiting spatial structure through shared weights and local connectivity, CNNs achieved unprecedented accuracy with 100x fewer parameters than equivalent MLPs.
+1998. The US Postal Service processes millions of handwritten checks daily - all by hand. Then Yann LeCun deploys LeNet-5: a convolutional neural network that reads zip codes with superhuman accuracy. It's not a research demo - it's processing real checks, in production, saving millions of dollars.
 
-This milestone recreates that revolution using YOUR spatial implementations.
+The breakthrough? LeCun realized images have STRUCTURE. Nearby pixels matter more than distant ones. The same edge detector works in the corner or the center. By exploiting these insights - local connectivity and weight sharing - CNNs achieve better accuracy with 100× fewer parameters.
+
+You're about to prove those same principles work using YOUR spatial implementations on real natural images. If you hit 75% on CIFAR-10, you've built computer vision that would have been publishable a decade ago.
 
 ## What You'll Build
 
@@ -46,15 +48,21 @@ python 02_lecun_cifar10.py
 | 01 (TinyDigits) | 1K train, 8x8 | Simple CNN | ~90% | +10% improvement |
 | 02 (CIFAR-10) | 50K train, 32x32 RGB | Deeper CNN | 65-75% | MLPs struggle here |
 
-## Key Learning
+## The Aha Moment: Structure Matches Reality
 
-**Convolution exploits spatial structure.** Three principles make CNNs dominant for vision:
+An MLP sees an image as 3,072 random numbers. It doesn't know pixel (0,0) is next to pixel (0,1). It learns brittle patterns like "if pixel 1,234 is bright AND pixel 2,891 is dark..." - unscalable and fragile.
 
-1. **Local Connectivity**: Only nearby pixels connect (instead of all-to-all)
-2. **Weight Sharing**: Same filter detects features anywhere in the image
-3. **Translation Invariance**: "Cat in corner" = "Cat in center"
+A CNN understands spatial structure:
 
-The result: 100x fewer parameters with BETTER accuracy.
+1. **Local Connectivity**: Each neuron only looks at nearby pixels (3×3 or 5×5 regions). Edges, corners, textures are all LOCAL patterns.
+2. **Weight Sharing**: The SAME filter detects edges everywhere. "Cat in top-left" and "cat in bottom-right" use the same feature detector.
+3. **Translation Invariance**: The network doesn't care WHERE the cat appears - only THAT it appears.
+
+**The result?**
+- MLP on CIFAR-10: ~100M parameters, ~50% accuracy (barely better than random)
+- YOUR CNN: ~1M parameters, 75%+ accuracy (real computer vision)
+
+**100× fewer parameters. 50% better accuracy.** That's what happens when architecture matches reality.
 
 ## Systems Insights
 
@@ -62,11 +70,15 @@ The result: 100x fewer parameters with BETTER accuracy.
 - **Compute**: Convolution is compute-intensive but highly parallelizable
 - **Architecture**: Hierarchical feature learning (edges --> textures --> objects)
 
-## What Part 2 Showcases
+## What Part 2 Proves
 
-- **YOUR DataLoader (Module 08)** batches 50,000 images efficiently
-- **YOUR Conv2d + MaxPool2d (Module 09)** enable spatial intelligence
-- First real test of your data pipeline at scale
+Part 1 validates YOUR implementations on TinyDigits. But Part 2 is where everything comes together at scale.
+
+50,000 natural color images. 32×32×3 = 3,072 dimensions per image. 10 diverse categories (airplanes, cars, birds, cats, ships...). This is HARD.
+
+Watch YOUR DataLoader stream batches from disk. Watch YOUR Conv2d layers extract features - first layer finds edges, second layer finds textures, third layer finds object parts. Watch YOUR MaxPool2d reduce dimensions while preserving features. Watch YOUR training loop iterate for 30-60 minutes.
+
+When you see "Test Accuracy: 72%," realize what just happened: YOUR implementations, running on YOUR computer, just achieved computer vision that rivals early ImageNet-era results. You didn't download a pretrained model. You built the framework AND trained the model. That's systems engineering.
 
 ## Historical Context
 
