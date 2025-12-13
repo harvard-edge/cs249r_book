@@ -30,7 +30,7 @@ This will:
 
 **Output:**
 ```
-🔥 TinyTorch Demo Validation
+Tiny🔥Torch Demo Validation
 ========================================
 
 📋 Demo 01: Zero to Ready

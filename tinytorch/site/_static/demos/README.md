@@ -34,7 +34,7 @@ You'll see:
 
 ```
   ╔═══════════════════════════════════════╗
-  ║   🔥 TinyTorch Demo Studio 🎬        ║
+  ║   Tiny🔥Torch Demo Studio 🎬        ║
   ╚═══════════════════════════════════════╝
 
 What would you like to do?
@@ -71,7 +71,7 @@ The script shows live output as commands run (not silent!):
 
 ⏳ Testing: setup-environment.sh
 
-  │ 🔥 TinyTorch Environment Setup
+  │ Tiny🔥Torch Environment Setup
   │ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   │
   │ 📦 Creating virtual environment...

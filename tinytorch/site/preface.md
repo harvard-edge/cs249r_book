@@ -43,7 +43,7 @@ TinyTorch teaches you the **AI bricks**—the stable engineering foundations you
 <p style="margin: 0.5rem 0 0 0;">The <a href="https://mlsysbook.ai">Machine Learning Systems</a> textbook teaches you the <em>concepts</em> of the rocket ship: propulsion, guidance, life support.</p>
 </div>
 <div style="background: #fff3e0; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #ff8247;">
-<strong style="color: #e65100;">🔥 TinyTorch</strong>
+<strong style="color: #e65100;">Tiny🔥Torch</strong>
 <p style="margin: 0.5rem 0 0 0;">TinyTorch is where you actually <em>build</em> a small rocket with your own hands. Not a toy—a real framework.</p>
 </div>
 </div>

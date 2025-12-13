@@ -377,7 +377,7 @@ def generate_final_report():
     }
 
 if __name__ == "__main__":
-    print("🔥 TinyTorch Module Status Report")
+    print("Tiny🔥Torch Module Status Report")
     print("Comprehensive analysis of modules 1-14 functionality")
     print()
 
