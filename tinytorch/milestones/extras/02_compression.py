@@ -5,10 +5,14 @@
 ║           Quantization + Pruning for Edge Deployment (MLPerf Style)         ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
-Historical Context (2015-2018):
+📚 HISTORICAL CONTEXT (2015-2018):
 - 2015: Han et al. "Deep Compression" - Pruning + Quantization + Huffman
 - 2017: MobileNets - Efficient architectures for mobile
 - 2018: MLPerf launches - Standardized ML benchmarking
+
+🎯 WHAT YOU'RE BUILDING:
+Using YOUR TinyTorch implementations, you'll build a complete compression
+pipeline that makes models 8-16× smaller while maintaining accuracy!
 
 This milestone demonstrates systematic model compression:
 1. Baseline model size and accuracy
@@ -17,23 +21,40 @@ This milestone demonstrates systematic model compression:
 4. Combine both techniques
 5. Measure accuracy-size tradeoffs
 
-Learning Objectives:
-- Understand quantization techniques (post-training, quantization-aware)
-- Learn structured vs unstructured pruning
-- Measure compression ratios and accuracy degradation
-- See how techniques compose (quantize → prune → quantize)
-
-Expected Output:
-- 4× compression from quantization (fp32 → int8)
-- 2-4× additional from 50-75% pruning
-- Overall: 8-16× smaller model with <5% accuracy loss
-
 ✅ REQUIRED MODULES (Run after Module 16):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Module 14 (Profiling)     : YOUR profiling to measure baselines
   Module 15 (Quantization)  : YOUR quantization implementations
   Module 16 (Compression)   : YOUR pruning techniques
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# =============================================================================
+# 📊 YOUR MODULES IN ACTION
+# =============================================================================
+#
+# ┌─────────────────────┬────────────────────────────────┬─────────────────────────────┐
+# │ What You Built      │ How It's Used Here             │ Systems Impact              │
+# ├─────────────────────┼────────────────────────────────┼─────────────────────────────┤
+# │ Module 15: Quantize │ Converts fp32 weights to int8  │ 4× memory reduction!        │
+# │                     │ with calibration               │                             │
+# │                     │                                │                             │
+# │ Module 16: Pruning  │ Removes near-zero weights      │ 2-4× additional compression │
+# │                     │ (magnitude-based)              │ with minimal accuracy loss  │
+# │                     │                                │                             │
+# │ Module 14: Profiler │ Measures before/after metrics  │ Quantify the tradeoffs      │
+# │                     │ for scientific comparison      │                             │
+# └─────────────────────┴────────────────────────────────┴─────────────────────────────┘
+#
+# =============================================================================
+
+📊 EXPECTED RESULTS:
+- 4× compression from quantization (fp32 → int8)
+- 2-4× additional from 50-75% pruning
+- Overall: 8-16× smaller model with <5% accuracy loss
+
+💡 KEY INSIGHT:
+Edge deployment requires aggressive compression. YOUR pipeline shows how
+production models fit on phones and embedded devices!
 
 🏗️ WORKFLOW:
     ┌──────────────┐
