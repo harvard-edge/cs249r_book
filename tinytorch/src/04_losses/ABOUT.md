@@ -87,10 +87,12 @@ log_softmax(x: Tensor, dim: int = -1) -> Tensor
 Computes numerically stable log-softmax using the log-sum-exp trick. This is the foundation for cross-entropy loss.
 
 **Parameters:**
-- `x`: Input tensor (typically logits from a model)
-- `dim`: Dimension along which to compute log-softmax (default: -1, last dimension)
+- `x` (Tensor): Input tensor containing logits (raw model outputs, unbounded values)
+- `dim` (int): Dimension along which to compute log-softmax (default: -1, last dimension)
 
 **Returns:** Tensor with same shape as input, containing log-probabilities
+
+**Note:** Logits are raw, unbounded scores from your model before any activation function. CrossEntropyLoss expects logits, not probabilities.
 
 ### Loss Functions
 
@@ -98,9 +100,9 @@ All loss functions follow the same pattern:
 
 | Loss Function | Constructor | Forward Signature | Use Case |
 |--------------|-------------|-------------------|----------|
-| `MSELoss` | `MSELoss()` | `forward(predictions, targets) -> Tensor` | Regression |
-| `CrossEntropyLoss` | `CrossEntropyLoss()` | `forward(logits, targets) -> Tensor` | Multi-class classification |
-| `BinaryCrossEntropyLoss` | `BinaryCrossEntropyLoss()` | `forward(predictions, targets) -> Tensor` | Binary classification |
+| `MSELoss` | `MSELoss()` | `forward(predictions: Tensor, targets: Tensor) -> Tensor` | Regression |
+| `CrossEntropyLoss` | `CrossEntropyLoss()` | `forward(logits: Tensor, targets: Tensor) -> Tensor` | Multi-class classification |
+| `BinaryCrossEntropyLoss` | `BinaryCrossEntropyLoss()` | `forward(predictions: Tensor, targets: Tensor) -> Tensor` | Binary classification |
 
 **Common Pattern:**
 ```python
@@ -115,10 +117,15 @@ Understanding input shapes is crucial for correct loss computation:
 | Loss | Predictions Shape | Targets Shape | Output Shape |
 |------|------------------|---------------|--------------|
 | MSE | `(N,)` or `(N, D)` | Same as predictions | `()` scalar |
-| CrossEntropy | `(N, C)` (logits) | `(N,)` (class indices) | `()` scalar |
-| BinaryCrossEntropy | `(N,)` (probabilities) | `(N,)` (0 or 1) | `()` scalar |
+| CrossEntropy | `(N, C)` logits¹ | `(N,)` class indices² | `()` scalar |
+| BinaryCrossEntropy | `(N,)` probabilities³ | `(N,)` binary labels (0 or 1) | `()` scalar |
 
 Where N = batch size, D = feature dimension, C = number of classes
+
+**Notes:**
+1. **Logits**: Raw unbounded values from your model (e.g., `[2.3, -1.2, 5.1]`). Do NOT apply softmax before passing to CrossEntropyLoss.
+2. **Class indices**: Integer values from 0 to C-1 indicating the correct class (e.g., `[0, 2, 1]` for 3 samples).
+3. **Probabilities**: Values between 0 and 1 after applying sigmoid activation. Must be in valid probability range.
 
 ## Core Concepts
 
@@ -549,30 +556,13 @@ Implement automatic differentiation to compute gradients of your loss functions.
 
 ## Get Started
 
-````{grid} 1 2 3 3
+```{admonition} Interactive Options
+:class: tip
 
-```{grid-item-card} 🚀 Launch Binder
-:link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/04_losses/04_losses.py
-:class-header: bg-light
-
-Run interactively in browser - no setup required
+- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/04_losses/04_losses.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/04_losses/04_losses.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/04_losses/04_losses.py)** - Browse the implementation code
 ```
-
-```{grid-item-card} ☁️ Open in Colab
-:link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/04_losses/04_losses.py
-:class-header: bg-light
-
-Use Google Colab for cloud compute
-```
-
-```{grid-item-card} 📄 View Source
-:link: https://github.com/mlsysbook/TinyTorch/blob/main/src/04_losses/04_losses.py
-:class-header: bg-light
-
-Browse the implementation code
-```
-
-````
 
 ```{admonition} Save Your Progress
 :class: warning

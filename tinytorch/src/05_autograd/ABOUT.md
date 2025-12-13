@@ -195,20 +195,22 @@ class MulBackward(Function):
         For z = a * b:
         ∂z/∂a = b → grad_a = grad_output * b
         ∂z/∂b = a → grad_b = grad_output * a
+
+        Uses vectorized element-wise multiplication (NumPy broadcasting).
         """
         a, b = self.saved_tensors
         grad_a = grad_b = None
 
         if a.requires_grad:
-            grad_a = grad_output * b.data  # Chain rule: incoming grad × local derivative
+            grad_a = grad_output * b.data  # Vectorized element-wise multiplication
 
         if b.requires_grad:
-            grad_b = grad_output * a.data
+            grad_b = grad_output * a.data  # NumPy handles broadcasting automatically
 
         return grad_a, grad_b
 ```
 
-The elegance is that each operation only knows its own derivative. The chain rule connects them all.
+The elegance is that each operation only knows its own derivative. The chain rule connects them all. NumPy's vectorized operations handle all element-wise computations efficiently without explicit loops.
 
 ### Backward Pass Implementation
 
@@ -227,21 +229,21 @@ def backward(self, gradient=None):
         else:
             raise ValueError("backward() requires gradient for non-scalar tensors")
 
-    # Accumulate gradient
+    # Accumulate gradient (vectorized NumPy operation)
     if self.grad is None:
         self.grad = np.zeros_like(self.data)
     self.grad += gradient
 
     # Propagate to parent tensors
     if hasattr(self, '_grad_fn') and self._grad_fn is not None:
-        grads = self._grad_fn.apply(gradient)  # Compute input gradients
+        grads = self._grad_fn.apply(gradient)  # Compute input gradients using vectorized ops
 
         for tensor, grad in zip(self._grad_fn.saved_tensors, grads):
             if isinstance(tensor, Tensor) and tensor.requires_grad and grad is not None:
                 tensor.backward(grad)  # Recursive call
 ```
 
-The recursion naturally handles arbitrarily deep networks. For a 100-layer network, calling `loss.backward()` triggers 100 recursive calls, one per layer, flowing gradients from output to input.
+The recursion naturally handles arbitrarily deep networks. For a 100-layer network, calling `loss.backward()` triggers 100 recursive calls, one per layer, flowing gradients from output to input. Note that while the graph traversal uses recursion, the gradient computations within each `apply()` method use vectorized NumPy operations for efficiency.
 
 The `gradient` parameter deserves attention. For scalar losses (the typical case), you call `loss.backward()` without arguments, and the method initializes the gradient to 1.0. This makes sense: `∂loss/∂loss = 1`. For non-scalar tensors, you must provide the gradient from the next layer explicitly.
 
@@ -335,6 +337,7 @@ class MatmulBackward(Function):
     For Z = A @ B:
     - Must store A and B during forward pass
     - Backward computes: grad_A = grad_Z @ B.T and grad_B = A.T @ grad_Z
+    - Uses vectorized NumPy operations (np.matmul, np.swapaxes)
     """
 
     def apply(self, grad_output):
@@ -342,19 +345,19 @@ class MatmulBackward(Function):
         grad_a = grad_b = None
 
         if a.requires_grad:
-            # Need B.T to compute grad_A
+            # Vectorized transpose and matmul (no explicit loops)
             b_T = np.swapaxes(b.data, -2, -1)
             grad_a = np.matmul(grad_output, b_T)
 
         if b.requires_grad:
-            # Need A.T to compute grad_B
+            # Vectorized operations for efficiency
             a_T = np.swapaxes(a.data, -2, -1)
             grad_b = np.matmul(a_T, grad_output)
 
         return grad_a, grad_b
 ```
 
-Notice that both `a` and `b` must be saved during forward pass. For large matrices, this storage cost dominates memory usage.
+Notice that both `a` and `b` must be saved during forward pass. For large matrices, this storage cost dominates memory usage. All gradient computations use vectorized NumPy operations, which are implemented in optimized C/Fortran code under the hood—no explicit Python loops are needed.
 
 ## Production Context
 
@@ -575,30 +578,13 @@ Implement SGD, Adam, and other optimization algorithms that use your autograd gr
 
 ## Get Started
 
-````{grid} 1 2 3 3
+```{admonition} Interactive Options
+:class: tip
 
-```{grid-item-card} 🚀 Launch Binder
-:link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/05_autograd/05_autograd.py
-:class-header: bg-light
-
-Run interactively in browser - no setup required
+- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/05_autograd/05_autograd.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/05_autograd/05_autograd.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/05_autograd/05_autograd.py)** - Browse the implementation code
 ```
-
-```{grid-item-card} ☁️ Open in Colab
-:link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/05_autograd/05_autograd.py
-:class-header: bg-light
-
-Use Google Colab for cloud compute
-```
-
-```{grid-item-card} 📄 View Source
-:link: https://github.com/mlsysbook/TinyTorch/blob/main/src/05_autograd/05_autograd.py
-:class-header: bg-light
-
-Browse the implementation code
-```
-
-````
 
 ```{admonition} Save Your Progress
 :class: warning

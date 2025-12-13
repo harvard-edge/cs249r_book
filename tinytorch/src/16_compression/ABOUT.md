@@ -119,7 +119,16 @@ KnowledgeDistillation(teacher_model, student_model, temperature=3.0, alpha=0.7)
 low_rank_approximate(weight_matrix, rank_ratio=0.5) -> Tuple[ndarray, ndarray, ndarray]
 ```
 
-Decompose weight matrix using SVD to reduce parameters. Returns `(U, S, V)` factors that reconstruct the approximation.
+**Parameters:**
+- `weight_matrix`: Weight matrix to compress (e.g., (512, 256) Linear layer weights)
+- `rank_ratio`: Fraction of original rank to keep (0.5 = keep 50% of singular values)
+
+**Returns:**
+- `U`: Left singular vectors (shape: m × k)
+- `S`: Singular values (shape: k)
+- `V`: Right singular vectors (shape: k × n)
+
+Where k = rank_ratio × min(m, n). Reconstruct approximation with `U @ diag(S) @ V`.
 
 ## Core Concepts
 
@@ -158,6 +167,21 @@ def magnitude_prune(model, sparsity=0.9):
 ```
 
 The elegance is in the percentile-based threshold. Setting `sparsity=0.9` means "remove the bottom 90% of weights by magnitude." NumPy's `percentile` function finds the exact value that splits the distribution, and then a binary mask zeros out everything below that threshold.
+
+To understand why this works, consider a typical weight distribution after training:
+
+```
+Weight Magnitudes (sorted):
+[0.001, 0.002, 0.003, ..., 0.085, 0.087, ..., 0.95, 1.2, 2.3, 3.1]
+ └──────────────── 90% ────────────────┘  └────── 10% ──────┘
+        Small, removable                    Large, important
+
+90th percentile = 0.087
+Threshold mask: magnitude >= 0.087
+Result: Keep only weights >= 0.087 (top 10%)
+```
+
+The critical insight is that weight distributions in trained networks are heavily skewed toward zero. Most weights contribute minimally, so removing them preserves the essential computation while dramatically reducing storage and compute.
 
 The memory impact is immediate. A model with 10 million parameters at 90% sparsity has only 1 million active weights. With sparse storage formats (like scipy's CSR matrix), this translates directly to 90% memory reduction. The compute savings come from skipping zero multiplications, though realizing this speedup requires sparse computation libraries.
 
@@ -215,6 +239,17 @@ def structured_prune(model, prune_ratio=0.5):
 
 The L2 norm `||W[:,i]||_2 = sqrt(sum(w_j^2))` measures the total magnitude of all weights in a channel. Channels with small L2 norms contribute less to the output because all their weights are small. Removing entire channels creates block sparsity that hardware can exploit through vectorized operations on the remaining dense channels.
 
+The key insight in structured pruning is that you remove entire computational units, not scattered weights. When you zero out channel `i` in layer `l`, you're eliminating:
+- All connections from that channel to the next layer (forward propagation)
+- All gradient computation for that channel (backward propagation)
+- The entire channel's activation storage (memory savings)
+
+This creates contiguous blocks of zeros that enable:
+1. **Memory coalescing**: Hardware accesses dense remaining channels sequentially
+2. **SIMD operations**: CPUs/GPUs process multiple channels in parallel
+3. **No indexing overhead**: Don't need sparse matrix formats to track zero locations
+4. **Cache efficiency**: Better spatial locality from accessing dense blocks
+
 The trade-off is clear: structured pruning achieves lower sparsity (typically 30-50%) than magnitude pruning (80-90%), but the sparsity it creates enables real hardware acceleration. On GPUs and specialized accelerators, structured sparsity can provide 2-3x speedup, while unstructured sparsity requires custom sparse kernels to see any speedup at all.
 
 ### Knowledge Distillation
@@ -254,13 +289,45 @@ Dividing logits by temperature before softmax spreads probability mass across cl
 
 The combined loss balances two objectives. The soft loss (with `alpha=0.7`) teaches the student to match the teacher's reasoning process. The hard loss (with `1-alpha=0.3`) ensures the student still learns correct classifications. This combination typically achieves 10x compression with only 2-5% accuracy loss.
 
-### Lottery Ticket Hypothesis
+### Low-Rank Approximation Theory
 
-The Lottery Ticket Hypothesis posits that dense neural networks contain sparse subnetworks (winning tickets) that can train to comparable accuracy when isolated at initialization. This suggests that pruning discovers rather than creates efficient networks, and that over-parameterization aids in finding these subnetworks through gradient descent.
+Weight matrices in neural networks often contain redundancy that can be captured through low-rank approximations. Singular Value Decomposition (SVD) provides the mathematically optimal way to approximate a matrix with fewer parameters while minimizing reconstruction error.
 
-Your magnitude pruning implementation creates these sparse networks by identifying the most important weights. The hypothesis explains why aggressive pruning (90% sparsity) maintains accuracy: you're revealing the winning ticket that was always present in the dense network.
+The core idea is matrix factorization. Instead of storing a full (512, 256) weight matrix with 131,072 parameters, you decompose it into smaller factors that capture the essential structure:
 
-The implications are profound for systems design. If winning tickets exist at initialization, you could potentially train sparse networks from scratch, saving memory and compute throughout training. However, finding these tickets reliably requires careful initialization and pruning schedules, areas of active research.
+```python
+def low_rank_approximate(weight_matrix, rank_ratio=0.5):
+    """Approximate weight matrix using SVD-based low-rank decomposition."""
+    m, n = weight_matrix.shape
+
+    # Perform SVD: W = U @ diag(S) @ V
+    U, S, V = np.linalg.svd(weight_matrix, full_matrices=False)
+
+    # Keep only top-k singular values
+    max_rank = min(m, n)
+    target_rank = max(1, int(rank_ratio * max_rank))
+
+    # Truncate to target rank
+    U_truncated = U[:, :target_rank]     # (m, k)
+    S_truncated = S[:target_rank]         # (k,)
+    V_truncated = V[:target_rank, :]      # (k, n)
+
+    return U_truncated, S_truncated, V_truncated
+```
+
+SVD identifies the most important "directions" in the weight matrix through singular values. Larger singular values capture more variance, so keeping only the top k values preserves most of the matrix's information while dramatically reducing parameters.
+
+For a (512, 256) matrix with rank_ratio=0.5:
+- Original: 512 × 256 = 131,072 parameters
+- Compressed: (512 × 128) + 128 + (128 × 256) = 98,432 parameters
+- Compression ratio: 1.33x (25% reduction)
+
+The compression ratio improves with larger matrices. For a (1024, 1024) matrix at rank_ratio=0.1:
+- Original: 1,048,576 parameters
+- Compressed: (1024 × 102) + 102 + (102 × 1024) = 209,046 parameters
+- Compression ratio: 5.0x (80% reduction)
+
+Low-rank approximation trades accuracy for size. The reconstruction error depends on the discarded singular values. Choosing the right rank_ratio balances compression and accuracy preservation.
 
 ### Compression Trade-offs
 
@@ -499,27 +566,16 @@ Implement caching and memoization strategies to eliminate redundant computations
 
 ## Get Started
 
-````{grid} 1 2 3 3
+```{admonition} Interactive Options
+:class: tip
 
-```{grid-item-card} 🚀 Launch Binder
-:link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/16_compression/16_compression.py
-:class-header: bg-light
-
-Run interactively in browser - no setup required
+- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/16_compression/16_compression.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/16_compression/16_compression.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/16_compression/16_compression.py)** - Browse the implementation code
 ```
 
-```{grid-item-card} ☁️ Open in Colab
-:link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/16_compression/16_compression.py
-:class-header: bg-light
+```{admonition} Save Your Progress
+:class: warning
 
-Use Google Colab for cloud compute
+Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 ```
-
-```{grid-item-card} 📄 View Source
-:link: https://github.com/mlsysbook/TinyTorch/blob/main/src/16_compression/16_compression.py
-:class-header: bg-light
-
-Browse the implementation code
-```
-
-````

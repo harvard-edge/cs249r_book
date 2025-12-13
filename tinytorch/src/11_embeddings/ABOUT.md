@@ -192,7 +192,7 @@ def forward(self, indices: Tensor) -> Tensor:
     return result
 ```
 
-The beauty is in the simplicity: `self.weight.data[indices.data.astype(int)]` uses NumPy's advanced indexing to look up multiple embeddings simultaneously. For input indices `[1, 42, 7]`, this single operation retrieves three vectors in one efficient step, automatically handling batched inputs of any shape.
+The beauty is in the simplicity: `self.weight.data[indices.data.astype(int)]` uses NumPy's advanced indexing (also called fancy indexing) to look up multiple embeddings simultaneously. For input indices `[1, 42, 7]`, this single operation retrieves rows 1, 42, and 7 from the weight matrix in one efficient step, automatically handling batched inputs of any shape. While conceptually equivalent to creating one-hot vectors and matrix multiplication, direct indexing is orders of magnitude faster and requires no intermediate allocations.
 
 ### Embedding Table Mechanics
 
@@ -229,7 +229,7 @@ self.position_embeddings = Tensor(
 )
 ```
 
-During forward pass, you add position vectors to token embeddings:
+During forward pass, you slice position embeddings and add them to token embeddings:
 
 ```python
 def forward(self, x: Tensor) -> Tensor:
@@ -237,16 +237,23 @@ def forward(self, x: Tensor) -> Tensor:
     batch_size, seq_len, embed_dim = x.shape
 
     # Slice position embeddings for this sequence length
+    # Tensor slicing preserves gradient flow (from Module 01's __getitem__)
     pos_embeddings = self.position_embeddings[:seq_len]
 
     # Reshape to add batch dimension: (1, seq_len, embed_dim)
     pos_data = pos_embeddings.data[np.newaxis, :, :]
     pos_embeddings_batched = Tensor(pos_data, requires_grad=pos_embeddings.requires_grad)
 
-    # Add positional information - gradients flow through both!
+    # Copy gradient function to preserve backward connection
+    if hasattr(pos_embeddings, '_grad_fn') and pos_embeddings._grad_fn is not None:
+        pos_embeddings_batched._grad_fn = pos_embeddings._grad_fn
+
+    # Add positional information - gradients flow through both x and pos_embeddings!
     result = x + pos_embeddings_batched
     return result
 ```
+
+The slicing operation `self.position_embeddings[:seq_len]` preserves gradient tracking because TinyTorch's Tensor `__getitem__` (from Module 01) maintains the connection to the original parameter. This allows backpropagation to update only the position embeddings actually used in the forward pass.
 
 The advantage is flexibility: the model can learn task-specific positional patterns. The disadvantage is memory cost and a hard maximum sequence length.
 
@@ -288,6 +295,8 @@ PE(pos, 2i+1) = cos(pos / 10000^(2i/embed_dim))  # Odd dimensions
 The `10000` base creates different wavelengths across dimensions. Dimension 0 oscillates rapidly (frequency ≈ 1), while dimension 510 changes extremely slowly (frequency ≈ 1/10000). This multi-scale structure gives each position a unique "fingerprint" and enables the model to learn relative position through simple vector arithmetic.
 
 At position 0, all sine terms equal 0 and all cosine terms equal 1: `[0, 1, 0, 1, 0, 1, ...]`. At position 1, the pattern shifts based on each dimension's frequency. The combination of many frequencies creates distinct encodings where nearby positions have similar (but not identical) vectors, providing smooth positional gradients.
+
+The trigonometric identity enables learning relative positions: `PE(pos+k)` can be expressed as a linear function of `PE(pos)` using sine and cosine addition formulas. This allows attention mechanisms to implicitly learn positional offsets (like "the token 3 positions ahead") through learned weights on the position encodings, without the model needing separate relative position parameters.
 
 ### Embedding Dimension Trade-offs
 
@@ -607,30 +616,13 @@ Implement attention mechanisms that let embeddings interact with each other. You
 
 ## Get Started
 
-````{grid} 1 2 3 3
+```{admonition} Interactive Options
+:class: tip
 
-```{grid-item-card} 🚀 Launch Binder
-:link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/11_embeddings/11_embeddings.py
-:class-header: bg-light
-
-Run interactively in browser - no setup required
+- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/11_embeddings/11_embeddings.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/11_embeddings/11_embeddings.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/11_embeddings/11_embeddings.py)** - Browse the implementation code
 ```
-
-```{grid-item-card} ☁️ Open in Colab
-:link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/11_embeddings/11_embeddings.py
-:class-header: bg-light
-
-Use Google Colab for cloud compute
-```
-
-```{grid-item-card} 📄 View Source
-:link: https://github.com/mlsysbook/TinyTorch/blob/main/src/11_embeddings/11_embeddings.py
-:class-header: bg-light
-
-Browse the implementation code
-```
-
-````
 
 ```{admonition} Save Your Progress
 :class: warning

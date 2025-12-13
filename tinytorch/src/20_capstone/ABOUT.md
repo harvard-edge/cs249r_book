@@ -3,11 +3,11 @@
 **OPTIMIZATION TIER** | Difficulty: ●●●● (4/4) | Time: 6-8 hours | Prerequisites: All modules (01-19)
 
 **Prerequisites: All modules** means you've built a complete ML framework. This capstone assumes:
-- Complete TinyTorch framework (Modules 01-13)
-- Optimization techniques (Modules 14-18)
-- Benchmarking methodology (Module 19)
+- Complete TinyTorch framework (Modules 01-13) - **Required**
+- Optimization techniques (Modules 14-18) - **Optional but recommended**
+- Benchmarking methodology (Module 19) - **Required**
 
-If you've completed all 19 modules, you're ready for this final integration challenge.
+The core benchmarking functionality (Parts 1-4) works with just Modules 01-13 and 19. Modules 14-18 enable the advanced optimization workflow (Part 4b), which demonstrates how to integrate all TinyTorch components. If optimization modules aren't available, the system gracefully degrades to baseline benchmarking only.
 
 ## Overview
 
@@ -123,6 +123,32 @@ Creates a benchmark report instance that measures and stores model performance m
 | `generate_submission` | `generate_submission(baseline_report, optimized_report=None, ...) -> dict` | Creates standardized JSON with baseline, optimized, improvements |
 | `save_submission` | `save_submission(submission, filepath="submission.json") -> str` | Writes JSON to file with validation |
 | `validate_submission_schema` | `validate_submission_schema(submission) -> bool` | Validates structure and value ranges |
+
+### Module Dependencies and Imports
+
+This capstone integrates components from across TinyTorch:
+
+**Core dependencies (required):**
+```python
+from tinytorch.core.tensor import Tensor
+from tinytorch.core.layers import Linear
+from tinytorch.core.activations import ReLU
+from tinytorch.core.losses import CrossEntropyLoss
+```
+
+**Optimization modules (optional):**
+```python
+# These imports use try/except blocks for graceful degradation
+try:
+    from tinytorch.perf.profiling import Profiler, quick_profile
+    from tinytorch.perf.compression import magnitude_prune, structured_prune
+    from tinytorch.benchmarking import Benchmark, BenchmarkResult
+except ImportError:
+    # Core benchmarking still works without optimization modules
+    pass
+```
+
+The advanced optimization workflow (Part 4b) demonstrates these optional integrations, but the core benchmarking system (Parts 1-4) works with just the foundation modules (01-13) and basic benchmarking (19).
 
 ## Core Concepts
 
@@ -592,30 +618,13 @@ You've built a complete ML framework from scratch—from basic tensors to produc
 
 ## Get Started
 
-````{grid} 1 2 3 3
+```{admonition} Interactive Options
+:class: tip
 
-```{grid-item-card} 🚀 Launch Binder
-:link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/20_capstone/20_capstone.py
-:class-header: bg-light
-
-Run interactively in browser - no setup required
+- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/20_capstone/20_capstone.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/20_capstone/20_capstone.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/20_capstone/20_capstone.py)** - Browse the implementation code
 ```
-
-```{grid-item-card} ☁️ Open in Colab
-:link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/20_capstone/20_capstone.py
-:class-header: bg-light
-
-Use Google Colab for cloud compute
-```
-
-```{grid-item-card} 📄 View Source
-:link: https://github.com/mlsysbook/TinyTorch/blob/main/src/20_capstone/20_capstone.py
-:class-header: bg-light
-
-Browse the implementation code
-```
-
-````
 
 ```{admonition} Save Your Progress
 :class: warning

@@ -22,7 +22,7 @@ By the end, your spatial operations will enable convolutional neural networks (C
 ```{admonition} By completing this module, you will:
 :class: tip
 
-- **Implement** Conv2d with explicit 6-nested loops revealing O(B×C×H×W×K²) computational complexity
+- **Implement** Conv2d with explicit 7-nested loops revealing O(B×C×H×W×K²×C_in) computational complexity
 - **Master** spatial dimension calculations with stride, padding, and kernel size interactions
 - **Understand** receptive fields, parameter sharing, and translation equivariance in CNNs
 - **Analyze** memory vs computation trade-offs: pooling reduces spatial dimensions 4x while preserving features
@@ -57,7 +57,7 @@ flowchart LR
 | Part | What You'll Implement | Key Concept |
 |------|----------------------|-------------|
 | 1 | `Conv2d.__init__()` | He initialization for ReLU networks |
-| 2 | `Conv2d.forward()` | 6-nested loops for spatial convolution |
+| 2 | `Conv2d.forward()` | 7-nested loops for spatial convolution |
 | 3 | `MaxPool2d.forward()` | Maximum selection in sliding windows |
 | 4 | `AvgPool2d.forward()` | Average pooling for smooth features |
 
@@ -167,7 +167,7 @@ def forward(self, x):
     # Initialize output
     output = np.zeros((batch_size, out_channels, out_height, out_width))
 
-    # Explicit 6-nested loop convolution
+    # Explicit 7-nested loop convolution
     for b in range(batch_size):
         for out_ch in range(out_channels):
             for out_h in range(out_height):
@@ -188,7 +188,7 @@ def forward(self, x):
                     output[b, out_ch, out_h, out_w] = conv_sum
 ```
 
-The six nested loops reveal where the computational cost comes from. For a typical CNN layer processing a batch of 32 RGB images (224×224) with 64 output channels and 3×3 kernels, this structure executes **2.8 billion multiply-accumulate operations** per forward pass. This is why optimized implementations matter.
+The seven nested loops reveal where the computational cost comes from. For a typical CNN layer processing a batch of 32 RGB images (224×224) with 64 output channels and 3×3 kernels, this structure executes **2.8 billion multiply-accumulate operations** per forward pass. This is why optimized implementations matter.
 
 Each output pixel summarizes information from a local neighborhood in the input. A 3×3 convolution looks at 9 pixels to produce each output value, enabling the network to detect local patterns like edges, corners, and textures.
 
@@ -668,30 +668,13 @@ Shift from spatial processing (images) to sequential processing (text). You'll i
 
 ## Get Started
 
-````{grid} 1 2 3 3
+```{admonition} Interactive Options
+:class: tip
 
-```{grid-item-card} 🚀 Launch Binder
-:link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/09_spatial/09_spatial.py
-:class-header: bg-light
-
-Run interactively in browser - no setup required
+- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/09_spatial/09_spatial.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/09_spatial/09_spatial.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/09_spatial/09_spatial.py)** - Browse the implementation code
 ```
-
-```{grid-item-card} ☁️ Open in Colab
-:link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/09_spatial/09_spatial.py
-:class-header: bg-light
-
-Use Google Colab for cloud compute
-```
-
-```{grid-item-card} 📄 View Source
-:link: https://github.com/mlsysbook/TinyTorch/blob/main/src/09_spatial/09_spatial.py
-:class-header: bg-light
-
-Browse the implementation code
-```
-
-````
 
 ```{admonition} Save Your Progress
 :class: warning

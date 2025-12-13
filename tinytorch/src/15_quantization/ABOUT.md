@@ -499,27 +499,16 @@ Implement model pruning and weight compression techniques. You'll build structur
 
 ## Get Started
 
-````{grid} 1 2 3 3
+```{admonition} Interactive Options
+:class: tip
 
-```{grid-item-card} 🚀 Launch Binder
-:link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/15_quantization/15_quantization.py
-:class-header: bg-light
-
-Run interactively in browser - no setup required
+- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/15_quantization/15_quantization.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/15_quantization/15_quantization.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/15_quantization/15_quantization.py)** - Browse the implementation code
 ```
 
-```{grid-item-card} ☁️ Open in Colab
-:link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/15_quantization/15_quantization.py
-:class-header: bg-light
+```{admonition} Save Your Progress
+:class: warning
 
-Use Google Colab for cloud compute
+Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 ```
-
-```{grid-item-card} 📄 View Source
-:link: https://github.com/mlsysbook/TinyTorch/blob/main/src/15_quantization/15_quantization.py
-:class-header: bg-light
-
-Browse the implementation code
-```
-
-````

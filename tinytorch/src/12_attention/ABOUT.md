@@ -15,14 +15,14 @@ If you can explain why `softmax(x).sum(axis=-1)` equals 1.0 and how embeddings c
 
 The attention mechanism revolutionized deep learning by solving a fundamental problem: how can models focus on relevant information when processing sequences? Before attention, models like RNNs compressed entire sequences into fixed-size hidden states, creating an information bottleneck. Attention changes this by allowing every position in a sequence to directly access information from every other position, weighted by relevance.
 
-You'll build scaled dot-product attention and multi-head attention from scratch, the exact mechanisms powering GPT, BERT, and modern transformers. By implementing the core formula `Attention(Q, K, V) = softmax(QK^T / √d_k) V` with explicit loops, you'll witness the O(n²) complexity that makes attention both powerful and challenging at scale. This hands-on implementation reveals why research into efficient attention variants like FlashAttention is crucial for production systems.
+You'll build scaled dot-product attention and multi-head attention from scratch, the exact mechanisms powering GPT, BERT, and modern transformers. By implementing the core formula `Attention(Q, K, V) = softmax(QK^T / √d_k) V` with vectorized matrix operations, you'll witness the O(n²) memory complexity that makes attention both powerful and challenging at scale. This hands-on implementation reveals why research into efficient attention variants like FlashAttention is crucial for production systems.
 
 ## Learning Objectives
 
 ```{admonition} By completing this module, you will:
 :class: tip
 
-- **Implement** scaled dot-product attention with explicit O(n²) complexity demonstration through nested loops
+- **Implement** scaled dot-product attention with vectorized operations that reveal O(n²) memory complexity
 - **Build** multi-head attention for parallel processing of different relationship types across representation subspaces
 - **Master** attention weight computation, normalization, and the query-key-value paradigm
 - **Understand** quadratic memory scaling and why attention becomes the bottleneck in long-context transformers
@@ -163,22 +163,24 @@ The core attention computation answers a simple question: how similar is each qu
 
 But raw dot products grow with embedding dimension, creating numerical instability in softmax. With 512-dimensional embeddings, dot products can reach hundreds, causing softmax to saturate (output probabilities near 0 or 1 with tiny gradients). Scaling by `1/√d_k` normalizes the variance, keeping values in a stable range regardless of embedding dimension.
 
-Your implementation computes this efficiently using matrix multiplication:
+Your implementation computes this using vectorized matrix operations:
 
 ```python
-# From scaled_dot_product_attention
+# From scaled_dot_product_attention (lines 303-319)
 d_model = Q.shape[-1]
 
-# Compute all query-key similarities at once: O(n²) operation
+# Compute all query-key similarities at once using matmul
+# This is mathematically equivalent to nested loops computing Q[i] · K[j]
+# for all i,j pairs, but vectorized for efficiency
 K_t = K.transpose(-2, -1)  # Transpose to align dimensions
-scores = Q.matmul(K_t)     # (batch, seq_len, seq_len)
+scores = Q.matmul(K_t)     # (batch, seq_len, seq_len) - the O(n²) matrix
 
 # Scale by 1/√d_k for numerical stability
 scale_factor = 1.0 / math.sqrt(d_model)
 scores = scores * scale_factor
 ```
 
-The resulting `scores` tensor is the attention matrix before normalization. Element `[i,j]` represents how much position i should attend to position j. The matrix multiplication handles all n² query-key pairs simultaneously, which is computationally efficient but explains attention's quadratic memory cost.
+The resulting `scores` tensor is the attention matrix before normalization. Element `[i,j]` represents how much position i should attend to position j. The vectorized `matmul` operation computes all n² query-key pairs simultaneously—while much faster than Python loops, it still creates the full O(n²) attention matrix that dominates memory usage at scale.
 
 ### Attention Weights and Softmax Normalization
 
@@ -264,7 +266,7 @@ When combined with the masking logic in attention (adding -1e9 to masked scores 
 
 ### Computational Complexity: The O(n²) Reality
 
-Attention's power comes from all-to-all connectivity: every position can attend to every other position. But this creates quadratic scaling in both computation and memory. For sequence length n, the attention matrix has n² elements. Computing it requires n² dot products, softmax normalizes n² values, and applying it to values uses n² weights.
+Attention's power comes from all-to-all connectivity: every position can attend to every other position. But this creates quadratic scaling in both computation and memory. For sequence length n, the attention matrix has n² elements. The vectorized `Q @ K^T` operation computes all n² similarity scores in one matrix multiplication, softmax normalizes n² values, and applying attention to values multiplies n² weights by the value vectors.
 
 The memory cost is particularly severe. For GPT-3 with 2048-token context, a single attention matrix stores 2048² = 4,194,304 float32 values, requiring 16 MB. With 96 layers, attention matrices alone need 1.5 GB, excluding activations, gradients, and other tensors. This quadratic wall is why long-context AI remains an active research challenge.
 
@@ -474,14 +476,14 @@ Why use 8 heads of 64 dimensions instead of 1 head of 512 dimensions? Parameters
 :class: dropdown
 
 **Parameter count (both are identical):**
-- 8 heads × 64 dims: Linear(512→512) for Q, K, V, Out = 4 × (512×512) = 1,048,576
-- 1 head × 512 dims: Same projections = 1,048,576
+- 8 heads × 64 dims: Linear(512→512) for Q, K, V, Out = 4 × (512×512 + 512) weights+biases
+- 1 head × 512 dims: Same projection parameters
 
 **Key differences:**
 
 **1. Parallelization:**
 - 8 heads can process in parallel on modern GPUs (separate CUDA streams)
-- 1 head must process sequentially
+- Each head's smaller matmul operations utilize GPU cores more efficiently
 
 **2. Representation diversity:**
 - 8 heads learn 8 different similarity functions (syntax, semantics, position, etc.)
@@ -602,30 +604,13 @@ Build complete transformer blocks by combining your attention mechanism with fee
 
 ## Get Started
 
-````{grid} 1 2 3 3
+```{admonition} Interactive Options
+:class: tip
 
-```{grid-item-card} 🚀 Launch Binder
-:link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/12_attention/12_attention.py
-:class-header: bg-light
-
-Run interactively in browser - no setup required
+- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/12_attention/12_attention.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/12_attention/12_attention.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/12_attention/12_attention.py)** - Browse the implementation code
 ```
-
-```{grid-item-card} ☁️ Open in Colab
-:link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/12_attention/12_attention.py
-:class-header: bg-light
-
-Use Google Colab for cloud compute
-```
-
-```{grid-item-card} 📄 View Source
-:link: https://github.com/mlsysbook/TinyTorch/blob/main/src/12_attention/12_attention.py
-:class-header: bg-light
-
-Browse the implementation code
-```
-
-````
 
 ```{admonition} Save Your Progress
 :class: warning

@@ -148,7 +148,7 @@ Core benchmarking engine for single-metric evaluation across multiple models.
 ### BenchmarkSuite Class
 
 ```python
-BenchmarkSuite(models: List[Any], datasets: List[Any] = None, output_dir: str = "benchmark_results")
+BenchmarkSuite(models: List[Any], datasets: List[Any], output_dir: str = "benchmark_results")
 ```
 
 Comprehensive multi-metric evaluation suite for generating Pareto frontiers and optimization trade-off analysis.
@@ -431,7 +431,7 @@ The following shows equivalent benchmarking patterns in TinyTorch and production
 `````{tab-set}
 ````{tab-item} Your Tiny🔥Torch
 ```python
-from tinytorch.benchmarking.benchmark import Benchmark
+from tinytorch.benchmarking import Benchmark
 
 # Setup models and benchmark
 benchmark = Benchmark(
@@ -627,30 +627,13 @@ Apply everything you have learned in Modules 01-19 to compete in the TorchPerf O
 
 ## Get Started
 
-````{grid} 1 2 3 3
+```{admonition} Interactive Options
+:class: tip
 
-```{grid-item-card} 🚀 Launch Binder
-:link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/19_benchmarking/19_benchmarking.py
-:class-header: bg-light
-
-Run interactively in browser - no setup required
+- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/19_benchmarking/19_benchmarking.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/19_benchmarking/19_benchmarking.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/19_benchmarking/19_benchmarking.py)** - Browse the implementation code
 ```
-
-```{grid-item-card} ☁️ Open in Colab
-:link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/19_benchmarking/19_benchmarking.py
-:class-header: bg-light
-
-Use Google Colab for cloud compute
-```
-
-```{grid-item-card} 📄 View Source
-:link: https://github.com/mlsysbook/TinyTorch/blob/main/src/19_benchmarking/19_benchmarking.py
-:class-header: bg-light
-
-Browse the implementation code
-```
-
-````
 
 ```{admonition} Save Your Progress
 :class: warning

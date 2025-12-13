@@ -98,7 +98,7 @@ Initializes profiler with measurement tracking structures.
 | Method | Signature | Description |
 |--------|-----------|-------------|
 | `count_parameters` | `count_parameters(model) -> int` | Count total trainable parameters |
-| `count_flops` | `count_flops(model, input_shape) -> int` | Count FLOPs for one forward pass |
+| `count_flops` | `count_flops(model, input_shape) -> int` | Count FLOPs per sample (batch-size independent) |
 | `measure_memory` | `measure_memory(model, input_shape) -> Dict` | Measure memory usage components |
 | `measure_latency` | `measure_latency(model, input_tensor, warmup, iterations) -> float` | Measure inference latency in milliseconds |
 
@@ -248,7 +248,7 @@ The following comparison shows equivalent profiling operations in TinyTorch and 
 `````{tab-set}
 ````{tab-item} Your Tiny🔥Torch
 ```python
-from tinytorch.profiling import Profiler
+from tinytorch.perf.profiling import Profiler
 
 # Create profiler
 profiler = Profiler()
@@ -338,16 +338,18 @@ This is just the feed-forward networks. Attention adds more parameters.
 
 **Q2: FLOP Counting and Computational Cost**
 
-A Linear(512, 512) layer processes a batch of 64 samples. How many FLOPs are required? If your CPU achieves 50 GFLOP/s, what's the minimum latency?
+A Linear(512, 512) layer processes a batch of 64 samples. Your profiler's `count_flops()` method returns FLOPs per sample (batch-size independent). How many FLOPs are required for one sample? For the whole batch, if each sample is processed independently?
 
 ```{admonition} Answer
 :class: dropdown
 
-FLOPs per sample: 512 × 512 × 2 = 524,288 FLOPs
+Per-sample FLOPs (what `count_flops()` returns): 512 × 512 × 2 = **524,288 FLOPs**
 
-Total FLOPs: 64 × 524,288 = 33,554,432 FLOPs
+Note: The `count_flops()` method is batch-size independent. It returns per-sample FLOPs whether you pass input_shape=(1, 512) or (64, 512).
 
-Minimum latency: 33,554,432 FLOPs ÷ 50 GFLOP/s = 33.55M ÷ 50B/s = **0.67 ms**
+If processing a batch of 64 samples: 64 × 524,288 = 33,554,432 total FLOPs
+
+Minimum latency at 50 GFLOP/s: 33,554,432 FLOPs ÷ 50 GFLOP/s = **0.67 ms** for the full batch
 
 This assumes perfect computational efficiency (100%). Real latency is higher due to memory bandwidth and overhead.
 ```
@@ -433,27 +435,16 @@ Implement quantization to reduce model size and accelerate inference. You'll use
 
 ## Get Started
 
-````{grid} 1 2 3 3
+```{admonition} Interactive Options
+:class: tip
 
-```{grid-item-card} 🚀 Launch Binder
-:link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/14_profiling/14_profiling.py
-:class-header: bg-light
-
-Run interactively in browser - no setup required
+- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/14_profiling/14_profiling.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/14_profiling/14_profiling.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/14_profiling/14_profiling.py)** - Browse the implementation code
 ```
 
-```{grid-item-card} ☁️ Open in Colab
-:link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/14_profiling/14_profiling.py
-:class-header: bg-light
+```{admonition} Save Your Progress
+:class: warning
 
-Use Google Colab for cloud compute
+Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 ```
-
-```{grid-item-card} 📄 View Source
-:link: https://github.com/mlsysbook/TinyTorch/blob/main/src/14_profiling/14_profiling.py
-:class-header: bg-light
-
-Browse the implementation code
-```
-
-````

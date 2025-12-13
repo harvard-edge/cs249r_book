@@ -81,6 +81,18 @@ To keep this module focused, you will **not** implement:
 
 This section documents the transformer components you'll implement. Each class builds on the previous, culminating in a complete language model.
 
+### Helper Functions
+
+#### create_causal_mask
+
+```python
+create_causal_mask(seq_len: int) -> Tensor
+```
+
+Creates a causal (autoregressive) attention mask that prevents positions from attending to future positions. Returns a lower triangular matrix where position `i` can only attend to positions `j ≤ i`.
+
+**Returns**: Tensor of shape `(1, seq_len, seq_len)` with 1.0 for allowed positions, 0.0 for masked positions.
+
 ### LayerNorm
 
 ```python
@@ -132,15 +144,16 @@ Complete transformer block with self-attention, MLP, layer normalization, and re
 GPT(vocab_size: int, embed_dim: int, num_layers: int, num_heads: int, max_seq_len: int = 1024) -> GPT
 ```
 
-Complete GPT model for autoregressive language modeling with token embeddings, positional encoding, stacked transformer blocks, and generation capability.
+Complete GPT model for autoregressive language modeling with token embeddings, positional encoding, stacked transformer blocks, and generation capability. The architecture combines token and positional embeddings, processes through multiple transformer blocks with causal masking, applies final layer normalization, and projects to vocabulary logits.
 
 **Core Methods:**
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `forward` | `forward(tokens: Tensor) -> Tensor` | Compute vocabulary logits for each position |
-| `generate` | `generate(prompt_tokens: Tensor, max_new_tokens: int = 50, temperature: float = 1.0) -> Tensor` | Autoregressively generate text |
-| `parameters` | `parameters() -> List[Tensor]` | Returns all model parameters |
+| `forward` | `forward(tokens: Tensor) -> Tensor` | Compute vocabulary logits for each position with causal masking |
+| `generate` | `generate(prompt_tokens: Tensor, max_new_tokens: int = 50, temperature: float = 1.0) -> Tensor` | Autoregressively generate text using temperature-controlled sampling |
+| `parameters` | `parameters() -> List[Tensor]` | Returns all model parameters from embeddings, blocks, and output head |
+| `_create_causal_mask` | `_create_causal_mask(seq_len: int) -> Tensor` | Internal method creating upper triangular mask for autoregressive attention |
 
 ## Core Concepts
 
@@ -265,9 +278,23 @@ The transformer block is where all components unite into a coherent processing u
 class TransformerBlock:
     def __init__(self, embed_dim, num_heads, mlp_ratio=4):
         self.attention = MultiHeadAttention(embed_dim, num_heads)
-        self.ln1 = LayerNorm(embed_dim)
-        self.ln2 = LayerNorm(embed_dim)
-        self.mlp = MLP(embed_dim, int(embed_dim * mlp_ratio))
+        self.ln1 = LayerNorm(embed_dim)  # Before attention
+        self.ln2 = LayerNorm(embed_dim)  # Before MLP
+        hidden_dim = int(embed_dim * mlp_ratio)
+        self.mlp = MLP(embed_dim, hidden_dim)
+
+    def forward(self, x, mask=None):
+        # First sub-layer: attention with residual
+        normed1 = self.ln1.forward(x)
+        attention_out = self.attention.forward(normed1, mask)
+        x = x + attention_out  # Residual connection
+
+        # Second sub-layer: MLP with residual
+        normed2 = self.ln2.forward(x)
+        mlp_out = self.mlp.forward(normed2)
+        output = x + mlp_out  # Residual connection
+
+        return output
 ```
 
 The data flow creates a residual stream that accumulates information. Input embeddings enter the first block and flow through attention (adding relationship information) and MLP (adding transformation), then continue to the next block. By the final block, the residual stream contains the original embeddings plus contributions from every attention and MLP sub-layer in the stack.
@@ -276,7 +303,7 @@ This residual stream perspective explains why transformers can be trained to hun
 
 ### Parameter Scaling and Memory Requirements
 
-Understanding parameter distribution and memory requirements is essential for designing and deploying transformers. Parameters scale roughly quadratically with embedding dimension, while attention memory scales quadratically with sequence length.
+Understanding parameter distribution and memory requirements is essential for designing and deploying transformers. Parameters scale roughly quadratically with embedding dimension, while attention memory scales quadratically with sequence length. These scaling laws determine the feasibility of training and deploying transformer models.
 
 For a single transformer block with `embed_dim = 512` and `num_heads = 8`:
 
@@ -549,30 +576,13 @@ Profile your transformer to identify performance bottlenecks. You'll learn to me
 
 ## Get Started
 
-````{grid} 1 2 3 3
+```{admonition} Interactive Options
+:class: tip
 
-```{grid-item-card} 🚀 Launch Binder
-:link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/13_transformers/13_transformers.py
-:class-header: bg-light
-
-Run interactively in browser - no setup required
+- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/13_transformers/13_transformers.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/13_transformers/13_transformers.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/13_transformers/13_transformers.py)** - Browse the implementation code
 ```
-
-```{grid-item-card} ☁️ Open in Colab
-:link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/13_transformers/13_transformers.py
-:class-header: bg-light
-
-Use Google Colab for cloud compute
-```
-
-```{grid-item-card} 📄 View Source
-:link: https://github.com/mlsysbook/TinyTorch/blob/main/src/13_transformers/13_transformers.py
-:class-header: bg-light
-
-Browse the implementation code
-```
-
-````
 
 ```{admonition} Save Your Progress
 :class: warning

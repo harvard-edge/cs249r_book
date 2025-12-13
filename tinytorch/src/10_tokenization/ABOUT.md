@@ -113,6 +113,7 @@ CharTokenizer(vocab: Optional[List[str]] = None)
 - `vocab_size`: Total number of unique characters + special tokens
 - `char_to_id`: Mapping from characters to IDs
 - `id_to_char`: Mapping from IDs to characters
+- `unk_id`: ID for unknown characters (always 0)
 
 ### BPETokenizer
 
@@ -127,6 +128,14 @@ BPETokenizer(vocab_size: int = 1000)
 | `train` | `train(corpus: List[str], vocab_size: int = None) -> None` | Learn BPE merges from corpus |
 | `encode` | `encode(text: str) -> List[int]` | Convert text to subword token IDs |
 | `decode` | `decode(tokens: List[int]) -> str` | Convert token IDs back to text |
+
+**Helper Methods:**
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `_get_word_tokens` | `_get_word_tokens(word: str) -> List[str]` | Convert word to character list with end-of-word marker |
+| `_get_pairs` | `_get_pairs(word_tokens: List[str]) -> Set[Tuple[str, str]]` | Extract all adjacent character pairs |
+| `_apply_merges` | `_apply_merges(tokens: List[str]) -> List[str]` | Apply learned merge rules to token sequence |
+| `_build_mappings` | `_build_mappings() -> None` | Build token-to-ID and ID-to-token dictionaries |
 
 **Properties:**
 - `vocab`: List of tokens (characters + learned merges)
@@ -588,30 +597,13 @@ Convert your token IDs into learnable dense vector representations. You'll imple
 
 ## Get Started
 
-````{grid} 1 2 3 3
+```{admonition} Interactive Options
+:class: tip
 
-```{grid-item-card} 🚀 Launch Binder
-:link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/10_tokenization/10_tokenization.py
-:class-header: bg-light
-
-Run interactively in browser - no setup required
+- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/10_tokenization/10_tokenization.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/10_tokenization/10_tokenization.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/10_tokenization/10_tokenization.py)** - Browse the implementation code
 ```
-
-```{grid-item-card} ☁️ Open in Colab
-:link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/10_tokenization/10_tokenization.py
-:class-header: bg-light
-
-Use Google Colab for cloud compute
-```
-
-```{grid-item-card} 📄 View Source
-:link: https://github.com/mlsysbook/TinyTorch/blob/main/src/10_tokenization/10_tokenization.py
-:class-header: bg-light
-
-Browse the implementation code
-```
-
-````
 
 ```{admonition} Save Your Progress
 :class: warning

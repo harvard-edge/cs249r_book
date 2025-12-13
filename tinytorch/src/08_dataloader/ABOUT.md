@@ -130,8 +130,31 @@ Wraps a dataset to provide batched iteration with optional shuffling.
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `__len__()` | `int` | Number of batches (ceiling of samples divided by batch_size) |
-| `__iter__()` | `Iterator` | Returns iterator yielding batched tensors |
+| `__iter__()` | `Iterator` | Returns generator yielding batched tensors |
 | `_collate_batch(batch)` | `Tuple[Tensor, ...]` | Stacks list of samples into batch tensors |
+
+### Data Augmentation Transforms
+
+```python
+RandomHorizontalFlip(p=0.5)
+RandomCrop(size, padding=4)
+Compose(transforms)
+```
+
+Transform classes for data augmentation during training. Applied to individual samples before batching.
+
+**RandomHorizontalFlip:**
+- `p`: Probability of flipping (0.0 to 1.0)
+- Flips images horizontally along width axis with given probability
+
+**RandomCrop:**
+- `size`: Target crop size (int for square, tuple for (H, W))
+- `padding`: Pixels to pad on each side before cropping
+- Standard augmentation for CIFAR-10: pads to 40×40, crops back to 32×32
+
+**Compose:**
+- `transforms`: List of transform callables to apply sequentially
+- Chains multiple transforms into a pipeline
 
 ## Core Concepts
 
@@ -229,17 +252,38 @@ Each epoch generates a fresh shuffle, so the same samples appear in different ba
 
 The memory cost of shuffling is `8 bytes × dataset_size`. For 1 million samples, that's 8 MB, negligible compared to the actual data. The time cost is O(n) for generating and shuffling indices, which happens once per epoch, not per batch.
 
-### Iterator Protocol
+### Iterator Protocol and Generator Pattern
 
 Python's iterator protocol enables `for batch in dataloader` syntax. When Python encounters this loop, it first calls `dataloader.__iter__()` to get an iterator object. Your `__iter__` method is a generator function (contains `yield`), so Python automatically creates a generator that produces values lazily.
 
-Each time the loop needs the next batch, Python calls `next()` on the generator, which executes `__iter__` until the next `yield` statement. The generator pauses at yield, returns the batch, then resumes when next() is called again.
+Here's the complete implementation showing the generator pattern:
+
+```python
+def __iter__(self) -> Iterator:
+    """Return iterator over batches."""
+    # Create list of indices
+    indices = list(range(len(self.dataset)))
+
+    # Shuffle if requested
+    if self.shuffle:
+        random.shuffle(indices)
+
+    # Yield batches - this is a generator function
+    for i in range(0, len(indices), self.batch_size):
+        batch_indices = indices[i:i + self.batch_size]
+        batch = [self.dataset[idx] for idx in batch_indices]
+
+        # Collate batch
+        yield self._collate_batch(batch)
+```
+
+Each time the loop needs the next batch, Python calls `next()` on the generator, which executes `__iter__` until the next `yield` statement. The generator pauses at yield, returns the batch, then resumes when next() is called again. This is a generator function, not a regular function that returns an iterator object.
 
 This lazy evaluation is crucial for memory efficiency. At any moment, only the current batch exists in memory. The previous batch has been freed (assuming the training code doesn't hold references), and future batches haven't been created yet.
 
-Consider iterating through 1,000 batches of 32 images each. If you pre-generated all batches, you'd need memory for 32,000 images simultaneously. With the iterator protocol, you only need memory for 32 images at a time, a 1,000× reduction.
+Consider iterating through 1,000 batches of 32 images each. If you pre-generated all batches, you'd need memory for 32,000 images simultaneously. With the generator protocol, you only need memory for 32 images at a time, a 1,000× reduction.
 
-The iterator also enables infinite datasets. If your dataset generates samples on-demand (synthetic data), the iterator can yield batches forever without running out. The training loop controls when to stop, not the dataset.
+The generator also enables infinite datasets. If your dataset generates samples on-demand (synthetic data), the generator can yield batches forever without running out. The training loop controls when to stop, not the dataset.
 
 ### Memory-Efficient Loading
 
@@ -568,27 +612,16 @@ Implement Conv2d, MaxPool2d, and Flatten layers to build convolutional neural ne
 
 ## Get Started
 
-````{grid} 1 2 3 3
+```{admonition} Interactive Options
+:class: tip
 
-```{grid-item-card} 🚀 Launch Binder
-:link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/08_dataloader/08_dataloader.py
-:class-header: bg-light
-
-Run interactively in browser - no setup required
+- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/08_dataloader/08_dataloader.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/08_dataloader/08_dataloader.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/08_dataloader/08_dataloader.py)** - Browse the implementation code
 ```
 
-```{grid-item-card} ☁️ Open in Colab
-:link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/08_dataloader/08_dataloader.py
-:class-header: bg-light
+```{admonition} Save Your Progress
+:class: warning
 
-Use Google Colab for cloud compute
+Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 ```
-
-```{grid-item-card} 📄 View Source
-:link: https://github.com/mlsysbook/TinyTorch/blob/main/src/08_dataloader/08_dataloader.py
-:class-header: bg-light
-
-Browse the implementation code
-```
-
-````

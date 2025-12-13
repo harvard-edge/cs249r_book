@@ -102,13 +102,22 @@ SGD(params, lr=0.01, momentum=0.0, weight_decay=0.0)
 Stochastic Gradient Descent with optional momentum and weight decay.
 
 **Parameters:**
-- `lr`: Learning rate (step size)
-- `momentum`: Momentum factor (0.0-1.0, typically 0.9)
-- `weight_decay`: L2 penalty coefficient
+- `params`: List of Tensor parameters to optimize
+- `lr`: Learning rate (step size, default: 0.01)
+- `momentum`: Momentum factor (0.0-1.0, typically 0.9, default: 0.0)
+- `weight_decay`: L2 penalty coefficient (default: 0.0)
 
 **Update rule:**
 - Without momentum: `param = param - lr * grad`
 - With momentum: `v = momentum * v + grad; param = param - lr * v`
+
+**State management methods:**
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `has_momentum` | `has_momentum() -> bool` | Check if optimizer uses momentum (momentum > 0) |
+| `get_momentum_state` | `get_momentum_state() -> Optional[List]` | Get momentum buffers for checkpointing |
+| `set_momentum_state` | `set_momentum_state(state: Optional[List]) -> None` | Restore momentum buffers from checkpoint |
 
 ### Adam Optimizer
 
@@ -119,10 +128,11 @@ Adam(params, lr=0.001, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.0)
 Adaptive Moment Estimation with per-parameter learning rates.
 
 **Parameters:**
-- `lr`: Learning rate
-- `betas`: Coefficients (β₁, β₂) for computing running averages
-- `eps`: Small constant for numerical stability
-- `weight_decay`: L2 penalty coefficient
+- `params`: List of Tensor parameters to optimize
+- `lr`: Learning rate (default: 0.001)
+- `betas`: Tuple of coefficients (β₁, β₂) for computing running averages (default: (0.9, 0.999))
+- `eps`: Small constant for numerical stability (default: 1e-8)
+- `weight_decay`: L2 penalty coefficient (default: 0.0)
 
 **State:**
 - `m_buffers`: First moment estimates (momentum of gradients)
@@ -135,6 +145,13 @@ AdamW(params, lr=0.001, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.01)
 ```
 
 Adam with decoupled weight decay regularization.
+
+**Parameters:**
+- `params`: List of Tensor parameters to optimize
+- `lr`: Learning rate (default: 0.001)
+- `betas`: Tuple of coefficients (β₁, β₂) for computing running averages (default: (0.9, 0.999))
+- `eps`: Small constant for numerical stability (default: 1e-8)
+- `weight_decay`: L2 penalty coefficient (default: 0.01, higher than Adam)
 
 **Key difference from Adam:** Weight decay is applied directly to parameters after gradient update, not mixed into the gradient.
 
@@ -497,30 +514,13 @@ Combine optimizers with training loops to actually train neural networks. You'll
 
 ## Get Started
 
-````{grid} 1 2 3 3
+```{admonition} Interactive Options
+:class: tip
 
-```{grid-item-card} 🚀 Launch Binder
-:link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/06_optimizers/06_optimizers.py
-:class-header: bg-light
-
-Run interactively in browser - no setup required
+- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/06_optimizers/06_optimizers.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/06_optimizers/06_optimizers.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/06_optimizers/06_optimizers.py)** - Browse the implementation code
 ```
-
-```{grid-item-card} ☁️ Open in Colab
-:link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/06_optimizers/06_optimizers.py
-:class-header: bg-light
-
-Use Google Colab for cloud compute
-```
-
-```{grid-item-card} 📄 View Source
-:link: https://github.com/mlsysbook/TinyTorch/blob/main/src/06_optimizers/06_optimizers.py
-:class-header: bg-light
-
-Browse the implementation code
-```
-
-````
 
 ```{admonition} Save Your Progress
 :class: warning

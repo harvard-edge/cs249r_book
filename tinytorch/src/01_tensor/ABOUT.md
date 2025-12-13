@@ -117,7 +117,7 @@ These methods transform tensors without changing their data (for views) or perfo
 |--------|-----------|-------------|
 | `matmul` | `matmul(other) -> Tensor` | Matrix multiplication |
 | `reshape` | `reshape(*shape) -> Tensor` | Change shape (-1 to infer) |
-| `transpose` | `transpose() -> Tensor` | Swap last two dimensions |
+| `transpose` | `transpose(dim0=None, dim1=None) -> Tensor` | Swap dimensions (defaults to last two) |
 
 ### Reductions
 
@@ -125,9 +125,9 @@ Reduction operations collapse one or more dimensions by aggregating values. The 
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `sum` | `sum(axis=None) -> Tensor` | Sum elements |
-| `mean` | `mean(axis=None) -> Tensor` | Average elements |
-| `max` | `max(axis=None) -> Tensor` | Maximum element |
+| `sum` | `sum(axis=None, keepdims=False) -> Tensor` | Sum elements |
+| `mean` | `mean(axis=None, keepdims=False) -> Tensor` | Average elements |
+| `max` | `max(axis=None, keepdims=False) -> Tensor` | Maximum element |
 
 ## Core Concepts
 
@@ -457,7 +457,7 @@ The following comparison shows equivalent operations in TinyTorch and PyTorch. N
 `````{tab-set}
 ````{tab-item} Your Tiny🔥Torch
 ```python
-from tinytorch import Tensor
+from tinytorch.core.tensor import Tensor
 
 x = Tensor([[1, 2], [3, 4]])
 y = x + 2
@@ -481,7 +481,7 @@ loss.backward()  # You'll build this in Module 05!
 
 Let's walk through each line to understand the comparison:
 
-- **Line 1 (Import)**: Both frameworks use a simple import. TinyTorch exposes `Tensor` directly; PyTorch uses `torch.tensor()` as a factory function.
+- **Line 1 (Import)**: Both frameworks use a simple import. TinyTorch exposes `Tensor` from `core.tensor`; PyTorch uses `torch.tensor()` as a factory function.
 - **Line 3 (Creation)**: TinyTorch infers dtype from input; PyTorch requires explicit `dtype=torch.float32` for floating-point operations. This explicitness matters for performance tuning in production.
 - **Line 4 (Broadcasting)**: Both handle `x + 2` identically, broadcasting the scalar across all elements. Same semantics, same result.
 - **Line 5 (Matrix multiply)**: TinyTorch uses `.matmul()` method; PyTorch supports both `.matmul()` and the `@` operator. The operation is identical.
@@ -614,30 +614,13 @@ Implement ReLU, Sigmoid, Tanh, and Softmax. You'll apply element-wise operations
 
 ## Get Started
 
-````{grid} 1 2 3 3
+```{admonition} Interactive Options
+:class: tip
 
-```{grid-item-card} 🚀 Launch Binder
-:link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/01_tensor/01_tensor.py
-:class-header: bg-light
-
-Run interactively in browser - no setup required
+- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/01_tensor/01_tensor.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/01_tensor/01_tensor.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/01_tensor/01_tensor.py)** - Browse the implementation code
 ```
-
-```{grid-item-card} ☁️ Open in Colab
-:link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/01_tensor/01_tensor.py
-:class-header: bg-light
-
-Use Google Colab for cloud compute
-```
-
-```{grid-item-card} 📄 View Source
-:link: https://github.com/mlsysbook/TinyTorch/blob/main/src/01_tensor/01_tensor.py
-:class-header: bg-light
-
-Browse the implementation code
-```
-
-````
 
 ```{admonition} Save Your Progress
 :class: warning

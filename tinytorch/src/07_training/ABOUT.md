@@ -141,29 +141,62 @@ Here's the complete training loop from your Trainer implementation:
 def train_epoch(self, dataloader, accumulation_steps=1):
     """Train for one epoch through the dataset."""
     self.model.training = True
+    self.training_mode = True
+
     total_loss = 0.0
     num_batches = 0
+    accumulated_loss = 0.0
 
     for batch_idx, (inputs, targets) in enumerate(dataloader):
         # Forward pass
         outputs = self.model.forward(inputs)
         loss = self.loss_fn.forward(outputs, targets)
 
+        # Scale loss for accumulation
+        scaled_loss = loss.data / accumulation_steps
+        accumulated_loss += scaled_loss
+
         # Backward pass
         loss.backward()
 
-        # Update parameters (with optional accumulation)
+        # Update parameters every accumulation_steps
         if (batch_idx + 1) % accumulation_steps == 0:
+            # Gradient clipping
             if self.grad_clip_norm is not None:
-                clip_grad_norm(self.model.parameters(), self.grad_clip_norm)
+                params = self.model.parameters()
+                clip_grad_norm(params, self.grad_clip_norm)
 
+            # Optimizer step
             self.optimizer.step()
             self.optimizer.zero_grad()
 
-            total_loss += loss.data
+            total_loss += accumulated_loss
+            accumulated_loss = 0.0
             num_batches += 1
+            self.step += 1
 
-    return total_loss / max(num_batches, 1)
+    # Handle remaining accumulated gradients
+    if accumulated_loss > 0:
+        if self.grad_clip_norm is not None:
+            params = self.model.parameters()
+            clip_grad_norm(params, self.grad_clip_norm)
+
+        self.optimizer.step()
+        self.optimizer.zero_grad()
+        total_loss += accumulated_loss
+        num_batches += 1
+
+    avg_loss = total_loss / max(num_batches, 1)
+    self.history['train_loss'].append(avg_loss)
+
+    # Update scheduler
+    if self.scheduler is not None:
+        current_lr = self.scheduler.get_lr(self.epoch)
+        self.optimizer.lr = current_lr
+        self.history['learning_rates'].append(current_lr)
+
+    self.epoch += 1
+    return avg_loss
 ```
 
 Each iteration processes one batch: the model transforms inputs into predictions, the loss function compares predictions to targets, backward pass computes gradients, gradient clipping prevents instability, and the optimizer updates parameters. The accumulated loss divided by batch count gives average training loss for monitoring convergence.
@@ -189,7 +222,8 @@ The pattern is simple: set `model.training = True` before training, set `model.t
 ```python
 def evaluate(self, dataloader):
     """Evaluate model without updating parameters."""
-    self.model.training = False  # Switch to eval mode
+    self.model.training = False
+    self.training_mode = False
 
     total_loss = 0.0
     correct = 0
@@ -202,12 +236,21 @@ def evaluate(self, dataloader):
 
         total_loss += loss.data
 
-        # Calculate accuracy
-        predictions = np.argmax(outputs.data, axis=1)
-        correct += np.sum(predictions == targets.data)
-        total += len(predictions)
+        # Calculate accuracy (for classification)
+        if len(outputs.data.shape) > 1:  # Multi-class
+            predictions = np.argmax(outputs.data, axis=1)
+            if len(targets.data.shape) == 1:  # Integer targets
+                correct += np.sum(predictions == targets.data)
+            else:  # One-hot targets
+                correct += np.sum(predictions == np.argmax(targets.data, axis=1))
+            total += len(predictions)
 
-    return total_loss / len(dataloader), correct / total
+    avg_loss = total_loss / len(dataloader) if len(dataloader) > 0 else 0.0
+    accuracy = correct / total if total > 0 else 0.0
+
+    self.history['eval_loss'].append(avg_loss)
+
+    return avg_loss, accuracy
 ```
 
 Notice what's missing: no `loss.backward()`, no `optimizer.step()`, no gradient updates. Evaluation measures current model performance without changing parameters. This separation is crucial: if you accidentally left `training = True` during evaluation, dropout would randomly zero activations, giving you noisy accuracy measurements that don't reflect true model quality.
@@ -296,13 +339,13 @@ A complete checkpoint includes:
 def save_checkpoint(self, path: str):
     """Save complete training state for resumption."""
     checkpoint = {
-        'epoch': self.epoch,              # Where we are in training
-        'step': self.step,                # Total iterations completed
-        'model_state': self._get_model_state(),      # All parameters
-        'optimizer_state': self._get_optimizer_state(), # Momentum buffers, etc.
-        'scheduler_state': self._get_scheduler_state(), # LR schedule position
-        'history': self.history,          # Loss and metric history
-        'training_mode': self.training_mode  # Train/eval state
+        'epoch': self.epoch,
+        'step': self.step,
+        'model_state': self._get_model_state(),
+        'optimizer_state': self._get_optimizer_state(),
+        'scheduler_state': self._get_scheduler_state(),
+        'history': self.history,
+        'training_mode': self.training_mode
     }
 
     Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -323,10 +366,15 @@ def load_checkpoint(self, path: str):
     self.epoch = checkpoint['epoch']
     self.step = checkpoint['step']
     self.history = checkpoint['history']
+    self.training_mode = checkpoint['training_mode']
 
-    self._set_model_state(checkpoint['model_state'])
-    self._set_optimizer_state(checkpoint['optimizer_state'])
-    self._set_scheduler_state(checkpoint['scheduler_state'])
+    # Restore states (simplified for educational purposes)
+    if 'model_state' in checkpoint:
+        self._set_model_state(checkpoint['model_state'])
+    if 'optimizer_state' in checkpoint:
+        self._set_optimizer_state(checkpoint['optimizer_state'])
+    if 'scheduler_state' in checkpoint:
+        self._set_scheduler_state(checkpoint['scheduler_state'])
 ```
 
 After loading, training resumes as if the interruption never happened. The next `train_epoch()` call starts at the correct epoch, uses the correct learning rate, and continues optimizing from the exact parameter values where you stopped.
@@ -613,27 +661,16 @@ Implement efficient data loading with batching, shuffling, and iteration. Your T
 
 ## Get Started
 
-````{grid} 1 2 3 3
+```{admonition} Interactive Options
+:class: tip
 
-```{grid-item-card} 🚀 Launch Binder
-:link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/07_training/07_training.py
-:class-header: bg-light
-
-Run interactively in browser - no setup required
+- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/07_training/07_training.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/07_training/07_training.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/07_training/07_training.py)** - Browse the implementation code
 ```
 
-```{grid-item-card} ☁️ Open in Colab
-:link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/07_training/07_training.py
-:class-header: bg-light
+```{admonition} Save Your Progress
+:class: warning
 
-Use Google Colab for cloud compute
+Binder and Colab sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
 ```
-
-```{grid-item-card} 📄 View Source
-:link: https://github.com/mlsysbook/TinyTorch/blob/main/src/07_training/07_training.py
-:class-header: bg-light
-
-Browse the implementation code
-```
-
-````
