@@ -39,7 +39,7 @@ by passing THREE increasingly difficult challenges.
     🔍 ATTENTION MECHANISM - The Key Innovation:
 
     Query (Q): "What am I looking for?"     ┌──────────────────────────────────────┐
-    Key (K):   "What do I contain?"         │ Attention(Q,K,V) = softmax(Q·Kᵀ/√d)·V │
+    Key (K):   "What do I contain?"         │ Attention(Q,K,V) = softmax(Q·Kᵀ/√d)·V│
     Value (V): "What information to pass?"  └──────────────────────────────────────┘
 
     For sequence reversal "PYTHON" → "NOHTYP":

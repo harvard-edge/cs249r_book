@@ -49,9 +49,9 @@ real-world problems. Let's recreate that breakthrough using YOUR TinyTorch!
     MLP treats each pixel INDEPENDENTLY - no spatial awareness!
 
     ┌────────────────────────────────────────────────────────────────────┐
-    │ MLP sees: [p₁, p₂, p₃, ..., p₆₄]  (just 64 numbers)               │
+    │ MLP sees: [p₁, p₂, p₃, ..., p₆₄]  (just 64 numbers)                │
     │                                                                    │
-    │ MLP doesn't know that p₁ and p₂ are NEIGHBORS!                    │
+    │ MLP doesn't know that p₁ and p₂ are NEIGHBORS!                     │
     │ Shifting an image 1 pixel changes ALL feature values!              │
     │                                                                    │
     │ This is why Milestone 04 (CNNs) will show ~10% improvement:        │

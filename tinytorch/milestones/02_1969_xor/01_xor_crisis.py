@@ -104,7 +104,7 @@ console = Console()
 # │                     │                                │ can't fix linear limits     │
 # │                     │                                │                             │
 # │ Module 03: Linear   │ Computes w1·x1 + w2·x2 + b     │ Creates LINEAR boundary     │
-# │                     │                                │ ❌ XOR needs NON-linear!    │
+# │                     │                                │ ❌ XOR needs NON-linear!     │
 # └─────────────────────┴────────────────────────────────┴─────────────────────────────┘
 #
 # KEY INSIGHT: YOUR modules work perfectly! The failure is ARCHITECTURAL.

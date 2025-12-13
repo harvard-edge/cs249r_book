@@ -52,9 +52,9 @@ Watch a multi-layer network SOLVE the "impossible" XOR problem that stumped AI f
 
     Mathematical Transformation:
     ┌──────────────────────────────────────────────────────────────────────┐
-    │ Original: (x₁, x₂)  →  Hidden: (h₁, h₂, h₃, h₄)  →  Output: y       │
+    │ Original: (x₁, x₂)  →  Hidden: (h₁, h₂, h₃, h₄)  →  Output: y        │
     │                             ↑                                        │
-    │                     ReLU(W₁·x + b₁)                                 │
+    │                     ReLU(W₁·x + b₁)                                  │
     │                                                                      │
     │ The hidden layer TRANSFORMS the input space into one where           │
     │ XOR becomes a simple linear classification problem!                  │
