@@ -133,6 +133,13 @@ from data_manager import DatasetManager
 #
 # =============================================================================
 
+
+# =============================================================================
+# DATASET CLASS - Your Module 08 Enables This Pattern
+# =============================================================================
+# The Dataset abstraction YOU built defines a contract: __len__() and __getitem__().
+# This simple interface lets YOUR DataLoader handle any data source uniformly.
+
 class CIFARDataset(Dataset):
     """Custom CIFAR-10 Dataset using YOUR Dataset interface from Module 10!
 
@@ -172,6 +179,13 @@ train_transforms = Compose([
     RandomHorizontalFlip(p=0.5),   # 50% chance to flip - cars/animals look similar flipped!
     RandomCrop(32, padding=4),      # Random crop with 4px padding - simulates translation
 ])
+
+
+# =============================================================================
+# CNN MODEL - Your Spatial Modules Power Feature Extraction
+# =============================================================================
+# CNNs revolutionized vision by exploiting spatial structure. YOUR Conv2d uses
+# local connectivity + weight sharing to detect patterns with 100x fewer params.
 
 def flatten(x):
     """Flatten spatial features for dense layers - YOUR implementation!"""
@@ -275,6 +289,12 @@ class CIFARCNN:
             self.fc2.weights, self.fc2.bias
         ]
 
+# =============================================================================
+# VISUALIZATIONS - Teaching Aids for Understanding
+# =============================================================================
+# These ASCII diagrams make the invisible visible - showing how YOUR DataLoader
+# batches data and how YOUR CNN extracts hierarchical features from images.
+
 def visualize_dataloader(train_size, test_size, batch_size):
     """Show how YOUR DataLoader processes data - making the invisible visible!"""
     batches_per_epoch = (train_size + batch_size - 1) // batch_size
@@ -362,6 +382,12 @@ def visualize_cifar_cnn():
     """)
     print("="*70)
 
+# =============================================================================
+# TRAINING LOOP - Your Modules Working Together
+# =============================================================================
+# Watch YOUR complete ML system in action: DataLoader batches images, CNN extracts
+# features, Autograd computes gradients, Adam updates 600K+ parameters each step.
+
 def train_cifar_cnn(model, train_loader, epochs=3, learning_rate=0.001):
     """Train CNN using YOUR complete training system with DataLoader!"""
     print("\n🚀 Training CIFAR-10 CNN with YOUR TinyTorch!")
@@ -436,6 +462,12 @@ def train_cifar_cnn(model, train_loader, epochs=3, learning_rate=0.001):
 
     return model
 
+# =============================================================================
+# TESTING - Evaluating Your CNN on Unseen Images
+# =============================================================================
+# True test of generalization: YOUR CNN must classify images it never saw during
+# training. BatchNorm switches to running statistics, no augmentation applied.
+
 def test_cifar_cnn(model, test_loader, class_names):
     """Test YOUR CNN on CIFAR-10 test set using DataLoader."""
     print("\n🧪 Testing YOUR CNN on Natural Images with YOUR DataLoader...")
@@ -497,6 +529,12 @@ def test_cifar_cnn(model, test_loader, class_names):
 
     return accuracy
 
+# =============================================================================
+# SYSTEMS ANALYSIS - Understanding the Engineering Trade-offs
+# =============================================================================
+# ML systems is about understanding trade-offs: parameters vs. computation,
+# memory vs. speed, accuracy vs. efficiency. YOUR CNN embodies these choices.
+
 def analyze_cnn_systems(model):
     """Analyze YOUR CNN from an ML systems perspective."""
     print("\n🔬 SYSTEMS ANALYSIS of YOUR CNN Implementation:")
@@ -529,6 +567,12 @@ def analyze_cnn_systems(model):
     print(f"   • Parameter sharing: 3×3 kernel vs 32×32 dense")
     print(f"   • Translation invariance from weight sharing")
     print(f"   • YOUR implementation demonstrates all of these!")
+
+# =============================================================================
+# MAIN - Orchestrating Your Complete ML System
+# =============================================================================
+# The main function ties everything together: data loading, model creation,
+# training, testing, and analysis. This is YOUR end-to-end ML pipeline.
 
 def main():
     """Demonstrate CIFAR-10 CNN using YOUR TinyTorch!"""
