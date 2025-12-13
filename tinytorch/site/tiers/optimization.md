@@ -2,7 +2,6 @@
 
 **Transform research prototypes into production-ready systems.**
 
----
 
 ## What You'll Learn
 
@@ -15,7 +14,6 @@ The Optimization tier teaches you how to make ML systems fast, small, and deploy
 - What KV-caching does to accelerate transformer inference
 - How batching and other optimizations achieve production speed
 
----
 
 ## Module Progression
 
@@ -53,7 +51,6 @@ graph TB
     style OLYMPICS fill:#fef3c7,stroke:#f59e0b,stroke-width:4px
 ```
 
----
 
 ## Module Details
 
@@ -69,7 +66,6 @@ graph TB
 
 **Key insight**: Don't optimize blindly. Profile first, then optimize the bottlenecks.
 
----
 
 ### 15. Quantization - Smaller Models, Similar Accuracy
 
@@ -83,7 +79,6 @@ graph TB
 
 **Impact**: Models shrink from 100MB → 25MB while maintaining 95%+ of original accuracy.
 
----
 
 ### 16. Compression - Pruning Unnecessary Parameters
 
@@ -97,7 +92,6 @@ graph TB
 
 **Impact**: Combined with quantization, achieve 8-16× compression (quantize + prune).
 
----
 
 ### 17. Memoization - KV-Cache for Fast Generation
 
@@ -111,7 +105,6 @@ graph TB
 
 **Impact**: Text generation goes from 0.5 tokens/sec → 50+ tokens/sec.
 
----
 
 ### 18. Acceleration - Batching and Beyond
 
@@ -125,7 +118,6 @@ graph TB
 
 **Impact**: Combined with KV-cache, achieve 12-40× faster inference than naive implementations.
 
----
 
 ### 19. Benchmarking - Systematic Measurement
 
@@ -139,7 +131,6 @@ graph TB
 
 **Historical context**: MLCommons' MLPerf (founded 2018) established systematic benchmarking as AI systems grew too complex for ad-hoc evaluation.
 
----
 
 ## What You Can Build After This Tier
 
@@ -166,7 +157,6 @@ After completing the Optimization tier, you'll be able to:
   - Cloud infrastructure (cost-effective serving)
   - Real-time applications (low-latency requirements)
 
----
 
 ## Prerequisites
 
@@ -181,7 +171,6 @@ After completing the Optimization tier, you'll be able to:
 - Systems programming background
 - Understanding of hardware constraints
 
----
 
 ## Time Commitment
 
@@ -191,7 +180,6 @@ After completing the Optimization tier, you'll be able to:
 
 **Recommended pace**: 1 module per week (this tier is dense!)
 
----
 
 ## Learning Approach
 
@@ -203,7 +191,6 @@ Each module follows **Measure → Optimize → Validate**:
 
 This mirrors production ML workflows where optimization is an iterative, data-driven process.
 
----
 
 ## Key Achievement: MLPerf Torch Olympics
 
@@ -218,7 +205,6 @@ python 03_generation_opts.py    # KV-cache + batching (12-40× faster)
 
 **What makes this special**: You'll have built the entire optimization pipeline from scratch—profiling tools, quantization engine, pruning algorithms, caching systems, and benchmarking infrastructure.
 
----
 
 ## Two Optimization Tracks
 
@@ -238,7 +224,6 @@ Both tracks start from **Module 14 (Profiling)** and converge at **Module 19 (Be
 
 **Recommendation**: Complete modules in order (14→15→16→17→18→19) to build a complete understanding of the optimization landscape.
 
----
 
 ## Real-World Impact
 
@@ -252,7 +237,6 @@ The techniques in this tier are used by every production ML system:
 
 After this tier, you'll understand how real ML systems achieve production performance.
 
----
 
 ## Next Steps
 
@@ -271,6 +255,5 @@ tito module start 14_profiling
 - **[ Architecture Tier](architecture)** (Modules 08-13): CNNs and transformers
 - **[ Torch Olympics](olympics)** (Module 20): Final integration challenge
 
----
 
 **[← Back to Home](../intro)** • **[View All Modules](../chapters/00-introduction)** • **[MLPerf Milestone](../chapters/milestones)**

@@ -61,7 +61,6 @@ graph LR
 - Complete modules → Unlock milestones → Achieve historical ML recreations
 - Build capabilities → Validate with history → Track achievements
 
----
 
 ## Where Your Data Lives
 
@@ -134,7 +133,6 @@ TinyTorch/
 
 </div>
 
----
 
 ## Progress Views
 
@@ -202,7 +200,6 @@ tito milestone status
 
 </div>
 
----
 
 ## Data Management Commands
 
@@ -261,7 +258,6 @@ Before any reset, TinyTorch automatically:
 
 </div>
 
----
 
 ## Data Safety & Recovery
 
@@ -318,7 +314,6 @@ tito system health
 
 </div>
 
----
 
 ## Data Health Checks
 
@@ -364,7 +359,6 @@ Or restore from backup:
 
 </div>
 
----
 
 ## Best Practices
 
@@ -405,7 +399,6 @@ Or restore from backup:
 
 </div>
 
----
 
 ## Understanding What Gets Tracked
 
@@ -451,7 +444,6 @@ Or restore from backup:
 
 </div>
 
----
 
 ## Common Data Scenarios
 
@@ -515,7 +507,6 @@ cp -r .tito/ ~/Desktop/my-tinytorch-progress/
 
 </div>
 
----
 
 ## FAQ
 
@@ -543,7 +534,6 @@ cp -r .tito/ ~/Desktop/my-tinytorch-progress/
 
 **A**: No. TinyTorch is completely local. No data leaves your machine. No tracking, no analytics, no cloud sync.
 
----
 
 ## Next Steps
 
@@ -554,6 +544,5 @@ cp -r .tito/ ~/Desktop/my-tinytorch-progress/
 <a href="milestones.html" style="display: inline-block; background: #9c27b0; color: white; padding: 0.75rem 1.5rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500;">Milestone System →</a>
 </div>
 
----
 
 *Your progress is tracked, your data is safe, and your journey is yours. TinyTorch keeps track of what you've built and achieved - you focus on learning ML systems engineering.*

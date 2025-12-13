@@ -2,7 +2,6 @@
 
 **TinyTorch teaches you to *build* ML systems. These resources help you understand the *why* behind what you're building.**
 
----
 
 ## Companion Textbook
 
@@ -24,7 +23,6 @@
 
 **When to use it**: Read in parallel with TinyTorch. When you implement Module 05 (Autograd), read the book's chapter on automatic differentiation to understand the systems engineering behind your code.
 
----
 
 ## Related Academic Courses
 
@@ -43,7 +41,6 @@
 - **[CS 224n: Natural Language Processing](http://web.stanford.edu/class/cs224n/)** (Stanford)
   *Transformers and NLP - complements TinyTorch Modules 10-13*
 
----
 
 ## Other Textbooks
 
@@ -53,7 +50,6 @@
 - **[Hands-On Machine Learning](https://www.oreilly.com/library/view/hands-on-machine-learning/9781098125967/)** by Aurélien Géron
   *Practical implementations using established frameworks*
 
----
 
 ## Minimal Frameworks
 
@@ -68,7 +64,6 @@
 - **[tinygrad](https://github.com/geohot/tinygrad)** by George Hotz
   *Performance-focused educational framework with GPU acceleration.*
 
----
 
 ## Production Framework Internals
 
@@ -78,6 +73,5 @@
 - **[PyTorch: Extending PyTorch](https://pytorch.org/docs/stable/notes/extending.md)**
   *Custom operators and autograd functions*
 
----
 
 **Ready to start?** See the **[Quick Start Guide](quickstart-guide)** for a 15-minute hands-on introduction.

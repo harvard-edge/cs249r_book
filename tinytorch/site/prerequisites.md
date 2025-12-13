@@ -2,7 +2,6 @@
 
 **Purpose**: Ensure you have the foundational knowledge to succeed in TinyTorch and discover complementary resources for deeper learning.
 
----
 
 ## Core Requirements
 
@@ -23,7 +22,6 @@ You need TWO things to start building:
 
 **That's it. You're ready to start building.**
 
----
 
 ## "Nice to Have" Background
 
@@ -35,7 +33,6 @@ You need TWO things to start building:
 
 **Learning Philosophy**: TinyTorch teaches ML systems through implementation. You'll understand backpropagation by building it, not by watching lectures about it.
 
----
 
 ## Self-Assessment: Which Learning Path Fits You?
 
@@ -69,7 +66,6 @@ You need TWO things to start building:
 
 **Best for**: PhD students, research engineers, anyone implementing custom operations
 
----
 
 ## Complementary Learning Resources
 
@@ -103,7 +99,6 @@ You need TWO things to start building:
 - Essential NumPy operations and array manipulation
 - **Review before Module 01** if NumPy is unfamiliar
 
----
 
 ## Ready to Begin?
 
@@ -116,7 +111,6 @@ You need TWO things to start building:
 
 **Not quite there?** Work through the resources above, then return when ready. TinyTorch will still be here, and you'll get more value once foundations are solid.
 
----
 
 ## Next Steps
 
@@ -130,6 +124,5 @@ You need TWO things to start building:
 - See [FAQ](faq.md) for common questions about TinyTorch
 - See [Community](community.md) to connect with other learners
 
----
 
 **Your journey from ML user to ML systems engineer starts here.**

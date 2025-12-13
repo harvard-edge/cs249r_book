@@ -33,7 +33,6 @@ Welcome to TinyTorch! This comprehensive guide will get you started whether you'
 </div>
 </div>
 
----
 
 <a id="students"></a>
 ##  For Students: Build Your ML Framework
@@ -224,7 +223,6 @@ To actually build the framework, you need local installation:
 
 The goal isn't just to write code - it's to **understand** how modern ML frameworks work by building one yourself.
 
----
 
 <a id="instructors"></a>
 ##  For Instructors & TAs: Classroom Support Coming Soon
@@ -288,7 +286,6 @@ We're actively seeking instructor feedback to shape the classroom experience.
 - **[Course Structure Overview](chapters/00-introduction.md)** - Full curriculum details
 - **[Module Documentation](tito/modules.md)** - Technical module specifications
 
----
 
 ## Additional Resources
 
@@ -326,6 +323,5 @@ We're actively seeking instructor feedback to shape the classroom experience.
 
 </div>
 
----
 
 **Ready to start building?** Choose your path above and dive into the most comprehensive ML systems course available!

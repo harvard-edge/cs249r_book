@@ -188,6 +188,10 @@ def measure_memory(self, model, input_shape: Tuple[int, ...]) -> Dict[str, float
 
     tracemalloc.stop()
 
+    # Calculate efficiency metrics
+    useful_memory = parameter_memory_mb + activation_memory_mb
+    memory_efficiency = useful_memory / max(peak_memory_mb, 0.001)  # Avoid division by zero
+
     return {
         'parameter_memory_mb': parameter_memory_mb,
         'activation_memory_mb': activation_memory_mb,

@@ -2,7 +2,6 @@
 
 **Understand the pedagogical narrative connecting modules 01-20 into a complete learning story from atomic components to production AI systems.**
 
----
 
 ## What This Page Is About
 
@@ -20,7 +19,6 @@ This page explains **WHY modules flow this way** - the learning narrative that t
 - **Planning your path?** Use this to understand how modules build on each other pedagogically
 - **Teaching TinyTorch?** Share this narrative to help students see the big picture
 
----
 
 ## The Six-Act Learning Story
 
@@ -42,7 +40,6 @@ graph LR
     style Act6 fill:#fff3e0
 ```
 
----
 
 ### Act I: Foundation (Modules 01-04) - Building the Atomic Components
 
@@ -80,7 +77,6 @@ How do you know if your model is learning? Loss functions measure the gap betwee
 
 **Connection to Act II**: Static components are useful, but the real power comes when they can LEARN from data. That requires gradients.
 
----
 
 ### Act II: Learning (Modules 05-07) - The Gradient Revolution
 
@@ -115,7 +111,6 @@ You assemble everything into the training loop - the heartbeat of machine learni
 
 **Connection to Act III**: Your learning system works beautifully on clean datasets that fit in memory. But real ML means messy data at scale.
 
----
 
 ### Act III: Data & Scale (Modules 08-09) - Handling Real-World Complexity
 
@@ -143,7 +138,6 @@ Neural networks need specialized operations for spatial data. Conv2D applies lea
 
 **Connection to Act IV**: You've mastered vision. But the most exciting ML breakthroughs are happening in language. Time to understand sequential data.
 
----
 
 ### Act IV: Language (Modules 10-13) - Understanding Sequential Data
 
@@ -183,7 +177,6 @@ You assemble attention, embeddings, and feed-forward layers into the Transformer
 
 **Connection to Act V**: Your transformer works, but it's slow and memory-hungry. Time to optimize for production.
 
----
 
 ### Act V: Production (Modules 14-19) - Optimization & Deployment
 
@@ -231,7 +224,6 @@ You build comprehensive benchmarking tools with precise timing, statistical anal
 
 **Connection to Act VI**: You have all the pieces - foundation, learning, data, language, optimization. Time to assemble them into a complete AI system.
 
----
 
 ### Act VI: Integration (Module 20) - Building Real AI Systems
 
@@ -260,7 +252,6 @@ Using all 19 previous modules, you build TinyGPT - a complete language model wit
 
 **🎯 Act VI Achievement**: You've built a complete AI framework and deployed a real language model - entirely from scratch, from tensors to text generation!
 
----
 
 ## How This Journey Connects to Everything Else
 
@@ -293,7 +284,6 @@ Using all 19 previous modules, you build TinyGPT - a complete language model wit
 
 **When to use Acts**: Understanding why you're learning something now, seeing how modules connect, maintaining motivation through the narrative arc.
 
----
 
 ### Journey vs. Milestones: Two Dimensions of Progress
 
@@ -330,7 +320,6 @@ As you progress through TinyTorch, you advance along **two dimensions simultaneo
 
 ** See [Journey Through ML History](milestones.md)** for complete milestone details and how to run them.
 
----
 
 ### Journey vs. Capabilities: Tracking Your Skills
 
@@ -364,7 +353,6 @@ The learning journey also maps to **21 capability checkpoints** you can track:
 
 See [Student Workflow](../student-workflow.md) for the development workflow and progress tracking.
 
----
 
 ## Visualizing Your Complete Journey
 
@@ -398,7 +386,6 @@ Act I → Act II → Act III → Act IV → Act V → Act VI
 - **Acts** help you understand and stay motivated
 - **Milestones** help you validate and celebrate
 
----
 
 ## Using This Journey: Student Guidance
 
@@ -435,7 +422,6 @@ As you work through modules, ask yourself:
 - Stay motivated through challenging modules (see where it's going)
 - Appreciate the pedagogical design (not arbitrary order)
 
----
 
 ## The Pedagogical Arc: Why This Progression Works
 
@@ -490,7 +476,6 @@ Each act teaches **systems thinking** - how components interact to create emerge
 
 **By Act VI, you think like a systems engineer** - not just "How do I implement this?" but "How does this affect memory? Compute? Training time? Accuracy?"
 
----
 
 ## FAQ: Understanding the Journey
 
@@ -545,7 +530,6 @@ Typical time estimates (varies by background):
 
 ** See [Milestones](milestones.md)** for details.
 
----
 
 ## What's Next?
 
@@ -564,7 +548,6 @@ Typical time estimates (varies by background):
 - **[Student Workflow](../student-workflow.md)** - Development workflow and progress tracking
 - **[Quick Start Guide](../quickstart-guide.md)** - Hands-on setup and first module
 
----
 
 **Remember**: You're not just learning ML algorithms. You're building ML systems - from mathematical foundations to production deployment. This journey transforms you from a framework user into a systems engineer who truly understands how modern AI works.
 

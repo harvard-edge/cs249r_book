@@ -32,7 +32,7 @@ By the end, your tensor will support arithmetic, broadcasting, matrix multiplica
 flowchart LR
     subgraph "Your Tensor Class"
         A["Properties<br/>shape, size, dtype"]
-        B["Arithmetic<br/>+, -, *, /, **"]
+        B["Arithmetic<br/>+, -, *, /"]
         C["Matrix Ops<br/>matmul()"]
         D["Shape Ops<br/>reshape, transpose"]
         E["Reductions<br/>sum, mean, max"]
@@ -52,7 +52,7 @@ flowchart LR
 | Part | What You'll Implement | Key Concept |
 |------|----------------------|-------------|
 | 1 | `__init__`, `shape`, `size`, `dtype` | Tensor as NumPy wrapper |
-| 2 | `__add__`, `__sub__`, `__mul__`, `__truediv__`, `__pow__` | Operator overloading + broadcasting |
+| 2 | `__add__`, `__sub__`, `__mul__`, `__truediv__` | Operator overloading + broadcasting |
 | 3 | `matmul()` | Matrix multiplication with shape validation |
 | 4 | `reshape()`, `transpose()` | Shape manipulation, views vs copies |
 | 5 | `sum()`, `mean()`, `max()` | Reductions along axes |
@@ -108,7 +108,6 @@ Python lets you override operators like `+` and `*` by implementing special meth
 | Subtraction | `__sub__` | `x - y` |
 | Multiplication | `__mul__` | `x * y` |
 | Division | `__truediv__` | `x / y` |
-| Power | `__pow__` | `x ** 2` |
 
 ### Matrix & Shape Operations
 

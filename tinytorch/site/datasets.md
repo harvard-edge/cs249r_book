@@ -41,7 +41,6 @@ TinyTorch uses a two-tier dataset approach:
 
 **Philosophy**: Following Andrej Karpathy's "~1K samples" approach—small datasets for learning, full benchmarks for validation.
 
----
 
 ## Shipped Datasets (Included with TinyTorch)
 
@@ -121,7 +120,6 @@ See detailed documentation: `datasets/tinytalks/README.md`
 
 </div>
 
----
 
 ## Downloaded Datasets (Auto-Downloaded On-Demand)
 
@@ -179,7 +177,6 @@ These standard benchmarks download automatically when you run relevant milestone
 
 </div>
 
----
 
 ## Dataset Selection Rationale
 
@@ -209,7 +206,6 @@ These standard benchmarks download automatically when you run relevant milestone
 - Standard CNN benchmark
 - 75%+ with basic CNN proves it works
 
----
 
 ## Accessing Datasets
 
@@ -243,7 +239,6 @@ conversations = load_tinytalks()
 # See milestones/data_manager.py for download utilities
 ```
 
----
 
 ## Dataset Sizes Summary
 
@@ -257,7 +252,6 @@ conversations = load_tinytalks()
 **Total shipped**: ~350 KB  
 **Total with benchmarks**: ~180 MB
 
----
 
 ## Why Ship-with-Repo Matters
 
@@ -279,7 +273,6 @@ conversations = load_tinytalks()
 
 </div>
 
----
 
 ## Frequently Asked Questions
 
@@ -298,7 +291,6 @@ A: Official sources via `milestones/data_manager.py`, with integrity verificatio
 **Q: Can I skip the large downloads?**  
 A: Yes! You can work through most milestones using only shipped datasets. Downloaded datasets are for validation milestones.
 
----
 
 ## Related Documentation
 

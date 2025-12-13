@@ -160,8 +160,6 @@ The next generation of engineers cannot rely on magic. They need to see how ever
 
 That is what TinyTorch offers: the confidence that comes from building something real.
 
----
-
 *Prof. Vijay Janapa Reddi*</br>
 *(Harvard University)*</br>
 *2025*

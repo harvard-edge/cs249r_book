@@ -8,7 +8,6 @@
 
 **The ultimate test: Build a complete, competition-ready ML system.**
 
----
 
 ## What Is the Torch Olympics?
 
@@ -24,7 +23,6 @@ This isn't a traditional homework assignment. It's a **systems engineering compe
 
 **Think of it as**: MLPerf meets academic research meets systems engineering—all using the framework YOU built.
 
----
 
 ## What You'll Build
 
@@ -57,7 +55,6 @@ graph TB
     style LEADERBOARD fill:#c8e6c9,stroke:#388e3c,stroke-width:4px
 ```
 
----
 
 ## Competition Tracks
 
@@ -78,7 +75,6 @@ graph TB
 
 **Current record**: 82% accuracy (can you beat it?)
 
----
 
 ### Track 2: Language Generation Quality
 
@@ -101,7 +97,6 @@ graph TB
 - Training stability
 - Generation sampling techniques
 
----
 
 ### Track 3: Inference Speed Championship
 
@@ -126,7 +121,6 @@ graph TB
 - Systems-level optimization
 - Performance benchmarking
 
----
 
 ### Track 4: Model Compression Masters
 
@@ -151,7 +145,6 @@ graph TB
 - Accuracy-efficiency trade-offs
 - Edge deployment considerations
 
----
 
 ## How It Works
 
@@ -212,7 +205,6 @@ tito olympics logo
 
 *Submission commands will be available in a future release.*
 
----
 
 ## Leaderboard Dimensions
 
@@ -228,7 +220,6 @@ Your submission is evaluated across **multiple dimensions**:
 
 **Final score**: Weighted combination of all dimensions. This mirrors real-world ML where you optimize for multiple objectives simultaneously.
 
----
 
 ## Learning Objectives
 
@@ -252,7 +243,6 @@ The Torch Olympics integrates everything you've learned:
 - **Innovation**: Trying new ideas and combinations
 - **Communication**: Writing clear technical reports
 
----
 
 ## Grading (For Classroom Use)
 
@@ -271,7 +261,6 @@ Instructors can use the Torch Olympics as a capstone project:
 - 60-69%: Partial completion
 - <60%: Incomplete submission
 
----
 
 ## Timeline
 
@@ -289,7 +278,6 @@ Instructors can use the Torch Olympics as a capstone project:
 - Days 8-10: Benchmarking
 - Days 11-14: Documentation and submission
 
----
 
 ## Support and Resources
 
@@ -312,7 +300,6 @@ Starter code will be provided for each track.
 - **[Benchmarking Guide](../modules/19_benchmarking_ABOUT)**: Measurement methodology
 - **[Optimization Techniques](../tiers/optimization)**: Compression and acceleration strategies
 
----
 
 ## Prerequisites
 
@@ -327,7 +314,6 @@ Starter code will be provided for each track.
 - Review optimization tier (Modules 14-19)
 - Practice with profiling tools
 
----
 
 ## Time Commitment
 
@@ -339,7 +325,6 @@ Starter code will be provided for each track.
 
 This is a capstone project—expect it to be challenging and rewarding!
 
----
 
 ## What You'll Take Away
 
@@ -353,7 +338,6 @@ By completing the Torch Olympics, you'll have:
 
 **This is what sets TinyTorch apart**: You didn't just learn to use ML frameworks—you built one, optimized it, and competed with it.
 
----
 
 ## Next Steps
 
@@ -375,6 +359,5 @@ tito olympics logo
 - **[ Architecture Tier](architecture)** (Modules 08-13)
 - **[ Optimization Tier](optimization)** (Modules 14-19)
 
----
 
 **[← Back to Home](../intro)**

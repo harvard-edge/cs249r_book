@@ -124,7 +124,7 @@ High-precision timing context manager using `time.perf_counter()` for monotonic,
 ### Benchmark Class
 
 ```python
-Benchmark(models: List[Any], datasets: List[Any] = None,
+Benchmark(models: List[Any], datasets: List[Any],
           warmup_runs: int = 5, measurement_runs: int = 10)
 ```
 
@@ -132,7 +132,7 @@ Core benchmarking engine for single-metric evaluation across multiple models.
 
 **Parameters:**
 - `models`: List of models to benchmark (supports any object with forward/predict/__call__)
-- `datasets`: Optional list of datasets for accuracy benchmarking
+- `datasets`: List of datasets for accuracy benchmarking (required)
 - `warmup_runs`: Number of warmup iterations before measurement (default: 5)
 - `measurement_runs`: Number of measurement iterations for statistical analysis (default: 10)
 
@@ -143,20 +143,22 @@ Core benchmarking engine for single-metric evaluation across multiple models.
 | `run_latency_benchmark` | `run_latency_benchmark(input_shape=(1,28,28)) -> Dict[str, BenchmarkResult]` | Measure inference time per model |
 | `run_accuracy_benchmark` | `run_accuracy_benchmark() -> Dict[str, BenchmarkResult]` | Measure prediction accuracy on datasets |
 | `run_memory_benchmark` | `run_memory_benchmark(input_shape=(1,28,28)) -> Dict[str, BenchmarkResult]` | Track peak memory usage during inference |
+| `compare_models` | `compare_models(metric: str = "latency") -> List[Dict]` | Compare models across a specific metric |
 
 ### BenchmarkSuite Class
 
 ```python
-BenchmarkSuite(models: List[Any], datasets: List[Any] = None)
+BenchmarkSuite(models: List[Any], datasets: List[Any] = None, output_dir: str = "benchmark_results")
 ```
 
 Comprehensive multi-metric evaluation suite for generating Pareto frontiers and optimization trade-off analysis.
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `run_comprehensive_benchmark` | `run_comprehensive_benchmark(input_shape=(1,28,28)) -> Dict[str, Dict]` | Run all benchmark types and aggregate results |
-| `generate_pareto_frontier` | `generate_pareto_frontier(x_metric, y_metric, results) -> List[str]` | Identify Pareto-optimal models on two metrics |
-| `visualize_tradeoffs` | `visualize_tradeoffs(results, save_path=None)` | Generate scatter plots showing metric relationships |
+| `run_full_benchmark` | `run_full_benchmark() -> Dict[str, Dict[str, BenchmarkResult]]` | Run all benchmark types and aggregate results |
+| `plot_pareto_frontier` | `plot_pareto_frontier(x_metric='latency', y_metric='accuracy')` | Plot Pareto frontier for two competing objectives |
+| `plot_results` | `plot_results(save_plots=True)` | Generate visualization plots for benchmark results |
+| `generate_report` | `generate_report() -> str` | Generate comprehensive benchmark report |
 
 ## Core Concepts
 

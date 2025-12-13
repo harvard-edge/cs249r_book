@@ -2,7 +2,6 @@
 
 **Build the mathematical core that makes neural networks learn.**
 
----
 
 ## What You'll Learn
 
@@ -15,7 +14,6 @@ The Foundation tier teaches you how to build a complete learning system from scr
 - What optimizers do to make training converge
 - How training loops orchestrate the entire learning process
 
----
 
 ## Module Progression
 
@@ -41,7 +39,6 @@ graph TB
     style M07 fill:#42a5f5,stroke:#0d47a1,stroke-width:4px
 ```
 
----
 
 ## Module Details
 
@@ -55,7 +52,6 @@ graph TB
 
 **Systems focus**: Memory layout, broadcasting semantics, operation fusion
 
----
 
 ### 02. Activations - Enabling Non-Linear Learning
 
@@ -67,7 +63,6 @@ graph TB
 
 **Systems focus**: Numerical stability, in-place operations, gradient flow
 
----
 
 ### 03. Layers - Building Blocks of Networks
 
@@ -79,7 +74,6 @@ graph TB
 
 **Systems focus**: Parameter storage, initialization strategies, forward computation
 
----
 
 ### 04. Losses - Measuring Success
 
@@ -91,7 +85,6 @@ graph TB
 
 **Systems focus**: Numerical stability (log-sum-exp trick), reduction strategies
 
----
 
 ### 05. Autograd - The Gradient Revolution
 
@@ -103,7 +96,6 @@ graph TB
 
 **Systems focus**: Computational graphs, topological sorting, gradient accumulation
 
----
 
 ### 06. Optimizers - Learning from Gradients
 
@@ -115,7 +107,6 @@ graph TB
 
 **Systems focus**: Update rules, momentum buffers, numerical stability
 
----
 
 ### 07. Training - Orchestrating the Learning Process
 
@@ -127,7 +118,6 @@ graph TB
 
 **Systems focus**: Batch processing, gradient clipping, learning rate scheduling
 
----
 
 ## What You Can Build After This Tier
 
@@ -145,7 +135,6 @@ After completing the Foundation tier, you'll be able to:
 - **Milestone 02 (1969)**: Solve the XOR problem that nearly ended AI research
 - **Milestone 03 (1986)**: Build multi-layer perceptrons that achieve 95%+ accuracy on MNIST
 
----
 
 ## Prerequisites
 
@@ -158,7 +147,6 @@ After completing the Foundation tier, you'll be able to:
 - NumPy experience
 - Understanding of neural network concepts
 
----
 
 ## Time Commitment
 
@@ -168,7 +156,6 @@ After completing the Foundation tier, you'll be able to:
 
 **Recommended pace**: 1-2 modules per week
 
----
 
 ## Learning Approach
 
@@ -178,7 +165,6 @@ Each module follows the **Build → Use → Reflect** cycle:
 2. **Use**: Apply it to real problems (toy datasets, simple networks)
 3. **Reflect**: Answer systems thinking questions (memory usage, computational complexity, design trade-offs)
 
----
 
 ## Next Steps
 
@@ -201,6 +187,5 @@ tito module start 01_tensor
 - **[ Optimization Tier](optimization)** (Modules 14-19): Production-ready performance
 - **[ Torch Olympics](olympics)** (Module 20): Compete in ML systems challenges
 
----
 
 **[← Back to Home](../intro)** • **[View All Modules](../chapters/00-introduction)** • **[Daily Workflow Guide](../student-workflow)**

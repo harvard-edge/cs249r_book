@@ -7,7 +7,6 @@
 
 **Purpose**: Fast solutions to common issues. Get unstuck and back to building ML systems quickly.
 
----
 
 ## Quick Diagnostic: Start Here
 
@@ -34,7 +33,6 @@ This checks:
 
 </div>
 
----
 
 ## Environment Issues
 
@@ -137,7 +135,6 @@ which pip  # Should show TinyTorch/venv/bin/pip
 
 </div>
 
----
 
 ## Module Issues
 
@@ -304,7 +301,6 @@ ls -l modules/01_tensor/01_tensor.ipynb
 
 </div>
 
----
 
 ## Import Issues
 
@@ -384,7 +380,6 @@ tito module complete XX
 
 </div>
 
----
 
 ## Milestone Issues
 
@@ -506,7 +501,6 @@ tito milestone run 03
 
 </div>
 
----
 
 ## Data & Progress Issues
 
@@ -589,7 +583,6 @@ nano .tito/progress.json
 
 </div>
 
----
 
 ## Dependency Issues
 
@@ -646,7 +639,6 @@ python -c "from rich import print; print('[bold green]Test[/bold green]')"
 
 </div>
 
----
 
 ## Performance Issues
 
@@ -705,7 +697,6 @@ top
 
 </div>
 
----
 
 ## Platform-Specific Issues
 
@@ -758,7 +749,6 @@ python --version  # Verify
 
 </div>
 
----
 
 ## Getting More Help
 
@@ -811,7 +801,6 @@ python -c "from tinytorch import Tensor" 2>&1 | less
 
 </div>
 
----
 
 ## Prevention: Best Practices
 
@@ -852,7 +841,6 @@ python -c "from tinytorch import Tensor" 2>&1 | less
 
 </div>
 
----
 
 ## Quick Reference: Fixing Common Errors
 
@@ -868,7 +856,6 @@ python -c "from tinytorch import Tensor" 2>&1 | less
 | `Tests fail` during export | Debug in Jupyter, check test assertions |
 | `Prerequisites not met` | `tito milestone info XX` to see requirements |
 
----
 
 ## Still Stuck?
 
@@ -879,6 +866,5 @@ python -c "from tinytorch import Tensor" 2>&1 | less
 <a href="overview.html" style="display: inline-block; background: #007bff; color: white; padding: 0.75rem 1.5rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500;">Command Reference →</a>
 </div>
 
----
 
 *Most issues have simple fixes. Start with `tito system health`, read error messages carefully, and remember: your code is always safe in `modules/` - only progress tracking can be reset.*

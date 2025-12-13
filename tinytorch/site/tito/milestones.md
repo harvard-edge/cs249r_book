@@ -156,7 +156,6 @@ tito milestone info 01
 tito milestone run 01
 ```
 
----
 
 ### Milestone 02: XOR Crisis (1969) 🔀
 
@@ -174,7 +173,6 @@ tito milestone info 02
 tito milestone run 02
 ```
 
----
 
 ### Milestone 03: MLP Revival (1986)
 
@@ -192,7 +190,6 @@ tito milestone info 03
 tito milestone run 03
 ```
 
----
 
 ### Milestone 04: CNN Revolution (1998) 👁
 
@@ -210,7 +207,6 @@ tito milestone info 04
 tito milestone run 04
 ```
 
----
 
 ### Milestone 05: Transformer Era (2017) 🤖
 
@@ -228,7 +224,6 @@ tito milestone info 05
 tito milestone run 05
 ```
 
----
 
 ### Milestone 06: MLPerf Benchmarks (2018) 🏆
 
@@ -246,7 +241,6 @@ tito milestone info 06
 tito milestone run 06
 ```
 
----
 
 ## Prerequisites and Validation
 
@@ -444,6 +438,5 @@ tito module complete XX
 <a href="chapters/milestones.html" style="display: inline-block; background: #6f42c1; color: white; padding: 0.75rem 1.5rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500;">Historical Context →</a>
 </div>
 
----
 
 *Every milestone uses YOUR code. Every achievement is proof you understand ML systems deeply. Build from scratch, recreate history, master the fundamentals.*

@@ -572,6 +572,5 @@ Before completing a module:
 - **NBDev Documentation**: [NBDev docs](https://nbdev.fast.ai/)
 - **TinyTorch CLI**: Use `tito --help` for development commands
 
----
 
 **Remember**: When in doubt, reference `08_optimizers` - it follows all these patterns perfectly and serves as the living example of proper module structure.

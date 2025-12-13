@@ -2,7 +2,6 @@
 
 **Experience the evolution of AI by rebuilding history's most important breakthroughs with YOUR TinyTorch implementations.**
 
----
 
 ## What Are Milestones?
 
@@ -15,7 +14,6 @@ Milestones are **proof-of-mastery demonstrations** that showcase what you can bu
 - **Real Achievements**: Not toy examples - these are historically significant breakthroughs
 - **Systems Thinking**: Understand WHY each innovation mattered for ML systems
 
----
 
 ## Two Dimensions of Your Progress
 
@@ -95,7 +93,6 @@ graph TB
 
 **Understanding Both Dimensions**: The **Acts** explain WHY you're building each component (pedagogical progression). The **Milestones** prove WHAT you've built works (historical validation). Together, they show you're not just completing exercises - you're building something real.
 
----
 
 ## The Timeline
 
@@ -138,7 +135,6 @@ python 02_rosenblatt_trained.py   # See the solution (trained)
 
 **Expected Results**: ~50% (untrained) → 95%+ (trained) accuracy
 
----
 
 ### 02. XOR Crisis (1969) - Minsky & Papert
 
@@ -168,7 +164,6 @@ python 02_xor_solved.py   # Hidden layers solve it!
 
 **Expected Results**: 50% (single layer) → 100% (multi-layer) on XOR
 
----
 
 ### 03. MLP Revival (1986) - Backpropagation Era
 
@@ -198,7 +193,6 @@ python 02_rumelhart_mnist.py       # Full MNIST
 
 **Expected Results**: 95%+ accuracy on MNIST
 
----
 
 ### 04. CNN Revolution (1998) - LeCun's Breakthrough
 
@@ -248,7 +242,6 @@ python 02_lecun_cifar10.py
 
 **Expected Results**: **70%+ accuracy on CIFAR-10** ✨
 
----
 
 ### 05. Transformer Era (2017) - Attention Revolution
 
@@ -278,7 +271,6 @@ python 02_vaswani_dialogue.py    # Multi-turn dialogue
 
 **Expected Results**: Loss < 1.5, coherent responses to questions
 
----
 
 ### 06. Torch Olympics Era (2018) - The Optimization Revolution
 
@@ -309,7 +301,6 @@ python 03_generation_opts.py    # Speed up inference (cache + batch)
 
 **Expected Results**: 8-16× smaller models, 12-40× faster inference
 
----
 
 ## Learning Philosophy
 
@@ -333,7 +324,6 @@ Each milestone teaches critical systems thinking:
 3. **Architectural Patterns**: How structure enables capability
 4. **Production Deployment**: What it takes to scale
 
----
 
 ## How to Use Milestones
 
@@ -372,7 +362,6 @@ Each milestone includes:
 - How would you optimize this for production?
 - What patterns appear in PyTorch/TensorFlow?
 
----
 
 ## Quick Reference
 
@@ -394,7 +383,6 @@ Each milestone includes:
 - **Systems understanding** - You know memory, compute, scaling
 - **Production relevance** - Patterns used in real ML frameworks
 
----
 
 ## Further Learning
 
@@ -405,7 +393,6 @@ After completing milestones, explore:
 - **Capstone Projects**: Build your own ML applications
 - **Research Papers**: Read the original papers for each milestone
 
----
 
 ## Why This Matters
 
@@ -417,7 +404,6 @@ By rebuilding ML history, you gain:
 - 🏆 Portfolio projects demonstrating mastery
 - 💼 Preparation for ML systems engineering roles
 
----
 
 **Ready to start your journey through ML history?**
 

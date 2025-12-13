@@ -12,7 +12,6 @@ Unlike traditional CS courses, ML systems education requires students to:
 - **Handle uncertainty** (ML is probabilistic, not deterministic)
 - **Consider real-world constraints** (memory, speed, scale)
 
----
 
 ## 📏 The "Rule of 3s" Framework
 
@@ -32,7 +31,6 @@ Unlike traditional CS courses, ML systems education requires students to:
 - **30 lines ≈ 1 screen** on most devices (no scrolling needed)
 - **Break larger implementations** into multiple scaffolded steps
 
----
 
 ##  Progressive Implementation Ladder Pattern
 
@@ -108,7 +106,6 @@ def forward(self, x):
     pass
 ```
 
----
 
 ## 🌉 Concept Bridge Pattern
 
@@ -155,7 +152,6 @@ inputs @ weights + bias
 - **Recommendation Systems**: User preferences × item features = recommendations
 ```
 
----
 
 ## 🎯 Confidence Builder Pattern
 
@@ -206,7 +202,6 @@ def test_basic_math_confidence():
 - [ ] **Provides specific hints** if something goes wrong
 - [ ] **Builds momentum** for harder challenges ahead
 
----
 
 ## 📚 Educational Progression Pattern
 
@@ -254,7 +249,6 @@ By the end of this module, you will:
 - **Next steps**: How this prepares for upcoming modules
 ```
 
----
 
 ## ▶ Student-Friendly Testing Guidelines
 
@@ -291,7 +285,6 @@ def test_with_educational_message(self):
     assert result == expected, f"See the guidance above to fix this!"
 ```
 
----
 
 ## 🎨 Visual Learning Integration
 
@@ -338,7 +331,6 @@ def show_learning_progress():
         print("🌱 Good start! Take your time with each concept.")
 ```
 
----
 
 ## ⚖ Balancing Challenge and Support
 
@@ -379,7 +371,6 @@ def adaptive_hint_system(student_attempts, time_spent):
 4. **Worked example**: Show a similar problem solved
 5. **Direct help**: Provide partial implementation
 
----
 
 ## 🔄 Iteration and Feedback Loops
 
@@ -421,7 +412,6 @@ def guided_implementation():
         print("💡 Debug tip: Check that you're returning a new Tensor")
 ```
 
----
 
 ## 📊 Assessment and Success Metrics
 
@@ -443,7 +433,6 @@ def guided_implementation():
 - **Application**: Students can use their implementations effectively
 - **Connection**: Students see how this fits into the bigger ML picture
 
----
 
 ##  Implementation Checklist
 
@@ -477,7 +466,6 @@ def guided_implementation():
 - [ ] **Celebration** of success
 - [ ] **Learning opportunity** when failing
 
----
 
 ## 💡 Key Insights for ML Systems Education
 

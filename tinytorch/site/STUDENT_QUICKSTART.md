@@ -194,7 +194,6 @@ Your work is graded on:
 3. **ML Systems Questions** (manually graded)
 4. **Checkpoint Achievements** (auto-validated)
 
----
 
 **Ready to build ML systems from scratch? Start with Module 01! **
 

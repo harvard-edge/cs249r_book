@@ -98,10 +98,15 @@ Base class for all differentiable operations. Every operation (addition, multipl
 | Class | Purpose | Gradient Rule |
 |-------|---------|---------------|
 | `AddBackward` | Addition gradients | ∂(a+b)/∂a = 1, ∂(a+b)/∂b = 1 |
+| `SubBackward` | Subtraction gradients | ∂(a-b)/∂a = 1, ∂(a-b)/∂b = -1 |
 | `MulBackward` | Multiplication gradients | ∂(a*b)/∂a = b, ∂(a*b)/∂b = a |
+| `DivBackward` | Division gradients | ∂(a/b)/∂a = 1/b, ∂(a/b)/∂b = -a/b² |
 | `MatmulBackward` | Matrix multiplication gradients | ∂(A@B)/∂A = grad@B.T, ∂(A@B)/∂B = A.T@grad |
 | `SumBackward` | Reduction gradients | ∂sum(a)/∂a[i] = 1 for all i |
 | `ReshapeBackward` | Shape manipulation | ∂(X.reshape(...))/∂X = grad.reshape(X.shape) |
+| `TransposeBackward` | Transpose gradients | ∂(X.T)/∂X = grad.T |
+
+**Additional Backward Classes:** The implementation includes backward functions for activations (`ReLUBackward`, `SigmoidBackward`, `SoftmaxBackward`, `GELUBackward`), losses (`MSEBackward`, `BCEBackward`, `CrossEntropyBackward`), and other operations (`PermuteBackward`, `EmbeddingBackward`, `SliceBackward`). These follow the same pattern as the core classes above.
 
 ### Enhanced Tensor Methods
 

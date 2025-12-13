@@ -68,7 +68,6 @@ tito community map
 
 **Privacy:** All fields are optional. We use anonymous UUIDs (no personal names). Data is stored locally in your project directory. See [Privacy Policy](PRIVACY_DATA_RETENTION.md) for details.
 
----
 
 ## Connect Now
 Validate your setup and track performance improvements:
@@ -100,7 +99,6 @@ tito benchmark capstone
 
 See [TITO CLI Reference](tito/overview.md) for complete command documentation.
 
----
 
 ## For Educators
 
@@ -112,7 +110,6 @@ Teaching TinyTorch in your classroom?
 - Assignment generation and distribution
 - Student progress tracking and classroom management
 
----
 
 ## Recognition & Showcase
 
@@ -128,7 +125,6 @@ Built something impressive with TinyTorch?
 - In course examples
 - As reference implementations
 
----
 
 ## Stay Updated
 
@@ -136,6 +132,5 @@ Built something impressive with TinyTorch?
 
 **Follow Development**: Check [GitHub Issues](https://github.com/mlsysbook/TinyTorch/issues) for roadmap and upcoming features
 
----
 
 **Build ML systems. Learn together. Grow the community.**

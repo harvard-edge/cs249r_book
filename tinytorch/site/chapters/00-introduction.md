@@ -2,7 +2,6 @@
 
 **Transform from ML user to ML systems engineer by building everything yourself.**
 
----
 
 ## The Origin Story: Why TinyTorch Exists
 
@@ -34,7 +33,6 @@ TinyTorch teaches ML systems the only way that really works: **by building them 
 
 When you implement your own tensor operations, write your own autograd, build your own optimizer - you gain understanding that's impossible to achieve by just calling APIs. You learn not just what these systems do, but HOW they do it and WHY they're designed that way.
 
----
 
 ## Core Learning Concepts
 
@@ -66,7 +64,6 @@ When you implement your own tensor operations, write your own autograd, build yo
 
 </div>
 
----
 
 ## What Makes TinyTorch Different
 
@@ -101,7 +98,6 @@ output = model(input)                    # YOU know exactly how this works
 # "What memory optimizations are possible?"
 ```
 
----
 
 ## Who This Course Serves
 
@@ -139,7 +135,6 @@ output = model(input)                    # YOU know exactly how this works
 - Deep learning theory (we learn through implementation)
 - Advanced math (we focus on practical systems implementation)
 
----
 
 ## What You'll Achieve: Tier-by-Tier Mastery
 
@@ -179,7 +174,6 @@ for batch in dataloader:  # Your data management
 - **Hardware Acceleration**: Kernels achieving 10x speedups through YOUR vectorization techniques
 - **Competition Ready**: Torch Olympics submissions competitive with industry implementations
 
----
 
 ## The ML Evolution Story You'll Experience
 
@@ -206,7 +200,6 @@ TinyTorch's three-tier structure follows the actual historical progression of ma
 
 **Why This Progression Matters**: You'll understand not just modern AI, but WHY it evolved this way. Each tier builds essential capabilities that inform the next, just like ML history itself.
 
----
 
 ## Systems Engineering Focus: Why Tiers Matter
 
@@ -255,7 +248,6 @@ After each tier, you become the team member who:
 - Leads performance optimization: "Here's our memory bottleneck and my 3-step plan to fix it"
 - Competes at industry scale: "Our optimizations achieve Torch Olympics benchmark performance"
 
----
 
 ## Learning Support & Community
 
@@ -276,7 +268,6 @@ After each tier, you become the team member who:
 - **Code Quality**: Professional coding standards and review processes
 - **Documentation**: Comprehensive guides and system architecture documentation
 
----
 
 ## Start Your Journey
 
@@ -305,7 +296,6 @@ All using code you wrote yourself, from mathematical first principles to product
 
 **Want to understand the pedagogical narrative behind this structure?** See [The Learning Journey](learning-journey.md) to understand WHY modules flow this way and HOW they build on each other through a six-act learning story.
 
----
 
 ### Foundation Tier (Modules 01-07)
 **Building Blocks of ML Systems • 6-8 weeks • All Prerequisites for Neural Networks**
@@ -340,7 +330,6 @@ All using code you wrote yourself, from mathematical first principles to product
 - Implement any optimization algorithm from research papers
 - Build custom neural network architectures from scratch
 
----
 
 ### Architecture Tier (Modules 08-13)
 **Modern AI Algorithms • 4-6 weeks • Vision + Language Architectures**
@@ -374,7 +363,6 @@ All using code you wrote yourself, from mathematical first principles to product
 - Build transformer architectures for any domain
 - Debug sequence modeling and attention patterns
 
----
 
 ### Optimization Tier (Modules 14-19)
 **Production & Performance • 4-6 weeks • Deploy and Scale ML Systems**
@@ -409,7 +397,6 @@ All using code you wrote yourself, from mathematical first principles to product
 - Deploy models with <100ms latency requirements
 - Design scalable ML system architectures
 
----
 
 ## Learning Path Recommendations
 
@@ -437,6 +424,5 @@ All using code you wrote yourself, from mathematical first principles to product
 
 </div>
 
----
 
 Welcome to ML systems engineering!

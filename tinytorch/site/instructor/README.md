@@ -571,6 +571,5 @@ ls submitted/*/MODULE/
 - [Course Discussions](https://github.com/MLSysBook/TinyTorch/discussions)
 - [Issue Tracker](https://github.com/MLSysBook/TinyTorch/issues)
 
----
 
 **Need help? Open an issue or contact the TinyTorch team!**

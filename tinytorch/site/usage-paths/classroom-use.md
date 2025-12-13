@@ -17,7 +17,6 @@
 
 **Vision:** Replace black-box API courses with deep systems understanding. Students will build neural networks from scratch, understand every operation, and graduate job-ready for ML engineering roles.
 
----
 
 ## 🎯 Planned Course Infrastructure
 
@@ -48,7 +47,6 @@
 
 **Current Status:** Complete NBGrader integration available! See the [Instructor Guide](../instructor-guide.md) for setup, grading workflows, and sample solutions.
 
----
 
 ## 🌟 Why TinyTorch for Your Classroom
 
@@ -100,7 +98,6 @@
 
 </div>
 
----
 
 ## Course Module Overview
 
@@ -108,7 +105,6 @@ The TinyTorch course consists of 20 progressive modules organized into learning 
 
 **See [Complete Course Structure](../chapters/00-introduction.md)** for detailed module descriptions, learning objectives, and prerequisites for each module.
 
----
 
 ## Academic Learning Goals
 
@@ -124,7 +120,6 @@ The TinyTorch course consists of 20 progressive modules organized into learning 
 - Optimize models for production deployment
 - Build complete frameworks supporting vision and language
 
----
 
 ##  Quick Start for Instructors
 
@@ -173,7 +168,6 @@ tito nbgrader release 01_tensor
 
 </div>
 
----
 
 ## 📋 Assessment Options
 
@@ -192,7 +186,6 @@ tito nbgrader release 01_tensor
 - Capstone project for final evaluation
 - Portfolio development opportunities
 
----
 
 ## Instructor Resources
 
@@ -213,7 +206,6 @@ tito nbgrader release 01_tensor
 - Instructor discussion forum (coming soon)
 - Regular updates and improvements
 
----
 
 ## 📞 Next Steps
 
@@ -222,6 +214,5 @@ tito nbgrader release 01_tensor
 3. **💻 Set up your environment** using the [Quick Start Guide](../quickstart-guide.md)
 4. **📧 Contact us** via GitHub Issues for instructor support
 
----
 
 *Ready to teach the most comprehensive ML systems course? Let's build something amazing together!* 

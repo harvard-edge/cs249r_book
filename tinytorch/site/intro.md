@@ -288,7 +288,6 @@ Perfect if you want to **debug ML systems**, **implement custom operations**, or
 
 **Prerequisites**: Python + basic linear algebra. No prior ML experience required.
 
----
 
 ##  Join the Community
 
@@ -318,6 +317,5 @@ Perfect if you want to **debug ML systems**, **implement custom operations**, or
   </div>
 </div>
 
----
 
 **Next Steps**: **[Quick Start Guide](quickstart-guide)** (15 min) • **[Course Structure](chapters/00-introduction)** • **[FAQ](faq.md)**

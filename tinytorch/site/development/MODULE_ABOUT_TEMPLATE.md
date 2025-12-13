@@ -65,7 +65,6 @@ result = example.method(...)
 
 [Continue with additional components...]
 
----
 
 **CHECKPOINT 1**: [What capability is now unlocked]
 
@@ -73,19 +72,16 @@ What you can do now: [Concrete demonstration of progress]
 
 Progress: ~X% through module | Time invested: ~Y hours | Remaining: ~Z hours
 
----
 
 ### [Component 3 Name]
 
 [Continue implementation...]
 
----
 
 **CHECKPOINT 2**: [Next capability unlocked]
 
 Progress: ~X% through module | Remaining: ~Z hours
 
----
 
 ## Getting Started
 

@@ -4,7 +4,6 @@
 
 **Last Updated**: November 27, 2025
 
----
 
 ## Quick Start
 
@@ -23,7 +22,6 @@ source .venv/bin/activate
 tito system health
 ```
 
----
 
 ## Core Development Tools
 
@@ -60,7 +58,6 @@ pip install jupyter jupyterlab
 pip install mypy
 ```
 
----
 
 ## Optional Tools (by Use Case)
 
@@ -101,7 +98,6 @@ vhs site/_static/demos/tapes/01-zero-to-ready.tape
 
 **Note**: Students never need VHS. This is purely for marketing material generation.
 
----
 
 ### 📚 Documentation Building
 
@@ -121,7 +117,6 @@ python -m http.server 8000
 open http://localhost:8000
 ```
 
----
 
 ### 🎨 CLI Development
 
@@ -140,7 +135,6 @@ tito module --help
 tito milestone --help
 ```
 
----
 
 ## Development Workflow
 
@@ -217,7 +211,6 @@ git push origin feature/your-feature
 # Create PR on GitHub
 ```
 
----
 
 ## Project Structure
 
@@ -244,7 +237,6 @@ TinyTorch/
 └── milestones/            # Historical milestone scripts
 ```
 
----
 
 ## Common Development Tasks
 
@@ -286,7 +278,6 @@ git commit -m "docs: update demo GIFs with new commands"
 4. Test integration: `pytest tests/XX_module/`
 5. Update docs: `src/XX_module/README.md`
 
----
 
 ## Troubleshooting
 
@@ -333,7 +324,6 @@ pip install -e .
 pytest tests/ -v -s
 ```
 
----
 
 ## Environment Variables
 
@@ -344,7 +334,6 @@ export TINYTORCH_DEBUG=1            # Verbose logging
 export TINYTORCH_TEST_MODE=1        # Skip slow operations in tests
 ```
 
----
 
 ## Git Workflow
 
@@ -371,7 +360,6 @@ refactor: simplify CLI argument parsing
 perf: optimize GIF generation script
 ```
 
----
 
 ## Release Checklist
 
@@ -385,7 +373,6 @@ When preparing a release:
 - [ ] Release notes written
 - [ ] PyPI package updated (if applicable)
 
----
 
 ## Getting Help
 
@@ -402,7 +389,6 @@ When preparing a release:
 - See: `site/_static/demos/GIF_PRODUCTION_GUIDE.md`
 - See: `site/_static/demos/QUICK_START.md`
 
----
 
 ## Contributing
 
@@ -412,6 +398,5 @@ See `CONTRIBUTING.md` for:
 - PR submission process
 - Code review expectations
 
----
 
 **Remember**: Students never need to install VHS or other dev tools. They just need Python, the TinyTorch environment, and Jupyter. All dev tooling is optional and for maintainers only.

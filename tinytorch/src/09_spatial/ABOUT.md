@@ -445,13 +445,13 @@ The following comparison shows equivalent operations in TinyTorch and PyTorch. N
 `````{tab-set}
 ````{tab-item} Your Tiny🔥Torch
 ```python
-from tinytorch.core.spatial import Conv2d, MaxPool2d
+from tinytorch.core.spatial import Conv2d, MaxPool2d, AvgPool2d
 from tinytorch.core.activations import ReLU
 
 # Build a CNN block
 conv1 = Conv2d(3, 64, kernel_size=3, padding=1)
 conv2 = Conv2d(64, 128, kernel_size=3, padding=1)
-pool = MaxPool2d(kernel_size=2, stride=2)
+pool = MaxPool2d(kernel_size=2, stride=2)  # Or use AvgPool2d for smooth features
 relu = ReLU()
 
 # Forward pass

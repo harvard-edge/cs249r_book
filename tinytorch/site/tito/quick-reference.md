@@ -211,6 +211,5 @@ from tinytorch.training import Trainer             # M07
 - **Need detailed docs?** See [CLI Documentation](overview.md)
 - **Teaching a course?** See [For Instructors & TAs](../for-instructors.md)
 
----
 
 **💡 Pro Tip**: Bookmark this page for quick command reference while building!

@@ -29,7 +29,6 @@ graph LR
 
 See [Student Workflow](../student-workflow.md) for the complete development cycle and best practices.
 
----
 
 ## Essential Commands
 
@@ -67,7 +66,6 @@ See [Student Workflow](../student-workflow.md) for the complete development cycl
 
 </div>
 
----
 
 ## Typical Development Session
 
@@ -133,7 +131,6 @@ tito module status
 
 </div>
 
----
 
 ## System Commands
 
@@ -180,7 +177,6 @@ Convenience command to launch Jupyter Lab from the correct directory.
 
 </div>
 
----
 
 ## Module Lifecycle Commands
 
@@ -312,7 +308,6 @@ tito module reset 01
 
 </div>
 
----
 
 ## Understanding the Export Process
 
@@ -352,7 +347,6 @@ When you run `tito module complete XX`, here's what happens:
 
 </div>
 
----
 
 ## Module Structure
 
@@ -394,7 +388,6 @@ tinytorch/
 - **Never edit** `tinytorch/` directly - it's auto-generated
 - Changes in `tinytorch/` will be lost on re-export
 
----
 
 ## Troubleshooting
 
@@ -454,7 +447,6 @@ python -c "from tinytorch import Tensor"
 
 See [Troubleshooting Guide](troubleshooting.md) for more issues and solutions.
 
----
 
 ## Next Steps
 
@@ -465,6 +457,5 @@ See [Troubleshooting Guide](troubleshooting.md) for more issues and solutions.
 <a href="milestones.html" style="display: inline-block; background: #9c27b0; color: white; padding: 0.75rem 1.5rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500;">Milestone System →</a>
 </div>
 
----
 
 *The module workflow is the heart of TinyTorch. Master these commands and you'll build ML systems with confidence. Every line of code you write becomes part of a real, working framework.*

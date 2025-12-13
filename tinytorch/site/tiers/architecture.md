@@ -2,7 +2,6 @@
 
 **Build modern neural architectures—from computer vision to language models.**
 
----
 
 ## What You'll Learn
 
@@ -15,7 +14,6 @@ The Architecture tier teaches you how to build the neural network architectures 
 - What embeddings do to represent discrete tokens as continuous vectors
 - How modern architectures compose these components into powerful systems
 
----
 
 ## Module Progression
 
@@ -47,7 +45,6 @@ graph TB
     style LLM fill:#fef3c7,stroke:#f59e0b,stroke-width:3px
 ```
 
----
 
 ## Module Details
 
@@ -61,7 +58,6 @@ graph TB
 
 **Systems focus**: Memory efficiency, batching strategies, I/O optimization
 
----
 
 ### 09. Spatial - Convolutional Neural Networks
 
@@ -75,7 +71,6 @@ graph TB
 
 **Historical impact**: This module enables **Milestone 04 (1998 CNN Revolution)** - achieving 75%+ accuracy on CIFAR-10 with YOUR implementations.
 
----
 
 ### 10. Tokenization - From Text to Numbers
 
@@ -87,7 +82,6 @@ graph TB
 
 **Systems focus**: Vocabulary management, encoding schemes, out-of-vocabulary handling
 
----
 
 ### 11. Embeddings - Learning Representations
 
@@ -99,7 +93,6 @@ graph TB
 
 **Systems focus**: Lookup tables, gradient backpropagation through indices, initialization
 
----
 
 ### 12. Attention - Context-Aware Representations
 
@@ -111,7 +104,6 @@ graph TB
 
 **Systems focus**: O(n²) memory/compute, masking strategies, numerical stability
 
----
 
 ### 13. Transformers - The Modern Architecture
 
@@ -125,7 +117,6 @@ graph TB
 
 **Historical impact**: This module enables **Milestone 05 (2017 Transformer Era)** - generating coherent text with YOUR attention implementation.
 
----
 
 ## What You Can Build After This Tier
 
@@ -143,7 +134,6 @@ After completing the Architecture tier, you'll be able to:
 - Train on real datasets (MNIST, CIFAR-10, text corpora)
 - Understand why modern architectures (ResNets, Vision Transformers, LLMs) work
 
----
 
 ## Prerequisites
 
@@ -157,7 +147,6 @@ After completing the Architecture tier, you'll be able to:
 - Computer vision concepts (convolution, feature maps)
 - NLP concepts (tokens, vocabulary, sequence modeling)
 
----
 
 ## Time Commitment
 
@@ -167,7 +156,6 @@ After completing the Architecture tier, you'll be able to:
 
 **Recommended pace**: 1 module per week (2 modules/week for intensive study)
 
----
 
 ## Learning Approach
 
@@ -177,7 +165,6 @@ Each module follows the **Build → Use → Reflect** cycle with **real datasets
 2. **Use**: Train on real data (CIFAR-10 images, text corpora)
 3. **Reflect**: Analyze systems trade-offs (memory vs accuracy, speed vs quality)
 
----
 
 ## Key Achievements
 
@@ -203,7 +190,6 @@ python 01_vaswani_generation.py  # Text generation with YOUR transformer
 
 **What makes this special**: Your attention implementation powers the same architecture behind GPT, ChatGPT, and modern LLMs.
 
----
 
 ## Two Parallel Tracks
 
@@ -221,7 +207,6 @@ The Architecture tier splits into two parallel paths that can be learned in any 
 
 **Recommendation**: Complete both tracks in order (08→09→10→11→12→13), but you can prioritize the track that interests you more.
 
----
 
 ## Next Steps
 
@@ -241,6 +226,5 @@ tito module start 10_tokenization
 - **[ Optimization Tier](optimization)** (Modules 14-19): Production-ready performance
 - **[ Torch Olympics](olympics)** (Module 20): Compete in ML systems challenges
 
----
 
 **[← Back to Home](../intro)** • **[View All Modules](../chapters/00-introduction)** • **[Historical Milestones](../chapters/milestones)**

@@ -257,7 +257,6 @@ See `INSTRUCTOR.md` for detailed grading rubrics for:
 - Review student submissions together
 - Practice debugging sessions
 
----
 
 **Last Updated**: November 2024  
 **For Questions**: See INSTRUCTOR.md or contact course instructor
