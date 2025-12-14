@@ -116,7 +116,7 @@ Concrete outcomes at each major checkpoint:
 | **01-06** | MLP solving XOR (hidden layers!) | AI Winter breakthrough 1969→1986 |
 | **01-08** | Complete training pipeline with DataLoader | Backpropagation era |
 | **01-09** | CNN with convolutions and pooling | LeNet-5 (1998) |
-| **01-13** | **GPT model** with autoregressive generation | "Attention Is All You Need" (2017) |
+| **01-13** | GPT model with autoregressive generation | "Attention Is All You Need" (2017) |
 | **01-19** | Optimized, quantized, accelerated system | Production ML today |
 | **01-20** | MLPerf-style benchmarking submission | Torch Olympics |
 
