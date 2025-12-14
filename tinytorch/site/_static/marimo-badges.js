@@ -32,15 +32,15 @@ document.addEventListener('DOMContentLoaded', function() {
     const notebookName = currentPath.split('/').pop().replace('.html', '');
 
     // Find the repository info from the page
-    const repoUrl = 'https://github.com/mlsysbook/TinyTorch';
-    const repoPath = 'mlsysbook/TinyTorch';
+    const repoUrl = 'https://github.com/harvard-edge/cs249r_book';
+    const repoPath = 'harvard-edge/cs249r_book';
     const branch = 'main';
 
     // Construct marimo molab URL
     // Marimo can open .ipynb files directly from GitHub
     // Format: https://marimo.app/molab?repo=owner/repo&path=path/to/file.ipynb
     // Works for all modules: 01_tensor, 02_activations, etc.
-    const marimoUrl = `https://marimo.app/molab?repo=${repoPath}&path=docs/chapters/modules/${notebookName}.ipynb`;
+    const marimoUrl = `https://marimo.app/molab?repo=${repoPath}&path=tinytorch/modules/${notebookName}.ipynb`;
 
     // Create marimo badge
     const marimoBadge = document.createElement('div');

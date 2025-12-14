@@ -10,7 +10,7 @@ Questions or feedback? [Join the discussion →](https://github.com/harvard-edge
 ```
 
 ```{note} Prerequisites Check
-This guide requires **Python programming** (classes, functions, NumPy basics) and **basic linear algebra** (matrix multiplication). Not sure if you're ready? Take the [Prerequisites Self-Assessment](prerequisites.md) first.
+This guide requires **Python programming** (classes, functions, NumPy basics) and **basic linear algebra** (matrix multiplication).
 ```
 
 Welcome to TinyTorch! This comprehensive guide will get you started whether you're a student building ML systems, an instructor setting up a course, or a TA supporting learners.
@@ -86,7 +86,7 @@ TinyTorch follows a simple three-step workflow that you'll repeat for each modul
 
 ```{mermaid}
 :align: center
-:caption: Architecture Overview
+:caption: "**TinyTorch Build Cycle.** The three-step workflow you repeat for each module: edit in Jupyter, export to the package, and validate with milestone scripts."
 graph LR
  A[1. Edit Module<br/>modules/NN_name.ipynb] --> B[2. Export to Package<br/>tito module complete N]
  B --> C[3. Validate with Milestones<br/>Run milestone scripts]
@@ -134,16 +134,10 @@ from tinytorch.core.tensor import Tensor # YOUR implementation!
 Run milestone scripts to prove your implementation works:
 
 ```bash
-cd milestones/01_1957_perceptron
-python 01_rosenblatt_forward.py # Uses YOUR Tensor (M01)
-python 02_rosenblatt_trained.py # Uses YOUR implementation (M01-M07)
+tito milestone run perceptron  # Uses YOUR Tensor, Activations, Layers
 ```
 
-Each milestone has a README explaining:
-- Required modules
-- Historical context
-- Expected results
-- What you're learning
+Each milestone validates that your modules work together correctly. Use `tito milestone list` to see all available milestones and their required modules.
 
 **What if validation fails?** If a milestone script produces errors:
 1. Read the error message carefully—it usually points to the problem
@@ -151,7 +145,7 @@ Each milestone has a README explaining:
 3. Return to your Jupyter notebook to debug and fix
 4. Re-export with `tito module complete 01` and try again
 
-**See [Historical Milestones](chapters/milestones.md)** for the complete progression through ML history.
+**See [Milestone System](tito/milestones)** for the complete progression through ML history.
 
 ### Your First Module (15 Minutes)
 
@@ -189,7 +183,7 @@ TinyTorch has 20 modules organized in progressive tiers:
 
 **Total: ~60-80 hours** over 14-18 weeks (4-6 hours/week pace).
 
-**See [Foundation Tier Overview](tiers/foundation.md)** for detailed module descriptions, or [Learning Journey](chapters/learning-journey.md) for the complete pedagogical narrative.
+**See [Foundation Tier Overview](tiers/foundation)** for detailed module descriptions.
 
 ### Essential Commands Reference
 
@@ -256,44 +250,7 @@ We're building comprehensive classroom support with NBGrader integration. For ha
 
 **Interested in early adoption?** [Join the discussion](https://github.com/harvard-edge/cs249r_book/discussions/1076) to share your use case.
 
-See the **[Instructor Guide](instructor-guide.md)** for detailed setup instructions and grading rubrics.
+Check back for detailed setup instructions and grading rubrics when classroom support is available.
 
 
-## Additional Resources
-
-<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin: 2rem 0;">
-
-<div style="background: #f0f9ff; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #3b82f6;">
-<h4 style="margin: 0 0 0.5rem 0; color: #1e40af;"> Course Documentation</h4>
-<ul style="margin: 0.5rem 0; padding-left: 1.25rem; font-size: 0.9rem;">
-<li><a href="chapters/learning-journey.html">Learning Journey</a></li>
-<li><a href="chapters/milestones.html">Historical Milestones</a></li>
-<li><a href="prerequisites.html">Prerequisites & Resources</a></li>
-<li><a href="faq.html">Frequently Asked Questions</a></li>
-</ul>
-</div>
-
-<div style="background: #f0fdf4; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #22c55e;">
-<h4 style="margin: 0 0 0.5rem 0; color: #166534;"> CLI & Tools</h4>
-<ul style="margin: 0.5rem 0; padding-left: 1.25rem; font-size: 0.9rem;">
-<li><a href="tito/overview.html">TITO CLI Overview</a></li>
-<li><a href="tito/modules.html">Module Workflow</a></li>
-<li><a href="tito/milestones.html">Milestone System</a></li>
-<li><a href="tito/troubleshooting.html">Troubleshooting</a></li>
-</ul>
-</div>
-
-<div style="background: #fef3c7; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #eab308;">
-<h4 style="margin: 0 0 0.5rem 0; color: #a16207;"> Community</h4>
-<ul style="margin: 0.5rem 0; padding-left: 1.25rem; font-size: 0.9rem;">
-<li><a href="community.html">Community Ecosystem</a></li>
-<li><a href="resources.html">Learning Resources</a></li>
-<li><a href="credits.html">Credits & Acknowledgments</a></li>
-<li><a href="https://github.com/mlsysbook/TinyTorch/discussions">GitHub Discussions</a></li>
-</ul>
-</div>
-
-</div>
-
-
-**Ready to start building?** Choose your path above and dive into the most comprehensive ML systems course available!
+**Ready to start building?** Head to the [Foundation Tier](tiers/foundation) and begin with Module 01!

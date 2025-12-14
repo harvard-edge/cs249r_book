@@ -9,7 +9,7 @@
 
 ```bash
 # Clone and setup
-git clone https://github.com/mlsysbook/TinyTorch.git
+git clone https://github.com/harvard-edge/cs249r_book.git
 cd TinyTorch
 
 # Run development setup
@@ -377,7 +377,7 @@ When preparing a release:
 ## Getting Help
 
 **For Development Questions:**
-- Check existing issues: https://github.com/mlsysbook/TinyTorch/issues
+- Check existing issues: https://github.com/harvard-edge/cs249r_book/issues
 - Review documentation: `docs/` directory
 - Ask in discussions: GitHub Discussions
 

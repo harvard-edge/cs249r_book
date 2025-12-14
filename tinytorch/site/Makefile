@@ -40,7 +40,7 @@ pdf:
 	@echo ""
 	@# Build LaTeX files
 	@echo "📚 Generating LaTeX files..."
-	@jupyter-book build . --builder latex --config _config_pdf.yml
+	@jupyter-book build . --builder latex --config _config_pdf.yml --toc _toc_pdf.yml
 	@echo ""
 	@# Remove emojis for clean professional PDF
 	@echo "🧹 Removing emojis for clean PDF..."

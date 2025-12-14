@@ -1,14 +1,18 @@
 # Module 18: Acceleration
 
-**OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 5-7 hours | Prerequisites: 01-07, 14
+:::{admonition} Module Info
+:class: note
 
-**Prerequisites: Modules 01-07, 14** means you need:
+**OPTIMIZATION TIER** | Difficulty: ●●●○ | Time: 5-7 hours | Prerequisites: 01-14
+
+**Prerequisites: Modules 01-14** means you need:
 - Tensor operations (Module 01) for understanding data structures
 - Neural network layers (Module 03) for knowing what to accelerate
 - Training loops (Module 07) for understanding the performance context
 - Profiling tools (Module 14) for measuring acceleration gains
 
 If you can multiply matrices and understand why matrix multiplication is expensive, you're ready.
+:::
 
 ## Overview
 
@@ -535,9 +539,9 @@ Learn to measure and compare performance systematically. You'll build benchmarki
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/18_acceleration/18_acceleration.py)** - Run interactively in browser, no setup required
-- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/18_acceleration/18_acceleration.py)** - Use Google Colab for cloud compute
-- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/18_acceleration/18_acceleration.py)** - Browse the implementation code
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?filepath=tinytorch/src/18_acceleration/18_acceleration.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/harvard-edge/cs249r_book/blob/main/tinytorch/src/18_acceleration/18_acceleration.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/src/18_acceleration/18_acceleration.py)** - Browse the implementation code
 ```
 
 ```{warning} Save Your Progress

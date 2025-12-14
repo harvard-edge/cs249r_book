@@ -1,8 +1,12 @@
 # Module 19: Benchmarking
 
-**OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 5-7 hours | Prerequisites: 01-07, 14
+:::{admonition} Module Info
+:class: note
 
-This module assumes familiarity with the complete TinyTorch foundation (Modules 01-07) and profiling concepts from Module 14. You should understand tensors, training loops, and basic performance measurement before tackling systematic benchmarking and statistical analysis.
+**OPTIMIZATION TIER** | Difficulty: ●●●○ | Time: 5-7 hours | Prerequisites: 01-18
+
+This module assumes familiarity with the complete TinyTorch stack (Modules 01-13), profiling (Module 14), and optimization techniques (Modules 15-18). You should understand how to build, profile, and optimize models before tackling systematic benchmarking and statistical comparison of optimizations.
+:::
 
 ## Overview
 
@@ -628,9 +632,9 @@ Apply everything you have learned in Modules 01-19 to compete in the TorchPerf O
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/19_benchmarking/19_benchmarking.py)** - Run interactively in browser, no setup required
-- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/19_benchmarking/19_benchmarking.py)** - Use Google Colab for cloud compute
-- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/19_benchmarking/19_benchmarking.py)** - Browse the implementation code
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?filepath=tinytorch/src/19_benchmarking/19_benchmarking.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/harvard-edge/cs249r_book/blob/main/tinytorch/src/19_benchmarking/19_benchmarking.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/src/19_benchmarking/19_benchmarking.py)** - Browse the implementation code
 ```
 
 ```{warning} Save Your Progress

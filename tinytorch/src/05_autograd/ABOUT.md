@@ -1,14 +1,18 @@
 # Module 05: Autograd
 
-**FOUNDATION TIER** | Difficulty: ●●● (3/4) | Time: 6-8 hours | Prerequisites: 01, 02, 03, 04
+:::{admonition} Module Info
+:class: note
+
+**FOUNDATION TIER** | Difficulty: ●●●○ | Time: 6-8 hours | Prerequisites: 01-04
 
 **Prerequisites: Modules 01-04** means you need:
 - Tensor operations (matmul, broadcasting, reductions)
-- Activation functions (ReLU, Sigmoid, Softmax)
-- Linear layers (weight matrices, bias vectors)
-- Loss functions (MSE, cross-entropy)
+- Activation functions (understanding non-linearity)
+- Neural network layers (what gradients flow through)
+- Loss functions (the "why" behind gradients)
 
-If you can compute a forward pass through a neural network manually, you're ready.
+If you can compute a forward pass through a neural network manually and understand why we need to minimize loss, you're ready.
+:::
 
 ## Overview
 
@@ -579,9 +583,9 @@ Implement SGD, Adam, and other optimization algorithms that use your autograd gr
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/05_autograd/05_autograd.py)** - Run interactively in browser, no setup required
-- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/05_autograd/05_autograd.py)** - Use Google Colab for cloud compute
-- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/05_autograd/05_autograd.py)** - Browse the implementation code
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?filepath=tinytorch/src/05_autograd/05_autograd.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/harvard-edge/cs249r_book/blob/main/tinytorch/src/05_autograd/05_autograd.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/src/05_autograd/05_autograd.py)** - Browse the implementation code
 ```
 
 ```{warning} Save Your Progress

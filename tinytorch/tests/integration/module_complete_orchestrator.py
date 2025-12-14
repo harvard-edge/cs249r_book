@@ -17,11 +17,11 @@ from tests.integration.run_module_tests import ModuleIntegrationTester
 
 # Map modules to their capability demonstrations
 CAPABILITY_DEMOS = {
-    "05_dense": "capabilities/05_neural_networks/demonstrate.py",
-    "06_spatial": "capabilities/06_computer_vision/demonstrate.py",
-    "07_attention": "capabilities/07_attention_mechanism/demonstrate.py",
-    "12_training": "capabilities/12_complete_training/demonstrate.py",
-    "17_tinygpt": "capabilities/17_language_model/demonstrate.py",
+    "03_layers": "capabilities/03_neural_networks/demonstrate.py",
+    "09_convolutions": "capabilities/09_computer_vision/demonstrate.py",
+    "12_attention": "capabilities/12_attention_mechanism/demonstrate.py",
+    "07_training": "capabilities/07_complete_training/demonstrate.py",
+    "13_transformers": "capabilities/13_language_model/demonstrate.py",
 }
 
 class ModuleCompletionOrchestrator:
@@ -157,10 +157,11 @@ class ModuleCompletionOrchestrator:
     def _suggest_next_module(self, current_module: str, console):
         """Suggest the next module to complete."""
         module_order = [
-            "01_setup", "02_tensor", "03_activations", "04_layers", "05_dense",
-            "06_spatial", "07_attention", "08_dataloader", "09_normalization",
-            "10_autograd", "11_optimizers", "12_training", "13_regularization",
-            "14_kernels", "15_benchmarking", "16_mlops", "17_tinygpt"
+            "01_tensor", "02_activations", "03_layers", "04_losses", "05_autograd",
+            "06_optimizers", "07_training", "08_dataloader", "09_convolutions",
+            "10_tokenization", "11_embeddings", "12_attention", "13_transformers",
+            "14_profiling", "15_quantization", "16_compression", "17_memoization",
+            "18_acceleration", "19_benchmarking", "20_capstone"
         ]
 
         try:

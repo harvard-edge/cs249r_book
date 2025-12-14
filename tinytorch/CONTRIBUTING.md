@@ -16,7 +16,7 @@ TinyTorch is an **educational framework** where every contribution should:
 
 1. **Clone and setup environment**:
    ```bash
-   git clone https://github.com/mlsysbook/TinyTorch.git
+   git clone https://github.com/harvard-edge/cs249r_book.git
    cd TinyTorch
    python -m venv .venv
    source .venv/bin/activate  # On Windows: .venv\Scripts\activate

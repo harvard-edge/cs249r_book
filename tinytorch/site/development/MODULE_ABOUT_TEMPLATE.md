@@ -184,21 +184,21 @@ Choose your preferred way to engage with this module:
 ````{grid} 1 2 3 3
 
 ```{grid-item-card} Launch Binder
-:link: https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/[NN]_[modulename]/[NN]_[modulename].py
+:link: https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?filepath=tinytorch/src/[NN]_[modulename]/[NN]_[modulename].py
 :class-header: bg-light
 
 Run this module interactively in your browser. No installation required!
 ```
 
 ```{grid-item-card} Open in Colab
-:link: https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/[NN]_[modulename]/[NN]_[modulename].py
+:link: https://colab.research.google.com/github/harvard-edge/cs249r_book/blob/main/tinytorch/src/[NN]_[modulename]/[NN]_[modulename].py
 :class-header: bg-light
 
 Use Google Colab for GPU access and cloud compute power.
 ```
 
 ```{grid-item-card} View Source
-:link: https://github.com/mlsysbook/TinyTorch/blob/main/src/[NN]_[modulename]/[NN]_[modulename].py
+:link: https://github.com/harvard-edge/cs249r_book/blob/main/src/[NN]_[modulename]/[NN]_[modulename].py
 :class-header: bg-light
 
 Browse the Python source code and understand the implementation.
@@ -242,7 +242,7 @@ These were removed based on expert review:
 ## Tier Definitions
 
 - **FOUNDATION TIER**: Core building blocks (Tensor, Activations, Layers, Losses, Autograd, Optimizers, Training)
-- **ARCHITECTURE TIER**: Model architectures (DataLoader, Spatial, Tokenization, Embeddings, Attention, Transformers)
+- **ARCHITECTURE TIER**: Model architectures (DataLoader, Convolutions, Tokenization, Embeddings, Attention, Transformers)
 - **OPTIMIZATION TIER**: Performance optimization (Profiling, Quantization, Compression, Memoization, Acceleration, Benchmarking, Capstone)
 
 ## Difficulty Scale

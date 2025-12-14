@@ -89,6 +89,41 @@ def process_latex_file(tex_file: Path) -> int:
         content
     )
 
+    # Fix figure placement: change [htbp] to [H] for inline placement
+    content = re.sub(
+        r'\\begin\{figure\}\[htbp\]',
+        r'\\begin{figure}[H]',
+        content
+    )
+
+    # Center all includegraphics that aren't already centered
+    # Find \includegraphics not preceded by \centering and wrap them
+    content = re.sub(
+        r'(\\begin\{figure\}\[H\]\n)(\\includegraphics)',
+        r'\1\\centering\n\2',
+        content
+    )
+
+    # Scale mermaid diagrams: use adjustbox for smart max-width scaling
+    # This allows small diagrams to stay natural size, but caps large ones at column width
+    # First, ensure adjustbox is available by adding to preamble if not present
+    if r'\usepackage{adjustbox}' not in content:
+        # Add adjustbox after float package
+        content = content.replace(
+            r'\usepackage{float}',
+            r'\usepackage{float}' + '\n' + r'\usepackage{adjustbox}'
+        )
+
+    # Replace sphinxincludegraphics for mermaid with width-constrained includegraphics
+    # Using width=\linewidth ensures diagram fits within text margins
+    # height=0.6\textheight allows taller diagrams while keeping them on one page
+    # keepaspectratio prevents distortion - image scales to fit whichever constraint is tighter
+    content = re.sub(
+        r'\\sphinxincludegraphics\{(mermaid-[^}]+\.pdf)\}',
+        r'\\includegraphics[width=\\linewidth,height=0.6\\textheight,keepaspectratio]{\g<1>}',
+        content
+    )
+
     # Write back
     with open(tex_file, 'w', encoding='utf-8') as f:
         f.write(content)

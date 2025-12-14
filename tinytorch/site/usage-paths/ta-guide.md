@@ -9,7 +9,7 @@ Complete guide for TAs supporting TinyTorch courses, covering common student err
 TAs should develop deep familiarity with modules where students commonly struggle:
 
 1. **Module 05: Autograd** - Most conceptually challenging
-2. **Module 09: CNNs (Spatial)** - Complex nested loops and memory patterns
+2. **Module 09: Convolutions (CNNs)** - Complex nested loops and memory patterns
 3. **Module 13: Transformers** - Attention mechanisms and scaling
 
 ### Preparation Process
@@ -70,7 +70,7 @@ y.backward()  # Gradients flow correctly
 - Check gradient accumulation for broadcasted dimensions
 - Verify gradient shapes match original tensor shapes
 
-### Module 09: CNNs (Spatial)
+### Module 09: Convolutions (CNNs)
 
 #### Error 1: Index Out of Bounds
 **Symptom**: `IndexError` in convolution loops

@@ -13,7 +13,7 @@ TinyTorch uses a clean, simple approach to track your ML systems engineering jou
 
 ```{mermaid}
 :align: center
-:caption: Architecture Overview
+:caption: "**Progress Tracking Flow.** Build modules, export to package, unlock historical milestones, and track achievements through two parallel systems."
 graph LR
  A[Build Modules] --> B[Complete 01-20]
  B --> C[Export to Package]
@@ -98,7 +98,7 @@ TinyTorch/
 - Personal configuration
 
 **`progress.json`** - Module Completion
-```json
+```text
 {
  "version": "1.0",
  "completed_modules": [1, 2, 3, 4, 5, 6, 7],

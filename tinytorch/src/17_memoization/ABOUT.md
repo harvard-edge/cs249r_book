@@ -1,13 +1,17 @@
 # Module 17: Memoization
 
-**OPTIMIZATION TIER** | Difficulty: ●● (2/4) | Time: 3-5 hours | Prerequisites: 01-07
+:::{admonition} Module Info
+:class: note
 
-**Prerequisites: Modules 01-07** means you should be comfortable with:
+**OPTIMIZATION TIER** | Difficulty: ●●○○ | Time: 3-5 hours | Prerequisites: 01-14
+
+**Prerequisites: Modules 01-14** means you should be comfortable with:
 - Tensor operations, matrix multiplication, and shape manipulation (Module 01)
-- Forward passes through neural network layers (Module 03)
-- Training loops and model evaluation (Module 07)
+- Transformer architectures and attention (Modules 12-13)
+- Profiling tools (Module 14) to measure speedup
 
-This module introduces optimization techniques that make production language model inference economically viable. If you understand how neural networks compute predictions, you're ready to learn how to make them dramatically faster.
+This module introduces optimization techniques that make production language model inference economically viable. If you understand how transformers compute attention and why it's expensive, you're ready to learn how to make inference dramatically faster.
+:::
 
 ## Overview
 
@@ -576,9 +580,9 @@ Implement kernel fusion, operator batching, and CPU/GPU optimization techniques.
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/17_memoization/17_memoization.py)** - Run interactively in browser, no setup required
-- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/17_memoization/17_memoization.py)** - Use Google Colab for cloud compute
-- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/17_memoization/17_memoization.py)** - Browse the implementation code
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?filepath=tinytorch/src/17_memoization/17_memoization.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/harvard-edge/cs249r_book/blob/main/tinytorch/src/17_memoization/17_memoization.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/src/17_memoization/17_memoization.py)** - Browse the implementation code
 ```
 
 ```{warning} Save Your Progress

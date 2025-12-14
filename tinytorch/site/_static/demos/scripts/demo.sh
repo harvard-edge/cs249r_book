@@ -99,7 +99,7 @@ EOF
 
     # Measure git clone
     cd /tmp
-    GIT_CLONE_TIME=$(time_command "git_clone" "git clone https://github.com/mlsysbook/TinyTorch.git")
+    GIT_CLONE_TIME=$(time_command "git_clone" "git clone https://github.com/harvard-edge/cs249r_book.git")
 
     # Measure setup
     cd TinyTorch

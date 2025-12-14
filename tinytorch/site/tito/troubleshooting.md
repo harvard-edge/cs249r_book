@@ -550,7 +550,7 @@ echo '{"logo_theme":"standard"}' > .tito/config.json
 <div style="background: #fff5f5; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #e74c3c; margin: 1.5rem 0;">
 
 **Symptom**:
-```bash
+```text
 $ tito module status
 Shows modules as completed that you haven't done
 ```
@@ -790,7 +790,7 @@ python -c "from tinytorch import Tensor" 2>&1 | less
 <div style="background: #f3e5f5; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #9c27b0; margin: 1.5rem 0;">
 
 **GitHub Issues**: Report bugs or ask questions
-- Repository: [mlsysbook/TinyTorch](https://github.com/mlsysbook/TinyTorch)
+- Repository: [harvard-edge/cs249r_book](https://github.com/harvard-edge/cs249r_book)
 - Search existing issues first
 - Include error messages and OS details
 
@@ -862,7 +862,7 @@ python -c "from tinytorch import Tensor" 2>&1 | less
 <div style="background: #f8f9fa; padding: 2rem; border-radius: 0.5rem; margin: 2rem 0; text-align: center;">
 <h3 style="margin: 0 0 1rem 0; color: #495057;">Need More Help?</h3>
 <p style="margin: 0 0 1.5rem 0; color: #6c757d;">Try these resources for additional support</p>
-<a href="https://github.com/mlsysbook/TinyTorch/issues" style="display: inline-block; background: #28a745; color: white; padding: 0.75rem 1.5rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500; margin-right: 1rem;">Report Issue →</a>
+<a href="https://github.com/harvard-edge/cs249r_book/issues" style="display: inline-block; background: #28a745; color: white; padding: 0.75rem 1.5rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500; margin-right: 1rem;">Report Issue →</a>
 <a href="overview.html" style="display: inline-block; background: #007bff; color: white; padding: 0.75rem 1.5rem; border-radius: 0.25rem; text-decoration: none; font-weight: 500;">Command Reference →</a>
 </div>
 

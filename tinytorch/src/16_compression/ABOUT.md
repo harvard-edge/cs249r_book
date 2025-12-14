@@ -1,13 +1,17 @@
 # Module 16: Compression
 
-**OPTIMIZATION TIER** | Difficulty: ●●● (3/4) | Time: 5-7 hours | Prerequisites: 01-07, 14
+:::{admonition} Module Info
+:class: note
 
-**Prerequisites: Modules 01-07, 14** means you should have:
+**OPTIMIZATION TIER** | Difficulty: ●●●○ | Time: 5-7 hours | Prerequisites: 01-14
+
+**Prerequisites: Modules 01-14** means you should have:
 - Built tensors, layers, and the complete training pipeline (Modules 01-07)
 - Implemented profiling tools to measure model characteristics (Module 14)
 - Comfort with weight distributions, parameter counting, and memory analysis
 
 If you can profile a model's parameters and understand weight distributions, you're ready.
+:::
 
 ## Overview
 
@@ -567,9 +571,9 @@ Implement caching and memoization strategies to eliminate redundant computations
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/16_compression/16_compression.py)** - Run interactively in browser, no setup required
-- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/16_compression/16_compression.py)** - Use Google Colab for cloud compute
-- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/16_compression/16_compression.py)** - Browse the implementation code
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?filepath=tinytorch/src/16_compression/16_compression.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/harvard-edge/cs249r_book/blob/main/tinytorch/src/16_compression/16_compression.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/src/16_compression/16_compression.py)** - Browse the implementation code
 ```
 
 ```{warning} Save Your Progress

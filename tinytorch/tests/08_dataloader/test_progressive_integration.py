@@ -1,13 +1,13 @@
 """
 Module 08: Progressive Integration Tests
-Tests that Module 09 (Autograd) works correctly AND that the entire prior stack (01→08) still works.
+Tests that Module 08 (DataLoader) works correctly AND that Foundation tier (01→07) still works.
 
-DEPENDENCY CHAIN: 01_setup → 02_tensor → 03_activations → 04_layers → 05_dense → 06_spatial → 07_attention → 08_dataloader → 09_autograd
-This is where we enable automatic differentiation - the foundation of neural network training.
+DEPENDENCY CHAIN: 01_tensor → ... → 07_training → 08_dataloader
+This is where we enable efficient data loading for training.
 
 🎯 WHAT THIS TESTS:
-- Module 08: Automatic gradient computation, computation graphs, backpropagation
-- Integration: Autograd works with all previous modules (tensors, layers, data)
+- Module 08: Dataset abstraction, batching, shuffling, data pipelines
+- Integration: DataLoader works with Foundation tier modules
 - Regression: Complete ML pipeline (01→08) still works correctly
 - Preparation: Ready for optimizers (Module 10) and training (Module 11)
 

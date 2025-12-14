@@ -1,13 +1,17 @@
 # Module 14: Profiling
 
-**OPTIMIZATION TIER** | Difficulty: ●● (2/4) | Time: 3-5 hours | Prerequisites: 01-07
+:::{admonition} Module Info
+:class: note
 
-**Prerequisites: Modules 01-07** means you should have:
-- Built tensors with shape manipulation and operations
-- Implemented layers with forward passes
-- Understanding of training loops and batching
+**OPTIMIZATION TIER** | Difficulty: ●●○○ | Time: 3-5 hours | Prerequisites: 01-13
 
-If you can calculate matrix multiplication cost and track memory usage patterns, you're ready.
+**Prerequisites: Modules 01-13** means you should have:
+- Built the complete ML stack (Modules 01-07)
+- Implemented CNN architectures (Module 09) or Transformers (Modules 10-13)
+- Models to profile and optimize
+
+**Why these prerequisites**: You'll profile models built in Modules 1-13. Understanding the implementations helps you interpret profiling results (e.g., why attention is memory-bound).
+:::
 
 ## Overview
 
@@ -436,9 +440,9 @@ Implement quantization to reduce model size and accelerate inference. You'll use
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/14_profiling/14_profiling.py)** - Run interactively in browser, no setup required
-- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/14_profiling/14_profiling.py)** - Use Google Colab for cloud compute
-- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/14_profiling/14_profiling.py)** - Browse the implementation code
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?filepath=tinytorch/src/14_profiling/14_profiling.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/harvard-edge/cs249r_book/blob/main/tinytorch/src/14_profiling/14_profiling.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/src/14_profiling/14_profiling.py)** - Browse the implementation code
 ```
 
 ```{warning} Save Your Progress

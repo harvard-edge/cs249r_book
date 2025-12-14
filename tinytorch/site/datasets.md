@@ -294,8 +294,7 @@ A: Yes! You can work through most milestones using only shipped datasets. Downlo
 
 ## Related Documentation
 
-- [Milestones Guide](chapters/milestones.md) - See how each dataset is used in historical achievements
-- [Student Workflow](student-workflow.md) - Learn the development cycle
-- [Quick Start](getting-started.md) - Start building in 15 minutes
+- [Milestone System](tito/milestones) - See how each dataset is used in historical achievements
+- [Quick Start](getting-started) - Start building in 15 minutes
 
 **Dataset implementation details**: See `datasets/tinydigits/README.md` and `datasets/tinytalks/README.md` for technical specifications.

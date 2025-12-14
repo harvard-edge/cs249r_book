@@ -19,7 +19,7 @@ The Foundation tier teaches you how to build a complete learning system from scr
 
 ```{mermaid}
 :align: center
-:caption: Architecture Overview
+:caption: "**Foundation Module Dependencies.** Tensors and activations feed into layers, which connect to losses and autograd, enabling optimizers and ultimately training loops."
 graph TB
     M01[01. Tensor<br/>Multidimensional arrays] --> M03[03. Layers<br/>Linear transformations]
     M02[02. Activations<br/>Non-linear functions] --> M03
@@ -125,7 +125,7 @@ graph TB
 
 ```{mermaid}
 :align: center
-:caption: Architecture Overview
+:caption: "**Foundation Tier Milestones.** After completing modules 01-07, you unlock three historical achievements spanning three decades of neural network breakthroughs."
 timeline
     title Historical Achievements Unlocked
     1957 : Perceptron : Binary classification with gradient descent
@@ -192,4 +192,4 @@ tito module start 01_tensor
 - **[ Torch Olympics](olympics)** (Module 20): Compete in ML systems challenges
 
 
-**[← Back to Home](../intro)** • **[Learning Journey](../chapters/learning-journey)** • **[Daily Workflow Guide](../student-workflow)**
+**[← Back to Home](../intro)** • **[Module Workflow](../tito/modules)**

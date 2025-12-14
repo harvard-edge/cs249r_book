@@ -219,7 +219,7 @@ FAILED test_tinytorch_import - ModuleNotFoundError: No module named 'tinytorch'
 ### First Time Setup
 ```bash
 # 1. Clone repository
-git clone https://github.com/yourname/TinyTorch.git
+git clone https://github.com/harvard-edge/cs249r_book.git
 cd TinyTorch
 
 # 2. Run setup

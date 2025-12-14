@@ -296,7 +296,7 @@ Starter code will be provided for each track.
 
 ### Documentation
 
-- **[MLPerf Milestone](../chapters/milestones)**: Historical context
+- **[Milestone System](../tito/milestones)**: Historical context
 - **[Benchmarking Guide](../modules/19_benchmarking_ABOUT)**: Measurement methodology
 - **[Optimization Techniques](../tiers/optimization)**: Compression and acceleration strategies
 

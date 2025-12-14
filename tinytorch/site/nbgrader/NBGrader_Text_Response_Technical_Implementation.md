@@ -101,7 +101,7 @@ Based on Education Architect recommendation:
 | `02_tensor` | 3 questions | Memory management, hardware abstraction, API design |
 | `03_activations` | 3 questions | Computational efficiency, numerical stability, hardware abstraction |
 | `04_layers` | 2 questions | Layer abstraction, parameter management |
-| `06_spatial` | 2 questions | Convolution optimization, memory access patterns |
+| `09_convolutions` | 2 questions | Convolution optimization, memory access patterns |
 | `07_attention` | 2 questions | Attention scaling, multi-head parallelization |
 | `10_optimizers` | 2 questions | Memory overhead, learning rate scheduling |
 

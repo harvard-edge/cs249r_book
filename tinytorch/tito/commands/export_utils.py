@@ -24,7 +24,7 @@ SOURCE_MAPPINGS = {
     ("core", "optimizers"): "src/06_optimizers/06_optimizers.py",
     ("core", "training"): "src/07_training/07_training.py",
     ("core", "dataloader"): "src/08_dataloader/08_dataloader.py",
-    ("core", "spatial"): "src/09_spatial/09_spatial.py",
+    ("core", "convolutions"): "src/09_convolutions/09_convolutions.py",
     ("core", "tokenization"): "src/10_tokenization/10_tokenization.py",
     ("core", "embeddings"): "src/11_embeddings/11_embeddings.py",
     ("core", "attention"): "src/12_attention/12_attention.py",

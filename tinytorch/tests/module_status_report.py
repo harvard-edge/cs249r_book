@@ -31,7 +31,7 @@ def check_module_imports():
         ("06_autograd", "tinytorch.core.autograd"),
         ("07_optimizers", "tinytorch.core.optimizers"),
         ("08_training", "tinytorch.core.training"),
-        ("09_spatial", "tinytorch.core.spatial"),
+        ("09_convolutions", "tinytorch.core.spatial"),
         ("10_dataloader", "tinytorch.data.loader"),
         ("11_tokenization", "tinytorch.core.tokenization"),
         ("12_embeddings", "tinytorch.core.embeddings"),

@@ -43,7 +43,7 @@ See [The Learning Journey](learning-journey.md) for the complete pedagogical nar
 
 ```{mermaid}
 :align: center
-:caption: Pedagogical Acts (What You're Learning)
+:caption: "**Pedagogical Acts and Historical Milestones.** Two dimensions of progress: Acts explain what you learn while milestones validate what you can build."
 graph TB
  subgraph "Pedagogical Acts (What You're Learning)"
  A1["Act I: Foundation<br/>Modules 01-04<br/>Atomic Components"]
@@ -100,7 +100,7 @@ graph TB
 
 ```{mermaid}
 :align: center
-:caption: Architecture Overview
+:caption: "**Journey Through ML History.** Six decades of breakthroughs you recreate with your own implementations, from the 1957 Perceptron to modern production systems."
 timeline
  title Journey Through ML History
  1957 : Perceptron : Binary classification with gradient descent
@@ -132,9 +132,7 @@ Input → Linear → Sigmoid → Output
 - Limitation: Only linearly separable problems
 
 ```bash
-cd milestones/01_1957_perceptron
-python 01_rosenblatt_forward.py # See the problem (random weights)
-python 02_rosenblatt_trained.py # See the solution (trained)
+tito milestone run perceptron
 ```
 
 **Expected Results**: ~50% (untrained) → 95%+ (trained) accuracy
@@ -346,8 +344,7 @@ tito module complete 02
 ### 2. Run the Milestone
 
 ```bash
-cd milestones/01_1957_perceptron
-python 02_rosenblatt_trained.py
+tito milestone run perceptron
 ```
 
 ### 3. Understand the Systems
@@ -376,7 +373,7 @@ Each milestone includes:
 | 01. Perceptron (1957) | 04 | Tensor, Activations, Layers |
 | 02. XOR (1969) | 06 | + Losses, Autograd |
 | 03. MLP (1986) | 08 | + Optimizers, Training |
-| 04. CNN (1998) | 09 | + Spatial, DataLoader |
+| 04. CNN (1998) | 09 | + Convolutions, DataLoader |
 | 05. Transformer (2017) | 13 | + Tokenization, Embeddings, Attention |
 | 06. Torch Olympics (2018) | 18 | + Profiling, Quantization, Compression, Memoization, Acceleration |
 
@@ -412,8 +409,7 @@ By rebuilding ML history, you gain:
 **Ready to start your journey through ML history?**
 
 ```bash
-cd milestones/01_1957_perceptron
-python 02_rosenblatt_trained.py
+tito milestone run perceptron
 ```
 
 **Build the future by understanding the past.**

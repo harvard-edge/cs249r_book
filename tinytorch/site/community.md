@@ -12,7 +12,7 @@
 
 TinyTorch is more than a course—it's a growing community of students, educators, and ML engineers learning systems engineering from first principles.
 
-### Community Dashboard (Available Now )
+## Community Dashboard (Available Now )
 
 Join the global TinyTorch community and see your progress:
 
@@ -64,7 +64,7 @@ tito community map
 - **Privacy-first** - All data stored locally in `.tinytorch/` directory
 - **Opt-in sharing** - You control what information to share
 
-**Privacy:** All fields are optional. We use anonymous UUIDs (no personal names). Data is stored locally in your project directory. See [Privacy Policy](PRIVACY_DATA_RETENTION.md) for details.
+**Privacy:** All fields are optional. We use anonymous UUIDs (no personal names). Data is stored locally in your project directory.
 
 
 ## Connect Now
@@ -102,7 +102,7 @@ See [TITO CLI Reference](tito/overview.md) for complete command documentation.
 
 Teaching TinyTorch in your classroom?
 
-**[See Getting Started - For Instructors](getting-started.html#instructors)** for:
+**See the [Getting Started](getting-started) guide** for:
 - Complete 30-minute instructor setup
 - NBGrader integration and grading workflows
 - Assignment generation and distribution
@@ -114,7 +114,7 @@ Teaching TinyTorch in your classroom?
 Built something impressive with TinyTorch?
 
 **Share it with the community:**
-- Post in [GitHub Discussions](https://github.com/mlsysbook/TinyTorch/discussions) under "Show and Tell"
+- Post in [GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions) under "Show and Tell"
 - Tag us on social media with #TinyTorch
 - Submit your project for community showcase (coming soon)
 
@@ -126,9 +126,9 @@ Built something impressive with TinyTorch?
 
 ## Stay Updated
 
-**GitHub Watch**: [Enable notifications](https://github.com/mlsysbook/TinyTorch) for releases and updates
+**GitHub Watch**: [Enable notifications](https://github.com/harvard-edge/cs249r_book) for releases and updates
 
-**Follow Development**: Check [GitHub Issues](https://github.com/mlsysbook/TinyTorch/issues) for roadmap and upcoming features
+**Follow Development**: Check [GitHub Issues](https://github.com/harvard-edge/cs249r_book/issues) for roadmap and upcoming features
 
 
 **Build ML systems. Learn together. Grow the community.**

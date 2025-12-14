@@ -1,13 +1,17 @@
 # Module 11: Embeddings
 
-**ARCHITECTURE TIER** | Difficulty: ●● (2/4) | Time: 3-5 hours | Prerequisites: 01, 10
+:::{admonition} Module Info
+:class: note
 
-**Prerequisites: Modules 01 and 10** means you should already understand:
+**ARCHITECTURE TIER** | Difficulty: ●●○○ | Time: 3-5 hours | Prerequisites: 01-07, 10
+
+**Prerequisites: Modules 01-07 and 10** means you should understand:
 - Tensor operations (shape manipulation, matrix operations, broadcasting)
-- Tokenization (converting text to token IDs, vocabularies, BPE)
-- Basic Python (classes, methods, indexing)
+- Training fundamentals (forward/backward, optimization)
+- Tokenization (converting text to token IDs, vocabularies)
 
 If you can explain how a tokenizer converts "hello" to token IDs and how to multiply matrices, you're ready.
+:::
 
 ## Overview
 
@@ -617,9 +621,9 @@ Implement attention mechanisms that let embeddings interact with each other. You
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/11_embeddings/11_embeddings.py)** - Run interactively in browser, no setup required
-- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/11_embeddings/11_embeddings.py)** - Use Google Colab for cloud compute
-- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/11_embeddings/11_embeddings.py)** - Browse the implementation code
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?filepath=tinytorch/src/11_embeddings/11_embeddings.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/harvard-edge/cs249r_book/blob/main/tinytorch/src/11_embeddings/11_embeddings.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/src/11_embeddings/11_embeddings.py)** - Browse the implementation code
 ```
 
 ```{warning} Save Your Progress

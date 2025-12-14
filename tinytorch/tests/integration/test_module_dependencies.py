@@ -5,24 +5,33 @@ Tests how each module interfaces with modules that came before it
 """
 
 # Module dependency graph for TinyTorch
+# Current module structure:
+# 01_tensor, 02_activations, 03_layers, 04_losses, 05_autograd,
+# 06_optimizers, 07_training, 08_dataloader, 09_convolutions,
+# 10_tokenization, 11_embeddings, 12_attention, 13_transformers,
+# 14_profiling, 15_quantization, 16_compression, 17_memoization,
+# 18_acceleration, 19_benchmarking, 20_capstone
 MODULE_DEPENDENCIES = {
-    "01_setup": [],  # No dependencies
-    "02_tensor": ["01_setup"],  # Depends on setup
-    "03_activations": ["02_tensor"],  # Needs Tensor
-    "04_layers": ["02_tensor"],  # Needs Tensor
-    "05_dense": ["02_tensor", "04_layers"],  # Needs Tensor and Layer base
-    "06_spatial": ["02_tensor", "04_layers"],  # Needs Tensor and Layer base
-    "07_attention": ["02_tensor", "04_layers", "05_dense"],  # Needs Tensor, Layer, Dense
-    "08_dataloader": ["02_tensor"],  # Needs Tensor
-    "09_normalization": ["02_tensor", "04_layers"],  # Needs Tensor and Layer
-    "10_autograd": ["02_tensor"],  # Core dependency on Tensor
-    "11_optimizers": ["02_tensor", "10_autograd"],  # Needs Tensor and autograd
-    "12_training": ["02_tensor", "10_autograd", "11_optimizers"],  # Training loop deps
-    "13_regularization": ["02_tensor", "04_layers"],  # Regularization techniques
-    "14_kernels": ["02_tensor"],  # Low-level tensor ops
-    "15_benchmarking": ["02_tensor"],  # Performance testing
-    "16_mlops": ["02_tensor", "12_training"],  # Production deployment
-    "17_tinygpt": ["02_tensor", "04_layers", "05_dense", "07_attention", "09_normalization"]  # Full stack
+    "01_tensor": [],  # No dependencies - foundation
+    "02_activations": ["01_tensor"],  # Needs Tensor
+    "03_layers": ["01_tensor"],  # Needs Tensor
+    "04_losses": ["01_tensor"],  # Needs Tensor
+    "05_autograd": ["01_tensor"],  # Core dependency on Tensor
+    "06_optimizers": ["01_tensor", "05_autograd"],  # Needs Tensor and autograd
+    "07_training": ["01_tensor", "05_autograd", "06_optimizers"],  # Training loop deps
+    "08_dataloader": ["01_tensor"],  # Needs Tensor
+    "09_convolutions": ["01_tensor", "03_layers"],  # Needs Tensor and Layer base
+    "10_tokenization": ["01_tensor"],  # Needs Tensor
+    "11_embeddings": ["01_tensor"],  # Needs Tensor
+    "12_attention": ["01_tensor", "03_layers"],  # Needs Tensor, Layer
+    "13_transformers": ["01_tensor", "03_layers", "12_attention"],  # Full attention stack
+    "14_profiling": ["01_tensor"],  # Performance analysis
+    "15_quantization": ["01_tensor"],  # Optimization techniques
+    "16_compression": ["01_tensor"],  # Optimization techniques
+    "17_memoization": ["01_tensor"],  # Optimization techniques
+    "18_acceleration": ["01_tensor"],  # Optimization techniques
+    "19_benchmarking": ["01_tensor"],  # Performance testing
+    "20_capstone": ["01_tensor", "09_convolutions", "13_transformers"]  # Full stack
 }
 
 def get_module_integration_tests(module_name: str):
@@ -57,7 +66,7 @@ def get_module_integration_tests(module_name: str):
         tests.append(("test_dense_with_activations", test_dense_with_activations))
         tests.append(("test_multi_layer_network", test_multi_layer_network))
 
-    elif module_name == "06_spatial":
+    elif module_name == "09_convolutions":
         tests.append(("test_conv2d_with_tensor", test_conv2d_with_tensor))
         tests.append(("test_pooling_integration", test_pooling_integration))
 

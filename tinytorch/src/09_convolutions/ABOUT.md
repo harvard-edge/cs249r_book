@@ -1,6 +1,9 @@
 # Module 09: Spatial
 
-**ARCHITECTURE TIER** | Difficulty: ●●● (3/4) | Time: 6-8 hours | Prerequisites: 01-08
+:::{admonition} Module Info
+:class: note
+
+**ARCHITECTURE TIER** | Difficulty: ●●●○ | Time: 6-8 hours | Prerequisites: 01-08
 
 **Prerequisites: Modules 01-08** assumes you have:
 - Built the complete training pipeline (Modules 01-07)
@@ -8,6 +11,7 @@
 - Understanding of parameter initialization, forward/backward passes, and optimization
 
 If you can train an MLP on MNIST using your training loop and DataLoader, you're ready.
+:::
 
 ## Overview
 
@@ -669,9 +673,9 @@ Shift from spatial processing (images) to sequential processing (text). You'll i
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/09_spatial/09_spatial.py)** - Run interactively in browser, no setup required
-- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/09_spatial/09_spatial.py)** - Use Google Colab for cloud compute
-- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/09_spatial/09_spatial.py)** - Browse the implementation code
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?filepath=tinytorch/src/09_convolutions/09_convolutions.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/harvard-edge/cs249r_book/blob/main/tinytorch/src/09_convolutions/09_convolutions.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/src/09_convolutions/09_convolutions.py)** - Browse the implementation code
 ```
 
 ```{warning} Save Your Progress

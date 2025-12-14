@@ -1,6 +1,9 @@
 # Module 20: Capstone
 
-**OPTIMIZATION TIER** | Difficulty: ●●●● (4/4) | Time: 6-8 hours | Prerequisites: All modules (01-19)
+:::{admonition} Module Info
+:class: note
+
+**OPTIMIZATION TIER** | Difficulty: ●●●● | Time: 6-8 hours | Prerequisites: All modules (01-19)
 
 **Prerequisites: All modules** means you've built a complete ML framework. This capstone assumes:
 - Complete TinyTorch framework (Modules 01-13) - **Required**
@@ -8,6 +11,7 @@
 - Benchmarking methodology (Module 19) - **Required**
 
 The core benchmarking functionality (Parts 1-4) works with just Modules 01-13 and 19. Modules 14-18 enable the advanced optimization workflow (Part 4b), which demonstrates how to integrate all TinyTorch components. If optimization modules aren't available, the system gracefully degrades to baseline benchmarking only.
+:::
 
 ## Overview
 
@@ -619,9 +623,9 @@ You've built a complete ML framework from scratch—from basic tensors to produc
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/20_capstone/20_capstone.py)** - Run interactively in browser, no setup required
-- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/20_capstone/20_capstone.py)** - Use Google Colab for cloud compute
-- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/20_capstone/20_capstone.py)** - Browse the implementation code
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?filepath=tinytorch/src/20_capstone/20_capstone.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/harvard-edge/cs249r_book/blob/main/tinytorch/src/20_capstone/20_capstone.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/src/20_capstone/20_capstone.py)** - Browse the implementation code
 ```
 
 ```{warning} Save Your Progress

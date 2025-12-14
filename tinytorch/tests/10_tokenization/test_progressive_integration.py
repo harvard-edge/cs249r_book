@@ -1,9 +1,9 @@
 """
 Module 10: Progressive Integration Tests
-Tests that Module 11 (Training) works correctly AND that the entire prior stack works.
+Tests that Module 10 (Tokenization) works correctly AND that Foundation + Architecture tier work.
 
-DEPENDENCY CHAIN: 01_setup → 02_tensor → 03_activations → 04_layers → 05_dense → 06_spatial → 07_attention → 08_dataloader → 09_autograd → 10_optimizers → 11_training
-This is where we enable complete end-to-end training loops.
+DEPENDENCY CHAIN: 01_tensor → ... → 08_dataloader → 09_convolutions → 10_tokenization
+This is where text processing begins for NLP pipelines.
 """
 
 import numpy as np

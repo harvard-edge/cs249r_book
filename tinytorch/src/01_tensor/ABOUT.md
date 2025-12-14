@@ -1,6 +1,9 @@
 # Module 01: Tensor
 
-**FOUNDATION TIER** | Difficulty: ● (1/4) | Time: 4-6 hours | Prerequisites: None
+:::{admonition} Module Info
+:class: note
+
+**FOUNDATION TIER** | Difficulty: ●○○○ | Time: 4-6 hours | Prerequisites: None
 
 **Prerequisites: None** means exactly that. This module assumes:
 - Basic Python (lists, classes, methods)
@@ -8,6 +11,7 @@
 - No machine learning background required
 
 If you can multiply two matrices by hand and write a Python class, you're ready.
+:::
 
 ## Overview
 
@@ -619,9 +623,9 @@ Implement ReLU, Sigmoid, Tanh, and Softmax. You'll apply element-wise operations
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/01_tensor/01_tensor.py)** - Run interactively in browser, no setup required
-- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/01_tensor/01_tensor.py)** - Use Google Colab for cloud compute
-- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/01_tensor/01_tensor.py)** - Browse the implementation code
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?filepath=tinytorch/src/01_tensor/01_tensor.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/harvard-edge/cs249r_book/blob/main/tinytorch/src/01_tensor/01_tensor.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/src/01_tensor/01_tensor.py)** - Browse the implementation code
 ```
 
 ```{warning} Save Your Progress

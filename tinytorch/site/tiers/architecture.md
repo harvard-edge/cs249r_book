@@ -19,12 +19,12 @@ The Architecture tier teaches you how to build the neural network architectures 
 
 ```{mermaid}
 :align: center
-:caption: Architecture Overview
+:caption: "**Architecture Module Flow.** Two parallel tracks branch from Foundation: vision (DataLoader, Convolutions) and language (Tokenization through Transformers)."
 graph TB
  F[ Foundation<br/>Tensor, Autograd, Training]
 
  F --> M08[08. DataLoader<br/>Efficient data pipelines]
- F --> M09[09. Spatial<br/>Conv2d + Pooling]
+ F --> M09[09. Convolutions<br/>Conv2d + Pooling]
 
  M08 --> M09
  M09 --> VISION[ Computer Vision<br/>CNNs unlock spatial intelligence]
@@ -61,7 +61,7 @@ graph TB
 **Systems focus**: Memory efficiency, batching strategies, I/O optimization
 
 
-### 09. Spatial - Convolutional Neural Networks
+### 09. Convolutions - Convolutional Neural Networks
 
 **What it is**: Conv2d (convolutional layers) and pooling operations for processing images.
 
@@ -124,7 +124,7 @@ graph TB
 
 ```{mermaid}
 :align: center
-:caption: Architecture Overview
+:caption: "**Architecture Tier Milestones.** After completing modules 08-13, you unlock computer vision (1998 CNN) and language understanding (2017 Transformer) breakthroughs."
 timeline
  title Historical Achievements Unlocked
  1998 : CNN Revolution : 75%+ accuracy on CIFAR-10 with spatial intelligence
@@ -200,7 +200,7 @@ python 01_vaswani_generation.py # Text generation with YOUR transformer
 The Architecture tier splits into two parallel paths that can be learned in any order:
 
 **Vision Track (Modules 08-09)**:
-- DataLoader → Spatial (Conv2d + Pooling)
+- DataLoader → Convolutions (Conv2d + Pooling)
 - Enables computer vision applications
 - Culminates in CNN milestone
 
@@ -231,4 +231,4 @@ tito module start 10_tokenization
 - **[ Torch Olympics](olympics)** (Module 20): Compete in ML systems challenges
 
 
-**[← Back to Home](../intro)** • **[Learning Journey](../chapters/learning-journey)** • **[Historical Milestones](../chapters/milestones)**
+**[← Back to Home](../intro)** • **[Milestone System](../tito/milestones)**

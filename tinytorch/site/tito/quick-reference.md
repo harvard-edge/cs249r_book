@@ -7,7 +7,7 @@
 ### Setup & Verification
 ```bash
 # Initial setup
-git clone https://github.com/mlsysbook/TinyTorch.git
+git clone https://github.com/harvard-edge/cs249r_book.git
 cd TinyTorch
 ./setup-environment.sh
 source activate.sh
@@ -122,17 +122,16 @@ python
 ### Running Milestones
 ```bash
 # After completing Foundation (M01-07)
-cd milestones/01_1957_perceptron
-python 01_rosenblatt_forward.py
+tito milestone run perceptron
 
 # After completing Architecture (M01-09)
-cd milestones/04_1998_cnn
-python 01_lenet_inference.py
-python 02_lenet_training.py
+tito milestone run cnn
 
 # After completing Optimization (M01-19)
-cd milestones/06_2018_mlperf
-python benchmark.py
+tito milestone run mlperf
+
+# List all milestones and their requirements
+tito milestone list
 ```
 
 ## File Structure

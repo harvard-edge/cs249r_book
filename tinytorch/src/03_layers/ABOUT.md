@@ -1,6 +1,9 @@
 # Module 03: Layers
 
-**FOUNDATION TIER** | Difficulty: ●● (2/4) | Time: 5-7 hours | Prerequisites: 01, 02
+:::{admonition} Module Info
+:class: note
+
+**FOUNDATION TIER** | Difficulty: ●●○○ | Time: 5-7 hours | Prerequisites: 01, 02
 
 **Prerequisites: Modules 01 and 02** means you have built:
 - Tensor class with arithmetic, broadcasting, matrix multiplication, and shape manipulation
@@ -8,6 +11,7 @@
 - Understanding of element-wise operations and reductions
 
 If you can multiply tensors, apply activations, and understand shape transformations, you're ready.
+:::
 
 ## Overview
 
@@ -665,9 +669,9 @@ Implement loss functions (MSELoss, CrossEntropyLoss) that measure prediction err
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/mlsysbook/TinyTorch/main?filepath=src/03_layers/03_layers.py)** - Run interactively in browser, no setup required
-- **[Open in Colab](https://colab.research.google.com/github/mlsysbook/TinyTorch/blob/main/src/03_layers/03_layers.py)** - Use Google Colab for cloud compute
-- **[View Source](https://github.com/mlsysbook/TinyTorch/blob/main/src/03_layers/03_layers.py)** - Browse the implementation code
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?filepath=tinytorch/src/03_layers/03_layers.py)** - Run interactively in browser, no setup required
+- **[Open in Colab](https://colab.research.google.com/github/harvard-edge/cs249r_book/blob/main/tinytorch/src/03_layers/03_layers.py)** - Use Google Colab for cloud compute
+- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/src/03_layers/03_layers.py)** - Browse the implementation code
 ```
 
 ```{warning} Save Your Progress

@@ -162,7 +162,7 @@ validate() {
         echo ""
 
         test_command "git clone" \
-            "git clone https://github.com/mlsysbook/TinyTorch.git TinyTorch_validate" \
+            "git clone https://github.com/harvard-edge/cs249r_book.git TinyTorch_validate" \
             "Cloning into" \
             "$collect_timing" \
             "true"

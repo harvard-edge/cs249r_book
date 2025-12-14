@@ -1,3 +1,5 @@
+# TinyTorch
+
 ```{raw} html
 <div style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border: 2px solid #f59e0b; border-radius: 0.75rem; padding: 1.25rem 1.5rem; margin: 0 0 2rem 0; text-align: center;">
   <div style="display: flex; align-items: center; justify-content: center; gap: 0.5rem; margin-bottom: 0.5rem;">
@@ -9,12 +11,11 @@
     <strong>Classroom ready: Summer/Fall 2026</strong> · <a href="https://github.com/harvard-edge/cs249r_book/discussions/1076" style="color: #b45309; font-weight: 600;">Share your feedback →</a>
   </p>
 </div>
-```
 
-<!-- Main heading -->
-<h1 style="text-align: center; font-size: 3rem; margin: 0rem 0 0.5rem 0; font-weight: 700;">
+<p style="text-align: center; font-size: 2.5rem; margin: 0rem 0 0.5rem 0; font-weight: 700;">
 Build Your Own ML Framework
-</h1>
+</p>
+```
 
 <p style="text-align: center; margin: 0 0 1.5rem 0;">
 <a href="https://mlsysbook.ai" target="_blank" class="textbook-link" style="color: #64748b; font-size: 0.95rem; text-decoration: none; border-bottom: 1px solid #cbd5e1; transition: all 0.2s ease;">
@@ -149,7 +150,7 @@ Capstone: Vision • Language • Speed • Compression tracks
 
 </div>
 
-**[Learning Journey](chapters/learning-journey)** • **[Getting started guide](getting-started)** • **[Join the community](community)**
+**[The Big Picture](big-picture)** • **[Getting started guide](getting-started)** • **[Join the community](community)**
 
 ## Recreate ML History
 
@@ -221,7 +222,7 @@ Walk through ML history by rebuilding its greatest breakthroughs with YOUR TinyT
 </div>
 ```
 
-**[View complete milestone details](chapters/milestones)** to see full technical requirements and learning objectives.
+**[View complete milestone details](tito/milestones)** to see full technical requirements and learning objectives.
 
 ## Why Build Instead of Use?
 
@@ -267,7 +268,7 @@ Every module follows a proven learning cycle that builds deep understanding:
 
 ```{mermaid}
 :align: center
-:caption: Architecture Overview
+:caption: "**Build-Use-Reflect Learning Cycle.** Every module follows this proven pattern: implement from scratch, apply to real problems, then answer systems thinking questions."
 graph LR
     B[Build<br/>Implement from scratch] --> U[Use<br/>Real data, real problems]
     U --> R[Reflect<br/>Systems thinking questions]
@@ -320,4 +321,4 @@ Perfect if you want to **debug ML systems**, **implement custom operations**, or
 </div>
 
 
-**Next Steps**: **[Quick Start](getting-started)** (15 min) • **[Learning Journey](chapters/learning-journey)** • **[FAQ](faq.md)**
+**Next Steps**: **[Quick Start](getting-started)** (15 min) • **[The Big Picture](big-picture)** • **[Community](community)**
