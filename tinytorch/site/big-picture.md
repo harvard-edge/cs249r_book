@@ -23,7 +23,7 @@ TinyTorch takes you from basic tensors to production-ready ML systems through 20
 ```{mermaid}
 :align: center
 :caption: TinyTorch Module Flow
-:zoom: 1.5
+
 graph TB
     subgraph F["FOUNDATION"]
         T["01: Tensor"] --> A["02: Activations"] --> L["03: Layers"] --> Loss["04: Losses"] --> Auto["05: Autograd"] --> Opt["06: Optimizers"] --> Train["07: Training"]
