@@ -1,5 +1,42 @@
 ## 2025 Updates
 
+### 📅 December 14 — v0.5.0: The TinyTorch Release
+
+**The highlight of this release is the public preview of Tiny🔥Torch**, the companion hands-on learning platform integrated into the MLSysBook repository as a monorepo. This release represents a major milestone in providing students with a complete "build your own PyTorch from scratch" experience.
+
+<details>
+<summary>**🔥 TinyTorch Platform**</summary>
+
+- `█████` **Public Preview Release**: TinyTorch officially launches as the hands-on companion to the MLSysBook, allowing students to build their own deep learning framework from the ground up. Includes 20 progressive modules from tensors to transformers.
+- `█████` **Module Documentation**: Comprehensive ABOUT.md files generated for all 19 modules (02-20), providing standardized pedagogical documentation including learning objectives, module connections, and "aha moment" descriptions for each learning milestone.
+- `█████` **Milestone System**: Major overhaul including the new consolidated transformer attention milestone, rewritten XOR crisis milestone for clarity, and CIFAR-10 Part 2 with DataLoader showcase. Prerequisites now correctly reflect actual import dependencies.
+- `█████` **PDF Lab Guide**: Complete PDF documentation with improved admonition colors, mermaid diagram sizing, TOC depth settings, and TeX Gyre fonts. The big-picture diagram now features a top-down layout with module numbers.
+- `████░` **Tito CLI**: Enhanced CLI with milestone name aliases for easier access, module view command, centralized color theme system, and improved health/status commands. All 20 module tests now pass.
+- `███░░` **Branding & Styling**: Standardized "Tiny🔥Torch" branding across the codebase with consistent emoji placement and fire theme.
+- `██░░░` **Module Refactoring**: Module 09 renamed from "Spatial" to "Convolutions" for clarity. Test directory numbering aligned with module numbering.
+
+</details>
+
+<details>
+<summary>**📖 Book Updates**</summary>
+
+- `███░░` **Version 0.5.0**: Major release integrating TinyTorch into the MLSysBook ecosystem, with improved figure captions featuring bold titles and descriptions.
+- `███░░` **Repository Restructure**: Book content reorganized under `book/` directory to accommodate the monorepo structure with TinyTorch.
+- `██░░░` **Volume Planning**: Added comprehensive volume split planning documents for future multi-volume distribution strategy.
+- `██░░░` **Website**: Updated announcement banner celebrating 10K GitHub stars, subscribe modal improvements with role selection, and consistent link colors.
+
+</details>
+
+<details>
+<summary>**🔧 Infrastructure**</summary>
+
+- `████░` **Monorepo Integration**: TinyTorch integrated into the MLSysBook repository with dedicated CI/CD workflows, the Tito CLI tool, and streamlined deployment configurations.
+- `███░░` **CI/CD Improvements**: Added preflight checks before dev and live deploys, standardized workflow naming convention, and synced PDF build between Makefile and CI workflow.
+- `██░░░` **Code Quality**: Pre-commit hook to collapse extra blank lines, codespell configuration updates, and consistent whitespace formatting across codebase.
+- `█░░░░` **GitHub Migration**: Updated all TinyTorch URLs from mlsysbook/TinyTorch to harvard-edge/cs249r_book.
+
+</details>
+
 ### 📅 December 11
 
 <details>
