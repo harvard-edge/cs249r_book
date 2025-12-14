@@ -18,37 +18,87 @@ TinyTorch takes you from basic tensors to production-ready ML systems through 20
 
 - **Optimization (orange)**: Make it fast. Profile to find bottlenecks, then apply quantization, compression, memoization, or acceleration. Benchmarking measures your improvements.
 
+<div class="big-picture-diagram">
+
 ```{mermaid}
 :align: center
 :caption: TinyTorch Module Flow
-graph LR
+:zoom: 1.5
+graph TB
     subgraph F["FOUNDATION"]
-        direction TB
-        T[Tensor] --> A[Activations] --> L[Layers] --> Loss[Losses] --> Auto[Autograd] --> Opt[Optimizers] --> Train[Training]
+        T["01: Tensor"] --> A["02: Activations"] --> L["03: Layers"] --> Loss["04: Losses"] --> Auto["05: Autograd"] --> Opt["06: Optimizers"] --> Train["07: Training"]
     end
 
     subgraph Arch["ARCHITECTURE"]
-        direction TB
-        Data[DataLoader] --> Conv[CNNs]
-        Data --> Tok[Tokentic] --> Emb[Embed] --> Att[Attention] --> Trans[Transform]
+        Data["08: DataLoader"]
+        Data --> Conv["09: CNNs"]
+        Data --> Tok["10: Tokentic"] --> Emb["11: Embed"] --> Att["12: Attention"] --> Trans["13: Transform"]
     end
 
     subgraph Optim["OPTIMIZATION"]
-        direction TB
-        Prof[Profiling] --> Q[Quant] & C[Compress] & M[Memo] & Ac[Accel]
-        Q & C & M & Ac --> Bench[Benchmark]
+        Prof["14: Profiling"]
+        Prof --> Q["15: Quant"]
+        Prof --> C["16: Compress"]
+        Prof --> M["17: Memo"]
+        Prof --> Ac["18: Accel"]
+        Q --> Bench["19: Benchmark"]
+        C --> Bench
+        M --> Bench
+        Ac --> Bench
     end
 
     Train --> Data
     Conv --> Prof
     Trans --> Prof
-    Bench --> Cap[Capstone]
+    Bench --> Cap["20: Capstone"]
 
-    style F fill:#e3f2fd
-    style Arch fill:#f3e5f5
-    style Optim fill:#fff3e0
-    style Cap fill:#fff59d
+    %% Foundation - Blue
+    style T fill:#2196f3,color:#fff
+    style A fill:#2196f3,color:#fff
+    style L fill:#2196f3,color:#fff
+    style Loss fill:#2196f3,color:#fff
+    style Auto fill:#2196f3,color:#fff
+    style Opt fill:#2196f3,color:#fff
+    style Train fill:#2196f3,color:#fff
+
+    %% Architecture - Purple
+    style Data fill:#9c27b0,color:#fff
+    style Conv fill:#9c27b0,color:#fff
+    style Tok fill:#9c27b0,color:#fff
+    style Emb fill:#9c27b0,color:#fff
+    style Att fill:#9c27b0,color:#fff
+    style Trans fill:#9c27b0,color:#fff
+
+    %% Optimization - Orange
+    style Prof fill:#ff9800,color:#fff
+    style Q fill:#ff9800,color:#fff
+    style C fill:#ff9800,color:#fff
+    style M fill:#ff9800,color:#fff
+    style Ac fill:#ff9800,color:#fff
+    style Bench fill:#ff9800,color:#fff
+
+    %% Capstone - Gold
+    style Cap fill:#ffc107,color:#000
+
+    %% Subgraph backgrounds
+    style F fill:#e3f2fd,stroke:#1976d2
+    style Arch fill:#f3e5f5,stroke:#7b1fa2
+    style Optim fill:#fff3e0,stroke:#f57c00
 ```
+
+</div>
+
+<style>
+.big-picture-diagram .mermaid {
+    min-width: 100%;
+    max-width: none !important;
+}
+.big-picture-diagram .mermaid svg {
+    min-height: 600px;
+    width: 100% !important;
+    max-width: none !important;
+}
+</style>
 
 **Flexible paths:**
 - **Vision focus**: Foundation → DataLoader → Convolutions → Optimization
