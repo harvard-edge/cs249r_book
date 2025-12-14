@@ -4,9 +4,13 @@
 
 ## Overview
 
-In 1986, **Rumelhart, Hinton, and Williams** published "Learning representations by back-propagating errors," proving that multi-layer networks could be trained effectively on real-world data. This **ended the AI Winter** and launched modern deep learning.
+**For 17 years, neural networks were considered dead.**
 
-This milestone recreates that breakthrough using YOUR TinyTorch on image classification.
+After Minsky's XOR proof (Milestone 02), funding dried up, researchers moved on, and "neural network" became a dirty word in AI. The field was stuck in the AI Winter.
+
+Then in 1986, **Rumelhart, Hinton, and Williams** published a single paper that changed everything: "Learning representations by back-propagating errors." They proved that multi-layer networks could learn *automatically*—no hand-crafted features, no expert rules. Just data in, patterns out.
+
+This milestone recreates that breakthrough. You'll train YOUR TinyTorch implementation on real images and watch it discover features you never programmed.
 
 ## What You'll Build
 
@@ -47,19 +51,40 @@ python 02_rumelhart_mnist.py
 | 01 (TinyDigits) | 1K train, 8x8 | ~2.4K | 75-85% | 3-5 min |
 | 02 (MNIST) | 60K train, 28x28 | ~100K | 94-97% | 10-15 min |
 
-## Key Learning
+## The Aha Moment: Automatic Feature Discovery
 
-**Hidden layers learn useful representations automatically.** The network discovers edge detectors, curve patterns, and digit-specific features without being told what to look for.
+**Watch YOUR network learn something you never taught it.**
 
-This is **representation learning** - the foundation of deep learning's power:
-- Manual feature engineering --> Automatic feature learning
-- Domain expertise --> Data-driven discovery
+After training, examine the first hidden layer weights. You'll see edge detectors—horizontal, vertical, diagonal patterns. Nobody programmed these. The network discovered them because edges are useful for recognizing digits.
+
+This is **representation learning**, the foundation of deep learning's power:
+- Manual feature engineering → Automatic feature discovery
+- Domain expertise → Data-driven patterns
+- Hand-crafted rules → Emergent intelligence
+
+**The moment you realize**: Your ~100 lines of TinyTorch code just replicated the breakthrough that ended the AI Winter.
 
 ## Systems Insights
 
 - **Memory**: ~100K parameters for MNIST (reasonable for 1986 hardware)
 - **Compute**: Dense matrix operations dominate training time
 - **Architecture**: Each hidden layer learns increasingly abstract features
+
+## YOUR Code Powers This
+
+Every component comes from YOUR implementations:
+
+| Component | Your Module | What It Does |
+|-----------|-------------|--------------|
+| `Tensor` | Module 01 | Stores images and weights |
+| `Linear` | Module 03 | YOUR fully-connected layers |
+| `ReLU` | Module 02 | YOUR activation functions |
+| `CrossEntropyLoss` | Module 04 | YOUR loss computation |
+| `backward()` | Module 05 | YOUR autograd engine |
+| `SGD` | Module 06 | YOUR optimizer |
+| `DataLoader` | Module 08 | YOUR batching pipeline |
+
+**No PyTorch. No TensorFlow. Just YOUR code learning to read handwritten digits.**
 
 ## Historical Context
 
